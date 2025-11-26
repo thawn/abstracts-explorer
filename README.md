@@ -27,16 +27,23 @@ cd neurips-abstracts
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Install in development mode
+# Install Python dependencies
 pip install -e .
 
 # Install with development dependencies
 pip install -e ".[dev]"
+
+# Install Node.js dependencies for web UI
+npm install
+
+# Install vendor files (Tailwind CSS, Font Awesome, Marked.js)
+npm run install:vendor
 ```
 
 ### Requirements
 
 - Python 3.8+
+- Node.js 14+ (for web UI)
 - requests >= 2.31.0
 
 ## Configuration
@@ -250,6 +257,30 @@ neurips-abstracts create-embeddings \
   --lm-studio-url http://localhost:5000 \
   --model custom-embedding-model
 ```
+
+### Start Web Interface
+
+```bash
+# Start the web UI with default settings
+neurips-abstracts web-ui
+
+# Use custom host and port
+neurips-abstracts web-ui --host 0.0.0.0 --port 8080
+
+# Specify database and embeddings location
+neurips-abstracts web-ui \
+  --db-path neurips_2025.db \
+  --embeddings-path chroma_db
+
+# Enable debug mode
+neurips-abstracts web-ui --debug
+```
+
+The web interface provides:
+- 🔍 **Search**: Keyword and AI-powered semantic search
+- 💬 **Chat**: Interactive RAG chat to ask questions about papers
+- 📊 **Filters**: Filter by track, decision, event type, session, and topics
+- 📄 **Details**: View full paper information including authors and abstracts
 
 See `CLI_REFERENCE.md` for complete CLI documentation and examples.
 

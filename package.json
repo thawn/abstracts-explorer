@@ -5,7 +5,11 @@
     "scripts": {
         "test": "jest",
         "test:watch": "jest --watch",
-        "test:coverage": "jest --coverage"
+        "test:coverage": "jest --coverage",
+        "install:vendor": "npm run install:vendor:fontawesome && npm run install:vendor:marked && npm run install:vendor:tailwind",
+        "install:vendor:fontawesome": "mkdir -p src/neurips_abstracts/web_ui/static/vendor && cp node_modules/@fortawesome/fontawesome-free/css/all.min.css src/neurips_abstracts/web_ui/static/vendor/fontawesome.min.css && cp -r node_modules/@fortawesome/fontawesome-free/webfonts src/neurips_abstracts/web_ui/static/",
+        "install:vendor:marked": "mkdir -p src/neurips_abstracts/web_ui/static/vendor && cp node_modules/marked/lib/marked.umd.js src/neurips_abstracts/web_ui/static/vendor/marked.min.js",
+        "install:vendor:tailwind": "mkdir -p src/neurips_abstracts/web_ui/static/vendor && curl -o src/neurips_abstracts/web_ui/static/vendor/tailwind.min.js https://cdn.tailwindcss.com/3.4.1"
     },
     "jest": {
         "testEnvironment": "jsdom",
@@ -26,5 +30,9 @@
         "@testing-library/jest-dom": "^6.1.5",
         "jest": "^29.7.0",
         "jest-environment-jsdom": "^29.7.0"
+    },
+    "dependencies": {
+        "@fortawesome/fontawesome-free": "^7.1.0",
+        "marked": "^17.0.1"
     }
 }
