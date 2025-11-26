@@ -100,6 +100,102 @@ async function searchPapers() {
     }
 }
 
+// Format a single paper card
+function formatPaperCard(paper, options = {}) {
+    const {
+        compact = false,
+        showNumber = null,
+        abstractLength = compact ? 200 : 300,
+        idPrefix = ''
+    } = options;
+
+    const title = paper.name || paper.title || 'Untitled';
+    // Handle authors as either array or string (for safety)
+    let authors = 'Unknown';
+    if (paper.authors) {
+        if (Array.isArray(paper.authors)) {
+            authors = paper.authors.join(', ');
+        } else if (typeof paper.authors === 'string') {
+            authors = paper.authors;
+        }
+    }
+
+    // Build abstract with collapsible details if needed
+    let abstractHtml = '';
+    if (paper.abstract) {
+        if (paper.abstract.length > abstractLength) {
+            const preview = paper.abstract.substring(0, abstractLength);
+            abstractHtml = `
+                <details class="text-gray-700 ${compact ? 'text-xs' : 'text-sm'} leading-relaxed ${compact ? 'mt-2' : ''}" onclick="event.stopPropagation()">
+                    <summary class="cursor-pointer hover:text-purple-600">
+                        ${escapeHtml(preview)}... <span class="text-purple-600 font-medium">Show more</span>
+                    </summary>
+                    <p class="mt-2">${escapeHtml(paper.abstract)}</p>
+                </details>
+            `;
+        } else {
+            abstractHtml = `<p class="text-gray-700 ${compact ? 'text-xs' : 'text-sm'} leading-relaxed ${compact ? 'mt-2' : ''}">${escapeHtml(paper.abstract)}</p>`;
+        }
+    } else if (!compact) {
+        abstractHtml = `<p class="text-gray-700 text-sm leading-relaxed">No abstract available</p>`;
+    }
+
+    // Build metadata badges
+    let metadata = '';
+    if (paper.session) {
+        metadata += `<span class="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full mr-${compact ? '1' : '2'}"><i class="fas fa-calendar-alt mr-1"></i>${escapeHtml(paper.session)}</span>`;
+    }
+    if (paper.poster_position) {
+        metadata += `<span class="px-2 py-1 bg-yellow-100 text-yellow-700 text-xs rounded-full mr-${compact ? '1' : '2'}"><i class="fas fa-map-pin mr-1"></i>Poster ${escapeHtml(paper.poster_position)}</span>`;
+    }
+    if (paper.distance !== undefined) {
+        metadata += `<span class="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full"><i class="fas fa-chart-line mr-1"></i>${(1 - paper.distance).toFixed(compact ? 2 : 3)}</span>`;
+    }
+
+    const cardId = idPrefix ? `id="${idPrefix}"` : '';
+    const cardClasses = compact
+        ? 'paper-card bg-white rounded-lg shadow-sm p-3 hover:shadow-md cursor-pointer border border-gray-200'
+        : 'paper-card bg-white rounded-lg shadow-md p-6 hover:shadow-lg cursor-pointer';
+
+    return `
+        <div ${cardId} class="${cardClasses}" onclick="showPaperDetails(${paper.id})">
+            ${showNumber !== null ? `
+                <div class="flex items-start justify-between mb-1">
+                    <span class="text-xs font-semibold text-purple-600">#${showNumber}</span>
+                    ${paper.paper_url ? `
+                        <a href="${escapeHtml(paper.paper_url)}" target="_blank" class="text-purple-600 hover:text-purple-800 text-xs" onclick="event.stopPropagation()">
+                            <i class="fas fa-external-link-alt"></i>
+                        </a>
+                    ` : ''}
+                </div>
+            ` : ''}
+            <div class="flex items-start justify-between ${compact ? 'mb-1' : 'mb-2'}">
+                <h${compact ? '4' : '3'} class="${compact ? 'text-sm' : 'text-lg'} font-semibold text-gray-800 flex-1 ${compact ? 'leading-tight' : ''}">${escapeHtml(title)}</h${compact ? '4' : '3'}>
+            </div>
+            <p class="${compact ? 'text-xs' : 'text-sm'} text-gray-600 ${compact ? 'mb-2 truncate' : 'mb-3'}">
+                <i class="fas fa-users mr-1"></i>${escapeHtml(authors)}
+            </p>
+            ${metadata ? `<div class="${compact ? 'mb-2' : 'mb-3'}">${metadata}</div>` : ''}
+            ${abstractHtml}
+            ${!compact && paper.paper_url ? `
+                <div class="mt-3">
+                    <a href="${escapeHtml(paper.paper_url)}" target="_blank" class="text-purple-600 hover:text-purple-800 text-sm" onclick="event.stopPropagation()">
+                        <i class="fas fa-external-link-alt mr-1"></i>View Paper Details
+                    </a>
+                </div>
+            ` : ''}
+            ${!compact && paper.distance !== undefined && !metadata.includes('chart-line') ? `
+                <div class="mt-3 pt-3 border-t">
+                    <span class="text-xs text-gray-500">
+                        <i class="fas fa-chart-line mr-1"></i>
+                        Relevance: ${(1 - paper.distance).toFixed(3)}
+                    </span>
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
 // Display search results
 function displaySearchResults(data) {
     const resultsDiv = document.getElementById('search-results');
@@ -127,67 +223,9 @@ function displaySearchResults(data) {
         </div>
     `;
 
-    // Display papers
+    // Display papers using the shared formatting function
     data.papers.forEach(paper => {
-        const title = paper.name || paper.title || 'Untitled';
-        const authors = paper.authors ? paper.authors.join(', ') : 'Unknown';
-
-        // Build abstract with collapsible details if needed
-        let abstractHtml = '';
-        if (paper.abstract) {
-            if (paper.abstract.length > 300) {
-                const preview = paper.abstract.substring(0, 300);
-                abstractHtml = `
-                    <details class="text-gray-700 text-sm leading-relaxed" onclick="event.stopPropagation()">
-                        <summary class="cursor-pointer hover:text-purple-600">
-                            ${escapeHtml(preview)}... <span class="text-purple-600 font-medium">Show more</span>
-                        </summary>
-                        <p class="mt-2">${escapeHtml(paper.abstract)}</p>
-                    </details>
-                `;
-            } else {
-                abstractHtml = `<p class="text-gray-700 text-sm leading-relaxed">${escapeHtml(paper.abstract)}</p>`;
-            }
-        } else {
-            abstractHtml = `<p class="text-gray-700 text-sm leading-relaxed">No abstract available</p>`;
-        }
-
-        // Build metadata badges
-        let metadata = '';
-        if (paper.session) {
-            metadata += `<span class="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full mr-2"><i class="fas fa-calendar-alt mr-1"></i>${escapeHtml(paper.session)}</span>`;
-        }
-        if (paper.poster_position) {
-            metadata += `<span class="px-2 py-1 bg-yellow-100 text-yellow-700 text-xs rounded-full mr-2"><i class="fas fa-map-pin mr-1"></i>Poster ${escapeHtml(paper.poster_position)}</span>`;
-        }
-
-        html += `
-            <div class="paper-card bg-white rounded-lg shadow-md p-6 hover:shadow-lg cursor-pointer" onclick="showPaperDetails(${paper.id})">
-                <div class="flex items-start justify-between mb-2">
-                    <h3 class="text-lg font-semibold text-gray-800 flex-1">${escapeHtml(title)}</h3>
-                </div>
-                <p class="text-sm text-gray-600 mb-3">
-                    <i class="fas fa-users mr-1"></i>${escapeHtml(authors)}
-                </p>
-                ${metadata ? `<div class="mb-3">${metadata}</div>` : ''}
-                ${abstractHtml}
-                ${paper.paper_url ? `
-                    <div class="mt-3">
-                        <a href="${escapeHtml(paper.paper_url)}" target="_blank" class="text-purple-600 hover:text-purple-800 text-sm" onclick="event.stopPropagation()">
-                            <i class="fas fa-external-link-alt mr-1"></i>View Paper Details
-                        </a>
-                    </div>
-                ` : ''}
-                ${paper.distance !== undefined ? `
-                    <div class="mt-3 pt-3 border-t">
-                        <span class="text-xs text-gray-500">
-                            <i class="fas fa-chart-line mr-1"></i>
-                            Relevance: ${(1 - paper.distance).toFixed(3)}
-                        </span>
-                    </div>
-                ` : ''}
-            </div>
-        `;
+        html += formatPaperCard(paper, { compact: false });
     });
 
     resultsDiv.innerHTML = html;
@@ -318,12 +356,24 @@ async function sendChatMessage() {
             return;
         }
 
-        // Extract response text from the response object
-        const responseText = typeof data.response === 'string'
-            ? data.response
-            : data.response.response || JSON.stringify(data.response);
+        // Extract response text and papers from the response object
+        // The API returns: { response: { response: "text", papers: [...], metadata: {...} } }
+        let responseText, papers;
+        if (typeof data.response === 'object' && data.response !== null) {
+            responseText = data.response.response || JSON.stringify(data.response);
+            papers = data.response.papers || [];
+        } else if (typeof data.response === 'string') {
+            responseText = data.response;
+            papers = [];
+        } else {
+            responseText = JSON.stringify(data.response);
+            papers = [];
+        }
 
         addChatMessage(responseText, 'assistant');
+
+        // Display relevant papers
+        displayChatPapers(papers);
     } catch (error) {
         console.error('Chat error:', error);
         document.getElementById(loadingId).remove();
@@ -375,6 +425,32 @@ function addChatMessage(text, role, isLoading = false) {
     return messageId;
 }
 
+// Display chat papers in the side panel
+function displayChatPapers(papers) {
+    const papersDiv = document.getElementById('chat-papers');
+
+    if (!papers || papers.length === 0) {
+        papersDiv.innerHTML = `
+            <div class="text-center text-gray-500 py-8">
+                <i class="fas fa-inbox text-4xl mb-3 opacity-20"></i>
+                <p class="text-sm">No papers found for this query</p>
+            </div>
+        `;
+        return;
+    }
+
+    let html = '';
+    papers.forEach((paper, index) => {
+        html += formatPaperCard(paper, {
+            compact: true,
+            showNumber: index + 1,
+            idPrefix: `paper-${index + 1}`
+        });
+    });
+
+    papersDiv.innerHTML = html;
+}
+
 // Reset chat
 async function resetChat() {
     try {
@@ -385,6 +461,15 @@ async function resetChat() {
         const messagesDiv = document.getElementById('chat-messages');
         messagesDiv.innerHTML = '';
         addChatMessage('Conversation reset. How can I help you explore NeurIPS abstracts?', 'assistant');
+
+        // Clear papers panel
+        const papersDiv = document.getElementById('chat-papers');
+        papersDiv.innerHTML = `
+            <div class="text-center text-gray-500 py-8">
+                <i class="fas fa-inbox text-4xl mb-3 opacity-20"></i>
+                <p class="text-sm">Ask a question to see relevant papers</p>
+            </div>
+        `;
     } catch (error) {
         console.error('Error resetting chat:', error);
     }

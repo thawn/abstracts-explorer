@@ -55,6 +55,7 @@ class RAGChat:
     def __init__(
         self,
         embeddings_manager,
+        database=None,
         lm_studio_url: Optional[str] = None,
         model: Optional[str] = None,
         max_context_papers: Optional[int] = None,
@@ -69,6 +70,8 @@ class RAGChat:
         ----------
         embeddings_manager : EmbeddingsManager
             Manager for embeddings and vector search.
+        database : NeurIPSDatabase, optional
+            Database instance for querying paper details.
         lm_studio_url : str, optional
             URL for LM Studio API. If None, uses config value.
         model : str, optional
@@ -80,6 +83,7 @@ class RAGChat:
         """
         config = get_config()
         self.embeddings_manager = embeddings_manager
+        self.database = database
         self.lm_studio_url = (lm_studio_url or config.llm_backend_url).rstrip("/")
         self.model = model or config.chat_model
         self.max_context_papers = max_context_papers or config.max_context_papers
@@ -235,13 +239,57 @@ class RAGChat:
         """
         papers = []
         for i in range(len(search_results["ids"][0])):
+            paper_id = search_results["ids"][0][i]
+            metadata = search_results["metadatas"][0][i]
+
+            # Get full paper details from database if available
+            if self.database is not None:
+                try:
+                    # Get full paper record from database (includes session, poster_position, etc.)
+                    paper_rows = self.database.query("SELECT * FROM papers WHERE id = ?", (paper_id,))
+                    if paper_rows:
+                        paper = dict(paper_rows[0])
+
+                        # Get authors from authors table
+                        authors_rows = self.database.get_paper_authors(paper_id)
+                        paper["authors"] = [a["fullname"] for a in authors_rows]
+
+                        # Add distance/similarity scores
+                        if "distances" in search_results and search_results["distances"][0]:
+                            distance = search_results["distances"][0][i]
+                            paper["distance"] = distance
+                            paper["similarity"] = 1 - distance if distance <= 1 else 0
+
+                        # Add aliases for consistency (database uses 'name', web UI expects 'title' too)
+                        if "name" in paper:
+                            paper["title"] = paper["name"]
+
+                        # Add abstract from search results if not in database
+                        if not paper.get("abstract") and "documents" in search_results:
+                            paper["abstract"] = search_results["documents"][0][i]
+
+                        papers.append(paper)
+                        continue
+                except Exception as e:
+                    logger.debug(f"Failed to get full paper details for {paper_id}: {e}")
+                    # Fall through to metadata-based approach
+
+            # Fallback: use metadata from ChromaDB (less complete)
+            authors_str = metadata.get("authors", "N/A")
+            authors = [authors_str] if isinstance(authors_str, str) else []
+
             paper = {
-                "id": search_results["ids"][0][i],
-                "title": search_results["metadatas"][0][i].get("title", "N/A"),
-                "authors": search_results["metadatas"][0][i].get("authors", "N/A"),
+                "id": paper_id,
+                "title": metadata.get("title", "N/A"),
+                "name": metadata.get("title", "N/A"),
+                "authors": authors,
                 "abstract": search_results["documents"][0][i] if "documents" in search_results else "",
-                "decision": search_results["metadatas"][0][i].get("decision", "N/A"),
-                "topic": search_results["metadatas"][0][i].get("topic", "N/A"),
+                "decision": metadata.get("decision", "N/A"),
+                "topic": metadata.get("topic", "N/A"),
+                "session": metadata.get("session", None),
+                "poster_position": metadata.get("poster_position", None),
+                "paper_url": metadata.get("paper_url", None),
+                "distance": search_results["distances"][0][i] if "distances" in search_results else None,
                 "similarity": 1 - search_results["distances"][0][i] if search_results["distances"][0][i] <= 1 else 0,
             }
             papers.append(paper)
@@ -264,11 +312,27 @@ class RAGChat:
         context_parts = []
         for i, paper in enumerate(papers, 1):
             context_parts.append(f"Paper {i}:")
-            context_parts.append(f"Title: {paper['title']}")
-            context_parts.append(f"Authors: {paper['authors']}")
-            context_parts.append(f"Topic: {paper['topic']}")
-            context_parts.append(f"Decision: {paper['decision']}")
-            context_parts.append(f"Abstract: {paper['abstract']}")
+
+            # Handle title (could be 'title' or 'name')
+            title = paper.get("title") or paper.get("name", "N/A")
+            context_parts.append(f"Title: {title}")
+
+            # Handle authors (could be list or string)
+            authors = paper.get("authors", "N/A")
+            if isinstance(authors, list):
+                authors = ", ".join(authors) if authors else "N/A"
+            context_parts.append(f"Authors: {authors}")
+
+            # Handle optional fields
+            topic = paper.get("topic", "N/A")
+            context_parts.append(f"Topic: {topic}")
+
+            decision = paper.get("decision", "N/A")
+            context_parts.append(f"Decision: {decision}")
+
+            abstract = paper.get("abstract", "N/A")
+            context_parts.append(f"Abstract: {abstract}")
+
             context_parts.append("")  # Empty line between papers
 
         return "\n".join(context_parts)

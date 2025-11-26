@@ -287,9 +287,9 @@
 
         <!-- Chat Tab -->
         <div id="chat-tab" class="tab-content hidden">
-            <div class="grid grid-cols-1 gap-6">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <!-- Chat Interface -->
-                <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                <div class="lg:col-span-2 bg-white rounded-lg shadow-md overflow-hidden">
                     <!-- Chat Header -->
                     <div class="bg-purple-600 text-white px-6 py-4 flex justify-between items-center">
                         <div>
@@ -344,6 +344,21 @@
                         </div>
                     </div>
                 </div>
+<!-- Relevant Papers Panel -->
+<div class="lg:col-span-1 bg-white rounded-lg shadow-md overflow-hidden">
+    <div class="bg-purple-600 text-white px-6 py-4">
+        <h3 class="font-semibold text-lg">
+            <i class="fas fa-file-alt mr-2"></i>Relevant Papers
+        </h3>
+        <p class="text-sm opacity-90">Papers used for the response</p>
+    </div>
+    <div id="chat-papers" class="h-[450px] overflow-y-auto p-4 space-y-3 bg-gray-50">
+        <div class="text-center text-gray-500 py-8">
+            <i class="fas fa-inbox text-4xl mb-3 opacity-20"></i>
+            <p class="text-sm">Ask a question to see relevant papers</p>
+        </div>
+    </div>
+</div>
             </div>
         </div>
     </main>

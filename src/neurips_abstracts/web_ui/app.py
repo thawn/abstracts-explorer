@@ -86,9 +86,12 @@ def get_rag_chat():
         em = get_embeddings_manager()
         rag_chat = RAGChat(
             embeddings_manager=em,
+            database=None,  # Will be set per-request
             lm_studio_url=config.llm_backend_url,
             model=config.chat_model,
         )
+    # Update database reference for this request
+    rag_chat.database = get_database()
     return rag_chat
 
 
