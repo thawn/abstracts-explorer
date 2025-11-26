@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=61.0", "wheel", "setuptools_scm>=8.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "neurips-abstracts"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A package to download NeurIPS conference data and load it into a SQLite database"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -65,6 +65,10 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 neurips_abstracts = ["web_ui/static/*", "web_ui/templates/*"]
+
+[tool.setuptools_scm]
+# Automatically determine version from git tags
+write_to = "src/neurips_abstracts/_version.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
