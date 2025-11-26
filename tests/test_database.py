@@ -14,21 +14,9 @@ from pathlib import Path
 
 from neurips_abstracts.database import DatabaseManager, DatabaseError
 
-
-@pytest.fixture
-def db_manager(tmp_path):
-    """Create a DatabaseManager instance with a temporary database."""
-    db_path = tmp_path / "test.db"
-    return DatabaseManager(db_path)
-
-
-@pytest.fixture
-def connected_db(db_manager):
-    """Create and connect to a database."""
-    db_manager.connect()
-    db_manager.create_tables()
-    yield db_manager
-    db_manager.close()
+# Fixtures are now imported from conftest.py:
+# - db_manager: DatabaseManager instance with temporary database
+# - connected_db: Connected database with tables created
 
 
 class TestDatabaseManager:

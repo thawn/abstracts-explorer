@@ -10,33 +10,9 @@ from unittest.mock import Mock, patch, MagicMock
 
 from neurips_abstracts.embeddings import EmbeddingsManager, EmbeddingsError
 
-
-@pytest.fixture
-def mock_lm_studio():
-    """Mock LM Studio API responses."""
-    with patch("neurips_abstracts.embeddings.requests") as mock_requests:
-        # Mock successful embedding response
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "data": [{"embedding": [0.1] * 4096}],
-            "model": "text-embedding-qwen3-embedding-4b",
-        }
-        mock_response.raise_for_status = Mock()
-        mock_requests.post.return_value = mock_response
-        mock_requests.get.return_value = mock_response
-        yield mock_requests
-
-
-@pytest.fixture
-def embeddings_manager(tmp_path):
-    """Create an EmbeddingsManager instance for testing."""
-    chroma_path = tmp_path / "test_chroma"
-    return EmbeddingsManager(
-        lm_studio_url="http://localhost:1234",
-        chroma_path=chroma_path,
-        collection_name="test_collection",
-    )
+# Fixtures imported from conftest.py:
+# - mock_lm_studio: Mock LM Studio API responses
+# - embeddings_manager: EmbeddingsManager instance for testing
 
 
 @pytest.fixture
@@ -111,6 +87,11 @@ def test_database(tmp_path):
     conn.commit()
     conn.close()
     return db_path
+
+
+# Note: The above test_database fixture is kept here as it has a slightly different
+# schema than the one in conftest.py. This fixture includes specific fields
+# (paper_url, poster_position) that are needed for embeddings tests.
 
 
 class TestEmbeddingsManager:

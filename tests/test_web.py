@@ -50,10 +50,14 @@ def client(app):
     return app.test_client()
 
 
+# Note: Flask app fixtures (app, client) are kept in this file as they're specific
+# to web testing and not shared with other test modules.
+
+
 @pytest.fixture
 def test_db(tmp_path):
     """
-    Create a test database with sample papers.
+    Create a test database with sample papers for web testing.
 
     Parameters
     ----------
@@ -64,6 +68,12 @@ def test_db(tmp_path):
     -------
     DatabaseManager
         Database manager with test data
+
+    Notes
+    -----
+    This fixture creates a database with authors table and specific test papers
+    for web interface testing. It's kept separate from conftest.py's test_database
+    fixture as it has a different structure with authors.
     """
     db_path = tmp_path / "test.db"
     db = DatabaseManager(str(db_path))

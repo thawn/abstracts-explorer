@@ -19,69 +19,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from neurips_abstracts.database import DatabaseManager
 from neurips_abstracts.config import Config, get_config
+from tests.test_helpers import check_lm_studio_available, requires_lm_studio, find_free_port
 
-
-def check_lm_studio_available():
-    """
-    Check if LM Studio is running and available with the configured chat model.
-
-    Returns
-    -------
-    bool
-        True if LM Studio is available with a chat model, False otherwise.
-    """
-    try:
-        config = get_config()
-        url = config.llm_backend_url
-        model = config.chat_model
-
-        # Check if server is running
-        response = requests.get(f"{url}/v1/models", timeout=2)
-        if response.status_code != 200:
-            return False
-
-        # Check if there are any models loaded
-        data = response.json()
-        if not data.get("data"):
-            return False
-
-        # Try a simple chat completion with the configured model
-        test_response = requests.post(
-            f"{url}/v1/chat/completions",
-            json={
-                "model": model,
-                "messages": [{"role": "user", "content": "test"}],
-                "max_tokens": 5,
-            },
-            timeout=5,
-        )
-        return test_response.status_code == 200
-
-    except (requests.exceptions.RequestException, requests.exceptions.Timeout):
-        return False
-
-
-# Skip marker for tests requiring LM Studio
-requires_lm_studio = pytest.mark.skipif(
-    not check_lm_studio_available(),
-    reason="LM Studio not running. Start LM Studio to run chat tests.",
-)
-
-
-def find_free_port():
-    """
-    Find a free port to use for testing.
-
-    Returns
-    -------
-    int
-        Available port number
-    """
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("", 0))
-        s.listen(1)
-        port = s.getsockname()[1]
-    return port
+# Helper functions imported from test_helpers:
+# - check_lm_studio_available(): Check if LM Studio is running
+# - requires_lm_studio: Skip marker for tests requiring LM Studio
+# - find_free_port(): Find a free port for testing
 
 
 @pytest.fixture(scope="module")

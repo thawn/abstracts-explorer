@@ -14,99 +14,14 @@ from unittest.mock import Mock, patch, MagicMock
 from neurips_abstracts.rag import RAGChat, RAGError
 from neurips_abstracts.embeddings import EmbeddingsManager
 from neurips_abstracts.config import get_config
+from tests.test_helpers import check_lm_studio_available, requires_lm_studio
 
-
-def check_lm_studio_available():
-    """
-    Check if LM Studio is running and available with the configured chat model.
-
-    Returns
-    -------
-    bool
-        True if LM Studio is available with a chat model, False otherwise.
-    """
-    try:
-        config = get_config()
-        url = config.llm_backend_url
-        model = config.chat_model
-
-        # Check if server is running
-        response = requests.get(f"{url}/v1/models", timeout=2)
-        if response.status_code != 200:
-            return False
-
-        # Check if there are any models loaded
-        data = response.json()
-        if not data.get("data"):
-            return False
-
-        # Try a simple chat completion with the configured model
-        test_response = requests.post(
-            f"{url}/v1/chat/completions",
-            json={
-                "model": model,
-                "messages": [{"role": "user", "content": "test"}],
-                "max_tokens": 5,
-            },
-            timeout=5,
-        )
-        return test_response.status_code == 200
-
-    except (requests.exceptions.RequestException, requests.exceptions.Timeout):
-        return False
-
-
-# Skip marker for tests requiring LM Studio
-requires_lm_studio = pytest.mark.skipif(
-    not check_lm_studio_available(),
-    reason="LM Studio not running or no chat model loaded. Check configuration and ensure LM Studio is started with the configured chat model.",
-)
-
-
-@pytest.fixture
-def mock_embeddings_manager():
-    """Create a mock embeddings manager."""
-    mock_em = Mock(spec=EmbeddingsManager)
-
-    # Mock successful search results
-    mock_em.search_similar.return_value = {
-        "ids": [["paper1", "paper2", "paper3"]],
-        "distances": [[0.1, 0.2, 0.3]],
-        "metadatas": [
-            [
-                {
-                    "title": "Attention Is All You Need",
-                    "authors": "Vaswani et al.",
-                    "topic": "Deep Learning",
-                    "decision": "Accept (oral)",
-                    "keywords": "transformers, attention",
-                },
-                {
-                    "title": "BERT: Pre-training of Deep Bidirectional Transformers",
-                    "authors": "Devlin et al.",
-                    "topic": "Natural Language Processing",
-                    "decision": "Accept (poster)",
-                    "keywords": "language models, pretraining",
-                },
-                {
-                    "title": "GPT-3: Language Models are Few-Shot Learners",
-                    "authors": "Brown et al.",
-                    "topic": "Language Models",
-                    "decision": "Accept (oral)",
-                    "keywords": "large language models, in-context learning",
-                },
-            ]
-        ],
-        "documents": [
-            [
-                "We propose a new architecture based entirely on attention mechanisms.",
-                "We introduce BERT, a language representation model.",
-                "We train GPT-3, a 175 billion parameter language model.",
-            ]
-        ],
-    }
-
-    return mock_em
+# Fixtures imported from conftest.py:
+# - mock_embeddings_manager: Mock embeddings manager with predefined search results
+#
+# Helper functions imported from test_helpers:
+# - check_lm_studio_available(): Check if LM Studio is running
+# - requires_lm_studio: Skip marker for tests requiring LM Studio
 
 
 @pytest.fixture
