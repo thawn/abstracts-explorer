@@ -494,6 +494,34 @@ describe('NeurIPS Abstracts Web UI', () => {
             expect(messagesDiv.innerHTML).toContain('Deep learning is a subset of machine learning');
         });
 
+        test('should handle response as dictionary object', async () => {
+            const chatInput = document.getElementById('chat-input');
+            const nPapersSelect = document.getElementById('n-papers');
+
+            chatInput.value = 'Test query';
+
+            const option = document.createElement('option');
+            option.value = '3';
+            option.selected = true;
+            nPapersSelect.appendChild(option);
+
+            // Backend returns response as a dictionary with nested response field
+            fetch.mockResolvedValueOnce({
+                json: async () => ({
+                    response: {
+                        response: 'This is the actual response text',
+                        papers: [],
+                        metadata: {}
+                    }
+                })
+            });
+
+            await app.sendChatMessage();
+
+            const messagesDiv = document.getElementById('chat-messages');
+            expect(messagesDiv.innerHTML).toContain('This is the actual response text');
+        });
+
         test('should clear input after sending', async () => {
             const input = document.getElementById('chat-input');
             input.value = 'Test message';

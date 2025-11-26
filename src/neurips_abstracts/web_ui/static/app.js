@@ -318,7 +318,12 @@ async function sendChatMessage() {
             return;
         }
 
-        addChatMessage(data.response, 'assistant');
+        // Extract response text from the response object
+        const responseText = typeof data.response === 'string'
+            ? data.response
+            : data.response.response || JSON.stringify(data.response);
+
+        addChatMessage(responseText, 'assistant');
     } catch (error) {
         console.error('Chat error:', error);
         document.getElementById(loadingId).remove();
