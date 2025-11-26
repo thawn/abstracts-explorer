@@ -43,8 +43,8 @@ async function loadStats() {
         }
 
         document.getElementById('stats').innerHTML = `
-            <div class="text-sm font-semibold">${data.total_papers.toLocaleString()} Papers</div>
-            <div class="text-xs opacity-90">${data.min_year} - ${data.max_year}</div>
+            <div class="text-sm font-semibold">${data.total_papers.toLocaleString()} Abstracts</div>
+            <div class="text-xs opacity-90">Neurips 2025</div>
         `;
     } catch (error) {
         console.error('Error loading stats:', error);
@@ -342,6 +342,11 @@ function addChatMessage(text, role, isLoading = false) {
     const icon = isUser ? 'fa-user' : 'fa-robot';
     const justifyClass = isUser ? 'justify-end' : 'justify-start';
 
+    // Render markdown for assistant messages, escape HTML for user messages
+    const contentHtml = isUser
+        ? `<p class="whitespace-pre-wrap">${escapeHtml(text)}</p>`
+        : `<div class="markdown-content">${marked.parse(text)}</div>`;
+
     const messageDiv = document.createElement('div');
     messageDiv.id = messageId;
     messageDiv.className = 'chat-message';
@@ -353,7 +358,7 @@ function addChatMessage(text, role, isLoading = false) {
                 </div>
             ` : ''}
             <div class="${bgColor} rounded-lg p-4 shadow-sm max-w-2xl">
-                <p class="whitespace-pre-wrap">${escapeHtml(text)}</p>
+                ${contentHtml}
                 ${isLoading ? '<div class="spinner mt-2" style="width: 20px; height: 20px; border-width: 2px;"></div>' : ''}
             </div>
             ${isUser ? `
@@ -378,18 +383,8 @@ async function resetChat() {
         });
 
         const messagesDiv = document.getElementById('chat-messages');
-        messagesDiv.innerHTML = `
-            <div class="chat-message">
-                <div class="flex items-start gap-3">
-                    <div class="flex-shrink-0 w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white">
-                        <i class="fas fa-robot text-sm"></i>
-                    </div>
-                    <div class="bg-white rounded-lg p-4 shadow-sm max-w-2xl">
-                        <p class="text-gray-700">Conversation reset. How can I help you explore NeurIPS papers?</p>
-                    </div>
-                </div>
-            </div>
-        `;
+        messagesDiv.innerHTML = '';
+        addChatMessage('Conversation reset. How can I help you explore NeurIPS abstracts?', 'assistant');
     } catch (error) {
         console.error('Error resetting chat:', error);
     }

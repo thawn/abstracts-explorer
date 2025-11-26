@@ -12,6 +12,38 @@ const path = require('path');
 const appJsPath = path.join(__dirname, '../static/app.js');
 const appJsCode = fs.readFileSync(appJsPath, 'utf8');
 
+// Mock the marked library for markdown parsing
+global.marked = {
+    parse: (text) => {
+        // Simple mock that converts markdown to HTML
+        let html = text;
+
+        // Convert **bold** to <strong>
+        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+        // Convert *italic* to <em>
+        html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+        // Convert # headers
+        html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+        html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+        html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+
+        // Convert lists
+        html = html.replace(/^\* (.+)$/gm, '<li>$1</li>');
+        html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+
+        // Convert code blocks
+        html = html.replace(/```(.+?)```/gs, '<pre><code>$1</code></pre>');
+        html = html.replace(/`(.+?)`/g, '<code>$1</code>');
+
+        // Convert paragraphs
+        html = html.replace(/^(?!<[huplc])(.*?)$/gm, '<p>$1</p>');
+
+        return html;
+    }
+};
+
 // Create a function to evaluate the code in a controlled environment
 function loadAppJs() {
     // Execute the app.js code
@@ -129,8 +161,8 @@ describe('NeurIPS Abstracts Web UI', () => {
             await app.loadStats();
 
             const statsDiv = document.getElementById('stats');
-            expect(statsDiv.innerHTML).toContain('12,500 Papers');
-            expect(statsDiv.innerHTML).toContain('2020 - 2025');
+            expect(statsDiv.innerHTML).toContain('12,500 Abstracts');
+            expect(statsDiv.innerHTML).toContain('Neurips 2025');
         });
 
         test('should handle error response', async () => {
@@ -443,12 +475,44 @@ describe('NeurIPS Abstracts Web UI', () => {
             expect(messagesDiv.innerHTML).toContain('spinner');
         });
 
-        test('should escape HTML in messages', () => {
+        test('should escape HTML in user messages', () => {
             app.addChatMessage('<script>alert("xss")</script>', 'user');
 
             const messagesDiv = document.getElementById('chat-messages');
             expect(messagesDiv.innerHTML).not.toContain('<script>');
             expect(messagesDiv.innerHTML).toContain('&lt;script&gt;');
+        });
+
+        test('should render markdown in assistant messages', () => {
+            app.addChatMessage('**Bold text** and *italic text*', 'assistant');
+
+            const messagesDiv = document.getElementById('chat-messages');
+            expect(messagesDiv.innerHTML).toContain('<strong>Bold text</strong>');
+            expect(messagesDiv.innerHTML).toContain('<em>italic text</em>');
+            expect(messagesDiv.innerHTML).toContain('markdown-content');
+        });
+
+        test('should render markdown headers in assistant messages', () => {
+            app.addChatMessage('# Heading 1\n## Heading 2', 'assistant');
+
+            const messagesDiv = document.getElementById('chat-messages');
+            expect(messagesDiv.innerHTML).toContain('<h1>Heading 1</h1>');
+            expect(messagesDiv.innerHTML).toContain('<h2>Heading 2</h2>');
+        });
+
+        test('should render markdown code in assistant messages', () => {
+            app.addChatMessage('Use `code` for inline code', 'assistant');
+
+            const messagesDiv = document.getElementById('chat-messages');
+            expect(messagesDiv.innerHTML).toContain('<code>code</code>');
+        });
+
+        test('should render markdown lists in assistant messages', () => {
+            app.addChatMessage('* Item 1\n* Item 2', 'assistant');
+
+            const messagesDiv = document.getElementById('chat-messages');
+            expect(messagesDiv.innerHTML).toContain('<li>Item 1</li>');
+            expect(messagesDiv.innerHTML).toContain('<li>Item 2</li>');
         });
     });
 
