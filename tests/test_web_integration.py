@@ -117,6 +117,11 @@ def start_web_server(db_path, port):
 
     # Import after setting env var
     from neurips_abstracts.web_ui import run_server
+    from neurips_abstracts.config import get_config
+
+    # Force reload config to pick up the environment variable
+    # This is important on Linux where multiprocessing uses fork()
+    get_config(reload=True)
 
     # Run server (config will be loaded lazily on first request)
     run_server(host="127.0.0.1", port=port, debug=False)
@@ -152,11 +157,14 @@ def web_server(test_database):
 
     # Set environment variable before starting server
     import os
+    from pathlib import Path
 
-    os.environ["PAPER_DB_PATH"] = str(test_database)
+    # Ensure the database path is absolute
+    abs_db_path = str(Path(test_database).absolute())
+    os.environ["PAPER_DB_PATH"] = abs_db_path
 
     # Start server in a separate process
-    server_process = Process(target=start_web_server, args=(test_database, port), daemon=True)
+    server_process = Process(target=start_web_server, args=(abs_db_path, port), daemon=True)
     server_process.start()
 
     # Wait for server to start
@@ -208,6 +216,13 @@ class TestWebUIIntegration:
         host, port, base_url = web_server
 
         response = requests.get(f"{base_url}/api/stats", timeout=5)
+        if response.status_code != 200:
+            # Print error for debugging
+            try:
+                error_data = response.json()
+                print(f"Error response: {error_data}")
+            except:
+                print(f"Error response (non-JSON): {response.text}")
         assert response.status_code == 200
 
         data = response.json()

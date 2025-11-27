@@ -144,6 +144,7 @@ def stats():
             }
         )
     except Exception as e:
+        logger.error(f"Error in stats endpoint: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -253,6 +254,7 @@ def search():
 
         return jsonify({"papers": papers, "count": len(papers), "query": query, "use_embeddings": use_embeddings})
     except Exception as e:
+        logger.error(f"Error in search endpoint: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 

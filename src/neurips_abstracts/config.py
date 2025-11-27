@@ -240,10 +240,11 @@ class Config:
         """
         path_obj = Path(path)
         if path_obj.is_absolute():
-            return path
+            # Return absolute path as string (expanduser to handle ~)
+            return str(path_obj.expanduser().absolute())
 
-        # Resolve relative to data_dir
-        return str(Path(self.data_dir) / path)
+        # Resolve relative to data_dir and make absolute
+        return str((Path(self.data_dir) / path).absolute())
 
     def to_dict(self) -> Dict[str, Any]:
         """
