@@ -256,8 +256,8 @@ CHAT_MAX_TOKENS=500
 
         assert config.data_dir == "/custom/data"
         # Paths should be resolved relative to custom data_dir
-        assert config.embedding_db_path == "/custom/data/chroma_db"
-        assert config.paper_db_path == "/custom/data/neurips_2025.db"
+        assert config.embedding_db_path == str((Path("/custom/data") / "chroma_db").absolute())
+        assert config.paper_db_path == str((Path("/custom/data") / "neurips_2025.db").absolute())
 
     def test_config_absolute_paths_unchanged(self, tmp_path):
         """Test that absolute paths are not modified."""
@@ -272,8 +272,8 @@ PAPER_DB_PATH=/absolute/path/to/papers.db
         config = Config(env_path=env_file)
 
         # Absolute paths should remain unchanged
-        assert config.embedding_db_path == "/absolute/path/to/chroma_db"
-        assert config.paper_db_path == "/absolute/path/to/papers.db"
+        assert config.embedding_db_path == str((Path("/absolute/path/to/chroma_db")).absolute())
+        assert config.paper_db_path == str((Path("/absolute/path/to/papers.db")).absolute())
 
 
 class TestGetConfig:
