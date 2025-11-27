@@ -4,9 +4,11 @@ Tests for configuration module.
 This module tests the configuration loading and management functionality.
 """
 
-
+import os
+import pytest
 
 from neurips_abstracts.config import Config, get_config, load_env_file
+from neurips_abstracts import config as config_module
 
 
 class TestLoadEnvFile:
@@ -84,6 +86,25 @@ LLM_BACKEND_URL=http://test
 
 class TestConfig:
     """Test Config class."""
+
+    def teardown_method(self):
+        """Clean up environment variables after each test."""
+        # List of all config-related environment variables
+        env_vars_to_clean = [
+            "CHAT_MODEL",
+            "EMBEDDING_MODEL",
+            "LLM_BACKEND_URL",
+            "LLM_BACKEND_AUTH_TOKEN",
+            "EMBEDDING_DB_PATH",
+            "PAPER_DB_PATH",
+            "COLLECTION_NAME",
+            "MAX_CONTEXT_PAPERS",
+            "CHAT_TEMPERATURE",
+            "CHAT_MAX_TOKENS",
+        ]
+        for var in env_vars_to_clean:
+            if var in os.environ:
+                del os.environ[var]
 
     def test_config_defaults(self):
         """Test default configuration values."""
@@ -225,6 +246,10 @@ CHAT_MAX_TOKENS=500
 
 class TestGetConfig:
     """Test get_config function."""
+
+    def teardown_method(self):
+        """Reset global config state after each test."""
+        config_module._config = None
 
     def test_get_config_singleton(self):
         """Test that get_config returns same instance."""
