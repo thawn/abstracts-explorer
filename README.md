@@ -459,9 +459,20 @@ pytest -m slow
 
 # Run all tests including slow ones
 pytest -m ""
+
+# Run end-to-end tests (requires Chrome or Firefox browser)
+pytest -m e2e
+
+# Run E2E tests with verbose output
+pytest tests/test_web_e2e.py -v -m e2e
+
+# Run E2E tests with Firefox instead of Chrome
+E2E_BROWSER=firefox pytest tests/test_web_e2e.py -v -m e2e
 ```
 
-**Note:** Tests requiring LM Studio are marked as `slow` and skipped by default. To run them, use `pytest -m slow` (requires LM Studio running with a chat model loaded).
+**Note:**
+- Tests requiring LM Studio are marked as `slow` and skipped by default. To run them, use `pytest -m slow` (requires LM Studio running with a chat model loaded).
+- End-to-end tests are marked as `e2e` and require either Chrome or Firefox browser. These tests use Selenium to automate browser interactions and verify the web UI works correctly. By default, Chrome is tried first, then Firefox. You can specify a browser with the `E2E_BROWSER` environment variable.
 
 ### Code Structure
 

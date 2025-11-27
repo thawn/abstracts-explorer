@@ -35,6 +35,8 @@ dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
     "pytest-mock>=3.11.0",
+    "selenium>=4.0.0",
+    "webdriver-manager>=4.0.0",
 ]
 embeddings = [
     "chromadb>=0.4.0",
@@ -78,6 +80,7 @@ python_functions = ["test_*"]
 markers = [
     "slow: marks tests as slow (deselected by default)",
     "integration: marks tests as integration tests (require real data)",
+    "e2e: marks tests as end-to-end tests (require browser automation)",
 ]
 addopts = [
     "--verbose",
