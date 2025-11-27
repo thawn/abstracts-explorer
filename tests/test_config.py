@@ -6,6 +6,7 @@ This module tests the configuration loading and management functionality.
 
 import os
 import pytest
+from pathlib import Path
 
 from neurips_abstracts.config import Config, get_config, load_env_file
 from neurips_abstracts import config as config_module
@@ -115,8 +116,8 @@ class TestConfig:
         assert config.embedding_model == "text-embedding-qwen3-embedding-4b"
         assert config.llm_backend_url == "http://localhost:1234"
         assert config.llm_backend_auth_token == ""
-        assert config.embedding_db_path == "data/chroma_db"
-        assert config.paper_db_path == "data/neurips_2025.db"
+        assert config.embedding_db_path == str((Path("data") / "chroma_db").absolute())
+        assert config.paper_db_path == str((Path("data") / "neurips_2025.db").absolute())
         assert config.collection_name == "neurips_papers"
         assert config.max_context_papers == 5
         assert config.chat_temperature == 0.7
@@ -147,8 +148,8 @@ CHAT_MAX_TOKENS=2000
         assert config.llm_backend_url == "http://custom:9999"
         assert config.llm_backend_auth_token == "secret-token"
         # Paths are resolved relative to data_dir
-        assert config.embedding_db_path == "data/custom_chroma"
-        assert config.paper_db_path == "data/custom.db"
+        assert config.embedding_db_path == str((Path("data") / "custom_chroma").absolute())
+        assert config.paper_db_path == str((Path("data") / "custom.db").absolute())
         assert config.collection_name == "custom_collection"
         assert config.max_context_papers == 15
         assert config.chat_temperature == 0.9
