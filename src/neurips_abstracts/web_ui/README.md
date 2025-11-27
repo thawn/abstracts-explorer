@@ -76,7 +76,10 @@ src/neurips_abstracts/web_ui/
 The web UI uses the same configuration system as the rest of the package. Set environment variables or use a `.env` file:
 
 ```bash
-# Database paths
+# Data directory (default: data)
+DATA_DIR=data
+
+# Database paths (relative to DATA_DIR unless absolute)
 PAPER_DB_PATH=neurips_2025.db
 EMBEDDING_DB_PATH=chroma_db
 

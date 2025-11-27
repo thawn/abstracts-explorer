@@ -5,14 +5,17 @@ Demo script to show search results with author names and new metadata fields.
 
 from pathlib import Path
 from neurips_abstracts.database import DatabaseManager
+from neurips_abstracts.config import get_config
 
 
 def demo_author_lookup():
     """Demonstrate author name lookup from database."""
 
-    db_path = Path("neurips_2025.db")
+    config = get_config()
+    db_path = Path(config.paper_db_path)
     if not db_path.exists():
-        print("❌ Database not found: neurips_2025.db")
+        print(f"❌ Database not found: {db_path}")
+        print(f"Please run: neurips-abstracts download --year 2025 --output {db_path}")
         return
 
     print("=" * 70)

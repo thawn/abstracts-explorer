@@ -40,10 +40,14 @@ nano .env
 - **LLM_BACKEND_URL**: URL of the LLM backend server (default: `http://localhost:1234`)
 - **LLM_BACKEND_AUTH_TOKEN**: Optional authentication token for LLM backend (default: empty)
 
+### Data Directory
+
+- **DATA_DIR**: Base directory for data files (default: `data`)
+
 ### Database Paths
 
-- **EMBEDDING_DB_PATH**: Path to ChromaDB database (default: `chroma_db`)
-- **PAPER_DB_PATH**: Path to SQLite database with papers (default: `neurips_2025.db`)
+- **EMBEDDING_DB_PATH**: Path to ChromaDB database (default: `chroma_db`). If relative, resolved relative to DATA_DIR.
+- **PAPER_DB_PATH**: Path to SQLite database with papers (default: `neurips_2025.db`). If relative, resolved relative to DATA_DIR.
 
 ### RAG Settings
 
@@ -54,6 +58,10 @@ nano .env
 
 ```bash
 # .env file example
+
+# Base directory for data files
+DATA_DIR=data
+
 CHAT_MODEL=gemma-3-4b-it-qat
 CHAT_TEMPERATURE=0.7
 CHAT_MAX_TOKENS=1000
@@ -63,8 +71,13 @@ EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b
 LLM_BACKEND_URL=http://localhost:1234
 LLM_BACKEND_AUTH_TOKEN=
 
+# Paths relative to DATA_DIR (will resolve to data/chroma_db and data/neurips_2025.db)
 EMBEDDING_DB_PATH=chroma_db
 PAPER_DB_PATH=neurips_2025.db
+
+# Or use absolute paths:
+# EMBEDDING_DB_PATH=/absolute/path/to/chroma_db
+# PAPER_DB_PATH=/absolute/path/to/neurips_2025.db
 
 COLLECTION_NAME=neurips_papers
 MAX_CONTEXT_PAPERS=5

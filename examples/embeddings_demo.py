@@ -16,14 +16,18 @@ Prerequisites
 
 from pathlib import Path
 from neurips_abstracts import EmbeddingsManager
+from neurips_abstracts.config import get_config
 
 
 def main():
     """Main function demonstrating embeddings functionality."""
 
+    # Get configuration
+    config = get_config()
+
     # Configuration
     db_path = Path("authors_demo.db")
-    chroma_path = Path("./chroma_db")
+    chroma_path = Path(config.embedding_db_path)
 
     print("NeurIPS Embeddings Demo")
     print("=" * 50)

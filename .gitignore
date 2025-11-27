@@ -69,11 +69,11 @@ venv.bak/
 *.swo
 *~
 
-# Database files
+# Database files (now in data/ directory which is already ignored)
+# Keep patterns here in case someone puts DBs elsewhere
 *.db
 *.sqlite
 *.sqlite3
-chroma_db/
 
 # Debug files
 page_source.html

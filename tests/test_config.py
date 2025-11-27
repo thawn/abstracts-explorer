@@ -110,12 +110,13 @@ class TestConfig:
         """Test default configuration values."""
         config = Config()
 
+        assert config.data_dir == "data"
         assert config.chat_model == "diffbot-small-xl-2508"
         assert config.embedding_model == "text-embedding-qwen3-embedding-4b"
         assert config.llm_backend_url == "http://localhost:1234"
         assert config.llm_backend_auth_token == ""
-        assert config.embedding_db_path == "chroma_db"
-        assert config.paper_db_path == "neurips_2025.db"
+        assert config.embedding_db_path == "data/chroma_db"
+        assert config.paper_db_path == "data/neurips_2025.db"
         assert config.collection_name == "neurips_papers"
         assert config.max_context_papers == 5
         assert config.chat_temperature == 0.7
@@ -145,8 +146,9 @@ CHAT_MAX_TOKENS=2000
         assert config.embedding_model == "custom-embedding"
         assert config.llm_backend_url == "http://custom:9999"
         assert config.llm_backend_auth_token == "secret-token"
-        assert config.embedding_db_path == "custom_chroma"
-        assert config.paper_db_path == "custom.db"
+        # Paths are resolved relative to data_dir
+        assert config.embedding_db_path == "data/custom_chroma"
+        assert config.paper_db_path == "data/custom.db"
         assert config.collection_name == "custom_collection"
         assert config.max_context_papers == 15
         assert config.chat_temperature == 0.9
@@ -206,6 +208,7 @@ CHAT_MAX_TOKENS=500
         config_dict = config.to_dict()
 
         assert isinstance(config_dict, dict)
+        assert "data_dir" in config_dict
         assert "chat_model" in config_dict
         assert "embedding_model" in config_dict
         assert "llm_backend_url" in config_dict
@@ -242,6 +245,34 @@ CHAT_MAX_TOKENS=500
         assert "Config(" in repr_str
         assert "chat_model=" in repr_str
         assert "embedding_model=" in repr_str
+
+    def test_config_data_dir(self, tmp_path):
+        """Test that data_dir can be configured."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("DATA_DIR=/custom/data")
+
+        config = Config(env_path=env_file)
+
+        assert config.data_dir == "/custom/data"
+        # Paths should be resolved relative to custom data_dir
+        assert config.embedding_db_path == "/custom/data/chroma_db"
+        assert config.paper_db_path == "/custom/data/neurips_2025.db"
+
+    def test_config_absolute_paths_unchanged(self, tmp_path):
+        """Test that absolute paths are not modified."""
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            f"""
+EMBEDDING_DB_PATH=/absolute/path/to/chroma_db
+PAPER_DB_PATH=/absolute/path/to/papers.db
+"""
+        )
+
+        config = Config(env_path=env_file)
+
+        # Absolute paths should remain unchanged
+        assert config.embedding_db_path == "/absolute/path/to/chroma_db"
+        assert config.paper_db_path == "/absolute/path/to/papers.db"
 
 
 class TestGetConfig:

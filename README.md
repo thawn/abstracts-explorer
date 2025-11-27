@@ -62,12 +62,13 @@ nano .env
 
 ### Available Settings
 
+- `DATA_DIR` - Base directory for data files (default: data)
 - `CHAT_MODEL` - Language model for RAG chat (default: diffbot-small-xl-2508)
 - `EMBEDDING_MODEL` - Text embedding model (default: text-embedding-qwen3-embedding-4b)
 - `LLM_BACKEND_URL` - LM Studio API URL (default: http://localhost:1234)
 - `LLM_BACKEND_AUTH_TOKEN` - Authentication token (optional)
-- `EMBEDDING_DB_PATH` - ChromaDB directory (default: chroma_db)
-- `PAPER_DB_PATH` - SQLite database (default: neurips_2025.db)
+- `EMBEDDING_DB_PATH` - ChromaDB directory (default: chroma_db, resolved relative to DATA_DIR)
+- `PAPER_DB_PATH` - SQLite database (default: neurips_2025.db, resolved relative to DATA_DIR)
 - `COLLECTION_NAME` - ChromaDB collection name (default: neurips_papers)
 - `MAX_CONTEXT_PAPERS` - Papers for RAG context (default: 5)
 

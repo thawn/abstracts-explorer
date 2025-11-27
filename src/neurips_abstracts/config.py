@@ -82,6 +82,8 @@ class Config:
 
     Attributes
     ----------
+    data_dir : str
+        Base directory for data files (databases, embeddings).
     chat_model : str
         Name of the language model for chat/RAG.
     embedding_model : str
@@ -132,6 +134,9 @@ class Config:
 
     def _load_config(self):
         """Load configuration from environment variables."""
+        # Data Directory (base directory for all data files)
+        self.data_dir = self._get_env("DATA_DIR", default="data")
+
         # Chat/Language Model Settings
         self.chat_model = self._get_env("CHAT_MODEL", default="diffbot-small-xl-2508")
         self.chat_temperature = self._get_env_float("CHAT_TEMPERATURE", default=0.7)
@@ -144,9 +149,9 @@ class Config:
         self.llm_backend_url = self._get_env("LLM_BACKEND_URL", default="http://localhost:1234")
         self.llm_backend_auth_token = self._get_env("LLM_BACKEND_AUTH_TOKEN", default="")
 
-        # Database Paths
-        self.embedding_db_path = self._get_env("EMBEDDING_DB_PATH", default="chroma_db")
-        self.paper_db_path = self._get_env("PAPER_DB_PATH", default="neurips_2025.db")
+        # Database Paths (resolved relative to data_dir if not absolute)
+        self.embedding_db_path = self._resolve_path(self._get_env("EMBEDDING_DB_PATH", default="chroma_db"))
+        self.paper_db_path = self._resolve_path(self._get_env("PAPER_DB_PATH", default="neurips_2025.db"))
 
         # Collection Settings
         self.collection_name = self._get_env("COLLECTION_NAME", default="neurips_papers")
@@ -216,6 +221,30 @@ class Config:
         except (ValueError, TypeError):
             return default
 
+    def _resolve_path(self, path: str) -> str:
+        """
+        Resolve a path relative to the data directory.
+
+        If the path is absolute, returns it unchanged.
+        Otherwise, resolves it relative to data_dir.
+
+        Parameters
+        ----------
+        path : str
+            Path to resolve.
+
+        Returns
+        -------
+        str
+            Resolved path (relative to data_dir if not absolute).
+        """
+        path_obj = Path(path)
+        if path_obj.is_absolute():
+            return path
+
+        # Resolve relative to data_dir
+        return str(Path(self.data_dir) / path)
+
     def to_dict(self) -> Dict[str, Any]:
         """
         Convert configuration to dictionary.
@@ -232,6 +261,7 @@ class Config:
         >>> print(config_dict["chat_model"])
         """
         return {
+            "data_dir": self.data_dir,
             "chat_model": self.chat_model,
             "chat_temperature": self.chat_temperature,
             "chat_max_tokens": self.chat_max_tokens,

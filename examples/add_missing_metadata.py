@@ -10,11 +10,15 @@ import sqlite3
 from pathlib import Path
 import chromadb
 from tqdm import tqdm
+from neurips_abstracts.config import get_config
+
+# Get configuration
+config = get_config()
 
 # Paths
-DB_PATH = Path("data/neurips_2025.db")
-CHROMA_PATH = Path("chroma_db")
-COLLECTION_NAME = "neurips_papers"
+DB_PATH = Path(config.paper_db_path)
+CHROMA_PATH = Path(config.embedding_db_path)
+COLLECTION_NAME = config.collection_name
 
 print("=" * 70)
 print("Adding Missing Metadata to ChromaDB")

@@ -8,6 +8,7 @@ to query NeurIPS papers with natural language.
 
 from pathlib import Path
 from neurips_abstracts import EmbeddingsManager, RAGChat
+from neurips_abstracts.config import get_config
 
 
 def main():
@@ -17,17 +18,20 @@ def main():
     print("RAG Chat Demo")
     print("=" * 70)
 
+    # Get configuration
+    config = get_config()
+
     # Check if embeddings exist
-    embeddings_path = Path("chroma_db")
+    embeddings_path = Path(config.embedding_db_path)
     if not embeddings_path.exists():
-        print("\n❌ Embeddings database not found: chroma_db")
+        print(f"\n❌ Embeddings database not found: {embeddings_path}")
         print("\nPlease create embeddings first:")
-        print("  neurips-abstracts create-embeddings --db-path neurips_2025.db")
+        print(f"  neurips-abstracts create-embeddings --db-path {config.paper_db_path}")
         return 1
 
     # Initialize embeddings manager
     print("\n📊 Loading embeddings...")
-    em = EmbeddingsManager("chroma_db")
+    em = EmbeddingsManager(config.embedding_db_path)
     em.connect()
 
     stats = em.get_collection_stats()
