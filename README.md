@@ -71,6 +71,8 @@ nano .env
 - `PAPER_DB_PATH` - SQLite database (default: neurips_2025.db, resolved relative to DATA_DIR)
 - `COLLECTION_NAME` - ChromaDB collection name (default: neurips_papers)
 - `MAX_CONTEXT_PAPERS` - Papers for RAG context (default: 5)
+- `ENABLE_QUERY_REWRITING` - Enable AI-powered query rewriting (default: true)
+- `QUERY_SIMILARITY_THRESHOLD` - Similarity threshold for caching (default: 0.7)
 
 See [CONFIGURATION.md](CONFIGURATION.md) for complete documentation.
 
@@ -280,6 +282,8 @@ neurips-abstracts web-ui --debug
 The web interface provides:
 - 🔍 **Search**: Keyword and AI-powered semantic search
 - 💬 **Chat**: Interactive RAG chat to ask questions about papers
+  - ✨ **NEW**: Displays rewritten query showing how your question was optimized
+  - 📊 Cache status indicator (retrieved vs. cached papers)
 - 📊 **Filters**: Filter by track, decision, event type, session, and topics
 - 📄 **Details**: View full paper information including authors and abstracts
 
@@ -548,8 +552,38 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 For issues, questions, or contributions, please visit:
 https://github.com/yourusername/neurips-abstracts/issues
 
+## Query Rewriting Feature
+
+The RAG system now includes intelligent query rewriting to improve search results:
+
+- **Automatic Query Optimization**: User questions are automatically rewritten into effective search queries using the LLM
+- **Context-Aware Rewriting**: Follow-up questions consider conversation history for better context
+- **Smart Caching**: Similar follow-up queries reuse cached papers to reduce unnecessary retrievals
+- **Configurable**: Enable/disable via `ENABLE_QUERY_REWRITING` environment variable
+- **Tunable Threshold**: Control caching behavior with `QUERY_SIMILARITY_THRESHOLD` (0.0-1.0)
+
+Example:
+```python
+from neurips_abstracts import RAGChat, EmbeddingsManager, DatabaseManager
+
+with EmbeddingsManager() as em, DatabaseManager("neurips.db") as db:
+    chat = RAGChat(em, db)
+    
+    # First query - rewrites and retrieves papers
+    response1 = chat.query("What about transformers?")
+    # Rewritten: "transformer architecture attention mechanism neural networks"
+    
+    # Follow-up - detects similar query, reuses cached papers
+    response2 = chat.query("Tell me more about transformers")
+    # Reuses same papers without re-retrieval
+    
+    # Different topic - retrieves new papers
+    response3 = chat.query("What about reinforcement learning?")
+    # New retrieval for different topic
+```
+
 ## ToDo
 
-- improve the rag 
-  - add query rewriting
-  - only do retrieval for follow up question if the rewritten query is above a semantic distance threshold
+- Further RAG improvements
+  - consider [multi-turn conversation refinement](https://www.emergentmind.com/topics/multi-turn-rag-conversations)
+  - Implement citation extraction and validation

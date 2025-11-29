@@ -574,3 +574,225 @@ class TestRAGChatIntegration:
         assert all("role" in msg and "content" in msg for msg in data)
 
         em.close()
+
+
+class TestRAGChatQueryRewriting:
+    """Test RAGChat query rewriting functionality."""
+
+    def test_rewrite_query_success(self, mock_embeddings_manager, mock_database):
+        """Test successful query rewriting."""
+        with patch("neurips_abstracts.rag.requests.post") as mock_post:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "choices": [{"message": {"content": "transformer attention mechanism neural networks"}}]
+            }
+            mock_response.raise_for_status = Mock()
+            mock_post.return_value = mock_response
+
+            chat = RAGChat(mock_embeddings_manager, mock_database)
+            rewritten = chat._rewrite_query("What about transformers?")
+
+            assert isinstance(rewritten, str)
+            assert len(rewritten) > 0
+            assert rewritten == "transformer attention mechanism neural networks"
+            mock_post.assert_called_once()
+
+    def test_rewrite_query_with_conversation_history(self, mock_embeddings_manager, mock_database):
+        """Test query rewriting with conversation history."""
+        with patch("neurips_abstracts.rag.requests.post") as mock_post:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "choices": [{"message": {"content": "transformer attention mechanism applications"}}]
+            }
+            mock_response.raise_for_status = Mock()
+            mock_post.return_value = mock_response
+
+            chat = RAGChat(mock_embeddings_manager, mock_database)
+
+            # Add conversation history
+            chat.conversation_history = [
+                {"role": "user", "content": "Tell me about transformers"},
+                {"role": "assistant", "content": "Transformers use attention..."},
+            ]
+
+            rewritten = chat._rewrite_query("What are the applications?")
+
+            # Check that conversation history was included
+            call_args = mock_post.call_args
+            messages = call_args[1]["json"]["messages"]
+            assert len(messages) > 2  # System prompt + history + current query
+            assert any(msg["content"] == "Tell me about transformers" for msg in messages)
+
+    def test_rewrite_query_timeout_fallback(self, mock_embeddings_manager, mock_database):
+        """Test query rewriting falls back to original on timeout."""
+        with patch("neurips_abstracts.rag.requests.post") as mock_post:
+            mock_post.side_effect = requests.exceptions.Timeout("Timeout")
+
+            chat = RAGChat(mock_embeddings_manager, mock_database)
+            original_query = "What is deep learning?"
+            rewritten = chat._rewrite_query(original_query)
+
+            # Should return original query on timeout
+            assert rewritten == original_query
+
+    def test_rewrite_query_http_error_fallback(self, mock_embeddings_manager, mock_database):
+        """Test query rewriting falls back to original on HTTP error."""
+        with patch("neurips_abstracts.rag.requests.post") as mock_post:
+            mock_response = Mock()
+            mock_response.status_code = 500
+            mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError(response=mock_response)
+            mock_post.return_value = mock_response
+
+            chat = RAGChat(mock_embeddings_manager, mock_database)
+            original_query = "What is neural network?"
+            rewritten = chat._rewrite_query(original_query)
+
+            # Should return original query on error
+            assert rewritten == original_query
+
+    def test_rewrite_query_invalid_response_fallback(self, mock_embeddings_manager, mock_database):
+        """Test query rewriting falls back to original on invalid response."""
+        with patch("neurips_abstracts.rag.requests.post") as mock_post:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {"invalid": "response"}
+            mock_response.raise_for_status = Mock()
+            mock_post.return_value = mock_response
+
+            chat = RAGChat(mock_embeddings_manager, mock_database)
+            original_query = "What is AI?"
+            rewritten = chat._rewrite_query(original_query)
+
+            # Should return original query on invalid response
+            assert rewritten == original_query
+
+    def test_should_retrieve_papers_first_query(self, mock_embeddings_manager, mock_database):
+        """Test that first query always retrieves papers."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+
+        should_retrieve = chat._should_retrieve_papers("deep learning neural networks")
+
+        assert should_retrieve is True
+
+    def test_should_retrieve_papers_similar_queries(self, mock_embeddings_manager, mock_database):
+        """Test that similar queries reuse cached papers."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        chat.last_search_query = "deep learning neural networks"
+
+        # Very similar query (high Jaccard similarity)
+        should_retrieve = chat._should_retrieve_papers("deep learning networks")
+
+        # Should NOT retrieve (similarity is high)
+        assert should_retrieve is False
+
+    def test_should_retrieve_papers_different_queries(self, mock_embeddings_manager, mock_database):
+        """Test that different queries retrieve new papers."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        chat.last_search_query = "deep learning neural networks"
+
+        # Very different query
+        should_retrieve = chat._should_retrieve_papers("natural language processing transformers")
+
+        # Should retrieve (similarity is low)
+        assert should_retrieve is True
+
+    def test_query_with_rewriting_enabled(self, mock_embeddings_manager, mock_database):
+        """Test query with query rewriting enabled."""
+        with patch("neurips_abstracts.rag.requests.post") as mock_post:
+            # Mock both query rewriting and response generation
+            def mock_post_side_effect(*args, **kwargs):
+                mock_response = Mock()
+                mock_response.status_code = 200
+                mock_response.raise_for_status = Mock()
+
+                # Check if it's a rewriting request (shorter max_tokens)
+                if kwargs.get("json", {}).get("max_tokens", 1000) == 100:
+                    mock_response.json.return_value = {
+                        "choices": [{"message": {"content": "attention mechanism transformers"}}]
+                    }
+                else:
+                    mock_response.json.return_value = {
+                        "choices": [{"message": {"content": "Response about attention"}}]
+                    }
+                return mock_response
+
+            mock_post.side_effect = mock_post_side_effect
+
+            chat = RAGChat(mock_embeddings_manager, mock_database)
+            chat.enable_query_rewriting = True
+
+            result = chat.query("What about attention?")
+
+            assert "response" in result
+            assert "metadata" in result
+            assert "rewritten_query" in result["metadata"]
+            assert result["metadata"]["rewritten_query"] == "attention mechanism transformers"
+
+    def test_query_with_rewriting_disabled(self, mock_embeddings_manager, mock_database, mock_lm_studio_response):
+        """Test query with query rewriting disabled."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        chat.enable_query_rewriting = False
+
+        result = chat.query("What is attention mechanism?")
+
+        assert "response" in result
+        # Should use original query
+        call_args = mock_embeddings_manager.search_similar.call_args
+        assert call_args[0][0] == "What is attention mechanism?"
+
+    def test_query_caching_similar_queries(self, mock_embeddings_manager, mock_database):
+        """Test that similar follow-up queries reuse cached papers."""
+        with patch("neurips_abstracts.rag.requests.post") as mock_post:
+
+            def mock_post_side_effect(*args, **kwargs):
+                mock_response = Mock()
+                mock_response.status_code = 200
+                mock_response.raise_for_status = Mock()
+
+                # Check if it's a rewriting request
+                if kwargs.get("json", {}).get("max_tokens", 1000) == 100:
+                    mock_response.json.return_value = {
+                        "choices": [{"message": {"content": "deep learning networks"}}]
+                    }
+                else:
+                    mock_response.json.return_value = {"choices": [{"message": {"content": "Response"}}]}
+                return mock_response
+
+            mock_post.side_effect = mock_post_side_effect
+
+            chat = RAGChat(mock_embeddings_manager, mock_database)
+            chat.enable_query_rewriting = True
+
+            # First query
+            result1 = chat.query("Tell me about deep learning")
+            search_call_count_1 = mock_embeddings_manager.search_similar.call_count
+
+            # Similar follow-up query
+            result2 = chat.query("What about deep learning?")
+            search_call_count_2 = mock_embeddings_manager.search_similar.call_count
+
+            # Should only have called search once (cached second time)
+            assert search_call_count_1 == 1
+            assert search_call_count_2 == 1  # No new search
+            assert result2["metadata"]["retrieved_new_papers"] is False
+
+    def test_reset_conversation_clears_cache(self, mock_embeddings_manager, mock_database):
+        """Test that reset_conversation clears query cache."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+
+        # Set up some state
+        chat.last_search_query = "some query"
+        chat._cached_papers = [{"id": 1}]
+        chat._cached_context = "some context"
+        chat.conversation_history = [{"role": "user", "content": "test"}]
+
+        # Reset
+        chat.reset_conversation()
+
+        # Check everything is cleared
+        assert chat.last_search_query is None
+        assert chat._cached_papers == []
+        assert chat._cached_context == ""
+        assert chat.conversation_history == []

@@ -99,7 +99,149 @@ class RAGChat:
         self.model = model or config.chat_model
         self.max_context_papers = max_context_papers or config.max_context_papers
         self.temperature = temperature or config.chat_temperature
+        self.enable_query_rewriting = config.enable_query_rewriting
+        self.query_similarity_threshold = config.query_similarity_threshold
         self.conversation_history: List[Dict[str, str]] = []
+        self.last_search_query: Optional[str] = None
+
+    def _rewrite_query(self, user_query: str) -> str:
+        """
+        Rewrite user query into an effective search query.
+
+        Uses the LLM to transform conversational questions into optimized
+        search queries, considering conversation history for follow-up questions.
+
+        Parameters
+        ----------
+        user_query : str
+            Original user query or question.
+
+        Returns
+        -------
+        str
+            Rewritten query optimized for semantic search.
+
+        Raises
+        ------
+        RAGError
+            If query rewriting fails.
+
+        Examples
+        --------
+        >>> chat = RAGChat(em, db)
+        >>> rewritten = chat._rewrite_query("What about transformers?")
+        >>> print(rewritten)
+        "transformer architecture attention mechanism neural networks"
+        """
+        # Build system prompt for query rewriting
+        system_prompt = (
+            "You are a query rewriting assistant. Your task is to rewrite user questions "
+            "into effective search queries for finding relevant research papers. "
+            "Convert conversational questions into keyword-based search queries. "
+            "For follow-up questions, incorporate context from previous conversation. "
+            "Output ONLY the rewritten query, nothing else. "
+            "Keep queries concise (5-15 words) and focused on key concepts."
+        )
+
+        # Build messages with conversation history for context
+        messages = [{"role": "system", "content": system_prompt}]
+
+        # Include recent conversation history for context (last 4 messages)
+        if self.conversation_history:
+            context_history = self.conversation_history[-4:]
+            messages.extend(context_history)
+
+        # Add current query
+        messages.append(
+            {
+                "role": "user",
+                "content": f"Rewrite this query: {user_query}",
+            }
+        )
+
+        try:
+            response = requests.post(
+                f"{self.lm_studio_url}/v1/chat/completions",
+                json={
+                    "model": self.model,
+                    "messages": messages,
+                    "temperature": 0.3,  # Lower temperature for consistent rewrites
+                    "max_tokens": 100,  # Short rewritten queries
+                },
+                timeout=30,  # Shorter timeout for quick rewriting
+            )
+            response.raise_for_status()
+            data = response.json()
+            rewritten = data["choices"][0]["message"]["content"].strip()
+
+            # Remove any quotes or extra formatting
+            rewritten = rewritten.strip("\"'")
+
+            logger.info(f"Rewrote query: '{user_query}' -> '{rewritten}'")
+            return rewritten
+
+        except requests.exceptions.Timeout:
+            logger.warning("Query rewriting timed out, using original query")
+            return user_query
+        except requests.exceptions.HTTPError as e:
+            logger.warning(f"Query rewriting failed (HTTP {e.response.status_code}), using original query")
+            return user_query
+        except (KeyError, IndexError) as e:
+            logger.warning(f"Invalid response from LLM during query rewriting: {e}, using original query")
+            return user_query
+        except Exception as e:
+            logger.warning(f"Query rewriting failed: {e}, using original query")
+            return user_query
+
+    def _should_retrieve_papers(self, rewritten_query: str) -> bool:
+        """
+        Determine if new papers should be retrieved based on query similarity.
+
+        Compares the rewritten query with the last search query to avoid
+        redundant retrievals for similar follow-up questions.
+
+        Parameters
+        ----------
+        rewritten_query : str
+            The rewritten search query.
+
+        Returns
+        -------
+        bool
+            True if papers should be retrieved, False to reuse previous context.
+
+        Examples
+        --------
+        >>> chat = RAGChat(em, db)
+        >>> chat._should_retrieve_papers("deep learning networks")
+        True
+        """
+        # Always retrieve if this is the first query
+        if self.last_search_query is None:
+            return True
+
+        # Simple similarity check: count common words
+        # For better similarity, could use embeddings, but this is fast and effective
+        query_words = set(rewritten_query.lower().split())
+        last_words = set(self.last_search_query.lower().split())
+
+        # Calculate Jaccard similarity
+        if not query_words or not last_words:
+            return True
+
+        intersection = query_words & last_words
+        union = query_words | last_words
+        similarity = len(intersection) / len(union)
+
+        # Retrieve if queries are less similar than threshold
+        should_retrieve = similarity < self.query_similarity_threshold
+
+        logger.info(
+            f"Query similarity: {similarity:.2f} (threshold: {self.query_similarity_threshold}). "
+            f"{'Retrieving new papers' if should_retrieve else 'Reusing previous context'}"
+        )
+
+        return should_retrieve
 
     def query(
         self,
@@ -145,25 +287,72 @@ class RAGChat:
             if n_results is None:
                 n_results = self.max_context_papers
 
-            # Search for relevant papers
-            logger.info(f"Searching for papers related to: {question}")
-            search_results = self.embeddings_manager.search_similar(
-                question, n_results=n_results, where=metadata_filter
-            )
+            # Rewrite query for better semantic search (if enabled)
+            if self.enable_query_rewriting:
+                rewritten_query = self._rewrite_query(question)
+            else:
+                rewritten_query = question
+                logger.info("Query rewriting disabled, using original query")
 
-            if not search_results["ids"][0]:
-                logger.warning("No relevant papers found")
-                return {
-                    "response": "I couldn't find any relevant papers to answer your question.",
-                    "papers": [],
-                    "metadata": {"n_papers": 0},
-                }
+            # Check if we should retrieve new papers or reuse previous context
+            should_retrieve = self._should_retrieve_papers(rewritten_query) if self.enable_query_rewriting else True
 
-            # Format context from papers using shared utility
-            papers = format_search_results(search_results, self.database, include_documents=True)
-            context = build_context_from_papers(papers)
+            if should_retrieve:
+                # Search for relevant papers using rewritten query
+                logger.info(f"Searching for papers with rewritten query: {rewritten_query}")
+                search_results = self.embeddings_manager.search_similar(
+                    rewritten_query, n_results=n_results, where=metadata_filter
+                )
 
-            # Generate response using LM Studio
+                # Store rewritten query for next comparison
+                self.last_search_query = rewritten_query
+
+                if not search_results["ids"][0]:
+                    logger.warning("No relevant papers found")
+                    return {
+                        "response": "I couldn't find any relevant papers to answer your question.",
+                        "papers": [],
+                        "metadata": {"n_papers": 0, "rewritten_query": rewritten_query},
+                    }
+
+                # Format context from papers using shared utility
+                papers = format_search_results(search_results, self.database, include_documents=True)
+                context = build_context_from_papers(papers)
+
+                # Cache papers for potential reuse
+                self._cached_papers = papers
+                self._cached_context = context
+            else:
+                # Reuse cached papers and context from previous query
+                logger.info("Reusing cached papers from previous query")
+                papers = getattr(self, "_cached_papers", [])
+                context = getattr(self, "_cached_context", "")
+
+                if not papers:
+                    # Fallback: retrieve papers if cache is empty
+                    logger.warning("Cache empty, retrieving papers")
+                    search_results = self.embeddings_manager.search_similar(
+                        rewritten_query, n_results=n_results, where=metadata_filter
+                    )
+                    self.last_search_query = rewritten_query
+
+                    if not search_results["ids"][0]:
+                        logger.warning("No relevant papers found")
+                        return {
+                            "response": "I couldn't find any relevant papers to answer your question.",
+                            "papers": [],
+                            "metadata": {"n_papers": 0, "rewritten_query": rewritten_query},
+                        }
+
+                    # Format context from papers using shared utility
+                    papers = format_search_results(search_results, self.database, include_documents=True)
+                    context = build_context_from_papers(papers)
+
+                    # Cache papers for potential reuse
+                    self._cached_papers = papers
+                    self._cached_context = context
+
+            # Generate response using LM Studio (uses original question, not rewritten query)
             logger.info(f"Generating response using {len(papers)} papers as context")
             response_text = self._generate_response(question, context, system_prompt)
 
@@ -174,7 +363,12 @@ class RAGChat:
             return {
                 "response": response_text,
                 "papers": papers,
-                "metadata": {"n_papers": len(papers), "model": self.model},
+                "metadata": {
+                    "n_papers": len(papers),
+                    "model": self.model,
+                    "rewritten_query": rewritten_query,
+                    "retrieved_new_papers": should_retrieve,
+                },
             }
 
         except PaperFormattingError as e:
@@ -227,14 +421,17 @@ class RAGChat:
 
     def reset_conversation(self):
         """
-        Reset conversation history.
+        Reset conversation history and cached context.
 
         Examples
         --------
         >>> chat.reset_conversation()
         """
         self.conversation_history = []
-        logger.info("Conversation history reset")
+        self.last_search_query = None
+        self._cached_papers = []
+        self._cached_context = ""
+        logger.info("Conversation history and cache reset")
 
     def _generate_response(self, question: str, context: str, system_prompt: Optional[str] = None) -> str:
         """

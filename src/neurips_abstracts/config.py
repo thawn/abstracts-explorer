@@ -104,6 +104,10 @@ class Config:
         Default temperature for chat generation.
     chat_max_tokens : int
         Default max tokens for chat responses.
+    enable_query_rewriting : bool
+        Whether to enable query rewriting for better semantic search.
+    query_similarity_threshold : float
+        Similarity threshold for determining when to retrieve new papers (0.0-1.0).
 
     Examples
     --------
@@ -158,6 +162,10 @@ class Config:
 
         # RAG Settings
         self.max_context_papers = self._get_env_int("MAX_CONTEXT_PAPERS", default=5)
+
+        # Query Rewriting Settings
+        self.enable_query_rewriting = self._get_env_bool("ENABLE_QUERY_REWRITING", default=True)
+        self.query_similarity_threshold = self._get_env_float("QUERY_SIMILARITY_THRESHOLD", default=0.7)
 
     def _get_env(self, key: str, default: str = "") -> str:
         """
@@ -220,6 +228,29 @@ class Config:
             return float(value)
         except (ValueError, TypeError):
             return default
+
+    def _get_env_bool(self, key: str, default: bool = False) -> bool:
+        """
+        Get boolean environment variable.
+
+        Parameters
+        ----------
+        key : str
+            Environment variable name.
+        default : bool
+            Default value if not set or invalid.
+
+        Returns
+        -------
+        bool
+            Environment variable value as boolean or default.
+        """
+        value = self._env.get(key, "").lower()
+        if value in ("true", "1", "yes", "on"):
+            return True
+        elif value in ("false", "0", "no", "off"):
+            return False
+        return default
 
     def _resolve_path(self, path: str) -> str:
         """

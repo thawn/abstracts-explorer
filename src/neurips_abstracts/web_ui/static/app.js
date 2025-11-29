@@ -909,22 +909,30 @@ async function sendChatMessage() {
 
         // Extract response text and papers from the response object
         // The API returns: { response: { response: "text", papers: [...], metadata: {...} } }
-        let responseText, papers;
+        let responseText, papers, metadata;
         if (typeof data.response === 'object' && data.response !== null) {
             responseText = data.response.response || JSON.stringify(data.response);
             papers = data.response.papers || [];
+            metadata = data.response.metadata || {};
         } else if (typeof data.response === 'string') {
             responseText = data.response;
             papers = [];
+            metadata = {};
         } else {
             responseText = JSON.stringify(data.response);
             papers = [];
+            metadata = {};
+        }
+
+        // Update currentSearchTerm to use the rewritten query if available
+        if (metadata.rewritten_query) {
+            currentSearchTerm = metadata.rewritten_query;
         }
 
         addChatMessage(responseText, 'assistant');
 
-        // Display relevant papers
-        displayChatPapers(papers);
+        // Display relevant papers with metadata (including rewritten query)
+        displayChatPapers(papers, metadata);
     } catch (error) {
         console.error('Chat error:', error);
         document.getElementById(loadingId).remove();
@@ -977,7 +985,7 @@ function addChatMessage(text, role, isLoading = false) {
 }
 
 // Display chat papers in the side panel
-function displayChatPapers(papers) {
+function displayChatPapers(papers, metadata = {}) {
     const papersDiv = document.getElementById('chat-papers');
 
     if (!papers || papers.length === 0) {
@@ -991,6 +999,33 @@ function displayChatPapers(papers) {
     }
 
     let html = '';
+
+    // Display rewritten query if available
+    if (metadata.rewritten_query) {
+        const wasRetrieved = metadata.retrieved_new_papers !== false;
+        const cacheIcon = wasRetrieved ? 'fa-sync-alt' : 'fa-check-circle';
+        const cacheColor = wasRetrieved ? 'text-blue-600' : 'text-green-600';
+        const cacheText = wasRetrieved ? 'Retrieved new papers' : 'Using cached papers';
+
+        html += `
+            <div class="bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-4 mb-4 shadow-sm">
+                <div class="flex items-start gap-2 mb-2">
+                    <i class="fas fa-magic text-purple-600 mt-1"></i>
+                    <div class="flex-1">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-1">Optimized Search Query</h3>
+                        <p class="text-sm text-gray-800 font-medium italic">"${escapeHtml(metadata.rewritten_query)}"</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 text-xs text-gray-600 mt-2 pt-2 border-t border-purple-200">
+                    <i class="fas ${cacheIcon} ${cacheColor}"></i>
+                    <span>${cacheText}</span>
+                    <span class="ml-auto">${papers.length} paper${papers.length !== 1 ? 's' : ''} found</span>
+                </div>
+            </div>
+        `;
+    }
+
+    // Display papers
     papers.forEach((paper, index) => {
         html += formatPaperCard(paper, {
             compact: true,
