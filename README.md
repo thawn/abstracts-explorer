@@ -553,5 +553,4 @@ https://github.com/yourusername/neurips-abstracts/issues
 - improve the rag 
   - add query rewriting
   - only do retrieval for follow up question if the rewritten query is above a semantic distance threshold
-- the details view doubles the content of the beginning of the abstract.
 - render latex formulae

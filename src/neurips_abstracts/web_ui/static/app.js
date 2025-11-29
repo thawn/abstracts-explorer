@@ -622,12 +622,13 @@ function formatPaperCard(paper, options = {}) {
     if (paper.abstract) {
         if (paper.abstract.length > abstractLength) {
             const preview = paper.abstract.substring(0, abstractLength);
+            const remaining = paper.abstract.substring(abstractLength);
             abstractHtml = `
                 <details class="text-gray-700 ${compact ? 'text-xs' : 'text-sm'} leading-relaxed ${compact ? 'mt-2' : ''}" onclick="event.stopPropagation()">
                     <summary class="cursor-pointer hover:text-purple-600">
                         ${escapeHtml(preview)}... <span class="text-purple-600 font-medium">Show more</span>
                     </summary>
-                    <p class="mt-2">${escapeHtml(paper.abstract)}</p>
+                    <p class="mt-2">${escapeHtml(remaining)}</p>
                 </details>
             `;
         } else {
