@@ -12,8 +12,14 @@
     <!-- Font Awesome for icons -->
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome.min.css') }}">
 
+    <!-- KaTeX for LaTeX rendering -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/katex.min.css') }}">
+    <script src="{{ url_for('static', filename='vendor/katex.min.js') }}"></script>
+
     <!-- Marked.js for Markdown rendering -->
     <script src="{{ url_for('static', filename='vendor/marked.min.js') }}"></script>
+    <!-- Marked-KaTeX extension for LaTeX in Markdown -->
+    <script src="{{ url_for('static', filename='vendor/marked-katex-extension.min.js') }}"></script>
 
     <!-- Custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">

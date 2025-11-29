@@ -8,9 +8,11 @@
         "test:coverage": "jest --coverage",
         "build:tailwind": "npx tailwindcss -i src/neurips_abstracts/web_ui/static/tailwind.input.css -o src/neurips_abstracts/web_ui/static/vendor/tailwind.css --minify",
         "watch:tailwind": "npx tailwindcss -i src/neurips_abstracts/web_ui/static/tailwind.input.css -o src/neurips_abstracts/web_ui/static/vendor/tailwind.css --watch",
-        "install:vendor": "npm run install:vendor:fontawesome && npm run install:vendor:marked && npm run build:tailwind",
+        "install:vendor": "npm run install:vendor:fontawesome && npm run install:vendor:marked && npm run install:vendor:katex && npm run install:vendor:marked-katex && npm run build:tailwind",
         "install:vendor:fontawesome": "mkdir -p src/neurips_abstracts/web_ui/static/vendor && cp node_modules/@fortawesome/fontawesome-free/css/all.min.css src/neurips_abstracts/web_ui/static/vendor/fontawesome.min.css && cp -r node_modules/@fortawesome/fontawesome-free/webfonts src/neurips_abstracts/web_ui/static/",
-        "install:vendor:marked": "mkdir -p src/neurips_abstracts/web_ui/static/vendor && cp node_modules/marked/lib/marked.umd.js src/neurips_abstracts/web_ui/static/vendor/marked.min.js && cp node_modules/marked/lib/marked.umd.js.map src/neurips_abstracts/web_ui/static/vendor/marked.min.js.map"
+        "install:vendor:marked": "mkdir -p src/neurips_abstracts/web_ui/static/vendor && cp node_modules/marked/lib/marked.umd.js src/neurips_abstracts/web_ui/static/vendor/marked.min.js && cp node_modules/marked/lib/marked.umd.js.map src/neurips_abstracts/web_ui/static/vendor/marked.min.js.map",
+        "install:vendor:katex": "mkdir -p src/neurips_abstracts/web_ui/static/vendor && cp node_modules/katex/dist/katex.min.js src/neurips_abstracts/web_ui/static/vendor/katex.min.js && cp node_modules/katex/dist/katex.min.css src/neurips_abstracts/web_ui/static/vendor/katex.min.css && cp -r node_modules/katex/dist/fonts src/neurips_abstracts/web_ui/static/vendor/",
+        "install:vendor:marked-katex": "mkdir -p src/neurips_abstracts/web_ui/static/vendor && cp node_modules/marked-katex-extension/lib/index.umd.js src/neurips_abstracts/web_ui/static/vendor/marked-katex-extension.min.js"
     },
     "jest": {
         "testEnvironment": "jsdom",
@@ -36,6 +38,8 @@
     },
     "dependencies": {
         "@fortawesome/fontawesome-free": "^7.1.0",
-        "marked": "^17.0.1"
+        "katex": "^0.16.25",
+        "marked": "^17.0.1",
+        "marked-katex-extension": "^5.1.6"
     }
 }
