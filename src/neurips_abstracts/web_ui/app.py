@@ -636,10 +636,11 @@ def generate_markdown_with_assets(papers, search_query, assets_dir):
                 if paper.get("url"):
                     markdown += f"**Source URL:** {paper['url']}\n\n"
 
-                # Download poster image if available (from eventmedia)
-                if paper.get("eventmedia") and assets_dir:
-                    # eventmedia might contain image URLs - try to extract and download
-                    poster_filename = download_poster_image(paper["eventmedia"], assets_dir, f"poster_{paper['id']}")
+                # Download poster image if available (from eventmedia or by paper ID)
+                if assets_dir:
+                    poster_filename = download_poster_image(
+                        paper.get("eventmedia"), assets_dir, f"poster_{paper['id']}", paper["id"]
+                    )
                     if poster_filename:
                         markdown += f"**Poster Image:** ![Poster](assets/{poster_filename})\n\n"
 
@@ -685,9 +686,9 @@ def download_file(url, target_dir, filename):
         return None
 
 
-def download_poster_image(eventmedia, target_dir, base_filename):
+def download_poster_image(eventmedia, target_dir, base_filename, paper_id=None):
     """
-    Download poster image from eventmedia field.
+    Download poster image from eventmedia field or construct URL from paper ID.
 
     Parameters
     ----------
@@ -697,6 +698,8 @@ def download_poster_image(eventmedia, target_dir, base_filename):
         Directory to save image to
     base_filename : str
         Base filename (extension will be added based on image type)
+    paper_id : int, optional
+        Paper ID to use as fallback for constructing poster URL
 
     Returns
     -------
@@ -710,16 +713,42 @@ def download_poster_image(eventmedia, target_dir, base_filename):
         if eventmedia and eventmedia.strip().startswith("["):
             media_list = json.loads(eventmedia)
             for media_item in media_list:
-                if isinstance(media_item, dict) and "url" in media_item:
-                    # Check if it's an image
-                    url = media_item["url"]
-                    if any(ext in url.lower() for ext in [".jpg", ".jpeg", ".png", ".gif", ".webp"]):
+                if isinstance(media_item, dict):
+                    # Check for "file" key (poster images) or "url" key (other media)
+                    file_path = media_item.get("file")
+                    url = media_item.get("url") or media_item.get("uri")
+
+                    # Prioritize poster files (skip thumbnails, prefer full size)
+                    if file_path and any(
+                        ext in file_path.lower() for ext in [".jpg", ".jpeg", ".png", ".gif", ".webp"]
+                    ):
+                        # Skip thumbnail versions
+                        if "-thumb" in file_path:
+                            continue
+                        # Construct full URL from file path
+                        full_url = f"https://neurips.cc{file_path}"
+                        # Determine extension
+                        ext = file_path.split(".")[-1].split("?")[0]
+                        filename = f"{base_filename}.{ext}"
+                        return download_file(full_url, target_dir, filename)
+
+                    # Fall back to URL field
+                    elif url and any(ext in url.lower() for ext in [".jpg", ".jpeg", ".png", ".gif", ".webp"]):
                         # Determine extension
                         ext = url.split(".")[-1].split("?")[0]
                         filename = f"{base_filename}.{ext}"
                         return download_file(url, target_dir, filename)
     except Exception as e:
         logger.warning(f"Failed to parse eventmedia: {e}")
+
+    # Fallback: try to construct poster URL from paper ID
+    if paper_id:
+        try:
+            poster_url = f"https://neurips.cc/media/PosterPDFs/NeurIPS%202025/{paper_id}.png"
+            filename = f"{base_filename}.png"
+            return download_file(poster_url, target_dir, filename)
+        except Exception as e:
+            logger.debug(f"Failed to download poster from constructed URL for paper {paper_id}: {e}")
 
     return None
 

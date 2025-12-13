@@ -486,3 +486,125 @@ class TestWebUIRunServer:
             run_server(host="0.0.0.0", port=8080, debug=True)
 
             mock_run.assert_called_once_with(host="0.0.0.0", port=8080, debug=True)
+
+
+class TestDownloadPosterImage:
+    """Test download_poster_image function."""
+
+    def test_download_poster_from_file_path(self, tmp_path):
+        """Test downloading poster from eventmedia with 'file' key."""
+        from neurips_abstracts.web_ui.app import download_poster_image
+        import json
+
+        eventmedia = json.dumps(
+            [
+                {"id": 121603, "type": "URL", "name": "OpenReview", "uri": "https://openreview.net/forum?id=test"},
+                {
+                    "id": 134330,
+                    "file": "/media/PosterPDFs/NeurIPS%202025/114996.png",
+                    "type": "Poster",
+                    "name": "Poster",
+                },
+            ]
+        )
+
+        with patch("neurips_abstracts.web_ui.app.download_file") as mock_download:
+            mock_download.return_value = "poster_114996.png"
+            result = download_poster_image(eventmedia, tmp_path, "poster_114996", 114996)
+
+            # Verify download_file was called with correct URL
+            mock_download.assert_called_once_with(
+                "https://neurips.cc/media/PosterPDFs/NeurIPS%202025/114996.png", tmp_path, "poster_114996.png"
+            )
+            assert result == "poster_114996.png"
+
+    def test_download_poster_skips_thumbnails(self, tmp_path):
+        """Test that thumbnail images are skipped in favor of full size."""
+        from neurips_abstracts.web_ui.app import download_poster_image
+        import json
+
+        eventmedia = json.dumps(
+            [
+                {
+                    "id": 130886,
+                    "file": "/media/PosterPDFs/NeurIPS%202025/114997-thumb.png",
+                    "type": "Poster",
+                    "name": "Poster",
+                },
+                {
+                    "id": 134331,
+                    "file": "/media/PosterPDFs/NeurIPS%202025/114997.png",
+                    "type": "Poster",
+                    "name": "Poster",
+                },
+            ]
+        )
+
+        with patch("neurips_abstracts.web_ui.app.download_file") as mock_download:
+            mock_download.return_value = "poster_114997.png"
+            result = download_poster_image(eventmedia, tmp_path, "poster_114997", 114997)
+
+            # Verify download_file was called with full size, not thumbnail
+            mock_download.assert_called_once_with(
+                "https://neurips.cc/media/PosterPDFs/NeurIPS%202025/114997.png", tmp_path, "poster_114997.png"
+            )
+            assert result == "poster_114997.png"
+
+    def test_download_poster_fallback_to_paper_id(self, tmp_path):
+        """Test fallback to constructing URL from paper ID when eventmedia has no poster."""
+        from neurips_abstracts.web_ui.app import download_poster_image
+        import json
+
+        # Eventmedia with only OpenReview link, no poster
+        eventmedia = json.dumps(
+            [{"id": 121603, "type": "URL", "name": "OpenReview", "uri": "https://openreview.net/forum?id=test"}]
+        )
+
+        with patch("neurips_abstracts.web_ui.app.download_file") as mock_download:
+            mock_download.return_value = "poster_115000.png"
+            result = download_poster_image(eventmedia, tmp_path, "poster_115000", 115000)
+
+            # Verify download_file was called with constructed URL
+            mock_download.assert_called_once_with(
+                "https://neurips.cc/media/PosterPDFs/NeurIPS%202025/115000.png", tmp_path, "poster_115000.png"
+            )
+            assert result == "poster_115000.png"
+
+    def test_download_poster_no_eventmedia_uses_fallback(self, tmp_path):
+        """Test fallback to paper ID when eventmedia is None."""
+        from neurips_abstracts.web_ui.app import download_poster_image
+
+        with patch("neurips_abstracts.web_ui.app.download_file") as mock_download:
+            mock_download.return_value = "poster_115001.png"
+            result = download_poster_image(None, tmp_path, "poster_115001", 115001)
+
+            # Verify download_file was called with constructed URL
+            mock_download.assert_called_once_with(
+                "https://neurips.cc/media/PosterPDFs/NeurIPS%202025/115001.png", tmp_path, "poster_115001.png"
+            )
+            assert result == "poster_115001.png"
+
+    def test_download_poster_returns_none_on_error(self, tmp_path):
+        """Test that function returns None when download fails."""
+        from neurips_abstracts.web_ui.app import download_poster_image
+
+        with patch("neurips_abstracts.web_ui.app.download_file") as mock_download:
+            mock_download.side_effect = Exception("Download failed")
+            result = download_poster_image(None, tmp_path, "poster_error", 999999)
+
+            assert result is None
+
+    def test_download_poster_from_url_field(self, tmp_path):
+        """Test downloading poster from eventmedia with 'url' key."""
+        from neurips_abstracts.web_ui.app import download_poster_image
+        import json
+
+        eventmedia = json.dumps([{"id": 121603, "url": "https://example.com/poster.png", "type": "Image"}])
+
+        with patch("neurips_abstracts.web_ui.app.download_file") as mock_download:
+            mock_download.return_value = "poster_test.png"
+            result = download_poster_image(eventmedia, tmp_path, "poster_test")
+
+            # Verify download_file was called with URL from 'url' field
+            mock_download.assert_called_once_with("https://example.com/poster.png", tmp_path, "poster_test.png")
+            assert result == "poster_test.png"
