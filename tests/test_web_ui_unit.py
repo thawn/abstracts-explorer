@@ -608,3 +608,206 @@ class TestDownloadPosterImage:
             # Verify download_file was called with URL from 'url' field
             mock_download.assert_called_once_with("https://example.com/poster.png", tmp_path, "poster_test.png")
             assert result == "poster_test.png"
+
+
+class TestGetPosterUrl:
+    """Test get_poster_url function."""
+
+    def test_get_poster_url_from_file_path(self):
+        """Test extracting poster URL from eventmedia with 'file' key."""
+        from neurips_abstracts.web_ui.app import get_poster_url
+        import json
+
+        eventmedia = json.dumps(
+            [
+                {"id": 121603, "type": "URL", "name": "OpenReview", "uri": "https://openreview.net/forum?id=test"},
+                {"id": 134330, "file": "/media/PosterPDFs/NeurIPS%202025/114996.png", "type": "Poster"},
+            ]
+        )
+
+        url = get_poster_url(eventmedia, 114996)
+        assert url == "https://neurips.cc/media/PosterPDFs/NeurIPS%202025/114996.png"
+
+    def test_get_poster_url_skips_thumbnails(self):
+        """Test that thumbnail images are skipped."""
+        from neurips_abstracts.web_ui.app import get_poster_url
+        import json
+
+        eventmedia = json.dumps(
+            [
+                {"file": "/media/PosterPDFs/NeurIPS%202025/114997-thumb.png", "type": "Poster"},
+                {"file": "/media/PosterPDFs/NeurIPS%202025/114997.png", "type": "Poster"},
+            ]
+        )
+
+        url = get_poster_url(eventmedia, 114997)
+        assert url == "https://neurips.cc/media/PosterPDFs/NeurIPS%202025/114997.png"
+
+    def test_get_poster_url_fallback(self):
+        """Test fallback to constructing URL from paper ID."""
+        from neurips_abstracts.web_ui.app import get_poster_url
+
+        # No eventmedia
+        url = get_poster_url(None, 115000)
+        assert url == "https://neurips.cc/media/PosterPDFs/NeurIPS%202025/115000.png"
+
+    def test_get_poster_url_from_url_field(self):
+        """Test extracting URL from 'url' field."""
+        from neurips_abstracts.web_ui.app import get_poster_url
+        import json
+
+        eventmedia = json.dumps([{"url": "https://example.com/poster.png", "type": "Image"}])
+
+        url = get_poster_url(eventmedia, 100)
+        assert url == "https://example.com/poster.png"
+
+
+class TestParallelDownload:
+    """Test parallel download functionality."""
+
+    def test_download_paper_pdf_task_success(self, tmp_path):
+        """Test successful PDF download task."""
+        from neurips_abstracts.web_ui.app import download_paper_pdf_task
+
+        paper = {"id": 123, "paper_pdf_url": "https://example.com/paper.pdf"}
+
+        with patch("neurips_abstracts.web_ui.app.download_file") as mock_download:
+            mock_download.return_value = "paper_123.pdf"
+            paper_id, filename = download_paper_pdf_task(paper, tmp_path)
+
+            assert paper_id == 123
+            assert filename == "paper_123.pdf"
+            mock_download.assert_called_once_with("https://example.com/paper.pdf", tmp_path, "paper_123.pdf")
+
+    def test_download_paper_pdf_task_constructs_url(self, tmp_path):
+        """Test PDF download task constructs URL from paper_url."""
+        from neurips_abstracts.web_ui.app import download_paper_pdf_task
+
+        paper = {"id": 456, "paper_url": "https://openreview.net/forum?id=abc123"}
+
+        with patch("neurips_abstracts.web_ui.app.download_file") as mock_download:
+            mock_download.return_value = "paper_456.pdf"
+            paper_id, filename = download_paper_pdf_task(paper, tmp_path)
+
+            assert paper_id == 456
+            assert filename == "paper_456.pdf"
+            # Verify URL was converted from forum to pdf
+            mock_download.assert_called_once_with("https://openreview.net/pdf?id=abc123", tmp_path, "paper_456.pdf")
+
+    def test_download_paper_pdf_task_no_url(self, tmp_path):
+        """Test PDF download task when no URL is available."""
+        from neurips_abstracts.web_ui.app import download_paper_pdf_task
+
+        paper = {"id": 789}
+
+        paper_id, filename = download_paper_pdf_task(paper, tmp_path)
+
+        assert paper_id == 789
+        assert filename is None
+
+    def test_download_poster_image_task_success(self, tmp_path):
+        """Test successful poster image download task."""
+        from neurips_abstracts.web_ui.app import download_poster_image_task
+        import json
+
+        eventmedia = json.dumps([{"file": "/media/PosterPDFs/NeurIPS%202025/111.png", "type": "Poster"}])
+        paper = {"id": 111, "eventmedia": eventmedia}
+
+        with patch("neurips_abstracts.web_ui.app.download_file") as mock_download:
+            mock_download.return_value = "poster_111.png"
+            paper_id, filename = download_poster_image_task(paper, tmp_path)
+
+            assert paper_id == 111
+            assert filename == "poster_111.png"
+
+    def test_download_assets_parallel_success(self, tmp_path):
+        """Test parallel download of poster images only (PDFs not downloaded)."""
+        from neurips_abstracts.web_ui.app import download_assets_parallel
+        import json
+
+        papers = [
+            {
+                "id": 1,
+                "eventmedia": json.dumps([{"file": "/media/PosterPDFs/NeurIPS%202025/1.png"}]),
+            },
+            {
+                "id": 2,
+                "eventmedia": json.dumps([{"file": "/media/PosterPDFs/NeurIPS%202025/2.png"}]),
+            },
+            {
+                "id": 3,
+                "eventmedia": json.dumps([{"file": "/media/PosterPDFs/NeurIPS%202025/3.png"}]),
+            },
+        ]
+
+        with patch("neurips_abstracts.web_ui.app.download_file") as mock_download:
+            # Simulate successful downloads
+            mock_download.side_effect = lambda url, target, filename: filename
+
+            poster_results = download_assets_parallel(papers, tmp_path, max_workers=2)
+
+            # Verify all posters were downloaded (only posters, no PDFs)
+            assert len(poster_results) == 3
+            assert poster_results[1] == "poster_1.png"
+            assert poster_results[2] == "poster_2.png"
+            assert poster_results[3] == "poster_3.png"
+
+            # Verify download_file was called 3 times (3 poster downloads, no PDFs)
+            assert mock_download.call_count == 3
+
+    def test_download_assets_parallel_handles_failures(self, tmp_path):
+        """Test parallel download handles individual failures gracefully."""
+        from neurips_abstracts.web_ui.app import download_assets_parallel
+        import json
+
+        papers = [
+            {
+                "id": 1,
+                "eventmedia": json.dumps([{"file": "/media/PosterPDFs/NeurIPS%202025/1.png"}]),
+            },
+            {
+                "id": 2,
+                "eventmedia": json.dumps([{"file": "/media/PosterPDFs/NeurIPS%202025/2.png"}]),
+            },
+        ]
+
+        with patch("neurips_abstracts.web_ui.app.download_file") as mock_download:
+            # Simulate one success and one failure
+            def download_side_effect(url, target, filename):
+                if "poster_1" in filename:
+                    return filename
+                return None  # Simulate failure for paper 2
+
+            mock_download.side_effect = download_side_effect
+
+            poster_results = download_assets_parallel(papers, tmp_path, max_workers=2)
+
+            # Only paper 1 should be in results
+            assert 1 in poster_results
+            assert poster_results[1] == "poster_1.png"
+            assert 2 not in poster_results
+
+    def test_generate_markdown_with_remote_links(self, tmp_path):
+        """Test markdown generation with direct links to remote resources (no downloads)."""
+        from neurips_abstracts.web_ui.app import generate_markdown_with_assets
+        import json
+
+        papers = [
+            {
+                "id": 100,
+                "name": "Test Paper",
+                "abstract": "Test abstract",
+                "paper_pdf_url": "https://example.com/100.pdf",
+                "eventmedia": json.dumps([{"file": "/media/PosterPDFs/NeurIPS%202025/100.png"}]),
+            }
+        ]
+
+        markdown = generate_markdown_with_assets(papers, "test query", tmp_path)
+
+        # Verify markdown contains link to PDF on OpenReview (not downloaded)
+        assert "View on OpenReview" in markdown
+        assert "https://example.com/100.pdf" in markdown
+
+        # Verify markdown contains direct link to poster on neurips.cc (not downloaded)
+        assert "https://neurips.cc/media/PosterPDFs/NeurIPS%202025/100.png" in markdown
+        assert "![Poster](https://neurips.cc/media/PosterPDFs/NeurIPS%202025/100.png)" in markdown

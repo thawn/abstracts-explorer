@@ -12,6 +12,7 @@ import shutil
 import zipfile
 from pathlib import Path
 from io import BytesIO
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, g, send_file
 from flask_cors import CORS
 import requests
@@ -560,9 +561,153 @@ def export_interesting_papers():
         return jsonify({"error": str(e)}), 500
 
 
+def download_paper_pdf_task(paper, assets_dir):
+    """
+    Prepare and execute PDF download for a paper.
+
+    Parameters
+    ----------
+    paper : dict
+        Paper dictionary
+    assets_dir : Path
+        Directory to save file to
+
+    Returns
+    -------
+    tuple
+        (paper_id, filename or None)
+    """
+    paper_id = paper["id"]
+    pdf_url = paper.get("paper_pdf_url")
+    if not pdf_url and paper.get("paper_url"):
+        # Convert forum URL to PDF URL
+        pdf_url = paper["paper_url"].replace("/forum?id=", "/pdf?id=")
+
+    if pdf_url:
+        filename = download_file(pdf_url, assets_dir, f"paper_{paper_id}.pdf")
+        return (paper_id, filename)
+    return (paper_id, None)
+
+
+def get_poster_url(eventmedia, paper_id):
+    """
+    Extract poster image URL from eventmedia field or construct from paper ID.
+
+    Parameters
+    ----------
+    eventmedia : str
+        Event media field (may contain JSON or URLs)
+    paper_id : int
+        Paper ID to use as fallback for constructing poster URL
+
+    Returns
+    -------
+    str or None
+        Poster image URL if found, None otherwise
+    """
+    try:
+        import json
+
+        # Try to parse eventmedia as JSON
+        if eventmedia and eventmedia.strip().startswith("["):
+            media_list = json.loads(eventmedia)
+            for media_item in media_list:
+                if isinstance(media_item, dict):
+                    # Check for "file" key (poster images)
+                    file_path = media_item.get("file")
+
+                    # Prioritize poster files (skip thumbnails, prefer full size)
+                    if file_path and any(
+                        ext in file_path.lower() for ext in [".jpg", ".jpeg", ".png", ".gif", ".webp"]
+                    ):
+                        # Skip thumbnail versions
+                        if "-thumb" in file_path:
+                            continue
+                        # Construct full URL from file path
+                        return f"https://neurips.cc{file_path}"
+
+                    # Fall back to URL field
+                    url = media_item.get("url") or media_item.get("uri")
+                    if url and any(ext in url.lower() for ext in [".jpg", ".jpeg", ".png", ".gif", ".webp"]):
+                        return url
+    except Exception as e:
+        logger.warning(f"Failed to parse eventmedia: {e}")
+
+    # Fallback: construct poster URL from paper ID
+    if paper_id:
+        return f"https://neurips.cc/media/PosterPDFs/NeurIPS%202025/{paper_id}.png"
+
+    return None
+
+
+def download_poster_image_task(paper, assets_dir):
+    """
+    Prepare and execute poster image download for a paper.
+
+    Parameters
+    ----------
+    paper : dict
+        Paper dictionary
+    assets_dir : Path
+        Directory to save file to
+
+    Returns
+    -------
+    tuple
+        (paper_id, filename or None)
+    """
+    paper_id = paper["id"]
+    filename = download_poster_image(paper.get("eventmedia"), assets_dir, f"poster_{paper_id}", paper_id)
+    return (paper_id, filename)
+
+
+def download_assets_parallel(papers, assets_dir, max_workers=10):
+    """
+    Download poster images in parallel for all papers.
+
+    Note: PDFs are not downloaded; links to OpenReview are provided instead.
+
+    Parameters
+    ----------
+    papers : list
+        List of paper dictionaries
+    assets_dir : Path
+        Directory to save files to
+    max_workers : int
+        Maximum number of parallel download threads
+
+    Returns
+    -------
+    dict
+        Poster results dict where keys are paper IDs and values are filenames
+    """
+    poster_results = {}
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all poster download tasks
+        poster_futures = {
+            executor.submit(download_poster_image_task, paper, assets_dir): paper["id"] for paper in papers
+        }
+
+        # Collect poster results as they complete
+        for future in as_completed(poster_futures):
+            try:
+                paper_id, filename = future.result()
+                if filename:
+                    poster_results[paper_id] = filename
+            except Exception as e:
+                paper_id = poster_futures[future]
+                logger.warning(f"Failed to download poster for paper {paper_id}: {e}")
+
+    logger.info(f"Downloaded {len(poster_results)} posters in parallel")
+    return poster_results
+
+
 def generate_markdown_with_assets(papers, search_query, assets_dir):
     """
-    Generate markdown content with links to downloaded assets.
+    Generate markdown content with links to remote assets.
+
+    Note: No files are downloaded. PDFs and poster images link to their original URLs.
 
     Parameters
     ----------
@@ -571,7 +716,7 @@ def generate_markdown_with_assets(papers, search_query, assets_dir):
     search_query : str
         Search query context
     assets_dir : Path or None
-        Directory to download assets to, or None to skip downloads
+        Ignored (kept for backward compatibility)
 
     Returns
     -------
@@ -616,19 +761,13 @@ def generate_markdown_with_assets(papers, search_query, assets_dir):
                 if paper.get("poster_position"):
                     markdown += f"**Poster:** {paper['poster_position']}\n\n"
 
-                # Download and link PDF if available
-                # Try paper_pdf_url first, then construct from paper_url
+                # Always link to PDF on OpenReview (not downloaded)
+                paper_id = paper["id"]
                 pdf_url = paper.get("paper_pdf_url")
                 if not pdf_url and paper.get("paper_url"):
-                    # Convert forum URL to PDF URL by replacing 'forum' with 'pdf'
                     pdf_url = paper["paper_url"].replace("/forum?id=", "/pdf?id=")
-
-                if pdf_url and assets_dir:
-                    pdf_filename = download_file(pdf_url, assets_dir, f"paper_{paper['id']}.pdf")
-                    if pdf_filename:
-                        markdown += f"**PDF:** [Download](assets/{pdf_filename})\n\n"
-                elif pdf_url:
-                    markdown += f"**PDF URL:** {pdf_url}\n\n"
+                if pdf_url:
+                    markdown += f"**PDF:** [View on OpenReview]({pdf_url})\n\n"
 
                 if paper.get("paper_url"):
                     markdown += f"**Paper URL:** {paper['paper_url']}\n\n"
@@ -636,13 +775,10 @@ def generate_markdown_with_assets(papers, search_query, assets_dir):
                 if paper.get("url"):
                     markdown += f"**Source URL:** {paper['url']}\n\n"
 
-                # Download poster image if available (from eventmedia or by paper ID)
-                if assets_dir:
-                    poster_filename = download_poster_image(
-                        paper.get("eventmedia"), assets_dir, f"poster_{paper['id']}", paper["id"]
-                    )
-                    if poster_filename:
-                        markdown += f"**Poster Image:** ![Poster](assets/{poster_filename})\n\n"
+                # Link to poster image on neurips.cc (not downloaded)
+                poster_url = get_poster_url(paper.get("eventmedia"), paper_id)
+                if poster_url:
+                    markdown += f"**Poster Image:** ![Poster]({poster_url})\n\n"
 
                 if paper.get("abstract"):
                     markdown += f"**Abstract:**\n\n{paper['abstract']}\n\n"
