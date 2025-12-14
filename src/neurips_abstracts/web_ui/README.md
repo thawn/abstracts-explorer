@@ -54,6 +54,10 @@ The web interface provides:
 
 - **Paper Search**: Keyword and semantic search capabilities
 - **AI Chat**: RAG-powered Q&A about papers
+- **Interesting Papers**: Rate and organize papers with star ratings
+  - **JSON Import/Export**: Save and load your paper ratings
+  - Export ratings to backup or share with colleagues
+  - Import ratings with smart merging (preserves existing ratings)
 - **Statistics**: Database statistics and insights
 - **Modern UI**: Clean, responsive design using Tailwind CSS
 - **REST API**: JSON API for all functionality

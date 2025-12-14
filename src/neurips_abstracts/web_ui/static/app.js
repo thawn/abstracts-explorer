@@ -529,6 +529,174 @@ async function saveInterestingPapersAsMarkdown(event) {
     }
 }
 
+// Save interesting papers data as JSON file
+function saveInterestingPapersAsJSON() {
+    if (Object.keys(paperPriorities).length === 0) {
+        alert('No papers rated yet. Rate some papers before saving.');
+        return;
+    }
+
+    try {
+        // Create export data with metadata
+        const exportData = {
+            version: '1.0',
+            exportDate: new Date().toISOString(),
+            sortOrder: interestingPapersSortOrder,
+            paperPriorities: paperPriorities,
+            paperCount: Object.keys(paperPriorities).length
+        };
+
+        // Convert to JSON string
+        const jsonString = JSON.stringify(exportData, null, 2);
+
+        // Create blob and download
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `interesting-papers-${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        console.log('Successfully saved interesting papers as JSON');
+    } catch (error) {
+        console.error('Error saving JSON:', error);
+        alert('Error saving JSON file: ' + error.message);
+    }
+}
+
+// Trigger file input for loading JSON
+function loadInterestingPapersFromJSON() {
+    const fileInput = document.getElementById('json-file-input');
+    if (fileInput) {
+        fileInput.click();
+    }
+}
+
+// Handle JSON file load
+function handleJSONFileLoad(event) {
+    const file = event.target.files[0];
+    if (!file) {
+        return;
+    }
+
+    // Validate file type
+    if (!file.name.endsWith('.json')) {
+        alert('Please select a JSON file.');
+        event.target.value = '';
+        return;
+    }
+
+    const reader = new FileReader();
+
+    reader.onload = function (e) {
+        try {
+            const importData = JSON.parse(e.target.result);
+
+            // Validate data structure
+            if (!importData.paperPriorities || typeof importData.paperPriorities !== 'object') {
+                throw new Error('Invalid JSON format: missing or invalid paperPriorities');
+            }
+
+            // Ask for confirmation if there are existing ratings
+            const existingCount = Object.keys(paperPriorities).length;
+            let shouldProceed = true;
+
+            if (existingCount > 0) {
+                const importCount = Object.keys(importData.paperPriorities).length;
+                shouldProceed = confirm(
+                    `You have ${existingCount} existing rated paper(s).\n` +
+                    `This will load ${importCount} paper(s) from the file.\n\n` +
+                    `Choose OK to merge (existing ratings will be preserved unless they conflict),\n` +
+                    `or Cancel to abort.`
+                );
+            }
+
+            if (!shouldProceed) {
+                event.target.value = '';
+                return;
+            }
+
+            // Merge the imported data with existing data
+            // Existing ratings take precedence (we don't overwrite)
+            const beforeCount = Object.keys(paperPriorities).length;
+            let newCount = 0;
+            let updatedCount = 0;
+
+            for (const [paperId, data] of Object.entries(importData.paperPriorities)) {
+                if (paperPriorities[paperId]) {
+                    // Paper already rated - keep existing
+                    updatedCount++;
+                } else {
+                    // New rating from import
+                    paperPriorities[paperId] = data;
+                    newCount++;
+                }
+            }
+
+            // Optionally restore sort order if not set
+            if (importData.sortOrder && !localStorage.getItem('interestingPapersSortOrder')) {
+                interestingPapersSortOrder = importData.sortOrder;
+                localStorage.setItem('interestingPapersSortOrder', interestingPapersSortOrder);
+
+                // Update the dropdown
+                const sortSelect = document.getElementById('sort-order');
+                if (sortSelect) {
+                    sortSelect.value = interestingPapersSortOrder;
+                }
+            }
+
+            // Save to localStorage
+            savePriorities();
+
+            // Update UI
+            updateInterestingPapersCount();
+
+            // Reload interesting papers if on that tab
+            if (currentTab === 'interesting') {
+                loadInterestingPapers();
+            }
+
+            // Show success message
+            const afterCount = Object.keys(paperPriorities).length;
+            let message = `Successfully loaded ${newCount} new rated paper(s).`;
+            if (updatedCount > 0) {
+                message += `\n${updatedCount} paper(s) were already rated (kept existing ratings).`;
+            }
+            message += `\nTotal rated papers: ${afterCount}`;
+
+            if (importData.exportDate) {
+                const exportDate = new Date(importData.exportDate).toLocaleString();
+                message += `\n\nFile exported on: ${exportDate}`;
+            }
+
+            alert(message);
+
+            console.log('Successfully loaded interesting papers from JSON', {
+                newCount,
+                updatedCount,
+                totalCount: afterCount
+            });
+
+        } catch (error) {
+            console.error('Error loading JSON:', error);
+            alert('Error loading JSON file: ' + error.message + '\n\nPlease ensure the file is a valid interesting papers export.');
+        }
+
+        // Reset the file input
+        event.target.value = '';
+    };
+
+    reader.onerror = function () {
+        alert('Error reading file. Please try again.');
+        event.target.value = '';
+    };
+
+    reader.readAsText(file);
+}
+
 // Generate markdown content for interesting papers
 function generateInterestingPapersMarkdown(papers) {
     // Add priority to each paper

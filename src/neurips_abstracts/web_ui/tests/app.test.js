@@ -63,7 +63,10 @@ function loadAppJs() {
         addChatMessage,
         resetChat,
         showError,
-        escapeHtml
+        escapeHtml,
+        saveInterestingPapersAsJSON,
+        loadInterestingPapersFromJSON,
+        handleJSONFileLoad
     };
 }
 
@@ -977,6 +980,396 @@ describe('NeurIPS Abstracts Web UI', () => {
             const resultsDiv = document.getElementById('search-results');
             expect(resultsDiv.innerHTML).toContain('Error');
             expect(console.error).toHaveBeenCalled();
+        });
+    });
+
+    describe('JSON Import/Export', () => {
+        let mockCreateElement;
+        let mockBlob;
+        let mockURL;
+        let originalAlert;
+        let originalConfirm;
+        let testApp;
+
+        beforeEach(() => {
+            // Mock alert and confirm
+            originalAlert = global.alert;
+            originalConfirm = global.confirm;
+            global.alert = jest.fn();
+            global.confirm = jest.fn(() => true);
+
+            // Mock URL.createObjectURL and revokeObjectURL
+            mockURL = {
+                createObjectURL: jest.fn(() => 'blob:mock-url'),
+                revokeObjectURL: jest.fn()
+            };
+            global.URL = mockURL;
+
+            // Mock Blob
+            mockBlob = jest.fn((content, options) => ({
+                content,
+                options
+            }));
+            global.Blob = mockBlob;
+
+            // Store original createElement
+            mockCreateElement = document.createElement;
+
+            // Mock localStorage
+            global.localStorage = {
+                getItem: jest.fn(),
+                setItem: jest.fn(),
+                clear: jest.fn()
+            };
+
+            // Setup sort order select element
+            const sortSelect = document.createElement('select');
+            sortSelect.id = 'sort-order';
+            document.body.appendChild(sortSelect);
+
+            // Create mocks for functions that may be called - make them available globally
+            global.updateInterestingPapersCount = jest.fn();
+            global.loadInterestingPapers = jest.fn();
+            global.savePriorities = jest.fn();
+
+            // Reload the app with the mocked functions available
+            testApp = loadAppJs();
+        });
+
+        afterEach(() => {
+            global.alert = originalAlert;
+            global.confirm = originalConfirm;
+        });
+
+        describe('saveInterestingPapersAsJSON', () => {
+            test('should alert if no papers are rated', () => {
+                // Call with empty paperPriorities (default state)
+                testApp.saveInterestingPapersAsJSON();
+
+                expect(global.alert).toHaveBeenCalledWith(
+                    'No papers rated yet. Rate some papers before saving.'
+                );
+            });
+
+            test('should create and download JSON file with correct structure', () => {
+                // Set up test data by directly modifying the global paperPriorities 
+                // We need to access it from the eval scope
+                eval(`
+                    paperPriorities = {
+                        '1': { priority: 3, searchTerm: 'machine learning' },
+                        '2': { priority: 2, searchTerm: 'neural networks' }
+                    };
+                    interestingPapersSortOrder = 'search-rating-poster';
+                `);
+
+                const mockDate = new Date('2025-12-14T10:00:00.000Z');
+                const OriginalDate = global.Date;
+                global.Date = class extends OriginalDate {
+                    constructor() {
+                        super();
+                        return mockDate;
+                    }
+                    static now() {
+                        return mockDate.getTime();
+                    }
+                };
+                global.Date.prototype = OriginalDate.prototype;
+
+                testApp.saveInterestingPapersAsJSON();
+
+                // Check that Blob was created with correct content
+                expect(mockBlob).toHaveBeenCalled();
+                const blobContent = mockBlob.mock.calls[0][0][0];
+                const exportData = JSON.parse(blobContent);
+
+                expect(exportData).toMatchObject({
+                    version: '1.0',
+                    sortOrder: 'search-rating-poster',
+                    paperPriorities: {
+                        '1': { priority: 3, searchTerm: 'machine learning' },
+                        '2': { priority: 2, searchTerm: 'neural networks' }
+                    },
+                    paperCount: 2
+                });
+
+                // Check that download was triggered
+                expect(document.createElement).toHaveBeenCalledWith('a');
+                expect(mockURL.createObjectURL).toHaveBeenCalled();
+                expect(mockURL.revokeObjectURL).toHaveBeenCalled();
+
+                global.Date = OriginalDate;
+            });
+
+            test('should handle errors gracefully', () => {
+                // Set up test data
+                eval(`
+                    paperPriorities = {
+                        '1': { priority: 3, searchTerm: 'machine learning' }
+                    };
+                `);
+
+                // Mock Blob to throw error
+                global.Blob = jest.fn(() => {
+                    throw new Error('Blob creation failed');
+                });
+
+                testApp.saveInterestingPapersAsJSON();
+
+                expect(global.alert).toHaveBeenCalledWith(
+                    expect.stringContaining('Error saving JSON file')
+                );
+            });
+        });
+
+        describe('loadInterestingPapersFromJSON', () => {
+            test('should trigger file input click', () => {
+                const mockFileInput = {
+                    click: jest.fn()
+                };
+                const originalGetElementById = document.getElementById;
+                document.getElementById = jest.fn(() => mockFileInput);
+
+                testApp.loadInterestingPapersFromJSON();
+
+                expect(mockFileInput.click).toHaveBeenCalled();
+
+                document.getElementById = originalGetElementById;
+            });
+        });
+
+        describe('handleJSONFileLoad', () => {
+            let mockEvent;
+            let mockFileReader;
+
+            beforeEach(() => {
+                mockFileReader = {
+                    onload: null,
+                    onerror: null,
+                    readAsText: jest.fn(function () {
+                        // Simulate async file read
+                        setTimeout(() => {
+                            if (this.onload) {
+                                this.onload({ target: { result: this._mockResult } });
+                            }
+                        }, 0);
+                    }),
+                    _mockResult: ''
+                };
+
+                global.FileReader = jest.fn(() => mockFileReader);
+
+                mockEvent = {
+                    target: {
+                        files: [],
+                        value: ''
+                    }
+                };
+            });
+
+            test('should return early if no file selected', () => {
+                mockEvent.target.files = [];
+
+                testApp.handleJSONFileLoad(mockEvent);
+
+                expect(global.FileReader).not.toHaveBeenCalled();
+            });
+
+            test('should reject non-JSON files', () => {
+                mockEvent.target.files = [{ name: 'test.txt' }];
+
+                testApp.handleJSONFileLoad(mockEvent);
+
+                expect(global.alert).toHaveBeenCalledWith('Please select a JSON file.');
+                expect(mockEvent.target.value).toBe('');
+            });
+
+            test('should load valid JSON and merge with existing data', async () => {
+                // Set up initial state with some existing papers
+                eval(`
+                    paperPriorities = {
+                        '1': { priority: 3, searchTerm: 'machine learning' },
+                        '2': { priority: 2, searchTerm: 'neural networks' }
+                    };
+                    currentTab = 'interesting';
+                `);
+
+                const validJSON = {
+                    version: '1.0',
+                    exportDate: '2025-12-14T09:00:00.000Z',
+                    sortOrder: 'rating-poster-search',
+                    paperPriorities: {
+                        '3': { priority: 3, searchTerm: 'deep learning' },
+                        '4': { priority: 1, searchTerm: 'transformers' }
+                    },
+                    paperCount: 2
+                };
+
+                mockFileReader._mockResult = JSON.stringify(validJSON);
+                mockEvent.target.files = [{ name: 'test.json' }];
+
+                testApp.handleJSONFileLoad(mockEvent);
+
+                // Wait for FileReader to process
+                await new Promise(resolve => setTimeout(resolve, 15));
+
+                // Check that priorities were merged - access from eval context
+                const mergedPriorities = eval('paperPriorities');
+                expect(mergedPriorities['3']).toEqual({
+                    priority: 3,
+                    searchTerm: 'deep learning'
+                });
+                expect(mergedPriorities['4']).toEqual({
+                    priority: 1,
+                    searchTerm: 'transformers'
+                });
+
+                // Original priorities should still be there
+                expect(mergedPriorities['1']).toBeDefined();
+                expect(mergedPriorities['2']).toBeDefined();
+
+                // Check that UI was updated
+                expect(global.savePriorities).toHaveBeenCalled();
+                expect(global.updateInterestingPapersCount).toHaveBeenCalled();
+                expect(global.loadInterestingPapers).toHaveBeenCalled();
+                expect(global.alert).toHaveBeenCalledWith(
+                    expect.stringContaining('Successfully loaded 2 new rated paper')
+                );
+            });
+
+            test('should handle existing ratings conflict', async () => {
+                // Set up initial state
+                eval(`
+                    paperPriorities = {
+                        '1': { priority: 3, searchTerm: 'machine learning' },
+                        '2': { priority: 2, searchTerm: 'neural networks' }
+                    };
+                    currentTab = 'interesting';
+                `);
+
+                const validJSON = {
+                    version: '1.0',
+                    paperPriorities: {
+                        '1': { priority: 5, searchTerm: 'different term' }, // Conflicts with existing
+                        '3': { priority: 3, searchTerm: 'new paper' }
+                    },
+                    paperCount: 2
+                };
+
+                mockFileReader._mockResult = JSON.stringify(validJSON);
+                mockEvent.target.files = [{ name: 'test.json' }];
+
+                testApp.handleJSONFileLoad(mockEvent);
+
+                // Wait for FileReader to process
+                await new Promise(resolve => setTimeout(resolve, 15));
+
+                // Check from eval context
+                const mergedPriorities = eval('paperPriorities');
+
+                // Original rating for paper 1 should be preserved
+                expect(mergedPriorities['1']).toEqual({
+                    priority: 3,
+                    searchTerm: 'machine learning'
+                });
+
+                // New paper should be added
+                expect(mergedPriorities['3']).toEqual({
+                    priority: 3,
+                    searchTerm: 'new paper'
+                });
+
+                expect(global.alert).toHaveBeenCalledWith(
+                    expect.stringContaining('1 paper(s) were already rated')
+                );
+            });
+
+            test('should ask for confirmation when existing ratings exist', async () => {
+                // Set up initial state with existing ratings
+                eval(`
+                    paperPriorities = {
+                        '1': { priority: 3, searchTerm: 'machine learning' },
+                        '2': { priority: 2, searchTerm: 'neural networks' }
+                    };
+                `);
+
+                global.confirm = jest.fn(() => false); // User cancels
+
+                const validJSON = {
+                    version: '1.0',
+                    paperPriorities: {
+                        '3': { priority: 3, searchTerm: 'deep learning' }
+                    },
+                    paperCount: 1
+                };
+
+                mockFileReader._mockResult = JSON.stringify(validJSON);
+                mockEvent.target.files = [{ name: 'test.json' }];
+
+                testApp.handleJSONFileLoad(mockEvent);
+
+                // Wait for FileReader to process
+                await new Promise(resolve => setTimeout(resolve, 15));
+
+                expect(global.confirm).toHaveBeenCalled();
+                expect(global.savePriorities).not.toHaveBeenCalled();
+            });
+
+            test('should handle invalid JSON format', async () => {
+                mockFileReader._mockResult = 'invalid json{';
+                mockEvent.target.files = [{ name: 'test.json' }];
+
+                testApp.handleJSONFileLoad(mockEvent);
+
+                // Wait for FileReader to process
+                await new Promise(resolve => setTimeout(resolve, 15));
+
+                expect(global.alert).toHaveBeenCalledWith(
+                    expect.stringContaining('Error loading JSON file')
+                );
+            });
+
+            test('should handle missing paperPriorities field', async () => {
+                mockFileReader._mockResult = JSON.stringify({
+                    version: '1.0',
+                    exportDate: '2025-12-14T09:00:00.000Z'
+                    // Missing paperPriorities
+                });
+                mockEvent.target.files = [{ name: 'test.json' }];
+
+                testApp.handleJSONFileLoad(mockEvent);
+
+                // Wait for FileReader to process
+                await new Promise(resolve => setTimeout(resolve, 15));
+
+                expect(global.alert).toHaveBeenCalledWith(
+                    expect.stringContaining('Invalid JSON format: missing or invalid paperPriorities')
+                );
+            });
+
+            test('should handle file read error', async () => {
+                mockEvent.target.files = [{ name: 'test.json' }];
+
+                global.FileReader = jest.fn(function () {
+                    return {
+                        onload: null,
+                        onerror: null,
+                        readAsText: jest.fn(function () {
+                            setTimeout(() => {
+                                if (this.onerror) {
+                                    this.onerror();
+                                }
+                            }, 0);
+                        })
+                    };
+                });
+
+                testApp.handleJSONFileLoad(mockEvent);
+
+                // Wait for FileReader to process
+                await new Promise(resolve => setTimeout(resolve, 15));
+
+                expect(global.alert).toHaveBeenCalledWith('Error reading file. Please try again.');
+            });
         });
     });
 });

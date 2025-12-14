@@ -284,6 +284,10 @@ The web interface provides:
 - 💬 **Chat**: Interactive RAG chat to ask questions about papers
   - ✨ **NEW**: Displays rewritten query showing how your question was optimized
   - 📊 Cache status indicator (retrieved vs. cached papers)
+- ⭐ **Interesting Papers**: Rate and organize papers you're interested in
+  - 💾 **NEW**: Save and load your ratings as JSON files
+  - 📥 Export your interesting papers for backup or sharing
+  - 📤 Import ratings from JSON files with smart merging
 - 📊 **Filters**: Filter by track, decision, event type, session, and topics
 - 📄 **Details**: View full paper information including authors and abstracts
 
