@@ -263,10 +263,6 @@ async function saveInterestingPapersAsMarkdown(event) {
         const searchInput = document.getElementById('search-input');
         const searchQuery = searchInput ? searchInput.value : '';
 
-        // Check if user wants to download assets
-        const downloadAssetsCheckbox = document.getElementById('download-assets-checkbox');
-        const downloadAssets = downloadAssetsCheckbox ? downloadAssetsCheckbox.checked : false;
-
         // Request the backend to generate markdown
         const response = await fetch(`${API_BASE}/api/export/interesting-papers`, {
             method: 'POST',
@@ -276,8 +272,7 @@ async function saveInterestingPapersAsMarkdown(event) {
             body: JSON.stringify({
                 paper_ids: paperIds,
                 priorities: paperPriorities,
-                search_query: searchQuery,
-                download_assets: downloadAssets
+                search_query: searchQuery
             })
         });
 

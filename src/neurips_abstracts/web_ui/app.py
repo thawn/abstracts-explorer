@@ -445,20 +445,17 @@ def export_interesting_papers():
         Dictionary mapping paper IDs to priority ratings (1-5)
     search_query : str, optional
         Search query context
-    download_assets : bool, optional
-        Whether to download PDFs and images (default: True)
 
     Returns
     -------
     file
-        Zip file containing markdown and downloaded assets
+        Markdown file containing paper information with remote links to assets
     """
     try:
         data = request.json
         paper_ids = data.get("paper_ids", [])
         priorities = data.get("priorities", {})
         search_query = data.get("search_query", "")
-        download_assets = data.get("download_assets", True)
 
         if not paper_ids:
             return jsonify({"error": "No paper IDs provided"}), 400
@@ -498,63 +495,19 @@ def export_interesting_papers():
             )
         )
 
-        # Create temporary directory for files
-        temp_dir = tempfile.mkdtemp()
-        assets_dir = Path(temp_dir) / "assets"
-        assets_dir.mkdir(exist_ok=True)
+        # Generate markdown with remote links (no asset downloads)
+        markdown = generate_markdown_with_assets(papers, search_query, None)
 
-        try:
-            # Generate markdown with asset links
-            markdown = generate_markdown_with_assets(papers, search_query, assets_dir if download_assets else None)
+        # Return markdown file directly
+        markdown_buffer = BytesIO(markdown.encode("utf-8"))
+        markdown_buffer.seek(0)
 
-            # If not downloading assets, just return the markdown file
-            if not download_assets:
-                # Clean up temp directory
-                shutil.rmtree(temp_dir)
-
-                # Return markdown directly
-                markdown_buffer = BytesIO(markdown.encode("utf-8"))
-                markdown_buffer.seek(0)
-
-                return send_file(
-                    markdown_buffer,
-                    mimetype="text/markdown",
-                    as_attachment=True,
-                    download_name=f'interesting-papers-{papers[0].get("year", "2025")}.md',
-                )
-
-            # Write markdown file
-            markdown_path = Path(temp_dir) / "interesting-papers.md"
-            with open(markdown_path, "w", encoding="utf-8") as f:
-                f.write(markdown)
-
-            # Create zip file
-            zip_buffer = BytesIO()
-            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                # Add markdown
-                zip_file.write(markdown_path, "interesting-papers.md")
-
-                # Add assets if they were downloaded
-                if download_assets and assets_dir.exists():
-                    for asset_file in assets_dir.glob("*"):
-                        zip_file.write(asset_file, f"assets/{asset_file.name}")
-
-            zip_buffer.seek(0)
-
-            # Clean up temp directory
-            shutil.rmtree(temp_dir)
-
-            return send_file(
-                zip_buffer,
-                mimetype="application/zip",
-                as_attachment=True,
-                download_name=f'interesting-papers-{papers[0].get("year", "2025")}.zip',
-            )
-
-        except Exception as e:
-            # Clean up on error
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            raise
+        return send_file(
+            markdown_buffer,
+            mimetype="text/markdown",
+            as_attachment=True,
+            download_name=f'interesting-papers-{papers[0].get("year", "2025")}.md',
+        )
 
     except Exception as e:
         logger.error(f"Error exporting interesting papers: {e}")
