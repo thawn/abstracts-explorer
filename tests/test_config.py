@@ -5,7 +5,6 @@ This module tests the configuration loading and management functionality.
 """
 
 import os
-import pytest
 from pathlib import Path
 
 from neurips_abstracts.config import Config, get_config, load_env_file
@@ -263,7 +262,7 @@ CHAT_MAX_TOKENS=500
         """Test that absolute paths are not modified."""
         env_file = tmp_path / ".env"
         env_file.write_text(
-            f"""
+            """
 EMBEDDING_DB_PATH=/absolute/path/to/chroma_db
 PAPER_DB_PATH=/absolute/path/to/papers.db
 """

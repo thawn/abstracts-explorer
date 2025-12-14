@@ -221,7 +221,7 @@ class TestWebUIIntegration:
             try:
                 error_data = response.json()
                 print(f"Error response: {error_data}")
-            except:
+            except Exception:
                 print(f"Error response (non-JSON): {response.text}")
         assert response.status_code == 200
 

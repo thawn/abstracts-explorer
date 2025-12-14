@@ -617,7 +617,7 @@ class TestRAGChatQueryRewriting:
                 {"role": "assistant", "content": "Transformers use attention..."},
             ]
 
-            rewritten = chat._rewrite_query("What are the applications?")
+            chat._rewrite_query("What are the applications?")
 
             # Check that conversation history was included
             call_args = mock_post.call_args
@@ -766,7 +766,7 @@ class TestRAGChatQueryRewriting:
             chat.enable_query_rewriting = True
 
             # First query
-            result1 = chat.query("Tell me about deep learning")
+            chat.query("Tell me about deep learning")
             search_call_count_1 = mock_embeddings_manager.search_similar.call_count
 
             # Similar follow-up query

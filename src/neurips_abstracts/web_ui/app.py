@@ -7,8 +7,6 @@ and exploring the NeurIPS abstracts database.
 
 import os
 import logging
-import tempfile
-import shutil
 import zipfile
 from pathlib import Path
 from io import BytesIO
@@ -634,7 +632,6 @@ def generate_folder_structure_export(papers, search_query, sort_order="search-ra
     BytesIO
         Buffer containing zip file
     """
-    from datetime import datetime
     import re
 
     # Create in-memory zip file
@@ -721,7 +718,6 @@ def generate_main_readme(papers, search_query, sort_order="search-rating-poster"
     """
     from datetime import datetime
     import re
-    from bs4 import BeautifulSoup
 
     markdown = "# NeurIPS 2025 - Interesting Papers\n\n"
 
@@ -739,7 +735,7 @@ def generate_main_readme(papers, search_query, sort_order="search-rating-poster"
             markdown += f"**Dates:** {conf_info['dates']}\n\n"
         if conf_info.get("location"):
             markdown += f"**Location:** {conf_info['location']}\n\n"
-        markdown += f"**Website:** [https://neurips.cc/](https://neurips.cc/)\n\n"
+        markdown += "**Website:** [https://neurips.cc/](https://neurips.cc/)\n\n"
         if conf_info.get("description"):
             markdown += f"**About:** {conf_info['description']}\n\n"
     else:
@@ -790,7 +786,7 @@ def generate_main_readme(papers, search_query, sort_order="search-rating-poster"
     if sort_order == "poster-search-rating":
         # Single file with all papers
         markdown += "## Papers\n\n"
-        markdown += f"All papers are organized in a single file: [View All Papers](all_papers.md)\n\n"
+        markdown += "All papers are organized in a single file: [View All Papers](all_papers.md)\n\n"
         markdown += f"**Total Papers:** {len(papers)}\n\n"
 
         # Still show search terms summary
