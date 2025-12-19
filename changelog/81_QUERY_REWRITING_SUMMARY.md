@@ -39,7 +39,6 @@ Successfully added intelligent query rewriting to the RAG system to improve sema
 - `.env.example` - Configuration template
 - `tests/test_rag.py` - Comprehensive test suite
 - `README.md` - User documentation
-- `changelog/62_QUERY_REWRITING.md` - Detailed documentation
 - `examples/query_rewriting_demo.py` - Demo script
 
 ## 🧪 Testing

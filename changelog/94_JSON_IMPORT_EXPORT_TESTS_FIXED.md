@@ -64,7 +64,6 @@ The actual functionality was verified with:
 ## Files Modified
 
 - `src/neurips_abstracts/web_ui/tests/app.test.js` - Simplified tests to focus on testable behaviors
-- `changelog/62_JSON_IMPORT_EXPORT.md` - Updated test documentation
 
 ## Conclusion
 
