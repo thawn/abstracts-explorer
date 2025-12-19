@@ -17,6 +17,7 @@ from .database import DatabaseManager
 from .downloader import download_neurips_data
 from .embeddings import EmbeddingsManager, EmbeddingsError
 from .rag import RAGChat, RAGError
+from .plugins import get_plugin, list_plugins, list_plugin_names
 
 
 def setup_logging(verbosity: int) -> None:
@@ -510,29 +511,67 @@ def download_command(args: argparse.Namespace) -> int:
     ----------
     args : argparse.Namespace
         Command-line arguments containing:
+        - plugin: Name of the downloader plugin to use
         - year: Year of NeurIPS conference
         - output: Path for the database file
         - force: Whether to force re-download
+        - list_plugins: Whether to list available plugins
 
     Returns
     -------
     int
         Exit code (0 for success, non-zero for failure)
     """
-    output_path = Path(args.output)
+    # Import plugins to register them
+    import neurips_abstracts.plugins.neurips_downloader
+    import neurips_abstracts.plugins.ml4ps_downloader
 
-    print(f"Downloading NeurIPS {args.year} data...")
+    # If list_plugins flag is set, show available plugins and exit
+    if hasattr(args, "list_plugins") and args.list_plugins:
+        print("Available downloader plugins:")
+        print("=" * 70)
+        plugins = list_plugins()
+        for plugin_meta in plugins:
+            print(f"\n📦 {plugin_meta['name']}")
+            print(f"   {plugin_meta['description']}")
+            if plugin_meta.get("supported_years"):
+                years = plugin_meta["supported_years"]
+                if len(years) > 5:
+                    print(f"   Supported years: {min(years)}-{max(years)}")
+                else:
+                    print(f"   Supported years: {', '.join(map(str, years))}")
+        print("\n" + "=" * 70)
+        return 0
+
+    output_path = Path(args.output)
+    plugin_name = getattr(args, "plugin", "neurips")
+
+    # Get the plugin
+    plugin = get_plugin(plugin_name)
+    if not plugin:
+        print(f"❌ Error: Plugin '{plugin_name}' not found", file=sys.stderr)
+        print(f"\nAvailable plugins: {', '.join(list_plugin_names())}", file=sys.stderr)
+        print("\nUse --list-plugins to see details", file=sys.stderr)
+        return 1
+
+    print(f"Using plugin: {plugin.plugin_name}")
+    print(f"Downloading {plugin.plugin_description}...")
     print("=" * 70)
 
     try:
-        # Download data
-        data = download_neurips_data(
-            year=args.year,
-            output_path=output_path.parent / f"neurips_{args.year}.json",
-            force_download=args.force,
-        )
+        # Prepare kwargs for plugin
+        kwargs = {}
 
-        print(f"✅ Downloaded {len(data):,} papers")
+        # Add plugin-specific options
+        if plugin_name == "ml4ps":
+            kwargs["fetch_abstracts"] = getattr(args, "fetch_abstracts", True)
+            kwargs["max_workers"] = getattr(args, "max_workers", 20)
+
+        # Download data using plugin
+        json_path = output_path.parent / f"{plugin_name}_{args.year}.json"
+        data = plugin.download(year=args.year, output_path=str(json_path), force_download=args.force, **kwargs)
+
+        print(f"✅ Downloaded {data.get('count', 0):,} papers")
 
         # Create database
         print(f"\n📊 Creating database: {output_path}")
@@ -546,6 +585,10 @@ def download_command(args: argparse.Namespace) -> int:
 
     except Exception as e:
         print(f"\n❌ Error: {e}", file=sys.stderr)
+        import traceback
+
+        if args.verbose > 0:
+            traceback.print_exc()
         return 1
 
 
@@ -647,12 +690,36 @@ Examples:
     download_parser = subparsers.add_parser(
         "download",
         help="Download NeurIPS data and create database",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+Download papers from various sources using plugins.
+
+Available plugins:
+  neurips  - Official NeurIPS conference data (2013-2025)
+  ml4ps    - ML4PS (Machine Learning for Physical Sciences) workshop (2025)
+
+Examples:
+  # Download NeurIPS 2025 papers
+  neurips-abstracts download --plugin neurips --year 2025 --output neurips_2025.db
+  
+  # Download ML4PS 2025 workshop papers with abstracts
+  neurips-abstracts download --plugin ml4ps --year 2025 --output ml4ps_2025.db
+  
+  # List available plugins
+  neurips-abstracts download --list-plugins
+        """,
+    )
+    download_parser.add_argument(
+        "--plugin",
+        type=str,
+        default="neurips",
+        help="Downloader plugin to use (default: neurips). Use --list-plugins to see available plugins",
     )
     download_parser.add_argument(
         "--year",
         type=int,
         default=2025,
-        help="Year of NeurIPS conference (default: 2025)",
+        help="Year of conference/workshop (default: 2025)",
     )
     download_parser.add_argument(
         "--output",
@@ -664,6 +731,23 @@ Examples:
         "--force",
         action="store_true",
         help="Force re-download even if file exists",
+    )
+    download_parser.add_argument(
+        "--list-plugins",
+        action="store_true",
+        help="List available downloader plugins and exit",
+    )
+    download_parser.add_argument(
+        "--fetch-abstracts",
+        action="store_true",
+        default=True,
+        help="Fetch abstracts (for plugins that support it, like ml4ps)",
+    )
+    download_parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=20,
+        help="Maximum parallel workers for fetching data (default: 20)",
     )
 
     # Create embeddings command
