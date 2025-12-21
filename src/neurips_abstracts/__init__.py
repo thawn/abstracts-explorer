@@ -37,8 +37,10 @@ Example usage with plugins::
 
 Creating Custom Plugins
 ------------------------
-You can create custom downloader plugins by subclassing `DownloaderPlugin`::
+You can create custom downloader plugins by subclassing `DownloaderPlugin` for full control,
+or `LightweightDownloaderPlugin` for a simpler interface::
 
+    # Full schema plugin
     from neurips_abstracts.plugins import DownloaderPlugin, register_plugin
 
     class MyCustomPlugin(DownloaderPlugin):
@@ -59,6 +61,54 @@ You can create custom downloader plugins by subclassing `DownloaderPlugin`::
 
     # Register your plugin
     register_plugin(MyCustomPlugin())
+
+Lightweight Plugin API
+-----------------------
+For simpler use cases, use `LightweightDownloaderPlugin` which only requires essential fields::
+
+    from neurips_abstracts.plugins import (
+        LightweightDownloaderPlugin,
+        convert_lightweight_to_neurips_schema,
+        register_plugin
+    )
+
+    class MyLightweightPlugin(LightweightDownloaderPlugin):
+        plugin_name = "myworkshop"
+        plugin_description = "My workshop downloader"
+        supported_years = [2025]
+
+        def download(self, year=None, output_path=None, force_download=False, **kwargs):
+            # Return papers in lightweight format
+            papers = [
+                {
+                    'id': 1,
+                    'title': 'Paper Title',
+                    'authors': ['John Doe', 'Jane Smith'],
+                    'abstract': 'Paper abstract...',
+                    'session': 'Morning Session',
+                    'poster_position': 'A1',
+                    'paper_pdf_url': 'https://example.com/paper.pdf',  # optional
+                    'url': 'https://example.com/paper',  # optional
+                    'keywords': ['ML', 'Physics'],  # optional
+                }
+            ]
+
+            # Convert to full schema
+            return convert_lightweight_to_neurips_schema(
+                papers,
+                session_default='My Workshop 2025',
+                event_type='Workshop Poster',
+                source_url='https://myworkshop.com'
+            )
+
+        def get_metadata(self):
+            return {
+                'name': self.plugin_name,
+                'description': self.plugin_description,
+                'supported_years': self.supported_years
+            }
+
+    register_plugin(MyLightweightPlugin())
 """
 
 from .config import Config, get_config
@@ -68,11 +118,13 @@ from .embeddings import EmbeddingsManager
 from .rag import RAGChat
 from .plugins import (
     DownloaderPlugin,
+    LightweightDownloaderPlugin,
     PluginRegistry,
     register_plugin,
     get_plugin,
     list_plugins,
     list_plugin_names,
+    convert_lightweight_to_neurips_schema,
 )
 
 # Import plugins to auto-register them
@@ -88,9 +140,11 @@ __all__ = [
     "EmbeddingsManager",
     "RAGChat",
     "DownloaderPlugin",
+    "LightweightDownloaderPlugin",
     "PluginRegistry",
     "register_plugin",
     "get_plugin",
     "list_plugins",
     "list_plugin_names",
+    "convert_lightweight_to_neurips_schema",
 ]

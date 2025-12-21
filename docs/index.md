@@ -5,6 +5,7 @@ Welcome to the documentation for the NeurIPS Abstracts package! This package pro
 ## Features
 
 - **Download NeurIPS abstracts** from the official OpenReview API
+- **Plugin system** for downloading from workshops and other conferences
 - **Store abstracts** in a SQLite database with full metadata
 - **Create vector embeddings** for semantic search
 - **RAG (Retrieval-Augmented Generation)** chat interface for querying papers
@@ -23,6 +24,12 @@ Download abstracts for NeurIPS 2025:
 
 ```bash
 neurips-abstracts download --year 2025 --db-path neurips_2025.db
+```
+
+Or download from a workshop using plugins:
+
+```bash
+neurips-abstracts download --plugin ml4ps --year 2025 --db-path ml4ps.db
 ```
 
 Create embeddings for semantic search:
@@ -52,6 +59,7 @@ neurips-abstracts chat --db-path neurips_2025.db
 installation
 configuration
 usage
+plugins
 cli_reference
 ```
 

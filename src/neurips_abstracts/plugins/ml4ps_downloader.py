@@ -3,6 +3,7 @@ ML4PS Workshop Downloader Plugin
 =================================
 
 Plugin for downloading papers from the Machine Learning for Physical Sciences workshop.
+Uses the lightweight plugin API for simplified implementation.
 """
 
 from typing import Any, Dict, List, Optional
@@ -16,19 +17,18 @@ import time
 from urllib.parse import urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
-from datetime import datetime
 
-from neurips_abstracts.plugins import DownloaderPlugin
+from neurips_abstracts.plugin import LightweightDownloaderPlugin, convert_lightweight_to_neurips_schema
 
 logger = logging.getLogger(__name__)
 
 
-class ML4PSDownloaderPlugin(DownloaderPlugin):
+class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
     """
     Plugin for downloading papers from ML4PS (Machine Learning for Physical Sciences) workshop.
 
     This plugin scrapes papers from the ML4PS workshop website and fetches abstracts
-    from the NeurIPS virtual conference pages.
+    from the NeurIPS virtual conference pages. Uses the lightweight plugin API.
     """
 
     plugin_name = "ml4ps"
@@ -65,19 +65,19 @@ class ML4PSDownloaderPlugin(DownloaderPlugin):
         fetch_abstracts : bool, optional
             Whether to fetch abstracts from NeurIPS virtual site (default: True)
         max_workers : int, optional
-            Maximum parallel workers for fetching abstracts (default: 20)
+            Maximum parallel workers for fetching abstracts (default: 10)
         **kwargs : Any
             Additional parameters
 
         Returns
         -------
         dict
-            Downloaded data in format:
+            Downloaded data in NeurIPS format (automatically converted from lightweight format):
             {
                 'count': int,
                 'next': None,
                 'previous': None,
-                'results': [list of papers]
+                'results': [list of papers in full NeurIPS schema]
             }
         """
         if year is None:
@@ -117,8 +117,16 @@ class ML4PSDownloaderPlugin(DownloaderPlugin):
             logger.info(f"Fetching abstracts for {len(papers)} papers...")
             self._fetch_abstracts_for_papers(papers, max_workers=max_workers)
 
-        # Convert to database format
-        data = self._convert_to_database_format(papers)
+        # Convert to lightweight format
+        lightweight_papers = self._convert_to_lightweight_format(papers)
+
+        # Convert to full NeurIPS schema using converter
+        data = convert_lightweight_to_neurips_schema(
+            lightweight_papers,
+            session_default="ML4PhysicalSciences 2025 Workshop",
+            event_type="Workshop Poster",
+            source_url="https://ml4physicalsciences.github.io/2025/",
+        )
 
         # Save to file if path provided
         if output_path:
@@ -200,129 +208,12 @@ class ML4PSDownloaderPlugin(DownloaderPlugin):
         text = " ".join(text.split())
         return text.strip()
 
-    def _parse_authors(self, authors_str: str) -> List[Dict[str, Any]]:
-        """Parse authors string into list of author objects."""
-        if not authors_str:
-            return []
-
-        authors = []
-        author_names = [name.strip() for name in authors_str.split(",") if name.strip()]
-
-        for idx, fullname in enumerate(author_names):
-            author_id = -(idx + 1) * 1000000  # Temporary ID scheme
-            authors.append({"id": author_id, "fullname": fullname, "url": "", "institution": ""})
-
-        return authors
-
     def _extract_paper_id_from_poster_url(self, poster_url: str) -> Optional[str]:
-        """Extract paper_id from poster URL."""
+        """Extract paper_id from poster URL (needed for fetching abstracts)."""
         match = re.search(r"/(\d+)\.png$", poster_url)
         if match:
             return match.group(1)
         return None
-
-    def _create_eventmedia(
-        self,
-        paper_id: int,
-        paper_url: Optional[str],
-        poster_url: Optional[str],
-        video_url: Optional[str],
-        neurips_paper_id: Optional[str],
-        openreview_url: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """Create eventmedia list in the format expected by the database schema."""
-        eventmedia = []
-        media_id = paper_id * 1000
-        timestamp = datetime.now().isoformat()
-
-        # Add OpenReview link if available
-        if openreview_url:
-            eventmedia.append(
-                {
-                    "id": media_id + 1,
-                    "modified": timestamp,
-                    "display_section": 1,
-                    "type": "URL",
-                    "name": "OpenReview",
-                    "visible": True,
-                    "sortkey": 0,
-                    "is_live_content": False,
-                    "uri": openreview_url,
-                    "resourcetype": "UriEventmedia",
-                }
-            )
-
-        # Add NeurIPS Virtual link if we have NeurIPS paper ID
-        if neurips_paper_id:
-            eventmedia.append(
-                {
-                    "id": media_id + 2,
-                    "modified": timestamp,
-                    "display_section": 1,
-                    "type": "URL",
-                    "name": "NeurIPS Virtual",
-                    "visible": True,
-                    "sortkey": 0,
-                    "is_live_content": False,
-                    "uri": f"https://neurips.cc/virtual/2025/loc/san-diego/poster/{neurips_paper_id}",
-                    "resourcetype": "UriEventmedia",
-                }
-            )
-
-        # Add poster
-        if poster_url:
-            eventmedia.append(
-                {
-                    "id": media_id + 3,
-                    "file": poster_url,
-                    "modified": timestamp,
-                    "display_section": 1,
-                    "type": "Poster",
-                    "name": "Poster",
-                    "visible": True,
-                    "sortkey": 0,
-                    "is_live_content": False,
-                    "detailed_kind": "",
-                    "generated_from": None,
-                    "resourcetype": "EventmediaImageFile",
-                }
-            )
-
-        # Add PDF
-        if paper_url:
-            eventmedia.append(
-                {
-                    "id": media_id + 4,
-                    "modified": timestamp,
-                    "display_section": 1,
-                    "type": "PDF",
-                    "name": "Paper",
-                    "visible": True,
-                    "sortkey": 0,
-                    "is_live_content": False,
-                    "uri": paper_url,
-                    "resourcetype": "UriEventmedia",
-                }
-            )
-
-        # Add video
-        if video_url:
-            eventmedia.append(
-                {
-                    "id": media_id + 5,
-                    "modified": timestamp,
-                    "display_section": 1,
-                    "type": "URL",
-                    "name": "Video",
-                    "visible": True,
-                    "sortkey": 0,
-                    "is_live_content": False,
-                    "uri": video_url,
-                    "resourcetype": "UriEventmedia",
-                }
-            )
-
-        return eventmedia
 
     def _fetch_abstract_and_openreview(self, paper_id: str) -> tuple[Optional[str], Optional[str]]:
         """Fetch abstract and OpenReview URL from NeurIPS virtual conference page."""
@@ -554,87 +445,62 @@ class ML4PSDownloaderPlugin(DownloaderPlugin):
 
         logger.info(f"Abstract fetching complete: {success_count} successful, {fail_count} failed")
 
-    def _convert_to_database_format(self, papers: List[Dict]) -> Dict[str, Any]:
-        """Convert scraped papers to database schema format."""
-        results = []
-        author_counter = 1
+    def _convert_to_lightweight_format(self, papers: List[Dict]) -> List[Dict]:
+        """
+        Convert scraped papers to lightweight format.
+
+        The lightweight format requires only:
+        - title: str
+        - authors: list (strings or dicts)
+        - abstract: str
+        - session: str
+        - poster_position: str
+
+        Optional fields:
+        - id: int
+        - paper_pdf_url: str
+        - poster_image_url: str
+        - url: str (OpenReview or other)
+        - award: str
+        - keywords: list
+        """
+        lightweight_papers = []
 
         for paper in papers:
-            # Parse authors
-            authors_list = self._parse_authors(paper.get("authors_str", ""))
+            # Extract author names from authors_str
+            authors_str = paper.get("authors_str", "")
+            authors = [name.strip() for name in authors_str.split(",") if name.strip()]
 
-            # Update author IDs to be unique
-            for author in authors_list:
-                author["id"] = author_counter
-                author_counter += 1
+            # Determine session based on event type
+            session = "ML4PhysicalSciences 2025 Workshop"
+            if paper.get("eventtype") == "Spotlight":
+                session = "ML4PhysicalSciences 2025 Workshop - Spotlight"
 
-            # Create eventmedia
-            eventmedia = self._create_eventmedia(
-                paper["id"],
-                paper.get("paper_url"),
-                paper.get("poster_url"),
-                paper.get("video_url"),
-                paper.get("neurips_paper_id"),
-                paper.get("openreview_url"),
-            )
+            # Extract award from awards list if present
+            awards_list = paper.get("awards", [])
+            award_str = ", ".join(awards_list) if awards_list else None
 
-            # Determine virtualsite_url
-            virtualsite_url = ""
-            if paper.get("neurips_paper_id"):
-                virtualsite_url = f"/virtual/2025/loc/san-diego/poster/{paper['neurips_paper_id']}"
-
-            openreview_url = paper.get("openreview_url", "")
-            pdf_url = paper.get("paper_url", "")
-
-            # Create paper in database format
-            db_paper = {
-                "id": paper["id"],
-                "uid": f"ml4ps2025_{paper['id']}",
-                "name": paper["title"],
-                "authors": authors_list,
+            lightweight_paper = {
+                # Required fields
+                "title": paper["title"],
+                "authors": authors,
                 "abstract": paper.get("abstract", ""),
-                "topic": "ML4PhysicalSciences Workshop",
-                "keywords": [],
-                "decision": paper.get("decision", "Accept (poster)"),
-                "session": "ML4PhysicalSciences 2025 Workshop",
-                "eventtype": paper.get("eventtype", "Poster"),
-                "event_type": "Workshop Poster",
-                "room_name": "",
-                "virtualsite_url": virtualsite_url,
-                "url": openreview_url or pdf_url,
-                "sourceid": None,
-                "sourceurl": "https://ml4physicalsciences.github.io/2025/",
-                "starttime": "",
-                "endtime": "",
-                "starttime2": None,
-                "endtime2": None,
-                "diversity_event": None,
-                "paper_url": openreview_url,
-                "paper_pdf_url": pdf_url,
-                "children_url": None,
-                "children": [],
-                "children_ids": [],
-                "parent1": "",
-                "parent2": None,
-                "parent2_id": None,
-                "eventmedia": eventmedia,
-                "show_in_schedule_overview": False,
-                "visible": True,
-                "poster_position": "",
-                "schedule_html": "",
-                "latitude": None,
-                "longitude": None,
-                "related_events": [],
-                "related_events_ids": [],
+                "session": session,
+                "poster_position": str(paper["id"]),  # Use paper ID as position
+                # Optional fields
+                "id": paper["id"],
+                "paper_pdf_url": paper.get("paper_url"),
+                "poster_image_url": paper.get("poster_url"),
+                "url": paper.get("openreview_url") or paper.get("paper_url"),
+                "award": award_str,
             }
 
-            # Add awards as keywords
-            if paper.get("awards"):
-                db_paper["keywords"] = paper["awards"]
+            # Remove None values from optional fields
+            lightweight_paper = {k: v for k, v in lightweight_paper.items() if v is not None and v != ""}
 
-            results.append(db_paper)
+            lightweight_papers.append(lightweight_paper)
 
-        return {"count": len(results), "next": None, "previous": None, "results": results}
+        return lightweight_papers
 
 
 # Auto-register the plugin when imported

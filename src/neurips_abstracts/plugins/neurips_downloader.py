@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from pathlib import Path
 import logging
 
-from neurips_abstracts.plugins import DownloaderPlugin
+from neurips_abstracts.plugin import DownloaderPlugin
 from neurips_abstracts.downloader import download_neurips_data
 
 logger = logging.getLogger(__name__)
