@@ -30,7 +30,6 @@ class TestICLRPlugin:
         metadata = plugin.get_metadata()
         assert metadata["name"] == "iclr"
         assert metadata["description"] == "Official ICLR conference data downloader"
-        assert metadata["supported_years"] == [2025]
         assert "year" in metadata["parameters"]
         assert "output_path" in metadata["parameters"]
         assert "force_download" in metadata["parameters"]
@@ -53,8 +52,8 @@ class TestICLRPlugin:
         """Test year validation with unsupported year."""
         plugin = ICLRDownloaderPlugin()
 
-        with pytest.raises(ValueError, match="Year 2020 not supported"):
-            plugin.validate_year(2020)
+        with pytest.raises(ValueError, match="Year 1800 not supported"):
+            plugin.validate_year(1800)
 
     @patch("neurips_abstracts.plugins.json_conference_downloader.requests.get")
     def test_download_success(self, mock_get):
