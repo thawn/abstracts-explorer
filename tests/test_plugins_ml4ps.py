@@ -418,7 +418,8 @@ class TestML4PSFullPipeline:
         mock_fetch.assert_called_once()
 
     @patch.object(ML4PSDownloaderPlugin, "_scrape_papers")
-    def test_download_saves_to_file(self, mock_scrape, ml4ps_plugin, sample_scraped_papers, tmp_path):
+    @patch.object(ML4PSDownloaderPlugin, "_fetch_abstracts_for_papers")
+    def test_download_saves_to_file(self, mock_fetch, mock_scrape, ml4ps_plugin, sample_scraped_papers, tmp_path):
         """Test that download saves to file."""
         mock_scrape.return_value = sample_scraped_papers
         output_file = tmp_path / "ml4ps_output.json"
