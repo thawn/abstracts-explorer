@@ -8,7 +8,19 @@ Note: This module requires Flask and related dependencies.
 Install with: pip install neurips-abstracts[web]
 """
 
-__all__ = ["app", "run_server"]
+
+def _initialize():
+    """Lazy initialization of web UI components."""
+    import importlib
+
+    app_module = importlib.import_module(".app", package=__name__)
+
+    # Set as module attributes to make them importable
+    import sys
+
+    current_module = sys.modules[__name__]
+    current_module.app = app_module.app
+    current_module.run_server = app_module.run_server
 
 
 def __getattr__(name):
@@ -18,11 +30,11 @@ def __getattr__(name):
     This allows the CLI and other parts of the package to work without
     the web dependencies installed.
     """
-    if name in __all__:
-        from .app import app, run_server
+    if name in ("app", "run_server"):
+        _initialize()
+        return globals()[name]
 
-        if name == "app":
-            return app
-        elif name == "run_server":
-            return run_server
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+__all__ = ["app", "run_server"]
