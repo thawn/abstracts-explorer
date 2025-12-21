@@ -1,3 +1,7 @@
+---
+applyTo: "**"
+---
+
 # AI Coding Instructions
 
 This file contains instructions and conventions for AI assistants working on this project.
@@ -473,11 +477,11 @@ See `.gitignore`:
 
 ## Version History
 
-- See `changelog/` directory for detailed version history:
-- when creating changelog entries, check the existing files and make sure that the new file continues the numbering sequence.
+- See `changelog/` directory for detailed version history
+- When creating changelog entries, check the existing files and make sure that the new file continues the numbering sequence
 
 ---
 
-**Last Updated**: November 26, 2025
+**Last Updated**: December 21, 2025
 
 This file should be kept up-to-date as the project evolves. When making significant changes to conventions or structure, update this file accordingly.
