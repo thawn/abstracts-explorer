@@ -483,6 +483,8 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
                 "poster_image_url": paper.get("poster_url"),
                 "url": paper.get("openreview_url") or paper.get("paper_url"),
                 "award": award_str,
+                "year": 2025,
+                "conference": "ML4PS",
             }
 
             # Remove None values from optional fields

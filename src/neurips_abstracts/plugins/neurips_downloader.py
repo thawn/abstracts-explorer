@@ -90,6 +90,12 @@ class NeurIPSDownloaderPlugin(DownloaderPlugin):
             year=year, output_path=output_path, timeout=timeout, force_download=force_download
         )
 
+        # Add year and conference fields to each paper
+        if "results" in data and isinstance(data["results"], list):
+            for paper in data["results"]:
+                paper["year"] = year
+                paper["conference"] = "NeurIPS"
+
         logger.info(f"Successfully downloaded {data.get('count', 0)} papers from NeurIPS {year}")
 
         return data

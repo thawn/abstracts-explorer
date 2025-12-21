@@ -554,8 +554,8 @@ def download_command(args: argparse.Namespace) -> int:
         print("\nUse --list-plugins to see details", file=sys.stderr)
         return 1
 
-    print(f"Using plugin: {plugin.plugin_name}")
-    print(f"Downloading {plugin.plugin_description}...")
+    print(f"Using plugin: {plugin.plugin_description}")
+    print(f"Downloading {plugin.plugin_name}...")
     print("=" * 70)
 
     try:
