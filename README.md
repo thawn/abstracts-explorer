@@ -502,6 +502,28 @@ E2E_BROWSER=firefox uv run pytest tests/test_web_e2e.py -v -m e2e
 - Tests requiring LM Studio are marked as `slow` and skipped by default. To run them, use `uv run pytest -m slow` (requires LM Studio running with a chat model loaded).
 - End-to-end tests are marked as `e2e` and require either Chrome or Firefox browser. These tests use Selenium to automate browser interactions and verify the web UI works correctly. By default, Chrome is tried first, then Firefox. You can specify a browser with the `E2E_BROWSER` environment variable.
 
+### Git Hooks for Web UI
+
+The project includes Git hooks that automatically rebuild vendor files (Font Awesome, Marked.js, KaTeX, Tailwind CSS) when HTML, JavaScript, or CSS files change:
+
+- **pre-commit**: Rebuilds vendor files before committing web UI changes
+- **post-checkout**: Updates vendor files after switching branches
+- **post-merge**: Updates vendor files after pulling/merging changes
+
+These hooks are automatically installed when you run `npm install`. They ensure vendor files stay synchronized with source code changes without manual intervention.
+
+To manually rebuild vendor files:
+```bash
+npm run install:vendor
+```
+
+To temporarily bypass the pre-commit hook:
+```bash
+git commit --no-verify
+```
+
+See [docs/vendor-auto-update.md](docs/vendor-auto-update.md) for more information.
+
 ### Code Structure
 
 ```

@@ -1,0 +1,32 @@
+#!/bin/bash
+# Pre-commit hook to ensure vendor files are up-to-date
+
+# Check if HTML, JS, or CSS files are being committed
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR -- \
+    'src/neurips_abstracts/web_ui/templates/*.html' \
+    'src/neurips_abstracts/web_ui/static/*.js' \
+    'src/neurips_abstracts/web_ui/static/*.css' \
+    'tailwind.config.js' \
+    2>/dev/null)
+
+if [ -n "$STAGED_FILES" ]; then
+    echo "Detected changes in web UI files:"
+    echo "$STAGED_FILES"
+    echo "Running npm run install:vendor to ensure vendor files are up-to-date..."
+    npm run install:vendor
+    
+    # Check if vendor files were modified
+    VENDOR_CHANGES=$(git diff --name-only src/neurips_abstracts/web_ui/static/vendor/ 2>/dev/null)
+    
+    if [ -n "$VENDOR_CHANGES" ]; then
+        echo ""
+        echo "Vendor files were updated. Please stage these changes:"
+        echo "$VENDOR_CHANGES"
+        echo ""
+        echo "Run: git add src/neurips_abstracts/web_ui/static/vendor/"
+        echo "Then: git commit"
+        exit 1
+    fi
+fi
+
+exit 0

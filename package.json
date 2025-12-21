@@ -8,6 +8,8 @@
         "test:coverage": "jest --coverage",
         "build:tailwind": "npx tailwindcss -i src/neurips_abstracts/web_ui/static/tailwind.input.css -o src/neurips_abstracts/web_ui/static/vendor/tailwind.css --minify",
         "watch:tailwind": "npx tailwindcss -i src/neurips_abstracts/web_ui/static/tailwind.input.css -o src/neurips_abstracts/web_ui/static/vendor/tailwind.css --watch",
+        "postinstall": "npm run install:vendor && npm run setup:hooks",
+        "setup:hooks": "cp .githooks/pre-commit .git/hooks/pre-commit && cp .githooks/post-checkout .git/hooks/post-checkout && cp .githooks/post-merge .git/hooks/post-merge && chmod +x .git/hooks/pre-commit .git/hooks/post-checkout .git/hooks/post-merge",
         "install:vendor": "npm run install:vendor:fontawesome && npm run install:vendor:marked && npm run install:vendor:katex && npm run install:vendor:marked-katex && npm run build:tailwind",
         "install:vendor:fontawesome": "mkdir -p src/neurips_abstracts/web_ui/static/vendor && cp node_modules/@fortawesome/fontawesome-free/css/all.min.css src/neurips_abstracts/web_ui/static/vendor/fontawesome.min.css && cp -r node_modules/@fortawesome/fontawesome-free/webfonts src/neurips_abstracts/web_ui/static/",
         "install:vendor:marked": "mkdir -p src/neurips_abstracts/web_ui/static/vendor && cp node_modules/marked/lib/marked.umd.js src/neurips_abstracts/web_ui/static/vendor/marked.min.js && cp node_modules/marked/lib/marked.umd.js.map src/neurips_abstracts/web_ui/static/vendor/marked.min.js.map",
