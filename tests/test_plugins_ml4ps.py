@@ -325,6 +325,7 @@ class TestML4PSWebScraping:
             soup = ml4ps_plugin._fetch_page("https://example.com")
             assert soup is None
 
+    @pytest.mark.slow
     def test_fetch_page_retries(self, ml4ps_plugin):
         """Test that fetch_page retries on failure."""
         with patch.object(
@@ -582,6 +583,7 @@ class TestML4PSEndToEnd:
 class TestML4PSRegression:
     """Regression tests to ensure compatibility."""
 
+    @pytest.mark.slow
     @patch.object(ML4PSDownloaderPlugin, "_scrape_papers")
     def test_output_schema_matches_old_format(self, mock_scrape, ml4ps_plugin, sample_scraped_papers):
         """Test that output schema matches the original full schema format."""
