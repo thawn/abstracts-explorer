@@ -11,7 +11,7 @@ import zipfile
 from pathlib import Path
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from flask import Flask, render_template, request, jsonify, g, send_file
+from flask import Flask, render_template, request, jsonify, g, send_file, Response
 from flask_cors import CORS
 import requests
 
@@ -131,22 +131,56 @@ def index():
 @app.route("/api/stats")
 def stats():
     """
-    Get database statistics.
+    Get database statistics, optionally filtered by year and conference.
+
+    Query parameters:
+    - year: int (optional) - Filter by specific year
+    - conference: str (optional) - Filter by specific conference
 
     Returns
     -------
     dict
-        Statistics including paper count
+        Statistics including paper count, year, and conference
     """
     try:
+        # Get optional query parameters
+        year_param = request.args.get("year")
+        conference_param = request.args.get("conference")
+
+        # Convert year to int if provided
+        year = int(year_param) if year_param else None
+        conference = conference_param if conference_param else None
+
         database = get_database()
-        total_papers = database.get_paper_count()
+
+        # Build WHERE clause for filtered count
+        conditions = []
+        parameters = []
+
+        if year is not None:
+            conditions.append("year = ?")
+            parameters.append(year)
+
+        if conference is not None:
+            conditions.append("conference = ?")
+            parameters.append(conference)
+
+        if conditions:
+            where_clause = " AND ".join(conditions)
+            result = database.query(f"SELECT COUNT(*) as count FROM papers WHERE {where_clause}", tuple(parameters))
+            total_papers = result[0]["count"] if result else 0
+        else:
+            total_papers = database.get_paper_count()
 
         return jsonify(
             {
                 "total_papers": total_papers,
+                "year": year,
+                "conference": conference,
             }
         )
+    except ValueError as e:
+        return jsonify({"error": f"Invalid year parameter: {str(e)}"}), 400
     except Exception as e:
         logger.error(f"Error in stats endpoint: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
@@ -155,18 +189,82 @@ def stats():
 @app.route("/api/filters")
 def get_filters():
     """
-    Get available filter options.
+    Get available filter options, optionally filtered by year and conference.
+
+    Query parameters:
+    - year: int (optional) - Filter by specific year
+    - conference: str (optional) - Filter by specific conference
 
     Returns
     -------
     dict
-        Dictionary with sessions, topics, and eventtypes lists
+        Dictionary with sessions, topics, eventtypes, years, and conferences lists
     """
     try:
+        # Get optional query parameters
+        year_param = request.args.get("year")
+        conference_param = request.args.get("conference")
+
+        # Convert year to int if provided
+        year = int(year_param) if year_param else None
+        conference = conference_param if conference_param else None
+
         database = get_database()
-        filters = database.get_filter_options()
+        filters = database.get_filter_options(year=year, conference=conference)
         return jsonify(filters)
+    except ValueError as e:
+        return jsonify({"error": f"Invalid year parameter: {str(e)}"}), 400
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/available-filters")
+def get_available_filters():
+    """
+    Get available conferences and years from registered plugins.
+
+    Returns a mapping of conferences to their supported years based on
+    the registered downloader plugins.
+
+    Returns
+    -------
+    dict
+        Dictionary with:
+        - conferences: list of conference names
+        - years: list of all unique years across all plugins
+        - conference_years: dict mapping conference names to their supported years
+    """
+    try:
+        from neurips_abstracts.plugins import list_plugins
+
+        # Get all registered plugins
+        plugins = list_plugins()
+
+        # Build mapping of conferences to years
+        conference_years = {}
+        all_years = set()
+
+        for plugin_info in plugins:
+            conference_name = plugin_info.get("conference_name")
+            supported_years = plugin_info.get("supported_years", [])
+
+            if conference_name and supported_years:
+                if conference_name not in conference_years:
+                    conference_years[conference_name] = []
+                conference_years[conference_name].extend(supported_years)
+                all_years.update(supported_years)
+
+        # Sort years and deduplicate
+        all_years_sorted = sorted(list(all_years), reverse=True)
+        conferences = sorted(conference_years.keys())
+
+        # Sort years for each conference
+        for conf in conference_years:
+            conference_years[conf] = sorted(conference_years[conf], reverse=True)
+
+        return jsonify({"conferences": conferences, "years": all_years_sorted, "conference_years": conference_years})
+    except Exception as e:
+        logger.error(f"Error in available-filters endpoint: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -182,6 +280,8 @@ def search():
     - sessions: list[str] - Filter by sessions (optional)
     - topics: list[str] - Filter by topics (optional)
     - eventtypes: list[str] - Filter by event types (optional)
+    - years: list[int] - Filter by years (optional)
+    - conferences: list[str] - Filter by conferences (optional)
 
     Returns
     -------
@@ -196,6 +296,8 @@ def search():
         sessions = data.get("sessions", [])
         topics = data.get("topics", [])
         eventtypes = data.get("eventtypes", [])
+        years = data.get("years", [])
+        conferences = data.get("conferences", [])
 
         if not query:
             return jsonify({"error": "Query is required"}), 400
@@ -213,6 +315,12 @@ def search():
                 filter_conditions.append({"topic": {"$in": topics}})
             if eventtypes:
                 filter_conditions.append({"eventtype": {"$in": eventtypes}})
+            if years:
+                # Convert years to integers for ChromaDB
+                year_ints = [int(y) for y in years]
+                filter_conditions.append({"year": {"$in": year_ints}})
+            if conferences:
+                filter_conditions.append({"conference": {"$in": conferences}})
 
             # Use $or operator if multiple conditions, otherwise use single condition
             where_filter = None
@@ -221,7 +329,9 @@ def search():
             elif len(filter_conditions) == 1:
                 where_filter = filter_conditions[0]
 
-            logger.info(f"Search filter: sessions={sessions}, topics={topics}, eventtypes={eventtypes}")
+            logger.info(
+                f"Search filter: sessions={sessions}, topics={topics}, eventtypes={eventtypes}, years={years}, conferences={conferences}"
+            )
             logger.info(f"Where filter: {where_filter}")
 
             results = em.search_similar(query, n_results=limit * 2, where=where_filter)  # Get more results to filter
@@ -241,7 +351,13 @@ def search():
             # Keyword search in database with multiple filter support
             database = get_database()
             papers = database.search_papers(
-                keyword=query, sessions=sessions, topics=topics, eventtypes=eventtypes, limit=limit
+                keyword=query,
+                sessions=sessions,
+                topics=topics,
+                eventtypes=eventtypes,
+                years=years,
+                conferences=conferences,
+                limit=limit,
             )
 
             # Convert to list of dicts for JSON serialization
@@ -338,6 +454,8 @@ def chat():
     - sessions: list (optional) - Filter by sessions
     - topics: list (optional) - Filter by topics
     - eventtypes: list (optional) - Filter by event types
+    - years: list (optional) - Filter by years
+    - conferences: list (optional) - Filter by conferences
 
     Returns
     -------
@@ -355,6 +473,8 @@ def chat():
         sessions = data.get("sessions", [])
         topics = data.get("topics", [])
         eventtypes = data.get("eventtypes", [])
+        years = data.get("years", [])
+        conferences = data.get("conferences", [])
 
         if not message:
             return jsonify({"error": "Message is required"}), 400
@@ -372,6 +492,12 @@ def chat():
             filter_conditions.append({"topic": {"$in": topics}})
         if eventtypes:
             filter_conditions.append({"eventtype": {"$in": eventtypes}})
+        if years:
+            # Convert years to integers for ChromaDB
+            year_ints = [int(y) for y in years]
+            filter_conditions.append({"year": {"$in": year_ints}})
+        if conferences:
+            filter_conditions.append({"conference": {"$in": conferences}})
 
         # Use $or operator if multiple conditions, otherwise use single condition
         metadata_filter = None
@@ -409,6 +535,286 @@ def reset_chat():
         return jsonify({"success": True, "message": "Conversation reset"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/download", methods=["POST"])
+def download_and_embed():
+    """
+    Download abstracts for a conference/year and create embeddings for new/updated papers.
+
+    Uses Server-Sent Events (SSE) to stream progress updates to the client.
+
+    Expected JSON body:
+    - conference: str - Conference name (required)
+    - year: int - Conference year (required)
+
+    Returns
+    -------
+    Response
+        Server-Sent Events stream with progress updates
+    """
+    import json
+
+    # Read request data up-front to avoid accessing `request` inside the generator
+    data = request.get_json()
+    conference = data.get("conference") if data else None
+    year = data.get("year") if data else None
+
+    if not conference or not year:
+        return jsonify({"error": "Conference and year are required"}), 400
+
+    # Capture config before generator runs
+    config = get_config()
+    db_path = Path(config.paper_db_path)
+    
+    # For SSE streaming, we need standalone connections (not Flask g-based)
+    # We'll create them inside the generator where they're needed
+
+    def generate():
+        """Generator function that yields SSE-formatted progress updates."""
+        # Create standalone database and embeddings manager connections
+        database = None
+        em = None
+        
+        try:
+            from neurips_abstracts.plugins import get_plugin
+            import neurips_abstracts.plugins.neurips_downloader
+            import neurips_abstracts.plugins.iclr_downloader
+            import neurips_abstracts.plugins.icml_downloader
+            import neurips_abstracts.plugins.ml4ps_downloader
+            
+            # Create standalone database connection
+            database = DatabaseManager(str(db_path))
+            database.connect()
+            
+            # Create standalone embeddings manager
+            em = EmbeddingsManager(
+                lm_studio_url=config.llm_backend_url,
+                model_name=config.embedding_model,
+                chroma_path=config.embedding_db_path,
+                collection_name=config.collection_name,
+            )
+            em.connect()
+            em.create_collection()
+
+            # Map conference name to plugin name (lowercase)
+            plugin_name = conference.lower()
+
+            # Get the plugin
+            plugin = get_plugin(plugin_name)
+            if not plugin:
+                yield f"data: {json.dumps({'error': f'No plugin found for conference: {conference}'})}\n\n"
+                return
+
+            # Check if we already have data for this conference/year
+            result = database.query(
+                "SELECT COUNT(*) as count FROM papers WHERE year = ? AND conference = ?", (year, conference)
+            )
+            existing_count = result[0]["count"] if result else 0
+
+            is_update = existing_count > 0
+            action = "Updating" if is_update else "Downloading"
+
+            logger.info(f"{action} {conference} {year} (existing: {existing_count} papers)")
+
+            # Send initial progress
+            yield f"data: {json.dumps({'stage': 'download', 'progress': 0, 'message': f'{action} papers from {conference} {year}...'})}\n\n"
+
+            # Download data using plugin
+            json_path = db_path.parent / f"{plugin_name}_{year}.json"
+            download_data = plugin.download(
+                year=year, output_path=str(json_path), force_download=True  # Always re-download to get updates
+            )
+
+            downloaded_count = download_data.get("count", 0)
+            logger.info(f"Downloaded {downloaded_count} papers from {conference} {year}")
+
+            yield f"data: {json.dumps({'stage': 'download', 'progress': 100, 'message': f'Downloaded {downloaded_count} papers'})}\n\n"
+
+            # Get existing papers before update to track changes
+            existing_papers = {}
+            if is_update:
+                existing_rows = database.query(
+                    "SELECT id, uid, name, abstract FROM papers WHERE year = ? AND conference = ?",
+                    (year, conference),
+                )
+                # Map by uid (unique identifier) for easy lookup
+                existing_papers = {row["uid"]: {"id": row["id"], "name": row["name"], "abstract": row["abstract"]} for row in existing_rows if row["uid"]}
+
+            # Load into database (this will update existing papers)
+            yield f"data: {json.dumps({'stage': 'database', 'progress': 0, 'message': 'Loading papers into database...'})}\n\n"
+
+            new_count = database.load_json_data(download_data)
+            logger.info(f"Loaded/updated {new_count} papers in database")
+
+            yield f"data: {json.dumps({'stage': 'database', 'progress': 100, 'message': f'Loaded {new_count} papers into database'})}\n\n"
+
+            # Get papers after update and determine which ones changed
+            all_papers = database.query(
+                "SELECT id, uid, name, abstract, year, conference FROM papers WHERE year = ? AND conference = ?",
+                (year, conference),
+            )
+
+            # Get existing embeddings from ChromaDB to check what's missing
+            all_paper_ids = [str(p["id"]) for p in all_papers]
+            existing_embeddings = set()
+            try:
+                # Query ChromaDB to see which papers already have embeddings
+                if all_paper_ids:
+                    result = em.collection.get(ids=all_paper_ids, include=[])
+                    existing_embeddings = set(result['ids'])
+                    logger.info(f"Found {len(existing_embeddings)} existing embeddings in ChromaDB")
+            except Exception as e:
+                logger.warning(f"Could not check existing embeddings: {e}")
+
+            # Filter to papers that need embedding:
+            # 1. New papers (not in existing_papers dict)
+            # 2. Papers with changed title/abstract
+            # 3. Papers without embeddings in ChromaDB
+            papers_to_embed = []
+            for paper in all_papers:
+                uid = paper["uid"]
+                paper_id_str = str(paper["id"])
+                
+                if not uid or uid not in existing_papers:
+                    # New paper - needs embedding
+                    papers_to_embed.append(paper)
+                elif paper_id_str not in existing_embeddings:
+                    # Missing embedding - needs embedding
+                    papers_to_embed.append(paper)
+                else:
+                    # Check if title or abstract changed
+                    old_paper = existing_papers[uid]
+                    if old_paper["name"] != paper["name"] or old_paper["abstract"] != paper["abstract"]:
+                        # Content changed - needs re-embedding
+                        papers_to_embed.append(paper)
+
+            logger.info(f"Found {len(papers_to_embed)} papers needing embeddings: new/changed content or missing embeddings (out of {len(all_papers)} total)")
+
+            if not papers_to_embed:
+                complete_msg = {
+                    "stage": "complete",
+                    "success": True,
+                    "action": action.lower(),
+                    "downloaded": downloaded_count,
+                    "updated": new_count,
+                    "embedded": 0,
+                    "message": f"No papers found to embed for {conference} {year}",
+                }
+                yield f"data: {json.dumps(complete_msg)}\n\n"
+                return
+
+            # Get paper IDs for papers that need embedding
+            paper_ids = [p["id"] for p in papers_to_embed]
+
+            # Delete existing embeddings for papers that will be re-embedded
+            logger.info(f"Removing old embeddings for {len(paper_ids)} papers")
+            embed_prep_msg = {
+                "stage": "embeddings",
+                "progress": 0,
+                "message": f"Preparing to embed {len(paper_ids)} papers (new/changed/missing)...",
+            }
+            yield f"data: {json.dumps(embed_prep_msg)}\n\n"
+
+            # Only delete embeddings that exist
+            if paper_ids:
+                em.collection.delete(ids=[str(pid) for pid in paper_ids])
+
+            # Create new embeddings
+            logger.info(f"Creating embeddings for {len(paper_ids)} papers")
+            embedded_count = 0
+            batch_size = 50
+            total_papers = len(papers_to_embed)
+
+            for i in range(0, len(papers_to_embed), batch_size):
+                batch = papers_to_embed[i : i + batch_size]
+                batch_ids = [p["id"] for p in batch]
+                batch_texts = [f"Title: {p['name']}\n\nAbstract: {p['abstract']}" for p in batch]
+                batch_metadatas = [
+                    {
+                        "paper_id": str(p["id"]),
+                        "title": p["name"],
+                        "year": str(p["year"] if p["year"] else ""),
+                        "conference": p["conference"] if p["conference"] else "",
+                    }
+                    for p in batch
+                ]
+
+                # Get embeddings from LM Studio
+                embeddings = []
+                for j, text in enumerate(batch_texts):
+                    try:
+                        embedding = em.generate_embedding(text)
+                        embeddings.append(embedding)
+
+                        # Send progress update every 5 papers or on last paper
+                        current_paper = embedded_count + j + 1
+                        if current_paper % 5 == 0 or current_paper == total_papers:
+                            progress = int((current_paper / total_papers) * 100)
+                            progress_msg = {
+                                "stage": "embeddings",
+                                "progress": progress,
+                                "message": f"Creating embeddings... {current_paper}/{total_papers}",
+                            }
+                            yield f"data: {json.dumps(progress_msg)}\n\n"
+                    except Exception as e:
+                        logger.error(f"Failed to generate embedding: {e}")
+                        embeddings.append(None)
+
+                # Filter out failed embeddings
+                valid_embeddings = []
+                valid_ids = []
+                valid_texts = []
+                valid_metadatas = []
+                for idx, emb in enumerate(embeddings):
+                    if emb is not None:
+                        valid_embeddings.append(emb)
+                        valid_ids.append(str(batch_ids[idx]))
+                        valid_texts.append(batch_texts[idx])
+                        valid_metadatas.append(batch_metadatas[idx])
+
+                if valid_embeddings:
+                    # Add to ChromaDB
+                    em.collection.add(
+                        ids=valid_ids,
+                        embeddings=valid_embeddings,
+                        documents=valid_texts,
+                        metadatas=valid_metadatas,
+                    )
+                    embedded_count += len(valid_embeddings)
+                    logger.info(f"Embedded {embedded_count}/{len(papers_to_embed)} papers")
+
+            # Send completion message
+            complete_msg = {
+                "stage": "complete",
+                "success": True,
+                "action": action.lower(),
+                "downloaded": downloaded_count,
+                "updated": new_count,
+                "embedded": embedded_count,
+                "total_papers": len(all_papers),
+                "message": f"Successfully {action.lower()} {downloaded_count} papers and created {embedded_count} embeddings",
+            }
+            yield f"data: {json.dumps(complete_msg)}\n\n"
+
+        except Exception as e:
+            logger.error(f"Error in download endpoint: {e}", exc_info=True)
+            error_msg = {"error": str(e)}
+            yield f"data: {json.dumps(error_msg)}\n\n"
+        finally:
+            # Clean up connections
+            if database:
+                try:
+                    database.close()
+                except Exception:
+                    pass
+            if em:
+                try:
+                    em.close()
+                except Exception:
+                    pass
+
+    return Response(generate(), mimetype="text/event-stream")
 
 
 @app.route("/api/years")

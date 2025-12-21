@@ -34,6 +34,7 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
     plugin_name = "ml4ps"
     plugin_description = "ML4PS (Machine Learning for Physical Sciences) workshop downloader"
     supported_years = [2025]  # Currently only 2025 is implemented
+    conference_name = "ML4PS@Neurips"
 
     BASE_URL = "https://ml4physicalsciences.github.io/2025/"
     NEURIPS_VIRTUAL_BASE = "https://neurips.cc/virtual/2025/loc/san-diego/poster/"
@@ -143,12 +144,13 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
         Returns
         -------
         dict
-            Plugin metadata including name, description, supported years
+            Plugin metadata including name, description, supported years, conference name
         """
         return {
             "name": self.plugin_name,
             "description": self.plugin_description,
             "supported_years": self.supported_years,
+            "conference_name": self.conference_name,
             "parameters": {
                 "year": {
                     "type": "int",

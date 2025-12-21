@@ -170,12 +170,13 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
         Returns
         -------
         dict
-            Plugin metadata including name, description, supported years
+            Plugin metadata including name, description, supported years, conference name
         """
         return {
             "name": self.plugin_name,
             "description": self.plugin_description,
             "supported_years": self.supported_years,
+            "conference_name": self.conference_name,
             "parameters": {
                 "year": {
                     "type": "int",

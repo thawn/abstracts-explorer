@@ -77,10 +77,18 @@ describe('NeurIPS Abstracts Web UI', () => {
         // Setup DOM
         document.body.innerHTML = `
             <div id="stats"></div>
+            <select id="year-selector">
+                <option value="">All Years</option>
+            </select>
+            <select id="conference-selector">
+                <option value="">All Conferences</option>
+            </select>
             <button id="tab-search" class="tab-btn border-purple-600 text-gray-700"></button>
             <button id="tab-chat" class="tab-btn border-transparent text-gray-500"></button>
+            <button id="tab-interesting" class="tab-btn border-transparent text-gray-500"></button>
             <div id="search-tab" class="tab-content"></div>
             <div id="chat-tab" class="tab-content hidden"></div>
+            <div id="interesting-tab" class="tab-content hidden"></div>
             <input id="search-input" value="" />
             <select id="limit-select"><option value="10">10</option></select>
             <select id="session-filter" multiple></select>
@@ -94,6 +102,7 @@ describe('NeurIPS Abstracts Web UI', () => {
             <select id="chat-eventtype-filter"></select>
             <div id="chat-messages"></div>
             <div id="chat-papers"></div>
+            <div id="interesting-papers"></div>
         `;
 
         // Load app functions
@@ -162,8 +171,8 @@ describe('NeurIPS Abstracts Web UI', () => {
         test('should load and display stats successfully', async () => {
             const mockStats = {
                 total_papers: 12500,
-                min_year: 2020,
-                max_year: 2025
+                year: null,
+                conference: null
             };
 
             fetch.mockResolvedValueOnce({
@@ -174,7 +183,7 @@ describe('NeurIPS Abstracts Web UI', () => {
 
             const statsDiv = document.getElementById('stats');
             expect(statsDiv.innerHTML).toContain('12,500 Abstracts');
-            expect(statsDiv.innerHTML).toContain('Neurips 2025');
+            expect(statsDiv.innerHTML).toContain('All Conferences');
         });
 
         test('should handle error response', async () => {
@@ -206,8 +215,21 @@ describe('NeurIPS Abstracts Web UI', () => {
                 eventtypes: ['Poster', 'Oral']
             };
 
+            const mockAvailableFilters = {
+                conferences: ['NeurIPS', 'ICLR'],
+                years: [2023, 2024, 2025],
+                conference_years: {
+                    'NeurIPS': [2023, 2024, 2025],
+                    'ICLR': [2024, 2025]
+                }
+            };
+
+            // Mock both fetch calls (filters first, then available-filters)
             fetch.mockResolvedValueOnce({
                 json: async () => mockFilters
+            });
+            fetch.mockResolvedValueOnce({
+                json: async () => mockAvailableFilters
             });
 
             await app.loadFilterOptions();

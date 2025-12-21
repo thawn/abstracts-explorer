@@ -37,6 +37,7 @@ document.addEventListener('DOMContentLoaded', function () {
     loadStats();
     loadFilterOptions();
     loadPriorities();
+    updateDownloadButton();
 
     // Close modal when clicking outside of it
     document.getElementById('settings-modal').addEventListener('click', function (event) {
@@ -276,13 +277,66 @@ function updateStarDisplay(paperId) {
 }
 
 // Update interesting papers count in tab
-function updateInterestingPapersCount() {
-    const count = Object.keys(paperPriorities).length;
+async function updateInterestingPapersCount() {
     const countElement = document.getElementById('interesting-count');
-    if (countElement) {
-        countElement.textContent = count;
+    if (!countElement) {
+        return;
+    }
+
+    // If no rated papers, set count to 0
+    const paperIds = Object.keys(paperPriorities);
+    if (paperIds.length === 0) {
+        countElement.textContent = '0';
+        return;
+    }
+
+    // Get selected year and conference from header
+    const yearSelect = document.getElementById('year-selector');
+    const conferenceSelect = document.getElementById('conference-selector');
+    const selectedYear = yearSelect ? yearSelect.value : '';
+    const selectedConference = conferenceSelect ? conferenceSelect.value : '';
+
+    // If no filters are selected, just show total count
+    if (!selectedYear && !selectedConference) {
+        countElement.textContent = paperIds.length;
+        return;
+    }
+
+    // Fetch papers to filter by year/conference
+    try {
+        const response = await fetch(`${API_BASE}/api/papers/batch`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ paper_ids: paperIds.map(id => parseInt(id)) })
+        });
+
+        const data = await response.json();
+
+        if (data.error || !data.papers) {
+            // On error, show total count
+            countElement.textContent = paperIds.length;
+            return;
+        }
+
+        // Filter papers by year and conference
+        let filteredPapers = data.papers;
+        if (selectedYear) {
+            filteredPapers = filteredPapers.filter(paper => String(paper.year) === String(selectedYear));
+        }
+        if (selectedConference) {
+            filteredPapers = filteredPapers.filter(paper => paper.conference === selectedConference);
+        }
+
+        countElement.textContent = filteredPapers.length;
+    } catch (error) {
+        console.error('Error updating interesting papers count:', error);
+        // On error, show total count
+        countElement.textContent = paperIds.length;
     }
 }
+
 
 // Load and display interesting papers
 async function loadInterestingPapers() {
@@ -300,6 +354,12 @@ async function loadInterestingPapers() {
             </div>
         `;
         tabsContainer.classList.add('hidden');
+
+        // Update count to show 0
+        const countElement = document.getElementById('interesting-count');
+        if (countElement) {
+            countElement.textContent = '0';
+        }
         return;
     }
 
@@ -351,15 +411,50 @@ function displayInterestingPapers(papers) {
     const listDiv = document.getElementById('interesting-papers-list');
     const tabsNav = document.getElementById('interesting-session-tabs-nav');
 
+    // Get selected year and conference from header
+    const yearSelect = document.getElementById('year-selector');
+    const conferenceSelect = document.getElementById('conference-selector');
+    const selectedYear = yearSelect ? yearSelect.value : '';
+    const selectedConference = conferenceSelect ? conferenceSelect.value : '';
+
+    // Filter papers by year and conference
+    let filteredPapers = papers;
+    if (selectedYear) {
+        filteredPapers = filteredPapers.filter(paper => String(paper.year) === String(selectedYear));
+    }
+    if (selectedConference) {
+        filteredPapers = filteredPapers.filter(paper => paper.conference === selectedConference);
+    }
+
+    // If no papers match the filter, show empty state
+    if (filteredPapers.length === 0) {
+        listDiv.innerHTML = `
+            <div class="text-center text-gray-500 py-12">
+                <i class="fas fa-filter text-6xl mb-4 opacity-20"></i>
+                <p class="text-lg">No papers match the selected filters</p>
+                <p class="text-sm">Try selecting a different conference or year</p>
+            </div>
+        `;
+        const tabsContainer = document.getElementById('interesting-session-tabs');
+        tabsContainer.classList.add('hidden');
+
+        // Update count to show 0 filtered papers
+        const countElement = document.getElementById('interesting-count');
+        if (countElement) {
+            countElement.textContent = '0';
+        }
+        return;
+    }
+
     // Add priority and search term to each paper
-    papers.forEach(paper => {
+    filteredPapers.forEach(paper => {
         const paperData = paperPriorities[paper.id];
         paper.priority = paperData?.priority || 0;
         paper.searchTerm = paperData?.searchTerm || 'Unknown';
     });
 
     // Sort papers based on the selected sort order
-    papers.sort((a, b) => {
+    filteredPapers.sort((a, b) => {
         // First by session (always)
         const sessionCompare = (a.session || '').localeCompare(b.session || '');
         if (sessionCompare !== 0) return sessionCompare;
@@ -395,7 +490,7 @@ function displayInterestingPapers(papers) {
 
     // Group by session, then by grouping key based on sort order
     const groupedBySession = {};
-    papers.forEach(paper => {
+    filteredPapers.forEach(paper => {
         const session = paper.session || 'No Session';
         if (!groupedBySession[session]) {
             groupedBySession[session] = {};
@@ -514,6 +609,12 @@ function displayInterestingPapers(papers) {
     }
 
     listDiv.innerHTML = html;
+
+    // Update the count in the tab heading to show filtered papers
+    const countElement = document.getElementById('interesting-count');
+    if (countElement) {
+        countElement.textContent = filteredPapers.length;
+    }
 }
 
 // Switch to a different session in the interesting papers tab
@@ -953,7 +1054,18 @@ function switchTab(tab) {
 // Load statistics
 async function loadStats() {
     try {
-        const response = await fetch(`${API_BASE}/api/stats`);
+        // Get selected year and conference from header
+        const yearSelect = document.getElementById('year-selector');
+        const conferenceSelect = document.getElementById('conference-selector');
+        const selectedYear = yearSelect ? yearSelect.value : '';
+        const selectedConference = conferenceSelect ? conferenceSelect.value : '';
+
+        // Build query params for stats
+        const statsParams = new URLSearchParams();
+        if (selectedYear) statsParams.append('year', selectedYear);
+        if (selectedConference) statsParams.append('conference', selectedConference);
+
+        const response = await fetch(`${API_BASE}/api/stats?${statsParams.toString()}`);
         const data = await response.json();
 
         if (data.error) {
@@ -963,9 +1075,21 @@ async function loadStats() {
             return;
         }
 
+        // Build display text based on filters
+        let displayText = '';
+        if (data.year && data.conference) {
+            displayText = `${data.conference} ${data.year}`;
+        } else if (data.year) {
+            displayText = `Year ${data.year}`;
+        } else if (data.conference) {
+            displayText = data.conference;
+        } else {
+            displayText = 'All Conferences';
+        }
+
         document.getElementById('stats').innerHTML = `
             <div class="text-sm font-semibold">${data.total_papers.toLocaleString()} Abstracts</div>
-            <div class="text-xs opacity-90">Neurips 2025</div>
+            <div class="text-xs opacity-90">${displayText}</div>
         `;
     } catch (error) {
         console.error('Error loading stats:', error);
@@ -978,17 +1102,66 @@ async function loadStats() {
 // Load filter options
 async function loadFilterOptions() {
     try {
-        const response = await fetch(`${API_BASE}/api/filters`);
-        const data = await response.json();
+        // Get selected year and conference from header
+        const yearSelect = document.getElementById('year-selector');
+        const conferenceSelect = document.getElementById('conference-selector');
+        const selectedYear = yearSelect ? yearSelect.value : '';
+        const selectedConference = conferenceSelect ? conferenceSelect.value : '';
 
-        if (data.error) {
-            console.error('Error loading filters:', data.error);
+        // Build query params for filters
+        const filterParams = new URLSearchParams();
+        if (selectedYear) filterParams.append('year', selectedYear);
+        if (selectedConference) filterParams.append('conference', selectedConference);
+
+        // Load session, topic, eventtype filters from database (filtered by year/conference)
+        const filtersResponse = await fetch(`${API_BASE}/api/filters?${filterParams.toString()}`);
+        const filtersData = await filtersResponse.json();
+
+        if (filtersData.error) {
+            console.error('Error loading filters:', filtersData.error);
             return;
         }
 
-        // Populate search session filter
+        // Load available conferences and years from plugins
+        const availableResponse = await fetch(`${API_BASE}/api/available-filters`);
+        const availableData = await availableResponse.json();
+
+        if (availableData.error) {
+            console.error('Error loading available filters:', availableData.error);
+        } else {
+            // Store conference_years mapping and all years for future use
+            window.conferenceYearsMap = availableData.conference_years || {};
+            window.allYears = availableData.years || [];
+
+            // Populate year selector in header (only if empty)
+            if (yearSelect && yearSelect.options.length === 1) { // Only "All Years" option
+                if (availableData.years && availableData.years.length > 0) {
+                    availableData.years.forEach(year => {
+                        const option = document.createElement('option');
+                        option.value = year;
+                        option.textContent = year;
+                        yearSelect.appendChild(option);
+                    });
+                }
+            }
+
+            // Populate conference selector in header (only if empty)
+            if (conferenceSelect && conferenceSelect.options.length === 1) { // Only "All Conferences" option
+                if (availableData.conferences && availableData.conferences.length > 0) {
+                    availableData.conferences.forEach(conference => {
+                        const option = document.createElement('option');
+                        option.value = conference;
+                        option.textContent = conference;
+                        conferenceSelect.appendChild(option);
+                    });
+                }
+            }
+        }
+
+        // Clear and repopulate search session filter
         const sessionSelect = document.getElementById('session-filter');
-        data.sessions.forEach(session => {
+        sessionSelect.innerHTML = ''; // Clear existing options
+        filtersData.sessions.forEach(session => {
             const option = document.createElement('option');
             option.value = session;
             option.textContent = session;
@@ -996,9 +1169,10 @@ async function loadFilterOptions() {
             sessionSelect.appendChild(option);
         });
 
-        // Populate search topic filter
+        // Clear and repopulate search topic filter
         const topicSelect = document.getElementById('topic-filter');
-        data.topics.forEach(topic => {
+        topicSelect.innerHTML = ''; // Clear existing options
+        filtersData.topics.forEach(topic => {
             const option = document.createElement('option');
             option.value = topic;
             option.textContent = topic;
@@ -1006,18 +1180,20 @@ async function loadFilterOptions() {
             topicSelect.appendChild(option);
         });
 
-        // Populate search eventtype filter (single select)
+        // Clear and repopulate search eventtype filter (single select)
         const eventtypeSelect = document.getElementById('eventtype-filter');
-        data.eventtypes.forEach(eventtype => {
+        eventtypeSelect.innerHTML = ''; // Clear existing options
+        filtersData.eventtypes.forEach(eventtype => {
             const option = document.createElement('option');
             option.value = eventtype;
             option.textContent = eventtype;
             eventtypeSelect.appendChild(option);
         });
 
-        // Populate chat session filter
+        // Clear and repopulate chat session filter
         const chatSessionSelect = document.getElementById('chat-session-filter');
-        data.sessions.forEach(session => {
+        chatSessionSelect.innerHTML = ''; // Clear existing options
+        filtersData.sessions.forEach(session => {
             const option = document.createElement('option');
             option.value = session;
             option.textContent = session;
@@ -1025,9 +1201,10 @@ async function loadFilterOptions() {
             chatSessionSelect.appendChild(option);
         });
 
-        // Populate chat topic filter
+        // Clear and repopulate chat topic filter
         const chatTopicSelect = document.getElementById('chat-topic-filter');
-        data.topics.forEach(topic => {
+        chatTopicSelect.innerHTML = ''; // Clear existing options
+        filtersData.topics.forEach(topic => {
             const option = document.createElement('option');
             option.value = topic;
             option.textContent = topic;
@@ -1035,9 +1212,10 @@ async function loadFilterOptions() {
             chatTopicSelect.appendChild(option);
         });
 
-        // Populate chat eventtype filter (single select)
+        // Clear and repopulate chat eventtype filter (single select)
         const chatEventtypeSelect = document.getElementById('chat-eventtype-filter');
-        data.eventtypes.forEach(eventtype => {
+        chatEventtypeSelect.innerHTML = ''; // Clear existing options
+        filtersData.eventtypes.forEach(eventtype => {
             const option = document.createElement('option');
             option.value = eventtype;
             option.textContent = eventtype;
@@ -1078,6 +1256,12 @@ async function searchPapers() {
     const topics = Array.from(topicSelect.selectedOptions).map(opt => opt.value);
     const eventtype = eventtypeSelect.value; // Single select
 
+    // Get year and conference from header selectors
+    const yearSelect = document.getElementById('year-selector');
+    const conferenceSelect = document.getElementById('conference-selector');
+    const selectedYear = yearSelect.value;
+    const selectedConference = conferenceSelect.value;
+
     if (!query) {
         showError('Please enter a search query');
         return;
@@ -1109,6 +1293,16 @@ async function searchPapers() {
             requestBody.topics = topics;
         }
         if (eventtype) requestBody.eventtypes = [eventtype]; // Single value as array
+
+        // Add year filter if selected
+        if (selectedYear) {
+            requestBody.years = [parseInt(selectedYear)];
+        }
+
+        // Add conference filter if selected
+        if (selectedConference) {
+            requestBody.conferences = [selectedConference];
+        }
 
         const response = await fetch(`${API_BASE}/api/search`, {
             method: 'POST',
@@ -1419,6 +1613,12 @@ async function sendChatMessage() {
         const topics = Array.from(chatTopicSelect.selectedOptions).map(opt => opt.value);
         const eventtype = chatEventtypeSelect.value; // Single select
 
+        // Get year and conference from header selectors
+        const yearSelect = document.getElementById('year-selector');
+        const conferenceSelect = document.getElementById('conference-selector');
+        const selectedYear = yearSelect.value;
+        const selectedConference = conferenceSelect.value;
+
         const requestBody = {
             message,
             n_papers: nPapers
@@ -1432,6 +1632,16 @@ async function sendChatMessage() {
             requestBody.topics = topics;
         }
         if (eventtype) requestBody.eventtypes = [eventtype]; // Single value as array
+
+        // Add year filter if selected
+        if (selectedYear) {
+            requestBody.years = [parseInt(selectedYear)];
+        }
+
+        // Add conference filter if selected
+        if (selectedConference) {
+            requestBody.conferences = [selectedConference];
+        }
 
         const response = await fetch(`${API_BASE}/api/chat`, {
             method: 'POST',
@@ -1652,3 +1862,300 @@ function renderMarkdownWithLatex(text) {
     }
 }
 
+// Handle year selector change
+function handleYearChange() {
+    // Reload stats with the new year selection
+    loadStats();
+
+    // Reload filter options with the new year selection
+    loadFilterOptions();
+
+    // Update download button text
+    updateDownloadButton();
+
+    // Refresh interesting papers if the tab is visible, otherwise just update the count
+    if (currentTab === 'interesting') {
+        loadInterestingPapers();
+    } else {
+        updateInterestingPapersCount();
+    }
+
+    // Clear search results when year changes
+    const resultsDiv = document.getElementById('search-results');
+    resultsDiv.innerHTML = `
+        <div class="text-center text-gray-500 py-12">
+            <i class="fas fa-search text-6xl mb-4 opacity-20"></i>
+            <p class="text-lg">Enter a search query to find abstracts</p>
+            <p class="text-sm">Try "transformer architecture" or "reinforcement learning"</p>
+        </div>
+    `;
+}
+
+// Handle conference selector change
+function handleConferenceChange() {
+    // Update years dropdown based on selected conference
+    updateYearsForConference();
+
+    // Reload stats with the new conference selection
+    loadStats();
+
+    // Reload filter options with the new conference selection
+    loadFilterOptions();
+
+    // Update download button text
+    updateDownloadButton();
+
+    // Refresh interesting papers if the tab is visible, otherwise just update the count
+    if (currentTab === 'interesting') {
+        loadInterestingPapers();
+    } else {
+        updateInterestingPapersCount();
+    }
+
+    // Clear search results when conference changes
+    const resultsDiv = document.getElementById('search-results');
+    resultsDiv.innerHTML = `
+        <div class="text-center text-gray-500 py-12">
+            <i class="fas fa-search text-6xl mb-4 opacity-20"></i>
+            <p class="text-lg">Enter a search query to find abstracts</p>
+            <p class="text-sm">Try "transformer architecture" or "reinforcement learning"</p>
+        </div>
+    `;
+}
+
+// Update years dropdown based on selected conference
+function updateYearsForConference() {
+    const conferenceSelect = document.getElementById('conference-selector');
+    const yearSelect = document.getElementById('year-selector');
+
+    if (!conferenceSelect || !yearSelect || !window.conferenceYearsMap) {
+        return;
+    }
+
+    const selectedConference = conferenceSelect.value;
+    const currentYear = yearSelect.value; // Remember current selection
+
+    // Clear years dropdown (except "All Years" option)
+    yearSelect.innerHTML = '<option value="">All Years</option>';
+
+    if (selectedConference) {
+        // Conference selected: show only years for that conference
+        const yearsForConference = window.conferenceYearsMap[selectedConference] || [];
+        yearsForConference.forEach(year => {
+            const option = document.createElement('option');
+            option.value = year;
+            option.textContent = year;
+            yearSelect.appendChild(option);
+        });
+    } else {
+        // "All Conferences" selected: show all years
+        if (window.allYears && window.allYears.length > 0) {
+            window.allYears.forEach(year => {
+                const option = document.createElement('option');
+                option.value = year;
+                option.textContent = year;
+                yearSelect.appendChild(option);
+            });
+        }
+    }
+
+    // Try to restore previous year selection if it's still available
+    const availableYears = Array.from(yearSelect.options).map(opt => opt.value);
+    if (currentYear && availableYears.includes(currentYear)) {
+        yearSelect.value = currentYear;
+    } else {
+        yearSelect.value = ''; // Reset to "All Years" if previous selection not available
+    }
+}
+
+// Update download button text based on whether data exists for selected conference/year
+async function updateDownloadButton() {
+    const conferenceSelect = document.getElementById('conference-selector');
+    const yearSelect = document.getElementById('year-selector');
+    const downloadBtn = document.getElementById('download-btn');
+    const downloadBtnText = document.getElementById('download-btn-text');
+
+    if (!conferenceSelect || !yearSelect || !downloadBtn || !downloadBtnText) {
+        return;
+    }
+
+    const selectedConference = conferenceSelect.value;
+    const selectedYear = yearSelect.value;
+
+    // If no conference or year selected, disable button
+    if (!selectedConference || !selectedYear) {
+        downloadBtn.disabled = true;
+        downloadBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        downloadBtn.title = 'Select a conference and year to download';
+        downloadBtnText.textContent = 'Download';
+        return;
+    }
+
+    // Enable button
+    downloadBtn.disabled = false;
+    downloadBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+
+    // Check if we have data for this conference/year
+    try {
+        const response = await fetch(`${API_BASE}/api/stats?year=${selectedYear}&conference=${selectedConference}`);
+        const data = await response.json();
+
+        if (data.total_papers > 0) {
+            downloadBtnText.textContent = 'Update';
+            downloadBtn.title = `Update abstracts for ${selectedConference} ${selectedYear} (${data.total_papers} papers currently)`;
+        } else {
+            downloadBtnText.textContent = 'Download';
+            downloadBtn.title = `Download abstracts for ${selectedConference} ${selectedYear}`;
+        }
+    } catch (error) {
+        console.error('Error checking paper count:', error);
+        downloadBtnText.textContent = 'Download';
+        downloadBtn.title = `Download/update abstracts for ${selectedConference} ${selectedYear}`;
+    }
+}
+
+// Handle download/update button click
+async function handleDownload() {
+    const conferenceSelect = document.getElementById('conference-selector');
+    const yearSelect = document.getElementById('year-selector');
+    const downloadBtn = document.getElementById('download-btn');
+    const downloadBtnText = document.getElementById('download-btn-text');
+    const downloadIcon = document.getElementById('download-icon');
+    const progressBg = document.getElementById('download-progress-bg');
+
+    const selectedConference = conferenceSelect ? conferenceSelect.value : '';
+    const selectedYear = yearSelect ? yearSelect.value : '';
+
+    // Validate selections
+    if (!selectedConference) {
+        alert('Please select a conference first');
+        return;
+    }
+
+    if (!selectedYear) {
+        alert('Please select a year first');
+        return;
+    }
+
+    // Disable button during download
+    downloadBtn.disabled = true;
+    downloadBtn.classList.add('opacity-50', 'cursor-not-allowed');
+    const originalIcon = downloadIcon.className;
+    downloadIcon.className = 'fas fa-spinner fa-spin';
+    downloadBtnText.textContent = 'Starting...';
+
+    // Show progress bar background
+    progressBg.classList.remove('hidden');
+    progressBg.style.width = '0%';
+
+    try {
+        const response = await fetch(`${API_BASE}/api/download`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                conference: selectedConference,
+                year: parseInt(selectedYear)
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        // Read the SSE stream
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+
+            // Process complete SSE messages
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const dataStr = line.substring(6);
+                    if (dataStr.trim()) {
+                        try {
+                            const data = JSON.parse(dataStr);
+
+                            if (data.error) {
+                                alert(`Error: ${data.error}`);
+                                return;
+                            }
+
+                            // Update button progress based on stage
+                            if (data.stage === 'download') {
+                                downloadBtnText.textContent = `Downloading (${data.progress}%)`;
+                                progressBg.style.width = `${Math.round(data.progress / 3)}%`;
+                            } else if (data.stage === 'database') {
+                                downloadBtnText.textContent = `Loading DB (${data.progress}%)`;
+                                const progress = 33 + Math.round(data.progress / 3);
+                                progressBg.style.width = `${progress}%`;
+                            } else if (data.stage === 'embeddings') {
+                                downloadBtnText.textContent = `Embedding (${data.progress}%)`;
+                                const progress = 66 + Math.round(data.progress / 3);
+                                progressBg.style.width = `${progress}%`;
+                            } else if (data.stage === 'complete' && data.success) {
+                                // Complete
+                                progressBg.style.width = '100%';
+                                downloadIcon.className = 'fas fa-check';
+                                downloadBtnText.textContent = 'Complete!';
+
+                                // Show success message
+                                const action = data.action === 'updating' ? 'Updated' : 'Downloaded';
+                                const message = `${action} ${data.downloaded} papers\n` +
+                                    `Loaded ${data.updated} papers into database\n` +
+                                    `Created ${data.embedded} embeddings for new/changed content`;
+
+                                setTimeout(() => {
+                                    alert(message);
+
+                                    // Refresh the page data
+                                    loadStats();
+                                    loadFilterOptions();
+
+                                    // Refresh interesting papers if on that tab
+                                    if (currentTab === 'interesting') {
+                                        loadInterestingPapers();
+                                    } else {
+                                        updateInterestingPapersCount();
+                                    }
+
+                                    // Reset button after a delay
+                                    setTimeout(() => {
+                                        progressBg.classList.add('hidden');
+                                        progressBg.style.width = '0%';
+                                        updateDownloadButton();
+                                    }, 2000);
+                                }, 500);
+                            }
+                        } catch (e) {
+                            console.error('Error parsing SSE data:', e, dataStr);
+                        }
+                    }
+                }
+            }
+        }
+
+    } catch (error) {
+        console.error('Error downloading abstracts:', error);
+        alert(`Error downloading abstracts: ${error.message}`);
+        progressBg.classList.add('hidden');
+        progressBg.style.width = '0%';
+    } finally {
+        // Re-enable button
+        downloadBtn.disabled = false;
+        downloadBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        downloadIcon.className = originalIcon;
+        // Button text will be updated by updateDownloadButton() after data refresh
+    }
+}

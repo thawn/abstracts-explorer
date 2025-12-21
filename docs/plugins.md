@@ -19,7 +19,7 @@ Official NeurIPS conference data downloader.
 uv run neurips-abstracts download --plugin neurips --year 2025 --db-path neurips.db
 ```
 
-- **Years**: 2013-2025
+- **Years**: 2020-2025
 - **Source**: [neurips.cc](https://neurips.cc/)
 - **Fields**: Full schema (~40+ fields)
 

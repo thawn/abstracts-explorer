@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NeurIPS Abstracts Explorer</title>
+    <title>Abstracts Explorer</title>
 
     <!-- Tailwind CSS for modern styling -->
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/tailwind.css') }}">
@@ -249,13 +249,47 @@
                 <div class="flex items-center space-x-4">
                     <i class="fas fa-brain text-3xl"></i>
                     <div>
-                        <h1 class="text-2xl font-bold">NeurIPS Abstracts Explorer</h1>
-                        <p class="text-sm opacity-90">Explore NeurIPS conference abstracts with AI-powered search</p>
+                        <h1 class="text-2xl font-bold">Abstracts Explorer</h1>
+                        <p class="text-sm opacity-90">Explore conference abstracts with AI-powered search</p>
                     </div>
                 </div>
-                <div id="stats" class="text-right">
-                    <div class="text-sm opacity-90">Loading stats...</div>
-                </div>
+                <div class="flex items-center space-x-4">
+                    <!-- Conference Selector -->
+                    <div class="flex items-center space-x-2">
+                        <label for="conference-selector" class="text-sm font-medium">Conference:</label>
+                        <select id="conference-selector"
+                            class="px-3 py-2 bg-white/20 text-white rounded-lg border border-white/30 focus:ring-2 focus:ring-white/50 focus:border-transparent backdrop-blur-sm"
+                            onchange="handleConferenceChange()">
+                            <option value="">All Conferences</option>
+                        </select>
+                    </div>
+                    <!-- Year Selector -->
+                    <div class="flex items-center space-x-2">
+                        <label for="year-selector" class="text-sm font-medium">Year:</label>
+                        <select id="year-selector"
+                            class="px-3 py-2 bg-white/20 text-white rounded-lg border border-white/30 focus:ring-2 focus:ring-white/50 focus:border-transparent backdrop-blur-sm"
+                            onchange="handleYearChange()">
+                            <option value="">All Years</option>
+                        </select>
+                    </div>
+                    <!-- Download/Update Button with inline progress -->
+                    <button id="download-btn" onclick="handleDownload()"
+                        class="px-4 py-2 bg-white/20 text-white rounded-lg border border-white/30 hover:bg-white/30 focus:ring-2 focus:ring-white/50 focus:border-transparent backdrop-blur-sm transition-colors flex items-center space-x-2 relative overflow-hidden min-w-[160px]"
+                        title="Download or update abstracts for selected conference">
+                        <!-- Progress bar background (hidden by default) -->
+                        <div id="download-progress-bg" class="absolute inset-0 bg-white/10 transition-all duration-300 hidden"
+                            style="width: 0%"></div>
+                        <!-- Button content -->
+                        <div class="relative z-10 flex items-center space-x-2">
+                            <i class="fas fa-download" id="download-icon"></i>
+                            <span id="download-btn-text">Download</span>
+                        </div>
+                    </button>
+                    <!-- Stats -->
+                    <div id="stats" class="text-right">
+                        <div class="text-sm opacity-90">Loading stats...</div>
+                    </div>
+                    </div>
             </div>
         </div>
     </header>
@@ -328,7 +362,7 @@
                     <div class="bg-purple-600 text-white px-6 py-4 flex justify-between items-center">
                         <div>
                             <h3 class="font-semibold text-lg">AI Research Assistant</h3>
-                            <p class="text-sm opacity-90">Ask questions about NeurIPS abstracts</p>
+                            <p class="text-sm opacity-90">Ask questions about cpnference abstracts</p>
                         </div>
                         <button onclick="resetChat()" class="px-4 py-2 bg-white/20 rounded-lg hover:bg-white/30">
                             <i class="fas fa-redo mr-2"></i>Reset
@@ -345,7 +379,7 @@
                                 </div>
                                 <div class="bg-white text-gray-700 rounded-lg p-4 shadow-sm max-w-2xl">
                                     <div class="markdown-content">
-                                        <p>Hello! I'm your AI research assistant. Ask me anything about NeurIPS
+                                        <p>Hello! I'm your AI research assistant. Ask me anything about conference
                                             abstracts, and I'll help you find relevant research and insights.</p>
                                     </div>
                                 </div>
@@ -464,8 +498,8 @@
     <footer class="bg-gray-800 text-white mt-12">
         <div class="container mx-auto px-4 py-6">
             <div class="text-center">
-                <p class="text-sm">Powered by NeurIPS Abstracts Package</p>
-                <p class="text-xs text-gray-400 mt-2">Open source project for exploring NeurIPS conference abstracts</p>
+                <p class="text-sm">Powered by Conference Abstracts Package</p>
+                <p class="text-xs text-gray-400 mt-2">Open source project for exploring conference abstracts</p>
             </div>
         </div>
     </footer>
