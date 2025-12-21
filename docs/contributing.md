@@ -11,19 +11,29 @@ git clone <repository-url>
 cd abstracts
 ```
 
-### 2. Create Virtual Environment
+### 2. Install uv
+
+If you don't have uv installed yet:
 
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# macOS and Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Or with pip
+pip install uv
 ```
 
 ### 3. Install Dependencies
 
 ```bash
-pip install -e .
-pip install pytest pytest-cov pytest-mock
-pip install sphinx sphinx-rtd-theme myst-parser sphinx-autodoc-typehints
+# Install all dependencies including dev, web, and docs
+uv sync --all-extras
+
+# Activate the virtual environment
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 ```
 
 ### 4. Configure Environment
@@ -83,28 +93,28 @@ def search_papers(
 
 ```bash
 # Run all tests (excludes slow tests by default)
-pytest
+uv run pytest
 
 # Run with coverage
-pytest --cov=src/neurips_abstracts
+uv run pytest --cov=src/neurips_abstracts
 
 # Run specific test file
-pytest tests/test_database.py
+uv run pytest tests/test_database.py
 
 # Run specific test
-pytest tests/test_database.py::test_add_paper
+uv run pytest tests/test_database.py::test_add_paper
 
 # Verbose output
-pytest -v
+uv run pytest -v
 
 # Show print statements
-pytest -s
+uv run pytest -s
 
 # Run only slow tests (requires LM Studio)
-pytest -m slow
+uv run pytest -m slow
 
 # Run all tests including slow ones
-pytest -m ""
+uv run pytest -m ""
 ```
 
 **Note about slow tests:** Tests requiring LM Studio are marked as `slow` and skipped by default. This allows for faster development cycles. To run slow tests, you need:
@@ -202,7 +212,7 @@ def my_function(param1: str, param2: int = 10) -> bool:
 ```bash
 # Build HTML documentation
 cd docs
-make html
+uv run make html
 
 # View documentation
 open _build/html/index.html

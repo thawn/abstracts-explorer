@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel", "setuptools_scm>=8.0"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
 
 [project]
 name = "neurips-abstracts"
@@ -61,15 +61,14 @@ Issues = "https://github.com/yourusername/neurips-abstracts/issues"
 [project.scripts]
 neurips-abstracts = "neurips_abstracts.cli:main"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.hatch.version]
+source = "vcs"
 
-[tool.setuptools.package-data]
-neurips_abstracts = ["web_ui/static/*", "web_ui/templates/*"]
+[tool.hatch.build.hooks.vcs]
+version-file = "src/neurips_abstracts/_version.py"
 
-[tool.setuptools_scm]
-# Automatically determine version from git tags
-write_to = "src/neurips_abstracts/_version.py"
+[tool.hatch.build.targets.wheel]
+packages = ["src/neurips_abstracts"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

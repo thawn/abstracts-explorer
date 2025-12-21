@@ -10,6 +10,34 @@ This file contains instructions and conventions for AI assistants working on thi
 
 **neurips-abstracts** is a Python package for downloading, storing, and analyzing NeurIPS conference paper abstracts with vector embeddings and RAG (Retrieval-Augmented Generation) capabilities.
 
+## Package Manager: uv
+
+**IMPORTANT**: This project uses **uv** for package management, NOT pip/venv.
+
+### Quick Reference
+
+- **Install dependencies**: `uv sync` or `uv sync --all-extras`
+- **Run commands**: `uv run pytest`, `uv run neurips-abstracts`, etc.
+- **Add dependencies**: `uv add package-name`
+- **Virtual environment**: Automatically created in `.venv/`
+
+### Why uv?
+
+- **10-100x faster** than pip for installation and dependency resolution
+- **Automatic** virtual environment management
+- **Reliable** dependency resolution with lock files
+- **Modern** tooling with better error messages
+
+### When Writing Code or Instructions
+
+Always use uv commands:
+- ✅ `uv sync --extra dev` (correct)
+- ❌ `pip install -e ".[dev]"` (outdated)
+- ✅ `uv run pytest` (correct)
+- ❌ `pytest` (may not work without activation)
+
+See the "Package Management with uv" section below for complete documentation.
+
 ## Code Style & Conventions
 
 ### Python Style
@@ -159,33 +187,74 @@ def test_add_paper(temp_db):
 
 ```bash
 # Run all tests
-pytest
+uv run pytest
 
 # Run with coverage
-pytest --cov=src/neurips_abstracts --cov-report=html
+uv run pytest --cov=src/neurips_abstracts --cov-report=html
 
 # Run specific test file
-pytest tests/test_database.py
+uv run pytest tests/test_database.py
 
 # Run specific test
-pytest tests/test_database.py::test_add_paper
+uv run pytest tests/test_database.py::test_add_paper
 
 # Verbose output
-pytest -v
+uv run pytest -v
 
 # Show print statements
-pytest -s
+uv run pytest -s
 ```
 
-## Virtual Environment
+## Package Management with uv
 
-**Always activate the virtual environment** before running Python commands:
+This project uses **uv** for fast, reliable Python package management.
+
+### Why uv?
+
+- **Fast**: 10-100x faster than pip
+- **Reliable**: Consistent dependency resolution
+- **Compatible**: Works with existing pip/PyPI packages
+- **Modern**: Built-in virtual environment management
+
+### Basic Commands
 
 ```bash
-# Activation is handled automatically by configure_python_environment
-# Manual activation (if needed):
-source venv/bin/activate  # Unix/macOS
-venv\Scripts\activate     # Windows
+# Create virtual environment and install all dependencies
+uv sync
+
+# Install with specific extra dependencies
+uv sync --extra dev
+uv sync --extra web
+uv sync --extra docs
+uv sync --all-extras  # Install all optional dependencies
+
+# Add a new dependency
+uv add requests
+
+# Add a development dependency
+uv add --dev pytest
+
+# Run commands in the virtual environment
+uv run python script.py
+uv run pytest
+uv run neurips-abstracts --help
+
+# Activate the virtual environment manually (optional)
+source .venv/bin/activate  # Unix/macOS
+.venv\Scripts\activate     # Windows
+```
+
+### Installation
+
+```bash
+# macOS and Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Or with pip
+pip install uv
 ```
 
 ## Configuration System
@@ -239,15 +308,30 @@ print(config.llm_backend_url)
 
 - **requests**: API calls to OpenReview
 - **chromadb**: Vector embeddings storage
+- **pydantic**: Data validation
+- **beautifulsoup4**: HTML parsing
 - **sqlite3**: Built-in, for paper database
 
 ### Development Dependencies
 
+Install with `uv sync --extra dev`:
+
 - **pytest**: Testing framework
 - **pytest-cov**: Coverage reporting
 - **pytest-mock**: Mocking support
+- **selenium**: Browser automation testing
+- **webdriver-manager**: Browser driver management
+
+### Web Dependencies
+
+Install with `uv sync --extra web`:
+
+- **flask**: Web framework
+- **flask-cors**: CORS support
 
 ### Documentation Dependencies
+
+Install with `uv sync --extra docs`:
 
 - **sphinx**: Documentation generator
 - **sphinx-rtd-theme**: Read the Docs theme
@@ -263,7 +347,7 @@ Build documentation:
 
 ```bash
 cd docs
-make html
+uv run make html
 open _build/html/index.html
 ```
 
@@ -307,13 +391,14 @@ Add feature: RAG chat interface with LM Studio
 
 See `.gitignore`:
 - `__pycache__/`, `*.pyc`: Python cache
-- `venv/`, `env/`: Virtual environments
+- `.venv/`, `venv/`, `env/`: Virtual environments (uv uses `.venv` by default)
 - `.env`: Configuration secrets
 - `*.db`: Database files
 - `chroma_db/`: Embeddings database
 - `_build/`: Documentation build
 - `.pytest_cache/`: Test cache
 - `htmlcov/`: Coverage reports
+- `uv.lock`: Lock file (should be committed for applications, optional for libraries)
 
 ## External Integrations
 
@@ -377,8 +462,8 @@ See `.gitignore`:
 2. Implement feature with type hints and docstrings
 3. Write comprehensive tests (unit + integration)
 4. Update documentation (docstrings + user guide)
-5. Run tests: `pytest --cov=src/neurips_abstracts`
-6. Build docs: `cd docs && make html`
+5. Run tests: `uv run pytest --cov=src/neurips_abstracts`
+6. Build docs: `cd docs && uv run make html`
 7. Create changelog entry in `changelog/`
 8. Commit and create pull request
 
@@ -396,7 +481,7 @@ See `.gitignore`:
 
 1. Edit relevant Markdown files in `docs/`
 2. Or update docstrings in source code
-3. Rebuild: `cd docs && make html`
+3. Rebuild: `cd docs && uv run make html`
 4. Review in browser
 5. Commit changes
 
@@ -404,8 +489,8 @@ See `.gitignore`:
 
 ### Tests Failing
 
-- Check virtual environment is activated
-- Verify all dependencies installed: `pip install -e ".[dev]"`
+- Check virtual environment is activated (or use `uv run`)
+- Verify all dependencies installed: `uv sync --all-extras`
 - Check configuration in `.env`
 - Review test output for specific errors
 
@@ -418,15 +503,16 @@ See `.gitignore`:
 
 ### Documentation Build Errors
 
-- Install doc dependencies: `pip install -e ".[docs]"`
+- Install doc dependencies: `uv sync --extra docs`
 - Check for syntax errors in Markdown files
-- Clean build: `make clean && make html`
+- Clean build: `make clean && uv run make html`
 - Review error messages for specific issues
 
 ### Import Errors
 
-- Activate virtual environment
-- Reinstall package: `pip install -e .`
+- Use `uv run` to run commands in the virtual environment
+- Or activate virtual environment: `source .venv/bin/activate`
+- Reinstall package: `uv sync`
 - Check Python path
 - Verify module structure
 

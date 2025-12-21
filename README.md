@@ -16,6 +16,27 @@ A Python package for downloading NeurIPS conference data and loading it into a S
 
 ## Installation
 
+### Requirements
+
+- Python 3.8+
+- [uv](https://docs.astral.sh/uv/) - Fast Python package installer and resolver
+- Node.js 14+ (for web UI)
+
+### Install uv
+
+If you don't have uv installed yet:
+
+```bash
+# macOS and Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Or with pip
+pip install uv
+```
+
 ### From source
 
 ```bash
@@ -23,15 +44,17 @@ A Python package for downloading NeurIPS conference data and loading it into a S
 git clone https://github.com/yourusername/neurips-abstracts.git
 cd neurips-abstracts
 
-# Create a virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install Python dependencies
-pip install -e .
+# Create virtual environment and install dependencies with uv
+uv sync
 
 # Install with development dependencies
-pip install -e ".[dev]"
+uv sync --extra dev
+
+# Install with all optional dependencies (dev + web + docs)
+uv sync --all-extras
+
+# Activate the virtual environment
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install Node.js dependencies for web UI
 npm install
@@ -39,12 +62,6 @@ npm install
 # Install vendor files (Tailwind CSS, Font Awesome, Marked.js)
 npm run install:vendor
 ```
-
-### Requirements
-
-- Python 3.8+
-- Node.js 14+ (for web UI)
-- requests >= 2.31.0
 
 ## Configuration
 
