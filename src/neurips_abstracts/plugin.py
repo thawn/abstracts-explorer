@@ -205,6 +205,11 @@ def convert_lightweight_to_neurips_schema(
         # Get or generate paper ID
         paper_id = paper.get("id", idx + 1)
 
+        # Generate UID using conference, year, and paper_id
+        conference = paper.get("conference", "unknown")
+        year = paper.get("year", "unknown")
+        uid = f"{conference}_{year}_{paper_id}"
+
         # Process authors
         authors_list = []
         author_data = paper["authors"]
@@ -288,7 +293,7 @@ def convert_lightweight_to_neurips_schema(
         # Create full paper entry
         neurips_paper = {
             "id": paper_id,
-            "uid": f"paper_{paper_id}",
+            "uid": uid,
             "name": paper["title"],
             "authors": authors_list,
             "abstract": paper["abstract"],
