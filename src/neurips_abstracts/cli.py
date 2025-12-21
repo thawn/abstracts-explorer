@@ -564,7 +564,6 @@ def download_command(args: argparse.Namespace) -> int:
 
         # Add plugin-specific options
         if plugin_name == "ml4ps":
-            kwargs["fetch_abstracts"] = getattr(args, "fetch_abstracts", True)
             kwargs["max_workers"] = getattr(args, "max_workers", 20)
 
         # Download data using plugin
@@ -736,12 +735,6 @@ Examples:
         "--list-plugins",
         action="store_true",
         help="List available downloader plugins and exit",
-    )
-    download_parser.add_argument(
-        "--fetch-abstracts",
-        action="store_true",
-        default=True,
-        help="Fetch abstracts (for plugins that support it, like ml4ps)",
     )
     download_parser.add_argument(
         "--max-workers",

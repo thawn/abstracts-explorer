@@ -43,14 +43,21 @@ class TestCLI:
         """Test download command completes successfully."""
         output_db = tmp_path / "test.db"
 
-        # Mock the download function
-        mock_data = [
-            {"id": 1, "title": "Paper 1", "abstract": "Abstract 1"},
-            {"id": 2, "title": "Paper 2", "abstract": "Abstract 2"},
-        ]
+        # Mock the plugin and its download method
+        mock_plugin = Mock()
+        mock_plugin.plugin_name = "neurips"
+        mock_plugin.plugin_description = "NeurIPS Test Plugin"
+        mock_data = {
+            "results": [
+                {"id": 1, "title": "Paper 1", "abstract": "Abstract 1"},
+                {"id": 2, "title": "Paper 2", "abstract": "Abstract 2"},
+            ],
+            "count": 2,
+        }
+        mock_plugin.download.return_value = mock_data
 
-        with patch("neurips_abstracts.cli.download_neurips_data") as mock_download:
-            mock_download.return_value = mock_data
+        with patch("neurips_abstracts.cli.get_plugin") as mock_get_plugin:
+            mock_get_plugin.return_value = mock_plugin
 
             with patch.object(
                 sys,
@@ -69,8 +76,14 @@ class TestCLI:
         """Test download command handles errors gracefully."""
         output_db = tmp_path / "test.db"
 
-        with patch("neurips_abstracts.cli.download_neurips_data") as mock_download:
-            mock_download.side_effect = Exception("Network error")
+        # Mock the plugin to raise an exception
+        mock_plugin = Mock()
+        mock_plugin.plugin_name = "neurips"
+        mock_plugin.plugin_description = "NeurIPS Test Plugin"
+        mock_plugin.download.side_effect = Exception("Network error")
+
+        with patch("neurips_abstracts.cli.get_plugin") as mock_get_plugin:
+            mock_get_plugin.return_value = mock_plugin
 
             with patch.object(
                 sys,

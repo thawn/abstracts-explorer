@@ -33,7 +33,7 @@ Example usage with plugins::
 
     # Use ML4PS plugin
     ml4ps_plugin = get_plugin('ml4ps')
-    data = ml4ps_plugin.download(year=2025, fetch_abstracts=True)
+    data = ml4ps_plugin.download(year=2025)
 
 Creating Custom Plugins
 ------------------------

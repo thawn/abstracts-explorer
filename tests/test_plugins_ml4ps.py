@@ -394,16 +394,16 @@ class TestML4PSFullPipeline:
 
     @patch.object(ML4PSDownloaderPlugin, "_scrape_papers")
     @patch.object(ML4PSDownloaderPlugin, "_fetch_abstracts_for_papers")
-    def test_download_without_abstracts(self, mock_fetch, mock_scrape, ml4ps_plugin, sample_scraped_papers):
-        """Test download without fetching abstracts."""
+    def test_download_without_abstracts_mock(self, mock_fetch, mock_scrape, ml4ps_plugin, sample_scraped_papers):
+        """Test download with abstracts mocked (abstracts are always fetched)."""
         mock_scrape.return_value = sample_scraped_papers
 
-        result = ml4ps_plugin.download(year=2025, fetch_abstracts=False)
+        result = ml4ps_plugin.download(year=2025)
 
         assert result["count"] == 2
         assert len(result["results"]) == 2
         mock_scrape.assert_called_once()
-        mock_fetch.assert_not_called()
+        mock_fetch.assert_called_once()
 
     @patch.object(ML4PSDownloaderPlugin, "_scrape_papers")
     @patch.object(ML4PSDownloaderPlugin, "_fetch_abstracts_for_papers")
@@ -411,7 +411,7 @@ class TestML4PSFullPipeline:
         """Test download with abstract fetching."""
         mock_scrape.return_value = sample_scraped_papers
 
-        result = ml4ps_plugin.download(year=2025, fetch_abstracts=True)
+        result = ml4ps_plugin.download(year=2025)
 
         assert result["count"] == 2
         mock_scrape.assert_called_once()
@@ -423,7 +423,7 @@ class TestML4PSFullPipeline:
         mock_scrape.return_value = sample_scraped_papers
         output_file = tmp_path / "ml4ps_output.json"
 
-        result = ml4ps_plugin.download(year=2025, output_path=str(output_file), fetch_abstracts=False)
+        result = ml4ps_plugin.download(year=2025, output_path=str(output_file))
 
         assert output_file.exists()
         with open(output_file) as f:
@@ -528,7 +528,6 @@ class TestML4PSSchemaConversion:
 # ============================================================================
 
 
-@pytest.mark.slow
 class TestML4PSEndToEnd:
     """End-to-end tests for ML4PS plugin (slow, marked for optional execution)."""
 
@@ -550,17 +549,16 @@ class TestML4PSEndToEnd:
         assert plugin is not None
         assert isinstance(plugin, ML4PSDownloaderPlugin)
 
-    @pytest.mark.skip(reason="Requires network access - run manually")
+    @pytest.mark.slow
     def test_download_real_data(self, tmp_path):
-        """Test downloading real data from ML4PS website (requires network)."""
+        """Test downloading real data from ML4PS website."""
         plugin = ML4PSDownloaderPlugin()
         output_file = tmp_path / "ml4ps_real.json"
 
         result = plugin.download(
             year=2025,
             output_path=str(output_file),
-            fetch_abstracts=False,  # Skip abstracts for speed
-            max_workers=5,
+            max_workers=10,
         )
 
         assert result["count"] > 0
@@ -588,7 +586,7 @@ class TestML4PSRegression:
         """Test that output schema matches the original full schema format."""
         mock_scrape.return_value = sample_scraped_papers
 
-        result = ml4ps_plugin.download(year=2025, fetch_abstracts=False)
+        result = ml4ps_plugin.download(year=2025)
 
         # Check top-level structure
         assert "count" in result

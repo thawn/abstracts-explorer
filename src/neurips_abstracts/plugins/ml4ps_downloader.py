@@ -62,8 +62,6 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
             Path to save the downloaded JSON file
         force_download : bool
             Force re-download even if file exists
-        fetch_abstracts : bool, optional
-            Whether to fetch abstracts from NeurIPS virtual site (default: True)
         max_workers : int, optional
             Maximum parallel workers for fetching abstracts (default: 10)
         **kwargs : Any
@@ -100,7 +98,6 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
                     logger.warning(f"Failed to load local file: {str(e)}. Downloading from web...")
 
         # Get options from kwargs
-        fetch_abstracts = kwargs.get("fetch_abstracts", True)
         max_workers = kwargs.get("max_workers", 10)
 
         logger.info(f"Scraping ML4PS {year} workshop papers...")
@@ -112,10 +109,9 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
             logger.error("No papers were scraped")
             return {"count": 0, "next": None, "previous": None, "results": []}
 
-        # Fetch abstracts if requested
-        if fetch_abstracts:
-            logger.info(f"Fetching abstracts for {len(papers)} papers...")
-            self._fetch_abstracts_for_papers(papers, max_workers=max_workers)
+        # Fetch abstracts (required field)
+        logger.info(f"Fetching abstracts for {len(papers)} papers...")
+        self._fetch_abstracts_for_papers(papers, max_workers=max_workers)
 
         # Convert to lightweight format
         lightweight_papers = self._convert_to_lightweight_format(papers)
@@ -166,12 +162,6 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
                     "required": False,
                     "description": "Force re-download even if file exists",
                     "default": False,
-                },
-                "fetch_abstracts": {
-                    "type": "bool",
-                    "required": False,
-                    "description": "Whether to fetch abstracts from NeurIPS virtual site",
-                    "default": True,
                 },
                 "max_workers": {
                     "type": "int",
