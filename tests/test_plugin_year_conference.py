@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch, Mock
 from neurips_abstracts.plugins.neurips_downloader import NeurIPSDownloaderPlugin
+from neurips_abstracts.plugins.icml_downloader import ICMLDownloaderPlugin
 from neurips_abstracts.plugins.ml4ps_downloader import ML4PSDownloaderPlugin
 from neurips_abstracts.database import DatabaseManager
 
@@ -84,6 +85,81 @@ class TestNeurIPSPluginYearConference:
         # Verify new fields were added
         assert paper["year"] == 2025
         assert paper["conference"] == "NeurIPS"
+
+
+class TestICMLPluginYearConference:
+    """Test that ICML plugin sets year and conference fields."""
+
+    @patch("neurips_abstracts.plugins.json_conference_downloader.requests.get")
+    def test_icml_plugin_adds_year_and_conference(self, mock_get):
+        """Test that ICML plugin adds year and conference to each paper."""
+        # Mock the requests.get to return test data
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "count": 2,
+            "next": None,
+            "previous": None,
+            "results": [
+                {
+                    "id": 1,
+                    "name": "Paper 1",
+                    "abstract": "Abstract 1",
+                },
+                {
+                    "id": 2,
+                    "name": "Paper 2",
+                    "abstract": "Abstract 2",
+                },
+            ],
+        }
+        mock_get.return_value = mock_response
+
+        plugin = ICMLDownloaderPlugin()
+        data = plugin.download(year=2025)
+
+        # Verify year and conference were added to each paper
+        assert data["count"] == 2
+        assert len(data["results"]) == 2
+
+        for paper in data["results"]:
+            assert paper["year"] == 2025
+            assert paper["conference"] == "ICML"
+
+    @patch("neurips_abstracts.plugins.json_conference_downloader.requests.get")
+    def test_icml_plugin_preserves_existing_fields(self, mock_get):
+        """Test that ICML plugin preserves existing paper fields."""
+        # Mock the requests.get to return test data with existing fields
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "count": 1,
+            "next": None,
+            "previous": None,
+            "results": [
+                {
+                    "id": 1,
+                    "name": "Test Paper",
+                    "abstract": "Test Abstract",
+                    "authors": [{"fullname": "John Doe"}],
+                    "keywords": ["ML", "AI"],
+                },
+            ],
+        }
+        mock_get.return_value = mock_response
+
+        plugin = ICMLDownloaderPlugin()
+        data = plugin.download(year=2025)
+
+        # Verify existing fields are preserved
+        paper = data["results"][0]
+        assert paper["id"] == 1
+        assert paper["name"] == "Test Paper"
+        assert paper["abstract"] == "Test Abstract"
+        assert paper["authors"] == [{"fullname": "John Doe"}]
+        assert paper["keywords"] == ["ML", "AI"]
+
+        # Verify new fields were added
+        assert paper["year"] == 2025
+        assert paper["conference"] == "ICML"
 
 
 class TestML4PSPluginYearConference:

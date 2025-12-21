@@ -6,6 +6,7 @@ This module provides downloadable plugin implementations for different data sour
 
 Available plugins:
 - ICLRDownloaderPlugin: Official ICLR conference data
+- ICMLDownloaderPlugin: Official ICML conference data
 - ML4PSDownloaderPlugin: ML4PS workshop data
 - NeurIPSDownloaderPlugin: Official NeurIPS conference data
 
@@ -40,6 +41,7 @@ from neurips_abstracts.plugin import (
 
 # Import actual plugin implementations
 from .iclr_downloader import ICLRDownloaderPlugin
+from .icml_downloader import ICMLDownloaderPlugin
 from .ml4ps_downloader import ML4PSDownloaderPlugin
 from .neurips_downloader import NeurIPSDownloaderPlugin
 
@@ -68,6 +70,7 @@ __all__ = [
     "validate_papers",
     # Plugin implementations
     "ICLRDownloaderPlugin",
+    "ICMLDownloaderPlugin",
     "ML4PSDownloaderPlugin",
     "NeurIPSDownloaderPlugin",
 ]
