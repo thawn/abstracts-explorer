@@ -159,7 +159,7 @@ abstracts/
 2. **SCHEMA_MIGRATION.md** - Complete schema documentation (35+ fields)
 3. **BACKWARD_COMPATIBILITY_REMOVED.md** - Changes made
 4. **SUMMARY.md** - Package overview
-5. **LICENSE** - MIT License
+5. **LICENSE** - Apache License 2.0
 
 All functions have **NumPy-style docstrings** with:
 - Parameter descriptions

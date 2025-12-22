@@ -521,7 +521,7 @@ See `.gitignore`:
 - **Name**: neurips-abstracts
 - **Version**: 0.1.0
 - **Python**: >=3.11
-- **License**: MIT
+- **License**: Apache-2.0
 - **CLI Command**: `neurips-abstracts`
 
 ## Key Design Decisions

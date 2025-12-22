@@ -22,7 +22,7 @@ neurips-2025/abstracts/
 │   └── advanced_usage.py     # Advanced usage examples
 ├── pyproject.toml            # Package configuration
 ├── README.md                 # Comprehensive documentation
-├── LICENSE                   # MIT License
+├── LICENSE                   # Apache License 2.0
 └── venv/                     # Virtual environment
 ```
 
