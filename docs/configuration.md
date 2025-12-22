@@ -47,7 +47,7 @@ nano .env
 ### Database Paths
 
 - **EMBEDDING_DB_PATH**: Path to ChromaDB database (default: `chroma_db`). If relative, resolved relative to DATA_DIR.
-- **PAPER_DB_PATH**: Path to SQLite database with papers (default: `neurips_2025.db`). If relative, resolved relative to DATA_DIR.
+- **PAPER_DB_PATH**: Path to SQLite database with papers (default: `data/neurips_2025.db`). If relative, resolved relative to DATA_DIR.
 
 ### RAG Settings
 

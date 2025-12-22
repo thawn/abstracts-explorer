@@ -9,7 +9,7 @@ This guide covers common usage patterns for the NeurIPS Abstracts package.
 Download papers for a specific year:
 
 ```bash
-uv run neurips-abstracts download --year 2025 --db-path neurips_2025.db
+uv run neurips-abstracts download --year 2025 --db-path data/neurips_2025.db
 ```
 
 Options:
@@ -22,7 +22,7 @@ Options:
 Generate vector embeddings for semantic search:
 
 ```bash
-uv run neurips-abstracts create-embeddings --db-path neurips_2025.db
+uv run neurips-abstracts create-embeddings --db-path data/neurips_2025.db
 ```
 
 Options:
@@ -37,13 +37,13 @@ Search papers by keyword or semantic similarity:
 
 ```bash
 # Simple search
-uv run neurips-abstracts search "transformer architecture" --db-path neurips_2025.db
+uv run neurips-abstracts search "transformer architecture" --db-path data/neurips_2025.db
 
 # Limit results
-uv run neurips-abstracts search "reinforcement learning" --db-path neurips_2025.db --limit 10
+uv run neurips-abstracts search "reinforcement learning" --db-path data/neurips_2025.db --limit 10
 
 # Filter by year
-uv run neurips-abstracts search "neural networks" --db-path neurips_2025.db --year 2025
+uv run neurips-abstracts search "neural networks" --db-path data/neurips_2025.db --year 2025
 ```
 
 ### 4. Chat with Papers (RAG)
@@ -51,7 +51,7 @@ uv run neurips-abstracts search "neural networks" --db-path neurips_2025.db --ye
 Interactive chat interface powered by RAG:
 
 ```bash
-uv run neurips-abstracts chat --db-path neurips_2025.db
+uv run neurips-abstracts chat --db-path data/neurips_2025.db
 ```
 
 In the chat interface:
@@ -67,7 +67,7 @@ In the chat interface:
 from neurips_abstracts.database import NeurIPSDatabase
 
 # Open database
-db = NeurIPSDatabase("neurips_2025.db")
+db = NeurIPSDatabase("data/neurips_2025.db")
 
 # Get all papers
 papers = db.get_all_papers()
@@ -94,7 +94,7 @@ downloader = NeurIPSDownloader()
 papers = downloader.get_neurips_papers(year=2025)
 
 # Save to database
-db = NeurIPSDatabase("neurips_2025.db")
+db = NeurIPSDatabase("data/neurips_2025.db")
 for paper in papers:
     db.add_paper(paper)
 ```
@@ -167,8 +167,8 @@ Process multiple years:
 ```bash
 #!/bin/bash
 for year in 2023 2024 2025; do
-    uv run neurips-abstracts download --year $year --db-path neurips_${year}.db
-    uv run neurips-abstracts create-embeddings --db-path neurips_${year}.db
+    uv run neurips-abstracts download --year $year --db-path data/neurips_${year}.db
+    uv run neurips-abstracts create-embeddings --db-path data/neurips_${year}.db
 done
 ```
 
@@ -190,7 +190,7 @@ config = get_config()
 ```python
 from neurips_abstracts.database import NeurIPSDatabase
 
-db = NeurIPSDatabase("neurips_2025.db")
+db = NeurIPSDatabase("data/neurips_2025.db")
 
 # Complex search with multiple filters
 papers = db.search_papers(

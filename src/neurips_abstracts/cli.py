@@ -654,10 +654,10 @@ def main() -> int:
         epilog="""
 Examples:
   # Download NeurIPS 2025 data and create database
-  neurips-abstracts download --year 2025 --output neurips_2025.db
+  neurips-abstracts download --year 2025 --output data/neurips_2025.db
   
   # Generate embeddings for all papers
-  neurips-abstracts create-embeddings --db-path neurips_2025.db
+  neurips-abstracts create-embeddings --db-path data/neurips_2025.db
   
   # Search for similar papers
   neurips-abstracts search "graph neural networks for molecular generation"

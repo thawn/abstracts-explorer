@@ -85,7 +85,7 @@ nano .env
 - `LLM_BACKEND_URL` - LM Studio API URL (default: http://localhost:1234)
 - `LLM_BACKEND_AUTH_TOKEN` - Authentication token (optional)
 - `EMBEDDING_DB_PATH` - ChromaDB directory (default: chroma_db, resolved relative to DATA_DIR)
-- `PAPER_DB_PATH` - SQLite database (default: neurips_2025.db, resolved relative to DATA_DIR)
+- `PAPER_DB_PATH` - SQLite database (default: data/neurips_2025.db, resolved relative to DATA_DIR)
 - `COLLECTION_NAME` - ChromaDB collection name (default: neurips_papers)
 - `MAX_CONTEXT_PAPERS` - Papers for RAG context (default: 5)
 - `ENABLE_QUERY_REWRITING` - Enable AI-powered query rewriting (default: true)
@@ -119,7 +119,7 @@ data = download_json(
 from neurips_abstracts import DatabaseManager
 
 # Create and connect to database
-with DatabaseManager("neurips.db") as db:
+with DatabaseManager("data/neurips_2025.db") as db:
     # Create tables
     db.create_tables()
     
@@ -137,7 +137,7 @@ with DatabaseManager("neurips.db") as db:
 ```python
 from neurips_abstracts import DatabaseManager
 
-with DatabaseManager("neurips.db") as db:
+with DatabaseManager("data/neurips_2025.db") as db:
     # Search by keyword
     papers = db.search_papers(keyword="neural network")
     
@@ -167,7 +167,7 @@ with DatabaseManager("neurips.db") as db:
 ```python
 from neurips_abstracts import DatabaseManager
 
-with DatabaseManager("neurips.db") as db:
+with DatabaseManager("data/neurips_2025.db") as db:
     # Search authors by name
     authors = db.search_authors(name="Huang")
     for author in authors:
@@ -195,7 +195,7 @@ with DatabaseManager("neurips.db") as db:
 ```python
 from neurips_abstracts import DatabaseManager
 
-with DatabaseManager("neurips.db") as db:
+with DatabaseManager("data/neurips_2025.db") as db:
     # Execute custom SQL queries
     results = db.query(
         "SELECT name, authors, decision FROM papers WHERE eventtype = ? ORDER BY name",
@@ -222,7 +222,7 @@ data = download_neurips_data(
 
 # Load into database
 print("Loading data into database...")
-with DatabaseManager("neurips.db") as db:
+with DatabaseManager("data/neurips_2025.db") as db:
     db.create_tables()
     count = db.load_json_data(data)
     print(f"Loaded {count} papers")
@@ -331,7 +331,7 @@ with EmbeddingsManager() as em:
     
     # Embed papers from database
     count = em.embed_from_database(
-        "neurips.db",
+        "data/neurips_2025.db",
         where_clause="decision = 'Accept'"  # Optional filter
     )
     print(f"Embedded {count} papers")
@@ -557,7 +557,7 @@ except DownloadError as e:
     print(f"Download failed: {e}")
 
 try:
-    with DatabaseManager("neurips.db") as db:
+    with DatabaseManager("data/neurips_2025.db") as db:
         db.load_json_data(invalid_data)
 except DatabaseError as e:
     print(f"Database error: {e}")
@@ -611,7 +611,7 @@ Example:
 ```python
 from neurips_abstracts import RAGChat, EmbeddingsManager, DatabaseManager
 
-with EmbeddingsManager() as em, DatabaseManager("neurips.db") as db:
+with EmbeddingsManager() as em, DatabaseManager("data/neurips_2025.db") as db:
     chat = RAGChat(em, db)
     
     # First query - rewrites and retrieves papers

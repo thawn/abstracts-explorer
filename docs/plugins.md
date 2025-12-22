@@ -16,7 +16,7 @@ The plugin system provides two APIs:
 Official NeurIPS conference data downloader.
 
 ```bash
-uv run neurips-abstracts download --plugin neurips --year 2025 --db-path neurips.db
+uv run neurips-abstracts download --plugin neurips --year 2025 --db-path data/neurips.db
 ```
 
 - **Years**: 2020-2025
@@ -28,7 +28,7 @@ uv run neurips-abstracts download --plugin neurips --year 2025 --db-path neurips
 ML4PS (Machine Learning for Physical Sciences) workshop downloader.
 
 ```bash
-uv run neurips-abstracts download --plugin ml4ps --year 2025 --db-path ml4ps.db
+uv run neurips-abstracts download --plugin ml4ps --year 2025 --db-path data/ml4ps.db
 ```
 
 - **Years**: 2025
@@ -47,13 +47,13 @@ uv run neurips-abstracts download --list-plugins
 
 ```bash
 # Basic usage
-uv run neurips-abstracts download --plugin ml4ps --year 2025 --db-path output.db
+uv run neurips-abstracts download --plugin ml4ps --year 2025 --db-path data/output.db
 
 # With options
 uv run neurips-abstracts download \
     --plugin ml4ps \
     --year 2025 \
-    --db-path ml4ps_2025.db \
+    --db-path data/ml4ps_2025.db \
     --fetch-abstracts \
     --max-workers 10
 ```
@@ -181,7 +181,7 @@ _register()
 from my_workshop_plugin import MyWorkshopPlugin
 
 # Or use via CLI
-# uv run neurips-abstracts download --plugin myworkshop --year 2025 --db-path workshop.db
+# uv run neurips-abstracts download --plugin myworkshop --year 2025 --db-path data/workshop.db
 ```
 
 #### Flexible Author Format

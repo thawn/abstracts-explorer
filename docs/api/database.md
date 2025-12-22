@@ -29,7 +29,7 @@ The `NeurIPSDatabase` class handles all database operations including:
 from neurips_abstracts.database import NeurIPSDatabase
 
 # Initialize database
-db = NeurIPSDatabase("neurips_2025.db")
+db = NeurIPSDatabase("data/neurips_2025.db")
 
 # Add a paper
 paper_id = db.add_paper({

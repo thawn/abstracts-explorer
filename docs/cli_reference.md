@@ -34,13 +34,13 @@ neurips-abstracts download [OPTIONS]
 
 ```bash
 # Download 2025 papers
-uv run neurips-abstracts download --year 2025 --db-path neurips_2025.db
+uv run neurips-abstracts download --year 2025 --db-path data/neurips_2025.db
 
 # Force re-download
-uv run neurips-abstracts download --year 2025 --db-path neurips_2025.db --force
+uv run neurips-abstracts download --year 2025 --db-path data/neurips_2025.db --force
 
 # Disable caching
-uv run neurips-abstracts download --year 2025 --db-path neurips_2025.db --no-cache
+uv run neurips-abstracts download --year 2025 --db-path data/neurips_2025.db --no-cache
 ```
 
 ### create-embeddings
@@ -65,16 +65,16 @@ neurips-abstracts create-embeddings [OPTIONS]
 
 ```bash
 # Create embeddings with defaults
-uv run neurips-abstracts create-embeddings --db-path neurips_2025.db
+uv run neurips-abstracts create-embeddings --db-path data/neurips_2025.db
 
 # Use custom paths
 uv run neurips-abstracts create-embeddings \
-    --db-path neurips_2025.db \
+    --db-path data/neurips_2025.db \
     --embedding-db-path custom_embeddings \
     --collection-name my_papers
 
 # Force recreation
-uv run neurips-abstracts create-embeddings --db-path neurips_2025.db --force
+uv run neurips-abstracts create-embeddings --db-path data/neurips_2025.db --force
 ```
 
 ### search
@@ -104,19 +104,19 @@ neurips-abstracts search QUERY [OPTIONS]
 
 ```bash
 # Basic search
-uv run neurips-abstracts search "transformer" --db-path neurips_2025.db
+uv run neurips-abstracts search "transformer" --db-path data/neurips_2025.db
 
 # Limit results
-uv run neurips-abstracts search "deep learning" --db-path neurips_2025.db --limit 20
+uv run neurips-abstracts search "deep learning" --db-path data/neurips_2025.db --limit 20
 
 # Filter by year
-uv run neurips-abstracts search "neural network" --db-path neurips_2025.db --year 2025
+uv run neurips-abstracts search "neural network" --db-path data/neurips_2025.db --year 2025
 
 # Semantic search using embeddings
-uv run neurips-abstracts search "attention mechanism" --db-path neurips_2025.db --use-embeddings
+uv run neurips-abstracts search "attention mechanism" --db-path data/neurips_2025.db --use-embeddings
 
 # Search only titles
-uv run neurips-abstracts search "BERT" --db-path neurips_2025.db --title-only
+uv run neurips-abstracts search "BERT" --db-path data/neurips_2025.db --title-only
 ```
 
 ### chat
@@ -151,14 +151,14 @@ While in the chat session:
 
 ```bash
 # Start chat with defaults
-uv run neurips-abstracts chat --db-path neurips_2025.db
+uv run neurips-abstracts chat --db-path data/neurips_2025.db
 
 # Use custom model
-uv run neurips-abstracts chat --db-path neurips_2025.db --model llama-3.2-3b-instruct
+uv run neurips-abstracts chat --db-path data/neurips_2025.db --model llama-3.2-3b-instruct
 
 # Adjust response parameters
 uv run neurips-abstracts chat \
-    --db-path neurips_2025.db \
+    --db-path data/neurips_2025.db \
     --temperature 0.9 \
     --max-tokens 2000 \
     --n-papers 10
@@ -183,10 +183,10 @@ neurips-abstracts info [OPTIONS]
 
 ```bash
 # Basic info
-uv run neurips-abstracts info --db-path neurips_2025.db
+uv run neurips-abstracts info --db-path data/neurips_2025.db
 
 # Include embedding info
-uv run neurips-abstracts info --db-path neurips_2025.db --show-embeddings
+uv run neurips-abstracts info --db-path data/neurips_2025.db --show-embeddings
 ```
 
 ## Environment Variables

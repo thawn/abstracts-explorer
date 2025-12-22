@@ -184,7 +184,7 @@ neurips-abstracts download --plugin myplugin --year 2025 --db-path output.db
 neurips-abstracts download \
     --plugin ml4ps \
     --year 2025 \
-    --db-path ml4ps.db \
+    --db-path data/ml4ps_2025.db \
     --fetch-abstracts \
     --max-workers 10
 ```
