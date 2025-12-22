@@ -9,7 +9,7 @@ The framework consists of:
 - Base classes for plugin implementation (DownloaderPlugin, LightweightDownloaderPlugin)
 - Schema conversion utilities (convert_lightweight_to_neurips_schema)
 - Plugin registry for managing plugins (PluginRegistry)
-- Pydantic models for data validation (LightweightPaper, PaperModel, etc.)
+- Pydantic models for data validation (LightweightPaper)
 """
 
 from abc import ABC, abstractmethod
@@ -110,6 +110,8 @@ class LightweightDownloaderPlugin(DownloaderPlugin):
         - abstract (str): Paper abstract
         - session (str): Session/workshop/track name
         - poster_position (str): Poster position identifier
+        - year (int): Conference year (e.g., 2025)
+        - conference (str): Conference name (e.g., "NeurIPS", "ICLR")
 
     Optional fields per paper:
         - paper_pdf_url (str): URL to paper PDF
@@ -229,13 +231,13 @@ def convert_lightweight_to_neurips_schema(
                 elif isinstance(author, dict):
                     # Author dict - preserve original ID if present, use hash-based ID
                     fullname = author.get("fullname", author.get("name", "Unknown"))
-                    
+
                     # Store original ID if present
                     original_id = author.get("id") if "id" in author else None
-                    
+
                     # Always generate hash-based ID for consistency
                     author_id = abs(hash(fullname.lower())) % (10**9)
-                    
+
                     authors_list.append(
                         {
                             "id": author_id,
@@ -351,6 +353,161 @@ def convert_lightweight_to_neurips_schema(
         results.append(neurips_paper)
 
     return {"count": len(results), "next": None, "previous": None, "results": results}
+
+
+def convert_neurips_to_lightweight_schema(
+    papers: List[Dict[str, Any]], preserve_ids: bool = True
+) -> List[Dict[str, Any]]:
+    """
+    Convert full NeurIPS schema to lightweight paper format.
+
+    This function extracts only the fields needed for the lightweight schema
+    from papers in the full NeurIPS format, making it easier to work with
+    simplified data structures.
+
+    Parameters
+    ----------
+    papers : list
+        List of papers in full NeurIPS format with fields like:
+        - id (int)
+        - title or name (str) - will use 'title', fallback to 'name'
+        - authors (list of dict with 'fullname' or list of str)
+        - abstract (str)
+        - session (str)
+        - poster_position (str)
+        - paper_pdf_url (str, optional)
+        - poster_image_url (str, optional)
+        - url (str, optional)
+        - room_name (str, optional)
+        - keywords (list or str, optional)
+        - starttime (str, optional)
+        - endtime (str, optional)
+        - award or decision (str, optional)
+        - year (int, optional)
+        - conference (str, optional)
+    preserve_ids : bool, optional
+        If True, preserve the original paper ID (default: True)
+
+    Returns
+    -------
+    list of dict
+        Papers in lightweight format with only essential fields.
+        Authors are returned as lists of strings.
+
+    Examples
+    --------
+    >>> neurips_papers = [
+    ...     {
+    ...         'id': 123,
+    ...         'title': 'Deep Learning',
+    ...         'authors': [
+    ...             {'id': 1, 'fullname': 'John Doe', 'institution': 'MIT'},
+    ...             {'id': 2, 'fullname': 'Jane Smith', 'institution': 'Stanford'}
+    ...         ],
+    ...         'abstract': 'A paper about deep learning',
+    ...         'session': 'Session A',
+    ...         'poster_position': 'A-42',
+    ...         'paper_pdf_url': 'https://example.com/paper.pdf',
+    ...         'year': 2025,
+    ...         'conference': 'NeurIPS'
+    ...     }
+    ... ]
+    >>> lightweight = convert_neurips_to_lightweight_schema(neurips_papers)
+    >>> lightweight[0]['authors']
+    ['John Doe', 'Jane Smith']
+
+    Notes
+    -----
+    - Author objects are converted to lists of name strings
+    - Extra NeurIPS-specific fields are dropped
+    - 'name' field is converted to 'title' if needed
+    - Keywords are converted from string to list if needed
+    """
+    lightweight_papers = []
+
+    for paper in papers:
+        # Extract title (handle both 'title' and legacy 'name')
+        title = paper.get("title") or paper.get("name", "")
+        if not title:
+            continue  # Skip papers without title
+
+        # Extract and convert authors to list
+        authors_data = paper.get("authors", [])
+        authors = []
+
+        if isinstance(authors_data, list):
+            for author in authors_data:
+                if isinstance(author, dict):
+                    # Extract fullname from dict
+                    name = author.get("fullname") or author.get("name", "")
+                    if name:
+                        authors.append(name)
+                elif isinstance(author, str):
+                    # Already a string
+                    authors.append(author)
+        elif isinstance(authors_data, str):
+            # If authors is a comma or semicolon-separated string, split it
+            if ";" in authors_data:
+                authors = [a.strip() for a in authors_data.split(";") if a.strip()]
+            else:
+                authors = [a.strip() for a in authors_data.split(",") if a.strip()]
+
+        # Build lightweight paper
+        lightweight_paper = {
+            "title": title,
+            "authors": authors,
+            "abstract": paper.get("abstract", ""),
+            "session": paper.get("session", ""),
+            "poster_position": paper.get("poster_position", ""),
+        }
+
+        # Add optional fields if present
+        if preserve_ids and "id" in paper:
+            lightweight_paper["id"] = paper["id"]
+
+        if paper.get("paper_pdf_url"):
+            lightweight_paper["paper_pdf_url"] = paper["paper_pdf_url"]
+
+        if paper.get("poster_image_url"):
+            lightweight_paper["poster_image_url"] = paper["poster_image_url"]
+
+        if paper.get("url"):
+            lightweight_paper["url"] = paper["url"]
+
+        if paper.get("room_name"):
+            lightweight_paper["room_name"] = paper["room_name"]
+
+        # Handle keywords (can be list or string in NeurIPS schema)
+        keywords = paper.get("keywords")
+        if keywords:
+            if isinstance(keywords, str):
+                # Convert string to list
+                lightweight_paper["keywords"] = [k.strip() for k in keywords.split(",") if k.strip()]
+            elif isinstance(keywords, list):
+                lightweight_paper["keywords"] = keywords
+
+        if paper.get("starttime"):
+            lightweight_paper["starttime"] = paper["starttime"]
+
+        if paper.get("endtime"):
+            lightweight_paper["endtime"] = paper["endtime"]
+
+        # Use award if present, otherwise fall back to decision
+        award = paper.get("award") or (
+            paper.get("decision") if "award" in paper.get("decision", "").lower() else None
+        )
+        if award:
+            lightweight_paper["award"] = award
+
+        if paper.get("year"):
+            lightweight_paper["year"] = paper["year"]
+
+        if paper.get("conference"):
+            lightweight_paper["conference"] = paper["conference"]
+
+        lightweight_papers.append(lightweight_paper)
+
+    return lightweight_papers
 
 
 """
@@ -504,38 +661,16 @@ def list_plugin_names() -> List[str]:
 Plugin Data Models
 ==================
 
-Pydantic models for validating plugin data in both lightweight and full schema formats.
+Pydantic models for validating plugin data in lightweight schema format.
 """
 
-from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, field_validator
 
 
 # ============================================================================
 # Lightweight Schema Models (for LightweightDownloaderPlugin)
 # ============================================================================
-
-
-class LightweightAuthor(BaseModel):
-    """
-    Lightweight author model for plugins.
-
-    Can be a simple string (author name) or a dict with additional fields.
-    """
-
-    name: str
-    affiliation: Optional[str] = None
-    email: Optional[str] = None
-
-    model_config = ConfigDict(extra="allow")
-
-    @field_validator("name")
-    @classmethod
-    def validate_name(cls, v: str) -> str:
-        """Ensure name is not empty."""
-        if not v or not v.strip():
-            raise ValueError("Author name cannot be empty")
-        return v.strip()
 
 
 class LightweightPaper(BaseModel):
@@ -550,13 +685,17 @@ class LightweightPaper(BaseModel):
     title : str
         Paper title
     authors : list
-        List of author names (strings) or LightweightAuthor objects
+        List of author names (strings)
     abstract : str
         Paper abstract
     session : str
         Session/workshop/track name
     poster_position : str
         Poster position identifier
+    year : int
+        Conference year (e.g., 2025)
+    conference : str
+        Conference name (e.g., "NeurIPS", "ML4PS")
 
     Optional Fields
     ---------------
@@ -578,18 +717,16 @@ class LightweightPaper(BaseModel):
         End time
     award : str
         Award name (e.g., "Best Paper Award")
-    year : int
-        Conference year (e.g., 2025)
-    conference : str
-        Conference name (e.g., "NeurIPS", "ML4PS")
     """
 
     # Required fields
     title: str
-    authors: List[Union[str, Dict[str, Any]]]
+    authors: List[str]
     abstract: str
     session: str
     poster_position: str
+    year: int
+    conference: str
 
     # Optional fields
     id: Optional[int] = None
@@ -601,10 +738,6 @@ class LightweightPaper(BaseModel):
     starttime: Optional[str] = None
     endtime: Optional[str] = None
     award: Optional[str] = None
-    year: Optional[int] = None
-    conference: Optional[str] = None
-
-    model_config = ConfigDict(extra="allow")  # Allow extra fields
 
     @field_validator("title")
     @classmethod
@@ -616,10 +749,16 @@ class LightweightPaper(BaseModel):
 
     @field_validator("authors")
     @classmethod
-    def validate_authors(cls, v: List[Union[str, Dict[str, Any]]]) -> List[Union[str, Dict[str, Any]]]:
-        """Ensure authors list is not empty."""
+    def validate_authors(cls, v: List[str]) -> List[str]:
+        """Ensure authors list is not empty and properly formatted."""
         if not v or len(v) == 0:
             raise ValueError("Authors list cannot be empty")
+        for author in v:
+            if not author.strip():
+                raise ValueError("Author names cannot be empty")
+            # no semicolons allowed in author names
+            if ";" in author:
+                raise ValueError("Author names cannot contain semicolons")
         return v
 
     @field_validator("session")
@@ -630,249 +769,71 @@ class LightweightPaper(BaseModel):
             raise ValueError("Session cannot be empty")
         return v.strip()
 
-
-# ============================================================================
-# Full Schema Models (for DownloaderPlugin and database)
-# ============================================================================
-
-
-class EventMediaModel(BaseModel):
-    """
-    Pydantic model for event media item validation.
-
-    Attributes
-    ----------
-    id : int, optional
-        Media item identifier.
-    type : str, optional
-        Type of media (e.g., "Poster", "URL", "Image").
-    name : str, optional
-        Name/description of the media item.
-    file : str, optional
-        File path for the media (e.g., "/media/PosterPDFs/...").
-    url : str, optional
-        Direct URL to the media.
-    uri : str, optional
-        URI/link (e.g., OpenReview link).
-    modified : str, optional
-        Modification timestamp.
-    display_section : int, optional
-        Display section number.
-    visible : bool, optional
-        Visibility flag.
-    sortkey : int, optional
-        Sort key for ordering.
-    is_live_content : bool, optional
-        Flag indicating if content is live.
-    detailed_kind : str, optional
-        Detailed kind/subtype (e.g., "thumb" for thumbnails).
-    generated_from : int, optional
-        ID of the source media this was generated from.
-    resourcetype : str, optional
-        Resource type identifier (e.g., "UriEventmedia", "EventmediaImageFile").
-    """
-
-    id: Optional[int] = None
-    type: Optional[str] = ""
-    name: Optional[str] = ""
-    file: Optional[str] = None
-    uri: Optional[str] = None
-    modified: Optional[str] = None
-    display_section: Optional[int] = None
-    visible: Optional[bool] = None
-    sortkey: Optional[int] = None
-    is_live_content: Optional[bool] = None
-    detailed_kind: Optional[str] = None
-    generated_from: Optional[int] = None
-    resourcetype: Optional[str] = None
-
-    model_config = ConfigDict(extra="allow")  # Allow extra fields not in the model
-
-
-class AuthorModel(BaseModel):
-    """
-    Pydantic model for author data validation.
-
-    Attributes
-    ----------
-    id : int
-        Unique author identifier.
-    fullname : str
-        Full name of the author.
-    url : str, optional
-        URL to author profile.
-    institution : str, optional
-        Author's institution.
-    """
-
-    id: int
-    fullname: str
-    url: Optional[str] = ""
-    institution: Optional[str] = ""
-
-    @field_validator("fullname")
+    @field_validator("conference")
     @classmethod
-    def validate_fullname(cls, v: str) -> str:
-        """Ensure fullname is not empty."""
+    def validate_conference(cls, v: str) -> str:
+        """Ensure conference is not empty."""
         if not v or not v.strip():
-            raise ValueError("Author fullname cannot be empty")
+            raise ValueError("Conference cannot be empty")
         return v.strip()
 
-
-class PaperModel(BaseModel):
-    """
-    Pydantic model for paper data validation (full NeurIPS schema).
-
-    Attributes
-    ----------
-    id : int
-        Unique paper identifier.
-    name : str
-        Paper title.
-    authors : list or str, optional
-        List of author objects or comma-separated string of author IDs.
-    abstract : str, optional
-        Paper abstract.
-    uid : str, optional
-        Unique identifier string.
-    topic : str, optional
-        Paper topic/category.
-    keywords : list or str, optional
-        List of keywords or comma-separated string.
-    decision : str, optional
-        Acceptance decision (e.g., "Accept (poster)").
-    session : str, optional
-        Conference session.
-    eventtype : str, optional
-        Type of event (e.g., "Poster", "Oral").
-    event_type : str, optional
-        Alternative event type field.
-    room_name : str, optional
-        Room location.
-    virtualsite_url : str, optional
-        Virtual site URL.
-    url : str, optional
-        General URL.
-    sourceid : int, optional
-        Source identifier.
-    sourceurl : str, optional
-        Source URL.
-    starttime : str, optional
-        Event start time.
-    endtime : str, optional
-        Event end time.
-    starttime2 : str, optional
-        Alternative start time.
-    endtime2 : str, optional
-        Alternative end time.
-    diversity_event : str, optional
-        Diversity event indicator.
-    paper_url : str, optional
-        Paper URL.
-    paper_pdf_url : str, optional
-        PDF URL.
-    children_url : str, optional
-        Children URL.
-    children : list, optional
-        Child events.
-    children_ids : list, optional
-        Child event IDs.
-    parent1 : str, optional
-        First parent.
-    parent2 : str, optional
-        Second parent.
-    parent2_id : str, optional
-        Second parent ID.
-    eventmedia : list, optional
-        Event media items.
-    show_in_schedule_overview : bool, optional
-        Schedule visibility flag.
-    visible : bool, optional
-        General visibility flag.
-    poster_position : str, optional
-        Poster position/number.
-    schedule_html : str, optional
-        Schedule HTML content.
-    latitude : float, optional
-        Location latitude.
-    longitude : float, optional
-        Location longitude.
-    related_events : list, optional
-        Related events.
-    related_events_ids : list, optional
-        Related event IDs.
-    year : int, optional
-        Conference year (e.g., 2025).
-    conference : str, optional
-        Conference name (e.g., "NeurIPS", "ML4PS").
-    """
-
-    id: int
-    name: str
-    authors: Optional[Union[List[Dict[str, Any]], str]] = ""
-    abstract: Optional[str] = ""
-    uid: Optional[str] = ""
-    topic: Optional[str] = ""
-    keywords: Optional[Union[List[str], str]] = ""
-    decision: Optional[str] = ""
-    session: Optional[str] = ""
-    eventtype: Optional[str] = ""
-    event_type: Optional[str] = ""
-    room_name: Optional[str] = ""
-    virtualsite_url: Optional[str] = ""
-    url: Optional[str] = None
-    sourceid: Optional[int] = None
-    sourceurl: Optional[str] = ""
-    starttime: Optional[str] = ""
-    endtime: Optional[str] = ""
-    starttime2: Optional[str] = None
-    endtime2: Optional[str] = None
-    diversity_event: Optional[Union[str, bool]] = None
-    paper_url: Optional[str] = ""
-    paper_pdf_url: Optional[str] = None
-    children_url: Optional[str] = None
-    children: Optional[List[Any]] = Field(default_factory=list)
-    children_ids: Optional[List[Any]] = Field(default_factory=list)
-    parent1: Optional[str] = ""
-    parent2: Optional[str] = None
-    parent2_id: Optional[str] = None
-    eventmedia: Optional[List[Any]] = Field(default_factory=list)
-    show_in_schedule_overview: Optional[bool] = False
-    visible: Optional[bool] = True
-    poster_position: Optional[str] = ""
-    schedule_html: Optional[str] = ""
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
-    related_events: Optional[List[Any]] = Field(default_factory=list)
-    related_events_ids: Optional[List[Any]] = Field(default_factory=list)
-    year: Optional[int] = None
-    conference: Optional[str] = ""
-
-    model_config = ConfigDict(extra="allow")  # Allow extra fields not in the model
-
-    @field_validator("name")
+    @field_validator("year")
     @classmethod
-    def validate_name(cls, v: str) -> str:
-        """Ensure paper name is not empty."""
-        if not v or not v.strip():
-            raise ValueError("Paper name cannot be empty")
-        return v.strip()
-
-    @field_validator("id")
-    @classmethod
-    def validate_id(cls, v: Any) -> int:
-        """Ensure ID is a valid integer."""
-        if v is None:
-            raise ValueError("Paper ID cannot be None")
-        try:
-            return int(v)
-        except (ValueError, TypeError):
-            raise ValueError(f"Paper ID must be an integer, got {type(v).__name__}")
+    def validate_year(cls, v: int) -> int:
+        """Ensure year is reasonable."""
+        if v < 1900 or v > 2100:
+            raise ValueError(f"Year {v} is not reasonable (must be between 1900 and 2100)")
+        return v
 
 
 # ============================================================================
 # Validation Helper Functions
 # ============================================================================
+
+
+def sanitize_author_names(authors: List[str]) -> List[str]:
+    """
+    Filter out semicolons from author names.
+
+    Semicolons are not allowed in author names because they would interfere
+    with the comma-separated format used to store authors in the database.
+    This function replaces semicolons with spaces and normalizes whitespace.
+
+    Parameters
+    ----------
+    authors : list of str
+        List of author names to sanitize
+
+    Returns
+    -------
+    list of str
+        List of author names with semicolons replaced by spaces
+
+    Examples
+    --------
+    >>> sanitize_author_names(["John Doe", "Jane; Smith", "Bob;Johnson"])
+    ['John Doe', 'Jane Smith', 'Bob Johnson']
+
+    >>> sanitize_author_names(["Alice"])
+    ['Alice']
+
+    >>> sanitize_author_names([])
+    []
+
+    >>> sanitize_author_names(["Multi;;Semicolons"])
+    ['Multi Semicolons']
+
+    Notes
+    -----
+    This function is useful when importing data from sources that may contain
+    semicolons in author names. The LightweightPaper model will reject author
+    names containing semicolons during validation.
+
+    Multiple consecutive spaces are normalized to a single space.
+    """
+    import re
+
+    return [re.sub(r"\s+", " ", author.replace(";", " ")).strip() for author in authors]
 
 
 def validate_lightweight_paper(paper: Dict[str, Any]) -> LightweightPaper:
@@ -897,28 +858,6 @@ def validate_lightweight_paper(paper: Dict[str, Any]) -> LightweightPaper:
     return LightweightPaper(**paper)
 
 
-def validate_paper(paper: Dict[str, Any]) -> PaperModel:
-    """
-    Validate a paper dict against the full NeurIPS schema.
-
-    Parameters
-    ----------
-    paper : dict
-        Paper data to validate
-
-    Returns
-    -------
-    PaperModel
-        Validated paper model
-
-    Raises
-    ------
-    ValidationError
-        If the paper data is invalid
-    """
-    return PaperModel(**paper)
-
-
 def validate_lightweight_papers(papers: List[Dict[str, Any]]) -> List[LightweightPaper]:
     """
     Validate a list of papers against the lightweight schema.
@@ -941,28 +880,6 @@ def validate_lightweight_papers(papers: List[Dict[str, Any]]) -> List[Lightweigh
     return [validate_lightweight_paper(paper) for paper in papers]
 
 
-def validate_papers(papers: List[Dict[str, Any]]) -> List[PaperModel]:
-    """
-    Validate a list of papers against the full NeurIPS schema.
-
-    Parameters
-    ----------
-    papers : list
-        List of paper dicts to validate
-
-    Returns
-    -------
-    list of PaperModel
-        List of validated paper models
-
-    Raises
-    ------
-    ValidationError
-        If any paper data is invalid
-    """
-    return [validate_paper(paper) for paper in papers]
-
-
 # Export public API
 __all__ = [
     # Plugin base classes
@@ -976,15 +893,11 @@ __all__ = [
     "list_plugin_names",
     # Conversion utilities
     "convert_lightweight_to_neurips_schema",
+    "convert_neurips_to_lightweight_schema",
     # Pydantic models
-    "LightweightAuthor",
     "LightweightPaper",
-    "EventMediaModel",
-    "AuthorModel",
-    "PaperModel",
     # Validation functions
+    "sanitize_author_names",
     "validate_lightweight_paper",
     "validate_lightweight_papers",
-    "validate_paper",
-    "validate_papers",
 ]

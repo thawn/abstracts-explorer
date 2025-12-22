@@ -363,12 +363,10 @@ def search():
             # Convert to list of dicts for JSON serialization
             papers = [dict(p) for p in papers]
 
-            # Get authors from authors table for each paper
+            # Parse authors from comma-separated string for each paper
             for paper in papers:
-                paper_id = paper.get("id")
-                if paper_id:
-                    authors = database.get_paper_authors(paper_id)
-                    paper["authors"] = [a["fullname"] for a in authors]
+                if "authors" in paper and paper["authors"]:
+                    paper["authors"] = [a.strip() for a in paper["authors"].split(",")]
                 else:
                     paper["authors"] = []
 

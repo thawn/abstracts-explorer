@@ -14,11 +14,7 @@ from typing import Any, Dict, List, Optional, Union
 from pydantic import ValidationError
 
 # Import Pydantic models from plugin framework
-from neurips_abstracts.plugin import (
-    EventMediaModel,
-    AuthorModel,
-    PaperModel,
-)
+from neurips_abstracts.plugin import LightweightPaper
 
 logger = logging.getLogger(__name__)
 
@@ -109,9 +105,7 @@ class DatabaseManager:
         Create database tables for NeurIPS data.
 
         Creates the following tables:
-        - papers: Main table for paper information with full NeurIPS schema
-        - authors: Authors table with their information
-        - paper_authors: Junction table linking papers to authors
+        - papers: Main table for paper information with lightweight ML4PS schema
 
         Raises
         ------
@@ -124,79 +118,27 @@ class DatabaseManager:
         try:
             cursor = self.connection.cursor()
 
-            # Create authors table
-            cursor.execute(
-                """
-                CREATE TABLE IF NOT EXISTS authors (
-                    id INTEGER PRIMARY KEY,
-                    fullname TEXT NOT NULL,
-                    url TEXT,
-                    institution TEXT,
-                    original_id TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """
-            )
-
-            # Create index on author fullname for searching
-            cursor.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_author_fullname 
-                ON authors(fullname)
-            """
-            )
-
-            # Create index on institution
-            cursor.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_author_institution 
-                ON authors(institution)
-            """
-            )
-
-            # Create papers table with full NeurIPS schema
+            # Create papers table with lightweight ML4PS schema
+            # Based on LightweightPaper model fields
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS papers (
-                    id INTEGER PRIMARY KEY,
-                    uid TEXT,
-                    name TEXT NOT NULL,
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    uid TEXT UNIQUE,
+                    original_id TEXT,
+                    title TEXT NOT NULL,
                     authors TEXT,
                     abstract TEXT,
-                    topic TEXT,
-                    keywords TEXT,
-                    decision TEXT,
                     session TEXT,
-                    eventtype TEXT,
-                    event_type TEXT,
-                    room_name TEXT,
-                    virtualsite_url TEXT,
+                    poster_position TEXT,
+                    paper_pdf_url TEXT,
+                    poster_image_url TEXT,
                     url TEXT,
-                    sourceid INTEGER,
-                    sourceurl TEXT,
+                    room_name TEXT,
+                    keywords TEXT,
                     starttime TEXT,
                     endtime TEXT,
-                    starttime2 TEXT,
-                    endtime2 TEXT,
-                    diversity_event TEXT,
-                    paper_url TEXT,
-                    paper_pdf_url TEXT,
-                    children_url TEXT,
-                    children TEXT,
-                    children_ids TEXT,
-                    parent1 TEXT,
-                    parent2 TEXT,
-                    parent2_id TEXT,
-                    eventmedia TEXT,
-                    show_in_schedule_overview INTEGER,
-                    visible INTEGER,
-                    poster_position TEXT,
-                    schedule_html TEXT,
-                    latitude REAL,
-                    longitude REAL,
-                    related_events TEXT,
-                    related_events_ids TEXT,
-                    raw_data TEXT,
+                    award TEXT,
                     year INTEGER,
                     conference TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -204,7 +146,7 @@ class DatabaseManager:
             """
             )
 
-            # Create indices for common queries
+            # Create index on uid
             cursor.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_uid 
@@ -212,31 +154,19 @@ class DatabaseManager:
             """
             )
 
+            # Create index on original_id
             cursor.execute(
                 """
-                CREATE INDEX IF NOT EXISTS idx_id 
-                ON papers(id)
+                CREATE INDEX IF NOT EXISTS idx_original_id 
+                ON papers(original_id)
             """
             )
 
+            # Create index on title for searching
             cursor.execute(
                 """
-                CREATE INDEX IF NOT EXISTS idx_decision 
-                ON papers(decision)
-            """
-            )
-
-            cursor.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_topic 
-                ON papers(topic)
-            """
-            )
-
-            cursor.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_eventtype 
-                ON papers(eventtype)
+                CREATE INDEX IF NOT EXISTS idx_title 
+                ON papers(title)
             """
             )
 
@@ -258,35 +188,6 @@ class DatabaseManager:
                 """
                 CREATE INDEX IF NOT EXISTS idx_conference 
                 ON papers(conference)
-            """
-            )
-
-            # Create paper_authors junction table
-            cursor.execute(
-                """
-                CREATE TABLE IF NOT EXISTS paper_authors (
-                    paper_id INTEGER NOT NULL,
-                    author_id INTEGER NOT NULL,
-                    author_order INTEGER NOT NULL,
-                    PRIMARY KEY (paper_id, author_id),
-                    FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE CASCADE,
-                    FOREIGN KEY (author_id) REFERENCES authors(id) ON DELETE CASCADE
-                )
-            """
-            )
-
-            # Create indices for junction table
-            cursor.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_paper_authors_paper 
-                ON paper_authors(paper_id)
-            """
-            )
-
-            cursor.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_paper_authors_author 
-                ON paper_authors(author_id)
             """
             )
 
@@ -352,270 +253,94 @@ class DatabaseManager:
 
             for idx, record in enumerate(records):
                 try:
-                    # Validate record using Pydantic model
-                    paper = PaperModel(**record)
+                    # Validate record using Pydantic model (lightweight schema)
+                    paper = LightweightPaper(**record)
                 except ValidationError as e:
                     error_msg = f"Validation error for record {idx}: {str(e)}"
                     logger.warning(error_msg)
                     validation_errors.append(error_msg)
                     continue
 
-                # Extract validated fields
-                paper_id = paper.id
-                uid = paper.uid
-                name = paper.name
+                # Extract validated fields (lightweight schema only)
+                paper_id = paper.id if paper.id else None
+                original_id = record.get("uid", "")  # Get original UID from record, not from paper object
+                title = paper.title
                 abstract = paper.abstract
 
-                # Handle authors (could be list of dicts or string)
+                # Handle authors - store as semicolon-separated names
                 authors_data = paper.authors
-                authors_str = ""  # Store comma-separated author IDs
-                author_objects = []  # Store author objects for separate table
+                authors_str = ""
 
                 if isinstance(authors_data, list):
-                    # If list of dicts with author details, process them
-                    if authors_data and isinstance(authors_data[0], dict):
-                        author_ids = []
-                        for author_dict in authors_data:
-                            try:
-                                # Validate author using Pydantic model
-                                author = AuthorModel(**author_dict)
-                                
-                                # Store original ID from source data
-                                original_id = str(author.id) if author.id else None
-                                
-                                # Generate hash-based ID for consistency across conferences
-                                # This prevents ID collisions between different conferences
-                                hash_id = abs(hash(author.fullname.lower())) % (10**9)
-                                
-                                author_ids.append(str(hash_id))
-                                
-                                # Check if original_id was explicitly provided (for lightweight API)
-                                if 'original_id' in author_dict and author_dict['original_id'] is not None:
-                                    original_id = str(author_dict['original_id'])
-                                
-                                author_objects.append(
-                                    {
-                                        "id": hash_id,
-                                        "fullname": author.fullname,
-                                        "url": author.url,
-                                        "institution": author.institution,
-                                        "original_id": original_id,
-                                    }
-                                )
-                            except ValidationError as e:
-                                logger.warning(f"Author validation error in paper {paper_id}: {str(e)}")
-                                # Skip invalid author but continue with paper
-                                continue
-                        # Store comma-separated author IDs
-                        authors_str = ", ".join(author_ids)
-                    else:
-                        # Simple string list (keep as is for backward compatibility)
-                        authors_str = ", ".join(str(a) for a in authors_data)
+                    author_names = []
+                    for author_item in authors_data:
+                        if isinstance(author_item, dict):
+                            # Extract fullname from dict
+                            author_names.append(author_item.get("fullname", author_item.get("name", "")))
+                        else:
+                            # Simple string (author name)
+                            author_names.append(str(author_item))
+                    authors_str = "; ".join(author_names)
                 else:
                     authors_str = str(authors_data) if authors_data else ""
 
-                topic = paper.topic
+                # Generate UID as hash from title + original_id
+                import hashlib
+
+                uid_source = f"{title}:{original_id if original_id else ''}"
+                uid = hashlib.sha256(uid_source.encode("utf-8")).hexdigest()[:16]
+
+                # Extract lightweight schema fields
+                session = paper.session
+                poster_position = paper.poster_position
+                paper_pdf_url = paper.paper_pdf_url
+                poster_image_url = paper.poster_image_url
+                url = paper.url
+                room_name = paper.room_name
+                starttime = paper.starttime
+                endtime = paper.endtime
+                award = paper.award
+                year = paper.year
+                conference = paper.conference
 
                 # Handle keywords (could be list or string)
                 keywords = paper.keywords
                 if isinstance(keywords, list):
                     keywords = ", ".join(str(k) for k in keywords)
-
-                decision = paper.decision
-                session = paper.session
-                eventtype = paper.eventtype
-                event_type = paper.event_type
-                room_name = paper.room_name
-                virtualsite_url = paper.virtualsite_url
-                url = paper.url
-                sourceid = paper.sourceid
-                sourceurl = paper.sourceurl
-                starttime = paper.starttime
-                endtime = paper.endtime
-                starttime2 = paper.starttime2
-                endtime2 = paper.endtime2
-                # Convert boolean diversity_event to string for database storage
-                diversity_event = (
-                    str(paper.diversity_event) if isinstance(paper.diversity_event, bool) else paper.diversity_event
-                )
-                paper_url = paper.paper_url
-                paper_pdf_url = paper.paper_pdf_url
-                children_url = paper.children_url
-
-                # Handle array fields
-                children = paper.children
-                if isinstance(children, list):
-                    children = json.dumps(children)
-
-                children_ids = paper.children_ids
-                if isinstance(children_ids, list):
-                    children_ids = json.dumps(children_ids)
-
-                parent1 = paper.parent1
-                parent2 = paper.parent2
-                parent2_id = paper.parent2_id
-
-                # Validate and process eventmedia
-                eventmedia_data = paper.eventmedia
-                if isinstance(eventmedia_data, list):
-                    validated_eventmedia = []
-                    for media_item in eventmedia_data:
-                        if isinstance(media_item, dict):
-                            try:
-                                # Validate each media item
-                                validated_media = EventMediaModel(**media_item)
-                                validated_eventmedia.append(validated_media.model_dump(exclude_none=True))
-                            except ValidationError as e:
-                                logger.warning(f"EventMedia validation error in paper {paper_id}: {str(e)}")
-                                # Skip invalid media item but continue
-                                continue
-                        else:
-                            # Keep non-dict items as-is for backward compatibility
-                            validated_eventmedia.append(media_item)
-                    eventmedia = json.dumps(validated_eventmedia)
-                elif eventmedia_data is None:
-                    eventmedia = None
-                else:
-                    # Handle string or other types
-                    eventmedia = json.dumps(eventmedia_data) if eventmedia_data else None
-
-                show_in_schedule_overview = 1 if paper.show_in_schedule_overview else 0
-                visible = 1 if paper.visible else 0
-                poster_position = paper.poster_position
-                schedule_html = paper.schedule_html
-                latitude = paper.latitude
-                longitude = paper.longitude
-
-                related_events = paper.related_events
-                if isinstance(related_events, list):
-                    related_events = json.dumps(related_events)
-
-                related_events_ids = paper.related_events_ids
-                if isinstance(related_events_ids, list):
-                    related_events_ids = json.dumps(related_events_ids)
-
-                # Extract year and conference fields
-                year = paper.year
-                conference = paper.conference
-
-                # Store raw JSON for full data preservation
-                raw_data = json.dumps(record, ensure_ascii=False)
+                elif keywords is None:
+                    keywords = ""
 
                 try:
-                    # Insert paper
+                    # Insert paper with lightweight schema
                     cursor.execute(
                         """
                         INSERT OR REPLACE INTO papers 
-                        (id, uid, name, authors, abstract, topic, keywords, decision, session, 
-                         eventtype, event_type, room_name, virtualsite_url, url, sourceid, sourceurl,
-                         starttime, endtime, starttime2, endtime2, diversity_event, paper_url, 
-                         paper_pdf_url, children_url, children, children_ids, parent1, parent2, 
-                         parent2_id, eventmedia, show_in_schedule_overview, visible, poster_position, 
-                         schedule_html, latitude, longitude, related_events, related_events_ids, 
-                         year, conference, raw_data)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (id, uid, original_id, title, authors, abstract, session, poster_position,
+                         paper_pdf_url, poster_image_url, url, room_name, keywords, starttime, endtime,
+                         award, year, conference)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                         (
                             paper_id,
                             uid,
-                            name,
+                            original_id,
+                            title,
                             authors_str,
                             abstract,
-                            topic,
-                            keywords,
-                            decision,
                             session,
-                            eventtype,
-                            event_type,
-                            room_name,
-                            virtualsite_url,
+                            poster_position,
+                            paper_pdf_url,
+                            poster_image_url,
                             url,
-                            sourceid,
-                            sourceurl,
+                            room_name,
+                            keywords,
                             starttime,
                             endtime,
-                            starttime2,
-                            endtime2,
-                            diversity_event,
-                            paper_url,
-                            paper_pdf_url,
-                            children_url,
-                            children,
-                            children_ids,
-                            parent1,
-                            parent2,
-                            parent2_id,
-                            eventmedia,
-                            show_in_schedule_overview,
-                            visible,
-                            poster_position,
-                            schedule_html,
-                            latitude,
-                            longitude,
-                            related_events,
-                            related_events_ids,
+                            award,
                             year,
                             conference,
-                            raw_data,
                         ),
                     )
-
-                    # Insert authors into authors table
-                    # Check if author exists with same ID but different name (hash collision)
-                    for author_data in author_objects:
-                        # Check if this author ID exists with a different name
-                        cursor.execute(
-                            """
-                            SELECT fullname FROM authors WHERE id = ?
-                            """,
-                            (author_data["id"],),
-                        )
-                        existing = cursor.fetchone()
-                        
-                        if existing and existing[0] != author_data["fullname"]:
-                            # Hash collision - generate new ID by adding offset
-                            logger.warning(
-                                f"Author ID collision detected: ID {author_data['id']} "
-                                f"exists as '{existing[0]}' but trying to insert '{author_data['fullname']}'. "
-                                f"Generating new ID."
-                            )
-                            # Add an offset to avoid collision
-                            original_id = author_data["id"]
-                            offset = 1
-                            while True:
-                                new_id = original_id + offset
-                                cursor.execute("SELECT id FROM authors WHERE id = ?", (new_id,))
-                                if not cursor.fetchone():
-                                    author_data["id"] = new_id
-                                    logger.info(f"Using new ID {new_id} for author '{author_data['fullname']}'")
-                                    break
-                                offset += 1
-                                if offset > 1000:  # Safety limit
-                                    raise DatabaseError(f"Could not find available author ID after {offset} attempts")
-                        
-                        cursor.execute(
-                            """
-                            INSERT OR IGNORE INTO authors (id, fullname, url, institution, original_id)
-                            VALUES (?, ?, ?, ?, ?)
-                            """,
-                            (
-                                author_data["id"],
-                                author_data["fullname"],
-                                author_data["url"],
-                                author_data["institution"],
-                                author_data.get("original_id"),
-                            ),
-                        )
-
-                    # Insert paper-author relationships
-                    for idx, author_data in enumerate(author_objects, start=1):
-                        cursor.execute(
-                            """
-                            INSERT INTO paper_authors (paper_id, author_id, author_order)
-                            VALUES (?, ?, ?)
-                            """,
-                            (paper_id, author_data["id"], idx),
-                        )
 
                     inserted_count += 1
                 except sqlite3.IntegrityError:
@@ -695,11 +420,6 @@ class DatabaseManager:
     def search_papers(
         self,
         keyword: Optional[str] = None,
-        topic: Optional[str] = None,
-        topics: Optional[List[str]] = None,
-        decision: Optional[str] = None,
-        eventtype: Optional[str] = None,
-        eventtypes: Optional[List[str]] = None,
         session: Optional[str] = None,
         sessions: Optional[List[str]] = None,
         year: Optional[int] = None,
@@ -709,22 +429,12 @@ class DatabaseManager:
         limit: int = 100,
     ) -> List[sqlite3.Row]:
         """
-        Search for papers by various criteria.
+        Search for papers by various criteria (lightweight schema).
 
         Parameters
         ----------
         keyword : str, optional
-            Keyword to search in name, abstract, topic, or keywords fields.
-        topic : str, optional
-            Single topic to filter by (deprecated, use topics instead).
-        topics : list[str], optional
-            List of topics to filter by (matches ANY).
-        decision : str, optional
-            Decision type to filter by (e.g., "Accept (poster)", "Accept (oral)").
-        eventtype : str, optional
-            Single event type to filter by (deprecated, use eventtypes instead).
-        eventtypes : list[str], optional
-            List of event types to filter by (matches ANY).
+            Keyword to search in title, abstract, or keywords fields.
         session : str, optional
             Single session to filter by (deprecated, use sessions instead).
         sessions : list[str], optional
@@ -756,16 +466,10 @@ class DatabaseManager:
         >>> with db:
         ...     papers = db.search_papers(keyword="neural network", limit=10)
         >>> for paper in papers:
-        ...     print(paper['name'])
+        ...     print(paper['title'])
 
         >>> # Search with multiple sessions
         >>> papers = db.search_papers(sessions=["Session 1", "Session 2"])
-
-        >>> # Search with multiple topics and eventtypes
-        >>> papers = db.search_papers(
-        ...     topics=["Machine Learning", "Computer Vision"],
-        ...     eventtypes=["Poster", "Oral"]
-        ... )
 
         >>> # Search with years
         >>> papers = db.search_papers(years=[2024, 2025])
@@ -774,27 +478,9 @@ class DatabaseManager:
         parameters: List[Any] = []
 
         if keyword:
-            conditions.append("(name LIKE ? OR abstract LIKE ? OR topic LIKE ? OR keywords LIKE ?)")
+            conditions.append("(title LIKE ? OR abstract LIKE ? OR keywords LIKE ?)")
             search_term = f"%{keyword}%"
-            parameters.extend([search_term, search_term, search_term, search_term])
-
-        # Handle topics (prefer list form, fall back to single)
-        topic_list = topics if topics else ([topic] if topic else [])
-        if topic_list:
-            placeholders = ",".join("?" * len(topic_list))
-            conditions.append(f"topic IN ({placeholders})")
-            parameters.extend(topic_list)
-
-        if decision:
-            conditions.append("decision = ?")
-            parameters.append(decision)
-
-        # Handle eventtypes (prefer list form, fall back to single)
-        eventtype_list = eventtypes if eventtypes else ([eventtype] if eventtype else [])
-        if eventtype_list:
-            placeholders = ",".join("?" * len(eventtype_list))
-            conditions.append(f"eventtype IN ({placeholders})")
-            parameters.extend(eventtype_list)
+            parameters.extend([search_term, search_term, search_term])
 
         # Handle sessions (prefer list form, fall back to single)
         session_list = sessions if sessions else ([session] if session else [])
@@ -823,100 +509,25 @@ class DatabaseManager:
 
         return self.query(sql, tuple(parameters))
 
-    def get_paper_authors(self, paper_id: int) -> List[sqlite3.Row]:
-        """
-        Get all authors for a specific paper, ordered by author_order.
-
-        Parameters
-        ----------
-        paper_id : int
-            The paper ID to get authors for.
-
-        Returns
-        -------
-        list of sqlite3.Row
-            List of authors with fields: id, fullname, url, institution, author_order.
-
-        Raises
-        ------
-        DatabaseError
-            If query fails.
-
-        Examples
-        --------
-        >>> db = DatabaseManager("neurips.db")
-        >>> with db:
-        ...     authors = db.get_paper_authors(123456)
-        >>> for author in authors:
-        ...     print(f"{author['fullname']} - {author['institution']}")
-        """
-        sql = """
-            SELECT a.id, a.fullname, a.url, a.institution, pa.author_order
-            FROM authors a
-            JOIN paper_authors pa ON a.id = pa.author_id
-            WHERE pa.paper_id = ?
-            ORDER BY pa.author_order
-        """
-        return self.query(sql, (paper_id,))
-
-    def get_author_papers(self, author_id: int) -> List[sqlite3.Row]:
-        """
-        Get all papers by a specific author.
-
-        Parameters
-        ----------
-        author_id : int
-            The author ID to get papers for.
-
-        Returns
-        -------
-        list of sqlite3.Row
-            List of papers by this author.
-
-        Raises
-        ------
-        DatabaseError
-            If query fails.
-
-        Examples
-        --------
-        >>> db = DatabaseManager("neurips.db")
-        >>> with db:
-        ...     papers = db.get_author_papers(457880)
-        >>> for paper in papers:
-        ...     print(paper['name'])
-        """
-        sql = """
-            SELECT p.*
-            FROM papers p
-            JOIN paper_authors pa ON p.id = pa.paper_id
-            WHERE pa.author_id = ?
-            ORDER BY p.name
-        """
-        return self.query(sql, (author_id,))
-
-    def search_authors(
+    def search_authors_in_papers(
         self,
         name: Optional[str] = None,
-        institution: Optional[str] = None,
         limit: int = 100,
-    ) -> List[sqlite3.Row]:
+    ) -> List[Dict[str, Any]]:
         """
-        Search for authors by name or institution.
+        Search for authors by name within the papers' authors field.
 
         Parameters
         ----------
         name : str, optional
             Name to search for (partial match).
-        institution : str, optional
-            Institution to search for (partial match).
         limit : int, default=100
             Maximum number of results to return.
 
         Returns
         -------
-        list of sqlite3.Row
-            Matching authors with fields: id, fullname, url, institution.
+        list of dict
+            Unique authors found in papers with fields: name.
 
         Raises
         ------
@@ -927,53 +538,76 @@ class DatabaseManager:
         --------
         >>> db = DatabaseManager("neurips.db")
         >>> with db:
-        ...     authors = db.search_authors(name="Huang")
+        ...     authors = db.search_authors_in_papers(name="Huang")
         >>> for author in authors:
-        ...     print(f"{author['fullname']} - {author['institution']}")
-
-        >>> # Search by institution
-        >>> authors = db.search_authors(institution="Stanford")
+        ...     print(author['name'])
         """
-        conditions = []
-        parameters: List[Any] = []
+        if not name:
+            return []
 
-        if name:
-            conditions.append("fullname LIKE ?")
-            parameters.append(f"%{name}%")
+        try:
+            # Search for authors in the comma-separated authors field
+            sql = "SELECT DISTINCT authors FROM papers WHERE authors LIKE ? LIMIT ?"
+            parameters = [f"%{name}%", limit * 10]  # Get more papers to extract unique authors
 
-        if institution:
-            conditions.append("institution LIKE ?")
-            parameters.append(f"%{institution}%")
+            rows = self.query(sql, tuple(parameters))
 
-        where_clause = " AND ".join(conditions) if conditions else "1=1"
-        sql = f"SELECT * FROM authors WHERE {where_clause} LIMIT ?"
-        parameters.append(limit)
+            # Extract unique author names
+            author_names = set()
+            for row in rows:
+                if row["authors"]:
+                    # Split comma-separated authors
+                    for author in row["authors"].split(","):
+                        author = author.strip()
+                        if name.lower() in author.lower():
+                            author_names.add(author)
+                            if len(author_names) >= limit:
+                                break
+                if len(author_names) >= limit:
+                    break
 
-        return self.query(sql, tuple(parameters))
+            return [{"name": name} for name in sorted(author_names)[:limit]]
+        except sqlite3.Error as e:
+            raise DatabaseError(f"Author search failed: {str(e)}") from e
 
     def get_author_count(self) -> int:
         """
-        Get the total number of unique authors in the database.
+        Get the approximate number of unique authors in the database.
+
+        Note: This provides an estimate by counting unique author names
+        across all papers. The actual count may vary.
 
         Returns
         -------
         int
-            Number of unique authors.
+            Approximate number of unique authors.
 
         Raises
         ------
         DatabaseError
             If query fails.
         """
-        result = self.query("SELECT COUNT(*) as count FROM authors")
-        return result[0]["count"] if result else 0
+        try:
+            # Get all author fields
+            rows = self.query("SELECT authors FROM papers WHERE authors IS NOT NULL AND authors != ''")
+
+            # Extract unique author names
+            author_names = set()
+            for row in rows:
+                if row["authors"]:
+                    for author in row["authors"].split(","):
+                        author_names.add(author.strip())
+
+            return len(author_names)
+        except sqlite3.Error as e:
+            raise DatabaseError(f"Failed to count authors: {str(e)}") from e
 
     def get_filter_options(self, year: Optional[int] = None, conference: Optional[str] = None) -> dict:
         """
-        Get distinct values for filterable fields.
+        Get distinct values for filterable fields (lightweight schema).
 
-        Returns a dictionary with lists of distinct values for session, topic,
-        eventtype, year, and conference fields that can be used to populate filter dropdowns.
+        Returns a dictionary with lists of distinct values for session, year,
+        and conference fields that can be used to populate filter dropdowns.
         Optionally filters by year and/or conference.
 
         Parameters
@@ -986,7 +620,7 @@ class DatabaseManager:
         Returns
         -------
         dict
-            Dictionary with keys 'sessions', 'topics', 'eventtypes', 'years', 'conferences' containing
+            Dictionary with keys 'sessions', 'years', 'conferences' containing
             lists of distinct non-null values sorted alphabetically (or numerically for years).
 
         Raises
@@ -1028,20 +662,6 @@ class DatabaseManager:
             )
             sessions = [row["session"] for row in sessions_result]
 
-            # Get distinct topics
-            topics_result = self.query(
-                f"SELECT DISTINCT topic FROM papers WHERE {where_clause} AND topic IS NOT NULL AND topic != '' ORDER BY topic",
-                tuple(parameters) if parameters else (),
-            )
-            topics = [row["topic"] for row in topics_result]
-
-            # Get distinct eventtypes
-            eventtypes_result = self.query(
-                f"SELECT DISTINCT eventtype FROM papers WHERE {where_clause} AND eventtype IS NOT NULL AND eventtype != '' ORDER BY eventtype",
-                tuple(parameters) if parameters else (),
-            )
-            eventtypes = [row["eventtype"] for row in eventtypes_result]
-
             # Get distinct years (not filtered)
             years_result = self.query("SELECT DISTINCT year FROM papers WHERE year IS NOT NULL ORDER BY year DESC")
             years = [row["year"] for row in years_result]
@@ -1054,8 +674,6 @@ class DatabaseManager:
 
             return {
                 "sessions": sessions,
-                "topics": topics,
-                "eventtypes": eventtypes,
                 "years": years,
                 "conferences": conferences,
             }

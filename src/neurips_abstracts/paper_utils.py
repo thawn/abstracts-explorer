@@ -60,13 +60,11 @@ def get_paper_with_authors(database, paper_id: int) -> Dict[str, Any]:
 
         paper = dict(paper_rows[0])
 
-        # Get authors from authors table
-        authors_rows = database.get_paper_authors(paper_id)
-        paper["authors"] = [a["fullname"] for a in authors_rows]
-
-        # Add title alias for consistency (database uses 'name')
-        if "name" in paper and "title" not in paper:
-            paper["title"] = paper["name"]
+        # Parse authors from comma-separated string
+        if "authors" in paper and paper["authors"]:
+            paper["authors"] = [a.strip() for a in paper["authors"].split(",")]
+        else:
+            paper["authors"] = []
 
         return paper
 
@@ -218,9 +216,9 @@ def build_context_from_papers(papers: List[Dict[str, Any]]) -> str:
             raise PaperFormattingError(f"Paper {i} is not a dictionary.")
 
         # Validate required fields
-        title = paper.get("title") or paper.get("name")
+        title = paper.get("title")
         if not title:
-            raise PaperFormattingError(f"Paper {i} missing required 'title' or 'name' field.")
+            raise PaperFormattingError(f"Paper {i} missing required 'title' field.")
 
         authors = paper.get("authors")
         if not authors:

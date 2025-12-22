@@ -202,8 +202,8 @@ class TestICLRPlugin:
             # Should have made the request
             mock_get.assert_called_once()
 
-            # Should have the new data
-            assert data["results"][0]["name"] == "Fresh Paper"
+            # Should have the new data (converted to lightweight schema with 'title' field)
+            assert data["results"][0]["title"] == "Fresh Paper"
 
     @patch("neurips_abstracts.plugins.json_conference_downloader.requests.get")
     def test_download_request_exception(self, mock_get):
@@ -298,30 +298,22 @@ class TestICLRPluginDatabaseIntegration:
                 db.create_tables()
                 db.load_json_data(data)
 
-                # Verify paper was stored
-                papers = db.query("SELECT id, name, abstract, year, conference FROM papers")
+                # Verify paper was stored (lightweight schema uses 'title' not 'name')
+                papers = db.query("SELECT id, title, abstract, year, conference, authors FROM papers")
                 assert len(papers) == 1
 
                 paper = papers[0]
-                assert paper["name"] == "Test ICLR Paper"
+                assert paper["title"] == "Test ICLR Paper"
                 assert paper["abstract"] == "This is a test abstract for ICLR"
                 assert paper["year"] == 2025
                 assert paper["conference"] == "ICLR"
 
-                # Verify authors using the junction table
-                authors = db.query(
-                    """
-                    SELECT a.fullname 
-                    FROM authors a
-                    JOIN paper_authors pa ON a.id = pa.author_id
-                    WHERE pa.paper_id = ?
-                    ORDER BY pa.author_order
-                    """,
-                    (paper["id"],),
-                )
-                assert len(authors) == 2
-                assert authors[0]["fullname"] == "Alice Smith"
-                assert authors[1]["fullname"] == "Bob Jones"
+                # Verify authors (lightweight schema stores as semicolon-separated string)
+                authors_str = paper["authors"]
+                assert "Alice Smith" in authors_str
+                assert "Bob Jones" in authors_str
+                # Verify semicolon separator is used
+                assert ";" in authors_str
 
 
 class TestICLRPluginRegistration:

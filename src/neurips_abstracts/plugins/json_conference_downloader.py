@@ -12,7 +12,7 @@ import logging
 import json
 import requests
 
-from neurips_abstracts.plugin import DownloaderPlugin
+from neurips_abstracts.plugin import DownloaderPlugin, convert_neurips_to_lightweight_schema
 
 logger = logging.getLogger(__name__)
 
@@ -145,11 +145,17 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
         except json.JSONDecodeError as e:
             raise RuntimeError(f"Invalid JSON response from {url}: {str(e)}") from e
 
-        # Add year and conference fields to each paper
+        # Convert papers to lightweight schema
         if "results" in data and isinstance(data["results"], list):
+            # Add year and conference fields before conversion
             for paper in data["results"]:
                 paper["year"] = year
                 paper["conference"] = self.conference_name
+
+            # Convert to lightweight schema
+            data["results"] = convert_neurips_to_lightweight_schema(
+                data["results"], preserve_ids=False  # Let database generate IDs
+            )
 
         # Save to file if path provided
         if output_path:

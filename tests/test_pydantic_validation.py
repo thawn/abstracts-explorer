@@ -14,8 +14,11 @@ class TestPydanticValidation:
         data = [
             {
                 "id": "not-a-number",  # Invalid: should be integer
-                "name": "Test Paper",
+                "title": "Test Paper",
+                "authors": ["John Doe"],
                 "abstract": "Test abstract",
+                "session": "Test Session",
+                "poster_position": "A1",
             }
         ]
 
@@ -28,21 +31,27 @@ class TestPydanticValidation:
         data = [
             {
                 "id": 123456,
-                # Missing required 'name' field
+                # Missing required 'title' field
+                "authors": ["John Doe"],
                 "abstract": "Test abstract",
+                "session": "Test Session",
+                "poster_position": "A1",
             }
         ]
 
         count = connected_db.load_json_data(data)
         assert count == 0  # Record should be skipped due to validation error
 
-    def test_empty_paper_name(self, connected_db):
-        """Test that empty paper name is rejected."""
+    def test_empty_paper_title(self, connected_db):
+        """Test that empty paper title is rejected."""
         data = [
             {
                 "id": 123456,
-                "name": "",  # Invalid: name cannot be empty
+                "title": "",  # Invalid: title cannot be empty
+                "authors": ["John Doe"],
                 "abstract": "Test abstract",
+                "session": "Test Session",
+                "poster_position": "A1",
             }
         ]
 
@@ -54,48 +63,31 @@ class TestPydanticValidation:
         data = [
             {
                 "id": 123456,
-                "name": "Valid Paper",
+                "title": "Valid Paper",
+                "authors": ["", "Jane Smith"],  # First author empty - invalid
                 "abstract": "Test abstract",
-                "authors": [
-                    {
-                        "id": 999999,
-                        "fullname": "",  # Invalid: fullname cannot be empty
-                        "url": "http://test.com",
-                    }
-                ],
+                "session": "Test Session",
+                "poster_position": "A1",
             }
         ]
 
-        # Paper should be inserted but invalid author should be skipped
+        # Paper should be skipped due to invalid author
         count = connected_db.load_json_data(data)
-        assert count == 1  # Paper inserted despite invalid author
-
-        # Check that no authors were inserted
-        authors = connected_db.get_paper_authors(123456)
-        assert len(authors) == 0
+        assert count == 0  # Record skipped due to validation error
 
     def test_valid_data_passes_validation(self, connected_db):
         """Test that valid data passes validation."""
         data = [
             {
                 "id": 123456,
-                "name": "Valid Paper Title",
+                "title": "Valid Paper Title",
+                "authors": ["John Doe", "Jane Smith"],
                 "abstract": "This is a valid abstract",
-                "authors": [
-                    {
-                        "id": 999999,
-                        "fullname": "John Doe",
-                        "url": "http://test.com",
-                        "institution": "Test University",
-                    }
-                ],
-                "topic": "Machine Learning",
-                "keywords": ["deep learning", "neural networks"],
-                "decision": "Accept (poster)",
                 "session": "Test Session",
-                "eventtype": "Poster",
-                "event_type": "poster_template",
-                "diversity_event": False,  # Can be boolean
+                "poster_position": "A1",
+                "keywords": ["deep learning", "neural networks"],
+                "year": 2025,
+                "conference": "NeurIPS",
             }
         ]
 
@@ -105,20 +97,21 @@ class TestPydanticValidation:
         # Verify data was inserted correctly
         papers = connected_db.search_papers(keyword="Valid")
         assert len(papers) == 1
-        assert papers[0]["name"] == "Valid Paper Title"
+        assert papers[0]["title"] == "Valid Paper Title"
 
-        # Verify author was inserted
-        authors = connected_db.get_paper_authors(123456)
-        assert len(authors) == 1
-        assert authors[0]["fullname"] == "John Doe"
+        # Verify authors were stored as comma-separated string
+        assert papers[0]["authors"] == "John Doe, Jane Smith"
 
     def test_extra_fields_allowed(self, connected_db):
         """Test that extra fields not in model are allowed."""
         data = [
             {
                 "id": 123456,
-                "name": "Paper with Extra Fields",
+                "title": "Paper with Extra Fields",
+                "authors": ["John Doe"],
                 "abstract": "Test abstract",
+                "session": "Test Session",
+                "poster_position": "A1",
                 "extra_field_1": "This field is not in the model",
                 "extra_field_2": 12345,
                 "nested_extra": {"key": "value"},
@@ -134,9 +127,12 @@ class TestPydanticValidation:
         data = [
             {
                 "id": "123456",  # String that can be converted to int
-                "name": "Test Paper",
+                "title": "Test Paper",
+                "authors": ["John Doe"],
                 "abstract": "Test abstract",
-                "sourceid": "789",  # String that can be converted to int
+                "session": "Test Session",
+                "poster_position": "A1",
+                "year": "2025",  # String that can be converted to int
             }
         ]
 
@@ -144,94 +140,20 @@ class TestPydanticValidation:
         assert count == 1
 
         papers = connected_db.search_papers(keyword="Test")
-        assert papers[0]["id"] == 123456  # Should be integer
+        assert papers[0]["id"] is not None  # Should have valid ID
 
-    def test_eventmedia_validation(self, connected_db):
-        """Test that eventmedia items are validated correctly."""
-        import json
-
+    def test_authors_with_semicolons_rejected(self, connected_db):
+        """Test that author names with semicolons are rejected."""
         data = [
             {
                 "id": 123456,
-                "name": "Test Paper with EventMedia",
+                "title": "Test Paper",
+                "authors": ["John; Doe"],  # Semicolon not allowed
                 "abstract": "Test abstract",
-                "eventmedia": [
-                    {
-                        "id": 125963,
-                        "modified": "2025-09-18T17:35:12.146761-07:00",
-                        "display_section": 1,
-                        "type": "URL",
-                        "name": "OpenReview",
-                        "visible": True,
-                        "sortkey": 0,
-                        "is_live_content": False,
-                        "uri": "https://openreview.net/forum?id=test",
-                        "resourcetype": "UriEventmedia",
-                    },
-                    {
-                        "id": 130075,
-                        "file": "/media/PosterPDFs/test.png",
-                        "modified": "2025-10-19T06:42:09.814134-07:00",
-                        "display_section": 1,
-                        "type": "Poster",
-                        "name": "Poster",
-                        "visible": True,
-                        "sortkey": 0,
-                        "is_live_content": False,
-                        "detailed_kind": "",
-                        "generated_from": None,
-                        "resourcetype": "EventmediaImageFile",
-                    },
-                ],
+                "session": "Test Session",
+                "poster_position": "A1",
             }
         ]
 
         count = connected_db.load_json_data(data)
-        assert count == 1
-
-        papers = connected_db.search_papers(keyword="EventMedia")
-        assert len(papers) == 1
-
-        # Verify eventmedia was stored correctly
-        eventmedia = json.loads(papers[0]["eventmedia"])
-        assert len(eventmedia) == 2
-        assert eventmedia[0]["type"] == "URL"
-        assert eventmedia[0]["uri"] == "https://openreview.net/forum?id=test"
-        assert eventmedia[1]["type"] == "Poster"
-        assert eventmedia[1]["file"] == "/media/PosterPDFs/test.png"
-
-    def test_invalid_eventmedia_skipped(self, connected_db):
-        """Test that invalid eventmedia items are skipped but paper is still inserted."""
-        import json
-
-        data = [
-            {
-                "id": 123456,
-                "name": "Test Paper with Mixed EventMedia",
-                "abstract": "Test abstract",
-                "eventmedia": [
-                    {
-                        "id": "not-a-number",  # Invalid: id should be int
-                        "type": "URL",
-                        "name": "Invalid Item",
-                    },
-                    {
-                        "id": 125963,
-                        "type": "URL",
-                        "name": "Valid Item",
-                        "uri": "https://test.com",
-                    },
-                ],
-            }
-        ]
-
-        count = connected_db.load_json_data(data)
-        assert count == 1
-
-        papers = connected_db.search_papers(keyword="Mixed")
-        assert len(papers) == 1
-
-        # Verify only valid eventmedia item was stored
-        eventmedia = json.loads(papers[0]["eventmedia"])
-        assert len(eventmedia) == 1
-        assert eventmedia[0]["name"] == "Valid Item"
+        assert count == 0  # Record should be skipped due to validation error

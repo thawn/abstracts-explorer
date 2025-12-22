@@ -570,24 +570,12 @@ class EmbeddingsManager:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
 
-            # Check which columns exist in the papers table (for backward compatibility)
+            # Check which columns exist in the papers table
             cursor.execute("PRAGMA table_info(papers)")
             columns = {row[1] for row in cursor.fetchall()}
-            has_paper_url = "paper_url" in columns
-            has_poster_position = "poster_position" in columns
-            has_session = "session" in columns
-            has_eventtype = "eventtype" in columns
 
-            # Build query with available columns
-            base_columns = ["id", "name", "abstract", "authors", "topic", "keywords", "decision"]
-            if has_paper_url:
-                base_columns.append("paper_url")
-            if has_poster_position:
-                base_columns.append("poster_position")
-            if has_session:
-                base_columns.append("session")
-            if has_eventtype:
-                base_columns.append("eventtype")
+            # Build query with lightweight schema fields
+            base_columns = ["id", "title", "abstract", "authors", "keywords", "session"]
 
             query = f"SELECT {', '.join(base_columns)} FROM papers"
             if where_clause:
@@ -614,22 +602,11 @@ class EmbeddingsManager:
                     continue
 
                 metadata = {
-                    "title": row["name"] or "",
+                    "title": row["title"] or "",
                     "authors": row["authors"] or "",
-                    "topic": row["topic"] or "",
                     "keywords": row["keywords"] or "",
-                    "decision": row["decision"] or "",
+                    "session": row["session"] or "",
                 }
-
-                # Add optional fields if they exist in the database
-                if has_paper_url:
-                    metadata["paper_url"] = row["paper_url"] or ""
-                if has_poster_position:
-                    metadata["poster_position"] = row["poster_position"] or ""
-                if has_session:
-                    metadata["session"] = row["session"] or ""
-                if has_eventtype:
-                    metadata["eventtype"] = row["eventtype"] or ""
 
                 papers.append((paper_id, abstract, metadata))
 

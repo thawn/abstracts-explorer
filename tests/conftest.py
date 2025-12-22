@@ -60,124 +60,53 @@ def connected_db(db_manager):
 @pytest.fixture
 def sample_neurips_data():
     """
-    Sample NeurIPS data with authors for testing.
+    Sample data with lightweight schema for testing.
 
     Returns
     -------
     list
-        List of paper dictionaries with complete metadata and authors
+        List of paper dictionaries with lightweight schema
 
     Notes
     -----
-    This data uses the current schema with integer IDs and proper author relationships.
-    Includes two papers with overlapping authors to test author deduplication.
+    This data uses the lightweight schema with comma-separated authors.
+    Includes two papers for testing purposes.
     """
     return [
         {
             "id": 123456,
             "uid": "abc123",
-            "name": "Deep Learning with Neural Networks",
+            "title": "Deep Learning with Neural Networks",
             "abstract": "This paper explores deep neural networks",
-            "authors": [
-                {
-                    "id": 457880,
-                    "fullname": "Miaomiao Huang",
-                    "url": "http://neurips.cc/api/miniconf/users/457880?format=json",
-                    "institution": "Northeastern University",
-                },
-                {
-                    "id": 457881,
-                    "fullname": "John Smith",
-                    "url": "http://neurips.cc/api/miniconf/users/457881?format=json",
-                    "institution": "MIT",
-                },
-            ],
-            "keywords": "deep learning, neural networks",
-            "topic": "General Machine Learning",
-            "decision": "Accept (poster)",
+            "authors": ["Miaomiao Huang", "John Smith"],
+            "keywords": ["deep learning", "neural networks"],
             "session": "Session A",
-            "eventtype": "Poster",
-            "event_type": "poster_template",
+            "poster_position": "A-1",
             "room_name": "Hall A",
-            "virtualsite_url": "https://neurips.cc/virtual/2025/poster/123456",
             "url": "https://openreview.net/forum?id=abc123",
-            "sourceid": 123456,
-            "sourceurl": "https://openreview.net/forum?id=abc123",
+            "paper_pdf_url": "https://openreview.net/pdf?id=abc123",
             "starttime": "2025-12-10T10:00:00",
             "endtime": "2025-12-10T12:00:00",
-            "starttime2": None,
-            "endtime2": None,
-            "diversity_event": False,
-            "paper_url": "https://openreview.net/forum?id=abc123",
-            "paper_pdf_url": "https://openreview.net/pdf?id=abc123",
-            "children_url": None,
-            "children": [],
-            "children_ids": [],
-            "parent1": None,
-            "parent2": None,
-            "parent2_id": None,
-            "eventmedia": None,
-            "show_in_schedule_overview": True,
-            "visible": True,
-            "poster_position": "A-1",
-            "schedule_html": "<p>Poster Session A</p>",
-            "latitude": 40.7128,
-            "longitude": -74.0060,
-            "related_events": [],
-            "related_events_ids": [],
+            "year": 2025,
+            "conference": "NeurIPS",
         },
         {
             "id": 123457,
             "uid": "def456",
-            "name": "Advances in Computer Vision",
+            "title": "Advances in Computer Vision",
             "abstract": "This paper discusses computer vision techniques",
-            "authors": [
-                {
-                    "id": 457881,
-                    "fullname": "John Smith",
-                    "url": "http://neurips.cc/api/miniconf/users/457881?format=json",
-                    "institution": "MIT",
-                },
-                {
-                    "id": 457882,
-                    "fullname": "Jane Doe",
-                    "url": "http://neurips.cc/api/miniconf/users/457882?format=json",
-                    "institution": "Stanford University",
-                },
-            ],
-            "keywords": "computer vision, image processing",
-            "topic": "Computer Vision",
-            "decision": "Accept (oral)",
+            "authors": ["John Smith", "Jane Doe"],
+            "keywords": ["computer vision", "image processing"],
             "session": "Session B",
-            "eventtype": "Oral",
-            "event_type": "oral_template",
+            "poster_position": "B-2",
             "room_name": "Hall B",
-            "virtualsite_url": "https://neurips.cc/virtual/2025/oral/123457",
             "url": "https://openreview.net/forum?id=def456",
-            "sourceid": 123457,
-            "sourceurl": "https://openreview.net/forum?id=def456",
-            "starttime": "2025-12-10T14:00:00",
-            "endtime": "2025-12-10T15:00:00",
-            "starttime2": None,
-            "endtime2": None,
-            "diversity_event": False,
-            "paper_url": "https://openreview.net/forum?id=def456",
             "paper_pdf_url": "https://openreview.net/pdf?id=def456",
-            "children_url": None,
-            "children": [],
-            "children_ids": [],
-            "parent1": None,
-            "parent2": None,
-            "parent2_id": None,
-            "eventmedia": None,
-            "show_in_schedule_overview": True,
-            "visible": True,
-            "poster_position": "B-1",
-            "schedule_html": "<p>Oral Session B</p>",
-            "latitude": 40.7128,
-            "longitude": -74.0060,
-            "related_events": [],
-            "related_events_ids": [],
+            "starttime": "2025-12-10T14:00:00",
+            "endtime": "2025-12-10T16:00:00",
+            "award": "Best Paper Award",
+            "year": 2025,
+            "conference": "NeurIPS",
         },
     ]
 
