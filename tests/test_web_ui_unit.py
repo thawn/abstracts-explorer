@@ -811,3 +811,50 @@ class TestParallelDownload:
         # Verify markdown contains direct link to poster on neurips.cc (not downloaded)
         assert "https://neurips.cc/media/PosterPDFs/NeurIPS%202025/100.png" in markdown
         assert "![Poster](https://neurips.cc/media/PosterPDFs/NeurIPS%202025/100.png)" in markdown
+
+
+class TestConferencePluginMapping:
+    """Test conference name to plugin name mapping in download endpoint."""
+
+    def test_ml4ps_conference_name_maps_to_plugin(self):
+        """Test that 'ML4PS@Neurips' conference name correctly maps to 'ml4ps' plugin."""
+        from neurips_abstracts.plugins import get_plugin, list_plugins
+        
+        # Get all plugins and build mapping
+        plugins = list_plugins()
+        conference_to_plugin = {}
+        for plugin_info in plugins:
+            conf_name = plugin_info.get("conference_name")
+            plug_name = plugin_info.get("name")
+            if conf_name and plug_name:
+                conference_to_plugin[conf_name] = plug_name
+        
+        # Verify ML4PS@Neurips maps to ml4ps
+        assert "ML4PS@Neurips" in conference_to_plugin
+        assert conference_to_plugin["ML4PS@Neurips"] == "ml4ps"
+        
+        # Verify we can get the plugin
+        plugin_name = conference_to_plugin["ML4PS@Neurips"]
+        plugin = get_plugin(plugin_name)
+        assert plugin is not None
+        assert plugin.plugin_name == "ml4ps"
+
+    def test_all_conferences_map_to_plugins(self):
+        """Test that all conference names can be mapped to valid plugins."""
+        from neurips_abstracts.plugins import get_plugin, list_plugins
+        
+        # Get all plugins
+        plugins = list_plugins()
+        
+        # Build mapping and verify each conference has a valid plugin
+        for plugin_info in plugins:
+            conf_name = plugin_info.get("conference_name")
+            plug_name = plugin_info.get("name")
+            
+            if conf_name and plug_name:
+                # Verify we can get the plugin
+                plugin = get_plugin(plug_name)
+                assert plugin is not None, f"Plugin '{plug_name}' for conference '{conf_name}' not found"
+                
+                # Verify conference name and plugin name match
+                assert plugin.conference_name == conf_name

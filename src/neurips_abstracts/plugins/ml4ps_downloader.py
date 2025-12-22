@@ -486,7 +486,7 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
                 "url": paper.get("openreview_url") or paper.get("paper_url"),
                 "award": award_str,
                 "year": 2025,
-                "conference": "ML4PS",
+                "conference": self.conference_name,  # Use plugin's conference_name for consistency
             }
 
             # Remove None values from optional fields

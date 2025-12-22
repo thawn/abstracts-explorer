@@ -597,8 +597,24 @@ def download_and_embed():
             em.connect()
             em.create_collection()
 
-            # Map conference name to plugin name (lowercase)
-            plugin_name = conference.lower()
+            # Map conference name to plugin name
+            # Need to handle cases like "ML4PS@Neurips" -> "ml4ps"
+            from neurips_abstracts.plugins import list_plugins
+            plugins = list_plugins()
+            
+            # Build reverse mapping from conference_name to plugin name
+            conference_to_plugin = {}
+            for plugin_info in plugins:
+                conf_name = plugin_info.get("conference_name")
+                plug_name = plugin_info.get("name")
+                if conf_name and plug_name:
+                    conference_to_plugin[conf_name] = plug_name
+            
+            # Look up plugin name by conference name
+            plugin_name = conference_to_plugin.get(conference)
+            if not plugin_name:
+                # Fallback to simple lowercase if not found in mapping
+                plugin_name = conference.lower()
 
             # Get the plugin
             plugin = get_plugin(plugin_name)
