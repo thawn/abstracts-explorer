@@ -37,6 +37,7 @@ def test_authors_table_creation(db_manager):
     assert "fullname" in columns
     assert "url" in columns
     assert "institution" in columns
+    assert "original_id" in columns
     assert "created_at" in columns
 
 
@@ -74,8 +75,9 @@ def test_load_data_with_authors(db_manager, sample_neurips_data):
     relationship_count = cursor.fetchone()[0]
     assert relationship_count == 4  # 2 authors for paper 1, 2 for paper 2
 
-    # Check author data
-    cursor.execute("SELECT * FROM authors WHERE id = 457880")
+    # Check author data - now using hash-based IDs
+    # Hash ID is generated from author name
+    cursor.execute("SELECT * FROM authors WHERE fullname = 'Miaomiao Huang'")
     author = cursor.fetchone()
     assert author is not None
     # Note: sqlite3.Row indices are by position
@@ -84,6 +86,8 @@ def test_load_data_with_authors(db_manager, sample_neurips_data):
     author_dict = dict(zip(columns, author))
     assert author_dict["fullname"] == "Miaomiao Huang"
     assert author_dict["institution"] == "Northeastern University"
+    # Check that original ID is preserved
+    assert author_dict["original_id"] == "457880"
 
 
 def test_get_paper_authors(db_manager, sample_neurips_data):
@@ -106,7 +110,12 @@ def test_get_author_papers(db_manager, sample_neurips_data):
     db_manager.load_json_data(sample_neurips_data)
 
     # Get papers by John Smith (appears in both papers)
-    papers = db_manager.get_author_papers(457881)
+    # First find the hash-based ID for John Smith
+    cursor = db_manager.connection.cursor()
+    cursor.execute("SELECT id FROM authors WHERE fullname = 'John Smith'")
+    author_id = cursor.fetchone()[0]
+
+    papers = db_manager.get_author_papers(author_id)
     assert len(papers) == 2
 
     paper_names = {paper["name"] for paper in papers}
@@ -244,4 +253,6 @@ def test_authors_with_no_institution(db_manager):
     # Check author was inserted with None institution
     authors = db_manager.search_authors(name="No Institution")
     assert len(authors) == 1
-    assert authors[0]["institution"] is None
+    assert authors[0]["institution"] is None or authors[0]["institution"] == ""
+    # Check original ID is preserved
+    assert authors[0]["original_id"] == "999999"

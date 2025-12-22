@@ -188,7 +188,7 @@ class TestML4PSPluginYearConference:
         assert len(lightweight_papers) == 1
         paper = lightweight_papers[0]
         assert paper["year"] == 2025
-        assert paper["conference"] == "ML4PS"
+        assert paper["conference"] == "ML4PS@Neurips"
 
     def test_ml4ps_lightweight_format_preserves_fields(self):
         """Test that ML4PS plugin preserves all required fields."""
@@ -216,7 +216,7 @@ class TestML4PSPluginYearConference:
         assert paper["session"] == "ML4PhysicalSciences 2025 Workshop - Spotlight"
         assert paper["id"] == 42
         assert paper["year"] == 2025
-        assert paper["conference"] == "ML4PS"
+        assert paper["conference"] == "ML4PS@Neurips"
         assert paper["award"] == "Best Paper, Outstanding Poster"
 
 
@@ -341,18 +341,18 @@ class TestDatabaseYearConferenceIntegration:
                 assert papers[0]["id"] == 1
                 assert papers[0]["name"] == "ML4PS Paper 1"
                 assert papers[0]["year"] == 2025
-                assert papers[0]["conference"] == "ML4PS"
+                assert papers[0]["conference"] == "ML4PS@Neurips"
 
                 # Check second paper
                 assert papers[1]["id"] == 2
                 assert papers[1]["name"] == "ML4PS Paper 2"
                 assert papers[1]["year"] == 2025
-                assert papers[1]["conference"] == "ML4PS"
+                assert papers[1]["conference"] == "ML4PS@Neurips"
 
                 # Test filtering by year
                 papers_2025 = db.query("SELECT * FROM papers WHERE year = 2025")
                 assert len(papers_2025) == 2
 
                 # Test filtering by conference
-                ml4ps_papers = db.query("SELECT * FROM papers WHERE conference = 'ML4PS'")
+                ml4ps_papers = db.query("SELECT * FROM papers WHERE conference = 'ML4PS@Neurips'")
                 assert len(ml4ps_papers) == 2
