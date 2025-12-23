@@ -364,7 +364,7 @@ describe('NeurIPS Abstracts Web UI', () => {
             const data = {
                 papers: [
                     {
-                        id: 1,
+                        uid: 'test_uid_abc123',
                         name: 'Test Paper 1',
                         authors: ['Author A', 'Author B'],
                         abstract: 'This is a test abstract.',
@@ -373,7 +373,7 @@ describe('NeurIPS Abstracts Web UI', () => {
                         paper_url: 'https://example.com/paper1'
                     },
                     {
-                        id: 2,
+                        uid: 'test_uid_def456',
                         name: 'Test Paper 2',
                         authors: ['Author C'],
                         abstract: 'Another test abstract.'
@@ -398,7 +398,7 @@ describe('NeurIPS Abstracts Web UI', () => {
 
         test('should show AI-Powered badge for embedding search', () => {
             const data = {
-                papers: [{ id: 1, name: 'Test', authors: [], abstract: 'Test' }],
+                papers: [{ uid: 'test_uid_123', name: 'Test', authors: [], abstract: 'Test' }],
                 count: 1,
                 use_embeddings: true
             };
@@ -413,7 +413,7 @@ describe('NeurIPS Abstracts Web UI', () => {
             const data = {
                 papers: [
                     {
-                        id: 1,
+                        uid: 'test_uid_789',
                         name: 'Test Paper',
                         authors: null,
                         abstract: 'Test abstract'
@@ -433,7 +433,7 @@ describe('NeurIPS Abstracts Web UI', () => {
             const data = {
                 papers: [
                     {
-                        id: 1,
+                        uid: 'test_uid_abc',
                         name: 'Test Paper',
                         authors: 'John Doe, Jane Smith', // String instead of array
                         abstract: 'Test abstract'
@@ -455,7 +455,7 @@ describe('NeurIPS Abstracts Web UI', () => {
             const data = {
                 papers: [
                     {
-                        id: 1,
+                        uid: 'test_uid_def',
                         name: 'Test Paper',
                         authors: { name: 'John Doe' }, // Object instead of array
                         abstract: 'Test abstract'
@@ -478,7 +478,7 @@ describe('NeurIPS Abstracts Web UI', () => {
             const data = {
                 papers: [
                     {
-                        id: 1,
+                        uid: 'test_uid_ghi',
                         name: 'Test Paper',
                         authors: ['Author'],
                         abstract: longAbstract
@@ -503,7 +503,7 @@ describe('NeurIPS Abstracts Web UI', () => {
             const data = {
                 papers: [
                     {
-                        id: 1,
+                        uid: 'test_uid_jkl',
                         name: 'Test Paper',
                         authors: ['Author'],
                         abstract: shortAbstract
@@ -525,7 +525,7 @@ describe('NeurIPS Abstracts Web UI', () => {
             const data = {
                 papers: [
                     {
-                        id: 1,
+                        uid: 'test_uid_mno',
                         name: 'Test Paper',
                         authors: ['Author'],
                         abstract: 'Test',
@@ -548,7 +548,7 @@ describe('NeurIPS Abstracts Web UI', () => {
             const data = {
                 papers: [
                     {
-                        id: 1,
+                        uid: 'test_uid_pqr',
                         name: '<script>alert("xss")</script>',
                         authors: ['<b>Author</b>'],
                         abstract: '<img src=x onerror=alert(1)>'
@@ -567,6 +567,59 @@ describe('NeurIPS Abstracts Web UI', () => {
             expect(resultsDiv.innerHTML).toContain('&lt;b&gt;Author&lt;/b&gt;');
             // Abstract is passed through markdown parser which allows some HTML like images
             expect(resultsDiv.innerHTML).toContain('<img');
+        });
+
+        test('should properly quote string UIDs in onclick handlers', () => {
+            // Regression test: ensure onclick handlers have quoted UIDs for valid JavaScript
+            const data = {
+                papers: [
+                    {
+                        uid: 'test_uid_abc123',
+                        name: 'Test Paper',
+                        authors: ['Author'],
+                        abstract: 'Test abstract'
+                    }
+                ],
+                count: 1,
+                use_embeddings: false
+            };
+
+            app.displaySearchResults(data);
+
+            const resultsDiv = document.getElementById('search-results');
+
+            // Check that onclick has properly quoted UID
+            expect(resultsDiv.innerHTML).toContain("showPaperDetails('test_uid_abc123')");
+
+            // Should NOT contain unquoted version (which would be invalid JavaScript)
+            expect(resultsDiv.innerHTML).not.toContain('showPaperDetails(test_uid_abc123)');
+
+            // Check star rating onclick also has proper quotes
+            expect(resultsDiv.innerHTML).toContain("setPaperPriority('test_uid_abc123',");
+        });
+
+        test('should handle string UIDs with special characters in onclick', () => {
+            // Test that UIDs with underscores, hyphens, and alphanumeric chars work
+            const data = {
+                papers: [
+                    {
+                        uid: 'uid_123-abc_xyz',
+                        name: 'Test Paper',
+                        authors: ['Author'],
+                        abstract: 'Test'
+                    }
+                ],
+                count: 1,
+                use_embeddings: false
+            };
+
+            app.displaySearchResults(data);
+
+            const resultsDiv = document.getElementById('search-results');
+
+            // Verify proper quoting
+            expect(resultsDiv.innerHTML).toContain("showPaperDetails('uid_123-abc_xyz')");
+            expect(resultsDiv.innerHTML).toContain("setPaperPriority('uid_123-abc_xyz',");
         });
     });
 
@@ -899,7 +952,7 @@ describe('NeurIPS Abstracts Web UI', () => {
     describe('showPaperDetails', () => {
         test('should fetch and display paper details', async () => {
             const mockPaper = {
-                id: 1,
+                uid: 'test_uid_stu',
                 name: 'Test Paper',
                 authors: ['Author A', 'Author B'],
                 abstract: 'This is a test abstract',
@@ -914,9 +967,9 @@ describe('NeurIPS Abstracts Web UI', () => {
                 json: async () => mockPaper
             });
 
-            await app.showPaperDetails(1);
+            await app.showPaperDetails('test_uid_stu');
 
-            expect(fetch).toHaveBeenCalledWith('/api/paper/1');
+            expect(fetch).toHaveBeenCalledWith('/api/paper/test_uid_stu');
 
             // Check if modal was created
             const modal = document.querySelector('.fixed');
@@ -933,7 +986,7 @@ describe('NeurIPS Abstracts Web UI', () => {
 
         test('should handle missing PDF URL', async () => {
             const mockPaper = {
-                id: 1,
+                uid: 'test_uid_vwx',
                 name: 'Test Paper',
                 authors: [],
                 abstract: 'Test'
@@ -943,7 +996,7 @@ describe('NeurIPS Abstracts Web UI', () => {
                 json: async () => mockPaper
             });
 
-            await app.showPaperDetails(1);
+            await app.showPaperDetails('test_uid_vwx');
 
             const modal = document.querySelector('.fixed');
             expect(modal.innerHTML).not.toContain('View PDF');
@@ -962,7 +1015,7 @@ describe('NeurIPS Abstracts Web UI', () => {
 
         test('should escape HTML in paper details', async () => {
             const mockPaper = {
-                id: 1,
+                uid: 'test_uid_yza',
                 name: '<script>alert("xss")</script>',
                 authors: ['<b>Author</b>'],
                 abstract: '<img src=x onerror=alert(1)>'
@@ -972,7 +1025,7 @@ describe('NeurIPS Abstracts Web UI', () => {
                 json: async () => mockPaper
             });
 
-            await app.showPaperDetails(1);
+            await app.showPaperDetails('test_uid_yza');
 
             const modal = document.querySelector('.fixed');
             expect(modal.innerHTML).not.toContain('<script>');
@@ -995,7 +1048,7 @@ describe('NeurIPS Abstracts Web UI', () => {
                 json: async () => mockPaper
             });
 
-            await app.showPaperDetails(1);
+            await app.showPaperDetails('test_uid_bcd');
 
             // Error should be displayed
             const resultsDiv = document.getElementById('search-results');
@@ -1005,7 +1058,7 @@ describe('NeurIPS Abstracts Web UI', () => {
 
         test('should handle non-array authors error in paper details', async () => {
             const mockPaper = {
-                id: 1,
+                uid: 'test_uid_efg',
                 name: 'Test Paper',
                 authors: 123, // Number instead of array
                 abstract: 'Test abstract'
@@ -1015,7 +1068,7 @@ describe('NeurIPS Abstracts Web UI', () => {
                 json: async () => mockPaper
             });
 
-            await app.showPaperDetails(1);
+            await app.showPaperDetails('test_uid_efg');
 
             // Error should be displayed
             const resultsDiv = document.getElementById('search-results');
