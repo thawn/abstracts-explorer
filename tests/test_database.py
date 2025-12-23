@@ -195,13 +195,13 @@ class TestAddPaper:
 
     def test_add_paper_basic(self, connected_db, sample_paper):
         """Test adding a single paper with all fields."""
-        paper_id = connected_db.add_paper(sample_paper)
+        paper_uid = connected_db.add_paper(sample_paper)
 
-        assert paper_id is not None
-        assert isinstance(paper_id, int)
+        assert paper_uid is not None
+        assert isinstance(paper_uid, str)
 
         # Verify paper was added
-        result = connected_db.query("SELECT * FROM papers WHERE id = ?", (paper_id,))
+        result = connected_db.query("SELECT * FROM papers WHERE uid = ?", (paper_uid,))
         assert len(result) == 1
 
         row = result[0]
@@ -219,12 +219,12 @@ class TestAddPaper:
 
     def test_add_paper_minimal(self, connected_db, sample_paper_minimal):
         """Test adding a paper with only required fields."""
-        paper_id = connected_db.add_paper(sample_paper_minimal)
+        paper_uid = connected_db.add_paper(sample_paper_minimal)
 
-        assert paper_id is not None
+        assert paper_uid is not None
 
         # Verify paper was added
-        result = connected_db.query("SELECT * FROM papers WHERE id = ?", (paper_id,))
+        result = connected_db.query("SELECT * FROM papers WHERE uid = ?", (paper_uid,))
         assert len(result) == 1
 
         row = result[0]
@@ -244,12 +244,12 @@ class TestAddPaper:
     def test_add_paper_duplicate(self, connected_db, sample_paper):
         """Test adding a duplicate paper returns None."""
         # Add paper first time
-        paper_id1 = connected_db.add_paper(sample_paper)
-        assert paper_id1 is not None
+        paper_uid1 = connected_db.add_paper(sample_paper)
+        assert paper_uid1 is not None
 
         # Add same paper again (same title, conference, year -> same UID)
-        paper_id2 = connected_db.add_paper(sample_paper)
-        assert paper_id2 is None
+        paper_uid2 = connected_db.add_paper(sample_paper)
+        assert paper_uid2 is None
 
         # Verify only one paper in database
         count = connected_db.get_paper_count()
@@ -273,18 +273,19 @@ class TestAddPaper:
             conference="NeurIPS",
         )
 
-        paper_id = connected_db.add_paper(paper)
-        assert paper_id is not None
+        paper_uid = connected_db.add_paper(paper)
+        assert paper_uid is not None
 
-        # Verify the original_id was used
-        result = connected_db.query("SELECT * FROM papers WHERE id = ?", (paper_id,))
+        # Verify the original_id was stored
+        result = connected_db.query("SELECT * FROM papers WHERE uid = ?", (paper_uid,))
         assert len(result) == 1
+        assert result[0]["original_id"] == "12345"
 
     def test_add_paper_generates_uid(self, connected_db, sample_paper):
         """Test that add_paper generates a UID correctly."""
-        paper_id = connected_db.add_paper(sample_paper)
+        paper_uid = connected_db.add_paper(sample_paper)
 
-        result = connected_db.query("SELECT uid FROM papers WHERE id = ?", (paper_id,))
+        result = connected_db.query("SELECT uid FROM papers WHERE uid = ?", (paper_uid,))
         assert len(result) == 1
 
         uid = result[0]["uid"]

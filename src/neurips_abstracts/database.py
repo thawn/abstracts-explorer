@@ -123,8 +123,7 @@ class DatabaseManager:
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS papers (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    uid TEXT UNIQUE,
+                    uid TEXT PRIMARY KEY,
                     original_id TEXT,
                     title TEXT NOT NULL,
                     authors TEXT,
@@ -143,14 +142,6 @@ class DatabaseManager:
                     conference TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-            """
-            )
-
-            # Create index on uid
-            cursor.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_uid 
-                ON papers(uid)
             """
             )
 
@@ -209,8 +200,8 @@ class DatabaseManager:
 
         Returns
         -------
-        int or None
-            The ID of the inserted paper, or None if paper was skipped (duplicate).
+        str or None
+            The UID of the inserted paper, or None if paper was skipped (duplicate).
 
         Raises
         ------
@@ -232,8 +223,8 @@ class DatabaseManager:
         ...         year=2025,
         ...         conference="NeurIPS"
         ...     )
-        ...     paper_id = db.add_paper(paper)
-        >>> print(f"Inserted paper with ID: {paper_id}")
+        ...     paper_uid = db.add_paper(paper)
+        >>> print(f"Inserted paper with UID: {paper_uid}")
         """
         if not self.connection:
             raise DatabaseError("Not connected to database")
@@ -256,11 +247,11 @@ class DatabaseManager:
                 authors_str = str(authors_data) if authors_data else ""
 
             # Generate UID as hash from title + conference + year
-            uid_source = f"{title}:{paper.conference}:{paper.year}"
+            uid_source = f"{title}:{paper_id}:{paper.conference}:{paper.year}"
             uid = hashlib.sha256(uid_source.encode("utf-8")).hexdigest()[:16]
 
             # Check if paper already exists (by UID)
-            existing = cursor.execute("SELECT id FROM papers WHERE uid = ?", (uid,)).fetchone()
+            existing = cursor.execute("SELECT uid FROM papers WHERE uid = ?", (uid,)).fetchone()
             if existing:
                 logger.debug(f"Skipping duplicate paper: {title} (uid: {uid})")
                 return None
@@ -285,20 +276,19 @@ class DatabaseManager:
             elif keywords is None:
                 keywords = ""
 
-            # Use uid as original_id for now (can be overridden by caller if needed)
-            original_id = uid
+            # Use paper's original_id if available, otherwise use uid
+            original_id = str(paper.original_id) if paper.original_id else None
 
             # Insert paper with lightweight schema
             cursor.execute(
                 """
                 INSERT INTO papers 
-                (id, uid, original_id, title, authors, abstract, session, poster_position,
+                (uid, original_id, title, authors, abstract, session, poster_position,
                  paper_pdf_url, poster_image_url, url, room_name, keywords, starttime, endtime,
                  award, year, conference)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
-                    paper_id,
                     uid,
                     original_id,
                     title,
@@ -320,7 +310,7 @@ class DatabaseManager:
             )
 
             self.connection.commit()
-            return cursor.lastrowid
+            return uid
 
         except sqlite3.Error as e:
             self.connection.rollback()

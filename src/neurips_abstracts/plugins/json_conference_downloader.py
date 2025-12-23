@@ -149,9 +149,7 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
                 paper["conference"] = self.conference_name
 
             # Convert to lightweight schema (returns list of dicts)
-            papers_data = convert_neurips_to_lightweight_schema(
-                data["results"], preserve_ids=False  # Let database generate IDs
-            )
+            papers_data = convert_neurips_to_lightweight_schema(data["results"])
 
         # Convert to LightweightPaper objects
         papers = [LightweightPaper(**paper) for paper in papers_data]

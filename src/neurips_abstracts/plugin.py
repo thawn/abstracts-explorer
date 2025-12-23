@@ -349,9 +349,7 @@ def convert_lightweight_to_neurips_schema(
     return {"count": len(results), "next": None, "previous": None, "results": results}
 
 
-def convert_neurips_to_lightweight_schema(
-    papers: List[Dict[str, Any]], preserve_ids: bool = True
-) -> List[Dict[str, Any]]:
+def convert_neurips_to_lightweight_schema(papers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Convert full NeurIPS schema to lightweight paper format.
 
@@ -446,18 +444,22 @@ def convert_neurips_to_lightweight_schema(
             else:
                 authors = [a.strip() for a in authors_data.split(",") if a.strip()]
 
+        # Sanitize author names to remove semicolons (required by LightweightPaper validation)
+        authors = sanitize_author_names(authors)
+
         # Build lightweight paper
+        # Note: Use 'or ""' pattern to handle None values from source data
         lightweight_paper = {
             "title": title,
             "authors": authors,
-            "abstract": paper.get("abstract", ""),
-            "session": paper.get("session", ""),
-            "poster_position": paper.get("poster_position", ""),
+            "abstract": paper.get("abstract") or "",
+            "session": paper.get("session") or "No session",
+            "poster_position": paper.get("poster_position") or "",
         }
 
         # Add optional fields if present
-        if preserve_ids and "id" in paper:
-            lightweight_paper["id"] = paper["id"]
+        if "id" in paper:
+            lightweight_paper["original_id"] = paper["id"]
 
         if paper.get("paper_pdf_url"):
             lightweight_paper["paper_pdf_url"] = paper["paper_pdf_url"]
@@ -487,9 +489,8 @@ def convert_neurips_to_lightweight_schema(
             lightweight_paper["endtime"] = paper["endtime"]
 
         # Use award if present, otherwise fall back to decision
-        award = paper.get("award") or (
-            paper.get("decision") if "award" in paper.get("decision", "").lower() else None
-        )
+        decision = paper.get("decision") or ""
+        award = paper.get("award") or (paper.get("decision") if "award" in decision.lower() else None)
         if award:
             lightweight_paper["award"] = award
 

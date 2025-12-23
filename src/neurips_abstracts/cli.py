@@ -699,10 +699,10 @@ Available plugins:
 
 Examples:
   # Download NeurIPS 2025 papers
-  neurips-abstracts download --plugin neurips --year 2025 --output neurips_2025.db
+  neurips-abstracts download --plugin neurips --year 2025 --output data/neurips_2025.db
   
   # Download ML4PS 2025 workshop papers with abstracts
-  neurips-abstracts download --plugin ml4ps --year 2025 --output ml4ps_2025.db
+  neurips-abstracts download --plugin ml4ps --year 2025 --output data/ml4ps_2025.db
   
   # List available plugins
   neurips-abstracts download --list-plugins
@@ -723,8 +723,8 @@ Examples:
     download_parser.add_argument(
         "--output",
         type=str,
-        default="neurips.db",
-        help="Output database file path (default: neurips.db)",
+        default="data/neurips_2025.db",
+        help="Output database file path (default: data/neurips_2025.db)",
     )
     download_parser.add_argument(
         "--force",
