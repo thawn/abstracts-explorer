@@ -24,47 +24,41 @@ class TestGetPaperWithAuthors:
         mock_db = Mock()
         mock_db.query.return_value = [
             {
-                "id": 1,
-                "name": "Test Paper",
+                "uid": "abc123",
+                "title": "Test Paper",
                 "abstract": "Test abstract",
-                "decision": "Accept",
-                "topic": "ML",
+                "authors": "John Doe, Jane Smith",
+                "session": "ML",
             }
         ]
-        mock_db.get_paper_authors.return_value = [
-            {"fullname": "John Doe"},
-            {"fullname": "Jane Smith"},
-        ]
 
-        paper = get_paper_with_authors(mock_db, 1)
+        paper = get_paper_with_authors(mock_db, "abc123")
 
-        assert paper["id"] == 1
-        assert paper["name"] == "Test Paper"
-        assert paper["title"] == "Test Paper"  # Should add title alias
+        assert paper["uid"] == "abc123"
+        assert paper["title"] == "Test Paper"
         assert paper["authors"] == ["John Doe", "Jane Smith"]
-        mock_db.query.assert_called_once_with("SELECT * FROM papers WHERE id = ?", (1,))
-        mock_db.get_paper_authors.assert_called_once_with(1)
+        mock_db.query.assert_called_once_with("SELECT * FROM papers WHERE uid = ?", ("abc123",))
 
     def test_get_paper_with_authors_invalid_id(self):
-        """Test that invalid paper IDs raise error."""
+        """Test that invalid paper UIDs raise error."""
         mock_db = Mock()
 
-        # Test negative ID
-        with pytest.raises(PaperFormattingError, match="Invalid paper_id"):
-            get_paper_with_authors(mock_db, -1)
+        # Test empty string
+        with pytest.raises(PaperFormattingError, match="Invalid paper_uid"):
+            get_paper_with_authors(mock_db, "")
 
-        # Test zero
-        with pytest.raises(PaperFormattingError, match="Invalid paper_id"):
-            get_paper_with_authors(mock_db, 0)
+        # Test whitespace only
+        with pytest.raises(PaperFormattingError, match="Invalid paper_uid"):
+            get_paper_with_authors(mock_db, "   ")
 
-        # Test non-integer
-        with pytest.raises(PaperFormattingError, match="Invalid paper_id"):
-            get_paper_with_authors(mock_db, "123")
+        # Test non-string
+        with pytest.raises(PaperFormattingError, match="Invalid paper_uid"):
+            get_paper_with_authors(mock_db, 123)
 
     def test_get_paper_with_authors_no_database(self):
         """Test that missing database raises error."""
         with pytest.raises(PaperFormattingError, match="Database connection is required"):
-            get_paper_with_authors(None, 1)
+            get_paper_with_authors(None, "abc123")
 
     def test_get_paper_with_authors_not_found(self):
         """Test that missing paper raises error."""
@@ -72,15 +66,14 @@ class TestGetPaperWithAuthors:
         mock_db.query.return_value = []
 
         with pytest.raises(PaperFormattingError, match="not found in database"):
-            get_paper_with_authors(mock_db, 999)
+            get_paper_with_authors(mock_db, "nonexistent")
 
     def test_get_paper_with_authors_no_authors(self):
         """Test paper with no authors."""
         mock_db = Mock()
-        mock_db.query.return_value = [{"id": 1, "name": "Test Paper"}]
-        mock_db.get_paper_authors.return_value = []
+        mock_db.query.return_value = [{"uid": "abc123", "title": "Test Paper", "authors": None}]
 
-        paper = get_paper_with_authors(mock_db, 1)
+        paper = get_paper_with_authors(mock_db, "abc123")
 
         assert paper["authors"] == []
 
@@ -90,7 +83,7 @@ class TestGetPaperWithAuthors:
         mock_db.query.side_effect = Exception("Database connection lost")
 
         with pytest.raises(PaperFormattingError, match="Failed to retrieve paper"):
-            get_paper_with_authors(mock_db, 1)
+            get_paper_with_authors(mock_db, "abc123")
 
 
 class TestFormatSearchResults:
@@ -99,7 +92,7 @@ class TestFormatSearchResults:
     def test_format_search_results_success(self):
         """Test successful formatting of search results."""
         search_results = {
-            "ids": [[1, 2]],
+            "ids": [["abc123", "def456"]],
             "distances": [[0.2, 0.5]],
             "documents": [["Abstract 1", "Abstract 2"]],
             "metadatas": [[{}, {}]],
@@ -107,23 +100,19 @@ class TestFormatSearchResults:
 
         mock_db = Mock()
         mock_db.query.side_effect = [
-            [{"id": 1, "name": "Paper 1", "abstract": "Abstract 1"}],
-            [{"id": 2, "name": "Paper 2", "abstract": "Abstract 2"}],
-        ]
-        mock_db.get_paper_authors.side_effect = [
-            [{"fullname": "Author 1"}],
-            [{"fullname": "Author 2"}],
+            [{"uid": "abc123", "title": "Paper 1", "abstract": "Abstract 1", "authors": "Author 1"}],
+            [{"uid": "def456", "title": "Paper 2", "abstract": "Abstract 2", "authors": "Author 2"}],
         ]
 
         papers = format_search_results(search_results, mock_db)
 
         assert len(papers) == 2
-        assert papers[0]["id"] == 1
+        assert papers[0]["uid"] == "abc123"
         assert papers[0]["title"] == "Paper 1"
         assert papers[0]["authors"] == ["Author 1"]
         assert papers[0]["distance"] == 0.2
         assert papers[0]["similarity"] == 0.8
-        assert papers[1]["id"] == 2
+        assert papers[1]["uid"] == "def456"
         assert papers[1]["similarity"] == 0.5
 
     def test_format_search_results_empty_results(self):
@@ -152,7 +141,7 @@ class TestFormatSearchResults:
 
     def test_format_search_results_no_database(self):
         """Test that missing database raises error."""
-        search_results = {"ids": [[1, 2]]}
+        search_results = {"ids": [["abc123", "def456"]]}
 
         with pytest.raises(PaperFormattingError, match="Database connection is required"):
             format_search_results(search_results, None)
@@ -160,7 +149,7 @@ class TestFormatSearchResults:
     def test_format_search_results_inconsistent_lengths(self):
         """Test inconsistent result lengths."""
         search_results = {
-            "ids": [[1, 2]],
+            "ids": [["abc123", "def456"]],
             "distances": [[0.2]],  # Only 1 distance for 2 IDs
         }
         mock_db = Mock()
@@ -171,31 +160,27 @@ class TestFormatSearchResults:
     def test_format_search_results_skip_invalid_papers(self):
         """Test that invalid papers are skipped with warning."""
         search_results = {
-            "ids": [[1, 999, 2]],  # 999 doesn't exist
+            "ids": [["abc123", "nonexist", "def456"]],  # nonexist doesn't exist
             "distances": [[0.2, 0.3, 0.5]],
         }
 
         mock_db = Mock()
         mock_db.query.side_effect = [
-            [{"id": 1, "name": "Paper 1"}],
-            [],  # Paper 999 not found
-            [{"id": 2, "name": "Paper 2"}],
-        ]
-        mock_db.get_paper_authors.side_effect = [
-            [{"fullname": "Author 1"}],
-            [{"fullname": "Author 2"}],
+            [{"uid": "abc123", "title": "Paper 1", "authors": "Author 1"}],
+            [],  # Paper nonexist not found
+            [{"uid": "def456", "title": "Paper 2", "authors": "Author 2"}],
         ]
 
         papers = format_search_results(search_results, mock_db)
 
         # Should have 2 papers, skipping the invalid one
         assert len(papers) == 2
-        assert papers[0]["id"] == 1
-        assert papers[1]["id"] == 2
+        assert papers[0]["uid"] == "abc123"
+        assert papers[1]["uid"] == "def456"
 
     def test_format_search_results_all_invalid(self):
         """Test that all invalid papers raises error."""
-        search_results = {"ids": [[999, 998]]}
+        search_results = {"ids": [["nonexist1", "nonexist2"]]}
 
         mock_db = Mock()
         mock_db.query.return_value = []  # No papers found
@@ -206,13 +191,14 @@ class TestFormatSearchResults:
     def test_format_search_results_without_documents(self):
         """Test formatting without including documents."""
         search_results = {
-            "ids": [[1]],
+            "ids": [["abc123"]],
             "distances": [[0.2]],
         }
 
         mock_db = Mock()
-        mock_db.query.return_value = [{"id": 1, "name": "Paper 1", "abstract": "From DB"}]
-        mock_db.get_paper_authors.return_value = [{"fullname": "Author 1"}]
+        mock_db.query.return_value = [
+            {"uid": "abc123", "title": "Paper 1", "abstract": "From DB", "authors": "Author 1"}
+        ]
 
         papers = format_search_results(search_results, mock_db, include_documents=False)
 
@@ -222,13 +208,12 @@ class TestFormatSearchResults:
     def test_format_search_results_with_documents_override(self):
         """Test that documents from search results override missing abstracts."""
         search_results = {
-            "ids": [[1]],
+            "ids": [["abc123"]],
             "documents": [["From search"]],
         }
 
         mock_db = Mock()
-        mock_db.query.return_value = [{"id": 1, "name": "Paper 1"}]  # No abstract
-        mock_db.get_paper_authors.return_value = []
+        mock_db.query.return_value = [{"uid": "abc123", "title": "Paper 1", "authors": ""}]  # No abstract
 
         papers = format_search_results(search_results, mock_db, include_documents=True)
 
@@ -266,20 +251,6 @@ class TestBuildContextFromPapers:
         assert "Paper 2:" in context
         assert "Title: Paper 2" in context
         assert "Authors: Author 3" in context
-
-    def test_build_context_from_papers_with_name_field(self):
-        """Test context building with 'name' field instead of 'title'."""
-        papers = [
-            {
-                "name": "Paper with Name",
-                "authors": ["Author"],
-                "abstract": "Abstract",
-            }
-        ]
-
-        context = build_context_from_papers(papers)
-
-        assert "Title: Paper with Name" in context
 
     def test_build_context_from_papers_empty_list(self):
         """Test that empty papers list raises error."""

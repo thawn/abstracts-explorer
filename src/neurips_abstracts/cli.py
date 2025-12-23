@@ -350,7 +350,8 @@ def chat_command(args: argparse.Namespace) -> int:
         - embeddings_path: Path to ChromaDB database
         - collection: Name of the collection
         - lm_studio_url: LM Studio API URL
-        - model: Language model name
+        - model: Language model name for chat
+        - embedding_model: Embedding model name
         - max_context: Maximum papers to use as context
         - temperature: Sampling temperature
         - export: Path to export conversation
@@ -368,7 +369,8 @@ def chat_command(args: argparse.Namespace) -> int:
         print("=" * 70)
         print(f"Embeddings: {embeddings_path}")
         print(f"Collection: {args.collection}")
-        print(f"Model: {args.model}")
+        print(f"Chat Model: {args.model}")
+        print(f"Embedding Model: {args.embedding_model}")
         print(f"LM Studio: {args.lm_studio_url}")
         print("=" * 70)
 
@@ -384,7 +386,7 @@ def chat_command(args: argparse.Namespace) -> int:
             chroma_path=embeddings_path,
             collection_name=args.collection,
             lm_studio_url=args.lm_studio_url,
-            model_name=args.model,
+            model_name=args.embedding_model,
         )
 
         # Test LM Studio connection
@@ -880,7 +882,13 @@ Examples:
         "--model",
         type=str,
         default=config.chat_model,
-        help=f"Name of the language model (default: {config.chat_model})",
+        help=f"Name of the language model for chat (default: {config.chat_model})",
+    )
+    chat_parser.add_argument(
+        "--embedding-model",
+        type=str,
+        default=config.embedding_model,
+        help=f"Name of the embedding model (default: {config.embedding_model})",
     )
     chat_parser.add_argument(
         "--max-context",

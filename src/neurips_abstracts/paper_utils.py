@@ -17,7 +17,7 @@ class PaperFormattingError(Exception):
     pass
 
 
-def get_paper_with_authors(database, paper_id: int) -> Dict[str, Any]:
+def get_paper_with_authors(database, paper_uid: str) -> Dict[str, Any]:
     """
     Get a complete paper record with authors from database.
 
@@ -28,8 +28,8 @@ def get_paper_with_authors(database, paper_id: int) -> Dict[str, Any]:
     ----------
     database : DatabaseManager
         Database instance to query.
-    paper_id : int
-        Paper ID to retrieve.
+    paper_uid : str
+        Paper UID (unique identifier) to retrieve.
 
     Returns
     -------
@@ -39,24 +39,24 @@ def get_paper_with_authors(database, paper_id: int) -> Dict[str, Any]:
     Raises
     ------
     PaperFormattingError
-        If paper_id is invalid or paper not found in database.
+        If paper_uid is invalid or paper not found in database.
 
     Examples
     --------
-    >>> paper = get_paper_with_authors(db, 12345)
+    >>> paper = get_paper_with_authors(db, "b5ea3e6fa2ccb0be")
     >>> print(paper['title'], paper['authors'])
     """
-    if not isinstance(paper_id, int) or paper_id <= 0:
-        raise PaperFormattingError(f"Invalid paper_id: {paper_id}. Must be positive integer.")
+    if not isinstance(paper_uid, str) or not paper_uid.strip():
+        raise PaperFormattingError(f"Invalid paper_uid: {paper_uid}. Must be non-empty string.")
 
     if database is None:
         raise PaperFormattingError("Database connection is required but not provided.")
 
     try:
-        # Get full paper record from database
-        paper_rows = database.query("SELECT * FROM papers WHERE id = ?", (paper_id,))
+        # Get full paper record from database using uid
+        paper_rows = database.query("SELECT * FROM papers WHERE uid = ?", (paper_uid,))
         if not paper_rows:
-            raise PaperFormattingError(f"Paper with id={paper_id} not found in database.")
+            raise PaperFormattingError(f"Paper with uid={paper_uid} not found in database.")
 
         paper = dict(paper_rows[0])
 
@@ -71,7 +71,7 @@ def get_paper_with_authors(database, paper_id: int) -> Dict[str, Any]:
     except Exception as e:
         if isinstance(e, PaperFormattingError):
             raise
-        raise PaperFormattingError(f"Failed to retrieve paper {paper_id}: {str(e)}") from e
+        raise PaperFormattingError(f"Failed to retrieve paper {paper_uid}: {str(e)}") from e
 
 
 def format_search_results(
@@ -137,18 +137,16 @@ def format_search_results(
 
     papers = []
     for i in range(result_count):
-        paper_id = search_results["ids"][0][i]
+        paper_uid = search_results["ids"][0][i]
 
         try:
-            # Convert paper_id to integer (ChromaDB stores as string)
-            try:
-                paper_id_int = int(paper_id)
-            except (ValueError, TypeError):
-                logger.warning(f"Invalid paper_id format: {paper_id} ({type(paper_id)})")
+            # ChromaDB stores UIDs as strings - use them directly
+            if not isinstance(paper_uid, str):
+                logger.warning(f"Invalid paper_uid format: {paper_uid} ({type(paper_uid)})")
                 continue
 
             # Get complete paper from database (this validates paper exists)
-            paper = get_paper_with_authors(database, paper_id_int)
+            paper = get_paper_with_authors(database, paper_uid)
 
             # Add similarity/distance scores if available
             if "distances" in search_results and search_results["distances"][0]:
@@ -167,7 +165,7 @@ def format_search_results(
 
         except PaperFormattingError as e:
             # Log the error but continue with other papers
-            logger.warning(f"Skipping paper {paper_id}: {str(e)}")
+            logger.warning(f"Skipping paper {paper_uid}: {str(e)}")
             continue
 
     if not papers:
