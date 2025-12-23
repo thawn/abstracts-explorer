@@ -400,6 +400,9 @@ def chat_command(args: argparse.Namespace) -> int:
         # Connect to embeddings
         em.connect()
 
+        # Get or create the collection (should already exist for chat)
+        em.create_collection(reset=False)
+
         # Get collection stats
         stats = em.get_collection_stats()
         print(f"\n📊 Loaded {stats['count']:,} papers from collection '{stats['name']}'")
