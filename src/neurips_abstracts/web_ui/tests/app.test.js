@@ -92,14 +92,10 @@ describe('NeurIPS Abstracts Web UI', () => {
             <input id="search-input" value="" />
             <select id="limit-select"><option value="10">10</option></select>
             <select id="session-filter" multiple></select>
-            <select id="topic-filter" multiple></select>
-            <select id="eventtype-filter" multiple></select>
             <div id="search-results"></div>
             <input id="chat-input" value="" />
             <select id="n-papers"><option value="3">3</option></select>
             <select id="chat-session-filter" multiple></select>
-            <select id="chat-topic-filter" multiple></select>
-            <select id="chat-eventtype-filter"></select>
             <div id="chat-messages"></div>
             <div id="chat-papers"></div>
             <div id="interesting-papers"></div>
@@ -210,9 +206,7 @@ describe('NeurIPS Abstracts Web UI', () => {
     describe('loadFilterOptions', () => {
         test('should load and populate filter options successfully', async () => {
             const mockFilters = {
-                sessions: ['Session 1', 'Session 2'],
-                topics: ['Machine Learning', 'Computer Vision'],
-                eventtypes: ['Poster', 'Oral']
+                sessions: ['Session 1', 'Session 2']
             };
 
             const mockAvailableFilters = {
@@ -235,18 +229,11 @@ describe('NeurIPS Abstracts Web UI', () => {
             await app.loadFilterOptions();
 
             const sessionSelect = document.getElementById('session-filter');
-            const topicSelect = document.getElementById('topic-filter');
-            const eventtypeSelect = document.getElementById('eventtype-filter');
 
             expect(sessionSelect.options.length).toBe(2); // Two sessions
-            expect(topicSelect.options.length).toBe(2); // Two topics
-            expect(eventtypeSelect.options.length).toBe(2); // Two eventtypes
 
-            // Check that sessions and topics are selected by default, but not eventtypes (single select)
+            // Check that sessions are selected by default
             expect(Array.from(sessionSelect.options).every(opt => opt.selected)).toBe(true);
-            expect(Array.from(topicSelect.options).every(opt => opt.selected)).toBe(true);
-            // Eventtype is a single select dropdown, so not all options are selected by default
-            expect(eventtypeSelect.options.length).toBeGreaterThan(0);
         });
 
         test('should handle error response', async () => {
@@ -668,8 +655,6 @@ describe('NeurIPS Abstracts Web UI', () => {
         test('should send filter values when selected', async () => {
             const searchInput = document.getElementById('search-input');
             const sessionSelect = document.getElementById('session-filter');
-            const topicSelect = document.getElementById('topic-filter');
-            const eventtypeSelect = document.getElementById('eventtype-filter');
 
             searchInput.value = 'machine learning';
 
@@ -690,21 +675,6 @@ describe('NeurIPS Abstracts Web UI', () => {
             sessionOption3.selected = false; // Not selected, so filters will be sent
             sessionSelect.appendChild(sessionOption3);
 
-            const topicOption1 = document.createElement('option');
-            topicOption1.value = 'Computer Vision';
-            topicOption1.selected = true;
-            topicSelect.appendChild(topicOption1);
-
-            const topicOption2 = document.createElement('option');
-            topicOption2.value = 'NLP';
-            topicOption2.selected = false; // Not selected, so filters will be sent
-            topicSelect.appendChild(topicOption2);
-
-            const eventtypeOption = document.createElement('option');
-            eventtypeOption.value = 'Poster';
-            eventtypeOption.selected = true;
-            eventtypeSelect.appendChild(eventtypeOption);
-
             fetch.mockResolvedValueOnce({
                 json: async () => ({ papers: [], count: 0 })
             });
@@ -714,8 +684,6 @@ describe('NeurIPS Abstracts Web UI', () => {
             const callBody = JSON.parse(fetch.mock.calls[0][1].body);
             expect(callBody.query).toBe('machine learning');
             expect(callBody.sessions).toEqual(['Session 1', 'Session 2']);
-            expect(callBody.topics).toEqual(['Computer Vision']);
-            expect(callBody.eventtypes).toEqual(['Poster']);
         });
 
         test('should handle API error response', async () => {

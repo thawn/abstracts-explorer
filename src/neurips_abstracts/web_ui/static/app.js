@@ -130,31 +130,6 @@ function syncFiltersToModal(context) {
             opt.selected = sessionFilter.options[idx]?.selected || false;
         });
     }
-
-    // Sync topics
-    const topicFilter = document.getElementById(prefix + 'topic-filter');
-    const modalTopicFilter = document.getElementById('modal-topic-filter');
-    if (topicFilter && modalTopicFilter) {
-        // Copy options if modal is empty
-        if (modalTopicFilter.options.length === 0) {
-            modalTopicFilter.innerHTML = topicFilter.innerHTML;
-        }
-        // Copy selections
-        Array.from(modalTopicFilter.options).forEach((opt, idx) => {
-            opt.selected = topicFilter.options[idx]?.selected || false;
-        });
-    }
-
-    // Sync event type
-    const eventtypeFilter = document.getElementById(prefix + 'eventtype-filter');
-    const modalEventtypeFilter = document.getElementById('modal-eventtype-filter');
-    if (eventtypeFilter && modalEventtypeFilter) {
-        // Copy options if modal is empty
-        if (modalEventtypeFilter.options.length === 0) {
-            modalEventtypeFilter.innerHTML = eventtypeFilter.innerHTML;
-        }
-        modalEventtypeFilter.value = eventtypeFilter.value;
-    }
 }
 
 // Sync filters from modal back to search/chat
@@ -168,22 +143,6 @@ function syncFiltersFromModal(context) {
         Array.from(sessionFilter.options).forEach((opt, idx) => {
             opt.selected = modalSessionFilter.options[idx]?.selected || false;
         });
-    }
-
-    // Sync topics
-    const topicFilter = document.getElementById(prefix + 'topic-filter');
-    const modalTopicFilter = document.getElementById('modal-topic-filter');
-    if (topicFilter && modalTopicFilter) {
-        Array.from(topicFilter.options).forEach((opt, idx) => {
-            opt.selected = modalTopicFilter.options[idx]?.selected || false;
-        });
-    }
-
-    // Sync event type
-    const eventtypeFilter = document.getElementById(prefix + 'eventtype-filter');
-    const modalEventtypeFilter = document.getElementById('modal-eventtype-filter');
-    if (eventtypeFilter && modalEventtypeFilter) {
-        eventtypeFilter.value = modalEventtypeFilter.value;
     }
 }
 
@@ -1169,27 +1128,6 @@ async function loadFilterOptions() {
             sessionSelect.appendChild(option);
         });
 
-        // Clear and repopulate search topic filter
-        const topicSelect = document.getElementById('topic-filter');
-        topicSelect.innerHTML = ''; // Clear existing options
-        filtersData.topics.forEach(topic => {
-            const option = document.createElement('option');
-            option.value = topic;
-            option.textContent = topic;
-            option.selected = true; // Select all by default
-            topicSelect.appendChild(option);
-        });
-
-        // Clear and repopulate search eventtype filter (single select)
-        const eventtypeSelect = document.getElementById('eventtype-filter');
-        eventtypeSelect.innerHTML = ''; // Clear existing options
-        filtersData.eventtypes.forEach(eventtype => {
-            const option = document.createElement('option');
-            option.value = eventtype;
-            option.textContent = eventtype;
-            eventtypeSelect.appendChild(option);
-        });
-
         // Clear and repopulate chat session filter
         const chatSessionSelect = document.getElementById('chat-session-filter');
         chatSessionSelect.innerHTML = ''; // Clear existing options
@@ -1199,27 +1137,6 @@ async function loadFilterOptions() {
             option.textContent = session;
             option.selected = true; // Select all by default
             chatSessionSelect.appendChild(option);
-        });
-
-        // Clear and repopulate chat topic filter
-        const chatTopicSelect = document.getElementById('chat-topic-filter');
-        chatTopicSelect.innerHTML = ''; // Clear existing options
-        filtersData.topics.forEach(topic => {
-            const option = document.createElement('option');
-            option.value = topic;
-            option.textContent = topic;
-            option.selected = true; // Select all by default
-            chatTopicSelect.appendChild(option);
-        });
-
-        // Clear and repopulate chat eventtype filter (single select)
-        const chatEventtypeSelect = document.getElementById('chat-eventtype-filter');
-        chatEventtypeSelect.innerHTML = ''; // Clear existing options
-        filtersData.eventtypes.forEach(eventtype => {
-            const option = document.createElement('option');
-            option.value = eventtype;
-            option.textContent = eventtype;
-            chatEventtypeSelect.appendChild(option);
         });
     } catch (error) {
         console.error('Error loading filter options:', error);
@@ -1249,12 +1166,8 @@ async function searchPapers() {
 
     // Get multiple selected values from multi-select dropdowns
     const sessionSelect = document.getElementById('session-filter');
-    const topicSelect = document.getElementById('topic-filter');
-    const eventtypeSelect = document.getElementById('eventtype-filter');
 
     const sessions = Array.from(sessionSelect.selectedOptions).map(opt => opt.value);
-    const topics = Array.from(topicSelect.selectedOptions).map(opt => opt.value);
-    const eventtype = eventtypeSelect.value; // Single select
 
     // Get year and conference from header selectors
     const yearSelect = document.getElementById('year-selector');
@@ -1289,10 +1202,6 @@ async function searchPapers() {
         if (sessions.length > 0 && sessions.length < sessionSelect.options.length) {
             requestBody.sessions = sessions;
         }
-        if (topics.length > 0 && topics.length < topicSelect.options.length) {
-            requestBody.topics = topics;
-        }
-        if (eventtype) requestBody.eventtypes = [eventtype]; // Single value as array
 
         // Add year filter if selected
         if (selectedYear) {
@@ -1609,12 +1518,8 @@ async function sendChatMessage() {
 
         // Get multiple selected values from chat multi-select dropdowns
         const chatSessionSelect = document.getElementById('chat-session-filter');
-        const chatTopicSelect = document.getElementById('chat-topic-filter');
-        const chatEventtypeSelect = document.getElementById('chat-eventtype-filter');
 
         const sessions = Array.from(chatSessionSelect.selectedOptions).map(opt => opt.value);
-        const topics = Array.from(chatTopicSelect.selectedOptions).map(opt => opt.value);
-        const eventtype = chatEventtypeSelect.value; // Single select
 
         // Get year and conference from header selectors
         const yearSelect = document.getElementById('year-selector');
@@ -1631,10 +1536,6 @@ async function sendChatMessage() {
         if (sessions.length > 0 && sessions.length < chatSessionSelect.options.length) {
             requestBody.sessions = sessions;
         }
-        if (topics.length > 0 && topics.length < chatTopicSelect.options.length) {
-            requestBody.topics = topics;
-        }
-        if (eventtype) requestBody.eventtypes = [eventtype]; // Single value as array
 
         // Add year filter if selected
         if (selectedYear) {

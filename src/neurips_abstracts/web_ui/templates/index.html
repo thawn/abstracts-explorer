@@ -320,7 +320,7 @@
             <div class="bg-white rounded-lg shadow-md p-6 mb-6">
                 <div class="flex gap-4">
                     <div class="flex-1">
-                        <input type="text" id="search-input" placeholder="Search for abstracts by keywords or topic..."
+                        <input type="text" id="search-input" placeholder="Search for abstracts by keywords..."
                             class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-600 focus:border-transparent"
                             onkeypress="if(event.key === 'Enter') searchPapers()">
                     </div>
@@ -338,8 +338,6 @@
                 <!-- Hidden filter elements for search (used by JavaScript) -->
                 <div class="hidden">
                     <select id="session-filter" multiple></select>
-                    <select id="topic-filter" multiple></select>
-                    <select id="eventtype-filter"></select>
                 </div>
             </div>
 
@@ -391,7 +389,7 @@
                     <div class="p-6 bg-white border-t">
                         <div class="flex gap-4">
                             <input type="text" id="chat-input"
-                                placeholder="Ask about abstracts, research topics, or specific techniques..."
+                                placeholder="Ask about abstracts, research areas, or specific techniques..."
                                 class="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-600 focus:border-transparent"
                                 onkeypress="if(event.key === 'Enter') sendChatMessage()">
                             <button onclick="openChatSettings()"
@@ -408,8 +406,6 @@
                         <!-- Hidden filter elements for chat (used by JavaScript) -->
                         <div class="hidden">
                             <select id="chat-session-filter" multiple></select>
-                            <select id="chat-topic-filter" multiple></select>
-                            <select id="chat-eventtype-filter"></select>
                         </div>
                     </div>
                 </div>
@@ -567,35 +563,6 @@
                                 <i class="fas fa-times mr-1"></i>Deselect All
                             </button>
                         </div>
-                    </div>
-    
-                    <!-- Shared: Topics Filter -->
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">
-                            Topics (Ctrl/Cmd+Click for multiple)
-                        </label>
-                        <select id="modal-topic-filter" multiple size="8"
-                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-600">
-                        </select>
-                        <div class="flex gap-2 mt-2">
-                            <button onclick="selectAllFilter('modal-topic-filter')"
-                                class="px-3 py-2 text-sm text-purple-600 hover:text-purple-800 hover:bg-purple-50 rounded-lg border border-purple-200">
-                                <i class="fas fa-check-double mr-1"></i>Select All
-                            </button>
-                            <button onclick="deselectAllFilter('modal-topic-filter')"
-                                class="px-3 py-2 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-50 rounded-lg border border-gray-200">
-                                <i class="fas fa-times mr-1"></i>Deselect All
-                            </button>
-                        </div>
-                    </div>
-    
-                    <!-- Shared: Event Type Filter -->
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Event Type</label>
-                        <select id="modal-eventtype-filter"
-                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-600">
-                            <option value="">All Event Types</option>
-                        </select>
                     </div>
                 </div>
             </div>
