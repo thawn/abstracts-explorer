@@ -111,7 +111,9 @@ def main():
             ),
         ]
 
-        em.add_papers_batch(sample_papers)
+        print(f"   Adding {len(sample_papers)} sample papers...")
+        for paper_id, abstract, metadata in sample_papers:
+            em.add_paper(paper_id, abstract, metadata)
         print(f"✓ Added {len(sample_papers)} sample papers")
 
     else:

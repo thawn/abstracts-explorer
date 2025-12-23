@@ -54,7 +54,6 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         - db_path: Path to the SQLite database with papers
         - output: Path for the ChromaDB vector database
         - collection: Name for the ChromaDB collection
-        - batch_size: Number of papers to process at once
         - lm_studio_url: URL for LM Studio API
         - model: Name of the embedding model
         - force: Whether to reset existing collection
@@ -127,7 +126,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         em.create_collection(reset=args.force)
 
         # Generate embeddings with progress bar
-        print(f"\n🚀 Generating embeddings (batch size: {args.batch_size})...")
+        print(f"\n🚀 Generating embeddings...")
 
         # Determine total count for progress bar
         with DatabaseManager(db_path) as db:
@@ -147,7 +146,6 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
 
             embedded_count = em.embed_from_database(
                 db_path=db_path,
-                batch_size=args.batch_size,
                 where_clause=args.where,
                 progress_callback=update_progress,
             )
@@ -766,12 +764,6 @@ Examples:
         type=str,
         default=config.collection_name,
         help=f"Name for the ChromaDB collection (default: {config.collection_name})",
-    )
-    embeddings_parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=100,
-        help="Number of papers to process at once (default: 100)",
     )
     embeddings_parser.add_argument(
         "--lm-studio-url",

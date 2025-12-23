@@ -15,24 +15,21 @@ from neurips_abstracts.embeddings import EmbeddingsError
 
 @pytest.fixture
 def test_database(tmp_path):
-    """Create a test database with sample papers."""
+    """Create a test database with sample papers using lightweight schema."""
     db_path = tmp_path / "test.db"
     conn = sqlite3.connect(str(db_path))
     cursor = conn.cursor()
 
-    # Create papers table
+    # Create papers table with lightweight schema
     cursor.execute(
         """
         CREATE TABLE papers (
-            id INTEGER PRIMARY KEY,
-            name TEXT,
+            uid TEXT PRIMARY KEY,
+            title TEXT,
             abstract TEXT,
             authors TEXT,
-            topic TEXT,
             keywords TEXT,
-            decision TEXT,
-            paper_url TEXT,
-            poster_position TEXT
+            session TEXT
         )
     """
     )
@@ -40,44 +37,35 @@ def test_database(tmp_path):
     # Insert test data
     test_papers = [
         (
-            1,
+            "paper1",
             "Deep Learning Paper",
             "This paper presents a novel deep learning approach.",
             "John Doe, Jane Smith",
-            "Machine Learning",
             "deep learning, neural networks",
-            "Accept",
-            "https://papers.nips.cc/paper/1",
-            "A12",
+            "ML Session 1",
         ),
         (
-            2,
+            "paper2",
             "NLP Paper",
             "We introduce a new natural language processing method.",
             "Alice Johnson",
-            "Natural Language Processing",
             "NLP, transformers",
-            "Accept",
-            "https://papers.nips.cc/paper/2",
-            "B05",
+            "NLP Session 2",
         ),
         (
-            3,
+            "paper3",
             "Computer Vision Paper",
             "",  # Empty abstract
             "Bob Wilson",
-            "Computer Vision",
             "vision, CNN",
-            "Reject",
-            "",
-            "",
+            "CV Session 3",
         ),
     ]
 
     cursor.executemany(
         """
-        INSERT INTO papers (id, name, abstract, authors, topic, keywords, decision, paper_url, poster_position)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO papers (uid, title, abstract, authors, keywords, session)
+        VALUES (?, ?, ?, ?, ?, ?)
     """,
         test_papers,
     )
@@ -87,9 +75,8 @@ def test_database(tmp_path):
     return db_path
 
 
-# Note: The above test_database fixture is kept here as it has a slightly different
-# schema than the one in conftest.py. This fixture includes specific fields
-# (paper_url, poster_position) that are needed for embeddings tests.
+# Note: The above test_database fixture uses the lightweight schema
+# that matches the actual database structure used in production.
 
 
 class TestEmbeddingsManager:
@@ -228,8 +215,8 @@ class TestEmbeddingsManager:
         with pytest.raises(EmbeddingsError, match="Collection not initialized"):
             embeddings_manager.add_paper(paper_id=1, abstract="Test")
 
-    def test_add_papers_batch(self, embeddings_manager, mock_lm_studio):
-        """Test batch adding papers."""
+    def test_add_multiple_papers(self, embeddings_manager, mock_lm_studio):
+        """Test adding multiple papers."""
         embeddings_manager.connect()
         embeddings_manager.create_collection()
 
@@ -239,14 +226,15 @@ class TestEmbeddingsManager:
             (3, "Abstract 3", {"title": "Paper 3"}),
         ]
 
-        embeddings_manager.add_papers_batch(papers, batch_size=2)
+        for paper_id, abstract, metadata in papers:
+            embeddings_manager.add_paper(paper_id, abstract, metadata)
 
         stats = embeddings_manager.get_collection_stats()
         assert stats["count"] == 3
         embeddings_manager.close()
 
-    def test_add_papers_batch_with_empty_abstracts(self, embeddings_manager, mock_lm_studio):
-        """Test batch adding papers with some empty abstracts."""
+    def test_add_papers_with_empty_abstracts(self, embeddings_manager, mock_lm_studio):
+        """Test adding papers with some empty abstracts."""
         embeddings_manager.connect()
         embeddings_manager.create_collection()
 
@@ -256,7 +244,8 @@ class TestEmbeddingsManager:
             (3, "Abstract 3", {"title": "Paper 3"}),
         ]
 
-        embeddings_manager.add_papers_batch(papers)
+        for paper_id, abstract, metadata in papers:
+            embeddings_manager.add_paper(paper_id, abstract, metadata)
 
         stats = embeddings_manager.get_collection_stats()
         assert stats["count"] == 2  # Only 2 papers should be added
@@ -272,7 +261,8 @@ class TestEmbeddingsManager:
             (1, "Deep learning neural networks", {"title": "DL Paper"}),
             (2, "Natural language processing", {"title": "NLP Paper"}),
         ]
-        embeddings_manager.add_papers_batch(papers)
+        for paper_id, abstract, metadata in papers:
+            embeddings_manager.add_paper(paper_id, abstract, metadata)
 
         # Search
         results = embeddings_manager.search_similar("machine learning", n_results=2)
@@ -341,13 +331,13 @@ class TestEmbeddingsManager:
         embeddings_manager.connect()
         embeddings_manager.create_collection()
 
-        count = embeddings_manager.embed_from_database(test_database, where_clause="decision = 'Accept'")
+        count = embeddings_manager.embed_from_database(test_database, where_clause="session LIKE '%ML%'")
 
-        # Should only embed accepted papers with non-empty abstracts
-        assert count == 2
+        # Should only embed papers in ML sessions with non-empty abstracts (paper1)
+        assert count == 1
 
         stats = embeddings_manager.get_collection_stats()
-        assert stats["count"] == 2
+        assert stats["count"] == 1
         embeddings_manager.close()
 
     def test_embed_from_database_not_found(self, embeddings_manager, tmp_path):
@@ -375,13 +365,11 @@ class TestEmbeddingsManager:
         def progress_callback(current: int, total: int) -> None:
             progress_calls.append((current, total))
 
-        count = embeddings_manager.embed_from_database(
-            test_database, batch_size=1, progress_callback=progress_callback
-        )
+        count = embeddings_manager.embed_from_database(test_database, progress_callback=progress_callback)
 
         # Should embed 2 papers (one has empty abstract)
         assert count == 2
-        # Progress callback should be called with batch updates
+        # Progress callback should be called
         assert len(progress_calls) > 0
         # Check that the last progress call shows completion
         assert progress_calls[-1][0] <= progress_calls[-1][1]
@@ -390,22 +378,19 @@ class TestEmbeddingsManager:
 
     def test_embed_from_database_empty_result(self, embeddings_manager, tmp_path, mock_lm_studio):
         """Test embedding from database with no matching papers."""
-        # Create empty database
+        # Create empty database with lightweight schema
         db_path = tmp_path / "empty.db"
         conn = sqlite3.connect(str(db_path))
         cursor = conn.cursor()
         cursor.execute(
             """
             CREATE TABLE papers (
-                id INTEGER PRIMARY KEY,
-                name TEXT,
+                uid TEXT PRIMARY KEY,
+                title TEXT,
                 abstract TEXT,
                 authors TEXT,
-                topic TEXT,
                 keywords TEXT,
-                decision TEXT,
-                paper_url TEXT,
-                poster_position TEXT
+                session TEXT
             )
         """
         )
@@ -431,25 +416,22 @@ class TestEmbeddingsManager:
         cursor.execute(
             """
             CREATE TABLE papers (
-                id INTEGER PRIMARY KEY,
-                name TEXT,
+                uid TEXT PRIMARY KEY,
+                title TEXT,
                 abstract TEXT,
                 authors TEXT,
-                topic TEXT,
                 keywords TEXT,
-                decision TEXT,
-                paper_url TEXT,
-                poster_position TEXT
+                session TEXT
             )
         """
         )
         # Insert papers with empty or None abstracts
         cursor.executemany(
-            "INSERT INTO papers VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO papers VALUES (?, ?, ?, ?, ?, ?)",
             [
-                (1, "Paper 1", "", "Author", "Topic", "kw", "Accept", "url", "pos"),
-                (2, "Paper 2", None, "Author", "Topic", "kw", "Accept", "url", "pos"),
-                (3, "Paper 3", "   ", "Author", "Topic", "kw", "Accept", "url", "pos"),
+                ("p1", "Paper 1", "", "Author", "kw", "session1"),
+                ("p2", "Paper 2", None, "Author", "kw", "session2"),
+                ("p3", "Paper 3", "   ", "Author", "kw", "session3"),
             ],
         )
         conn.commit()
@@ -483,31 +465,34 @@ class TestEmbeddingsManager:
         embeddings_manager.close()
 
     def test_embed_from_database_with_metadata_fields(self, embeddings_manager, test_database, mock_lm_studio):
-        """Test that paper_url and poster_position are included in metadata."""
+        """Test that metadata fields from lightweight schema are included."""
         embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         count = embeddings_manager.embed_from_database(test_database)
         assert count == 2
 
-        # Search to verify metadata includes new fields
+        # Search to verify metadata includes lightweight schema fields
         results = embeddings_manager.search_similar("test", n_results=2)
         assert len(results["metadatas"][0]) > 0
 
-        # Check both papers have the new metadata fields
+        # Check papers have the lightweight schema metadata fields
         for metadata in results["metadatas"][0]:
-            assert "paper_url" in metadata
-            assert "poster_position" in metadata
+            assert "title" in metadata
+            assert "authors" in metadata
+            assert "keywords" in metadata
+            assert "session" in metadata
 
-        # Find paper 1's metadata
+        # Find paper1's metadata
         paper_1_metadata = None
         for i, paper_id in enumerate(results["ids"][0]):
-            if paper_id == "1":
+            if paper_id == "paper1":
                 paper_1_metadata = results["metadatas"][0][i]
                 break
 
         assert paper_1_metadata is not None
-        assert paper_1_metadata["paper_url"] == "https://papers.nips.cc/paper/1"
-        assert paper_1_metadata["poster_position"] == "A12"
+        assert paper_1_metadata["title"] == "Deep Learning Paper"
+        assert paper_1_metadata["authors"] == "John Doe, Jane Smith"
+        assert paper_1_metadata["session"] == "ML Session 1"
 
         embeddings_manager.close()
