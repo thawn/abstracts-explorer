@@ -723,8 +723,8 @@ Examples:
     download_parser.add_argument(
         "--output",
         type=str,
-        default="data/neurips_2025.db",
-        help="Output database file path (default: data/neurips_2025.db)",
+        default=config.paper_db_path,
+        help=f"Output database file path (default: {config.paper_db_path})",
     )
     download_parser.add_argument(
         "--force",
@@ -752,7 +752,7 @@ Examples:
     embeddings_parser.add_argument(
         "--db-path",
         type=str,
-        required=True,
+        default=config.paper_db_path,
         help="Path to the SQLite database with papers",
     )
     embeddings_parser.add_argument(
