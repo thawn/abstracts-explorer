@@ -159,7 +159,7 @@ with DatabaseManager("data/neurips_2025.db") as db:
     
     # Display results
     for paper in papers:
-        print(f"{paper['name']} - {paper['authors']}")
+        print(f"{paper['title']} - {paper['authors']}")
 ```
 
 ### Query Authors
@@ -198,12 +198,12 @@ from neurips_abstracts import DatabaseManager
 with DatabaseManager("data/neurips_2025.db") as db:
     # Execute custom SQL queries
     results = db.query(
-        "SELECT name, authors, decision FROM papers WHERE eventtype = ? ORDER BY name",
-        ("Oral",)
+        "SELECT title, authors FROM papers WHERE session = ? ORDER BY title",
+        ("Poster Session 1",)
     )
     
     for row in results:
-        print(f"{row['name']}: {row['authors']} ({row['decision']})")
+        print(f"{row['title']}: {row['authors']}")
 ```
 
 ## Complete Example
@@ -232,9 +232,8 @@ with DatabaseManager("data/neurips_2025.db") as db:
     
     print(f"\nFound {len(papers)} papers about deep learning:")
     for paper in papers:
-        print(f"- {paper['name']}")
+        print(f"- {paper['title']}")
         print(f"  Authors: {paper['authors']}")
-        print(f"  Decision: {paper['decision']}")
         print(f"  Session: {paper['session']}")
         print()
 ```
@@ -632,9 +631,3 @@ with EmbeddingsManager() as em, DatabaseManager("data/neurips_2025.db") as db:
 - Further RAG improvements
   - consider [multi-turn conversation refinement](https://www.emergentmind.com/topics/multi-turn-rag-conversations)
   - Implement citation extraction and validation
-- sqlite database: switch our central database schema from the complicated neurips schema to the lightweight schema used by ml4ps: 
-  Store authors as a comma separated list of names in one authors column.
-  The title of the paper should be stored in a field title (not name like in the neurips schema).
-  The uid for each paper should be generated as a hash from the title+original_id the original uid (if present in the scraped data) should be stored in an optional column original_id
-  
-  make sure to adapt all parts of the code to use the new schema.

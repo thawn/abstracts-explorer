@@ -502,16 +502,18 @@ class TestML4PSEndToEnd:
             max_workers=10,
         )
 
-        assert result["count"] > 0
-        assert len(result["results"]) > 0
+        # Result is now a list of LightweightPaper objects
+        assert isinstance(result, list)
+        assert len(result) > 0
         assert output_file.exists()
 
-        # Verify schema
-        first_paper = result["results"][0]
-        assert "id" in first_paper
-        assert "name" in first_paper
-        assert "authors" in first_paper
-        assert "session" in first_paper
+        # Verify schema - papers are LightweightPaper objects
+        first_paper = result[0]
+        assert hasattr(first_paper, "title")
+        assert hasattr(first_paper, "authors")
+        assert hasattr(first_paper, "session")
+        assert hasattr(first_paper, "year")
+        assert hasattr(first_paper, "conference")
 
 
 # ============================================================================
@@ -524,34 +526,42 @@ class TestML4PSRegression:
 
     @pytest.mark.slow
     @patch.object(ML4PSDownloaderPlugin, "_scrape_papers")
-    def test_output_schema_matches_old_format(self, mock_scrape, ml4ps_plugin, sample_scraped_papers):
-        """Test that output schema matches the original full schema format."""
+    def test_output_schema_matches_lightweight_format(self, mock_scrape, ml4ps_plugin, sample_scraped_papers):
+        """Test that output schema matches the lightweight format."""
         mock_scrape.return_value = sample_scraped_papers
 
         result = ml4ps_plugin.download(year=2025)
 
-        # Check top-level structure
-        assert "count" in result
-        assert "next" in result
-        assert "previous" in result
-        assert "results" in result
+        # Result should be a list of LightweightPaper objects
+        assert isinstance(result, list)
+        assert len(result) > 0
 
-        # Check paper structure
-        paper = result["results"][0]
-        required_fields = [
-            "id",
-            "uid",
-            "name",
-            "authors",
-            "abstract",
-            "session",
-            "event_type",
-            "eventmedia",
-            "keywords",
-            "sourceurl",
-        ]
-        for field in required_fields:
-            assert field in paper, f"Missing required field: {field}"
+        # Check first paper has required lightweight schema fields
+        first_paper = result[0]
+
+        # Required fields in LightweightPaper model
+        assert hasattr(first_paper, "title")
+        assert hasattr(first_paper, "authors")
+        assert hasattr(first_paper, "abstract")
+        assert hasattr(first_paper, "session")
+        assert hasattr(first_paper, "poster_position")
+        assert hasattr(first_paper, "year")
+        assert hasattr(first_paper, "conference")
+
+        # Verify data types
+        assert isinstance(first_paper.title, str)
+        assert isinstance(first_paper.authors, list)
+        assert isinstance(first_paper.abstract, str)
+        assert isinstance(first_paper.session, str)
+        assert isinstance(first_paper.poster_position, str)
+        assert isinstance(first_paper.year, int)
+        assert isinstance(first_paper.conference, str)
+
+        # Optional fields
+        assert hasattr(first_paper, "paper_pdf_url")
+        assert hasattr(first_paper, "poster_image_url")
+        assert hasattr(first_paper, "url")
+        assert hasattr(first_paper, "keywords")
 
     def test_author_format_compatibility(self, ml4ps_plugin, sample_scraped_papers):
         """Test that authors are formatted correctly in lightweight schema."""

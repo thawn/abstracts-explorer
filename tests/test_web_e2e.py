@@ -71,107 +71,74 @@ def test_database(tmp_path_factory):
 
         cursor = db.connection.cursor()
 
-        # Add test papers with realistic data
+        # Add test papers with realistic data (lightweight schema)
         papers_data = [
             (
                 "paper1",
                 "Attention is All You Need",
+                "Ashish Vaswani, Noam Shazeer",
                 "We propose the Transformer, a model architecture eschewing recurrence and instead "
                 "relying entirely on an attention mechanism to draw global dependencies between input and output.",
-                "Accept (oral)",
                 "Oral Session 1",
-                "Deep Learning",
-                "Oral",
+                "A1",
+                "attention, transformer, neural networks",
+                2025,
+                "NeurIPS",
             ),
             (
                 "paper2",
                 "BERT: Pre-training of Deep Bidirectional Transformers",
+                "Jacob Devlin, Ming-Wei Chang",
                 "We introduce a new language representation model called BERT, which stands for "
                 "Bidirectional Encoder Representations from Transformers.",
-                "Accept (poster)",
                 "Poster Session A",
-                "Natural Language Processing",
-                "Poster",
+                "P1",
+                "bert, nlp, transformers",
+                2025,
+                "NeurIPS",
             ),
             (
                 "paper3",
                 "Deep Residual Learning for Image Recognition",
+                "Kaiming He, Xiangyu Zhang",
                 "Deep residual nets are foundations of our submissions to ILSVRC & COCO 2015 competitions.",
-                "Accept (oral)",
                 "Oral Session 2",
-                "Computer Vision",
-                "Oral",
+                "A2",
+                "resnet, computer vision, deep learning",
+                2025,
+                "NeurIPS",
             ),
             (
                 "paper4",
                 "Generative Adversarial Networks",
+                "Ian Goodfellow, Yoshua Bengio",
                 "We propose a new framework for estimating generative models via an adversarial process.",
-                "Accept (poster)",
                 "Poster Session B",
-                "Generative Models",
-                "Poster",
+                "P2",
+                "gan, generative models, adversarial",
+                2025,
+                "NeurIPS",
             ),
             (
                 "paper5",
                 "Neural Machine Translation by Jointly Learning to Align and Translate",
+                "Dzmitry Bahdanau, Yoshua Bengio",
                 "Neural machine translation is a recently proposed approach to machine translation.",
-                "Accept (spotlight)",
                 "Spotlight Session",
-                "Natural Language Processing",
-                "Spotlight",
+                "S1",
+                "nmt, translation, attention",
+                2025,
+                "NeurIPS",
             ),
         ]
 
-        paper_ids = []
-        for uid, name, abstract, decision, session, topic, eventtype in papers_data:
+        for uid, title, authors, abstract, session, poster_position, keywords, year, conference in papers_data:
             cursor.execute(
                 """
-                INSERT INTO papers (uid, name, abstract, decision, session, topic, eventtype)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO papers (uid, title, authors, abstract, session, poster_position, keywords, year, conference)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (uid, name, abstract, decision, session, topic, eventtype),
-            )
-            paper_ids.append(cursor.lastrowid)
-
-        # Add authors
-        authors_data = [
-            ("Ashish Vaswani", "Google Brain"),
-            ("Noam Shazeer", "Google Brain"),
-            ("Jacob Devlin", "Google AI"),
-            ("Ming-Wei Chang", "Google AI"),
-            ("Kaiming He", "Microsoft Research"),
-            ("Xiangyu Zhang", "Microsoft Research"),
-            ("Ian Goodfellow", "OpenAI"),
-            ("Yoshua Bengio", "University of Montreal"),
-            ("Dzmitry Bahdanau", "University of Montreal"),
-        ]
-
-        author_ids = []
-        for fullname, institution in authors_data:
-            cursor.execute(
-                "INSERT INTO authors (fullname, institution) VALUES (?, ?)",
-                (fullname, institution),
-            )
-            author_ids.append(cursor.lastrowid)
-
-        # Link authors to papers (with author_order)
-        paper_author_links = [
-            (paper_ids[0], author_ids[0], 0),  # Attention paper - Vaswani
-            (paper_ids[0], author_ids[1], 1),  # Attention paper - Shazeer
-            (paper_ids[1], author_ids[2], 0),  # BERT - Devlin
-            (paper_ids[1], author_ids[3], 1),  # BERT - Chang
-            (paper_ids[2], author_ids[4], 0),  # ResNet - He
-            (paper_ids[2], author_ids[5], 1),  # ResNet - Zhang
-            (paper_ids[3], author_ids[6], 0),  # GAN - Goodfellow
-            (paper_ids[3], author_ids[7], 1),  # GAN - Bengio
-            (paper_ids[4], author_ids[8], 0),  # NMT - Bahdanau
-            (paper_ids[4], author_ids[7], 1),  # NMT - Bengio (appears in multiple papers)
-        ]
-
-        for paper_id, author_id, author_order in paper_author_links:
-            cursor.execute(
-                "INSERT INTO paper_authors (paper_id, author_id, author_order) VALUES (?, ?, ?)",
-                (paper_id, author_id, author_order),
+                (uid, title, authors, abstract, session, poster_position, keywords, year, conference),
             )
 
         db.connection.commit()
@@ -221,19 +188,19 @@ def web_server(test_database, tmp_path_factory):
     em.connect()
     em.create_collection(reset=True)
 
-    # Add embeddings for test papers (matching the paper IDs from test_database)
+    # Add embeddings for test papers (matching the paper UIDs from test_database)
     # Get the database to read papers
     db = DatabaseManager(str(test_database))
     db.connect()
     cursor = db.connection.cursor()
-    cursor.execute("SELECT id, abstract FROM papers")
+    cursor.execute("SELECT uid, abstract FROM papers")
     papers = cursor.fetchall()
 
     for paper in papers:
-        paper_id = paper[0]
+        paper_uid = paper[0]
         abstract = paper[1]
         if abstract:  # Only add if abstract exists
-            em.add_paper(paper_id=paper_id, abstract=abstract, metadata={"paper_id": str(paper_id)})
+            em.add_paper(paper_id=paper_uid, abstract=abstract, metadata={"paper_id": str(paper_uid)})
 
     db.close()
     # Don't close embeddings manager - keep the ChromaDB collection active
@@ -640,126 +607,6 @@ class TestWebUIE2E:
         results = browser.find_elements(By.CSS_SELECTOR, "#search-results .paper-card")
         assert len(results) <= 10
 
-    def test_search_with_topic_filter(self, web_server, browser):
-        """
-        Test searching with topic filter applied.
-
-        Parameters
-        ----------
-        web_server : tuple
-            Web server fixture
-        browser : webdriver.Chrome
-            Selenium WebDriver instance
-        """
-        base_url, _ = web_server
-        browser.get(base_url)
-
-        # Wait for page to load and filters to populate
-        time.sleep(1)
-
-        # Open search settings modal
-        wait = WebDriverWait(browser, 10)
-        settings_btn = wait.until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, "button[onclick='openSearchSettings()']"))
-        )
-        settings_btn.click()
-
-        # Wait for modal to open
-        wait.until(EC.visibility_of_element_located((By.ID, "settings-modal")))
-
-        # Select a topic filter (e.g., "Natural Language Processing")
-        topic_select = Select(browser.find_element(By.ID, "modal-topic-filter"))
-        try:
-            topic_select.select_by_visible_text("Natural Language Processing")
-        except NoSuchElementException:
-            # If exact text not found, select first available option
-            if len(topic_select.options) > 0:
-                topic_select.select_by_index(0)
-
-        # Close modal
-        close_btn = browser.find_element(By.CSS_SELECTOR, "button[onclick='closeSettings()']")
-        close_btn.click()
-
-        # Wait for modal to close
-        wait.until(EC.invisibility_of_element_located((By.ID, "settings-modal")))
-
-        # Perform search
-        search_input = browser.find_element(By.ID, "search-input")
-        search_input.send_keys("model")
-        search_input.send_keys(Keys.RETURN)
-
-        # Wait for results
-        wait = WebDriverWait(browser, 10)
-        try:
-            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")))
-            # Results should be filtered by topic
-            results = browser.find_elements(By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")
-            assert len(results) > 0
-        except TimeoutException:
-            # No results is also acceptable if filter is too restrictive
-            pass
-
-    def test_search_with_eventtype_filter(self, web_server, browser):
-        """
-        Test searching with event type filter applied.
-
-        Parameters
-        ----------
-        web_server : tuple
-            Web server fixture
-        browser : webdriver.Chrome
-            Selenium WebDriver instance
-        """
-        base_url, _ = web_server
-        browser.get(base_url)
-
-        # Wait for page to load
-        time.sleep(1)
-
-        # Open search settings modal
-        wait = WebDriverWait(browser, 10)
-        settings_btn = wait.until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, "button[onclick='openSearchSettings()']"))
-        )
-        settings_btn.click()
-
-        # Wait for modal to open
-        wait.until(EC.visibility_of_element_located((By.ID, "settings-modal")))
-
-        # Select event type filter - use select_by_value or select_by_index instead
-        eventtype_select = Select(browser.find_element(By.ID, "modal-eventtype-filter"))
-        # Get available options and select the first non-empty one
-        options = eventtype_select.options
-        if len(options) > 1:  # Skip "All" option if it exists
-            # Try to select by value "Oral" if available, otherwise select first available
-            try:
-                eventtype_select.select_by_value("Oral")
-            except:
-                # If "Oral" not found, select the second option (first non-All)
-                eventtype_select.select_by_index(1)
-
-        # Close modal
-        close_btn = browser.find_element(By.CSS_SELECTOR, "button[onclick='closeSettings()']")
-        close_btn.click()
-
-        # Wait for modal to close
-        wait.until(EC.invisibility_of_element_located((By.ID, "settings-modal")))
-
-        # Perform search
-        search_input = browser.find_element(By.ID, "search-input")
-        search_input.send_keys("learning")
-        search_input.send_keys(Keys.RETURN)
-
-        # Wait for results
-        wait = WebDriverWait(browser, 10)
-        try:
-            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")))
-            results = browser.find_elements(By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")
-            assert len(results) > 0
-        except TimeoutException:
-            # No results is acceptable
-            pass
-
     def test_collapsible_abstract(self, web_server, browser):
         """
         Test expanding and collapsing paper abstracts.
@@ -999,10 +846,8 @@ class TestWebUIE2E:
         chat_tab_button.click()
         time.sleep(0.5)
 
-        # Check filter elements
+        # Check filter elements (only session filter exists in lightweight schema)
         assert browser.find_element(By.ID, "chat-session-filter")
-        assert browser.find_element(By.ID, "chat-topic-filter")
-        assert browser.find_element(By.ID, "chat-eventtype-filter")
 
     def test_chat_send_message(self, web_server, browser):
         """
@@ -1128,40 +973,6 @@ class TestWebUIE2E:
             # Verify selection changed
             selected_value = n_papers_select.first_selected_option.get_attribute("value")
             assert selected_value is not None
-
-    def test_chat_with_filters(self, web_server, browser):
-        """
-        Test using filters in chat interface.
-
-        Parameters
-        ----------
-        web_server : tuple
-            Web server fixture
-        browser : webdriver.Chrome
-            Selenium WebDriver instance
-        """
-        base_url, _ = web_server
-        browser.get(base_url)
-
-        # Switch to chat tab
-        chat_tab_button = browser.find_element(By.ID, "tab-chat")
-        chat_tab_button.click()
-        time.sleep(1)
-
-        # Try to select a topic filter using Select class
-        topic_select_element = browser.find_element(By.ID, "chat-topic-filter")
-        topic_select = Select(topic_select_element)
-        options = topic_select.options
-
-        if len(options) > 1:  # More than just the default option
-            # Select second option (first actual filter value)
-            topic_select.select_by_index(1)
-            time.sleep(0.5)
-
-            # Verify it's selected
-            selected_option = topic_select.first_selected_option
-            assert selected_option is not None
-            assert selected_option.get_attribute("value") is not None
 
     def test_chat_papers_display(self, web_server, browser):
         """

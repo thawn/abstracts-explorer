@@ -240,6 +240,8 @@ def convert_neurips_to_lightweight_schema(papers: List[Dict[str, Any]]) -> List[
             "abstract": paper.get("abstract") or "",
             "session": paper.get("session") or "No session",
             "poster_position": paper.get("poster_position") or "",
+            "year": paper.get("year") or 0,
+            "conference": paper.get("conference") or "",
         }
 
         # Add optional fields if present
@@ -278,12 +280,6 @@ def convert_neurips_to_lightweight_schema(papers: List[Dict[str, Any]]) -> List[
         award = paper.get("award") or (paper.get("decision") if "award" in decision.lower() else None)
         if award:
             lightweight_paper["award"] = award
-
-        if paper.get("year"):
-            lightweight_paper["year"] = paper["year"]
-
-        if paper.get("conference"):
-            lightweight_paper["conference"] = paper["conference"]
 
         lightweight_papers.append(lightweight_paper)
 

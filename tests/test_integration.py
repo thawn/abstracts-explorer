@@ -606,6 +606,12 @@ class TestIntegration:
 
         # Convert JSON data to LightweightPaper objects
         raw_papers = real_data.get("results", real_data)  # Handle both dict and list formats
+
+        # Add year and conference to each paper (required by LightweightPaper)
+        for paper in raw_papers:
+            paper["year"] = 2025
+            paper["conference"] = "NeurIPS"
+
         lightweight_dicts = convert_neurips_to_lightweight_schema(raw_papers)
         papers = [LightweightPaper(**paper_dict) for paper_dict in lightweight_dicts]
 
@@ -621,9 +627,7 @@ class TestIntegration:
             em.create_collection()
 
             # Embed only papers with non-empty abstracts
-            embedded_count = em.embed_from_database(
-                db_file, batch_size=10, where_clause="abstract IS NOT NULL AND abstract != ''"
-            )
+            embedded_count = em.embed_from_database(db_file, where_clause="abstract IS NOT NULL AND abstract != ''")
 
             # All 7 papers should have abstracts
             assert embedded_count == 7
@@ -640,19 +644,21 @@ class TestIntegration:
             assert len(graph_results["ids"][0]) <= 3
             assert len(graph_results["ids"][0]) > 0
 
-            # Verify we got paper IDs back
-            result_ids = [int(pid) for pid in graph_results["ids"][0]]
-            assert all(pid in [119718, 119663, 114995, 119969, 119801, 119900, 120000] for pid in result_ids)
+            # Verify we got paper UIDs back (UIDs are hex strings in lightweight schema)
+            result_uids = graph_results["ids"][0]
+            assert all(isinstance(uid, str) for uid in result_uids)
+            # Verify UIDs are valid hex strings (8+ characters)
+            assert all(len(uid) >= 8 for uid in result_uids)
 
             # Verify distances are present and reasonable
             distances = graph_results["distances"][0]
             assert all(isinstance(d, (int, float)) for d in distances)
-            assert len(distances) == len(result_ids)
+            assert len(distances) == len(result_uids)
 
             # Verify metadata is preserved
             metadatas = graph_results["metadatas"][0]
             assert all("title" in meta for meta in metadatas)
-            assert all("decision" in meta for meta in metadatas)
+            assert all("session" in meta for meta in metadatas)
 
             # Step 4: Test search with different query
             reasoning_results = em.search_similar("reasoning and language models", n_results=2)
@@ -660,15 +666,20 @@ class TestIntegration:
             assert len(reasoning_results["ids"][0]) <= 2
             assert len(reasoning_results["ids"][0]) > 0
 
-            # Step 5: Test metadata filtering - only poster papers
-            poster_results = em.search_similar("machine learning", n_results=5, where={"decision": "Accept (poster)"})
+            # Step 5: Test metadata filtering - filter by session
+            # Get the first session name from our test data to use for filtering
+            with DatabaseManager(db_file) as db:
+                results = db.query("SELECT DISTINCT session FROM papers LIMIT 1")
+                first_session = results[0]["session"]
 
-            # Should return results
-            assert len(poster_results["ids"][0]) > 0
+            session_results = em.search_similar("machine learning", n_results=5, where={"session": first_session})
 
-            # Verify all returned papers are posters
-            for meta in poster_results["metadatas"][0]:
-                assert "poster" in meta["decision"].lower()
+            # Should return results (at least one paper from that session)
+            assert len(session_results["ids"][0]) > 0
+
+            # Verify all returned papers are from the specified session
+            for meta in session_results["metadatas"][0]:
+                assert meta["session"] == first_session
 
             # Step 6: Verify documents (abstracts) are returned
             docs = graph_results["documents"][0]

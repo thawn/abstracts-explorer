@@ -420,15 +420,14 @@ class TestRAGChatIntegration:
         em.connect()
         em.create_collection(reset=True)
 
-        # Add a test paper
+        # Add a test paper (use string uid to match lightweight schema)
         em.add_paper(
-            paper_id=1,
+            paper_id="1",
             abstract="This paper discusses attention mechanisms in neural networks.",
             metadata={
                 "title": "Attention Mechanisms",
                 "authors": "Test Author",
-                "topic": "Deep Learning",
-                "decision": "Accept",
+                "session": "Test Session",
                 "keywords": "attention, neural networks",
             },
         )
@@ -441,39 +440,24 @@ class TestRAGChatIntegration:
         db.connect()
         db.create_tables()
 
-        # Insert paper into database
+        # Insert paper into database (lightweight schema)
         cursor = db.connection.cursor()
         cursor.execute(
             """
-            INSERT INTO papers (uid, title, abstract, decision, topic, keywords)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO papers (uid, title, abstract, authors, session, poster_position, keywords, year, conference)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                1,
+                "1",  # uid is TEXT in lightweight schema
                 "Attention Mechanisms",
                 "This paper discusses attention mechanisms in neural networks.",
-                "Accept",
-                "Deep Learning",
+                "Test Author",  # authors stored as comma-separated string
+                "Test Session",  # session is required
+                "",  # poster_position
                 "attention, neural networks",
+                2025,  # year is required
+                "NeurIPS",  # conference is required
             ),
-        )
-
-        # Insert author
-        cursor.execute(
-            """
-            INSERT INTO authors (id, fullname)
-            VALUES (?, ?)
-            """,
-            (1, "Test Author"),
-        )
-
-        # Link paper to author
-        cursor.execute(
-            """
-            INSERT INTO paper_authors (paper_id, author_id, author_order)
-            VALUES (?, ?, ?)
-            """,
-            (1, 1, 0),
         )
 
         db.connection.commit()
@@ -510,15 +494,14 @@ class TestRAGChatIntegration:
         em.connect()
         em.create_collection(reset=True)
 
-        # Add test papers
+        # Add test papers (use string uid to match lightweight schema)
         em.add_paper(
-            paper_id=1,
+            paper_id="1",
             abstract="Transformers are a deep learning architecture based on attention.",
             metadata={
                 "title": "Transformers",
                 "authors": "Vaswani et al.",
-                "topic": "Deep Learning",
-                "decision": "Accept (oral)",
+                "session": "Test Session",
                 "keywords": "transformers, attention",
             },
         )
@@ -531,39 +514,24 @@ class TestRAGChatIntegration:
         db.connect()
         db.create_tables()
 
-        # Insert paper into database
+        # Insert paper into database (lightweight schema)
         cursor = db.connection.cursor()
         cursor.execute(
             """
-            INSERT INTO papers (uid, name, abstract, decision, topic, keywords)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO papers (uid, title, abstract, authors, session, poster_position, keywords, year, conference)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                1,
+                "1",  # uid is TEXT in lightweight schema
                 "Transformers",
                 "Transformers are a deep learning architecture based on attention.",
-                "Accept (oral)",
-                "Deep Learning",
+                "Vaswani et al.",  # authors stored as comma-separated string
+                "Test Session",  # session is required
+                "",  # poster_position
                 "transformers, attention",
+                2025,  # year is required
+                "NeurIPS",  # conference is required
             ),
-        )
-
-        # Insert author
-        cursor.execute(
-            """
-            INSERT INTO authors (id, fullname)
-            VALUES (?, ?)
-            """,
-            (1, "Vaswani et al."),
-        )
-
-        # Link paper to author
-        cursor.execute(
-            """
-            INSERT INTO paper_authors (paper_id, author_id, author_order)
-            VALUES (?, ?, ?)
-            """,
-            (1, 1, 0),
         )
 
         db.connection.commit()
@@ -601,14 +569,14 @@ class TestRAGChatIntegration:
         em.connect()
         em.create_collection(reset=True)
 
+        # Add test paper (use string uid to match lightweight schema)
         em.add_paper(
-            paper_id=1,
+            paper_id="1",
             abstract="Test abstract about machine learning.",
             metadata={
                 "title": "ML Paper",
                 "authors": "Author",
-                "topic": "ML",
-                "decision": "Accept",
+                "session": "Test Session",
                 "keywords": "machine learning",
             },
         )
@@ -621,39 +589,24 @@ class TestRAGChatIntegration:
         db.connect()
         db.create_tables()
 
-        # Insert paper into database
+        # Insert paper into database (lightweight schema)
         cursor = db.connection.cursor()
         cursor.execute(
             """
-            INSERT INTO papers (uid, name, abstract, decision, topic, keywords)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO papers (uid, title, abstract, authors, session, poster_position, keywords, year, conference)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                1,
+                "1",  # uid is TEXT in lightweight schema
                 "ML Paper",
                 "Test abstract about machine learning.",
-                "Accept",
-                "ML",
+                "Author",  # authors stored as comma-separated string
+                "Test Session",  # session is required
+                "",  # poster_position
                 "machine learning",
+                2025,  # year is required
+                "NeurIPS",  # conference is required
             ),
-        )
-
-        # Insert author
-        cursor.execute(
-            """
-            INSERT INTO authors (id, fullname)
-            VALUES (?, ?)
-            """,
-            (1, "Author"),
-        )
-
-        # Link paper to author
-        cursor.execute(
-            """
-            INSERT INTO paper_authors (paper_id, author_id, author_order)
-            VALUES (?, ?, ?)
-            """,
-            (1, 1, 0),
         )
 
         db.connection.commit()
