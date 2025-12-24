@@ -14,6 +14,7 @@ The framework consists of:
 
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
+from pydantic import ValidationError
 
 
 class DownloaderPlugin(ABC):
@@ -610,6 +611,33 @@ def sanitize_author_names(authors: List[str]) -> List[str]:
     import re
 
     return [re.sub(r"\s+", " ", author.replace(";", " ")).strip() for author in authors]
+
+
+def prepare_chroma_db_paper_data(paper: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Prepare paper data from chroma_db for validation by normalizing and converting fields.
+
+    Parameters
+    ----------
+    paper : dict
+        Paper data to prepare
+
+    Returns
+    -------
+    dict
+        Prepared paper data
+    """
+    # Split authors and keywords into lists
+    paper["authors"] = paper["authors"].split(";")
+    paper["year"] = int(paper["year"])
+    if "keywords" in paper:
+        paper["keywords"] = paper["keywords"].split(",")
+    if "original_id" in paper:
+        if paper["original_id"]:
+            paper["original_id"] = int(paper["original_id"])
+        else:
+            del paper["original_id"]
+    return paper
 
 
 def validate_lightweight_paper(paper: Dict[str, Any]) -> LightweightPaper:
