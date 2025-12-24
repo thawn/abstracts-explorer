@@ -37,7 +37,6 @@ document.addEventListener('DOMContentLoaded', function () {
     loadStats();
     loadFilterOptions();
     loadPriorities();
-    updateDownloadButton();
 
     // Close modal when clicking outside of it
     document.getElementById('settings-modal').addEventListener('click', function (event) {
@@ -1774,9 +1773,6 @@ function handleYearChange() {
     // Reload filter options with the new year selection
     loadFilterOptions();
 
-    // Update download button text
-    updateDownloadButton();
-
     // Refresh interesting papers if the tab is visible, otherwise just update the count
     if (currentTab === 'interesting') {
         loadInterestingPapers();
@@ -1805,9 +1801,6 @@ function handleConferenceChange() {
 
     // Reload filter options with the new conference selection
     loadFilterOptions();
-
-    // Update download button text
-    updateDownloadButton();
 
     // Refresh interesting papers if the tab is visible, otherwise just update the count
     if (currentTab === 'interesting') {
@@ -1869,197 +1862,5 @@ function updateYearsForConference() {
         yearSelect.value = currentYear;
     } else {
         yearSelect.value = ''; // Reset to "All Years" if previous selection not available
-    }
-}
-
-// Update download button text based on whether data exists for selected conference/year
-async function updateDownloadButton() {
-    const conferenceSelect = document.getElementById('conference-selector');
-    const yearSelect = document.getElementById('year-selector');
-    const downloadBtn = document.getElementById('download-btn');
-    const downloadBtnText = document.getElementById('download-btn-text');
-
-    if (!conferenceSelect || !yearSelect || !downloadBtn || !downloadBtnText) {
-        return;
-    }
-
-    const selectedConference = conferenceSelect.value;
-    const selectedYear = yearSelect.value;
-
-    // If no conference or year selected, disable button
-    if (!selectedConference || !selectedYear) {
-        downloadBtn.disabled = true;
-        downloadBtn.classList.add('opacity-50', 'cursor-not-allowed');
-        downloadBtn.title = 'Select a conference and year to download';
-        downloadBtnText.textContent = 'Download';
-        return;
-    }
-
-    // Enable button
-    downloadBtn.disabled = false;
-    downloadBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-
-    // Check if we have data for this conference/year
-    try {
-        const response = await fetch(`${API_BASE}/api/stats?year=${selectedYear}&conference=${selectedConference}`);
-        const data = await response.json();
-
-        if (data.total_papers > 0) {
-            downloadBtnText.textContent = 'Update';
-            downloadBtn.title = `Update abstracts for ${selectedConference} ${selectedYear} (${data.total_papers} papers currently)`;
-        } else {
-            downloadBtnText.textContent = 'Download';
-            downloadBtn.title = `Download abstracts for ${selectedConference} ${selectedYear}`;
-        }
-    } catch (error) {
-        console.error('Error checking paper count:', error);
-        downloadBtnText.textContent = 'Download';
-        downloadBtn.title = `Download/update abstracts for ${selectedConference} ${selectedYear}`;
-    }
-}
-
-// Handle download/update button click
-async function handleDownload() {
-    const conferenceSelect = document.getElementById('conference-selector');
-    const yearSelect = document.getElementById('year-selector');
-    const downloadBtn = document.getElementById('download-btn');
-    const downloadBtnText = document.getElementById('download-btn-text');
-    const downloadIcon = document.getElementById('download-icon');
-    const progressBg = document.getElementById('download-progress-bg');
-
-    const selectedConference = conferenceSelect ? conferenceSelect.value : '';
-    const selectedYear = yearSelect ? yearSelect.value : '';
-
-    // Validate selections
-    if (!selectedConference) {
-        alert('Please select a conference first');
-        return;
-    }
-
-    if (!selectedYear) {
-        alert('Please select a year first');
-        return;
-    }
-
-    // Disable button during download
-    downloadBtn.disabled = true;
-    downloadBtn.classList.add('opacity-50', 'cursor-not-allowed');
-    const originalIcon = downloadIcon.className;
-    downloadIcon.className = 'fas fa-spinner fa-spin';
-    downloadBtnText.textContent = 'Starting...';
-
-    // Show progress bar background
-    progressBg.classList.remove('hidden');
-    progressBg.style.width = '0%';
-
-    try {
-        const response = await fetch(`${API_BASE}/api/download`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                conference: selectedConference,
-                year: parseInt(selectedYear)
-            })
-        });
-
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        // Read the SSE stream
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-            const { done, value } = await reader.read();
-
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-
-            // Process complete SSE messages
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    const dataStr = line.substring(6);
-                    if (dataStr.trim()) {
-                        try {
-                            const data = JSON.parse(dataStr);
-
-                            if (data.error) {
-                                alert(`Error: ${data.error}`);
-                                return;
-                            }
-
-                            // Update button progress based on stage
-                            if (data.stage === 'download') {
-                                downloadBtnText.textContent = `Downloading (${data.progress}%)`;
-                                progressBg.style.width = `${Math.round(data.progress / 3)}%`;
-                            } else if (data.stage === 'database') {
-                                downloadBtnText.textContent = `Loading DB (${data.progress}%)`;
-                                const progress = 33 + Math.round(data.progress / 3);
-                                progressBg.style.width = `${progress}%`;
-                            } else if (data.stage === 'embeddings') {
-                                downloadBtnText.textContent = `Embedding (${data.progress}%)`;
-                                const progress = 66 + Math.round(data.progress / 3);
-                                progressBg.style.width = `${progress}%`;
-                            } else if (data.stage === 'complete' && data.success) {
-                                // Complete
-                                progressBg.style.width = '100%';
-                                downloadIcon.className = 'fas fa-check';
-                                downloadBtnText.textContent = 'Complete!';
-
-                                // Show success message
-                                const action = data.action === 'updating' ? 'Updated' : 'Downloaded';
-                                const message = `${action} ${data.downloaded} papers\n` +
-                                    `Loaded ${data.updated} papers into database\n` +
-                                    `Created ${data.embedded} embeddings for new/changed content`;
-
-                                setTimeout(() => {
-                                    alert(message);
-
-                                    // Refresh the page data
-                                    loadStats();
-                                    loadFilterOptions();
-
-                                    // Refresh interesting papers if on that tab
-                                    if (currentTab === 'interesting') {
-                                        loadInterestingPapers();
-                                    } else {
-                                        updateInterestingPapersCount();
-                                    }
-
-                                    // Reset button after a delay
-                                    setTimeout(() => {
-                                        progressBg.classList.add('hidden');
-                                        progressBg.style.width = '0%';
-                                        updateDownloadButton();
-                                    }, 2000);
-                                }, 500);
-                            }
-                        } catch (e) {
-                            console.error('Error parsing SSE data:', e, dataStr);
-                        }
-                    }
-                }
-            }
-        }
-
-    } catch (error) {
-        console.error('Error downloading abstracts:', error);
-        alert(`Error downloading abstracts: ${error.message}`);
-        progressBg.classList.add('hidden');
-        progressBg.style.width = '0%';
-    } finally {
-        // Re-enable button
-        downloadBtn.disabled = false;
-        downloadBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-        downloadIcon.className = originalIcon;
-        // Button text will be updated by updateDownloadButton() after data refresh
     }
 }
