@@ -149,6 +149,7 @@ class TestCLI:
         # Mock LM Studio connection failure
         with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
             mock_em.test_lm_studio_connection.return_value = False
             MockEM.return_value = mock_em
 
@@ -203,6 +204,7 @@ class TestCLI:
         # Mock embeddings manager
         with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
             mock_em.test_lm_studio_connection.return_value = True
             mock_em.embed_from_database.return_value = 2
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 2}
@@ -264,6 +266,7 @@ class TestCLI:
         # Mock embeddings manager
         with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
             mock_em.test_lm_studio_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
@@ -319,6 +322,7 @@ class TestCLI:
         # Mock embeddings manager
         with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
             mock_em.test_lm_studio_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
@@ -375,6 +379,7 @@ class TestCLI:
         # Mock embeddings manager
         with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (True, None, custom_model)
             mock_em.test_lm_studio_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
@@ -431,6 +436,7 @@ class TestCLI:
         # Mock embeddings manager to raise error
         with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
             mock_em.test_lm_studio_connection.return_value = True
             mock_em.connect.side_effect = EmbeddingsError("Connection failed")
             MockEM.return_value = mock_em
@@ -1141,11 +1147,13 @@ class TestCLIEmbeddingsProgressAndStats:
 
         with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
+            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
+            mock_em.test_lm_studio_connection.return_value = True
             mock_em.collection_exists.return_value = False
 
             # Mock embed_from_database to simulate progress callbacks
 
-            def mock_embed(db_path, batch_size=10, where_clause=None, progress_callback=None):
+            def mock_embed(db_path, batch_size=10, where_clause=None, progress_callback=None, force_recreate=False):
                 # Simulate calling progress callback with (current, total) arguments
                 if progress_callback:
                     progress_callback(1, 3)
