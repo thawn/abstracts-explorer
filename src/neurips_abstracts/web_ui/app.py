@@ -185,6 +185,57 @@ def stats():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/embedding-model-check")
+def check_embedding_model():
+    """
+    Check if the embedding model in the configuration matches the one in the database.
+
+    Returns
+    -------
+    dict
+        - compatible: bool - True if models match or no model is stored
+        - stored_model: str or None - Model stored in database
+        - current_model: str - Current model from configuration
+        - warning: str or None - Warning message if incompatible
+    """
+    try:
+        config = get_config()
+        database = get_database()
+        
+        # Get the stored embedding model from the database
+        stored_model = database.get_embedding_model()
+        current_model = config.embedding_model
+        
+        # Check compatibility
+        if stored_model is None:
+            # No model stored yet, considered compatible
+            compatible = True
+            warning = None
+        elif stored_model == current_model:
+            # Models match
+            compatible = True
+            warning = None
+        else:
+            # Models differ
+            compatible = False
+            warning = (
+                f"Embedding model mismatch detected! The embeddings were created with '{stored_model}' "
+                f"but the current configuration uses '{current_model}'. Embeddings from different models "
+                f"are incompatible. Please recreate the embeddings using: "
+                f"neurips-abstracts create-embeddings --db-path {config.paper_db_path} --force"
+            )
+        
+        return jsonify({
+            "compatible": compatible,
+            "stored_model": stored_model,
+            "current_model": current_model,
+            "warning": warning
+        })
+    except Exception as e:
+        logger.error(f"Error in embedding-model-check endpoint: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/filters")
 def get_filters():
     """

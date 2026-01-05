@@ -518,11 +518,64 @@ class EmbeddingsManager:
         except Exception as e:
             raise EmbeddingsError(f"Failed to get collection stats: {str(e)}") from e
 
+    def check_model_compatibility(self, db_path: Union[str, Path]) -> Tuple[bool, Optional[str], Optional[str]]:
+        """
+        Check if the current embedding model matches the one stored in the database.
+
+        Parameters
+        ----------
+        db_path : str or Path
+            Path to the SQLite database file.
+
+        Returns
+        -------
+        tuple of (bool, str or None, str or None)
+            - compatible: True if models match or no model is stored, False if they differ
+            - stored_model: Name of the model stored in the database, or None if not set
+            - current_model: Name of the current model
+
+        Raises
+        ------
+        EmbeddingsError
+            If database operations fail.
+
+        Examples
+        --------
+        >>> em = EmbeddingsManager()
+        >>> compatible, stored, current = em.check_model_compatibility("neurips.db")
+        >>> if not compatible:
+        ...     print(f"Model mismatch: stored={stored}, current={current}")
+        """
+        try:
+            db_path = Path(db_path)
+            if not db_path.exists():
+                # If database doesn't exist, consider it compatible (no previous embeddings)
+                return True, None, self.model_name
+
+            # Use DatabaseManager to check the stored model
+            db_manager = DatabaseManager(db_path)
+            db_manager.connect()
+            
+            stored_model = db_manager.get_embedding_model()
+            db_manager.close()
+
+            # If no model is stored, consider it compatible (first time embedding)
+            if stored_model is None:
+                return True, None, self.model_name
+
+            # Check if models match
+            compatible = stored_model == self.model_name
+            return compatible, stored_model, self.model_name
+
+        except Exception as e:
+            raise EmbeddingsError(f"Failed to check model compatibility: {str(e)}") from e
+
     def embed_from_database(
         self,
         db_path: Union[str, Path],
         where_clause: Optional[str] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None,
+        force_recreate: bool = False,
     ) -> int:
         """
         Embed papers from a SQLite database.
@@ -537,6 +590,8 @@ class EmbeddingsManager:
             SQL WHERE clause to filter papers (e.g., "decision = 'Accept'")
         progress_callback : callable, optional
             Callback function to report progress. Called with (current, total) number of papers processed.
+        force_recreate : bool, optional
+            If True, skip checking for existing embeddings and recreate all, by default False
 
         Returns
         -------
@@ -562,31 +617,28 @@ class EmbeddingsManager:
             raise EmbeddingsError("Collection not initialized. Call create_collection() first.")
 
         try:
-            # ToDo use DatabaseManager to handle database operations
             db_path = Path(db_path)
             if not db_path.exists():
                 raise EmbeddingsError(f"Database not found: {db_path}")
 
-            # Connect to database
-            conn = sqlite3.connect(str(db_path))
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+            # Use DatabaseManager for database operations
+            db_manager = DatabaseManager(db_path)
+            db_manager.connect()
 
-            # Check which columns exist in the papers table
-            cursor.execute("PRAGMA table_info(papers)")
+            # Store the embedding model in the database
+            db_manager.set_embedding_model(self.model_name)
 
             query = f"SELECT * FROM papers"
             if where_clause:
                 query += f" WHERE {where_clause}"
 
-            cursor.execute(query)
-            rows = cursor.fetchall()
+            rows = db_manager.query(query)
             total = len(rows)
 
             logger.info(f"Found {total} papers to embed")
 
             if total == 0:
-                conn.close()
+                db_manager.close()
                 return 0
 
             # Process papers one by one
@@ -597,7 +649,8 @@ class EmbeddingsManager:
                 paper = dict(row)
 
                 # Check if paper already exists in the collection and if it needs to be updated
-                if not self.paper_needs_update(paper):
+                # Skip this check if force_recreate is True
+                if not force_recreate and not self.paper_needs_update(paper):
                     logger.debug(f"Skipping paper {paper['uid']}: already exists in collection")
                     skipped_count += 1
                     # Still call progress callback to update the progress bar
@@ -616,11 +669,9 @@ class EmbeddingsManager:
                         logger.error(f"Failed to embed paper {paper['uid']}: {str(e)}")
                         continue
 
-            conn.close()
+            db_manager.close()
             logger.info(f"Successfully embedded {embedded_count} papers, skipped {skipped_count} existing papers")
             return embedded_count
 
-        except sqlite3.Error as e:
-            raise EmbeddingsError(f"Database error: {str(e)}") from e
         except Exception as e:
             raise EmbeddingsError(f"Failed to embed from database: {str(e)}") from e

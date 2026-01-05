@@ -106,6 +106,7 @@ class DatabaseManager:
 
         Creates the following tables:
         - papers: Main table for paper information with lightweight ML4PS schema
+        - embeddings_metadata: Metadata about embeddings (model used, creation date)
 
         Raises
         ------
@@ -141,6 +142,18 @@ class DatabaseManager:
                     year INTEGER,
                     conference TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """
+            )
+
+            # Create embeddings metadata table to track which model was used
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS embeddings_metadata (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    embedding_model TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """
             )
@@ -697,3 +710,103 @@ class DatabaseManager:
             }
         except sqlite3.Error as e:
             raise DatabaseError(f"Failed to get filter options: {str(e)}") from e
+
+    def get_embedding_model(self) -> Optional[str]:
+        """
+        Get the embedding model used for the current embeddings.
+
+        Returns
+        -------
+        str or None
+            Name of the embedding model, or None if not set.
+
+        Raises
+        ------
+        DatabaseError
+            If query fails.
+
+        Examples
+        --------
+        >>> db = DatabaseManager("neurips.db")
+        >>> with db:
+        ...     model = db.get_embedding_model()
+        >>> print(model)
+        'text-embedding-qwen3-embedding-4b'
+        """
+        if not self.connection:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            cursor = self.connection.cursor()
+            # Get the most recent embedding model entry
+            cursor.execute(
+                """
+                SELECT embedding_model FROM embeddings_metadata 
+                ORDER BY updated_at DESC 
+                LIMIT 1
+            """
+            )
+            result = cursor.fetchone()
+            return result["embedding_model"] if result else None
+        except sqlite3.Error as e:
+            raise DatabaseError(f"Failed to get embedding model: {str(e)}") from e
+
+    def set_embedding_model(self, model_name: str) -> None:
+        """
+        Set the embedding model used for embeddings.
+
+        This stores or updates the embedding model metadata. If a record exists,
+        it updates the model and timestamp. Otherwise, it creates a new record.
+
+        Parameters
+        ----------
+        model_name : str
+            Name of the embedding model.
+
+        Raises
+        ------
+        DatabaseError
+            If update fails.
+
+        Examples
+        --------
+        >>> db = DatabaseManager("neurips.db")
+        >>> with db:
+        ...     db.set_embedding_model("text-embedding-qwen3-embedding-4b")
+        """
+        if not self.connection:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            cursor = self.connection.cursor()
+            
+            # Check if any record exists
+            cursor.execute("SELECT COUNT(*) as count FROM embeddings_metadata")
+            result = cursor.fetchone()
+            count = result["count"] if result else 0
+
+            if count > 0:
+                # Update the most recent record
+                cursor.execute(
+                    """
+                    UPDATE embeddings_metadata 
+                    SET embedding_model = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = (SELECT id FROM embeddings_metadata ORDER BY updated_at DESC LIMIT 1)
+                """,
+                    (model_name,),
+                )
+            else:
+                # Insert new record
+                cursor.execute(
+                    """
+                    INSERT INTO embeddings_metadata (embedding_model)
+                    VALUES (?)
+                """,
+                    (model_name,),
+                )
+
+            self.connection.commit()
+            logger.info(f"Set embedding model to: {model_name}")
+        except sqlite3.Error as e:
+            self.connection.rollback()
+            raise DatabaseError(f"Failed to set embedding model: {str(e)}") from e

@@ -104,6 +104,28 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
             collection_name=args.collection,
         )
 
+        # Check for model mismatch
+        print("🔍 Checking embedding model compatibility...")
+        compatible, stored_model, current_model = em.check_model_compatibility(db_path)
+        
+        if not compatible:
+            print(f"\n⚠️  WARNING: Embedding model mismatch detected!")
+            print(f"   Stored model:  {stored_model}")
+            print(f"   Current model: {current_model}")
+            print("\n   Embeddings created with different models are incompatible.")
+            
+            if not args.force:
+                print("\n   Use --force to recreate embeddings with the new model.")
+                print("   This will delete existing embeddings and recreate them.\n")
+                response = input("Do you want to recreate embeddings with the new model? (y/N): ")
+                if response.lower() not in ['y', 'yes']:
+                    print("\n❌ Aborted by user. Use --force to skip this prompt.")
+                    return 1
+                # User confirmed, set force flag
+                args.force = True
+            else:
+                print("   --force flag detected: will recreate embeddings with new model")
+
         # Test connection
         print("🔌 Testing LM Studio connection...")
         if not em.test_lm_studio_connection():
@@ -148,6 +170,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
                 db_path=db_path,
                 where_clause=args.where,
                 progress_callback=update_progress,
+                force_recreate=args.force,
             )
 
         print(f"✅ Successfully generated embeddings for {embedded_count:,} papers")

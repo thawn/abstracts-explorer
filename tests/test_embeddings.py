@@ -16,62 +16,56 @@ from neurips_abstracts.embeddings import EmbeddingsError
 @pytest.fixture
 def test_database(tmp_path):
     """Create a test database with sample papers using lightweight schema."""
+    from neurips_abstracts.database import DatabaseManager
+    from neurips_abstracts.plugin import LightweightPaper
+    
     db_path = tmp_path / "test.db"
-    conn = sqlite3.connect(str(db_path))
-    cursor = conn.cursor()
-
-    # Create papers table with lightweight schema
-    cursor.execute(
-        """
-        CREATE TABLE papers (
-            uid TEXT PRIMARY KEY,
-            title TEXT,
-            abstract TEXT,
-            authors TEXT,
-            keywords TEXT,
-            session TEXT
-        )
-    """
-    )
-
-    # Insert test data
-    test_papers = [
-        (
-            "paper1",
-            "Deep Learning Paper",
-            "This paper presents a novel deep learning approach.",
-            "John Doe, Jane Smith",
-            "deep learning, neural networks",
-            "ML Session 1",
-        ),
-        (
-            "paper2",
-            "NLP Paper",
-            "We introduce a new natural language processing method.",
-            "Alice Johnson",
-            "NLP, transformers",
-            "NLP Session 2",
-        ),
-        (
-            "paper3",
-            "Computer Vision Paper",
-            "",  # Empty abstract
-            "Bob Wilson",
-            "vision, CNN",
-            "CV Session 3",
-        ),
-    ]
-
-    cursor.executemany(
-        """
-        INSERT INTO papers (uid, title, abstract, authors, keywords, session)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """,
-        test_papers,
-    )
-
-    conn.commit()
-    conn.close()
+    
+    # Use DatabaseManager to create the database with proper schema
+    with DatabaseManager(db_path) as db:
+        db.create_tables()
+        
+        # Create sample papers
+        papers = [
+            LightweightPaper(
+                uid="paper1",
+                title="Deep Learning Paper",
+                abstract="This paper presents a novel deep learning approach.",
+                authors=["John Doe", "Jane Smith"],
+                keywords=["deep learning", "neural networks"],
+                session="ML Session 1",
+                poster_position="P1",
+                year=2025,
+                conference="NeurIPS",
+            ),
+            LightweightPaper(
+                uid="paper2",
+                title="NLP Paper",
+                abstract="We introduce a new natural language processing method.",
+                authors=["Alice Johnson"],
+                keywords=["NLP", "transformers"],
+                session="NLP Session 2",
+                poster_position="P2",
+                year=2025,
+                conference="NeurIPS",
+            ),
+            LightweightPaper(
+                uid="paper3",
+                title="Computer Vision Paper",
+                abstract="",  # Empty abstract
+                authors=["Bob Wilson"],
+                keywords=["vision", "CNN"],
+                session="CV Session 3",
+                poster_position="P3",
+                year=2025,
+                conference="NeurIPS",
+            ),
+        ]
+        
+        # Add papers to database
+        for paper in papers:
+            db.add_paper(paper)
+    
     return db_path
 
 
@@ -543,3 +537,83 @@ class TestEmbeddingsManager:
         assert stats["count"] == 3
 
         embeddings_manager.close()
+
+
+
+def test_check_model_compatibility_no_database(embeddings_manager, tmp_path):
+    """Test checking model compatibility when database does not exist."""
+    non_existent_db = tmp_path / "nonexistent.db"
+    
+    compatible, stored, current = embeddings_manager.check_model_compatibility(non_existent_db)
+    
+    assert compatible is True
+    assert stored is None
+    assert current == embeddings_manager.model_name
+
+
+def test_check_model_compatibility_no_model_stored(embeddings_manager, tmp_path):
+    """Test checking model compatibility when no model is stored in database."""
+    from neurips_abstracts.database import DatabaseManager
+    
+    db_path = tmp_path / "test.db"
+    with DatabaseManager(db_path) as db:
+        db.create_tables()
+    
+    compatible, stored, current = embeddings_manager.check_model_compatibility(db_path)
+    
+    assert compatible is True
+    assert stored is None
+    assert current == embeddings_manager.model_name
+
+
+def test_check_model_compatibility_matching_models(embeddings_manager, tmp_path):
+    """Test checking model compatibility when models match."""
+    from neurips_abstracts.database import DatabaseManager
+    
+    db_path = tmp_path / "test.db"
+    with DatabaseManager(db_path) as db:
+        db.create_tables()
+        db.set_embedding_model(embeddings_manager.model_name)
+    
+    compatible, stored, current = embeddings_manager.check_model_compatibility(db_path)
+    
+    assert compatible is True
+    assert stored == embeddings_manager.model_name
+    assert current == embeddings_manager.model_name
+
+
+def test_check_model_compatibility_mismatched_models(embeddings_manager, tmp_path):
+    """Test checking model compatibility when models differ."""
+    from neurips_abstracts.database import DatabaseManager
+    
+    db_path = tmp_path / "test.db"
+    different_model = "different-embedding-model"
+    
+    with DatabaseManager(db_path) as db:
+        db.create_tables()
+        db.set_embedding_model(different_model)
+    
+    compatible, stored, current = embeddings_manager.check_model_compatibility(db_path)
+    
+    assert compatible is False
+    assert stored == different_model
+    assert current == embeddings_manager.model_name
+
+
+def test_embed_from_database_stores_model(embeddings_manager, test_database):
+    """Test that embed_from_database stores the embedding model in the database."""
+    from neurips_abstracts.database import DatabaseManager
+    
+    embeddings_manager.connect()
+    embeddings_manager.create_collection()
+    
+    # Embed papers
+    embeddings_manager.embed_from_database(test_database)
+    
+    # Check that the model was stored
+    with DatabaseManager(test_database) as db:
+        stored_model = db.get_embedding_model()
+        assert stored_model == embeddings_manager.model_name
+    
+    embeddings_manager.close()
+
