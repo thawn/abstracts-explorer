@@ -37,6 +37,7 @@ document.addEventListener('DOMContentLoaded', function () {
     loadStats();
     loadFilterOptions();
     loadPriorities();
+    checkEmbeddingModelCompatibility();
 
     // Close modal when clicking outside of it
     document.getElementById('settings-modal').addEventListener('click', function (event) {
@@ -55,6 +56,41 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 });
+
+// Check embedding model compatibility
+async function checkEmbeddingModelCompatibility() {
+    try {
+        const response = await fetch(`${API_BASE}/api/embedding-model-check`);
+        if (!response.ok) {
+            console.error('Failed to check embedding model compatibility');
+            return;
+        }
+        
+        const data = await response.json();
+        
+        if (!data.compatible && data.warning) {
+            // Show the warning banner
+            const banner = document.getElementById('embedding-warning-banner');
+            const messageEl = document.getElementById('embedding-warning-message');
+            const currentModelEl = document.getElementById('warning-current-model');
+            const storedModelEl = document.getElementById('warning-stored-model');
+            
+            messageEl.textContent = data.warning;
+            currentModelEl.textContent = data.current_model || 'N/A';
+            storedModelEl.textContent = data.stored_model || 'N/A';
+            
+            banner.classList.remove('hidden');
+        }
+    } catch (error) {
+        console.error('Error checking embedding model compatibility:', error);
+    }
+}
+
+// Dismiss embedding warning banner
+function dismissEmbeddingWarning() {
+    const banner = document.getElementById('embedding-warning-banner');
+    banner.classList.add('hidden');
+}
 
 // Open search settings modal
 function openSearchSettings() {

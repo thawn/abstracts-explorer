@@ -383,3 +383,49 @@ class TestAddPapers:
 
         with pytest.raises(DatabaseError, match="Not connected to database"):
             db_manager.add_papers(papers)
+
+
+
+class TestEmbeddingModelMetadata:
+    """Tests for embedding model metadata functionality."""
+
+    def test_get_embedding_model_none_when_not_set(self, connected_db):
+        """Test that get_embedding_model returns None when not set."""
+        model = connected_db.get_embedding_model()
+        assert model is None
+
+    def test_set_and_get_embedding_model(self, connected_db):
+        """Test setting and retrieving embedding model."""
+        model_name = "text-embedding-qwen3-embedding-4b"
+        connected_db.set_embedding_model(model_name)
+        
+        retrieved_model = connected_db.get_embedding_model()
+        assert retrieved_model == model_name
+
+    def test_update_embedding_model(self, connected_db):
+        """Test updating the embedding model."""
+        # Set initial model
+        model1 = "text-embedding-model-v1"
+        connected_db.set_embedding_model(model1)
+        assert connected_db.get_embedding_model() == model1
+        
+        # Update to new model
+        model2 = "text-embedding-model-v2"
+        connected_db.set_embedding_model(model2)
+        assert connected_db.get_embedding_model() == model2
+
+    def test_embedding_model_persists_across_connections(self, tmp_path):
+        """Test that embedding model persists across database connections."""
+        db_path = tmp_path / "test.db"
+        model_name = "persistent-model"
+        
+        # First connection: set the model
+        with DatabaseManager(db_path) as db1:
+            db1.create_tables()
+            db1.set_embedding_model(model_name)
+        
+        # Second connection: retrieve the model
+        with DatabaseManager(db_path) as db2:
+            retrieved_model = db2.get_embedding_model()
+            assert retrieved_model == model_name
+
