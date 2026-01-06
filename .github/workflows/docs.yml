@@ -32,10 +32,7 @@ jobs:
               with:
                   python-version: '3.12'
                   install-node: 'false'
-
-            - name: Install documentation dependencies
-              run: |
-                  uv sync --extra docs
+                  extras: '--extra docs'
 
             - name: Build documentation
               run: |

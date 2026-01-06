@@ -14,6 +14,10 @@ inputs:
     description: 'Whether to enable uv caching'
     required: false
     default: 'true'
+  extras:
+    description: 'Extra dependencies to install (e.g., "--extra dev --extra web")'
+    required: false
+    default: '--extra dev --extra web'
 
 runs:
   using: "composite"
@@ -40,4 +44,8 @@ runs:
       shell: bash
       run: |
         chmod +x .github/scripts/setup-ci.sh
-        .github/scripts/setup-ci.sh
+        SKIP_NODE=""
+        if [ "${{ inputs.install-node }}" = "false" ]; then
+          SKIP_NODE="--skip-node"
+        fi
+        .github/scripts/setup-ci.sh $SKIP_NODE --extras "${{ inputs.extras }}"
