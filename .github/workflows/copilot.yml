@@ -1,0 +1,53 @@
+name: Copilot Environment
+
+on:
+    workflow_dispatch:
+    push:
+        branches: [copilot/**]
+    pull_request:
+        branches: [copilot/**]
+
+jobs:
+    setup-and-test:
+        runs-on: ubuntu-latest
+        
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0  # Needed for hatch-vcs to determine version
+
+            - name: Setup NeurIPS Abstracts Environment
+              uses: ./.github/actions/setup-environment
+              with:
+                  python-version: '3.12'
+                  install-node: 'true'
+                  uv-cache: 'true'
+
+            - name: Verify Python environment
+              run: |
+                  uv run python --version
+                  uv run python -c "import neurips_abstracts; print(f'Package version: {neurips_abstracts.__version__}')"
+
+            - name: Verify Node.js environment
+              run: |
+                  node --version
+                  npm --version
+                  npm list --depth=0
+
+            - name: Run quick tests
+              run: |
+                  uv run pytest tests/ -v -m "not slow and not e2e" --maxfail=5
+
+            - name: Environment setup summary
+              if: always()
+              run: |
+                  echo "========================================="
+                  echo "Environment Setup Summary"
+                  echo "========================================="
+                  echo "Python: $(python3 --version)"
+                  echo "uv: $(uv --version)"
+                  echo "Node.js: $(node --version)"
+                  echo "npm: $(npm --version)"
+                  echo "Virtual environment: $(.venv/bin/python --version)"
+                  echo "========================================="

@@ -32,9 +32,16 @@ jobs:
               with:
                   python-version: ${{ matrix.python-version }}
 
-            - name: Install dependencies
+            - name: Setup environment (Unix)
+              if: runner.os != 'Windows'
               run: |
-                  uv sync --extra dev --extra web
+                  chmod +x .github/scripts/setup-ci.sh
+                  .github/scripts/setup-ci.sh --skip-node
+
+            - name: Setup environment (Windows)
+              if: runner.os == 'Windows'
+              run: |
+                  .github/scripts/setup-ci.ps1 --skip-node
 
             - name: Run tests (excluding slow and e2e tests)
               run: |
@@ -85,14 +92,11 @@ jobs:
         steps:
             - uses: actions/checkout@v4
 
-            - name: Set up Node.js
-              uses: actions/setup-node@v4
+            - name: Setup NeurIPS Abstracts Environment
+              uses: ./.github/actions/setup-environment
               with:
-                  node-version: "20"
-                  cache: "npm"
-
-            - name: Install dependencies
-              run: npm ci
+                  python-version: '3.12'
+                  install-node: 'true'
 
             - name: Run JavaScript tests
               run: npm test
