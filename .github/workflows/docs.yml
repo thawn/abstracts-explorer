@@ -27,16 +27,13 @@ jobs:
               with:
                   fetch-depth: 0 # Needed for hatch-vcs to determine version
 
-            - name: Install uv
-              uses: astral-sh/setup-uv@v4
+            - name: Setup NeurIPS Abstracts Environment
+              uses: ./.github/actions/setup-environment
               with:
-                  version: "latest"
-                  enable-cache: true
+                  python-version: '3.12'
+                  install-node: 'false'
 
-            - name: Set up Python
-              run: uv python install 3.12
-
-            - name: Install dependencies
+            - name: Install documentation dependencies
               run: |
                   uv sync --extra docs
 
