@@ -19,6 +19,7 @@ print_section() {
 # Parse command-line arguments
 INSTALL_NODE="true"
 INSTALL_PYTHON="true"
+EXTRA_DEPS="--extra dev --extra web"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -29,6 +30,10 @@ while [[ $# -gt 0 ]]; do
         --skip-python)
             INSTALL_PYTHON="false"
             shift
+            ;;
+        --extras)
+            EXTRA_DEPS="$2"
+            shift 2
             ;;
         *)
             echo "Unknown option: $1"
@@ -62,8 +67,8 @@ if [ "$INSTALL_PYTHON" = "true" ]; then
 
     # Install Python dependencies
     print_section "Installing Python dependencies"
-    # Install with dev and web extras for testing
-    uv sync --extra dev --extra web
+    # Install with specified extras for testing
+    uv sync $EXTRA_DEPS
     echo "✓ Python dependencies installed"
 fi
 

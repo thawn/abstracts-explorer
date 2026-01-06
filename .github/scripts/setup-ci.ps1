@@ -18,13 +18,31 @@ function Print-Section {
 # Parse command-line arguments
 $InstallNode = $true
 $InstallPython = $true
+$ExtraDeps = "--extra dev --extra web"
 
-foreach ($arg in $args) {
-    switch ($arg) {
-        "--skip-node" { $InstallNode = $false }
-        "--skip-python" { $InstallPython = $false }
+$i = 0
+while ($i -lt $args.Length) {
+    switch ($args[$i]) {
+        "--skip-node" { 
+            $InstallNode = $false 
+            $i++
+        }
+        "--skip-python" { 
+            $InstallPython = $false 
+            $i++
+        }
+        "--extras" {
+            $i++
+            if ($i -lt $args.Length) {
+                $ExtraDeps = $args[$i]
+                $i++
+            } else {
+                Write-Host "Error: --extras requires an argument" -ForegroundColor Red
+                exit 1
+            }
+        }
         default {
-            Write-Host "Unknown option: $arg" -ForegroundColor Red
+            Write-Host "Unknown option: $($args[$i])" -ForegroundColor Red
             exit 1
         }
     }
@@ -52,7 +70,7 @@ if ($InstallPython) {
 
     # Install Python dependencies
     Print-Section "Installing Python dependencies"
-    uv sync --extra dev --extra web
+    Invoke-Expression "uv sync $ExtraDeps"
     Write-Host "✓ Python dependencies installed" -ForegroundColor Green
 }
 
