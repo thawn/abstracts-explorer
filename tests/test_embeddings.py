@@ -4,7 +4,7 @@ Tests for the embeddings module.
 
 import pytest
 import sqlite3
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 from neurips_abstracts.embeddings import EmbeddingsError, EmbeddingsManager
 
@@ -101,11 +101,11 @@ class TestEmbeddingsManager:
             assert em.client is not None
         assert embeddings_manager.client is None
 
-    def test_test_lm_studio_connection_success(self, embeddings_manager, mock_lm_studio):
+    def test_test_lm_studio_connection_success(self, embeddings_manager):
         """Test successful LM Studio connection."""
         result = embeddings_manager.test_lm_studio_connection()
         assert result is True
-        mock_lm_studio.get.assert_called_once()
+        embeddings_manager.openai_client.models.list.assert_called_once()
 
     def test_test_lm_studio_connection_failure(self, embeddings_manager):
         """Test failed LM Studio connection."""
@@ -114,12 +114,12 @@ class TestEmbeddingsManager:
         result = embeddings_manager.test_lm_studio_connection()
         assert result is False
 
-    def test_generate_embedding_success(self, embeddings_manager, mock_lm_studio):
+    def test_generate_embedding_success(self, embeddings_manager):
         """Test successful embedding generation."""
         embedding = embeddings_manager.generate_embedding("Test text")
         assert isinstance(embedding, list)
         assert len(embedding) == 4096
-        mock_lm_studio.embeddings.create.assert_called_once()
+        embeddings_manager.openai_client.embeddings.create.assert_called_once()
 
     def test_generate_embedding_empty_text(self, embeddings_manager):
         """Test embedding generation with empty text."""
@@ -128,8 +128,11 @@ class TestEmbeddingsManager:
 
     def test_generate_embedding_api_error(self, embeddings_manager):
         """Test embedding generation with API error."""
-        # Mock the OpenAI client's embeddings.create() to raise an exception
-        embeddings_manager.openai_client.embeddings.create.side_effect = Exception("API error")
+        # Create a mock that will raise an exception
+        mock_response = Mock()
+        mock_response.side_effect = Exception("API error")
+        embeddings_manager.openai_client.embeddings.create = mock_response
+        
         with pytest.raises(EmbeddingsError, match="Failed to generate embedding"):
             embeddings_manager.generate_embedding("Test text")
 

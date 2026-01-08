@@ -295,13 +295,35 @@ def embeddings_manager(tmp_path):
     Notes
     -----
     Uses a test collection name and temporary ChromaDB storage path.
+    Mocks the OpenAI client to avoid real API calls.
     """
+    from unittest.mock import Mock
+    
     chroma_path = tmp_path / "test_chroma"
-    return EmbeddingsManager(
+    
+    # Create the manager
+    em = EmbeddingsManager(
         lm_studio_url="http://localhost:1234",
         chroma_path=chroma_path,
         collection_name="test_collection",
     )
+    
+    # Replace the OpenAI client with a mock
+    mock_client = Mock()
+    
+    # Mock embeddings.create()
+    mock_embedding_response = Mock()
+    mock_embedding_data = Mock()
+    mock_embedding_data.embedding = [0.1] * 4096
+    mock_embedding_response.data = [mock_embedding_data]
+    mock_client.embeddings.create.return_value = mock_embedding_response
+    
+    # Mock models.list()
+    mock_client.models.list.return_value = Mock()
+    
+    em.openai_client = mock_client
+    
+    return em
 
 
 @pytest.fixture

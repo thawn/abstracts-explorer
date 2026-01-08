@@ -207,8 +207,8 @@ class TestRAGChatQuery:
         chat.query("Explain transformers", system_prompt=custom_prompt)
 
         # Check that the custom prompt was used in the API call
-        call_args = mock_lm_studio_response.call_args
-        messages = call_args[1]["json"]["messages"]
+        call_args = mock_lm_studio_response.chat.completions.create.call_args
+        messages = call_args.kwargs["messages"]
         assert messages[0]["role"] == "system"
         assert messages[0]["content"] == custom_prompt
 
@@ -349,8 +349,8 @@ class TestRAGChatConversation:
         chat.query("Tell me more")
 
         # Check the API was called with history
-        call_args = mock_lm_studio_response.call_args
-        messages = call_args[1]["json"]["messages"]
+        call_args = mock_lm_studio_response.chat.completions.create.call_args
+        messages = call_args.kwargs["messages"]
 
         # Should have system prompt + history + current message
         assert len(messages) > 2
