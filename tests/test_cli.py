@@ -1026,6 +1026,24 @@ class TestWebUICommand:
         captured = capsys.readouterr()
         assert "Error starting web server" in captured.err
 
+    def test_web_ui_database_not_found(self, capsys):
+        """Test web-ui command handles database not found error gracefully."""
+        from neurips_abstracts.cli import web_ui_command
+        import argparse
+
+        args = argparse.Namespace(host="127.0.0.1", port=5000, debug=False)
+
+        # Mock run_server to raise FileNotFoundError (as it would when database is missing)
+        with patch("neurips_abstracts.web_ui.run_server", side_effect=FileNotFoundError("Database not found: /nonexistent/test.db")):
+            exit_code = web_ui_command(args)
+
+        # Should exit with code 1 but not show traceback
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        # Should NOT show "Error starting web server" or traceback
+        # The error message is printed by run_server itself before raising the exception
+        assert "Error starting web server" not in captured.err
+
 
 class TestMainDispatch:
     """Test main() command dispatch."""
