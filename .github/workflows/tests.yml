@@ -36,17 +36,12 @@ jobs:
               if: runner.os != 'Windows'
               run: |
                   chmod +x .github/scripts/setup-ci.sh
-                  .github/scripts/setup-ci.sh
+                  .github/scripts/setup-ci.sh --skip-node
 
             - name: Setup environment (Windows)
               if: runner.os == 'Windows'
               run: |
-                  .github/scripts/setup-ci.ps1
-
-            - name: Install Node.js dependencies
-              run: |
-                  npm install
-                  npm run install:vendor
+                  .github/scripts/setup-ci.ps1 --skip-node
 
             - name: Run tests (excluding slow and e2e tests)
               run: |
