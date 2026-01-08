@@ -263,8 +263,16 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
         Tuple of (base_url, port)
     """
     from neurips_abstracts.config import Config
-    import neurips_abstracts.web_ui.app as app_module
-    from neurips_abstracts.web_ui.app import app as flask_app
+    from neurips_abstracts.database import DatabaseManager
+
+    # Import the module, not the app object
+    from neurips_abstracts.web_ui import app as app_module_init
+    import sys
+
+    # Get the actual module
+    app_module = sys.modules["neurips_abstracts.web_ui.app"]
+    # Get the Flask app instance
+    flask_app = app_module.app
 
     # Unpack cached embeddings and mock client
     em, embeddings_path, collection_name, mock_client = test_embeddings
