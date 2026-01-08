@@ -126,7 +126,7 @@ class TestCLI:
         assert "Database file not found" in captured.err
 
     def test_create_embeddings_lm_studio_not_available(self, tmp_path, capsys):
-        """Test create-embeddings when LM Studio is not available."""
+        """Test create-embeddings when OpenAI API is not available."""
         # Create a test database
         from neurips_abstracts import DatabaseManager
 
@@ -146,7 +146,7 @@ class TestCLI:
             ]
             db.add_papers(papers)
 
-        # Mock LM Studio connection failure
+        # Mock OpenAI API connection failure
         with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
@@ -169,7 +169,7 @@ class TestCLI:
 
         assert exit_code == 1
         captured = capsys.readouterr()
-        assert "Failed to connect to LM Studio" in captured.err
+        assert "Failed to connect to OpenAI API" in captured.err
 
     def test_create_embeddings_success(self, tmp_path, capsys):
         """Test create-embeddings command completes successfully."""
@@ -474,12 +474,12 @@ class TestCLI:
         assert "Embeddings database not found" in captured.err
 
     def test_search_lm_studio_not_available(self, tmp_path, capsys):
-        """Test search command when LM Studio is not available."""
+        """Test search command when OpenAI API is not available."""
         # Create embeddings directory
         embeddings_path = tmp_path / "embeddings"
         embeddings_path.mkdir()
 
-        # Mock embeddings manager with LM Studio unavailable
+        # Mock embeddings manager with OpenAI API unavailable
         with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.test_lm_studio_connection.return_value = False
@@ -500,7 +500,7 @@ class TestCLI:
 
         assert exit_code == 1
         captured = capsys.readouterr()
-        assert "Failed to connect to LM Studio" in captured.err
+        assert "Failed to connect to OpenAI API" in captured.err
 
     def test_search_success(self, tmp_path, capsys):
         """Test search command completes successfully."""
@@ -901,7 +901,7 @@ class TestChatCommand:
         assert "Embeddings database not found" in captured.err
 
     def test_chat_lm_studio_not_available(self, tmp_path, capsys):
-        """Test chat command when LM Studio is not available."""
+        """Test chat command when OpenAI API is not available."""
         from neurips_abstracts.cli import chat_command
         import argparse
 
@@ -929,7 +929,7 @@ class TestChatCommand:
 
         assert exit_code == 1
         captured = capsys.readouterr()
-        assert "Failed to connect to LM Studio" in captured.err
+        assert "Failed to connect to OpenAI API" in captured.err
 
     def test_chat_rag_error(self, tmp_path, capsys):
         """Test chat command with RAG error."""

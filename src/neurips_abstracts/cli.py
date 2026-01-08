@@ -54,7 +54,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         - db_path: Path to the SQLite database with papers
         - output: Path for the ChromaDB vector database
         - collection: Name for the ChromaDB collection
-        - lm_studio_url: URL for LM Studio API
+        - lm_studio_url: URL for OpenAI-compatible API
         - model: Name of the embedding model
         - force: Whether to reset existing collection
         - where: SQL WHERE clause to filter papers
@@ -80,7 +80,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     print(f"Output:   {output_path}")
     print(f"Collection: {args.collection}")
     print(f"Model:    {args.model}")
-    print(f"LM Studio: {args.lm_studio_url}")
+    print(f"API URL: {args.lm_studio_url}")
     print("=" * 70)
 
     # Check paper count
@@ -127,7 +127,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
                 print("   --force flag detected: will recreate embeddings with new model")
 
         # Test connection
-        print("🔌 Testing LM Studio connection...")
+        print("🔌 Testing OpenAI API connection...")
         if not em.test_lm_studio_connection():
             print("\n❌ Failed to connect to LM Studio!", file=sys.stderr)
             print("\nPlease ensure:", file=sys.stderr)
@@ -213,7 +213,7 @@ def search_command(args: argparse.Namespace) -> int:
         - n_results: Number of results to return
         - where: Metadata filter conditions
         - show_abstract: Whether to show paper abstracts
-        - lm_studio_url: URL for LM Studio API
+        - lm_studio_url: URL for OpenAI-compatible API
         - model: Name of the embedding model
 
     Returns
@@ -247,7 +247,7 @@ def search_command(args: argparse.Namespace) -> int:
             collection_name=args.collection,
         )
 
-        # Test LM Studio connection
+        # Test OpenAI API connection
         if not em.test_lm_studio_connection():
             print("\n❌ Failed to connect to LM Studio!", file=sys.stderr)
             print("\nPlease ensure:", file=sys.stderr)
@@ -394,7 +394,7 @@ def chat_command(args: argparse.Namespace) -> int:
         print(f"Collection: {args.collection}")
         print(f"Chat Model: {args.model}")
         print(f"Embedding Model: {args.embedding_model}")
-        print(f"LM Studio: {args.lm_studio_url}")
+        print(f"API URL: {args.lm_studio_url}")
         print("=" * 70)
 
         # Check embeddings exist
@@ -412,8 +412,8 @@ def chat_command(args: argparse.Namespace) -> int:
             model_name=args.embedding_model,
         )
 
-        # Test LM Studio connection
-        print("\n🔌 Testing LM Studio connection...")
+        # Test OpenAI API connection
+        print("\n🔌 Testing OpenAI API connection...")
         if not em.test_lm_studio_connection():
             print("\n❌ Failed to connect to LM Studio!", file=sys.stderr)
             print("\nPlease ensure:", file=sys.stderr)

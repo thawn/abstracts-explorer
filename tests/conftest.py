@@ -217,26 +217,64 @@ def mock_lm_studio():
     Yields
     ------
     Mock
-        Mock requests module with configured responses
+        Mock OpenAI client with configured responses
 
     Notes
     -----
     Mocks both embedding and chat completion endpoints with typical responses.
     """
-    from unittest.mock import patch
+    from unittest.mock import patch, Mock
 
-    with patch("neurips_abstracts.embeddings.requests") as mock_requests:
-        # Mock successful embedding response
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "data": [{"embedding": [0.1] * 4096}],
-            "model": "text-embedding-qwen3-embedding-4b",
-        }
-        mock_response.raise_for_status = Mock()
-        mock_requests.post.return_value = mock_response
-        mock_requests.get.return_value = mock_response
-        yield mock_requests
+    with patch("neurips_abstracts.embeddings.OpenAI") as mock_openai_class:
+        # Create mock OpenAI client instance
+        mock_client = Mock()
+        mock_openai_class.return_value = mock_client
+        
+        # Mock models.list() for connection test
+        mock_models = Mock()
+        mock_client.models.list.return_value = mock_models
+        
+        # Mock embeddings.create() for embedding generation
+        mock_embedding_response = Mock()
+        mock_embedding_data = Mock()
+        mock_embedding_data.embedding = [0.1] * 4096
+        mock_embedding_response.data = [mock_embedding_data]
+        mock_client.embeddings.create.return_value = mock_embedding_response
+        
+        yield mock_client
+
+
+@pytest.fixture
+def mock_rag_openai():
+    """
+    Mock OpenAI client for RAG testing.
+
+    Yields
+    ------
+    Mock
+        Mock OpenAI client with configured chat completion responses
+
+    Notes
+    -----
+    Mocks chat.completions.create() for RAG query testing.
+    """
+    from unittest.mock import patch, Mock
+
+    with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+        # Create mock OpenAI client instance
+        mock_client = Mock()
+        mock_openai_class.return_value = mock_client
+        
+        # Mock chat.completions.create() for chat generation
+        mock_chat_response = Mock()
+        mock_choice = Mock()
+        mock_message = Mock()
+        mock_message.content = "Based on Paper 1 and Paper 2, attention mechanisms allow models to focus on relevant parts of the input."
+        mock_choice.message = mock_message
+        mock_chat_response.choices = [mock_choice]
+        mock_client.chat.completions.create.return_value = mock_chat_response
+        
+        yield mock_client
 
 
 @pytest.fixture
@@ -257,13 +295,35 @@ def embeddings_manager(tmp_path):
     Notes
     -----
     Uses a test collection name and temporary ChromaDB storage path.
+    Mocks the OpenAI client to avoid real API calls.
     """
+    from unittest.mock import Mock
+    
     chroma_path = tmp_path / "test_chroma"
-    return EmbeddingsManager(
+    
+    # Create the manager
+    em = EmbeddingsManager(
         lm_studio_url="http://localhost:1234",
         chroma_path=chroma_path,
         collection_name="test_collection",
     )
+    
+    # Replace the OpenAI client with a mock
+    mock_client = Mock()
+    
+    # Mock embeddings.create()
+    mock_embedding_response = Mock()
+    mock_embedding_data = Mock()
+    mock_embedding_data.embedding = [0.1] * 4096
+    mock_embedding_response.data = [mock_embedding_data]
+    mock_client.embeddings.create.return_value = mock_embedding_response
+    
+    # Mock models.list()
+    mock_client.models.list.return_value = Mock()
+    
+    em.openai_client = mock_client
+    
+    return em
 
 
 @pytest.fixture
