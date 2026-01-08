@@ -260,6 +260,7 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     """
     from neurips_abstracts.web_ui import app as flask_app
     from neurips_abstracts.config import Config, get_config
+    from unittest.mock import patch, Mock
 
     # Unpack cached embeddings
     em, embeddings_path, collection_name = test_embeddings
@@ -267,60 +268,87 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     port = find_free_port()
     base_url = f"http://localhost:{port}"
 
-    # Configure the app to use test database and embeddings
-    def mock_get_config():
-        config = Config()
-        config.paper_db_path = str(test_database)
-        config.embedding_db_path = str(embeddings_path)
-        config.collection_name = collection_name
-        return config
-
-    # Patch the config
-    import neurips_abstracts.web_ui.app as app_module
-
-    app_module.get_config = mock_get_config
-
-    # Inject the pre-created embeddings manager directly
-    # This avoids ChromaDB global registry conflicts when the app tries to connect
-    app_module.embeddings_manager = em
-    app_module.rag_chat = None
-
-    # Use werkzeug's make_server for better cross-platform compatibility
-    # This works more reliably in threads than Flask's app.run()
-    from werkzeug.serving import make_server
+    # Mock the OpenAI API for the web server's search operations
+    # The web server needs to generate embeddings for search queries
+    mock_openai_patcher = patch("neurips_abstracts.embeddings.OpenAI")
+    mock_openai_class = mock_openai_patcher.start()
     
-    server = make_server("localhost", port, flask_app, threaded=True)
-    
-    # Start server in a thread
-    def run_server():
-        server.serve_forever()
+    try:
+        # Create mock OpenAI client instance
+        mock_client = Mock()
+        mock_openai_class.return_value = mock_client
+        
+        # Mock models.list() for connection test
+        mock_models = Mock()
+        mock_client.models.list.return_value = mock_models
+        
+        # Mock embeddings.create() for embedding generation during searches
+        # Use the same dimension as in test_embeddings fixture
+        mock_embedding_response = Mock()
+        mock_embedding_data = Mock()
+        mock_embedding_data.embedding = [0.1] * MOCK_EMBEDDING_DIMENSION
+        mock_embedding_response.data = [mock_embedding_data]
+        mock_client.embeddings.create.return_value = mock_embedding_response
 
-    server_thread = threading.Thread(target=run_server, daemon=True)
-    server_thread.start()
+        # Configure the app to use test database and embeddings
+        def mock_get_config():
+            config = Config()
+            config.paper_db_path = str(test_database)
+            config.embedding_db_path = str(embeddings_path)
+            config.collection_name = collection_name
+            return config
 
-    # Wait for server to start
-    import requests
+        # Patch the config
+        import neurips_abstracts.web_ui.app as app_module
 
-    max_retries = 30
-    for i in range(max_retries):
-        try:
-            response = requests.get(base_url, timeout=1)
-            if response.status_code == 200:
-                break
-        except requests.exceptions.RequestException:
-            if i == max_retries - 1:
-                server.shutdown()
-                pytest.fail("Server failed to start")
-            time.sleep(0.5)
+        app_module.get_config = mock_get_config
 
-    yield (base_url, port)
+        # Inject the pre-created embeddings manager directly
+        # This avoids ChromaDB global registry conflicts when the app tries to connect
+        app_module.embeddings_manager = em
+        app_module.rag_chat = None
 
-    # Cleanup
-    server.shutdown()
-    
-    # Reset the app module state
-    app_module.embeddings_manager = None
-    app_module.rag_chat = None
+        # Use werkzeug's make_server for better cross-platform compatibility
+        # This works more reliably in threads than Flask's app.run()
+        from werkzeug.serving import make_server
+        
+        server = make_server("localhost", port, flask_app, threaded=True)
+        
+        # Start server in a thread
+        def run_server():
+            server.serve_forever()
+
+        server_thread = threading.Thread(target=run_server, daemon=True)
+        server_thread.start()
+
+        # Wait for server to start
+        import requests
+
+        max_retries = 30
+        for i in range(max_retries):
+            try:
+                response = requests.get(base_url, timeout=1)
+                if response.status_code == 200:
+                    break
+            except requests.exceptions.RequestException:
+                if i == max_retries - 1:
+                    server.shutdown()
+                    mock_openai_patcher.stop()
+                    pytest.fail("Server failed to start")
+                time.sleep(0.5)
+
+        yield (base_url, port)
+
+        # Cleanup
+        server.shutdown()
+        
+        # Reset the app module state
+        app_module.embeddings_manager = None
+        app_module.rag_chat = None
+        
+    finally:
+        # Ensure mock is always stopped
+        mock_openai_patcher.stop()
 
 
 def _check_chrome_available():
