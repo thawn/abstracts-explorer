@@ -3,7 +3,6 @@ Tests for the embeddings module.
 """
 
 import pytest
-import sqlite3
 from unittest.mock import Mock
 
 from neurips_abstracts.embeddings import EmbeddingsError, EmbeddingsManager
@@ -414,10 +413,17 @@ class TestEmbeddingsManager:
 
     def test_embed_from_database_sql_error(self, embeddings_manager, tmp_path):
         """Test embedding from database with SQL error."""
+        from neurips_abstracts.database import DatabaseManager
+        
         # Create database with only embeddings_metadata, but missing papers table
         db_path = tmp_path / "bad.db"
-        conn = sqlite3.connect(str(db_path))
-        cursor = conn.cursor()
+        
+        # Use DatabaseManager to connect, but manually create only embeddings_metadata table
+        # to simulate a corrupted/incomplete database
+        db = DatabaseManager(str(db_path))
+        db.connect()
+        
+        cursor = db.connection.cursor()
         # Create embeddings_metadata table
         cursor.execute(
             """
@@ -429,9 +435,9 @@ class TestEmbeddingsManager:
             )
         """
         )
-        # Note: NOT creating the papers table
-        conn.commit()
-        conn.close()
+        # Note: NOT creating the papers table to trigger error
+        db.connection.commit()
+        db.close()
 
         embeddings_manager.connect()
         embeddings_manager.create_collection()
