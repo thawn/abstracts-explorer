@@ -108,7 +108,7 @@ class RAGChat:
         auth_token = config.llm_backend_auth_token
         self.openai_client = OpenAI(
             base_url=f"{self.lm_studio_url}/v1",
-            api_key=auth_token or "not-needed"
+            api_key=auth_token or "lm-studio-local"
         )
 
     def _rewrite_query(self, user_query: str) -> str:

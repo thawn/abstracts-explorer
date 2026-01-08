@@ -112,7 +112,7 @@ class EmbeddingsManager:
         # Initialize OpenAI client
         self.openai_client = OpenAI(
             base_url=f"{self.lm_studio_url}/v1",
-            api_key=self.llm_backend_auth_token or "not-needed"
+            api_key=self.llm_backend_auth_token or "lm-studio-local"
         )
 
     def connect(self) -> None:
