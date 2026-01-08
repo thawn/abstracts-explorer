@@ -31,6 +31,9 @@ from tests.test_helpers import find_free_port
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+# Constants for E2E tests
+MOCK_EMBEDDING_DIMENSION = 4096  # Standard dimension for test embeddings
+
 # Module-level cache for driver paths to ensure single installation per session
 # This prevents redundant downloads and installations when running multiple E2E tests
 # The driver is only installed when:
@@ -189,88 +192,91 @@ def web_server(test_database, tmp_path_factory):
     mock_openai_patcher = patch("neurips_abstracts.embeddings.OpenAI")
     mock_openai_class = mock_openai_patcher.start()
     
-    # Create mock OpenAI client instance
-    mock_client = Mock()
-    mock_openai_class.return_value = mock_client
-    
-    # Mock models.list() for connection test
-    mock_models = Mock()
-    mock_client.models.list.return_value = mock_models
-    
-    # Mock embeddings.create() for embedding generation
-    mock_embedding_response = Mock()
-    mock_embedding_data = Mock()
-    mock_embedding_data.embedding = [0.1] * 4096
-    mock_embedding_response.data = [mock_embedding_data]
-    mock_client.embeddings.create.return_value = mock_embedding_response
+    try:
+        # Create mock OpenAI client instance
+        mock_client = Mock()
+        mock_openai_class.return_value = mock_client
+        
+        # Mock models.list() for connection test
+        mock_models = Mock()
+        mock_client.models.list.return_value = mock_models
+        
+        # Mock embeddings.create() for embedding generation
+        mock_embedding_response = Mock()
+        mock_embedding_data = Mock()
+        mock_embedding_data.embedding = [0.1] * MOCK_EMBEDDING_DIMENSION
+        mock_embedding_response.data = [mock_embedding_data]
+        mock_client.embeddings.create.return_value = mock_embedding_response
 
-    # Initialize embeddings with test data
-    em = EmbeddingsManager(chroma_path=embeddings_path, collection_name=f"test_collection_{unique_id}")
-    em.connect()
-    em.create_collection(reset=True)
+        # Initialize embeddings with test data
+        em = EmbeddingsManager(chroma_path=embeddings_path, collection_name=f"test_collection_{unique_id}")
+        em.connect()
+        em.create_collection(reset=True)
 
-    # Add embeddings for test papers (matching the paper UIDs from test_database)
-    # Get the database to read papers
-    db = DatabaseManager(str(test_database))
-    db.connect()
-    cursor = db.connection.cursor()
-    cursor.execute("SELECT * FROM papers")
-    papers = cursor.fetchall()
+        # Add embeddings for test papers (matching the paper UIDs from test_database)
+        # Get the database to read papers
+        db = DatabaseManager(str(test_database))
+        db.connect()
+        cursor = db.connection.cursor()
+        cursor.execute("SELECT * FROM papers")
+        papers = cursor.fetchall()
 
-    for paper in papers:
-        em.add_paper(dict(paper))
+        for paper in papers:
+            em.add_paper(dict(paper))
 
-    db.close()
-    # Don't close embeddings manager - keep the ChromaDB collection active
-    # The Flask app will use this same instance via the module-level cache
-    # em.close()
+        db.close()
+        # Don't close embeddings manager - keep the ChromaDB collection active
+        # The Flask app will use this same instance via the module-level cache
+        # em.close()
 
-    # Configure the app to use test database and embeddings
-    original_get_config = get_config
+        # Configure the app to use test database and embeddings
+        original_get_config = get_config
 
-    def mock_get_config():
-        config = Config()
-        config.paper_db_path = str(test_database)
-        config.embedding_db_path = str(embeddings_path)
-        config.collection_name = f"test_collection_{unique_id}"
-        return config
+        def mock_get_config():
+            config = Config()
+            config.paper_db_path = str(test_database)
+            config.embedding_db_path = str(embeddings_path)
+            config.collection_name = f"test_collection_{unique_id}"
+            return config
 
-    # Patch the config
-    import neurips_abstracts.web_ui.app as app_module
+        # Patch the config
+        import neurips_abstracts.web_ui.app as app_module
 
-    app_module.get_config = mock_get_config
+        app_module.get_config = mock_get_config
 
-    # Inject the pre-created embeddings manager directly (don't create a new one)
-    # This avoids ChromaDB global registry conflicts when the app tries to connect
-    app_module.embeddings_manager = em
-    app_module.rag_chat = None
+        # Inject the pre-created embeddings manager directly (don't create a new one)
+        # This avoids ChromaDB global registry conflicts when the app tries to connect
+        app_module.embeddings_manager = em
+        app_module.rag_chat = None
 
-    # Start server in a thread
-    def run_server():
-        flask_app.run(host="localhost", port=port, debug=False, use_reloader=False)
+        # Start server in a thread
+        def run_server():
+            flask_app.run(host="localhost", port=port, debug=False, use_reloader=False)
 
-    server_thread = threading.Thread(target=run_server, daemon=True)
-    server_thread.start()
+        server_thread = threading.Thread(target=run_server, daemon=True)
+        server_thread.start()
 
-    # Wait for server to start
-    import requests
+        # Wait for server to start
+        import requests
 
-    max_retries = 30
-    for i in range(max_retries):
-        try:
-            response = requests.get(base_url, timeout=1)
-            if response.status_code == 200:
-                break
-        except requests.exceptions.RequestException:
-            time.sleep(0.5)
-    else:
-        pytest.fail("Server failed to start")
+        max_retries = 30
+        for i in range(max_retries):
+            try:
+                response = requests.get(base_url, timeout=1)
+                if response.status_code == 200:
+                    break
+            except requests.exceptions.RequestException:
+                time.sleep(0.5)
+        else:
+            pytest.fail("Server failed to start")
 
-    yield (base_url, port)
+        yield (base_url, port)
 
-    # Cleanup: restore original config and stop mock
-    app_module.get_config = original_get_config
-    mock_openai_patcher.stop()
+        # Cleanup: restore original config
+        app_module.get_config = original_get_config
+    finally:
+        # Ensure mock is always stopped
+        mock_openai_patcher.stop()
 
 
 def _check_chrome_available():
