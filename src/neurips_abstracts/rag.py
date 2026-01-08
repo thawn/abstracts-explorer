@@ -2,7 +2,7 @@
 Retrieval Augmented Generation (RAG) for NeurIPS abstracts.
 
 This module provides RAG functionality to query papers and generate
-contextual responses using LM Studio's language models.
+contextual responses using OpenAI-compatible language model APIs.
 """
 
 import json
@@ -28,14 +28,14 @@ class RAGChat:
     """
     RAG chat interface for querying NeurIPS papers.
 
-    Uses embeddings for semantic search and LM Studio for response generation.
+    Uses embeddings for semantic search and OpenAI-compatible API for response generation.
 
     Parameters
     ----------
     embeddings_manager : EmbeddingsManager
         Manager for embeddings and vector search.
     lm_studio_url : str, optional
-        URL for LM Studio API, by default "http://localhost:1234"
+        URL for OpenAI-compatible API, by default "http://localhost:1234"
     model : str, optional
         Name of the language model, by default "auto"
     max_context_papers : int, optional
@@ -74,7 +74,7 @@ class RAGChat:
         database : DatabaseManager
             Database instance for querying paper details. REQUIRED - no fallback allowed.
         lm_studio_url : str, optional
-            URL for LM Studio API. If None, uses config value.
+            URL for OpenAI-compatible API. If None, uses config value.
         model : str, optional
             Name of the language model. If None, uses config value.
         max_context_papers : int, optional
@@ -345,7 +345,7 @@ class RAGChat:
                     self._cached_papers = papers
                     self._cached_context = context
 
-            # Generate response using LM Studio (uses original question, not rewritten query)
+            # Generate response using OpenAI API (uses original question, not rewritten query)
             logger.info(f"Generating response using {len(papers)} papers as context")
             response_text = self._generate_response(question, context, system_prompt)
 
@@ -426,7 +426,7 @@ class RAGChat:
 
     def _generate_response(self, question: str, context: str, system_prompt: Optional[str] = None) -> str:
         """
-        Generate response using LM Studio.
+        Generate response using OpenAI-compatible API.
 
         Parameters
         ----------
@@ -471,7 +471,7 @@ class RAGChat:
 
         messages.append({"role": "user", "content": user_message})
 
-        # Call LM Studio API using OpenAI client
+        # Call OpenAI-compatible API using OpenAI client
         try:
             response = self.openai_client.chat.completions.create(
                 model=self.model,

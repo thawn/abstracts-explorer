@@ -43,12 +43,12 @@ def chroma_collection():
 @pytest.fixture
 def embeddings_manager(chroma_collection):
     """
-    Get the EmbeddingsManager configured with LM Studio.
+    Get the EmbeddingsManager configured with OpenAI API.
 
     This fixture creates an EmbeddingsManager instance using the configuration
     from the environment (.env file). It reuses the ChromaDB client from the
     chroma_collection fixture to avoid conflicts. Tests using this fixture will
-    be skipped if LM Studio is not available.
+    be skipped if OpenAI API is not available.
 
     Parameters
     ----------
@@ -76,9 +76,9 @@ def embeddings_manager(chroma_collection):
         em.collection = chroma_collection
         em.client = chroma_collection._client
 
-        # Test LM Studio connection
+        # Test OpenAI API connection
         if not em.test_lm_studio_connection():
-            pytest.skip("LM Studio not available or model not loaded")
+            pytest.skip("OpenAI API not available or model not loaded")
 
         return em
     except Exception as e:
@@ -338,15 +338,15 @@ class TestChromaDBMetadata:
         Test semantic search combined with metadata filtering.
 
         Verifies that ChromaDB can perform vector similarity search while
-        simultaneously filtering by metadata fields. Uses the configured LM Studio
+        simultaneously filtering by metadata fields. Uses the configured OpenAI API
         embedding model from .env file.
 
         This test requires:
-        - LM Studio running at configured URL
-        - Correct embedding model loaded in LM Studio
+        - OpenAI API running at configured URL
+        - Correct embedding model loaded in OpenAI API
         - ChromaDB collection with embeddings created using that model
 
-        Note: Marked as slow because it requires LM Studio connection and may
+        Note: Marked as slow because it requires OpenAI API connection and may
         take time to generate embeddings.
         """
         # Get a session to filter by

@@ -5,8 +5,8 @@ Embeddings Module
 This module provides functionality to generate text embeddings for paper abstracts
 and store them in a vector database with paper metadata.
 
-The module uses the text-embedding-qwen3-embedding-4b model via a local LM Studio API
-and stores the embeddings in ChromaDB for efficient similarity search.
+The module uses an OpenAI-compatible API (such as LM Studio or blablador) to generate
+embeddings and stores them in ChromaDB for efficient similarity search.
 """
 
 import logging
@@ -35,7 +35,7 @@ class EmbeddingsManager:
     Manager for generating and storing text embeddings.
 
     This class handles:
-    - Connecting to LM Studio API for embedding generation
+    - Connecting to OpenAI-compatible API for embedding generation
     - Creating and managing a ChromaDB collection
     - Embedding paper abstracts with metadata
     - Similarity search operations
@@ -43,7 +43,7 @@ class EmbeddingsManager:
     Parameters
     ----------
     lm_studio_url : str, optional
-        URL of the LM Studio API endpoint, by default "http://localhost:1234"
+        URL of the OpenAI-compatible API endpoint, by default "http://localhost:1234"
     model_name : str, optional
         Name of the embedding model, by default "text-embedding-qwen3-embedding-4b"
     chroma_path : str or Path, optional
@@ -54,7 +54,7 @@ class EmbeddingsManager:
     Attributes
     ----------
     lm_studio_url : str
-        LM Studio API endpoint URL.
+        OpenAI-compatible API endpoint URL.
     model_name : str
         Embedding model name.
     chroma_path : Path
@@ -92,7 +92,7 @@ class EmbeddingsManager:
         Parameters
         ----------
         lm_studio_url : str, optional
-            URL of the LM Studio API endpoint. If None, uses config value.
+            URL of the OpenAI-compatible API endpoint. If None, uses config value.
         model_name : str, optional
             Name of the embedding model. If None, uses config value.
         chroma_path : str or Path, optional
@@ -158,7 +158,7 @@ class EmbeddingsManager:
 
     def test_lm_studio_connection(self) -> bool:
         """
-        Test connection to LM Studio API.
+        Test connection to OpenAI-compatible API endpoint.
 
         Returns
         -------
@@ -169,20 +169,20 @@ class EmbeddingsManager:
         --------
         >>> em = EmbeddingsManager()
         >>> if em.test_lm_studio_connection():
-        ...     print("LM Studio is accessible")
+        ...     print("API is accessible")
         """
         try:
             # Try to get models list
             models = self.openai_client.models.list()
-            logger.info(f"Successfully connected to LM Studio at {self.lm_studio_url}")
+            logger.info(f"Successfully connected to OpenAI API at {self.lm_studio_url}")
             return True
         except Exception as e:
-            logger.warning(f"Failed to connect to LM Studio: {str(e)}")
+            logger.warning(f"Failed to connect to OpenAI API: {str(e)}")
             return False
 
     def generate_embedding(self, text: str) -> List[float]:
         """
-        Generate embedding for a given text using LM Studio API.
+        Generate embedding for a given text using OpenAI-compatible API.
 
         Parameters
         ----------
@@ -223,7 +223,7 @@ class EmbeddingsManager:
             return embedding
 
         except Exception as e:
-            raise EmbeddingsError(f"Failed to generate embedding via LM Studio: {str(e)}") from e
+            raise EmbeddingsError(f"Failed to generate embedding via OpenAI API: {str(e)}") from e
 
     def create_collection(self, reset: bool = False) -> None:
         """

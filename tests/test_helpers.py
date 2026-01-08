@@ -15,21 +15,22 @@ from neurips_abstracts.embeddings import EmbeddingsManager
 
 def check_lm_studio_available():
     """
-    Check if LM Studio is running and available with the configured chat model.
+    Check if OpenAI-compatible API is available with the configured models.
 
     Returns
     -------
     bool
-        True if LM Studio is available with a chat model, False otherwise.
+        True if the API is available with required models, False otherwise.
 
     Notes
     -----
     This function checks:
-    1. If the LM Studio server is running
+    1. If the API server is running
     2. If any models are loaded
-    3. If a chat completion request works with the configured model
+    3. If an embedding generation request works with the configured model
 
-    Used to skip tests that require a running LM Studio instance.
+    Used to skip tests that require a running OpenAI-compatible API backend
+    (such as LM Studio or blablador).
     """
     try:
         config = get_config()
@@ -84,22 +85,22 @@ def find_free_port():
 
 def requires_lm_studio(func):
     """
-    Decorator that marks tests as slow and skips them if LM Studio is not available.
+    Decorator that marks tests as slow and skips them if OpenAI API backend is not available.
 
     This decorator:
     1. Marks the test as 'slow' (so it's skipped by default with -m "not slow")
-    2. Skips the test if LM Studio is not running or no chat model is loaded
+    2. Skips the test if the configured OpenAI-compatible API is not running or no model is loaded
 
     Usage
     -----
     @requires_lm_studio
-    def test_something_with_lm_studio():
+    def test_something_with_api():
         ...
     """
     # Apply both slow marker and skipif condition
     func = pytest.mark.slow(func)
     func = pytest.mark.skipif(
         not check_lm_studio_available(),
-        reason="LM Studio not running or no chat model loaded. Check configuration and ensure LM Studio is started with the configured chat model.",
+        reason="OpenAI-compatible API not available. Check configuration and ensure the API backend (LM Studio or blablador) is accessible with the configured models.",
     )(func)
     return func
