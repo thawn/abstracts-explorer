@@ -131,18 +131,6 @@ class EmbeddingsManager:
             )
         return self._openai_client
 
-    @openai_client.setter
-    def openai_client(self, client: OpenAI) -> None:
-        """
-        Set the OpenAI client (useful for testing with mocks).
-        
-        Parameters
-        ----------
-        client : OpenAI
-            OpenAI client instance to use.
-        """
-        self._openai_client = client
-
     def connect(self) -> None:
         """
         Connect to ChromaDB.

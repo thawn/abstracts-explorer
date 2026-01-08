@@ -127,18 +127,6 @@ class RAGChat:
             )
         return self._openai_client
 
-    @openai_client.setter
-    def openai_client(self, client: OpenAI) -> None:
-        """
-        Set the OpenAI client (useful for testing with mocks).
-        
-        Parameters
-        ----------
-        client : OpenAI
-            OpenAI client instance to use.
-        """
-        self._openai_client = client
-
     def _rewrite_query(self, user_query: str) -> str:
         """
         Rewrite user query into an effective search query.

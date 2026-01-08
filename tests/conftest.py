@@ -321,7 +321,8 @@ def embeddings_manager(tmp_path):
     # Mock models.list()
     mock_client.models.list.return_value = Mock()
     
-    em.openai_client = mock_client
+    # Set the private attribute directly to avoid triggering lazy loading
+    em._openai_client = mock_client
     
     return em
 
