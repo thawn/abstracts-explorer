@@ -7,7 +7,6 @@ code duplication and ensure consistency in test setup.
 
 import os
 import pytest
-import sqlite3
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -182,83 +181,62 @@ def test_database(tmp_path):
 
     Notes
     -----
-    Creates a database with 3 papers and 3 authors for testing search and
-    retrieval functionality.
+    Creates a database with 3 papers using the lightweight schema
+    via DatabaseManager for testing search and retrieval functionality.
     """
+    from neurips_abstracts.database import DatabaseManager
+    from neurips_abstracts.plugin import LightweightPaper
+    
     db_path = tmp_path / "test.db"
-    conn = sqlite3.connect(str(db_path))
-    cursor = conn.cursor()
-
-    # Create papers table
-    cursor.execute(
-        """
-        CREATE TABLE papers (
-            id INTEGER PRIMARY KEY,
-            uid TEXT,
-            name TEXT,
-            abstract TEXT,
-            authors TEXT,
-            topic TEXT,
-            keywords TEXT,
-            decision TEXT,
-            paper_url TEXT,
-            poster_position TEXT
-        )
-    """
-    )
-
-    # Insert test data
-    test_papers = [
-        (
-            1,
-            "paper1",
-            "Deep Learning Paper",
-            "This paper presents a novel deep learning approach.",
-            "John Doe, Jane Smith",
-            "Machine Learning",
-            "deep learning, neural networks",
-            "Accept",
-            "https://papers.nips.cc/paper/1",
-            "A12",
-        ),
-        (
-            2,
-            "paper2",
-            "NLP Paper",
-            "We introduce a new natural language processing method.",
-            "Alice Johnson",
-            "Natural Language Processing",
-            "NLP, transformers",
-            "Accept",
-            "https://papers.nips.cc/paper/2",
-            "B05",
-        ),
-        (
-            3,
-            "paper3",
-            "Computer Vision Paper",
-            "",  # Empty abstract to test edge case
-            "Bob Wilson",
-            "Computer Vision",
-            "vision, CNN",
-            "Reject",
-            "",
-            "",
-        ),
-    ]
-
-    cursor.executemany(
-        """
-        INSERT INTO papers 
-        (id, uid, name, abstract, authors, topic, keywords, decision, paper_url, poster_position)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """,
-        test_papers,
-    )
-
-    conn.commit()
-    conn.close()
-
+    
+    # Use DatabaseManager to create the database with proper schema
+    with DatabaseManager(db_path) as db:
+        db.create_tables()
+        
+        # Create sample papers using LightweightPaper model
+        papers = [
+            LightweightPaper(
+                original_id="paper1",
+                title="Deep Learning Paper",
+                abstract="This paper presents a novel deep learning approach.",
+                authors=["John Doe", "Jane Smith"],
+                keywords=["deep learning", "neural networks"],
+                session="Machine Learning",
+                poster_position="A12",
+                paper_pdf_url="https://papers.nips.cc/paper/1",
+                year=2025,
+                conference="NeurIPS",
+            ),
+            LightweightPaper(
+                original_id="paper2",
+                title="NLP Paper",
+                abstract="We introduce a new natural language processing method.",
+                authors=["Alice Johnson"],
+                keywords=["NLP", "transformers"],
+                session="Natural Language Processing",
+                poster_position="B05",
+                paper_pdf_url="https://papers.nips.cc/paper/2",
+                year=2025,
+                conference="NeurIPS",
+            ),
+            LightweightPaper(
+                original_id="paper3",
+                title="Computer Vision Paper",
+                abstract="",  # Empty abstract to test edge case
+                authors=["Bob Wilson"],
+                keywords=["vision", "CNN"],
+                session="Computer Vision",
+                poster_position="",
+                paper_pdf_url="",
+                year=2025,
+                conference="NeurIPS",
+            ),
+        ]
+        
+        # Add papers to database
+        for paper in papers:
+            db.add_paper(paper)
+    
     return db_path
 
 

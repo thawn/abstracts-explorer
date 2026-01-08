@@ -5,7 +5,6 @@ This module tests the command-line interface for neurips-abstracts,
 including the download and create-embeddings commands.
 """
 
-import sqlite3
 import sys
 from unittest.mock import Mock, patch
 import pytest
@@ -793,13 +792,16 @@ class TestCLI:
 
     def test_search_with_db_path_lookup_error(self, tmp_path, capsys):
         """Test search command when database connection fails."""
+        from neurips_abstracts.database import DatabaseManager
+        
         embeddings_path = tmp_path / "embeddings"
         embeddings_path.mkdir()
 
-        # Create a database but DatabaseManager will fail to connect
+        # Create an empty database using DatabaseManager
         db_path = tmp_path / "test.db"
-        conn = sqlite3.connect(str(db_path))
-        conn.close()
+        db = DatabaseManager(str(db_path))
+        db.connect()
+        db.close()
 
         # Mock embeddings manager
         with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
