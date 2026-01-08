@@ -262,8 +262,9 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     tuple
         Tuple of (base_url, port)
     """
-    from neurips_abstracts.web_ui import app as flask_app
-    from neurips_abstracts.config import Config, get_config
+    from neurips_abstracts.config import Config
+    import neurips_abstracts.web_ui.app as app_module
+    from neurips_abstracts.web_ui.app import app as flask_app
 
     # Unpack cached embeddings and mock client
     em, embeddings_path, collection_name, mock_client = test_embeddings
@@ -274,9 +275,6 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
 
     port = find_free_port()
     base_url = f"http://localhost:{port}"
-
-    # Patch the config and inject embeddings BEFORE importing/configuring the app
-    import neurips_abstracts.web_ui.app as app_module
 
     # Configure the app to use test database and embeddings
     def mock_get_config():
@@ -293,6 +291,24 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     # This prevents get_embeddings_manager() from creating a new instance
     app_module.embeddings_manager = em
     app_module.rag_chat = None
+
+    # Mock get_database to not check file existence
+    # Each Flask request thread will create its own database connection
+    original_get_database = app_module.get_database
+
+    def mock_get_database_wrapper():
+        """Wrapper that skips file existence check."""
+        from flask import g
+        import os
+
+        if "db" not in g:
+            db_path = str(test_database)
+            # Don't check file existence in tests - the database was created in a temp dir
+            g.db = DatabaseManager(db_path)
+            g.db.connect()
+        return g.db
+
+    app_module.get_database = mock_get_database_wrapper
 
     # Use werkzeug's make_server for better cross-platform compatibility
     # This works more reliably in threads than Flask's app.run()
@@ -330,6 +346,7 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     # Reset the app module state
     app_module.embeddings_manager = None
     app_module.rag_chat = None
+    app_module.get_database = original_get_database
 
 
 def _check_chrome_available():
