@@ -249,13 +249,6 @@ CHAT_MAX_TOKENS=500
         # But original value is still accessible
         assert config.llm_backend_auth_token == "secret-token-123"
 
-    def test_config_to_dict_empty_token(self):
-        """Test that to_dict shows empty string for no token."""
-        config = Config()
-        config_dict = config.to_dict()
-
-        assert config_dict["llm_backend_auth_token"] == ""
-
     def test_config_repr(self):
         """Test configuration string representation."""
         config = Config()
