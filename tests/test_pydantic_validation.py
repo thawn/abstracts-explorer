@@ -3,7 +3,6 @@ Tests for Pydantic validation in database module.
 """
 
 import pytest
-from neurips_abstracts.database import DatabaseManager
 from neurips_abstracts.plugin import LightweightPaper
 
 
@@ -33,7 +32,7 @@ class TestPydanticValidation:
         """Test that missing required fields are rejected."""
         # Missing required 'title' field - will raise ValidationError
         with pytest.raises(Exception):  # Pydantic will raise validation error
-            papers = [
+            [
                 LightweightPaper(
                     # Missing required 'title' field
                     authors=["John Doe"],
@@ -49,7 +48,7 @@ class TestPydanticValidation:
         """Test that empty paper title is rejected."""
         # Invalid: title cannot be empty - will raise ValidationError
         with pytest.raises(Exception):  # Pydantic will raise validation error
-            papers = [
+            [
                 LightweightPaper(
                     title="",  # Invalid: title cannot be empty
                     authors=["John Doe"],
@@ -65,7 +64,7 @@ class TestPydanticValidation:
         """Test that invalid author data is handled gracefully."""
         # First author empty - will raise ValidationError
         with pytest.raises(Exception):  # Pydantic will raise validation error
-            papers = [
+            [
                 LightweightPaper(
                     title="Valid Paper",
                     authors=["", "Jane Smith"],  # First author empty - invalid
@@ -148,7 +147,7 @@ class TestPydanticValidation:
         """Test that author names with semicolons are rejected."""
         # Semicolon not allowed - will raise ValidationError
         with pytest.raises(Exception):  # Pydantic will raise validation error
-            papers = [
+            [
                 LightweightPaper(
                     title="Test Paper",
                     authors=["John; Doe"],  # Semicolon not allowed

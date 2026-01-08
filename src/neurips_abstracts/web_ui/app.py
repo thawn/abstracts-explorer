@@ -10,7 +10,7 @@ import logging
 import zipfile
 from pathlib import Path
 from io import BytesIO
-from flask import Flask, render_template, request, jsonify, g, send_file, Response
+from flask import Flask, render_template, request, jsonify, g, send_file
 from flask_cors import CORS
 import requests
 
@@ -739,7 +739,7 @@ def generate_all_papers_markdown(papers, title):
                 markdown += f"**Poster:** {paper['poster_position']}\n\n"
 
             # Link to PDF on OpenReview
-            paper_id = paper["uid"]
+            paper["uid"]
             pdf_url = paper.get("paper_pdf_url")
             if not pdf_url and paper.get("paper_url"):
                 pdf_url = paper["paper_url"].replace("/forum?id=", "/pdf?id=")
@@ -1077,7 +1077,7 @@ def generate_search_term_markdown(search_term, papers):
                 markdown += f"**Poster:** {paper['poster_position']}\n\n"
 
             # Link to PDF on OpenReview
-            paper_id = paper["uid"]
+            paper["uid"]
             pdf_url = paper.get("paper_pdf_url")
             if not pdf_url and paper.get("paper_url"):
                 pdf_url = paper["paper_url"].replace("/forum?id=", "/pdf?id=")

@@ -12,9 +12,11 @@ The framework consists of:
 - Pydantic models for data validation (LightweightPaper)
 """
 
+import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
-from pydantic import ValidationError
+
+from pydantic import BaseModel, field_validator
 
 
 class DownloaderPlugin(ABC):
@@ -135,9 +137,6 @@ Schema Converter
 
 Utilities for converting between lightweight and full NeurIPS schema formats.
 """
-
-from typing import Any, Dict, List
-from datetime import datetime
 
 
 def convert_neurips_to_lightweight_schema(papers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -294,9 +293,6 @@ Plugin Registry
 Registry for managing and accessing downloader plugins.
 """
 
-from typing import Any, Dict, List, Optional
-import logging
-
 # DownloaderPlugin is defined earlier in this file
 
 logger = logging.getLogger(__name__)
@@ -440,9 +436,6 @@ Plugin Data Models
 
 Pydantic models for validating plugin data in lightweight schema format.
 """
-
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, field_validator
 
 
 # ============================================================================

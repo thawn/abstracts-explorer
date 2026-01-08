@@ -7,7 +7,6 @@ Tests that require a running LM Studio instance are skipped if it's not availabl
 
 import json
 import pytest
-import requests
 from unittest.mock import Mock, patch
 
 from neurips_abstracts.rag import RAGChat, RAGError

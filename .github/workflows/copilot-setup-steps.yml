@@ -44,6 +44,13 @@ jobs:
               run: |
                   uv run pytest tests/test_cli.py::TestCLI::test_main_no_command
 
+            - name: Run linting checks
+              run: |
+                  echo "Running linting checks..."
+                  uv pip install --system ruff mypy types-requests
+                  ruff check src/ tests/
+                  mypy src/ --ignore-missing-imports
+
             - name: Environment setup summary
               if: always()
               run: |

@@ -14,7 +14,6 @@ from tqdm import tqdm
 
 from .config import get_config
 from .database import DatabaseManager
-from .downloader import download_neurips_data
 from .embeddings import EmbeddingsManager, EmbeddingsError
 from .rag import RAGChat, RAGError
 from .plugins import get_plugin, list_plugins, list_plugin_names
@@ -109,7 +108,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         compatible, stored_model, current_model = em.check_model_compatibility(db_path)
         
         if not compatible:
-            print(f"\n⚠️  WARNING: Embedding model mismatch detected!")
+            print("\n⚠️  WARNING: Embedding model mismatch detected!")
             print(f"   Stored model:  {stored_model}")
             print(f"   Current model: {current_model}")
             print("\n   Embeddings created with different models are incompatible.")
@@ -148,7 +147,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         em.create_collection(reset=args.force)
 
         # Generate embeddings with progress bar
-        print(f"\n🚀 Generating embeddings...")
+        print("\n🚀 Generating embeddings...")
 
         # Determine total count for progress bar
         with DatabaseManager(db_path) as db:
@@ -314,16 +313,8 @@ def search_command(args: argparse.Namespace) -> int:
             print(f"{i + 1}. Paper ID: {paper_id}")
             print(f"   Title: {metadata.get('title', 'N/A')}")
 
-            # Get author names from database if available
+            # Get author names from metadata
             authors_display = metadata.get("authors", "N/A")
-            if db_manager:
-                try:
-                    authors = db_manager.get_paper_authors(int(paper_id))
-                    if authors:
-                        author_names = [author["fullname"] for author in authors]
-                        authors_display = ", ".join(author_names)
-                except Exception:
-                    pass  # Fall back to author IDs
 
             print(f"   Authors: {authors_display}")
             print(f"   Decision: {metadata.get('decision', 'N/A')}")
@@ -549,8 +540,6 @@ def download_command(args: argparse.Namespace) -> int:
         Exit code (0 for success, non-zero for failure)
     """
     # Import plugins to register them
-    import neurips_abstracts.plugins.neurips_downloader
-    import neurips_abstracts.plugins.ml4ps_downloader
 
     # If list_plugins flag is set, show available plugins and exit
     if hasattr(args, "list_plugins") and args.list_plugins:

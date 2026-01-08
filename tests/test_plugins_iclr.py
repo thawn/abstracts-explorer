@@ -9,7 +9,7 @@ import json
 import pytest
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch, Mock
+from unittest.mock import patch, Mock
 import requests
 
 from neurips_abstracts.plugins.iclr_downloader import ICLRDownloaderPlugin
@@ -140,7 +140,7 @@ class TestICLRPlugin:
             output_path = Path(tmpdir) / "iclr_2025.json"
 
             plugin = ICLRDownloaderPlugin()
-            data = plugin.download(year=2025, output_path=str(output_path))
+            plugin.download(year=2025, output_path=str(output_path))
 
             # Verify file was created
             assert output_path.exists()

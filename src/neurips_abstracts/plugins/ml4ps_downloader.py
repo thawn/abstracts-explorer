@@ -184,6 +184,7 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
                     time.sleep(2**attempt)
                 else:
                     return None
+        return None  # Explicit return if loop completes without returning
 
     def _clean_text(self, text: str) -> str:
         """Clean text by removing extra whitespace and unwanted characters."""

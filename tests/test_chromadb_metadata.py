@@ -6,12 +6,8 @@ are correctly stored in ChromaDB and can be used for filtering search results.
 """
 
 import pytest
-from pathlib import Path
-import chromadb
-from chromadb.config import Settings
 from unittest.mock import Mock
 from neurips_abstracts.plugin import validate_lightweight_paper, prepare_chroma_db_paper_data
-from neurips_abstracts.config import Config
 from neurips_abstracts.embeddings import EmbeddingsManager
 
 

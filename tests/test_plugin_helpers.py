@@ -2,7 +2,6 @@
 Tests for plugin helper functions.
 """
 
-import pytest
 from neurips_abstracts.plugin import (
     sanitize_author_names,
     convert_neurips_to_lightweight_schema,

@@ -2,10 +2,9 @@
 Tests for year and conference fields in plugins.
 """
 
-import pytest
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch, Mock
+from unittest.mock import patch, Mock
 from neurips_abstracts.plugins.neurips_downloader import NeurIPSDownloaderPlugin
 from neurips_abstracts.plugins.icml_downloader import ICMLDownloaderPlugin
 from neurips_abstracts.plugins.ml4ps_downloader import ML4PSDownloaderPlugin

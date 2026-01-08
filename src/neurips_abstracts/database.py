@@ -5,13 +5,11 @@ Database Module
 This module provides functionality to load JSON data into a SQLite database.
 """
 
-import json
 import logging
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import ValidationError
 
 # Import Pydantic models from plugin framework
 from neurips_abstracts.plugin import LightweightPaper
@@ -202,7 +200,7 @@ class DatabaseManager:
             self.connection.rollback()
             raise DatabaseError(f"Failed to create tables: {str(e)}") from e
 
-    def add_paper(self, paper: LightweightPaper) -> Optional[int]:
+    def add_paper(self, paper: LightweightPaper) -> Optional[str]:
         """
         Add a single paper to the database.
 
@@ -283,11 +281,14 @@ class DatabaseManager:
             conference = paper.conference
 
             # Handle keywords (could be list or None)
-            keywords = paper.keywords
-            if isinstance(keywords, list):
-                keywords = ", ".join(str(k) for k in keywords)
-            elif keywords is None:
-                keywords = ""
+            keywords_list = paper.keywords
+            keywords_str: str
+            if isinstance(keywords_list, list):
+                keywords_str = ", ".join(str(k) for k in keywords_list)
+            elif keywords_list is None:
+                keywords_str = ""
+            else:
+                keywords_str = ""
 
             # Use paper's original_id if available, otherwise use uid
             original_id = str(paper.original_id) if paper.original_id else None
@@ -313,7 +314,7 @@ class DatabaseManager:
                     poster_image_url,
                     url,
                     room_name,
-                    keywords,
+                    keywords_str,
                     starttime,
                     endtime,
                     award,

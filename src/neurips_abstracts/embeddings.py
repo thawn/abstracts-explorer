@@ -10,7 +10,6 @@ embeddings and stores them in ChromaDB for efficient similarity search.
 """
 
 import logging
-import sqlite3
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union, Tuple
 
@@ -189,7 +188,7 @@ class EmbeddingsManager:
         """
         try:
             # Try to get models list
-            models = self.openai_client.models.list()
+            _ = self.openai_client.models.list()
             logger.info(f"Successfully connected to OpenAI API at {self.lm_studio_url}")
             return True
         except Exception as e:
@@ -645,7 +644,7 @@ class EmbeddingsManager:
             # Store the embedding model in the database
             db_manager.set_embedding_model(self.model_name)
 
-            query = f"SELECT * FROM papers"
+            query = "SELECT * FROM papers"
             if where_clause:
                 query += f" WHERE {where_clause}"
 
