@@ -93,4 +93,3 @@ chmod +x .git/hooks/pre-commit
 
 See:
 - [docs/vendor-auto-update.md](../docs/vendor-auto-update.md) - User guide
-- [changelog/110_GIT_HOOKS_VENDOR_AUTO_UPDATE.md](../changelog/110_GIT_HOOKS_VENDOR_AUTO_UPDATE.md) - Implementation details

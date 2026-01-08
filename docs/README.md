@@ -66,7 +66,6 @@ start _build/html/index.html
 - **usage.md**: Usage examples and guide
 - **cli_reference.md**: Command-line interface reference
 - **contributing.md**: Contribution guidelines
-- **changelog.md**: Links to detailed changelog documents
 - **api/**: API reference documentation
   - Automatically generated from source code docstrings
   - Manual documentation with examples

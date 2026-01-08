@@ -70,4 +70,3 @@ Hooks monitor changes to:
 
 See:
 - `.githooks/README.md` - Detailed hook documentation and source files
-- `changelog/110_GIT_HOOKS_VENDOR_AUTO_UPDATE.md` - Implementation details

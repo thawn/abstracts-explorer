@@ -83,7 +83,6 @@ api/config
 :maxdepth: 1
 :caption: Development
 
-changelog
 contributing
 ```
 
