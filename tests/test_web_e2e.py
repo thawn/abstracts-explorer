@@ -150,45 +150,41 @@ def test_database(tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
-def web_server(test_database, tmp_path_factory):
+def test_embeddings(test_database, tmp_path_factory):
     """
-    Start a web server in a background thread for E2E testing.
-
+    Create a test embeddings database with mock embeddings for E2E tests.
+    
+    This fixture is cached at module scope to avoid recreating embeddings
+    for each test, improving test performance and reliability.
+    
     Parameters
     ----------
     test_database : Path
-        Path to the test database
+        Path to the test database with paper data
     tmp_path_factory : TempPathFactory
         Pytest fixture for creating temporary directories
-
-    Yields
-    ------
+        
+    Returns
+    -------
     tuple
-        Tuple of (base_url, port)
+        Tuple of (embeddings_manager, embeddings_path, collection_name)
     """
-    from neurips_abstracts.web_ui import app as flask_app
     from neurips_abstracts.embeddings import EmbeddingsManager
-    import chromadb.api.shared_system_client
     from unittest.mock import patch, Mock
-
-    # Clear ChromaDB's global client registry to avoid conflicts with other test modules
-    # This is necessary because ChromaDB maintains a singleton registry of clients by path
-    chromadb.api.shared_system_client.SharedSystemClient._identifier_to_system.clear()
-
-    port = find_free_port()
-    base_url = f"http://localhost:{port}"
-
-    # Create test embeddings database with unique path to avoid ChromaDB global cache conflicts
+    import chromadb.api.shared_system_client
     import uuid
     import time
-
-    # Use unique ID with timestamp to avoid conflicts with other test sessions and modules
+    
+    # Clear ChromaDB's global client registry to avoid conflicts
+    chromadb.api.shared_system_client.SharedSystemClient._identifier_to_system.clear()
+    
+    # Use unique ID with timestamp to avoid conflicts across test sessions
     unique_id = f"{int(time.time())}_{str(uuid.uuid4())[:8]}"
-    tmp_dir = tmp_path_factory.mktemp("web_e2e_embeddings")
-    embeddings_path = tmp_dir / f"web_e2e_chroma_{unique_id}"
-
+    tmp_dir = tmp_path_factory.mktemp("e2e_embeddings")
+    embeddings_path = tmp_dir / f"chroma_{unique_id}"
+    collection_name = f"test_collection_{unique_id}"
+    
     # Mock the OpenAI API for embedding generation
-    # E2E tests should not require a real API connection
     mock_openai_patcher = patch("neurips_abstracts.embeddings.OpenAI")
     mock_openai_class = mock_openai_patcher.start()
     
@@ -202,128 +198,132 @@ def web_server(test_database, tmp_path_factory):
         mock_client.models.list.return_value = mock_models
         
         # Mock embeddings.create() for embedding generation
+        # Use consistent mock embeddings for reproducibility
         mock_embedding_response = Mock()
         mock_embedding_data = Mock()
         mock_embedding_data.embedding = [0.1] * MOCK_EMBEDDING_DIMENSION
         mock_embedding_response.data = [mock_embedding_data]
         mock_client.embeddings.create.return_value = mock_embedding_response
-
-        # Initialize embeddings with test data
-        em = EmbeddingsManager(chroma_path=embeddings_path, collection_name=f"test_collection_{unique_id}")
+        
+        # Initialize embeddings manager
+        em = EmbeddingsManager(
+            chroma_path=embeddings_path,
+            collection_name=collection_name
+        )
         em.connect()
         em.create_collection(reset=True)
-
-        # Add embeddings for test papers (matching the paper UIDs from test_database)
-        # Get the database to read papers
+        
+        # Add embeddings for all test papers from the database
         db = DatabaseManager(str(test_database))
         db.connect()
         cursor = db.connection.cursor()
         cursor.execute("SELECT * FROM papers")
         papers = cursor.fetchall()
-
+        
+        # Add each paper to the embeddings database
         for paper in papers:
-            em.add_paper(dict(paper))
-
+            paper_dict = dict(paper)
+            em.add_paper(paper_dict)
+        
         db.close()
-        # Don't close embeddings manager - keep the ChromaDB collection active
-        # The Flask app will use this same instance via the module-level cache
-        # em.close()
-
-        # Configure the app to use test database and embeddings
-        original_get_config = get_config
-
-        def mock_get_config():
-            config = Config()
-            config.paper_db_path = str(test_database)
-            config.embedding_db_path = str(embeddings_path)
-            config.collection_name = f"test_collection_{unique_id}"
-            return config
-
-        # Patch the config
-        import neurips_abstracts.web_ui.app as app_module
-
-        app_module.get_config = mock_get_config
-
-        # Inject the pre-created embeddings manager directly (don't create a new one)
-        # This avoids ChromaDB global registry conflicts when the app tries to connect
-        app_module.embeddings_manager = em
-        app_module.rag_chat = None
-
-        # Use werkzeug's make_server for better cross-platform compatibility
-        # This works more reliably in threads than Flask's app.run()
-        from werkzeug.serving import make_server
         
-        server = make_server("localhost", port, flask_app, threaded=True)
+        # Return the embeddings manager and metadata
+        # Don't close it - it will be used by the web server
+        yield (em, embeddings_path, collection_name)
         
-        # Start server in a thread
-        def run_server():
-            server.serve_forever()
-
-        server_thread = threading.Thread(target=run_server, daemon=True)
-        server_thread.start()
-
-        # Wait for server to start
-        import requests
-
-        max_retries = 30
-        for i in range(max_retries):
-            try:
-                response = requests.get(base_url, timeout=1)
-                if response.status_code == 200:
-                    break
-            except requests.exceptions.RequestException:
-                if i == max_retries - 1:
-                    server.shutdown()
-                    pytest.fail("Server failed to start")
-                time.sleep(0.5)
-
-        yield (base_url, port)
-
-        # Shutdown server gracefully
-        server.shutdown()
-        
-        # Cleanup: restore original config
-        app_module.get_config = original_get_config
     finally:
-        # Ensure mock is always stopped
+        # Cleanup: stop the OpenAI mock patcher
         mock_openai_patcher.stop()
 
 
+@pytest.fixture(scope="module")
+def web_server(test_database, test_embeddings, tmp_path_factory):
+    """
+    Start a web server in a background thread for E2E testing.
+    
+    Uses cached embeddings from test_embeddings fixture for better performance
+    and reliability.
+
+    Parameters
+    ----------
+    test_database : Path
+        Path to the test database
+    test_embeddings : tuple
+        Cached embeddings manager, path, and collection name
+    tmp_path_factory : TempPathFactory
+        Pytest fixture for creating temporary directories
+
+    Yields
+    ------
+    tuple
+        Tuple of (base_url, port)
+    """
+    from neurips_abstracts.web_ui import app as flask_app
+    from neurips_abstracts.config import Config, get_config
+
+    # Unpack cached embeddings
+    em, embeddings_path, collection_name = test_embeddings
+
+    port = find_free_port()
+    base_url = f"http://localhost:{port}"
+
+    # Configure the app to use test database and embeddings
+    def mock_get_config():
+        config = Config()
+        config.paper_db_path = str(test_database)
+        config.embedding_db_path = str(embeddings_path)
+        config.collection_name = collection_name
+        return config
+
+    # Patch the config
+    import neurips_abstracts.web_ui.app as app_module
+
+    app_module.get_config = mock_get_config
+
+    # Inject the pre-created embeddings manager directly
+    # This avoids ChromaDB global registry conflicts when the app tries to connect
+    app_module.embeddings_manager = em
+    app_module.rag_chat = None
+
+    # Use werkzeug's make_server for better cross-platform compatibility
+    # This works more reliably in threads than Flask's app.run()
+    from werkzeug.serving import make_server
+    
+    server = make_server("localhost", port, flask_app, threaded=True)
+    
+    # Start server in a thread
+    def run_server():
+        server.serve_forever()
+
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
+
+    # Wait for server to start
+    import requests
+
+    max_retries = 30
+    for i in range(max_retries):
+        try:
+            response = requests.get(base_url, timeout=1)
+            if response.status_code == 200:
+                break
+        except requests.exceptions.RequestException:
+            if i == max_retries - 1:
+                server.shutdown()
+                pytest.fail("Server failed to start")
+            time.sleep(0.5)
+
+    yield (base_url, port)
+
+    # Cleanup
+    server.shutdown()
+    
+    # Reset the app module state
+    app_module.embeddings_manager = None
+    app_module.rag_chat = None
+
+
 def _check_chrome_available():
-    """
-    Check if Chrome browser is available for testing.
-
-    This check does NOT install the driver - it only verifies the browser exists.
-
-    Returns
-    -------
-    bool
-        True if Chrome is available, False otherwise
-    """
-    # Use cached result if available
-    if _driver_cache["chrome_available"] is not None:
-        return _driver_cache["chrome_available"]
-
-    try:
-        # Just check if Chrome/Chromium binary exists
-        chrome_options = ChromeOptions()
-        chrome_options.add_argument("--headless")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--version")
-
-        # Try to get Chrome binary path without installing driver
-        import shutil
-
-        chrome_binary = shutil.which("google-chrome") or shutil.which("chromium") or shutil.which("chromium-browser")
-        result = chrome_binary is not None
-        _driver_cache["chrome_available"] = result
-        return result
-    except Exception:
-        _driver_cache["chrome_available"] = False
-        return False
-
-
-def _check_firefox_available():
     """
     Check if Firefox browser is available for testing.
 
