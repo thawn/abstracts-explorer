@@ -79,6 +79,7 @@ class EmbeddingsManager:
     def __init__(
         self,
         lm_studio_url: Optional[str] = None,
+        auth_token: Optional[str] = None,
         model_name: Optional[str] = None,
         chroma_path: Optional[Union[str, Path]] = None,
         collection_name: Optional[str] = None,
@@ -101,6 +102,7 @@ class EmbeddingsManager:
         """
         config = get_config()
         self.lm_studio_url = (lm_studio_url or config.llm_backend_url).rstrip("/")
+        self.llm_backend_auth_token = auth_token or config.llm_backend_auth_token
         self.model_name = model_name or config.embedding_model
         self.chroma_path = Path(chroma_path or config.embedding_db_path)
         self.collection_name = collection_name or config.collection_name
@@ -165,7 +167,10 @@ class EmbeddingsManager:
         """
         try:
             # Try to get models list
-            response = requests.get(f"{self.lm_studio_url}/v1/models", timeout=5)
+            headers = (
+                {"Authorization": f"Bearer {self.llm_backend_auth_token}"} if self.llm_backend_auth_token else {}
+            )
+            response = requests.get(f"{self.lm_studio_url}/v1/models", timeout=5, headers=headers)
             response.raise_for_status()
             logger.info(f"Successfully connected to LM Studio at {self.lm_studio_url}")
             return True
@@ -203,10 +208,13 @@ class EmbeddingsManager:
             raise EmbeddingsError("Cannot generate embedding for empty text")
 
         try:
+            headers = (
+                {"Authorization": f"Bearer {self.llm_backend_auth_token}"} if self.llm_backend_auth_token else {}
+            )
             response = requests.post(
                 f"{self.lm_studio_url}/v1/embeddings",
                 json={"model": self.model_name, "input": text},
-                headers={"Content-Type": "application/json"},
+                headers={**headers, "Content-Type": "application/json"},
                 timeout=30,
             )
             response.raise_for_status()
@@ -555,7 +563,7 @@ class EmbeddingsManager:
             # Use DatabaseManager to check the stored model
             db_manager = DatabaseManager(db_path)
             db_manager.connect()
-            
+
             stored_model = db_manager.get_embedding_model()
             db_manager.close()
 
