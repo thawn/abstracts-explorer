@@ -501,15 +501,53 @@ E2E_BROWSER=firefox uv run pytest tests/test_web_e2e.py -v -m e2e
 - Tests requiring LM Studio are marked as `slow` and skipped by default. To run them, use `uv run pytest -m slow` (requires LM Studio running with a chat model loaded).
 - End-to-end tests are marked as `e2e` and require either Chrome or Firefox browser. These tests use Selenium to automate browser interactions and verify the web UI works correctly. By default, Chrome is tried first, then Firefox. You can specify a browser with the `E2E_BROWSER` environment variable.
 
-### Git Hooks for Web UI
+### Running Linters
 
-The project includes Git hooks that automatically rebuild vendor files (Font Awesome, Marked.js, KaTeX, Tailwind CSS) when HTML, JavaScript, or CSS files change:
+The project uses [ruff](https://docs.astral.sh/ruff/) for linting and [mypy](https://mypy.readthedocs.io/) for type checking:
 
-- **pre-commit**: Rebuilds vendor files before committing web UI changes
+```bash
+# Install linting tools (if not already installed)
+uv pip install --system ruff mypy types-requests
+
+# Check code with ruff
+ruff check src/ tests/
+
+# Auto-fix many ruff issues
+ruff check src/ tests/ --fix
+
+# Run mypy type checker
+mypy src/ --ignore-missing-imports
+
+# Format code (if needed)
+ruff format src/ tests/
+```
+
+**Note:** Linting is automatically run by the pre-commit hook, so you'll be notified of any issues before committing. The CI/CD pipeline also runs linting checks on all pull requests.
+
+### Git Hooks for Web UI and Code Quality
+
+The project includes Git hooks that automatically rebuild vendor files (Font Awesome, Marked.js, KaTeX, Tailwind CSS) when HTML, JavaScript, or CSS files change, and run code quality checks on Python files:
+
+- **pre-commit**: Rebuilds vendor files before committing web UI changes and runs linting checks (ruff and mypy) on Python files
 - **post-checkout**: Updates vendor files after switching branches
 - **post-merge**: Updates vendor files after pulling/merging changes
 
-These hooks are automatically installed when you run `npm install`. They ensure vendor files stay synchronized with source code changes without manual intervention.
+These hooks are automatically installed when you run `npm install`. They ensure vendor files stay synchronized with source code changes and maintain code quality without manual intervention.
+
+#### Linting Checks
+
+The pre-commit hook automatically runs:
+- **ruff**: Fast Python linter to check code style and potential errors
+- **mypy**: Static type checker to catch type-related bugs
+
+If linting fails, the commit will be blocked. You can fix the errors manually or use:
+```bash
+# Auto-fix many ruff issues
+ruff check src/ tests/ --fix
+
+# Check types
+mypy src/ --ignore-missing-imports
+```
 
 To manually rebuild vendor files:
 ```bash
