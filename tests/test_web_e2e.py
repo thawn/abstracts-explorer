@@ -345,7 +345,7 @@ def _create_chrome_driver():
 
     # Install driver only once per session
     if _driver_cache["chrome"] is None:
-        _driver_cache["chrome"] = ChromeDriverManager(chrome_type=ChromeType.BRAVE).install()
+        _driver_cache["chrome"] = ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install()
 
     service = ChromeService(_driver_cache["chrome"])
     driver = webdriver.Chrome(service=service, options=chrome_options)

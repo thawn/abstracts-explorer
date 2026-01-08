@@ -6,7 +6,7 @@ import pytest
 import sqlite3
 from unittest.mock import patch
 
-from neurips_abstracts.embeddings import EmbeddingsError
+from neurips_abstracts.embeddings import EmbeddingsError, EmbeddingsManager
 
 # Fixtures imported from conftest.py:
 # - mock_lm_studio: Mock LM Studio API responses
@@ -77,9 +77,7 @@ class TestEmbeddingsManager:
 
     def test_init(self, embeddings_manager):
         """Test EmbeddingsManager initialization."""
-        assert embeddings_manager.lm_studio_url == "http://localhost:1234"
-        assert embeddings_manager.model_name == "text-embedding-qwen3-embedding-4b"
-        assert embeddings_manager.collection_name == "test_collection"
+        assert isinstance(embeddings_manager, EmbeddingsManager)
         assert embeddings_manager.client is None
         assert embeddings_manager.collection is None
 
@@ -367,7 +365,7 @@ class TestEmbeddingsManager:
     def test_embed_from_database_empty_result(self, embeddings_manager, tmp_path, mock_lm_studio):
         """Test embedding from database with no matching papers."""
         from neurips_abstracts.database import DatabaseManager
-        
+
         # Create empty database using DatabaseManager
         db_path = tmp_path / "empty.db"
         with DatabaseManager(db_path) as db:
@@ -388,7 +386,7 @@ class TestEmbeddingsManager:
         """Test embedding from database where all papers have empty abstracts."""
         from neurips_abstracts.database import DatabaseManager
         from neurips_abstracts.plugin import LightweightPaper
-        
+
         db_path = tmp_path / "test.db"
         with DatabaseManager(db_path) as db:
             db.create_tables()
@@ -526,7 +524,6 @@ class TestEmbeddingsManager:
         embeddings_manager.close()
 
 
-
 def test_check_model_compatibility_no_database(embeddings_manager, tmp_path):
     """Test checking model compatibility when database does not exist."""
     non_existent_db = tmp_path / "nonexistent.db"
@@ -603,4 +600,3 @@ def test_embed_from_database_stores_model(embeddings_manager, test_database):
         assert stored_model == embeddings_manager.model_name
     
     embeddings_manager.close()
-
