@@ -38,11 +38,11 @@ def check_lm_studio_available():
     The result is cached to avoid multiple API calls during test collection.
     """
     global _lm_studio_available_cache
-    
+
     # Return cached result if available
     if _lm_studio_available_cache is not None:
         return _lm_studio_available_cache
-    
+
     try:
         config = get_config()
         em = EmbeddingsManager(
@@ -54,17 +54,6 @@ def check_lm_studio_available():
         try:
             # Connect and perform a lightweight liveness check via the embeddings API
             if not em.test_lm_studio_connection():
-                _lm_studio_available_cache = False
-                return False
-
-            # Try generating a tiny embedding to ensure the embedding endpoint works
-            try:
-                embedding = em.generate_embedding("test")
-                if not isinstance(embedding, list) or len(embedding) == 0:
-                    _lm_studio_available_cache = False
-                    return False
-            except Exception as e:
-                warn("Embedding generation failed", UserWarning)
                 _lm_studio_available_cache = False
                 return False
 
