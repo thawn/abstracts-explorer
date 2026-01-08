@@ -35,7 +35,13 @@ jobs:
             - name: Setup environment
               run: |
                   chmod +x .github/scripts/setup-ci.sh
-                  .github/scripts/setup-ci.sh --skip-node
+                  .github/scripts/setup-ci.sh
+
+            - name: Install Node.js dependencies
+              run: |
+                  npm install
+                  npm run install:vendor
+
 
             - name: Install Chrome for E2E tests
               uses: browser-actions/setup-chrome@v1
