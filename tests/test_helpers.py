@@ -12,6 +12,9 @@ import pytest
 from neurips_abstracts.config import get_config
 from neurips_abstracts.embeddings import EmbeddingsManager
 
+# Cache for LM Studio availability check to avoid multiple API calls during test collection
+_lm_studio_available_cache = None
+
 
 def check_lm_studio_available():
     """
@@ -31,7 +34,15 @@ def check_lm_studio_available():
 
     Used to skip tests that require a running OpenAI-compatible API backend
     (such as LM Studio or blablador).
+    
+    The result is cached to avoid multiple API calls during test collection.
     """
+    global _lm_studio_available_cache
+
+    # Return cached result if available
+    if _lm_studio_available_cache is not None:
+        return _lm_studio_available_cache
+
     try:
         config = get_config()
         em = EmbeddingsManager(
@@ -43,22 +54,16 @@ def check_lm_studio_available():
         try:
             # Connect and perform a lightweight liveness check via the embeddings API
             if not em.test_lm_studio_connection():
+                _lm_studio_available_cache = False
                 return False
 
-            # Try generating a tiny embedding to ensure the embedding endpoint works
-            try:
-                embedding = em.generate_embedding("test")
-                if not isinstance(embedding, list) or len(embedding) == 0:
-                    return False
-            except Exception as e:
-                warn("Embedding generation failed", UserWarning)
-                return False
-
+            _lm_studio_available_cache = True
             return True
         finally:
             em.close()
 
     except (requests.exceptions.RequestException, requests.exceptions.Timeout):
+        _lm_studio_available_cache = False
         return False
 
 

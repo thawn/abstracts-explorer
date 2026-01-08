@@ -104,12 +104,28 @@ class RAGChat:
         self.conversation_history: List[Dict[str, str]] = []
         self.last_search_query: Optional[str] = None
         
-        # Initialize OpenAI client
-        auth_token = config.llm_backend_auth_token
-        self.openai_client = OpenAI(
-            base_url=f"{self.lm_studio_url}/v1",
-            api_key=auth_token or "lm-studio-local"
-        )
+        # OpenAI client - lazy loaded on first use to avoid API calls during test collection
+        self._openai_client: Optional[OpenAI] = None
+        self._llm_backend_auth_token = config.llm_backend_auth_token
+
+    @property
+    def openai_client(self) -> OpenAI:
+        """
+        Get the OpenAI client, creating it lazily on first access.
+        
+        This lazy loading prevents API calls during test collection.
+        
+        Returns
+        -------
+        OpenAI
+            Initialized OpenAI client instance.
+        """
+        if self._openai_client is None:
+            self._openai_client = OpenAI(
+                base_url=f"{self.lm_studio_url}/v1",
+                api_key=self._llm_backend_auth_token or "lm-studio-local"
+            )
+        return self._openai_client
 
     def _rewrite_query(self, user_query: str) -> str:
         """

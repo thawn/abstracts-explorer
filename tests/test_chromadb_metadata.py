@@ -8,84 +8,168 @@ are correctly stored in ChromaDB and can be used for filtering search results.
 import pytest
 from pathlib import Path
 import chromadb
+from chromadb.config import Settings
+from unittest.mock import Mock
 from neurips_abstracts.plugin import validate_lightweight_paper, prepare_chroma_db_paper_data
 from neurips_abstracts.config import Config
 from neurips_abstracts.embeddings import EmbeddingsManager
 
 
+# Test embedding dimension for mock embeddings
+MOCK_EMBEDDING_DIMENSION = 4096
+
+
+@pytest.fixture(scope="module")
+def test_chroma_collection(tmp_path_factory):
+    """
+    Create a test ChromaDB collection with sample paper data.
+
+    This fixture creates an isolated ChromaDB instance in a temporary directory
+    and populates it with test paper data. All tests use this fixture instead of
+    relying on real data files.
+
+    Returns
+    -------
+    tuple
+        Tuple of (collection, mock_client, embeddings_manager)
+    """
+    import uuid
+    import time
+    import chromadb.api.shared_system_client
+
+    # Clear ChromaDB's global client registry to avoid conflicts
+    chromadb.api.shared_system_client.SharedSystemClient._identifier_to_system.clear()
+
+    # Create unique collection name to avoid conflicts
+    unique_id = f"{int(time.time())}_{str(uuid.uuid4())[:8]}"
+    tmp_dir = tmp_path_factory.mktemp("chroma_test")
+    chroma_path = tmp_dir / f"chroma_{unique_id}"
+    collection_name = f"test_papers_{unique_id}"
+
+    # Create mock OpenAI client
+    mock_client = Mock()
+    mock_models = Mock()
+    mock_client.models.list.return_value = mock_models
+
+    # Mock embeddings with consistent dimensions
+    mock_embedding_response = Mock()
+    mock_embedding_data = Mock()
+    mock_embedding_data.embedding = [0.1] * MOCK_EMBEDDING_DIMENSION
+    mock_embedding_response.data = [mock_embedding_data]
+    mock_client.embeddings.create.return_value = mock_embedding_response
+
+    # Initialize embeddings manager
+    em = EmbeddingsManager(chroma_path=chroma_path, collection_name=collection_name)
+    em._openai_client = mock_client  # Inject mock
+    em.connect()
+    em.create_collection(reset=True)
+
+    # Add test papers with diverse metadata
+    test_papers = [
+        {
+            "uid": "paper1",
+            "title": "Deep Learning for Computer Vision",
+            "authors": "Jane Smith; John Doe",
+            "abstract": "We present a novel deep learning approach for computer vision tasks.",
+            "session": "Oral Session 1",
+            "poster_position": "A1",
+            "keywords": "deep learning, computer vision",
+            "year": 2025,
+            "conference": "NeurIPS",
+        },
+        {
+            "uid": "paper2",
+            "title": "Reinforcement Learning in Robotics",
+            "authors": "Alice Johnson; Bob Wilson",
+            "abstract": "This paper explores reinforcement learning applications in robotics.",
+            "session": "Poster Session A",
+            "poster_position": "P1",
+            "keywords": "reinforcement learning, robotics",
+            "year": 2025,
+            "conference": "NeurIPS",
+        },
+        {
+            "uid": "paper3",
+            "title": "Natural Language Processing Advances",
+            "authors": "Carol White; David Brown",
+            "abstract": "Recent advances in natural language processing are discussed.",
+            "session": "Oral Session 1",
+            "poster_position": "A2",
+            "keywords": "nlp, transformers",
+            "year": 2025,
+            "conference": "NeurIPS",
+        },
+        {
+            "uid": "paper4",
+            "title": "Graph Neural Networks",
+            "authors": "Eve Green; Frank Black",
+            "abstract": "We introduce new architectures for graph neural networks.",
+            "session": "Poster Session B",
+            "poster_position": "P2",
+            "keywords": "graph neural networks, gnn",
+            "year": 2024,
+            "conference": "NeurIPS",
+        },
+        {
+            "uid": "paper5",
+            "title": "Generative Models for Images",
+            "authors": "Grace Lee; Henry Chen",
+            "abstract": "Novel generative models for image synthesis are presented.",
+            "session": "Spotlight Session",
+            "poster_position": "S1",
+            "keywords": "generative models, images",
+            "year": 2024,
+            "conference": "ICML",
+        },
+    ]
+
+    # Add papers to collection
+    for paper in test_papers:
+        em.add_paper(paper)
+
+    collection = em.collection
+
+    yield (collection, mock_client, em)
+
+    # Cleanup happens automatically
+
+
 @pytest.fixture
-def chroma_collection():
+def chroma_collection(test_chroma_collection):
     """
     Get the ChromaDB collection for testing.
 
-    This fixture connects to the actual ChromaDB database used by the application.
-    Tests are marked as integration tests since they depend on real data.
+    This fixture wraps the module-scoped test_chroma_collection fixture
+    to provide just the collection object.
 
     Returns
     -------
     chromadb.Collection
         The ChromaDB collection containing paper embeddings.
     """
-    config = Config()
-    chroma_path = Path(config.embedding_db_path)
-
-    if not chroma_path.exists():
-        pytest.skip(f"ChromaDB not found at {chroma_path}")
-
-    client = chromadb.PersistentClient(path=str(chroma_path))
-    try:
-        collection = client.get_collection(name="neurips_papers")
-        return collection
-    except Exception as e:
-        pytest.skip(f"Could not load ChromaDB collection: {e}")
+    collection, _, _ = test_chroma_collection
+    return collection
 
 
 @pytest.fixture
-def embeddings_manager(chroma_collection):
+def embeddings_manager(test_chroma_collection):
     """
-    Get the EmbeddingsManager configured with OpenAI API.
+    Get the EmbeddingsManager for semantic search tests.
 
-    This fixture creates an EmbeddingsManager instance using the configuration
-    from the environment (.env file). It reuses the ChromaDB client from the
-    chroma_collection fixture to avoid conflicts. Tests using this fixture will
-    be skipped if OpenAI API is not available.
-
-    Parameters
-    ----------
-    chroma_collection : chromadb.Collection
-        The ChromaDB collection (from fixture).
+    This fixture provides an EmbeddingsManager instance with a mock OpenAI client
+    that returns consistent embeddings.
 
     Returns
     -------
     EmbeddingsManager
         Configured embeddings manager instance.
     """
-    config = Config()
-
-    try:
-        # Create embeddings manager with config from .env
-        # Note: We don't call connect() to avoid creating a second client
-        em = EmbeddingsManager(
-            lm_studio_url=config.llm_backend_url,
-            model_name=config.embedding_model,
-            chroma_path=Path(config.embedding_db_path),
-            collection_name=config.collection_name,
-        )
-
-        # Reuse the existing collection from the fixture
-        em.collection = chroma_collection
-        em.client = chroma_collection._client
-
-        # Test OpenAI API connection
-        if not em.test_lm_studio_connection():
-            pytest.skip("OpenAI API not available or model not loaded")
-
-        return em
-    except Exception as e:
-        pytest.skip(f"Could not initialize EmbeddingsManager: {e}")
+    _, mock_client, em = test_chroma_collection
+    # Ensure mock client is still injected
+    em._openai_client = mock_client
+    return em
 
 
-@pytest.mark.integration
 class TestChromaDBMetadata:
     """Test suite for ChromaDB metadata filtering."""
 
@@ -292,7 +376,6 @@ class TestChromaDBMetadata:
                 assert isinstance(session, str), "Session should be a string"
                 assert len(session) > 0, "Session should not be empty string if present"
 
-    @pytest.mark.slow
     def test_all_documents_have_metadata(self, chroma_collection):
         """
         Test that all documents in the collection have metadata.
@@ -331,23 +414,14 @@ class TestChromaDBMetadata:
             missing_authors < sample_size * 0.5
         ), f"Too many documents missing authors metadata: {missing_authors}/{sample_size}"
 
-    @pytest.mark.integration
-    @pytest.mark.slow
     def test_semantic_search_with_filter(self, embeddings_manager, chroma_collection):
         """
         Test semantic search combined with metadata filtering.
 
         Verifies that ChromaDB can perform vector similarity search while
-        simultaneously filtering by metadata fields. Uses the configured OpenAI API
-        embedding model from .env file.
+        simultaneously filtering by metadata fields.
 
-        This test requires:
-        - OpenAI API running at configured URL
-        - Correct embedding model loaded in OpenAI API
-        - ChromaDB collection with embeddings created using that model
-
-        Note: Marked as slow because it requires OpenAI API connection and may
-        take time to generate embeddings.
+        Note: Marked as slow because it generates embeddings for search queries.
         """
         # Get a session to filter by
         sample_results = chroma_collection.get(limit=5, include=["metadatas"])

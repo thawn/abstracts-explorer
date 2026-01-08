@@ -122,11 +122,6 @@ docs/                      # Sphinx documentation
 ├── index.md              # Documentation homepage
 ├── api/                  # API reference
 └── *.md                  # User guide pages
-
-changelog/                 # Detailed change documentation
-├── 01_*.md               # Chronologically numbered
-├── 02_*.md
-└── ...
 ```
 
 ## Testing Requirements
@@ -464,8 +459,7 @@ See `.gitignore`:
 4. Update documentation (docstrings + user guide)
 5. Run tests: `uv run pytest --cov=src/neurips_abstracts`
 6. Build docs: `cd docs && uv run make html`
-7. Create changelog entry in `changelog/`
-8. Commit and create pull request
+7. Commit and create pull request
 
 ### Fixing a Bug
 
@@ -474,8 +468,7 @@ See `.gitignore`:
 3. Fix the bug
 4. Verify test passes
 5. Add regression test if needed
-6. Update changelog if significant
-7. Commit and create pull request
+6. Commit and create pull request
 
 ### Updating Documentation
 
@@ -558,13 +551,7 @@ See `.gitignore`:
 
 - **Documentation**: `docs/_build/html/index.html`
 - **Tests**: `tests/`
-- **Changelog**: `changelog/`
 - **Configuration**: `.env` (create from `.env.example`)
-
-## Version History
-
-- See `changelog/` directory for detailed version history
-- When creating changelog entries, check the existing files and make sure that the new file continues the numbering sequence
 
 ---
 

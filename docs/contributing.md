@@ -264,7 +264,6 @@ git push origin feature/my-new-feature
 - Provide clear description of changes
 - Reference related issues
 - Include test results
-- Update changelog if needed
 
 ## Code Review
 
@@ -291,8 +290,7 @@ git push origin feature/my-new-feature
 1. **Discuss first** - Open an issue to discuss major changes
 2. **Write tests first** - TDD when possible
 3. **Document thoroughly** - Code and user documentation
-4. **Update changelog** - Document the change
-5. **Consider backward compatibility** - Avoid breaking changes
+4. **Consider backward compatibility** - Avoid breaking changes
 
 ### Fixing Bugs
 

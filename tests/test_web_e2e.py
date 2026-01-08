@@ -31,6 +31,9 @@ from tests.test_helpers import find_free_port
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+# Constants for E2E tests
+MOCK_EMBEDDING_DIMENSION = 4096  # Standard dimension for test embeddings
+
 # Module-level cache for driver paths to ensure single installation per session
 # This prevents redundant downloads and installations when running multiple E2E tests
 # The driver is only installed when:
@@ -147,14 +150,110 @@ def test_database(tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
-def web_server(test_database, tmp_path_factory):
+def test_embeddings(test_database, tmp_path_factory):
+    """
+    Create a test embeddings database with mock embeddings for E2E tests.
+
+    This fixture is cached at module scope to avoid recreating embeddings
+    for each test, improving test performance and reliability.
+
+    Parameters
+    ----------
+    test_database : Path
+        Path to the test database with paper data
+    tmp_path_factory : TempPathFactory
+        Pytest fixture for creating temporary directories
+
+    Returns
+    -------
+    tuple
+        Tuple of (embeddings_manager, embeddings_path, collection_name, mock_client)
+    """
+    from neurips_abstracts.embeddings import EmbeddingsManager
+    from unittest.mock import Mock
+    import chromadb.api.shared_system_client
+    import uuid
+    import time
+
+    # Clear ChromaDB's global client registry to avoid conflicts
+    chromadb.api.shared_system_client.SharedSystemClient._identifier_to_system.clear()
+
+    # Use unique ID with timestamp to avoid conflicts across test sessions
+    unique_id = f"{int(time.time())}_{str(uuid.uuid4())[:8]}"
+    tmp_dir = tmp_path_factory.mktemp("e2e_embeddings")
+    embeddings_path = tmp_dir / f"chroma_{unique_id}"
+    collection_name = f"test_collection_{unique_id}"
+
+    # Create mock OpenAI client
+    # This will be injected directly into the EmbeddingsManager instance
+    mock_client = Mock()
+
+    # Mock models.list() for connection test
+    mock_models = Mock()
+    mock_client.models.list.return_value = mock_models
+
+    # Mock embeddings.create() for embedding generation
+    # IMPORTANT: This mock will be used for both adding papers AND searching
+    mock_embedding_response = Mock()
+    mock_embedding_data = Mock()
+    mock_embedding_data.embedding = [0.1] * MOCK_EMBEDDING_DIMENSION
+    mock_embedding_response.data = [mock_embedding_data]
+    mock_client.embeddings.create.return_value = mock_embedding_response
+
+    # Initialize embeddings manager
+    em = EmbeddingsManager(chroma_path=embeddings_path, collection_name=collection_name)
+
+    # Inject the mock client directly to bypass lazy loading
+    # This ensures we ALWAYS use the mock, never a real OpenAI connection
+    em._openai_client = mock_client
+
+    em.connect()
+
+    # Forcefully delete collection if it exists to ensure clean state
+    try:
+        em.client.delete_collection(name=collection_name)
+    except Exception:
+        pass  # Collection might not exist
+
+    # Create fresh collection
+    em.create_collection(reset=False)
+
+    # Add embeddings for all test papers from the database
+    db = DatabaseManager(str(test_database))
+    db.connect()
+    cursor = db.connection.cursor()
+    cursor.execute("SELECT * FROM papers")
+    papers = cursor.fetchall()
+
+    # Add each paper to the embeddings database
+    for paper in papers:
+        paper_dict = dict(paper)
+        em.add_paper(paper_dict)
+
+    db.close()
+
+    # Return the embeddings manager, metadata, and the mock client
+    # The mock client is returned so web_server can reuse it
+    yield (em, embeddings_path, collection_name, mock_client)
+
+    # Cleanup happens automatically
+
+
+@pytest.fixture(scope="module")
+def web_server(test_database, test_embeddings, tmp_path_factory):
     """
     Start a web server in a background thread for E2E testing.
+
+    Uses cached embeddings from test_embeddings fixture for better performance
+    and reliability. The mock OpenAI client is injected to ensure consistent
+    embedding dimensions.
 
     Parameters
     ----------
     test_database : Path
         Path to the test database
+    test_embeddings : tuple
+        Cached embeddings manager, path, collection name, and mock client
     tmp_path_factory : TempPathFactory
         Pytest fixture for creating temporary directories
 
@@ -163,70 +262,71 @@ def web_server(test_database, tmp_path_factory):
     tuple
         Tuple of (base_url, port)
     """
-    from neurips_abstracts.web_ui import app as flask_app
-    from neurips_abstracts.embeddings import EmbeddingsManager
-    import chromadb.api.shared_system_client
+    from neurips_abstracts.config import Config
+    from neurips_abstracts.database import DatabaseManager
 
-    # Clear ChromaDB's global client registry to avoid conflicts with other test modules
-    # This is necessary because ChromaDB maintains a singleton registry of clients by path
-    chromadb.api.shared_system_client.SharedSystemClient._identifier_to_system.clear()
+    # Import the module, not the app object
+    from neurips_abstracts.web_ui import app as app_module_init
+    import sys
+
+    # Get the actual module
+    app_module = sys.modules["neurips_abstracts.web_ui.app"]
+    # Get the Flask app instance
+    flask_app = app_module.app
+
+    # Unpack cached embeddings and mock client
+    em, embeddings_path, collection_name, mock_client = test_embeddings
+
+    # CRITICAL: Ensure the embeddings manager is using the mock client
+    # This prevents it from creating a real OpenAI connection during searches
+    em._openai_client = mock_client
 
     port = find_free_port()
     base_url = f"http://localhost:{port}"
 
-    # Create test embeddings database with unique path to avoid ChromaDB global cache conflicts
-    import uuid
-    import time
-
-    # Use unique ID with timestamp to avoid conflicts with other test sessions and modules
-    unique_id = f"{int(time.time())}_{str(uuid.uuid4())[:8]}"
-    tmp_dir = tmp_path_factory.mktemp("web_e2e_embeddings")
-    embeddings_path = tmp_dir / f"web_e2e_chroma_{unique_id}"
-
-    # Initialize embeddings with test data
-    em = EmbeddingsManager(chroma_path=embeddings_path, collection_name=f"test_collection_{unique_id}")
-    em.connect()
-    em.create_collection(reset=True)
-
-    # Add embeddings for test papers (matching the paper UIDs from test_database)
-    # Get the database to read papers
-    db = DatabaseManager(str(test_database))
-    db.connect()
-    cursor = db.connection.cursor()
-    cursor.execute("SELECT * FROM papers")
-    papers = cursor.fetchall()
-
-    for paper in papers:
-        em.add_paper(dict(paper))
-
-    db.close()
-    # Don't close embeddings manager - keep the ChromaDB collection active
-    # The Flask app will use this same instance via the module-level cache
-    # em.close()
-
     # Configure the app to use test database and embeddings
-    original_get_config = get_config
-
     def mock_get_config():
         config = Config()
         config.paper_db_path = str(test_database)
         config.embedding_db_path = str(embeddings_path)
-        config.collection_name = f"test_collection_{unique_id}"
+        config.collection_name = collection_name
         return config
-
-    # Patch the config
-    import neurips_abstracts.web_ui.app as app_module
 
     app_module.get_config = mock_get_config
 
-    # Inject the pre-created embeddings manager directly (don't create a new one)
-    # This avoids ChromaDB global registry conflicts when the app tries to connect
+    # Inject the pre-created embeddings manager directly
+    # CRITICAL: Set this BEFORE starting the server to avoid race conditions
+    # This prevents get_embeddings_manager() from creating a new instance
     app_module.embeddings_manager = em
     app_module.rag_chat = None
 
+    # Mock get_database to not check file existence
+    # Each Flask request thread will create its own database connection
+    original_get_database = app_module.get_database
+
+    def mock_get_database_wrapper():
+        """Wrapper that skips file existence check."""
+        from flask import g
+        import os
+
+        if "db" not in g:
+            db_path = str(test_database)
+            # Don't check file existence in tests - the database was created in a temp dir
+            g.db = DatabaseManager(db_path)
+            g.db.connect()
+        return g.db
+
+    app_module.get_database = mock_get_database_wrapper
+
+    # Use werkzeug's make_server for better cross-platform compatibility
+    # This works more reliably in threads than Flask's app.run()
+    from werkzeug.serving import make_server
+
+    server = make_server("localhost", port, flask_app, threaded=True)
+
     # Start server in a thread
     def run_server():
-        flask_app.run(host="localhost", port=port, debug=False, use_reloader=False)
+        server.serve_forever()
 
     server_thread = threading.Thread(target=run_server, daemon=True)
     server_thread.start()
@@ -241,14 +341,20 @@ def web_server(test_database, tmp_path_factory):
             if response.status_code == 200:
                 break
         except requests.exceptions.RequestException:
+            if i == max_retries - 1:
+                server.shutdown()
+                pytest.fail("Server failed to start")
             time.sleep(0.5)
-    else:
-        pytest.fail("Server failed to start")
 
     yield (base_url, port)
 
-    # Cleanup: restore original config
-    app_module.get_config = original_get_config
+    # Cleanup
+    server.shutdown()
+
+    # Reset the app module state
+    app_module.embeddings_manager = None
+    app_module.rag_chat = None
+    app_module.get_database = original_get_database
 
 
 def _check_chrome_available():
@@ -267,16 +373,10 @@ def _check_chrome_available():
         return _driver_cache["chrome_available"]
 
     try:
-        # Just check if Chrome/Chromium binary exists
-        chrome_options = ChromeOptions()
-        chrome_options.add_argument("--headless")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--version")
-
-        # Try to get Chrome binary path without installing driver
+        # Just check if Chrome binary exists
         import shutil
 
-        chrome_binary = shutil.which("google-chrome") or shutil.which("chromium") or shutil.which("chromium-browser")
+        chrome_binary = shutil.which("chromium") or shutil.which("chrome") or shutil.which("google-chrome")
         result = chrome_binary is not None
         _driver_cache["chrome_available"] = result
         return result

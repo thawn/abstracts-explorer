@@ -124,5 +124,4 @@ When modifying these scripts:
 1. Test on all platforms (Linux, macOS, Windows)
 2. Update this README with any new options or behavior
 3. Validate bash syntax: `bash -n setup-ci.sh`
-4. Update the changelog entry
-5. Update the composite action if the script interface changes
+4. Update the composite action if the script interface changes

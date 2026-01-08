@@ -5,13 +5,66 @@ This module contains common fixtures used across multiple test files to reduce
 code duplication and ensure consistency in test setup.
 """
 
+import os
 import pytest
 import sqlite3
+from pathlib import Path
 from unittest.mock import Mock
 
 from neurips_abstracts.database import DatabaseManager
 from neurips_abstracts.embeddings import EmbeddingsManager
 from neurips_abstracts.plugin import LightweightPaper
+from neurips_abstracts.config import load_env_file
+
+
+@pytest.fixture(scope="session", autouse=True)
+def test_config():
+    """
+    Ensure tests use predictable configuration from .env.example.
+    
+    This fixture sets environment variables from .env.example to provide
+    consistent defaults for all tests, preventing tests from being affected
+    by the user's custom .env file. However, it only sets variables that
+    are not already in the environment, allowing individual tests to override.
+    
+    The fixture runs automatically for all tests (autouse=True) at session scope.
+    """
+    from neurips_abstracts.config import get_config
+    
+    # Find .env.example file
+    repo_root = Path(__file__).parent.parent
+    env_example = repo_root / ".env.example"
+    
+    if not env_example.exists():
+        # If .env.example doesn't exist, skip this fixture
+        yield
+        return
+    
+    # Load values from .env.example
+    example_vars = load_env_file(env_example)
+    
+    # Store which environment variables we added (not ones that were already there)
+    added_vars = []
+    
+    # Only set environment variables that are NOT already set
+    # This allows individual tests to override and prevents interference
+    for key, value in example_vars.items():
+        if key not in os.environ:
+            os.environ[key] = value
+            added_vars.append(key)
+    
+    # Force config reload to pick up test environment variables
+    get_config(reload=True)
+    
+    yield
+    
+    # Remove only the environment variables we added
+    for key in added_vars:
+        if key in os.environ:
+            del os.environ[key]
+    
+    # Reload config to restore user's configuration
+    get_config(reload=True)
 
 
 @pytest.fixture
@@ -321,7 +374,8 @@ def embeddings_manager(tmp_path):
     # Mock models.list()
     mock_client.models.list.return_value = Mock()
     
-    em.openai_client = mock_client
+    # Set the private attribute directly to avoid triggering lazy loading
+    em._openai_client = mock_client
     
     return em
 

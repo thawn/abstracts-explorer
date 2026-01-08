@@ -11,7 +11,7 @@ import time
 import requests
 import threading
 from pathlib import Path
-from multiprocessing import Process
+from unittest.mock import patch, Mock
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -23,6 +23,9 @@ from tests.test_helpers import requires_lm_studio, find_free_port
 # - check_lm_studio_available(): Check if LM Studio is running
 # - requires_lm_studio: Skip marker for tests requiring LM Studio
 # - find_free_port(): Find a free port for testing
+
+# Constants for tests
+MOCK_EMBEDDING_DIMENSION = 4096  # Standard dimension for test embeddings
 
 
 @pytest.fixture(scope="module")
@@ -60,36 +63,11 @@ def test_database(tmp_path_factory, web_test_papers):
     return db_path
 
 
-def start_web_server(db_path, port):
-    """
-    Start the web server in a separate process.
 
-    Parameters
-    ----------
-    db_path : Path
-        Path to the test database
-    port : int
-        Port to run the server on
-    """
-    import os
-
-    # Set environment variable for database path
-    os.environ["PAPER_DB_PATH"] = str(db_path)
-
-    # Import after setting env var
-    from neurips_abstracts.web_ui import run_server
-    from neurips_abstracts.config import get_config
-
-    # Force reload config to pick up the environment variable
-    # This is important on Linux where multiprocessing uses fork()
-    get_config(reload=True)
-
-    # Run server (config will be loaded lazily on first request)
-    run_server(host="127.0.0.1", port=port, debug=False)
 
 
 @pytest.fixture(scope="module")
-def web_server(test_database):
+def web_server(test_database, tmp_path_factory):
     """
     Start the web server for testing.
 
@@ -97,6 +75,8 @@ def web_server(test_database):
     ----------
     test_database : Path
         Path to the test database
+    tmp_path_factory : TempPathFactory
+        Pytest fixture for creating temporary directories
 
     Yields
     ------
@@ -112,40 +92,135 @@ def web_server(test_database):
     except ImportError:
         pytest.skip("Flask not installed - web UI tests require 'pip install neurips-abstracts[web]'")
 
+    import os
+    import uuid
+    import chromadb.api.shared_system_client
+
+    # Clear ChromaDB's global client registry to avoid conflicts with other test modules
+    chromadb.api.shared_system_client.SharedSystemClient._identifier_to_system.clear()
+
     port = find_free_port()
     host = "127.0.0.1"
     base_url = f"http://{host}:{port}"
 
-    # Set environment variable before starting server
-    import os
-    from pathlib import Path
+    # Create test embeddings database with unique path
+    unique_id = f"{int(time.time())}_{str(uuid.uuid4())[:8]}"
+    tmp_dir = tmp_path_factory.mktemp("web_integration_embeddings")
+    embeddings_path = tmp_dir / f"web_integration_chroma_{unique_id}"
+    collection_name = f"test_collection_{unique_id}"
 
-    # Ensure the database path is absolute
-    abs_db_path = str(Path(test_database).absolute())
-    os.environ["PAPER_DB_PATH"] = abs_db_path
+    # Set environment variables BEFORE importing the app modules
+    # This ensures the config is loaded with the correct test paths
+    original_db_path = os.environ.get("PAPER_DB_PATH")
+    original_embeddings_path = os.environ.get("EMBEDDING_DB_PATH")
+    original_collection_name = os.environ.get("COLLECTION_NAME")
 
-    # Start server in a separate process
-    server_process = Process(target=start_web_server, args=(abs_db_path, port), daemon=True)
-    server_process.start()
+    os.environ["PAPER_DB_PATH"] = str(test_database)
+    os.environ["EMBEDDING_DB_PATH"] = str(embeddings_path)
+    os.environ["COLLECTION_NAME"] = collection_name
 
-    # Wait for server to start
-    max_retries = 30
-    for i in range(max_retries):
-        try:
-            response = requests.get(base_url, timeout=1)
-            if response.status_code in [200, 404]:
-                break
-        except requests.exceptions.RequestException:
-            if i == max_retries - 1:
-                server_process.terminate()
-                pytest.fail("Web server failed to start")
-            time.sleep(0.5)
+    # Mock the OpenAI API for embedding generation
+    # Integration tests should not require a real API connection
+    mock_openai_patcher = patch("neurips_abstracts.embeddings.OpenAI")
+    mock_openai_class = mock_openai_patcher.start()
+    
+    try:
+        # Create mock OpenAI client instance
+        mock_client = Mock()
+        mock_openai_class.return_value = mock_client
+        
+        # Mock models.list() for connection test
+        mock_models = Mock()
+        mock_client.models.list.return_value = mock_models
+        
+        # Mock embeddings.create() for embedding generation
+        mock_embedding_response = Mock()
+        mock_embedding_data = Mock()
+        mock_embedding_data.embedding = [0.1] * MOCK_EMBEDDING_DIMENSION
+        mock_embedding_response.data = [mock_embedding_data]
+        mock_client.embeddings.create.return_value = mock_embedding_response
 
-    yield (host, port, base_url)
+        # Import after setting environment variables and mocking
+        from neurips_abstracts.web_ui import app as flask_app
+        from neurips_abstracts.embeddings import EmbeddingsManager
+        from neurips_abstracts.config import get_config
 
-    # Cleanup
-    server_process.terminate()
-    server_process.join(timeout=5)
+        # Force reload config to pick up environment variables
+        get_config(reload=True)
+
+        # Initialize embeddings with test data
+        em = EmbeddingsManager(chroma_path=embeddings_path, collection_name=collection_name)
+        em.connect()
+        em.create_collection(reset=True)
+
+        # Add embeddings for test papers
+        from neurips_abstracts.database import DatabaseManager
+        db = DatabaseManager(str(test_database))
+        db.connect()
+        cursor = db.connection.cursor()
+        cursor.execute("SELECT * FROM papers")
+        papers = cursor.fetchall()
+
+        for paper in papers:
+            em.add_paper(dict(paper))
+
+        db.close()
+
+        # Inject the pre-created embeddings manager directly
+        import neurips_abstracts.web_ui.app as app_module
+        app_module.embeddings_manager = em
+        app_module.rag_chat = None
+
+        # Use werkzeug's make_server for better cross-platform compatibility
+        # This works more reliably in threads than Flask's app.run()
+        from werkzeug.serving import make_server
+        
+        server = make_server(host, port, flask_app, threaded=True)
+        
+        # Start server in a thread
+        def run_server():
+            server.serve_forever()
+
+        server_thread = threading.Thread(target=run_server, daemon=True)
+        server_thread.start()
+
+        # Wait for server to start
+        max_retries = 30
+        for i in range(max_retries):
+            try:
+                response = requests.get(base_url, timeout=1)
+                if response.status_code in [200, 404]:
+                    break
+            except requests.exceptions.RequestException:
+                if i == max_retries - 1:
+                    server.shutdown()
+                    pytest.fail("Web server failed to start")
+                time.sleep(0.5)
+
+        yield (host, port, base_url)
+        
+        # Shutdown server gracefully
+        server.shutdown()
+
+    finally:
+        # Ensure mock is always stopped
+        mock_openai_patcher.stop()
+        
+        # Restore original environment variables
+        if original_db_path is not None:
+            os.environ["PAPER_DB_PATH"] = original_db_path
+        elif "PAPER_DB_PATH" in os.environ:
+            del os.environ["PAPER_DB_PATH"]
+            
+        if original_embeddings_path is not None:
+            os.environ["EMBEDDING_DB_PATH"] = original_embeddings_path
+        elif "EMBEDDING_DB_PATH" in os.environ:
+            del os.environ["EMBEDDING_DB_PATH"]
+            
+        if original_collection_name is not None:
+            os.environ["COLLECTION_NAME"] = original_collection_name
+        elif "COLLECTION_NAME" in os.environ:
+            del os.environ["COLLECTION_NAME"]
 
 
 class TestWebUIIntegration:
@@ -487,8 +562,8 @@ class TestWebUIIntegration:
             # If we got results, check they have similarity scores
             if data["papers"]:
                 for paper in data["papers"]:
-                    assert "id" in paper
-                    assert "name" in paper
+                    assert "uid" in paper
+                    assert "title" in paper
                     assert "abstract" in paper
                     # Semantic search results should include similarity score
                     assert "similarity" in paper, "Semantic search results should include similarity score"
@@ -650,8 +725,8 @@ class TestWebUISemanticSearchWithResults:
             # If we got results, verify they have similarity scores
             if data["papers"]:
                 for paper in data["papers"]:
-                    assert "id" in paper
-                    assert "name" in paper or "title" in paper
+                    assert "uid" in paper
+                    assert "title" in paper
                     # Semantic search should add similarity
                     assert "similarity" in paper
                     assert isinstance(paper["similarity"], (int, float))

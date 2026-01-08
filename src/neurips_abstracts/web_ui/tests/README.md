@@ -182,5 +182,3 @@ The JavaScript testing infrastructure is complete and ready for:
 - ✅ Coverage reporting
 - ✅ Watch mode for development
 - ✅ Integration with Python test suite
-
-For more details, see [changelog/41_JAVASCRIPT_UNIT_TESTS.md](../changelog/41_JAVASCRIPT_UNIT_TESTS.md)

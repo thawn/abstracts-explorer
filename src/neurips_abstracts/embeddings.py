@@ -109,11 +109,27 @@ class EmbeddingsManager:
         self.client: Optional[Any] = None  # chromadb.Client
         self.collection: Optional[Any] = None  # chromadb.Collection
         
-        # Initialize OpenAI client
-        self.openai_client = OpenAI(
-            base_url=f"{self.lm_studio_url}/v1",
-            api_key=self.llm_backend_auth_token or "lm-studio-local"
-        )
+        # OpenAI client - lazy loaded on first use to avoid API calls during test collection
+        self._openai_client: Optional[OpenAI] = None
+
+    @property
+    def openai_client(self) -> OpenAI:
+        """
+        Get the OpenAI client, creating it lazily on first access.
+        
+        This lazy loading prevents API calls during test collection.
+        
+        Returns
+        -------
+        OpenAI
+            Initialized OpenAI client instance.
+        """
+        if self._openai_client is None:
+            self._openai_client = OpenAI(
+                base_url=f"{self.lm_studio_url}/v1",
+                api_key=self.llm_backend_auth_token or "lm-studio-local"
+            )
+        return self._openai_client
 
     def connect(self) -> None:
         """
