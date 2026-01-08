@@ -87,10 +87,11 @@ LLM_BACKEND_URL=http://test
 class TestConfig:
     """Test Config class."""
 
-    def teardown_method(self):
-        """Clean up environment variables after each test."""
+    def setup_method(self):
+        """Clear environment variables before each test to ensure isolation."""
         # List of all config-related environment variables
         env_vars_to_clean = [
+            "DATA_DIR",
             "CHAT_MODEL",
             "EMBEDDING_MODEL",
             "LLM_BACKEND_URL",
@@ -101,6 +102,30 @@ class TestConfig:
             "MAX_CONTEXT_PAPERS",
             "CHAT_TEMPERATURE",
             "CHAT_MAX_TOKENS",
+            "ENABLE_QUERY_REWRITING",
+            "QUERY_SIMILARITY_THRESHOLD",
+        ]
+        for var in env_vars_to_clean:
+            if var in os.environ:
+                del os.environ[var]
+
+    def teardown_method(self):
+        """Clean up environment variables after each test."""
+        # List of all config-related environment variables
+        env_vars_to_clean = [
+            "DATA_DIR",
+            "CHAT_MODEL",
+            "EMBEDDING_MODEL",
+            "LLM_BACKEND_URL",
+            "LLM_BACKEND_AUTH_TOKEN",
+            "EMBEDDING_DB_PATH",
+            "PAPER_DB_PATH",
+            "COLLECTION_NAME",
+            "MAX_CONTEXT_PAPERS",
+            "CHAT_TEMPERATURE",
+            "CHAT_MAX_TOKENS",
+            "ENABLE_QUERY_REWRITING",
+            "QUERY_SIMILARITY_THRESHOLD",
         ]
         for var in env_vars_to_clean:
             if var in os.environ:
