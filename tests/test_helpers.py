@@ -4,11 +4,13 @@ Shared test helper utilities.
 This module contains common utility functions used across multiple test files
 to reduce code duplication and ensure consistency.
 """
+from warnings import warn
 
 import socket
 import requests
 import pytest
 from neurips_abstracts.config import get_config
+from neurips_abstracts.embeddings import EmbeddingsManager
 
 
 def check_lm_studio_available():
@@ -31,30 +33,29 @@ def check_lm_studio_available():
     """
     try:
         config = get_config()
-        url = config.llm_backend_url
-        model = config.chat_model
-
-        # Check if server is running
-        response = requests.get(f"{url}/v1/models", timeout=2)
-        if response.status_code != 200:
-            return False
-
-        # Check if there are any models loaded
-        data = response.json()
-        if not data.get("data"):
-            return False
-
-        # Try a simple chat completion with the configured model
-        test_response = requests.post(
-            f"{url}/v1/chat/completions",
-            json={
-                "model": model,
-                "messages": [{"role": "user", "content": "test"}],
-                "max_tokens": 5,
-            },
-            timeout=5,
+        em = EmbeddingsManager(
+            lm_studio_url=config.llm_backend_url,
+            auth_token=config.llm_backend_auth_token,
+            model_name=config.embedding_model,
         )
-        return test_response.status_code == 200
+
+        try:
+            # Connect and perform a lightweight liveness check via the embeddings API
+            if not em.test_lm_studio_connection():
+                return False
+
+            # Try generating a tiny embedding to ensure the embedding endpoint works
+            try:
+                embedding = em.generate_embedding("test")
+                if not isinstance(embedding, list) or len(embedding) == 0:
+                    return False
+            except Exception as e:
+                warn("Embedding generation failed", UserWarning)
+                return False
+
+            return True
+        finally:
+            em.close()
 
     except (requests.exceptions.RequestException, requests.exceptions.Timeout):
         return False
