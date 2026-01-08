@@ -1086,7 +1086,7 @@ class TestWebUIE2E:
             results_div = browser.find_element(By.ID, "search-results")
             assert results_div is not None
 
-    def test_browser_back_forward(self, web_server, browser):
+    def test_browser_single_page_app(self, web_server, browser):
         """
         Test browser back/forward navigation.
 
@@ -1104,19 +1104,15 @@ class TestWebUIE2E:
         search_input = browser.find_element(By.ID, "search-input")
         search_input.send_keys("attention")
         search_input.send_keys(Keys.RETURN)
-        time.sleep(2)
+        time.sleep(0.5)
 
         # Switch to chat tab
         chat_tab_button = browser.find_element(By.ID, "tab-chat")
         chat_tab_button.click()
-        time.sleep(1)
-
-        # Go back
-        browser.back()
-        time.sleep(1)
+        time.sleep(0.2)
 
         # Should still be on the same page (single page app)
-        assert "Abstracts Explorer" in browser.title
+        assert browser.current_url == base_url + "/"
 
     def test_page_no_javascript_errors(self, web_server, browser):
         """

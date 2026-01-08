@@ -32,21 +32,20 @@ jobs:
               with:
                   python-version: ${{ matrix.python-version }}
 
-            - name: Install dependencies
+            - name: Setup environment (Unix)
+              if: runner.os != 'Windows'
               run: |
-                  uv sync --extra dev --extra web
+                  chmod +x .github/scripts/setup-ci.sh
+                  .github/scripts/setup-ci.sh --skip-node
+
+            - name: Setup environment (Windows)
+              if: runner.os == 'Windows'
+              run: |
+                  .github/scripts/setup-ci.ps1 --skip-node
 
             - name: Run tests (excluding slow and e2e tests)
               run: |
                   uv run pytest tests/ -v --cov=neurips_abstracts --cov-report=xml --cov-report=term-missing -m "not slow and not e2e"
-
-            - name: Upload coverage to Codecov
-              if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
-              uses: codecov/codecov-action@v4
-              with:
-                  file: ./coverage.xml
-                  fail_ci_if_error: false
-                  token: ${{ secrets.CODECOV_TOKEN }}
 
     lint:
         runs-on: ubuntu-latest
@@ -85,23 +84,11 @@ jobs:
         steps:
             - uses: actions/checkout@v4
 
-            - name: Set up Node.js
-              uses: actions/setup-node@v4
+            - name: Setup NeurIPS Abstracts Environment
+              uses: ./.github/actions/setup-environment
               with:
-                  node-version: "20"
-                  cache: "npm"
-
-            - name: Install dependencies
-              run: npm ci
+                  python-version: '3.12'
+                  install-node: 'true'
 
             - name: Run JavaScript tests
               run: npm test
-
-            - name: Upload JavaScript coverage
-              if: always()
-              uses: codecov/codecov-action@v4
-              with:
-                  files: ./coverage/coverage-final.json
-                  flags: javascript
-                  fail_ci_if_error: false
-                  token: ${{ secrets.CODECOV_TOKEN }}
