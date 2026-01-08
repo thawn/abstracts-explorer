@@ -166,6 +166,7 @@ def web_server(test_database, tmp_path_factory):
     from neurips_abstracts.web_ui import app as flask_app
     from neurips_abstracts.embeddings import EmbeddingsManager
     import chromadb.api.shared_system_client
+    from unittest.mock import patch, Mock
 
     # Clear ChromaDB's global client registry to avoid conflicts with other test modules
     # This is necessary because ChromaDB maintains a singleton registry of clients by path
@@ -182,6 +183,26 @@ def web_server(test_database, tmp_path_factory):
     unique_id = f"{int(time.time())}_{str(uuid.uuid4())[:8]}"
     tmp_dir = tmp_path_factory.mktemp("web_e2e_embeddings")
     embeddings_path = tmp_dir / f"web_e2e_chroma_{unique_id}"
+
+    # Mock the OpenAI API for embedding generation
+    # E2E tests should not require a real API connection
+    mock_openai_patcher = patch("neurips_abstracts.embeddings.OpenAI")
+    mock_openai_class = mock_openai_patcher.start()
+    
+    # Create mock OpenAI client instance
+    mock_client = Mock()
+    mock_openai_class.return_value = mock_client
+    
+    # Mock models.list() for connection test
+    mock_models = Mock()
+    mock_client.models.list.return_value = mock_models
+    
+    # Mock embeddings.create() for embedding generation
+    mock_embedding_response = Mock()
+    mock_embedding_data = Mock()
+    mock_embedding_data.embedding = [0.1] * 4096
+    mock_embedding_response.data = [mock_embedding_data]
+    mock_client.embeddings.create.return_value = mock_embedding_response
 
     # Initialize embeddings with test data
     em = EmbeddingsManager(chroma_path=embeddings_path, collection_name=f"test_collection_{unique_id}")
@@ -247,8 +268,9 @@ def web_server(test_database, tmp_path_factory):
 
     yield (base_url, port)
 
-    # Cleanup: restore original config
+    # Cleanup: restore original config and stop mock
     app_module.get_config = original_get_config
+    mock_openai_patcher.stop()
 
 
 def _check_chrome_available():

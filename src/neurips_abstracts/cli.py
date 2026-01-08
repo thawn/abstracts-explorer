@@ -129,12 +129,12 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         # Test connection
         print("🔌 Testing OpenAI API connection...")
         if not em.test_lm_studio_connection():
-            print("\n❌ Failed to connect to LM Studio!", file=sys.stderr)
+            print("\n❌ Failed to connect to OpenAI API!", file=sys.stderr)
             print("\nPlease ensure:", file=sys.stderr)
-            print(f"  - LM Studio is running at {args.lm_studio_url}", file=sys.stderr)
+            print(f"  - OpenAI-compatible API is running at {args.lm_studio_url}", file=sys.stderr)
             print(f"  - The {args.model} model is loaded", file=sys.stderr)
             return 1
-        print("✅ Successfully connected to LM Studio\n")
+        print("✅ Successfully connected to OpenAI API\n")
 
         # Connect to ChromaDB
         em.connect()
@@ -249,9 +249,9 @@ def search_command(args: argparse.Namespace) -> int:
 
         # Test OpenAI API connection
         if not em.test_lm_studio_connection():
-            print("\n❌ Failed to connect to LM Studio!", file=sys.stderr)
+            print("\n❌ Failed to connect to OpenAI API!", file=sys.stderr)
             print("\nPlease ensure:", file=sys.stderr)
-            print(f"  - LM Studio is running at {args.lm_studio_url}", file=sys.stderr)
+            print(f"  - OpenAI-compatible API is running at {args.lm_studio_url}", file=sys.stderr)
             print(f"  - The {args.model} model is loaded", file=sys.stderr)
             return 1
 
@@ -415,12 +415,12 @@ def chat_command(args: argparse.Namespace) -> int:
         # Test OpenAI API connection
         print("\n🔌 Testing OpenAI API connection...")
         if not em.test_lm_studio_connection():
-            print("\n❌ Failed to connect to LM Studio!", file=sys.stderr)
+            print("\n❌ Failed to connect to OpenAI API!", file=sys.stderr)
             print("\nPlease ensure:", file=sys.stderr)
-            print(f"  - LM Studio is running at {args.lm_studio_url}", file=sys.stderr)
+            print(f"  - OpenAI-compatible API is running at {args.lm_studio_url}", file=sys.stderr)
             print("  - A language model is loaded", file=sys.stderr)
             return 1
-        print("✅ Successfully connected to LM Studio")
+        print("✅ Successfully connected to OpenAI API")
 
         # Connect to embeddings
         em.connect()
