@@ -1,0 +1,49 @@
+name: Slow Tests
+
+on:
+    push:
+        branches: [main, develop]
+    pull_request:
+        branches: [main, develop]
+    workflow_dispatch:
+    schedule:
+        # Run daily at 2 AM UTC
+        - cron: '0 2 * * *'
+
+jobs:
+    slow-tests:
+        runs-on: ubuntu-latest
+        
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0 # Needed for hatch-vcs to determine version
+
+            - name: Install uv
+              uses: astral-sh/setup-uv@v4
+              with:
+                  version: "latest"
+                  enable-cache: true
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+
+            - name: Setup environment
+              run: |
+                  chmod +x .github/scripts/setup-ci.sh
+                  .github/scripts/setup-ci.sh --skip-node
+
+            - name: Configure blablador settings
+              env:
+                  BLABLADOR_TOKEN: ${{ secrets.BLABLADOR_TOKEN }}
+              run: |
+                  echo "CHAT_MODEL=alias-fast" >> $GITHUB_ENV
+                  echo "EMBEDDING_MODEL=alias-embedding" >> $GITHUB_ENV
+                  echo "LLM_BACKEND_URL=https://api.blablador.com" >> $GITHUB_ENV
+                  echo "LLM_BACKEND_AUTH_TOKEN=$BLABLADOR_TOKEN" >> $GITHUB_ENV
+
+            - name: Run slow tests
+              run: |
+                  uv run pytest tests/ -v --cov=neurips_abstracts --cov-report=xml --cov-report=term-missing -m "slow"

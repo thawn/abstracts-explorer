@@ -84,21 +84,20 @@ def mock_embeddings_manager_empty():
 @pytest.fixture
 def mock_lm_studio_response():
     """Mock LM Studio API response."""
-    with patch("neurips_abstracts.rag.requests.post") as mock_post:
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "choices": [
-                {
-                    "message": {
-                        "content": "Based on Paper 1 and Paper 2, attention mechanisms allow models to focus on relevant parts of the input."
-                    }
-                }
-            ]
-        }
-        mock_response.raise_for_status = Mock()
-        mock_post.return_value = mock_response
-        yield mock_post
+    with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+        mock_client = Mock()
+        mock_openai_class.return_value = mock_client
+        
+        # Mock chat.completions.create()
+        mock_chat_response = Mock()
+        mock_choice = Mock()
+        mock_message = Mock()
+        mock_message.content = "Based on Paper 1 and Paper 2, attention mechanisms allow models to focus on relevant parts of the input."
+        mock_choice.message = mock_message
+        mock_chat_response.choices = [mock_choice]
+        mock_client.chat.completions.create.return_value = mock_chat_response
+        
+        yield mock_client
 
 
 class TestRAGChatInit:
@@ -226,39 +225,41 @@ class TestRAGChatQuery:
 
     def test_query_api_timeout(self, mock_embeddings_manager, mock_database):
         """Test query with API timeout."""
-        with patch("neurips_abstracts.rag.requests.post") as mock_post:
-            mock_post.side_effect = requests.exceptions.Timeout("Timeout")
+        with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+            mock_client = Mock()
+            mock_openai_class.return_value = mock_client
+            mock_client.chat.completions.create.side_effect = Exception("Timeout")
 
             chat = RAGChat(mock_embeddings_manager, mock_database)
 
-            with pytest.raises(RAGError, match="Request to LM Studio timed out"):
+            with pytest.raises(RAGError, match="Failed to generate response"):
                 chat.query("What is machine learning?")
 
     def test_query_api_http_error(self, mock_embeddings_manager, mock_database):
         """Test query with HTTP error."""
-        with patch("neurips_abstracts.rag.requests.post") as mock_post:
-            mock_response = Mock()
-            mock_response.status_code = 500
-            mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError(response=mock_response)
-            mock_post.return_value = mock_response
+        with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+            mock_client = Mock()
+            mock_openai_class.return_value = mock_client
+            mock_client.chat.completions.create.side_effect = Exception("API error")
 
             chat = RAGChat(mock_embeddings_manager, mock_database)
 
-            with pytest.raises(RAGError, match="LM Studio API error"):
+            with pytest.raises(RAGError, match="Failed to generate response"):
                 chat.query("What is deep learning?")
 
     def test_query_invalid_response(self, mock_embeddings_manager, mock_database):
         """Test query with invalid API response format."""
-        with patch("neurips_abstracts.rag.requests.post") as mock_post:
+        with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+            mock_client = Mock()
+            mock_openai_class.return_value = mock_client
+            # Mock an invalid response structure
             mock_response = Mock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {"invalid": "response"}
-            mock_response.raise_for_status = Mock()
-            mock_post.return_value = mock_response
+            mock_response.choices = []
+            mock_client.chat.completions.create.return_value = mock_response
 
             chat = RAGChat(mock_embeddings_manager, mock_database)
 
-            with pytest.raises(RAGError, match="Invalid response from LM Studio API"):
+            with pytest.raises(RAGError, match="Failed to generate response"):
                 chat.query("What is AI?")
 
     def test_query_general_exception(self, mock_embeddings_manager, mock_database):
@@ -640,14 +641,17 @@ class TestRAGChatQueryRewriting:
 
     def test_rewrite_query_success(self, mock_embeddings_manager, mock_database):
         """Test successful query rewriting."""
-        with patch("neurips_abstracts.rag.requests.post") as mock_post:
+        with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+            mock_client = Mock()
+            mock_openai_class.return_value = mock_client
+            
             mock_response = Mock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {
-                "choices": [{"message": {"content": "transformer attention mechanism neural networks"}}]
-            }
-            mock_response.raise_for_status = Mock()
-            mock_post.return_value = mock_response
+            mock_choice = Mock()
+            mock_message = Mock()
+            mock_message.content = "transformer attention mechanism neural networks"
+            mock_choice.message = mock_message
+            mock_response.choices = [mock_choice]
+            mock_client.chat.completions.create.return_value = mock_response
 
             chat = RAGChat(mock_embeddings_manager, mock_database)
             rewritten = chat._rewrite_query("What about transformers?")
@@ -655,18 +659,21 @@ class TestRAGChatQueryRewriting:
             assert isinstance(rewritten, str)
             assert len(rewritten) > 0
             assert rewritten == "transformer attention mechanism neural networks"
-            mock_post.assert_called_once()
+            mock_client.chat.completions.create.assert_called_once()
 
     def test_rewrite_query_with_conversation_history(self, mock_embeddings_manager, mock_database):
         """Test query rewriting with conversation history."""
-        with patch("neurips_abstracts.rag.requests.post") as mock_post:
+        with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+            mock_client = Mock()
+            mock_openai_class.return_value = mock_client
+            
             mock_response = Mock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {
-                "choices": [{"message": {"content": "transformer attention mechanism applications"}}]
-            }
-            mock_response.raise_for_status = Mock()
-            mock_post.return_value = mock_response
+            mock_choice = Mock()
+            mock_message = Mock()
+            mock_message.content = "transformer attention mechanism applications"
+            mock_choice.message = mock_message
+            mock_response.choices = [mock_choice]
+            mock_client.chat.completions.create.return_value = mock_response
 
             chat = RAGChat(mock_embeddings_manager, mock_database)
 
@@ -679,15 +686,17 @@ class TestRAGChatQueryRewriting:
             chat._rewrite_query("What are the applications?")
 
             # Check that conversation history was included
-            call_args = mock_post.call_args
-            messages = call_args[1]["json"]["messages"]
+            call_args = mock_client.chat.completions.create.call_args
+            messages = call_args.kwargs["messages"]
             assert len(messages) > 2  # System prompt + history + current query
             assert any(msg["content"] == "Tell me about transformers" for msg in messages)
 
     def test_rewrite_query_timeout_fallback(self, mock_embeddings_manager, mock_database):
         """Test query rewriting falls back to original on timeout."""
-        with patch("neurips_abstracts.rag.requests.post") as mock_post:
-            mock_post.side_effect = requests.exceptions.Timeout("Timeout")
+        with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+            mock_client = Mock()
+            mock_openai_class.return_value = mock_client
+            mock_client.chat.completions.create.side_effect = Exception("Timeout")
 
             chat = RAGChat(mock_embeddings_manager, mock_database)
             original_query = "What is deep learning?"
@@ -698,11 +707,10 @@ class TestRAGChatQueryRewriting:
 
     def test_rewrite_query_http_error_fallback(self, mock_embeddings_manager, mock_database):
         """Test query rewriting falls back to original on HTTP error."""
-        with patch("neurips_abstracts.rag.requests.post") as mock_post:
-            mock_response = Mock()
-            mock_response.status_code = 500
-            mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError(response=mock_response)
-            mock_post.return_value = mock_response
+        with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+            mock_client = Mock()
+            mock_openai_class.return_value = mock_client
+            mock_client.chat.completions.create.side_effect = Exception("API error")
 
             chat = RAGChat(mock_embeddings_manager, mock_database)
             original_query = "What is neural network?"
@@ -713,12 +721,13 @@ class TestRAGChatQueryRewriting:
 
     def test_rewrite_query_invalid_response_fallback(self, mock_embeddings_manager, mock_database):
         """Test query rewriting falls back to original on invalid response."""
-        with patch("neurips_abstracts.rag.requests.post") as mock_post:
+        with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+            mock_client = Mock()
+            mock_openai_class.return_value = mock_client
+            # Mock an invalid response structure
             mock_response = Mock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {"invalid": "response"}
-            mock_response.raise_for_status = Mock()
-            mock_post.return_value = mock_response
+            mock_response.choices = []
+            mock_client.chat.completions.create.return_value = mock_response
 
             chat = RAGChat(mock_embeddings_manager, mock_database)
             original_query = "What is AI?"
@@ -759,25 +768,27 @@ class TestRAGChatQueryRewriting:
 
     def test_query_with_rewriting_enabled(self, mock_embeddings_manager, mock_database):
         """Test query with query rewriting enabled."""
-        with patch("neurips_abstracts.rag.requests.post") as mock_post:
+        with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+            mock_client = Mock()
+            mock_openai_class.return_value = mock_client
+            
             # Mock both query rewriting and response generation
-            def mock_post_side_effect(*args, **kwargs):
+            def mock_create_side_effect(*args, **kwargs):
                 mock_response = Mock()
-                mock_response.status_code = 200
-                mock_response.raise_for_status = Mock()
+                mock_choice = Mock()
+                mock_message = Mock()
 
                 # Check if it's a rewriting request (shorter max_tokens)
-                if kwargs.get("json", {}).get("max_tokens", 1000) == 100:
-                    mock_response.json.return_value = {
-                        "choices": [{"message": {"content": "attention mechanism transformers"}}]
-                    }
+                if kwargs.get("max_tokens", 1000) == 100:
+                    mock_message.content = "attention mechanism transformers"
                 else:
-                    mock_response.json.return_value = {
-                        "choices": [{"message": {"content": "Response about attention"}}]
-                    }
+                    mock_message.content = "Response about attention"
+                
+                mock_choice.message = mock_message
+                mock_response.choices = [mock_choice]
                 return mock_response
 
-            mock_post.side_effect = mock_post_side_effect
+            mock_client.chat.completions.create.side_effect = mock_create_side_effect
 
             chat = RAGChat(mock_embeddings_manager, mock_database)
             chat.enable_query_rewriting = True
@@ -803,23 +814,26 @@ class TestRAGChatQueryRewriting:
 
     def test_query_caching_similar_queries(self, mock_embeddings_manager, mock_database):
         """Test that similar follow-up queries reuse cached papers."""
-        with patch("neurips_abstracts.rag.requests.post") as mock_post:
+        with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+            mock_client = Mock()
+            mock_openai_class.return_value = mock_client
 
-            def mock_post_side_effect(*args, **kwargs):
+            def mock_create_side_effect(*args, **kwargs):
                 mock_response = Mock()
-                mock_response.status_code = 200
-                mock_response.raise_for_status = Mock()
+                mock_choice = Mock()
+                mock_message = Mock()
 
                 # Check if it's a rewriting request
-                if kwargs.get("json", {}).get("max_tokens", 1000) == 100:
-                    mock_response.json.return_value = {
-                        "choices": [{"message": {"content": "deep learning networks"}}]
-                    }
+                if kwargs.get("max_tokens", 1000) == 100:
+                    mock_message.content = "deep learning networks"
                 else:
-                    mock_response.json.return_value = {"choices": [{"message": {"content": "Response"}}]}
+                    mock_message.content = "Response"
+                
+                mock_choice.message = mock_message
+                mock_response.choices = [mock_choice]
                 return mock_response
 
-            mock_post.side_effect = mock_post_side_effect
+            mock_client.chat.completions.create.side_effect = mock_create_side_effect
 
             chat = RAGChat(mock_embeddings_manager, mock_database)
             chat.enable_query_rewriting = True

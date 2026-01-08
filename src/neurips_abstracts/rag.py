@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 
-import requests
+from openai import OpenAI
 
 from .config import get_config
 from .paper_utils import format_search_results, build_context_from_papers, PaperFormattingError
@@ -103,6 +103,13 @@ class RAGChat:
         self.query_similarity_threshold = config.query_similarity_threshold
         self.conversation_history: List[Dict[str, str]] = []
         self.last_search_query: Optional[str] = None
+        
+        # Initialize OpenAI client
+        auth_token = config.llm_backend_auth_token
+        self.openai_client = OpenAI(
+            base_url=f"{self.lm_studio_url}/v1",
+            api_key=auth_token or "not-needed"
+        )
 
     def _rewrite_query(self, user_query: str) -> str:
         """
@@ -160,19 +167,14 @@ class RAGChat:
         )
 
         try:
-            response = requests.post(
-                f"{self.lm_studio_url}/v1/chat/completions",
-                json={
-                    "model": self.model,
-                    "messages": messages,
-                    "temperature": 0.3,  # Lower temperature for consistent rewrites
-                    "max_tokens": 100,  # Short rewritten queries
-                },
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=0.3,  # Lower temperature for consistent rewrites
+                max_tokens=100,  # Short rewritten queries
                 timeout=30,  # Shorter timeout for quick rewriting
             )
-            response.raise_for_status()
-            data = response.json()
-            rewritten = data["choices"][0]["message"]["content"].strip()
+            rewritten = response.choices[0].message.content.strip()
 
             # Remove any quotes or extra formatting
             rewritten = rewritten.strip("\"'")
@@ -180,15 +182,6 @@ class RAGChat:
             logger.info(f"Rewrote query: '{user_query}' -> '{rewritten}'")
             return rewritten
 
-        except requests.exceptions.Timeout:
-            logger.warning("Query rewriting timed out, using original query")
-            return user_query
-        except requests.exceptions.HTTPError as e:
-            logger.warning(f"Query rewriting failed (HTTP {e.response.status_code}), using original query")
-            return user_query
-        except (KeyError, IndexError) as e:
-            logger.warning(f"Invalid response from LLM during query rewriting: {e}, using original query")
-            return user_query
         except Exception as e:
             logger.warning(f"Query rewriting failed: {e}, using original query")
             return user_query
@@ -373,8 +366,6 @@ class RAGChat:
 
         except PaperFormattingError as e:
             raise RAGError(f"Failed to format papers: {str(e)}") from e
-        except requests.exceptions.RequestException as e:
-            raise RAGError(f"API request failed: {str(e)}") from e
         except Exception as e:
             raise RAGError(f"Query failed: {str(e)}") from e
 
@@ -480,28 +471,17 @@ class RAGChat:
 
         messages.append({"role": "user", "content": user_message})
 
-        # Call LM Studio API
+        # Call LM Studio API using OpenAI client
         try:
-            response = requests.post(
-                f"{self.lm_studio_url}/v1/chat/completions",
-                json={
-                    "model": self.model,
-                    "messages": messages,
-                    "temperature": self.temperature,
-                    "max_tokens": 1000,
-                },
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=1000,
                 timeout=180,
             )
-            response.raise_for_status()
-            data = response.json()
-            return data["choices"][0]["message"]["content"]
+            return response.choices[0].message.content
 
-        except requests.exceptions.Timeout:
-            raise RAGError("Request to LM Studio timed out")
-        except requests.exceptions.HTTPError as e:
-            raise RAGError(f"LM Studio API error: {e.response.status_code}")
-        except KeyError:
-            raise RAGError("Invalid response from LM Studio API")
         except Exception as e:
             raise RAGError(f"Failed to generate response: {str(e)}")
 

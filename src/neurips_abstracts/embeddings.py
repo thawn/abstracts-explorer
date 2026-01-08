@@ -14,7 +14,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union, Tuple
 
-import requests
+from openai import OpenAI
 import chromadb
 from chromadb.config import Settings
 
@@ -108,6 +108,12 @@ class EmbeddingsManager:
         self.collection_name = collection_name or config.collection_name
         self.client: Optional[Any] = None  # chromadb.Client
         self.collection: Optional[Any] = None  # chromadb.Collection
+        
+        # Initialize OpenAI client
+        self.openai_client = OpenAI(
+            base_url=f"{self.lm_studio_url}/v1",
+            api_key=self.llm_backend_auth_token or "not-needed"
+        )
 
     def connect(self) -> None:
         """
@@ -167,14 +173,10 @@ class EmbeddingsManager:
         """
         try:
             # Try to get models list
-            headers = (
-                {"Authorization": f"Bearer {self.llm_backend_auth_token}"} if self.llm_backend_auth_token else {}
-            )
-            response = requests.get(f"{self.lm_studio_url}/v1/models", timeout=5, headers=headers)
-            response.raise_for_status()
+            models = self.openai_client.models.list()
             logger.info(f"Successfully connected to LM Studio at {self.lm_studio_url}")
             return True
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
             logger.warning(f"Failed to connect to LM Studio: {str(e)}")
             return False
 
@@ -208,29 +210,20 @@ class EmbeddingsManager:
             raise EmbeddingsError("Cannot generate embedding for empty text")
 
         try:
-            headers = (
-                {"Authorization": f"Bearer {self.llm_backend_auth_token}"} if self.llm_backend_auth_token else {}
+            response = self.openai_client.embeddings.create(
+                model=self.model_name,
+                input=text
             )
-            response = requests.post(
-                f"{self.lm_studio_url}/v1/embeddings",
-                json={"model": self.model_name, "input": text},
-                headers={**headers, "Content-Type": "application/json"},
-                timeout=30,
-            )
-            response.raise_for_status()
-            data = response.json()
-
-            if "data" not in data or len(data["data"]) == 0:
+            
+            if not response.data or len(response.data) == 0:
                 raise EmbeddingsError("No embedding data in API response")
 
-            embedding = data["data"][0]["embedding"]
+            embedding = response.data[0].embedding
             logger.debug(f"Generated embedding with dimension: {len(embedding)}")
             return embedding
 
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
             raise EmbeddingsError(f"Failed to generate embedding via LM Studio: {str(e)}") from e
-        except (KeyError, IndexError, ValueError) as e:
-            raise EmbeddingsError(f"Invalid response format from LM Studio: {str(e)}") from e
 
     def create_collection(self, reset: bool = False) -> None:
         """
