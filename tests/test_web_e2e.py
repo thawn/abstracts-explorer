@@ -153,103 +153,107 @@ def test_database(tmp_path_factory):
 def test_embeddings(test_database, tmp_path_factory):
     """
     Create a test embeddings database with mock embeddings for E2E tests.
-    
+
     This fixture is cached at module scope to avoid recreating embeddings
     for each test, improving test performance and reliability.
-    
+
     Parameters
     ----------
     test_database : Path
         Path to the test database with paper data
     tmp_path_factory : TempPathFactory
         Pytest fixture for creating temporary directories
-        
+
     Returns
     -------
     tuple
-        Tuple of (embeddings_manager, embeddings_path, collection_name)
+        Tuple of (embeddings_manager, embeddings_path, collection_name, mock_client)
     """
     from neurips_abstracts.embeddings import EmbeddingsManager
-    from unittest.mock import patch, Mock
+    from unittest.mock import Mock
     import chromadb.api.shared_system_client
     import uuid
     import time
-    
+
     # Clear ChromaDB's global client registry to avoid conflicts
     chromadb.api.shared_system_client.SharedSystemClient._identifier_to_system.clear()
-    
+
     # Use unique ID with timestamp to avoid conflicts across test sessions
     unique_id = f"{int(time.time())}_{str(uuid.uuid4())[:8]}"
     tmp_dir = tmp_path_factory.mktemp("e2e_embeddings")
     embeddings_path = tmp_dir / f"chroma_{unique_id}"
     collection_name = f"test_collection_{unique_id}"
-    
-    # Mock the OpenAI API for embedding generation
-    mock_openai_patcher = patch("neurips_abstracts.embeddings.OpenAI")
-    mock_openai_class = mock_openai_patcher.start()
-    
+
+    # Create mock OpenAI client
+    # This will be injected directly into the EmbeddingsManager instance
+    mock_client = Mock()
+
+    # Mock models.list() for connection test
+    mock_models = Mock()
+    mock_client.models.list.return_value = mock_models
+
+    # Mock embeddings.create() for embedding generation
+    # IMPORTANT: This mock will be used for both adding papers AND searching
+    mock_embedding_response = Mock()
+    mock_embedding_data = Mock()
+    mock_embedding_data.embedding = [0.1] * MOCK_EMBEDDING_DIMENSION
+    mock_embedding_response.data = [mock_embedding_data]
+    mock_client.embeddings.create.return_value = mock_embedding_response
+
+    # Initialize embeddings manager
+    em = EmbeddingsManager(chroma_path=embeddings_path, collection_name=collection_name)
+
+    # Inject the mock client directly to bypass lazy loading
+    # This ensures we ALWAYS use the mock, never a real OpenAI connection
+    em._openai_client = mock_client
+
+    em.connect()
+
+    # Forcefully delete collection if it exists to ensure clean state
     try:
-        # Create mock OpenAI client instance
-        mock_client = Mock()
-        mock_openai_class.return_value = mock_client
-        
-        # Mock models.list() for connection test
-        mock_models = Mock()
-        mock_client.models.list.return_value = mock_models
-        
-        # Mock embeddings.create() for embedding generation
-        # Use consistent mock embeddings for reproducibility
-        mock_embedding_response = Mock()
-        mock_embedding_data = Mock()
-        mock_embedding_data.embedding = [0.1] * MOCK_EMBEDDING_DIMENSION
-        mock_embedding_response.data = [mock_embedding_data]
-        mock_client.embeddings.create.return_value = mock_embedding_response
-        
-        # Initialize embeddings manager
-        em = EmbeddingsManager(
-            chroma_path=embeddings_path,
-            collection_name=collection_name
-        )
-        em.connect()
-        em.create_collection(reset=True)
-        
-        # Add embeddings for all test papers from the database
-        db = DatabaseManager(str(test_database))
-        db.connect()
-        cursor = db.connection.cursor()
-        cursor.execute("SELECT * FROM papers")
-        papers = cursor.fetchall()
-        
-        # Add each paper to the embeddings database
-        for paper in papers:
-            paper_dict = dict(paper)
-            em.add_paper(paper_dict)
-        
-        db.close()
-        
-        # Return the embeddings manager and metadata
-        # Don't close it - it will be used by the web server
-        yield (em, embeddings_path, collection_name)
-        
-    finally:
-        # Cleanup: stop the OpenAI mock patcher
-        mock_openai_patcher.stop()
+        em.client.delete_collection(name=collection_name)
+    except Exception:
+        pass  # Collection might not exist
+
+    # Create fresh collection
+    em.create_collection(reset=False)
+
+    # Add embeddings for all test papers from the database
+    db = DatabaseManager(str(test_database))
+    db.connect()
+    cursor = db.connection.cursor()
+    cursor.execute("SELECT * FROM papers")
+    papers = cursor.fetchall()
+
+    # Add each paper to the embeddings database
+    for paper in papers:
+        paper_dict = dict(paper)
+        em.add_paper(paper_dict)
+
+    db.close()
+
+    # Return the embeddings manager, metadata, and the mock client
+    # The mock client is returned so web_server can reuse it
+    yield (em, embeddings_path, collection_name, mock_client)
+
+    # Cleanup happens automatically
 
 
 @pytest.fixture(scope="module")
 def web_server(test_database, test_embeddings, tmp_path_factory):
     """
     Start a web server in a background thread for E2E testing.
-    
+
     Uses cached embeddings from test_embeddings fixture for better performance
-    and reliability.
+    and reliability. The mock OpenAI client is injected to ensure consistent
+    embedding dimensions.
 
     Parameters
     ----------
     test_database : Path
         Path to the test database
     test_embeddings : tuple
-        Cached embeddings manager, path, and collection name
+        Cached embeddings manager, path, collection name, and mock client
     tmp_path_factory : TempPathFactory
         Pytest fixture for creating temporary directories
 
@@ -260,98 +264,103 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     """
     from neurips_abstracts.web_ui import app as flask_app
     from neurips_abstracts.config import Config, get_config
-    from unittest.mock import patch, Mock
 
-    # Unpack cached embeddings
-    em, embeddings_path, collection_name = test_embeddings
+    # Unpack cached embeddings and mock client
+    em, embeddings_path, collection_name, mock_client = test_embeddings
+
+    # CRITICAL: Ensure the embeddings manager is using the mock client
+    # This prevents it from creating a real OpenAI connection during searches
+    em._openai_client = mock_client
 
     port = find_free_port()
     base_url = f"http://localhost:{port}"
 
-    # Mock the OpenAI API for the web server's search operations
-    # The web server needs to generate embeddings for search queries
-    mock_openai_patcher = patch("neurips_abstracts.embeddings.OpenAI")
-    mock_openai_class = mock_openai_patcher.start()
-    
-    try:
-        # Create mock OpenAI client instance
-        mock_client = Mock()
-        mock_openai_class.return_value = mock_client
-        
-        # Mock models.list() for connection test
-        mock_models = Mock()
-        mock_client.models.list.return_value = mock_models
-        
-        # Mock embeddings.create() for embedding generation during searches
-        # Use the same dimension as in test_embeddings fixture
-        mock_embedding_response = Mock()
-        mock_embedding_data = Mock()
-        mock_embedding_data.embedding = [0.1] * MOCK_EMBEDDING_DIMENSION
-        mock_embedding_response.data = [mock_embedding_data]
-        mock_client.embeddings.create.return_value = mock_embedding_response
+    # Patch the config and inject embeddings BEFORE importing/configuring the app
+    import neurips_abstracts.web_ui.app as app_module
 
-        # Configure the app to use test database and embeddings
-        def mock_get_config():
-            config = Config()
-            config.paper_db_path = str(test_database)
-            config.embedding_db_path = str(embeddings_path)
-            config.collection_name = collection_name
-            return config
+    # Configure the app to use test database and embeddings
+    def mock_get_config():
+        config = Config()
+        config.paper_db_path = str(test_database)
+        config.embedding_db_path = str(embeddings_path)
+        config.collection_name = collection_name
+        return config
 
-        # Patch the config
-        import neurips_abstracts.web_ui.app as app_module
+    app_module.get_config = mock_get_config
 
-        app_module.get_config = mock_get_config
+    # Inject the pre-created embeddings manager directly
+    # CRITICAL: Set this BEFORE starting the server to avoid race conditions
+    # This prevents get_embeddings_manager() from creating a new instance
+    app_module.embeddings_manager = em
+    app_module.rag_chat = None
 
-        # Inject the pre-created embeddings manager directly
-        # This avoids ChromaDB global registry conflicts when the app tries to connect
-        app_module.embeddings_manager = em
-        app_module.rag_chat = None
+    # Use werkzeug's make_server for better cross-platform compatibility
+    # This works more reliably in threads than Flask's app.run()
+    from werkzeug.serving import make_server
 
-        # Use werkzeug's make_server for better cross-platform compatibility
-        # This works more reliably in threads than Flask's app.run()
-        from werkzeug.serving import make_server
-        
-        server = make_server("localhost", port, flask_app, threaded=True)
-        
-        # Start server in a thread
-        def run_server():
-            server.serve_forever()
+    server = make_server("localhost", port, flask_app, threaded=True)
 
-        server_thread = threading.Thread(target=run_server, daemon=True)
-        server_thread.start()
+    # Start server in a thread
+    def run_server():
+        server.serve_forever()
 
-        # Wait for server to start
-        import requests
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
 
-        max_retries = 30
-        for i in range(max_retries):
-            try:
-                response = requests.get(base_url, timeout=1)
-                if response.status_code == 200:
-                    break
-            except requests.exceptions.RequestException:
-                if i == max_retries - 1:
-                    server.shutdown()
-                    mock_openai_patcher.stop()
-                    pytest.fail("Server failed to start")
-                time.sleep(0.5)
+    # Wait for server to start
+    import requests
 
-        yield (base_url, port)
+    max_retries = 30
+    for i in range(max_retries):
+        try:
+            response = requests.get(base_url, timeout=1)
+            if response.status_code == 200:
+                break
+        except requests.exceptions.RequestException:
+            if i == max_retries - 1:
+                server.shutdown()
+                pytest.fail("Server failed to start")
+            time.sleep(0.5)
 
-        # Cleanup
-        server.shutdown()
-        
-        # Reset the app module state
-        app_module.embeddings_manager = None
-        app_module.rag_chat = None
-        
-    finally:
-        # Ensure mock is always stopped
-        mock_openai_patcher.stop()
+    yield (base_url, port)
+
+    # Cleanup
+    server.shutdown()
+
+    # Reset the app module state
+    app_module.embeddings_manager = None
+    app_module.rag_chat = None
 
 
 def _check_chrome_available():
+    """
+    Check if Chrome browser is available for testing.
+
+    This check does NOT install the driver - it only verifies the browser exists.
+
+    Returns
+    -------
+    bool
+        True if Chrome is available, False otherwise
+    """
+    # Use cached result if available
+    if _driver_cache["chrome_available"] is not None:
+        return _driver_cache["chrome_available"]
+
+    try:
+        # Just check if Chrome binary exists
+        import shutil
+
+        chrome_binary = shutil.which("chromium") or shutil.which("chrome") or shutil.which("google-chrome")
+        result = chrome_binary is not None
+        _driver_cache["chrome_available"] = result
+        return result
+    except Exception:
+        _driver_cache["chrome_available"] = False
+        return False
+
+
+def _check_firefox_available():
     """
     Check if Firefox browser is available for testing.
 
