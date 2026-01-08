@@ -472,7 +472,14 @@ class TestWebUIRunServer:
         from neurips_abstracts.web_ui import run_server, app
 
         with patch.object(app, "run") as mock_run:
-            run_server(host="127.0.0.1", port=5000, debug=False)
+            with patch("neurips_abstracts.web_ui.app.os.path.exists", return_value=True):
+                with patch("neurips_abstracts.web_ui.app.get_config") as mock_config:
+                    mock_cfg = Mock()
+                    mock_cfg.paper_db_path = "/some/path/test.db"
+                    mock_cfg.embedding_db_path = "/some/path/chroma_db"
+                    mock_config.return_value = mock_cfg
+                    
+                    run_server(host="127.0.0.1", port=5000, debug=False)
 
             # Verify app.run was called with correct parameters
             mock_run.assert_called_once_with(host="127.0.0.1", port=5000, debug=False)
@@ -482,9 +489,39 @@ class TestWebUIRunServer:
         from neurips_abstracts.web_ui import run_server, app
 
         with patch.object(app, "run") as mock_run:
-            run_server(host="0.0.0.0", port=8080, debug=True)
+            with patch("neurips_abstracts.web_ui.app.os.path.exists", return_value=True):
+                with patch("neurips_abstracts.web_ui.app.get_config") as mock_config:
+                    mock_cfg = Mock()
+                    mock_cfg.paper_db_path = "/some/path/test.db"
+                    mock_cfg.embedding_db_path = "/some/path/chroma_db"
+                    mock_config.return_value = mock_cfg
+                    
+                    run_server(host="0.0.0.0", port=8080, debug=True)
 
             mock_run.assert_called_once_with(host="0.0.0.0", port=8080, debug=True)
+
+    def test_run_server_database_not_found(self, capsys):
+        """Test that run_server raises FileNotFoundError when database doesn't exist."""
+        from neurips_abstracts.web_ui import run_server
+
+        with patch("neurips_abstracts.web_ui.app.os.path.exists", return_value=False):
+            with patch("neurips_abstracts.web_ui.app.get_config") as mock_config:
+                mock_cfg = Mock()
+                mock_cfg.paper_db_path = "/nonexistent/test.db"
+                mock_cfg.embedding_db_path = "/some/path/chroma_db"
+                mock_config.return_value = mock_cfg
+                
+                with pytest.raises(FileNotFoundError) as exc_info:
+                    run_server(host="127.0.0.1", port=5000, debug=False)
+                
+                # Verify error message includes database path
+                assert "/nonexistent/test.db" in str(exc_info.value)
+        
+        # Verify helpful error message was printed
+        captured = capsys.readouterr()
+        assert "Database not found" in captured.err
+        assert "neurips-abstracts download" in captured.err
+        assert "create-embeddings" in captured.err
 
 
 class TestConferencePluginMapping:

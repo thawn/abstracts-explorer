@@ -642,6 +642,9 @@ def web_ui_command(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         print("\n\n👋 Server stopped")
         return 0
+    except FileNotFoundError:
+        # Database not found - error message already printed by run_server
+        return 1
     except Exception as e:
         print(f"\n❌ Error starting web server: {e}", file=sys.stderr)
         import traceback
