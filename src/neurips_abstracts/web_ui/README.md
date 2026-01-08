@@ -87,7 +87,7 @@ DATA_DIR=data
 PAPER_DB_PATH=neurips_2025.db
 EMBEDDING_DB_PATH=chroma_db
 
-# LM Studio settings
+# OpenAI-compatible API (such as LM Studio or blablador) settings
 LLM_BACKEND_URL=http://localhost:1234
 CHAT_MODEL=your-model-name
 EMBEDDING_MODEL=your-embedding-model
@@ -152,4 +152,4 @@ Or install Flask manually if not using uv:
 
 - The web UI requires a database to be created first (`neurips-abstracts download`)
 - For semantic search, embeddings must be generated (`neurips-abstracts create-embeddings`)
-- For AI chat, LM Studio must be running with a compatible model loaded
+- For AI chat, OpenAI-compatible API (such as LM Studio or blablador) must be running with a compatible model loaded

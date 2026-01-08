@@ -89,7 +89,7 @@ class Config:
     embedding_model : str
         Name of the embedding model.
     llm_backend_url : str
-        URL for LM Studio or compatible API.
+        URL for OpenAI-compatible API endpoint.
     llm_backend_auth_token : str
         Authentication token for LLM backend (if required).
     embedding_db_path : str
