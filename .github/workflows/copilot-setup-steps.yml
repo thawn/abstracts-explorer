@@ -44,12 +44,20 @@ jobs:
               run: |
                   uv run pytest tests/test_cli.py::TestCLI::test_main_no_command
 
-            - name: Run linting checks
+            - name: Verify linting tools and pre-commit hooks
               run: |
-                  echo "Running linting checks..."
+                  echo "Verifying linting tools are installed..."
                   uv pip install --system ruff mypy types-requests
-                  ruff check src/ tests/
-                  mypy src/ --ignore-missing-imports
+                  command -v ruff && echo "✓ ruff is available"
+                  command -v mypy && echo "✓ mypy is available"
+                  echo ""
+                  echo "Verifying pre-commit hooks are installed..."
+                  if [ -x .git/hooks/pre-commit ]; then
+                    echo "✓ pre-commit hook is installed and executable"
+                  else
+                    echo "✗ pre-commit hook is not installed or not executable"
+                    exit 1
+                  fi
 
             - name: Environment setup summary
               if: always()
