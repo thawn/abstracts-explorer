@@ -171,9 +171,15 @@ def web_server(test_database, tmp_path_factory):
         app_module.embeddings_manager = em
         app_module.rag_chat = None
 
+        # Use werkzeug's make_server for better cross-platform compatibility
+        # This works more reliably in threads than Flask's app.run()
+        from werkzeug.serving import make_server
+        
+        server = make_server(host, port, flask_app, threaded=True)
+        
         # Start server in a thread
         def run_server():
-            flask_app.run(host=host, port=port, debug=False, use_reloader=False)
+            server.serve_forever()
 
         server_thread = threading.Thread(target=run_server, daemon=True)
         server_thread.start()
@@ -187,10 +193,14 @@ def web_server(test_database, tmp_path_factory):
                     break
             except requests.exceptions.RequestException:
                 if i == max_retries - 1:
+                    server.shutdown()
                     pytest.fail("Web server failed to start")
                 time.sleep(0.5)
 
         yield (host, port, base_url)
+        
+        # Shutdown server gracefully
+        server.shutdown()
 
     finally:
         # Ensure mock is always stopped
