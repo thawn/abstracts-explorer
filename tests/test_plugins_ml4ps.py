@@ -7,8 +7,7 @@ workshop downloader plugin, including the lightweight API conversion.
 
 import json
 import pytest
-from unittest.mock import Mock, patch, MagicMock
-from pathlib import Path
+from unittest.mock import Mock, patch
 import requests
 
 from neurips_abstracts.plugins.ml4ps_downloader import ML4PSDownloaderPlugin

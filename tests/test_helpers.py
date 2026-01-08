@@ -4,7 +4,6 @@ Shared test helper utilities.
 This module contains common utility functions used across multiple test files
 to reduce code duplication and ensure consistency.
 """
-from warnings import warn
 
 import socket
 import requests

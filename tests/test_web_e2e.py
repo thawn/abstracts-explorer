@@ -20,12 +20,12 @@ from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.firefox import GeckoDriverManager
 from webdriver_manager.core.os_manager import ChromeType
 from neurips_abstracts.database import DatabaseManager
-from neurips_abstracts.config import Config, get_config
+from neurips_abstracts.config import Config
 from tests.test_helpers import find_free_port
 
 # Add src to path for imports
@@ -262,11 +262,9 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     tuple
         Tuple of (base_url, port)
     """
-    from neurips_abstracts.config import Config
     from neurips_abstracts.database import DatabaseManager
 
     # Import the module, not the app object
-    from neurips_abstracts.web_ui import app as app_module_init
     import sys
 
     # Get the actual module
@@ -307,7 +305,6 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     def mock_get_database_wrapper():
         """Wrapper that skips file existence check."""
         from flask import g
-        import os
 
         if "db" not in g:
             db_path = str(test_database)

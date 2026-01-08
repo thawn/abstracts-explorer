@@ -12,7 +12,6 @@ import sqlite3
 
 from neurips_abstracts.database import DatabaseManager, DatabaseError
 from neurips_abstracts.plugin import LightweightPaper
-from pydantic import ValidationError
 
 # Fixtures are now imported from conftest.py:
 # - db_manager: DatabaseManager instance with temporary database
