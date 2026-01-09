@@ -11,7 +11,7 @@ from unittest.mock import patch
 from neurips_abstracts import download_json, DatabaseManager
 from neurips_abstracts.downloader import download_neurips_data
 from neurips_abstracts.plugin import LightweightPaper, convert_neurips_to_lightweight_schema
-from tests.test_helpers import requires_lm_studio
+from tests.helpers import requires_lm_studio
 
 # Fixtures imported from conftest.py:
 # - sample_neurips_data: List of 2 papers with authors

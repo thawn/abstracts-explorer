@@ -17,7 +17,7 @@ from unittest.mock import patch, Mock
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from neurips_abstracts.database import DatabaseManager
-from tests.test_helpers import requires_lm_studio, find_free_port
+from tests.helpers import requires_lm_studio, find_free_port
 
 # Helper functions imported from test_helpers:
 # - check_lm_studio_available(): Check if LM Studio is running

@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 from neurips_abstracts.rag import RAGChat, RAGError
 from neurips_abstracts.embeddings import EmbeddingsManager
 from neurips_abstracts.config import get_config
-from tests.test_helpers import requires_lm_studio
+from tests.helpers import requires_lm_studio
 
 # Fixtures imported from conftest.py:
 # - mock_embeddings_manager: Mock embeddings manager with predefined search results
