@@ -107,15 +107,33 @@ src/neurips_abstracts/    # Main package
 ├── embeddings.py         # ChromaDB embeddings management
 ├── rag.py                # RAG chat interface
 ├── config.py             # Configuration management
-└── cli.py                # Command-line interface
+├── cli.py                # Command-line interface
+├── plugin.py             # Plugin system and helpers
+├── paper_utils.py        # Paper formatting utilities
+└── plugins/              # Plugin implementations
+    ├── __init__.py
+    ├── neurips_downloader.py
+    ├── iclr_downloader.py
+    ├── icml_downloader.py
+    └── ml4ps_downloader.py
 
-tests/                     # Test suite
-├── test_database.py      # Database tests
-├── test_downloader.py    # Downloader tests
-├── test_embeddings.py    # Embeddings tests
-├── test_rag.py           # RAG tests
-├── test_config.py        # Configuration tests
-└── test_integration.py   # Integration tests
+tests/                     # Test suite (one test file per module)
+├── conftest.py           # Shared fixtures
+├── helpers.py            # Shared helper functions
+├── test_cli.py           # Tests for cli.py
+├── test_config.py        # Tests for config.py
+├── test_database.py      # Tests for database.py
+├── test_downloader.py    # Tests for downloader.py
+├── test_embeddings.py    # Tests for embeddings.py (includes ChromaDB)
+├── test_paper_utils.py   # Tests for paper_utils.py
+├── test_plugin.py        # Tests for plugin.py (all plugin functionality)
+├── test_plugins_iclr.py  # Tests for plugins/iclr_downloader.py
+├── test_plugins_ml4ps.py # Tests for plugins/ml4ps_downloader.py
+├── test_rag.py           # Tests for rag.py
+├── test_web_ui.py        # Tests for web_ui/app.py
+├── test_integration.py   # Integration tests across modules
+├── test_web_integration.py # Web UI integration tests
+└── test_web_e2e.py       # Web UI end-to-end tests
 
 docs/                      # Sphinx documentation
 ├── conf.py               # Sphinx configuration
@@ -132,7 +150,21 @@ docs/                      # Sphinx documentation
 - **Coverage**: Use pytest-cov, aim for >90% coverage
 - **Mocking**: Use pytest-mock for external dependencies
 
-### Test Organization
+### Test Organization Principle
+
+**One test file per source module**: Each source module should have exactly one corresponding test file with the same base name. This keeps tests organized and easy to find.
+
+Examples:
+- `src/neurips_abstracts/database.py` → `tests/test_database.py`
+- `src/neurips_abstracts/plugin.py` → `tests/test_plugin.py` (includes all plugin-related tests)
+- `src/neurips_abstracts/web_ui/app.py` → `tests/test_web_ui.py` (unit tests)
+
+**Exception for test types**: Different types of tests (unit, integration, e2e) may have separate files:
+- `test_integration.py` - Cross-module integration tests
+- `test_web_integration.py` - Web UI integration tests  
+- `test_web_e2e.py` - End-to-end browser tests
+
+### Test Organization Structure
 
 1. **Unit tests**: Test individual functions/methods in isolation
 2. **Integration tests**: Test component interactions
