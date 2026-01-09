@@ -667,7 +667,7 @@ def main() -> int:
 
     parser = argparse.ArgumentParser(
         prog="neurips-abstracts",
-        description="Tools for working with NeurIPS conference abstracts",
+        description="Abstracts Explorer - Tools for working with conference abstracts",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -871,7 +871,7 @@ Examples:
     # Chat command
     chat_parser = subparsers.add_parser(
         "chat",
-        help="Interactive RAG chat with NeurIPS papers",
+        help="Interactive RAG chat with papers",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Start an interactive chat session using RAG to answer questions about papers.",
     )
@@ -934,7 +934,7 @@ Examples:
         "web-ui",
         help="Start the web interface",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="Start a Flask web server with a modern UI for exploring NeurIPS papers.",
+        description="Start a Flask web server with a modern UI for exploring papers.",
     )
     web_parser.add_argument(
         "--host",
