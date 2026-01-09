@@ -1,680 +1,182 @@
 # Abstracts Explorer
 
-Abstracts Explorer - A package to download conference data and search it with a LLM-based semantic search including document retrieval and question answering.
+A package to download conference data and search it with LLM-based semantic search including document retrieval and question answering.
 
 ## Features
 
-- 📥 Download conference data from various sources
-- 💾 Store data in a SQLite database with efficient indexing
-- 🔍 Search and query papers by keywords, track, and other attributes
-- 🤖 **NEW**: Generate text embeddings and store in vector database for semantic search
-- 🔎 **NEW**: Find similar papers using AI-powered semantic similarity
-- 💬 **NEW**: Interactive RAG chat to ask questions about papers
-- ⚙️ **NEW**: Environment-based configuration with `.env` file support
-- 🧪 Comprehensive test suite with pytest (123 tests, 78% coverage)
-- 📚 Full documentation with NumPy-style docstrings
+- 📥 Download conference data from various sources (NeurIPS, ICLR, ICML, ML4PS)
+- 💾 Store data in SQLite database with efficient indexing
+- 🔍 Search papers by keywords, track, and other attributes
+- 🤖 Generate text embeddings for semantic search
+- 🔎 Find similar papers using AI-powered semantic similarity
+- 💬 Interactive RAG chat to ask questions about papers
+- 🌐 Web interface for browsing and searching papers
+- ⚙️ Environment-based configuration with `.env` file support
 
 ## Installation
 
-### Requirements
-
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/) - Fast Python package installer and resolver
-- Node.js 14+ (for web UI)
-
-### Install uv
-
-If you don't have uv installed yet:
+**Requirements:** Python 3.11+, [uv](https://docs.astral.sh/uv/) package manager, Node.js 14+ (for web UI)
 
 ```bash
-# macOS and Linux
+# Install uv (if not already installed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Windows
-powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
-
-# Or with pip
-pip install uv
-```
-
-### From source
-
-```bash
 # Clone the repository
 git clone https://github.com/thawn/neurips-abstracts.git
 cd abstracts-explorer
 
-# Create virtual environment and install dependencies with uv
-uv sync
-
-# Install with development dependencies
-uv sync --extra dev
-
-# Install with all optional dependencies (dev + web + docs)
+# Install dependencies
 uv sync --all-extras
-
-# Activate the virtual environment
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install Node.js dependencies for web UI
 npm install
-
-# Install vendor files (Tailwind CSS, Font Awesome, Marked.js)
 npm run install:vendor
 ```
 
+📖 **[Full Installation Guide](docs/installation.md)**
+
 ## Configuration
 
-The package supports environment-based configuration using `.env` files. This allows you to customize default settings without modifying command-line arguments.
-
-### Quick Setup
+Create a `.env` file to customize settings:
 
 ```bash
-# Copy the example configuration file
 cp .env.example .env
-
-# Edit with your preferred settings
-nano .env
+# Edit .env with your preferred settings
 ```
 
-### Available Settings
-
-- `DATA_DIR` - Base directory for data files (default: data)
-- `CHAT_MODEL` - Language model for RAG chat (default: diffbot-small-xl-2508)
-- `EMBEDDING_MODEL` - Text embedding model (default: text-embedding-qwen3-embedding-4b)
-- `LLM_BACKEND_URL` - LM Studio API URL (default: http://localhost:1234)
-- `LLM_BACKEND_AUTH_TOKEN` - Authentication token (optional)
-- `EMBEDDING_DB_PATH` - ChromaDB directory (default: chroma_db, resolved relative to DATA_DIR)
-- `PAPER_DB_PATH` - SQLite database (default: data/abstracts.db, resolved relative to DATA_DIR)
-- `COLLECTION_NAME` - ChromaDB collection name (default: papers)
-- `MAX_CONTEXT_PAPERS` - Papers for RAG context (default: 5)
-- `ENABLE_QUERY_REWRITING` - Enable AI-powered query rewriting (default: true)
-- `QUERY_SIMILARITY_THRESHOLD` - Similarity threshold for caching (default: 0.7)
-
-See [CONFIGURATION.md](CONFIGURATION.md) for complete documentation.
+📖 **[Configuration Guide](docs/configuration.md)** - Complete list of settings and options
 
 ## Quick Start
 
-### Download NeurIPS Data
-
-Use the plugin system to download conference data:
-
-```python
-from abstracts_explorer.plugins import get_plugin
-from abstracts_explorer.plugin import LightweightPaper
-
-# Get the NeurIPS plugin
-neurips_plugin = get_plugin('neurips')
-
-# Download from a specific year
-papers_data = neurips_plugin.download(year=2025)
-
-# Save to a file
-papers_data = neurips_plugin.download(
-    year=2025,
-    output_path="data/neurips_2025.json"
-)
-```
-
-### Load Data into Database
-
-```python
-from abstracts_explorer import DatabaseManager
-
-# Create and connect to database
-with DatabaseManager("data/abstracts.db") as db:
-    # Create tables
-    db.create_tables()
-    
-    # Load JSON data
-    count = db.load_json_data(data)
-    print(f"Loaded {count} papers")
-    
-    # Get total paper count
-    total = db.get_paper_count()
-    print(f"Total papers in database: {total}")
-```
-
-### Search Papers
-
-```python
-from abstracts_explorer import DatabaseManager
-
-with DatabaseManager("data/abstracts.db") as db:
-    # Search by keyword
-    papers = db.search_papers(keyword="neural network")
-    
-    # Search by event type
-    oral_papers = db.search_papers(eventtype="Oral")
-    
-    # Search by decision
-    poster_papers = db.search_papers(decision="Accept (poster)")
-    
-    # Search by topic
-    ml_papers = db.search_papers(topic="Machine Learning")
-    
-    # Combined search with limit
-    papers = db.search_papers(
-        keyword="reinforcement learning",
-        eventtype="Poster",
-        limit=10
-    )
-    
-    # Display results
-    for paper in papers:
-        print(f"{paper['title']} - {paper['authors']}")
-```
-
-### Query Authors
-
-```python
-from abstracts_explorer import DatabaseManager
-
-with DatabaseManager("data/abstracts.db") as db:
-    # Search authors by name
-    authors = db.search_authors(name="Huang")
-    for author in authors:
-        print(f"{author['fullname']} - {author['institution']}")
-    
-    # Search by institution
-    stanford_authors = db.search_authors(institution="Stanford")
-    
-    # Get all papers by a specific author
-    papers = db.get_author_papers(author_id=457880)
-    print(f"Found {len(papers)} papers by this author")
-    
-    # Get all authors for a specific paper
-    authors = db.get_paper_authors(paper_id=123456)
-    for author in authors:
-        print(f"{author['author_order']}. {author['fullname']}")
-    
-    # Get author count
-    count = db.get_author_count()
-    print(f"Total unique authors: {count}")
-```
-
-### Custom Queries
-
-```python
-from abstracts_explorer import DatabaseManager
-
-with DatabaseManager("data/abstracts.db") as db:
-    # Execute custom SQL queries
-    results = db.query(
-        "SELECT title, authors FROM papers WHERE session = ? ORDER BY title",
-        ("Poster Session 1",)
-    )
-    
-    for row in results:
-        print(f"{row['title']}: {row['authors']}")
-```
-
-## Complete Example
-
-Here's a complete example that downloads NeurIPS 2025 data and loads it into a database:
-
-```python
-from abstracts_explorer.plugins import get_plugin
-from abstracts_explorer import DatabaseManager
-from abstracts_explorer.plugin import LightweightPaper
-
-# Get the NeurIPS plugin
-neurips_plugin = get_plugin('neurips')
-
-# Download data
-print("Downloading NeurIPS 2025 data...")
-papers_data = neurips_plugin.download(
-    year=2025,
-    output_path="data/neurips_2025.json"
-)
-
-# Convert to LightweightPaper objects
-papers = [LightweightPaper(**paper) for paper in papers_data]
-
-# Load into database
-print("Loading data into database...")
-with DatabaseManager("data/abstracts.db") as db:
-    db.create_tables()
-    count = db.add_papers(papers)
-    print(f"Loaded {count} papers")
-    
-    # Search for papers about deep learning
-    papers = db.search_papers(keyword="deep learning", limit=5)
-    
-    print(f"\nFound {len(papers)} papers about deep learning:")
-    for paper in papers:
-        print(f"- {paper['title']}")
-        print(f"  Authors: {paper['authors']}")
-        print(f"  Session: {paper['session']}")
-        print()
-```
-
-## Command-Line Interface
-
-The package includes a powerful CLI for common tasks:
-
-### Download Data
+### Download Conference Data
 
 ```bash
-# Download NeurIPS 2025 data and create database
-abstracts-explorer download --year 2025 --output abstracts.db
-
-# Force re-download
-abstracts-explorer download --year 2025 --output abstracts.db --force
+# Download NeurIPS 2025 papers
+abstracts-explorer download --year 2025 --output data/abstracts.db
 ```
 
-### Generate Embeddings
+### Generate Embeddings for Semantic Search
 
 ```bash
-# Generate embeddings for all papers
-abstracts-explorer create-embeddings --db-path abstracts.db
-
-# Use custom output directory
-abstracts-explorer create-embeddings \
-  --db-path abstracts.db \
-  --output embeddings/ \
-  --collection neurips_2025
-
-# Generate embeddings only for accepted papers
-abstracts-explorer create-embeddings \
-  --db-path abstracts.db \
-  --where "decision LIKE '%Accept%'"
-
-# Use custom settings
-abstracts-explorer create-embeddings \
-  --db-path abstracts.db \
-  --batch-size 50 \
-  --lm-studio-url http://localhost:5000 \
-  --model custom-embedding-model
+# Requires LM Studio running with embedding model loaded
+abstracts-explorer create-embeddings --db-path data/abstracts.db
 ```
 
 ### Start Web Interface
 
 ```bash
-# Start the web UI with default settings
 abstracts-explorer web-ui
-
-# Use custom host and port
-abstracts-explorer web-ui --host 0.0.0.0 --port 8080
-
-# Specify database and embeddings location
-abstracts-explorer web-ui \
-  --db-path abstracts.db \
-  --embeddings-path chroma_db
-
-# Enable debug mode
-abstracts-explorer web-ui --debug
+# Open http://127.0.0.1:5000 in your browser
 ```
 
-The web interface provides:
-- 🔍 **Search**: Keyword and AI-powered semantic search
-- 💬 **Chat**: Interactive RAG chat to ask questions about papers
-  - ✨ **NEW**: Displays rewritten query showing how your question was optimized
-  - 📊 Cache status indicator (retrieved vs. cached papers)
-- ⭐ **Interesting Papers**: Rate and organize papers you're interested in
-  - 💾 **NEW**: Save and load your ratings as JSON files
-  - 📥 Export your interesting papers for backup or sharing
-  - 📤 Import ratings from JSON files with smart merging
-- 📊 **Filters**: Filter by track, decision, event type, session, and topics
-- 📄 **Details**: View full paper information including authors and abstracts
+📖 **[Usage Guide](docs/usage.md)** - Detailed examples and workflows  
+📖 **[CLI Reference](docs/cli_reference.md)** - Complete command-line documentation  
+📖 **[API Reference](docs/api/modules.md)** - Python API documentation
 
-See `CLI_REFERENCE.md` for complete CLI documentation and examples.
+## Web Interface
 
-## Semantic Search with Embeddings
+The web UI provides an intuitive interface for browsing and searching papers:
 
-**NEW**: Generate text embeddings and perform semantic similarity search!
+- 🔍 **Search**: Keyword and AI-powered semantic search  
+- 💬 **Chat**: Interactive RAG chat with query rewriting
+- ⭐ **Ratings**: Save and organize interesting papers
+- 📊 **Filters**: Filter by track, decision, event type, and more
 
-### Prerequisites
-
-1. Install [LM Studio](https://lmstudio.ai/) and load the `text-embedding-qwen3-embedding-4b` model
-2. Start the LM Studio server (default: http://localhost:1234)
-3. ChromaDB is already included when you run `uv sync --all-extras` or `uv sync`
-
-### Generate Embeddings
-
-```python
-from abstracts_explorer import EmbeddingsManager
-
-# Initialize embeddings manager
-with EmbeddingsManager() as em:
-    em.create_collection()
-    
-    # Embed papers from database
-    count = em.embed_from_database(
-        "data/abstracts.db",
-        where_clause="decision = 'Accept'"  # Optional filter
-    )
-    print(f"Embedded {count} papers")
+```bash
+abstracts-explorer web-ui
+# Open http://127.0.0.1:5000
 ```
 
-### Search Similar Papers
+![Web UI Screenshot](https://github.com/user-attachments/assets/25b88d66-cd12-4564-bad6-9312861d51d6)
+*The web interface provides an intuitive way to search and explore conference papers*
+
+## Python API Examples
+
+### Download and Search Papers
 
 ```python
-from abstracts_explorer import EmbeddingsManager
-
-with EmbeddingsManager() as em:
-    em.create_collection()
-    
-    # Find papers similar to a query
-    results = em.search_similar(
-        "deep learning transformers for natural language processing",
-        n_results=5
-    )
-    
-    # Display results
-    for i, paper_id in enumerate(results['ids'][0], 1):
-        metadata = results['metadatas'][0][i-1]
-        similarity = 1 - results['distances'][0][i-1]
-        print(f"{i}. {metadata['title']}")
-        print(f"   Similarity: {similarity:.4f}")
-        print(f"   Authors: {metadata['authors']}")
-        print()
-```
-
-See `EMBEDDINGS_MODULE.md` for complete documentation and `examples/embeddings_demo.py` for a full demonstration.
-
-## Database Schema
-
-The package creates three tables with proper relational design:
-
-### Papers Table
-
-| Column          | Type      | Description                                         |
-| --------------- | --------- | --------------------------------------------------- |
-| id              | INTEGER   | Primary key - paper ID                              |
-| uid             | TEXT      | Unique hash identifier                              |
-| name            | TEXT      | Paper title                                         |
-| abstract        | TEXT      | Paper abstract                                      |
-| authors         | TEXT      | Comma-separated author IDs (links to authors table) |
-| keywords        | TEXT      | Comma-separated list of keywords                    |
-| topic           | TEXT      | Research topic/category                             |
-| decision        | TEXT      | Acceptance decision (e.g., "Accept (poster)")       |
-| session         | TEXT      | Session name                                        |
-| eventtype       | TEXT      | Event type (Poster, Oral, etc.)                     |
-| event_type      | TEXT      | Event type template                                 |
-| room_name       | TEXT      | Physical location                                   |
-| virtualsite_url | TEXT      | Virtual conference URL                              |
-| paper_url       | TEXT      | OpenReview paper URL                                |
-| starttime       | TEXT      | Event start time (ISO 8601)                         |
-| endtime         | TEXT      | Event end time (ISO 8601)                           |
-| poster_position | TEXT      | Poster location                                     |
-| raw_data        | TEXT      | Complete JSON data as text                          |
-| created_at      | TIMESTAMP | Record creation timestamp                           |
-| ...             | ...       | Plus 20+ more fields                                |
-
-### Authors Table
-
-| Column      | Type      | Description                          |
-| ----------- | --------- | ------------------------------------ |
-| id          | INTEGER   | Primary key - author ID from NeurIPS |
-| fullname    | TEXT      | Full name of the author              |
-| url         | TEXT      | NeurIPS API URL for author details   |
-| institution | TEXT      | Author's institution                 |
-| created_at  | TIMESTAMP | Record creation timestamp            |
-
-### Paper-Authors Junction Table
-
-| Column       | Type    | Description                             |
-| ------------ | ------- | --------------------------------------- |
-| paper_id     | INTEGER | Foreign key to papers.id                |
-| author_id    | INTEGER | Foreign key to authors.id               |
-| author_order | INTEGER | Order of author in paper (1, 2, 3, ...) |
-
-The junction table enables many-to-many relationships between papers and authors, preserving author order.
-
-Indexes are created on commonly queried fields for efficient searches. See `SCHEMA_MIGRATION.md` for complete details.
-
-## Configuration
-
-### Using Different Plugins
-
-You can download from different conference sources using plugins:
-
-```python
-from abstracts_explorer.plugins import get_plugin, list_plugins
-
-# List available plugins
-plugins = list_plugins()
-for plugin in plugins:
-    print(f"{plugin['name']}: {plugin['description']}")
-
-# Use a specific plugin
-ml4ps_plugin = get_plugin('ml4ps')
-data = ml4ps_plugin.download(year=2025)
-```
-
-### Database Location
-
-Specify any path for your database:
-
-```python
+from abstracts_explorer.plugins import get_plugin
 from abstracts_explorer import DatabaseManager
 
-# Use a specific path
-db = DatabaseManager("/path/to/your/database.db")
+# Download papers
+neurips_plugin = get_plugin('neurips')
+papers_data = neurips_plugin.download(year=2025)
 
-# Or relative path
-db = DatabaseManager("data/neurips.db")
+# Load into database and search
+with DatabaseManager("data/abstracts.db") as db:
+    db.create_tables()
+    db.add_papers(papers_data)
+    
+    # Search papers
+    papers = db.search_papers(keyword="deep learning", limit=5)
+    for paper in papers:
+        print(f"{paper['title']} by {paper['authors']}")
 ```
+
+### Semantic Search with Embeddings
+
+```python
+from abstracts_explorer import EmbeddingsManager
+
+with EmbeddingsManager() as em:
+    em.create_collection()
+    em.embed_from_database("data/abstracts.db")
+    
+    # Find similar papers
+    results = em.search_similar(
+        "transformers for natural language processing",
+        n_results=5
+    )
+```
+
+📖 **[Complete Usage Guide](docs/usage.md)** - More examples and workflows
+
+## Documentation
+
+📚 **[Full Documentation](docs/index.md)** - Complete documentation built with Sphinx
+
+### Quick Links
+
+- **[Installation Guide](docs/installation.md)** - Detailed installation instructions
+- **[Usage Guide](docs/usage.md)** - Examples and workflows  
+- **[Configuration Guide](docs/configuration.md)** - Environment variables and settings
+- **[CLI Reference](docs/cli_reference.md)** - Command-line interface documentation
+- **[Plugins Guide](docs/plugins.md)** - Plugin system and conference downloaders
+- **[API Reference](docs/api/modules.md)** - Python API documentation
+- **[Contributing Guide](docs/contributing.md)** - Development setup and guidelines
 
 ## Development
 
-### Setup Development Environment
-
 ```bash
-# Clone the repository
-git clone https://github.com/thawn/neurips-abstracts.git
-cd abstracts-explorer
-
-# Install uv if you haven't already
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Install in development mode with all dependencies
+# Install with development dependencies
 uv sync --all-extras
 
-# Activate the virtual environment
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-```
-
-### Running Tests
-
-```bash
-# Run all tests (excluding slow tests by default)
+# Run tests
 uv run pytest
 
-# Run with coverage report
-uv run pytest --cov=abstracts_explorer --cov-report=html
-
-# Run specific test file
-uv run pytest tests/test_database.py
-
-# Run specific test
-uv run pytest tests/test_database.py::TestDatabaseManager::test_connect
-
-# Run only slow tests (requires LM Studio running)
-uv run pytest -m slow
-
-# Run all tests including slow ones
-uv run pytest -m ""
-
-# Run end-to-end tests (requires Chrome or Firefox browser)
-uv run pytest -m e2e
-
-# Run E2E tests with verbose output
-uv run pytest tests/test_web_e2e.py -v -m e2e
-
-# Run E2E tests with Firefox instead of Chrome
-E2E_BROWSER=firefox uv run pytest tests/test_web_e2e.py -v -m e2e
-```
-
-**Note:**
-- Tests requiring LM Studio are marked as `slow` and skipped by default. To run them, use `uv run pytest -m slow` (requires LM Studio running with a chat model loaded).
-- End-to-end tests are marked as `e2e` and require either Chrome or Firefox browser. These tests use Selenium to automate browser interactions and verify the web UI works correctly. By default, Chrome is tried first, then Firefox. You can specify a browser with the `E2E_BROWSER` environment variable.
-
-### Running Linters
-
-The project uses [ruff](https://docs.astral.sh/ruff/) for linting and [mypy](https://mypy.readthedocs.io/) for type checking:
-
-```bash
-# Install linting tools (if not already installed)
-uv pip install --system ruff mypy types-requests
-
-# Check code with ruff
+# Run linters
 ruff check src/ tests/
-
-# Auto-fix many ruff issues
-ruff check src/ tests/ --fix
-
-# Run mypy type checker
-mypy src/ --ignore-missing-imports
-
-# Format code (if needed)
-ruff format src/ tests/
-```
-
-**Note:** Linting is automatically run by the pre-commit hook, so you'll be notified of any issues before committing. The CI/CD pipeline also runs linting checks on all pull requests.
-
-### Git Hooks for Web UI and Code Quality
-
-The project includes Git hooks that automatically rebuild vendor files (Font Awesome, Marked.js, KaTeX, Tailwind CSS) when HTML, JavaScript, or CSS files change, and run code quality checks on Python files:
-
-- **pre-commit**: Rebuilds vendor files before committing web UI changes and runs linting checks (ruff and mypy) on Python files
-- **post-checkout**: Updates vendor files after switching branches
-- **post-merge**: Updates vendor files after pulling/merging changes
-
-These hooks are automatically installed when you run `npm install`. They ensure vendor files stay synchronized with source code changes and maintain code quality without manual intervention.
-
-#### Linting Checks
-
-The pre-commit hook automatically runs:
-- **ruff**: Fast Python linter to check code style and potential errors
-- **mypy**: Static type checker to catch type-related bugs
-
-If linting fails, the commit will be blocked. You can fix the errors manually or use:
-```bash
-# Auto-fix many ruff issues
-ruff check src/ tests/ --fix
-
-# Check types
 mypy src/ --ignore-missing-imports
 ```
 
-To manually rebuild vendor files:
-```bash
-npm run install:vendor
-```
-
-To temporarily bypass the pre-commit hook:
-```bash
-git commit --no-verify
-```
-
-See [docs/vendor-auto-update.md](docs/vendor-auto-update.md) for more information.
-
-### Code Structure
-
-```
-abstracts-explorer/
-├── src/
-│   └── abstracts_explorer/
-│       ├── __init__.py         # Package initialization
-│       ├── database.py         # Database management
-│       ├── embeddings.py       # Vector embeddings
-│       ├── rag.py              # RAG chat interface
-│       ├── plugin.py           # Plugin system
-│       └── plugins/            # Plugin implementations
-├── tests/
-│   ├── __init__.py
-│   ├── test_database.py        # Database tests
-│   ├── test_embeddings.py      # Embeddings tests
-│   ├── test_plugin.py          # Plugin system tests
-│   └── test_integration.py     # Integration tests
-├── pyproject.toml              # Package configuration
-└── README.md                   # This file
-```
-
-## Error Handling
-
-The package provides custom exceptions for better error handling:
-
-```python
-from abstracts_explorer import DatabaseManager
-from abstracts_explorer.database import DatabaseError
-
-try:
-    with DatabaseManager("data/abstracts.db") as db:
-        db.load_json_data(invalid_data)
-except DatabaseError as e:
-    print(f"Database error: {e}")
-```
-
-## Logging
-
-The package uses Python's built-in logging. Configure it to see detailed logs:
-
-```python
-import logging
-
-# Enable debug logging
-logging.basicConfig(level=logging.INFO)
-
-# Now use the package
-from abstracts_explorer.plugins import get_plugin
-neurips_plugin = get_plugin('neurips')
-data = neurips_plugin.download(year=2025)
-```
-
-## License
-
-Apache License 2.0 - see LICENSE file for details.
+📖 **[Contributing Guide](docs/contributing.md)** - Complete development documentation
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please read our [Contributing Guide](docs/contributing.md) for details on:
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+- Development setup
+- Running tests and linters  
+- Code style and conventions
+- Submitting pull requests
+
+## License
+
+Apache License 2.0 - see [LICENSE](LICENSE) file for details.
 
 ## Support
 
-For issues, questions, or contributions, please visit:
-https://github.com/thawn/neurips-abstracts/issues
-
-## Query Rewriting Feature
-
-The RAG system now includes intelligent query rewriting to improve search results:
-
-- **Automatic Query Optimization**: User questions are automatically rewritten into effective search queries using the LLM
-- **Context-Aware Rewriting**: Follow-up questions consider conversation history for better context
-- **Smart Caching**: Similar follow-up queries reuse cached papers to reduce unnecessary retrievals
-- **Configurable**: Enable/disable via `ENABLE_QUERY_REWRITING` environment variable
-- **Tunable Threshold**: Control caching behavior with `QUERY_SIMILARITY_THRESHOLD` (0.0-1.0)
-
-Example:
-```python
-from abstracts_explorer import RAGChat, EmbeddingsManager, DatabaseManager
-
-with EmbeddingsManager() as em, DatabaseManager("data/abstracts.db") as db:
-    chat = RAGChat(em, db)
-    
-    # First query - rewrites and retrieves papers
-    response1 = chat.query("What about transformers?")
-    # Rewritten: "transformer architecture attention mechanism neural networks"
-    
-    # Follow-up - detects similar query, reuses cached papers
-    response2 = chat.query("Tell me more about transformers")
-    # Reuses same papers without re-retrieval
-    
-    # Different topic - retrieves new papers
-    response3 = chat.query("What about reinforcement learning?")
-    # New retrieval for different topic
-```
-
-## ToDo
-
-- Further RAG improvements
-  - consider [multi-turn conversation refinement](https://www.emergentmind.com/topics/multi-turn-rag-conversations)
-  - Implement citation extraction and validation
+For issues, questions, or contributions:
+- 🐛 [Report issues](https://github.com/thawn/neurips-abstracts/issues)
+- 💬 [Discussions](https://github.com/thawn/neurips-abstracts/discussions)
+- 📧 Contact the maintainers
