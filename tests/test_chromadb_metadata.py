@@ -3,6 +3,12 @@ Tests for ChromaDB metadata filtering functionality.
 
 Tests verify that lightweight schema metadata fields (session, year, conference, etc.)
 are correctly stored in ChromaDB and can be used for filtering search results.
+
+Note: This file is kept separate from test_embeddings.py due to fixture conflicts.
+The ChromaDB metadata tests require their own specialized fixtures that would conflict
+with the general embeddings fixtures in conftest.py. This separation follows the
+"one test file per module" principle with an exception for specialized test suites
+that require incompatible fixture setups.
 """
 
 import pytest
