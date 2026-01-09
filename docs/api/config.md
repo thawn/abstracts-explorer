@@ -164,8 +164,8 @@ EMBEDDING_DB_PATH = "chroma_db"
 LLM_BACKEND_URL = "http://localhost:1234"
 LLM_BACKEND_AUTH_TOKEN = ""
 
-PAPER_DB_PATH = "neurips_2025.db"
-COLLECTION_NAME = "neurips_papers"
+PAPER_DB_PATH = "abstracts.db"
+COLLECTION_NAME = "papers"
 MAX_CONTEXT_PAPERS = 5
 ```
 

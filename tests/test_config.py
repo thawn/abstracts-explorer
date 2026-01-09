@@ -160,8 +160,8 @@ class TestConfig:
         assert config.llm_backend_url == "http://localhost:1234"
         assert config.llm_backend_auth_token == ""
         assert config.embedding_db_path == str((Path("data") / "chroma_db").absolute())
-        assert config.paper_db_path == str((Path("data") / "neurips_2025.db").absolute())
-        assert config.collection_name == "neurips_papers"
+        assert config.paper_db_path == str((Path("data") / "abstracts.db").absolute())
+        assert config.collection_name == "papers"
         assert config.max_context_papers == 5
         assert config.chat_temperature == 0.7
         assert config.chat_max_tokens == 1000
@@ -293,7 +293,7 @@ CHAT_MAX_TOKENS=500
         assert config.data_dir == "/custom/data"
         # Paths should be resolved relative to custom data_dir
         assert config.embedding_db_path == str((Path("/custom/data") / "chroma_db").absolute())
-        assert config.paper_db_path == str((Path("/custom/data") / "papers.db").absolute())
+        assert config.paper_db_path == str((Path("/custom/data") / "abstracts.db").absolute())
 
     def test_config_absolute_paths_unchanged(self, tmp_path):
         """Test that absolute paths are not modified."""
