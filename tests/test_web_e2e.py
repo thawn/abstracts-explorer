@@ -26,7 +26,7 @@ from webdriver_manager.firefox import GeckoDriverManager
 from webdriver_manager.core.os_manager import ChromeType
 from neurips_abstracts.database import DatabaseManager
 from neurips_abstracts.config import Config
-from tests.test_helpers import find_free_port
+from tests.helpers import find_free_port
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))

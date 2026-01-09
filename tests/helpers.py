@@ -10,9 +10,86 @@ import requests
 import pytest
 from neurips_abstracts.config import get_config
 from neurips_abstracts.embeddings import EmbeddingsManager
+from neurips_abstracts.database import DatabaseManager
 
 # Cache for LM Studio availability check to avoid multiple API calls during test collection
 _lm_studio_available_cache = None
+
+
+def create_test_db_with_paper(db_path, paper_data):
+    """
+    Create a test database with a single paper.
+    
+    Parameters
+    ----------
+    db_path : Path or str
+        Path where the database should be created
+    paper_data : dict
+        Dictionary containing paper data with keys: uid, title, abstract, authors,
+        session, poster_position, keywords, year, conference
+        
+    Returns
+    -------
+    DatabaseManager
+        Connected database manager instance. Caller is responsible for closing it.
+        
+    Notes
+    -----
+    This helper reduces duplication in integration tests that need to manually
+    create databases with specific paper data. Default values are provided for
+    optional fields if not specified.
+    
+    Examples
+    --------
+    >>> db = create_test_db_with_paper(
+    ...     tmp_path / "test.db",
+    ...     {
+    ...         "uid": "1",
+    ...         "title": "Test Paper",
+    ...         "abstract": "Test abstract",
+    ...         "authors": "Test Author",
+    ...         "session": "Test Session",
+    ...         "keywords": "test",
+    ...         "year": 2025,
+    ...         "conference": "NeurIPS"
+    ...     }
+    ... )
+    >>> # Use db...
+    >>> db.close()
+    """
+    db = DatabaseManager(str(db_path))
+    db.connect()
+    db.create_tables()
+    
+    # Provide defaults for optional fields
+    defaults = {
+        "poster_position": "",
+        "keywords": "",
+    }
+    paper_data = {**defaults, **paper_data}
+    
+    # Insert paper into database (lightweight schema)
+    cursor = db.connection.cursor()
+    cursor.execute(
+        """
+        INSERT INTO papers (uid, title, abstract, authors, session, poster_position, keywords, year, conference)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            paper_data["uid"],
+            paper_data["title"],
+            paper_data["abstract"],
+            paper_data["authors"],
+            paper_data["session"],
+            paper_data["poster_position"],
+            paper_data["keywords"],
+            paper_data["year"],
+            paper_data["conference"],
+        ),
+    )
+    db.connection.commit()
+    
+    return db
 
 
 def check_lm_studio_available():

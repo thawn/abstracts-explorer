@@ -17,7 +17,7 @@ from unittest.mock import patch, Mock
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from neurips_abstracts.database import DatabaseManager
-from tests.test_helpers import requires_lm_studio, find_free_port
+from tests.helpers import requires_lm_studio, find_free_port
 
 # Helper functions imported from test_helpers:
 # - check_lm_studio_available(): Check if LM Studio is running
@@ -26,6 +26,8 @@ from tests.test_helpers import requires_lm_studio, find_free_port
 
 # Constants for tests
 MOCK_EMBEDDING_DIMENSION = 4096  # Standard dimension for test embeddings
+
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture(scope="module")
@@ -734,11 +736,24 @@ class TestWebUISemanticSearchWithResults:
 
 
 class TestWebUIChatEndpointFull:
-    """Test chat endpoint with full functionality."""
+    """
+    Test chat endpoint with full functionality.
+    
+    These integration tests require LM Studio to verify end-to-end chat functionality.
+    For unit testing without LM Studio, see:
+    - TestWebUIErrorHandlingPaths.test_chat_with_empty_message
+    - TestWebUIErrorHandlingPaths.test_chat_without_message
+    - Tests in test_rag.py for the underlying RAG functionality
+    """
 
     @requires_lm_studio
     def test_chat_with_valid_message_and_response(self, web_server):
-        """Test chat endpoint returns valid response."""
+        """
+        Test chat endpoint returns valid response.
+        
+        This integration test verifies the complete chat workflow with real API.
+        For unit testing without LM Studio, see tests in test_rag.py.
+        """
         host, port, base_url = web_server
 
         chat_data = {
@@ -767,7 +782,12 @@ class TestWebUIChatEndpointFull:
 
     @requires_lm_studio
     def test_chat_with_reset_flag(self, web_server):
-        """Test chat endpoint with reset flag."""
+        """
+        Test chat endpoint with reset flag.
+        
+        This integration test verifies conversation reset with real API.
+        For unit testing without LM Studio, see TestRAGChatConversation.test_reset_conversation in test_rag.py.
+        """
         host, port, base_url = web_server
 
         # First message
@@ -802,7 +822,12 @@ class TestWebUIChatEndpointFull:
 
     @requires_lm_studio
     def test_chat_with_custom_n_papers(self, web_server):
-        """Test chat endpoint with custom n_papers parameter."""
+        """
+        Test chat endpoint with custom n_papers parameter.
+        
+        This integration test verifies custom paper count with real API.
+        For unit testing without LM Studio, see TestRAGChatQuery.test_query_with_n_results in test_rag.py.
+        """
         host, port, base_url = web_server
 
         chat_data = {

@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 from neurips_abstracts.rag import RAGChat, RAGError
 from neurips_abstracts.embeddings import EmbeddingsManager
 from neurips_abstracts.config import get_config
-from tests.test_helpers import requires_lm_studio
+from tests.helpers import requires_lm_studio, create_test_db_with_paper
 
 # Fixtures imported from conftest.py:
 # - mock_embeddings_manager: Mock embeddings manager with predefined search results
@@ -404,11 +404,25 @@ class TestRAGChatExport:
 
 # Integration tests that require actual LM Studio
 class TestRAGChatIntegration:
-    """Integration tests requiring a running LM Studio instance."""
+    """
+    Integration tests requiring a running LM Studio instance.
+    
+    These tests verify end-to-end functionality with real LM Studio API.
+    Mocked versions of these tests exist in other test classes:
+    - test_real_query: See TestRAGChatQuery.test_query_success
+    - test_real_conversation: See TestRAGChatChat.test_chat_with_context and 
+      TestRAGChatConversation.test_conversation_history_accumulates
+    - test_real_export: See TestRAGChatExport.test_export_conversation
+    """
 
     @requires_lm_studio
     def test_real_query(self, tmp_path):
-        """Test real query with actual LM Studio backend using configured model."""
+        """
+        Test real query with actual LM Studio backend using configured model.
+        
+        This integration test verifies the complete RAG query workflow with real API.
+        For unit testing without LM Studio, see TestRAGChatQuery.test_query_success.
+        """
         # This test requires LM Studio to be running with the configured chat model
         # Create real embeddings manager
         from neurips_abstracts.embeddings import EmbeddingsManager
@@ -433,34 +447,20 @@ class TestRAGChatIntegration:
         )
 
         # Create database with test data
-        from neurips_abstracts.database import DatabaseManager
-
         db_path = tmp_path / "test.db"
-        db = DatabaseManager(str(db_path))
-        db.connect()
-        db.create_tables()
-
-        # Insert paper into database (lightweight schema)
-        cursor = db.connection.cursor()
-        cursor.execute(
-            """
-            INSERT INTO papers (uid, title, abstract, authors, session, poster_position, keywords, year, conference)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                "1",  # uid is TEXT in lightweight schema
-                "Attention Mechanisms",
-                "This paper discusses attention mechanisms in neural networks.",
-                "Test Author",  # authors stored as comma-separated string
-                "Test Session",  # session is required
-                "",  # poster_position
-                "attention, neural networks",
-                2025,  # year is required
-                "NeurIPS",  # conference is required
-            ),
+        db = create_test_db_with_paper(
+            db_path,
+            {
+                "uid": "1",
+                "title": "Attention Mechanisms",
+                "abstract": "This paper discusses attention mechanisms in neural networks.",
+                "authors": "Test Author",
+                "session": "Test Session",
+                "keywords": "attention, neural networks",
+                "year": 2025,
+                "conference": "NeurIPS",
+            }
         )
-
-        db.connection.commit()
 
         # Create RAG chat with configured settings
         chat = RAGChat(
@@ -484,7 +484,13 @@ class TestRAGChatIntegration:
 
     @requires_lm_studio
     def test_real_conversation(self, tmp_path):
-        """Test real conversation with actual LM Studio backend using configured model."""
+        """
+        Test real conversation with actual LM Studio backend using configured model.
+        
+        This integration test verifies multi-turn conversation with real API.
+        For unit testing without LM Studio, see TestRAGChatChat.test_chat_with_context
+        and TestRAGChatConversation.test_conversation_history_accumulates.
+        """
         from neurips_abstracts.embeddings import EmbeddingsManager
 
         config = get_config()
@@ -507,34 +513,20 @@ class TestRAGChatIntegration:
         )
 
         # Create database with test data
-        from neurips_abstracts.database import DatabaseManager
-
         db_path = tmp_path / "test.db"
-        db = DatabaseManager(str(db_path))
-        db.connect()
-        db.create_tables()
-
-        # Insert paper into database (lightweight schema)
-        cursor = db.connection.cursor()
-        cursor.execute(
-            """
-            INSERT INTO papers (uid, title, abstract, authors, session, poster_position, keywords, year, conference)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                "1",  # uid is TEXT in lightweight schema
-                "Transformers",
-                "Transformers are a deep learning architecture based on attention.",
-                "Vaswani et al.",  # authors stored as comma-separated string
-                "Test Session",  # session is required
-                "",  # poster_position
-                "transformers, attention",
-                2025,  # year is required
-                "NeurIPS",  # conference is required
-            ),
+        db = create_test_db_with_paper(
+            db_path,
+            {
+                "uid": "1",
+                "title": "Transformers",
+                "abstract": "Transformers are a deep learning architecture based on attention.",
+                "authors": "Vaswani et al.",
+                "session": "Test Session",
+                "keywords": "transformers, attention",
+                "year": 2025,
+                "conference": "NeurIPS",
+            }
         )
-
-        db.connection.commit()
 
         chat = RAGChat(
             em,
@@ -559,7 +551,12 @@ class TestRAGChatIntegration:
 
     @requires_lm_studio
     def test_real_export(self, tmp_path):
-        """Test exporting real conversation with configured model."""
+        """
+        Test exporting real conversation with configured model.
+        
+        This integration test verifies conversation export with real API.
+        For unit testing without LM Studio, see TestRAGChatExport.test_export_conversation.
+        """
         from neurips_abstracts.embeddings import EmbeddingsManager
 
         config = get_config()
@@ -582,34 +579,20 @@ class TestRAGChatIntegration:
         )
 
         # Create database with test data
-        from neurips_abstracts.database import DatabaseManager
-
         db_path = tmp_path / "test.db"
-        db = DatabaseManager(str(db_path))
-        db.connect()
-        db.create_tables()
-
-        # Insert paper into database (lightweight schema)
-        cursor = db.connection.cursor()
-        cursor.execute(
-            """
-            INSERT INTO papers (uid, title, abstract, authors, session, poster_position, keywords, year, conference)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                "1",  # uid is TEXT in lightweight schema
-                "ML Paper",
-                "Test abstract about machine learning.",
-                "Author",  # authors stored as comma-separated string
-                "Test Session",  # session is required
-                "",  # poster_position
-                "machine learning",
-                2025,  # year is required
-                "NeurIPS",  # conference is required
-            ),
+        db = create_test_db_with_paper(
+            db_path,
+            {
+                "uid": "1",
+                "title": "ML Paper",
+                "abstract": "Test abstract about machine learning.",
+                "authors": "Author",
+                "session": "Test Session",
+                "keywords": "machine learning",
+                "year": 2025,
+                "conference": "NeurIPS",
+            }
         )
-
-        db.connection.commit()
 
         chat = RAGChat(
             em,

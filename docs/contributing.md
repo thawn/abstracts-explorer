@@ -122,11 +122,30 @@ uv run pytest -m ""
 - A chat model loaded in LM Studio
 - Use `pytest -m slow` to run only slow tests
 
+### Test Organization
+
+**One test file per module**: Each source module should have exactly one corresponding test file. This makes tests easy to find and maintain.
+
+Examples:
+- `src/neurips_abstracts/database.py` → `tests/test_database.py`
+- `src/neurips_abstracts/plugin.py` → `tests/test_plugin.py`
+- `src/neurips_abstracts/web_ui/app.py` → `tests/test_web_ui.py`
+
+**Shared test code**:
+- `tests/conftest.py` - Shared pytest fixtures
+- `tests/helpers.py` - Shared helper functions
+
+**Exception for test types**: Different test types may have separate files:
+- `test_integration.py` - Cross-module integration tests
+- `test_web_integration.py` - Web UI integration tests
+- `test_web_e2e.py` - End-to-end browser tests
+
 ### Writing Tests
 
 - Use pytest framework
+- Follow the one test file per module principle
 - Create unit tests for all new functions
-- Use fixtures for common setup
+- Use fixtures for common setup (defined in `conftest.py`)
 - Mock external dependencies (API calls, LLM backends)
 - Aim for >80% code coverage
 

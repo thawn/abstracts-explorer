@@ -6,16 +6,19 @@ and proper author relationships. Tests using the old schema have been removed.
 See test_authors.py for comprehensive tests of the new schema.
 """
 
+import pytest
 from unittest.mock import patch
 
 from neurips_abstracts import download_json, DatabaseManager
 from neurips_abstracts.downloader import download_neurips_data
 from neurips_abstracts.plugin import LightweightPaper, convert_neurips_to_lightweight_schema
-from tests.test_helpers import requires_lm_studio
+from tests.helpers import requires_lm_studio
 
 # Fixtures imported from conftest.py:
 # - sample_neurips_data: List of 2 papers with authors
 # - mock_response: Mock HTTP response with sample data
+
+pytestmark = pytest.mark.integration
 
 
 class TestIntegration:
@@ -586,7 +589,7 @@ class TestIntegration:
         """
         End-to-end test: Load real NeurIPS data, generate embeddings, and perform semantic search.
 
-        This test verifies the complete embeddings workflow:
+        This integration test verifies the complete embeddings workflow with real API:
         1. Load papers from the real NeurIPS 2025 subset into database
         2. Generate embeddings for all papers with abstracts (requires LM Studio running)
         3. Perform semantic similarity searches
@@ -595,6 +598,10 @@ class TestIntegration:
 
         Note: This test requires LM Studio to be running and is marked as slow.
         The test will be skipped by default unless running with -m slow.
+        
+        For unit testing without LM Studio, see test_embeddings.py which contains
+        mocked versions of embedding operations (e.g., test_embed_from_database,
+        test_search_similar, test_add_paper, etc.).
         """
         from neurips_abstracts import DatabaseManager, EmbeddingsManager
 

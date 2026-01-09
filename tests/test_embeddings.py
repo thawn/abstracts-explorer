@@ -10,65 +10,7 @@ from neurips_abstracts.embeddings import EmbeddingsError, EmbeddingsManager
 # Fixtures imported from conftest.py:
 # - mock_lm_studio: Mock LM Studio API responses
 # - embeddings_manager: EmbeddingsManager instance for testing
-
-
-@pytest.fixture
-def test_database(tmp_path):
-    """Create a test database with sample papers using lightweight schema."""
-    from neurips_abstracts.database import DatabaseManager
-    from neurips_abstracts.plugin import LightweightPaper
-    
-    db_path = tmp_path / "test.db"
-    
-    # Use DatabaseManager to create the database with proper schema
-    with DatabaseManager(db_path) as db:
-        db.create_tables()
-        
-        # Create sample papers without uid (DatabaseManager will generate them)
-        papers = [
-            LightweightPaper(
-                title="Deep Learning Paper",
-                abstract="This paper presents a novel deep learning approach.",
-                authors=["John Doe", "Jane Smith"],
-                keywords=["deep learning", "neural networks"],
-                session="ML Session 1",
-                poster_position="P1",
-                year=2025,
-                conference="NeurIPS",
-            ),
-            LightweightPaper(
-                title="NLP Paper",
-                abstract="We introduce a new natural language processing method.",
-                authors=["Alice Johnson"],
-                keywords=["NLP", "transformers"],
-                session="NLP Session 2",
-                poster_position="P2",
-                year=2025,
-                conference="NeurIPS",
-            ),
-            LightweightPaper(
-                title="Computer Vision Paper",
-                abstract="",  # Empty abstract
-                authors=["Bob Wilson"],
-                keywords=["vision", "CNN"],
-                session="CV Session 3",
-                poster_position="P3",
-                year=2025,
-                conference="NeurIPS",
-            ),
-        ]
-        
-        # Add papers to database and collect their UIDs
-        paper_uids = []
-        for paper in papers:
-            uid = db.add_paper(paper)
-            paper_uids.append(uid)
-    
-    return db_path
-
-
-# Note: The above test_database fixture uses the lightweight schema
-# that matches the actual database structure used in production.
+# - test_database: Test database with sample papers for testing embeddings
 
 
 class TestEmbeddingsManager:
