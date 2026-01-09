@@ -586,7 +586,7 @@ class TestIntegration:
         """
         End-to-end test: Load real NeurIPS data, generate embeddings, and perform semantic search.
 
-        This test verifies the complete embeddings workflow:
+        This integration test verifies the complete embeddings workflow with real API:
         1. Load papers from the real NeurIPS 2025 subset into database
         2. Generate embeddings for all papers with abstracts (requires LM Studio running)
         3. Perform semantic similarity searches
@@ -595,6 +595,10 @@ class TestIntegration:
 
         Note: This test requires LM Studio to be running and is marked as slow.
         The test will be skipped by default unless running with -m slow.
+        
+        For unit testing without LM Studio, see test_embeddings.py which contains
+        mocked versions of embedding operations (e.g., test_embed_from_database,
+        test_search_similar, test_add_paper, etc.).
         """
         from neurips_abstracts import DatabaseManager, EmbeddingsManager
 

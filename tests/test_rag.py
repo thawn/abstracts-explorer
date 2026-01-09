@@ -404,11 +404,25 @@ class TestRAGChatExport:
 
 # Integration tests that require actual LM Studio
 class TestRAGChatIntegration:
-    """Integration tests requiring a running LM Studio instance."""
+    """
+    Integration tests requiring a running LM Studio instance.
+    
+    These tests verify end-to-end functionality with real LM Studio API.
+    Mocked versions of these tests exist in other test classes:
+    - test_real_query: See TestRAGChatQuery.test_query_success
+    - test_real_conversation: See TestRAGChatChat.test_chat_with_context and 
+      TestRAGChatConversation.test_conversation_history_accumulates
+    - test_real_export: See TestRAGChatExport.test_export_conversation
+    """
 
     @requires_lm_studio
     def test_real_query(self, tmp_path):
-        """Test real query with actual LM Studio backend using configured model."""
+        """
+        Test real query with actual LM Studio backend using configured model.
+        
+        This integration test verifies the complete RAG query workflow with real API.
+        For unit testing without LM Studio, see TestRAGChatQuery.test_query_success.
+        """
         # This test requires LM Studio to be running with the configured chat model
         # Create real embeddings manager
         from neurips_abstracts.embeddings import EmbeddingsManager
@@ -484,7 +498,13 @@ class TestRAGChatIntegration:
 
     @requires_lm_studio
     def test_real_conversation(self, tmp_path):
-        """Test real conversation with actual LM Studio backend using configured model."""
+        """
+        Test real conversation with actual LM Studio backend using configured model.
+        
+        This integration test verifies multi-turn conversation with real API.
+        For unit testing without LM Studio, see TestRAGChatChat.test_chat_with_context
+        and TestRAGChatConversation.test_conversation_history_accumulates.
+        """
         from neurips_abstracts.embeddings import EmbeddingsManager
 
         config = get_config()
@@ -559,7 +579,12 @@ class TestRAGChatIntegration:
 
     @requires_lm_studio
     def test_real_export(self, tmp_path):
-        """Test exporting real conversation with configured model."""
+        """
+        Test exporting real conversation with configured model.
+        
+        This integration test verifies conversation export with real API.
+        For unit testing without LM Studio, see TestRAGChatExport.test_export_conversation.
+        """
         from neurips_abstracts.embeddings import EmbeddingsManager
 
         config = get_config()
