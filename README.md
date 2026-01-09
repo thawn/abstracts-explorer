@@ -87,7 +87,7 @@ abstracts-explorer web-ui
 # Open http://127.0.0.1:5000
 ```
 
-![Web UI Screenshot](https://github.com/user-attachments/assets/25b88d66-cd12-4564-bad6-9312861d51d6)
+![Web UI Screenshot](docs/images/screenshot.png)
 *The web interface provides an intuitive way to search and explore conference papers*
 
 ## Python API Examples
