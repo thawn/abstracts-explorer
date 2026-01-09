@@ -155,10 +155,10 @@ class Config:
 
         # Database Paths (resolved relative to data_dir if not absolute)
         self.embedding_db_path = self._resolve_path(self._get_env("EMBEDDING_DB_PATH", default="chroma_db"))
-        self.paper_db_path = self._resolve_path(self._get_env("PAPER_DB_PATH", default="papers.db"))
+        self.paper_db_path = self._resolve_path(self._get_env("PAPER_DB_PATH", default="abstracts.db"))
 
         # Collection Settings
-        self.collection_name = self._get_env("COLLECTION_NAME", default="conference_papers")
+        self.collection_name = self._get_env("COLLECTION_NAME", default="papers")
 
         # RAG Settings
         self.max_context_papers = self._get_env_int("MAX_CONTEXT_PAPERS", default=5)

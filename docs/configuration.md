@@ -47,11 +47,11 @@ nano .env
 ### Database Paths
 
 - **EMBEDDING_DB_PATH**: Path to ChromaDB database (default: `chroma_db`). If relative, resolved relative to DATA_DIR.
-- **PAPER_DB_PATH**: Path to SQLite database with papers (default: `data/neurips_2025.db`). If relative, resolved relative to DATA_DIR.
+- **PAPER_DB_PATH**: Path to SQLite database with papers (default: `data/abstracts.db`). If relative, resolved relative to DATA_DIR.
 
 ### RAG Settings
 
-- **COLLECTION_NAME**: ChromaDB collection name (default: `neurips_papers`)
+- **COLLECTION_NAME**: ChromaDB collection name (default: `papers`)
 - **MAX_CONTEXT_PAPERS**: Number of papers to include in RAG context (default: `5`)
 
 ## Example Configuration
@@ -71,15 +71,15 @@ EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b
 LLM_BACKEND_URL=http://localhost:1234
 LLM_BACKEND_AUTH_TOKEN=
 
-# Paths relative to DATA_DIR (will resolve to data/chroma_db and data/neurips_2025.db)
+# Paths relative to DATA_DIR (will resolve to data/chroma_db and data/abstracts.db)
 EMBEDDING_DB_PATH=chroma_db
-PAPER_DB_PATH=neurips_2025.db
+PAPER_DB_PATH=abstracts.db
 
 # Or use absolute paths:
 # EMBEDDING_DB_PATH=/absolute/path/to/chroma_db
-# PAPER_DB_PATH=/absolute/path/to/neurips_2025.db
+# PAPER_DB_PATH=/absolute/path/to/abstracts.db
 
-COLLECTION_NAME=neurips_papers
+COLLECTION_NAME=papers
 MAX_CONTEXT_PAPERS=5
 ```
 
