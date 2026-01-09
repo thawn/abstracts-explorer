@@ -96,7 +96,7 @@ def search_papers(
 uv run pytest
 
 # Run with coverage
-uv run pytest --cov=src/neurips_abstracts
+uv run pytest --cov=src/abstracts_explorer
 
 # Run specific test file
 uv run pytest tests/test_database.py
@@ -127,9 +127,9 @@ uv run pytest -m ""
 **One test file per module**: Each source module should have exactly one corresponding test file. This makes tests easy to find and maintain.
 
 Examples:
-- `src/neurips_abstracts/database.py` → `tests/test_database.py`
-- `src/neurips_abstracts/plugin.py` → `tests/test_plugin.py`
-- `src/neurips_abstracts/web_ui/app.py` → `tests/test_web_ui.py`
+- `src/abstracts_explorer/database.py` → `tests/test_database.py`
+- `src/abstracts_explorer/plugin.py` → `tests/test_plugin.py`
+- `src/abstracts_explorer/web_ui/app.py` → `tests/test_web_ui.py`
 
 **Shared test code**:
 - `tests/conftest.py` - Shared pytest fixtures
@@ -153,13 +153,13 @@ Examples:
 
 ```python
 import pytest
-from neurips_abstracts.database import NeurIPSDatabase
+from abstracts_explorer.database import DatabaseManager
 
 @pytest.fixture
 def db(tmp_path):
     """Create a temporary test database."""
     db_path = tmp_path / "test.db"
-    return NeurIPSDatabase(str(db_path))
+    return DatabaseManager(str(db_path))
 
 def test_add_paper(db):
     """Test adding a paper to the database."""

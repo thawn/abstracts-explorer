@@ -176,7 +176,7 @@ def convert_to_lightweight_schema(papers: List[Dict[str, Any]]) -> List[Dict[str
 
     Examples
     --------
-    >>> neurips_papers = [
+    >>> papers = [
     ...     {
     ...         'id': 123,
     ...         'title': 'Deep Learning',
@@ -192,7 +192,7 @@ def convert_to_lightweight_schema(papers: List[Dict[str, Any]]) -> List[Dict[str
     ...         'conference': 'NeurIPS'
     ...     }
     ... ]
-    >>> lightweight = convert_to_lightweight_schema(neurips_papers)
+    >>> lightweight = convert_to_lightweight_schema(papers)
     >>> lightweight[0]['authors']
     ['John Doe', 'Jane Smith']
 

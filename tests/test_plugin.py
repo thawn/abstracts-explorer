@@ -102,7 +102,7 @@ class TestConvertNeuripsToLightweightSchema:
 
     def test_basic_conversion(self):
         """Test basic conversion with all required fields."""
-        neurips_papers = [
+        papers = [
             {
                 "id": 123,
                 "title": "Test Paper",
@@ -116,7 +116,7 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(papers)
 
         assert len(result) == 1
         assert result[0]["title"] == "Test Paper"
@@ -128,7 +128,7 @@ class TestConvertNeuripsToLightweightSchema:
 
     def test_legacy_name_field(self):
         """Test conversion of legacy 'name' field to 'title'."""
-        neurips_papers = [
+        papers = [
             {
                 "id": 1,
                 "name": "Legacy Paper",  # Using 'name' instead of 'title'
@@ -139,14 +139,14 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(papers)
 
         assert result[0]["title"] == "Legacy Paper"
         assert "name" not in result[0]
 
     def test_authors_as_strings(self):
         """Test conversion when authors are already strings."""
-        neurips_papers = [
+        papers = [
             {
                 "id": 1,
                 "title": "Test Paper",
@@ -157,13 +157,13 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(papers)
 
         assert result[0]["authors"] == ["John Doe", "Jane Smith"]
 
     def test_authors_as_semicolon_separated_string(self):
         """Test conversion when authors is a semicolon-separated string."""
-        neurips_papers = [
+        papers = [
             {
                 "id": 1,
                 "title": "Test Paper",
@@ -174,13 +174,13 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(papers)
 
         assert result[0]["authors"] == ["John Doe", "Jane Smith", "Bob Johnson"]
 
     def test_optional_fields(self):
         """Test that optional fields are included when present."""
-        neurips_papers = [
+        papers = [
             {
                 "id": 1,
                 "title": "Test Paper",
@@ -200,7 +200,7 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(papers)
 
         assert result[0]["paper_pdf_url"] == "https://example.com/paper.pdf"
         assert result[0]["poster_image_url"] == "https://example.com/poster.png"
@@ -214,7 +214,7 @@ class TestConvertNeuripsToLightweightSchema:
 
     def test_keywords_as_string(self):
         """Test conversion of keywords from comma-separated string to list."""
-        neurips_papers = [
+        papers = [
             {
                 "id": 1,
                 "title": "Test Paper",
@@ -226,13 +226,13 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(papers)
 
         assert result[0]["keywords"] == ["machine learning", "deep learning", "AI"]
 
     def test_award_extraction(self):
         """Test extraction of award from decision field."""
-        neurips_papers = [
+        papers = [
             {
                 "id": 1,
                 "title": "Award Paper",
@@ -244,13 +244,13 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(papers)
 
         assert result[0]["award"] == "Best Paper Award"
 
     def test_award_field_direct(self):
         """Test that direct award field is preserved."""
-        neurips_papers = [
+        papers = [
             {
                 "id": 1,
                 "title": "Award Paper",
@@ -262,13 +262,13 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(papers)
 
         assert result[0]["award"] == "Outstanding Paper"
 
     def test_decision_without_award(self):
         """Test that regular decision is not converted to award."""
-        neurips_papers = [
+        papers = [
             {
                 "id": 1,
                 "title": "Test Paper",
@@ -280,13 +280,13 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(papers)
 
         assert "award" not in result[0]
 
     def test_decision_none_no_error(self):
         """Test that None decision value doesn't cause an error."""
-        neurips_papers = [
+        papers = [
             {
                 "id": 1,
                 "title": "Test Paper",
@@ -298,14 +298,14 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(papers)
 
         assert "award" not in result[0]
         # Should not raise AttributeError
 
     def test_none_field_values_converted_to_empty_strings(self):
         """Test that None field values are converted to empty strings."""
-        neurips_papers = [
+        papers = [
             {
                 "id": 1,
                 "title": "Test Paper",
@@ -316,7 +316,7 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(papers)
 
         # All None values should be converted to appropriate defaults
         assert result[0]["abstract"] == ""
@@ -326,7 +326,7 @@ class TestConvertNeuripsToLightweightSchema:
 
     def test_author_names_with_semicolons_sanitized(self):
         """Test that author names with semicolons are sanitized."""
-        neurips_papers = [
+        papers = [
             {
                 "id": 1,
                 "title": "Test Paper",
@@ -340,7 +340,7 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(papers)
 
         # Semicolons should be replaced with spaces
         assert result[0]["authors"] == ["John Doe", "Jane Smith"]
@@ -348,7 +348,7 @@ class TestConvertNeuripsToLightweightSchema:
 
     def test_multiple_papers(self):
         """Test conversion of multiple papers at once."""
-        neurips_papers = [
+        papers = [
             {
                 "id": 1,
                 "title": "Paper 1",
@@ -375,7 +375,7 @@ class TestConvertNeuripsToLightweightSchema:
             },
         ]
 
-        result = convert_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(papers)
 
         assert len(result) == 3
         assert result[0]["title"] == "Paper 1"
@@ -384,7 +384,7 @@ class TestConvertNeuripsToLightweightSchema:
 
     def test_paper_without_title(self):
         """Test that papers without title are skipped."""
-        neurips_papers = [
+        papers = [
             {
                 "id": 1,
                 # No title or name field
@@ -403,7 +403,7 @@ class TestConvertNeuripsToLightweightSchema:
             },
         ]
 
-        result = convert_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(papers)
 
         # First paper should be skipped
         assert len(result) == 1
@@ -411,7 +411,7 @@ class TestConvertNeuripsToLightweightSchema:
 
     def test_empty_title(self):
         """Test that papers with empty title are skipped."""
-        neurips_papers = [
+        papers = [
             {
                 "id": 1,
                 "title": "",  # Empty title
@@ -422,13 +422,13 @@ class TestConvertNeuripsToLightweightSchema:
             },
         ]
 
-        result = convert_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(papers)
 
         assert len(result) == 0
 
     def test_author_with_name_field(self):
         """Test author dict with 'name' instead of 'fullname'."""
-        neurips_papers = [
+        papers = [
             {
                 "id": 1,
                 "title": "Test Paper",
@@ -441,13 +441,13 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(papers)
 
         assert result[0]["authors"] == ["John Doe"]
 
     def test_author_without_name(self):
         """Test that authors without name/fullname are skipped."""
-        neurips_papers = [
+        papers = [
             {
                 "id": 1,
                 "title": "Test Paper",
@@ -462,13 +462,13 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(papers)
 
         assert result[0]["authors"] == ["John Doe", "Jane Smith"]
 
     def test_extra_neurips_fields_removed(self):
         """Test that NeurIPS-specific fields are not included in lightweight schema."""
-        neurips_papers = [
+        papers = [
             {
                 "id": 1,
                 "title": "Test Paper",
@@ -490,7 +490,7 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(papers)
 
         # Ensure extra fields are not present
         assert "topic" not in result[0]
@@ -534,7 +534,7 @@ class TestIntegration:
 
     def test_convert_and_validate(self):
         """Test converting from NeurIPS schema and then validating."""
-        neurips_papers = [
+        papers = [
             {
                 "id": 123,
                 "title": "Deep Learning Paper",
@@ -550,7 +550,7 @@ class TestIntegration:
             }
         ]
 
-        lightweight = convert_to_lightweight_schema(neurips_papers)
+        lightweight = convert_to_lightweight_schema(papers)
 
         # Should validate successfully
         validated = validate_lightweight_paper(lightweight[0])
@@ -561,7 +561,7 @@ class TestIntegration:
 
     def test_convert_sanitize_and_validate(self):
         """Test full pipeline: convert, sanitize, validate."""
-        neurips_papers = [
+        papers = [
             {
                 "id": 1,
                 "title": "Test Paper",
@@ -575,7 +575,7 @@ class TestIntegration:
         ]
 
         # Convert
-        lightweight = convert_to_lightweight_schema(neurips_papers)
+        lightweight = convert_to_lightweight_schema(papers)
 
         # Sanitize authors
         lightweight[0]["authors"] = sanitize_author_names(lightweight[0]["authors"])
@@ -885,8 +885,8 @@ class TestDatabaseYearConferenceIntegration:
                 assert len(papers_2024) == 2
 
                 # Test filtering by conference
-                neurips_papers = db.query("SELECT * FROM papers WHERE conference = 'NeurIPS'")
-                assert len(neurips_papers) == 2
+                papers = db.query("SELECT * FROM papers WHERE conference = 'NeurIPS'")
+                assert len(papers) == 2
 
     def test_ml4ps_year_conference_in_database(self):
         """Test that year and conference are stored in database from ML4PS plugin."""
@@ -1353,5 +1353,3 @@ class TestPydanticValidation:
                     conference="NeurIPS",
                 )
             ]
-
-

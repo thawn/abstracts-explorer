@@ -119,7 +119,7 @@ data = download_json(
 from abstracts_explorer import DatabaseManager
 
 # Create and connect to database
-with DatabaseManager("data/neurips_2025.db") as db:
+with DatabaseManager("data/abstracts.db") as db:
     # Create tables
     db.create_tables()
     
@@ -137,7 +137,7 @@ with DatabaseManager("data/neurips_2025.db") as db:
 ```python
 from abstracts_explorer import DatabaseManager
 
-with DatabaseManager("data/neurips_2025.db") as db:
+with DatabaseManager("data/abstracts.db") as db:
     # Search by keyword
     papers = db.search_papers(keyword="neural network")
     
@@ -167,7 +167,7 @@ with DatabaseManager("data/neurips_2025.db") as db:
 ```python
 from abstracts_explorer import DatabaseManager
 
-with DatabaseManager("data/neurips_2025.db") as db:
+with DatabaseManager("data/abstracts.db") as db:
     # Search authors by name
     authors = db.search_authors(name="Huang")
     for author in authors:
@@ -195,7 +195,7 @@ with DatabaseManager("data/neurips_2025.db") as db:
 ```python
 from abstracts_explorer import DatabaseManager
 
-with DatabaseManager("data/neurips_2025.db") as db:
+with DatabaseManager("data/abstracts.db") as db:
     # Execute custom SQL queries
     results = db.query(
         "SELECT title, authors FROM papers WHERE session = ? ORDER BY title",
@@ -222,7 +222,7 @@ data = download_neurips_data(
 
 # Load into database
 print("Loading data into database...")
-with DatabaseManager("data/neurips_2025.db") as db:
+with DatabaseManager("data/abstracts.db") as db:
     db.create_tables()
     count = db.load_json_data(data)
     print(f"Loaded {count} papers")
@@ -246,32 +246,32 @@ The package includes a powerful CLI for common tasks:
 
 ```bash
 # Download NeurIPS 2025 data and create database
-abstracts-explorer download --year 2025 --output neurips_2025.db
+abstracts-explorer download --year 2025 --output abstracts.db
 
 # Force re-download
-abstracts-explorer download --year 2025 --output neurips_2025.db --force
+abstracts-explorer download --year 2025 --output abstracts.db --force
 ```
 
 ### Generate Embeddings
 
 ```bash
 # Generate embeddings for all papers
-abstracts-explorer create-embeddings --db-path neurips_2025.db
+abstracts-explorer create-embeddings --db-path abstracts.db
 
 # Use custom output directory
 abstracts-explorer create-embeddings \
-  --db-path neurips_2025.db \
+  --db-path abstracts.db \
   --output embeddings/ \
   --collection neurips_2025
 
 # Generate embeddings only for accepted papers
 abstracts-explorer create-embeddings \
-  --db-path neurips_2025.db \
+  --db-path abstracts.db \
   --where "decision LIKE '%Accept%'"
 
 # Use custom settings
 abstracts-explorer create-embeddings \
-  --db-path neurips_2025.db \
+  --db-path abstracts.db \
   --batch-size 50 \
   --lm-studio-url http://localhost:5000 \
   --model custom-embedding-model
@@ -288,7 +288,7 @@ abstracts-explorer web-ui --host 0.0.0.0 --port 8080
 
 # Specify database and embeddings location
 abstracts-explorer web-ui \
-  --db-path neurips_2025.db \
+  --db-path abstracts.db \
   --embeddings-path chroma_db
 
 # Enable debug mode
@@ -330,7 +330,7 @@ with EmbeddingsManager() as em:
     
     # Embed papers from database
     count = em.embed_from_database(
-        "data/neurips_2025.db",
+        "data/abstracts.db",
         where_clause="decision = 'Accept'"  # Optional filter
     )
     print(f"Embedded {count} papers")
@@ -594,7 +594,7 @@ except DownloadError as e:
     print(f"Download failed: {e}")
 
 try:
-    with DatabaseManager("data/neurips_2025.db") as db:
+    with DatabaseManager("data/abstracts.db") as db:
         db.load_json_data(invalid_data)
 except DatabaseError as e:
     print(f"Database error: {e}")
@@ -648,7 +648,7 @@ Example:
 ```python
 from abstracts_explorer import RAGChat, EmbeddingsManager, DatabaseManager
 
-with EmbeddingsManager() as em, DatabaseManager("data/neurips_2025.db") as db:
+with EmbeddingsManager() as em, DatabaseManager("data/abstracts.db") as db:
     chat = RAGChat(em, db)
     
     # First query - rewrites and retrieves papers

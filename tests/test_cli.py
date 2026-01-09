@@ -1183,7 +1183,7 @@ class TestCLIEmbeddingsProgressAndStats:
 
             mock_em.embed_from_database.side_effect = mock_embed
             mock_em.get_collection_stats.return_value = {
-                "name": "neurips_papers",
+                "name": "papers",
                 "count": 3,
             }
 
@@ -1205,7 +1205,7 @@ class TestCLIEmbeddingsProgressAndStats:
         captured = capsys.readouterr()
         # Check stats are displayed (lines 132-136)
         assert "Collection Statistics" in captured.out
-        assert "neurips_papers" in captured.out
+        assert "papers" in captured.out
         assert "3" in captured.out
 
 

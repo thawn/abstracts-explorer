@@ -9,7 +9,7 @@ import json
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from neurips_abstracts.downloader import download_neurips_data
+from abstracts_explorer.downloader import download_neurips_data
 
 
 def main():

@@ -31,7 +31,7 @@ from abstracts_explorer.rag import RAGChat
 
 # Initialize embeddings manager
 em = EmbeddingsManager(
-    db_path="neurips_2025.db",
+    db_path="abstracts.db",
     embedding_db_path="chroma_db"
 )
 

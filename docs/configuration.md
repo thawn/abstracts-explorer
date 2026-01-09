@@ -86,7 +86,7 @@ MAX_CONTEXT_PAPERS=5
 ## Using Configuration in Code
 
 ```python
-from neurips_abstracts.config import get_config
+from abstracts_explorer.config import get_config
 
 # Get the singleton configuration instance
 config = get_config()

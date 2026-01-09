@@ -123,7 +123,7 @@ These files are installed automatically when you run:
 npm run install:vendor
 ```
 
-This command copies the necessary files from `node_modules` to `src/neurips_abstracts/web_ui/static/vendor/` and `src/neurips_abstracts/web_ui/static/webfonts/`.
+This command copies the necessary files from `node_modules` to `src/abstracts_explorer/web_ui/static/vendor/` and `src/abstracts_explorer/web_ui/static/webfonts/`.
 
 **Note**: The vendor files are excluded from git (via `.gitignore`) and must be generated locally or during deployment.
 

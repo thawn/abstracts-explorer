@@ -42,7 +42,7 @@ For complete control and complex data sources.
 
 **Example:**
 ```python
-from neurips_abstracts.plugins import DownloaderPlugin, register_plugin
+from abstracts_explorer.plugins import DownloaderPlugin, register_plugin
 
 class MyFullPlugin(DownloaderPlugin):
     plugin_name = "myplugin"
@@ -94,7 +94,7 @@ For simple data sources with minimal fields.
 
 **Example:**
 ```python
-from neurips_abstracts.plugins import (
+from abstracts_explorer.plugins import (
     LightweightDownloaderPlugin,
     convert_lightweight_to_neurips_schema,
     register_plugin
@@ -149,7 +149,7 @@ class MyLightweightPlugin(LightweightDownloaderPlugin):
 Create `my_workshop_plugin.py`:
 
 ```python
-from neurips_abstracts.plugins import (
+from abstracts_explorer.plugins import (
     LightweightDownloaderPlugin,
     convert_lightweight_to_neurips_schema,
     register_plugin
@@ -205,7 +205,7 @@ Then use it:
 
 ```bash
 # Import to register
-python -c "from neurips_abstracts.plugins import my_workshop_plugin"
+python -c "from abstracts_explorer.plugins import my_workshop_plugin"
 
 # Or via CLI
 neurips-abstracts download --plugin myworkshop --year 2025 --output workshop.db

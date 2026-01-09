@@ -116,7 +116,7 @@ def download_json(
     return data
 
 
-def download_conference_data(
+def download_neurips_data(
     year: int = 2025,
     output_path: Optional[Union[str, Path]] = None,
     timeout: int = 30,

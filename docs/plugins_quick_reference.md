@@ -7,7 +7,7 @@ Quick reference for the Abstracts Explorer plugin APIs.
 ### Minimal Example
 
 ```python
-from neurips_abstracts.plugins import (
+from abstracts_explorer.plugins import (
     LightweightDownloaderPlugin,
     convert_lightweight_to_neurips_schema,
     register_plugin
@@ -107,7 +107,7 @@ convert_lightweight_to_neurips_schema(
 ### Minimal Example
 
 ```python
-from neurips_abstracts.plugins import DownloaderPlugin, register_plugin
+from abstracts_explorer.plugins import DownloaderPlugin, register_plugin
 
 class MyPlugin(DownloaderPlugin):
     plugin_name = "myplugin"
@@ -286,5 +286,5 @@ print(f"Papers: {data['count']}")
 ## See Also
 
 - [Full Plugin Documentation](plugins.md)
-- [Plugin Technical Guide](../src/neurips_abstracts/plugins/README.md)
+- [Plugin Technical Guide](../src/abstracts_explorer/plugins/README.md)
 - [CLI Reference](cli_reference.md)

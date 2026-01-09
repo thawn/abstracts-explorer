@@ -54,9 +54,9 @@ git commit --no-verify
 ## Files Monitored
 
 Hooks monitor changes to:
-- `src/neurips_abstracts/web_ui/templates/*.html`
-- `src/neurips_abstracts/web_ui/static/*.js`
-- `src/neurips_abstracts/web_ui/static/*.css`
+- `src/abstracts_explorer/web_ui/templates/*.html`
+- `src/abstracts_explorer/web_ui/static/*.js`
+- `src/abstracts_explorer/web_ui/static/*.css`
 - `tailwind.config.js`
 
 ## Benefits

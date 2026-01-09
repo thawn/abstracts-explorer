@@ -30,9 +30,9 @@ from abstracts_explorer.embeddings import EmbeddingsManager
 
 # Initialize with database paths
 em = EmbeddingsManager(
-    db_path="neurips_2025.db",
+    db_path="abstracts.db",
     embedding_db_path="chroma_db",
-    collection_name="neurips_papers"
+    collection_name="papers"
 )
 ```
 
@@ -110,7 +110,7 @@ config = get_config()
 
 # Or directly
 em = EmbeddingsManager(
-    db_path="neurips_2025.db",
+    db_path="abstracts.db",
     model="text-embedding-nomic-embed-text-v1.5"
 )
 ```

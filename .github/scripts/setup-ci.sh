@@ -1,5 +1,5 @@
 #!/bin/bash
-# CI Environment Setup Script for NeurIPS Abstracts
+# CI Environment Setup Script for Abstracts Explorer
 # This script sets up the environment for running tests in CI
 
 set -e  # Exit on error

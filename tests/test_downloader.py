@@ -7,7 +7,7 @@ import pytest
 from unittest.mock import Mock, patch
 import requests
 
-from abstracts_explorer.downloader import download_json, download_conference_data, DownloadError
+from abstracts_explorer.downloader import download_json, download_neurips_data, DownloadError
 
 
 @pytest.fixture
@@ -125,7 +125,7 @@ class TestDownloadConferenceData:
     def test_download_conference_data_default_year(self, mock_response, sample_json_data):
         """Test downloading NeurIPS data with default year."""
         with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response) as mock_get:
-            result = download_conference_data()
+            result = download_neurips_data()
 
             assert result == sample_json_data
             expected_url = "https://neurips.cc/static/virtual/data/neurips-2025-orals-posters.json"
@@ -134,7 +134,7 @@ class TestDownloadConferenceData:
     def test_download_conference_data_custom_year(self, mock_response, sample_json_data):
         """Test downloading NeurIPS data with custom year."""
         with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response) as mock_get:
-            result = download_conference_data(year=2024)
+            result = download_neurips_data(year=2024)
 
             assert result == sample_json_data
             expected_url = "https://neurips.cc/static/virtual/data/neurips-2024-orals-posters.json"
@@ -145,7 +145,7 @@ class TestDownloadConferenceData:
         output_file = tmp_path / "neurips_2025.json"
 
         with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response):
-            result = download_conference_data(output_path=output_file)
+            result = download_neurips_data(output_path=output_file)
 
             assert result == sample_json_data
             assert output_file.exists()
@@ -153,7 +153,7 @@ class TestDownloadConferenceData:
     def test_download_conference_data_custom_timeout(self, mock_response):
         """Test downloading NeurIPS data with custom timeout."""
         with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response) as mock_get:
-            download_conference_data(timeout=120)
+            download_neurips_data(timeout=120)
 
             expected_url = "https://neurips.cc/static/virtual/data/neurips-2025-orals-posters.json"
             mock_get.assert_called_once_with(expected_url, timeout=120, verify=True)
@@ -164,7 +164,7 @@ class TestDownloadConferenceData:
             mock_get.side_effect = requests.exceptions.RequestException("Network error")
 
             with pytest.raises(DownloadError):
-                download_conference_data()
+                download_neurips_data()
 
 
 class TestLocalCaching:
@@ -236,7 +236,7 @@ class TestLocalCaching:
 
         # Should load from cache
         with patch("abstracts_explorer.downloader.requests.get") as mock_get:
-            result = download_conference_data(output_path=output_file)
+            result = download_neurips_data(output_path=output_file)
 
             assert result == sample_json_data
             # No HTTP request should be made
@@ -253,7 +253,7 @@ class TestLocalCaching:
 
         # Force download should ignore cache
         with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response):
-            result = download_conference_data(output_path=output_file, force_download=True)
+            result = download_neurips_data(output_path=output_file, force_download=True)
 
             assert result == sample_json_data
             assert result != old_data

@@ -175,13 +175,13 @@ Examples:
 
 ```python
 import pytest
-from abstracts_explorer.database import NeurIPSDatabase
+from abstracts_explorer.database import DatabaseManager
 
 @pytest.fixture
 def temp_db(tmp_path):
     """Create a temporary test database."""
     db_path = tmp_path / "test.db"
-    db = NeurIPSDatabase(str(db_path))
+    db = DatabaseManager(str(db_path))
     yield db
     db.close()
 
@@ -312,10 +312,10 @@ LLM_BACKEND_AUTH_TOKEN=
 
 # Database Paths
 EMBEDDING_DB_PATH=chroma_db
-PAPER_DB_PATH=neurips_2025.db
+PAPER_DB_PATH=abstracts.db
 
 # RAG Settings
-COLLECTION_NAME=neurips_papers
+COLLECTION_NAME=papers
 MAX_CONTEXT_PAPERS=5
 ```
 

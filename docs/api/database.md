@@ -4,7 +4,7 @@ The database module provides an interface for storing and retrieving conference 
 
 ## Overview
 
-The `NeurIPSDatabase` class handles all database operations including:
+The `DatabaseManager` class handles all database operations including:
 
 - Creating and managing database schema
 - Adding papers and authors
@@ -26,10 +26,10 @@ The `NeurIPSDatabase` class handles all database operations including:
 ### Basic Operations
 
 ```python
-from abstracts_explorer.database import NeurIPSDatabase
+from abstracts_explorer.database import DatabaseManager
 
 # Initialize database
-db = NeurIPSDatabase("data/neurips_2025.db")
+db = DatabaseManager("data/abstracts.db")
 
 # Add a paper
 paper_id = db.add_paper({

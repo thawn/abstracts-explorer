@@ -103,7 +103,7 @@ The Lightweight API requires only 5 fields per paper and optionally supports 8 m
 Create `my_workshop_plugin.py`:
 
 ```python
-from neurips_abstracts.plugins import (
+from abstracts_explorer.plugins import (
     LightweightDownloaderPlugin,
     convert_lightweight_to_neurips_schema,
     register_plugin
@@ -212,7 +212,7 @@ For more complex cases where you need complete control over all fields.
 #### Example: Advanced Plugin
 
 ```python
-from neurips_abstracts.plugins import DownloaderPlugin, register_plugin
+from abstracts_explorer.plugins import DownloaderPlugin, register_plugin
 import requests
 
 
@@ -304,7 +304,7 @@ _register()
 The `convert_lightweight_to_neurips_schema()` function automatically converts lightweight format to the full NeurIPS schema:
 
 ```python
-from neurips_abstracts.plugins import convert_lightweight_to_neurips_schema
+from abstracts_explorer.plugins import convert_lightweight_to_neurips_schema
 
 papers = [
     {
@@ -341,7 +341,7 @@ print(full_schema_data['results'][0]['eventmedia'])  # Generated from URLs
 
 ### From Package
 
-If your plugin is in the package's `src/neurips_abstracts/plugins/` directory, it will be auto-discovered when the package loads.
+If your plugin is in the package's `src/abstracts_explorer/plugins/` directory, it will be auto-discovered when the package loads.
 
 ### External Plugin
 
@@ -349,7 +349,7 @@ For plugins outside the package:
 
 ```python
 # In your code
-from neurips_abstracts.plugins import register_plugin
+from abstracts_explorer.plugins import register_plugin
 from my_external_plugin import MyPlugin
 
 register_plugin(MyPlugin())
@@ -529,4 +529,4 @@ def _scrape_papers(self, year, delay=1.0):
 
 - [CLI Reference](cli_reference.md) - Command-line interface documentation
 - [Usage Guide](usage.md) - General package usage
-- [Plugin README](../src/neurips_abstracts/plugins/README.md) - Technical plugin guide
+- [Plugin README](../src/abstracts_explorer/plugins/README.md) - Technical plugin guide

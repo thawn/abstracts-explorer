@@ -34,13 +34,13 @@ abstracts-explorer download [OPTIONS]
 
 ```bash
 # Download 2025 papers
-uv run abstracts-explorer download --year 2025 --db-path data/neurips_2025.db
+uv run abstracts-explorer download --year 2025 --db-path data/abstracts.db
 
 # Force re-download
-uv run abstracts-explorer download --year 2025 --db-path data/neurips_2025.db --force
+uv run abstracts-explorer download --year 2025 --db-path data/abstracts.db --force
 
 # Disable caching
-uv run abstracts-explorer download --year 2025 --db-path data/neurips_2025.db --no-cache
+uv run abstracts-explorer download --year 2025 --db-path data/abstracts.db --no-cache
 ```
 
 ### create-embeddings
@@ -65,16 +65,16 @@ abstracts-explorer create-embeddings [OPTIONS]
 
 ```bash
 # Create embeddings with defaults
-uv run abstracts-explorer create-embeddings --db-path data/neurips_2025.db
+uv run abstracts-explorer create-embeddings --db-path data/abstracts.db
 
 # Use custom paths
 uv run abstracts-explorer create-embeddings \
-    --db-path data/neurips_2025.db \
+    --db-path data/abstracts.db \
     --embedding-db-path custom_embeddings \
     --collection-name my_papers
 
 # Force recreation
-uv run abstracts-explorer create-embeddings --db-path data/neurips_2025.db --force
+uv run abstracts-explorer create-embeddings --db-path data/abstracts.db --force
 ```
 
 ### search
@@ -104,19 +104,19 @@ abstracts-explorer search QUERY [OPTIONS]
 
 ```bash
 # Basic search
-uv run abstracts-explorer search "transformer" --db-path data/neurips_2025.db
+uv run abstracts-explorer search "transformer" --db-path data/abstracts.db
 
 # Limit results
-uv run abstracts-explorer search "deep learning" --db-path data/neurips_2025.db --limit 20
+uv run abstracts-explorer search "deep learning" --db-path data/abstracts.db --limit 20
 
 # Filter by year
-uv run abstracts-explorer search "neural network" --db-path data/neurips_2025.db --year 2025
+uv run abstracts-explorer search "neural network" --db-path data/abstracts.db --year 2025
 
 # Semantic search using embeddings
-uv run abstracts-explorer search "attention mechanism" --db-path data/neurips_2025.db --use-embeddings
+uv run abstracts-explorer search "attention mechanism" --db-path data/abstracts.db --use-embeddings
 
 # Search only titles
-uv run abstracts-explorer search "BERT" --db-path data/neurips_2025.db --title-only
+uv run abstracts-explorer search "BERT" --db-path data/abstracts.db --title-only
 ```
 
 ### chat
@@ -151,14 +151,14 @@ While in the chat session:
 
 ```bash
 # Start chat with defaults
-uv run abstracts-explorer chat --db-path data/neurips_2025.db
+uv run abstracts-explorer chat --db-path data/abstracts.db
 
 # Use custom model
-uv run abstracts-explorer chat --db-path data/neurips_2025.db --model llama-3.2-3b-instruct
+uv run abstracts-explorer chat --db-path data/abstracts.db --model llama-3.2-3b-instruct
 
 # Adjust response parameters
 uv run abstracts-explorer chat \
-    --db-path data/neurips_2025.db \
+    --db-path data/abstracts.db \
     --temperature 0.9 \
     --max-tokens 2000 \
     --n-papers 10
@@ -183,10 +183,10 @@ abstracts-explorer info [OPTIONS]
 
 ```bash
 # Basic info
-uv run abstracts-explorer info --db-path data/neurips_2025.db
+uv run abstracts-explorer info --db-path data/abstracts.db
 
 # Include embedding info
-uv run abstracts-explorer info --db-path data/neurips_2025.db --show-embeddings
+uv run abstracts-explorer info --db-path data/abstracts.db --show-embeddings
 ```
 
 ## Environment Variables

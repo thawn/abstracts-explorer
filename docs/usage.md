@@ -9,7 +9,7 @@ This guide covers common usage patterns for Abstracts Explorer.
 Download papers for a specific year:
 
 ```bash
-uv run abstracts-explorer download --year 2025 --db-path data/neurips_2025.db
+uv run abstracts-explorer download --year 2025 --db-path data/abstracts.db
 ```
 
 Options:
@@ -22,7 +22,7 @@ Options:
 Generate vector embeddings for semantic search:
 
 ```bash
-uv run abstracts-explorer create-embeddings --db-path data/neurips_2025.db
+uv run abstracts-explorer create-embeddings --db-path data/abstracts.db
 ```
 
 Options:
@@ -37,13 +37,13 @@ Search papers by keyword or semantic similarity:
 
 ```bash
 # Simple search
-uv run abstracts-explorer search "transformer architecture" --db-path data/neurips_2025.db
+uv run abstracts-explorer search "transformer architecture" --db-path data/abstracts.db
 
 # Limit results
-uv run abstracts-explorer search "reinforcement learning" --db-path data/neurips_2025.db --limit 10
+uv run abstracts-explorer search "reinforcement learning" --db-path data/abstracts.db --limit 10
 
 # Filter by year
-uv run abstracts-explorer search "neural networks" --db-path data/neurips_2025.db --year 2025
+uv run abstracts-explorer search "neural networks" --db-path data/abstracts.db --year 2025
 ```
 
 ### 4. Chat with Papers (RAG)
@@ -51,7 +51,7 @@ uv run abstracts-explorer search "neural networks" --db-path data/neurips_2025.d
 Interactive chat interface powered by RAG:
 
 ```bash
-uv run abstracts-explorer chat --db-path data/neurips_2025.db
+uv run abstracts-explorer chat --db-path data/abstracts.db
 ```
 
 In the chat interface:
@@ -64,10 +64,10 @@ In the chat interface:
 ### Database Operations
 
 ```python
-from neurips_abstracts.database import NeurIPSDatabase
+from abstracts_explorer.database import DatabaseManager
 
 # Open database
-db = NeurIPSDatabase("data/neurips_2025.db")
+db = DatabaseManager("data/abstracts.db")
 
 # Get all papers
 papers = db.get_all_papers()
@@ -85,7 +85,7 @@ authors = db.get_authors_for_paper(paper_id)
 ### Downloading Papers
 
 ```python
-from neurips_abstracts.downloader import NeurIPSDownloader
+from abstracts_explorer.downloader import NeurIPSDownloader
 
 # Initialize downloader
 downloader = NeurIPSDownloader()
@@ -94,7 +94,7 @@ downloader = NeurIPSDownloader()
 papers = downloader.get_neurips_papers(year=2025)
 
 # Save to database
-db = NeurIPSDatabase("data/neurips_2025.db")
+db = DatabaseManager("data/abstracts.db")
 for paper in papers:
     db.add_paper(paper)
 ```
@@ -102,13 +102,13 @@ for paper in papers:
 ### Embeddings
 
 ```python
-from neurips_abstracts.embeddings import EmbeddingsManager
+from abstracts_explorer.embeddings import EmbeddingsManager
 
 # Initialize embeddings manager
 em = EmbeddingsManager(
-    db_path="neurips_2025.db",
+    db_path="abstracts.db",
     embedding_db_path="chroma_db",
-    collection_name="neurips_papers"
+    collection_name="papers"
 )
 
 # Create embeddings from database
@@ -128,12 +128,12 @@ results = em.search(
 ### RAG Chat
 
 ```python
-from neurips_abstracts.embeddings import EmbeddingsManager
-from neurips_abstracts.rag import RAGChat
+from abstracts_explorer.embeddings import EmbeddingsManager
+from abstracts_explorer.rag import RAGChat
 
 # Initialize
 em = EmbeddingsManager(
-    db_path="neurips_2025.db",
+    db_path="abstracts.db",
     embedding_db_path="chroma_db"
 )
 
@@ -181,16 +181,16 @@ import os
 os.environ['PAPER_DB_PATH'] = 'custom_papers.db'
 os.environ['EMBEDDING_DB_PATH'] = 'custom_embeddings'
 
-from neurips_abstracts.config import get_config
+from abstracts_explorer.config import get_config
 config = get_config()
 ```
 
 ### Programmatic Search
 
 ```python
-from neurips_abstracts.database import NeurIPSDatabase
+from abstracts_explorer.database import DatabaseManager
 
-db = NeurIPSDatabase("data/neurips_2025.db")
+db = DatabaseManager("data/abstracts.db")
 
 # Complex search with multiple filters
 papers = db.search_papers(

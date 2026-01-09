@@ -108,7 +108,7 @@ For simpler use cases, use `LightweightDownloaderPlugin` which only requires ess
 """
 
 from .config import Config, get_config
-from .downloader import download_json, download_conference_data
+from .downloader import download_json, download_neurips_data
 from .database import DatabaseManager
 from .embeddings import EmbeddingsManager
 from .rag import RAGChat
@@ -130,7 +130,7 @@ __all__ = [
     "Config",
     "get_config",
     "download_json",
-    "download_conference_data",
+    "download_neurips_data",
     "DatabaseManager",
     "EmbeddingsManager",
     "RAGChat",

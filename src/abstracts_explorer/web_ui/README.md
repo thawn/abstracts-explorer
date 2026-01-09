@@ -39,7 +39,7 @@ uv run neurips-abstracts web-ui --help
 You can also start the server from Python code:
 
 ```python
-from neurips_abstracts.web_ui import run_server
+from abstracts_explorer.web_ui import run_server
 
 # Start with defaults
 run_server()
@@ -65,7 +65,7 @@ The web interface provides:
 ## Module Structure
 
 ```
-src/neurips_abstracts/web_ui/
+src/abstracts_explorer/web_ui/
 ├── __init__.py          # Module exports
 ├── app.py               # Flask application
 ├── static/              # Static assets
@@ -84,7 +84,7 @@ The web UI uses the same configuration system as the rest of the package. Set en
 DATA_DIR=data
 
 # Database paths (relative to DATA_DIR unless absolute)
-PAPER_DB_PATH=neurips_2025.db
+PAPER_DB_PATH=abstracts.db
 EMBEDDING_DB_PATH=chroma_db
 
 # OpenAI-compatible API (such as LM Studio or blablador) settings
@@ -93,7 +93,7 @@ CHAT_MODEL=your-model-name
 EMBEDDING_MODEL=your-embedding-model
 
 # Collection name
-COLLECTION_NAME=neurips_papers
+COLLECTION_NAME=papers
 ```
 
 ## API Endpoints
@@ -120,7 +120,7 @@ pytest tests/test_web.py -v
 
 The web UI is fully integrated into the package:
 
-1. **Module Location**: `src/neurips_abstracts/web_ui/`
+1. **Module Location**: `src/abstracts_explorer/web_ui/`
 2. **CLI Command**: `uv run neurips-abstracts web-ui`
 3. **Optional Dependency**: Install with `uv sync --extra web`
 4. **Test Coverage**: 18 comprehensive tests

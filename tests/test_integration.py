@@ -10,7 +10,7 @@ import pytest
 from unittest.mock import patch
 
 from abstracts_explorer import download_json, DatabaseManager
-from abstracts_explorer.downloader import download_conference_data
+from abstracts_explorer.downloader import download_neurips_data
 from abstracts_explorer.plugin import LightweightPaper, convert_to_lightweight_schema
 from tests.helpers import requires_lm_studio
 
@@ -67,7 +67,7 @@ class TestIntegration:
 
         # Download NeurIPS data
         with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response):
-            data = download_conference_data(year=2025)
+            data = download_neurips_data(year=2025)
 
         # Convert JSON data to LightweightPaper objects and load into database
         lightweight_dicts = convert_to_lightweight_schema(data)
@@ -104,7 +104,7 @@ class TestIntegration:
 
         # Load data in first connection
         with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response):
-            data = download_conference_data()
+            data = download_neurips_data()
 
         # Convert JSON data to LightweightPaper objects
         lightweight_dicts = convert_to_lightweight_schema(data)
@@ -537,8 +537,8 @@ class TestIntegration:
             assert len(papers_2025) == 7
 
             # Test 4: Search by conference
-            neurips_papers = db.search_papers(conference="NeurIPS")
-            assert len(neurips_papers) == 7
+            papers = db.search_papers(conference="NeurIPS")
+            assert len(papers) == 7
 
             # Test 3: Keyword search
             graph_papers = db.search_papers(keyword="graph")
@@ -598,7 +598,7 @@ class TestIntegration:
 
         Note: This test requires LM Studio to be running and is marked as slow.
         The test will be skipped by default unless running with -m slow.
-        
+
         For unit testing without LM Studio, see test_embeddings.py which contains
         mocked versions of embedding operations (e.g., test_embed_from_database,
         test_search_similar, test_add_paper, etc.).

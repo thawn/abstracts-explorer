@@ -1,4 +1,4 @@
-# CI Environment Setup Script for NeurIPS Abstracts (Windows)
+# CI Environment Setup Script for Abstracts Explorer(Windows)
 # This script sets up the environment for running tests in CI on Windows
 
 $ErrorActionPreference = "Stop"
