@@ -5,14 +5,14 @@ build-backend = "hatchling.build"
 [project]
 name = "abstracts-explorer"
 dynamic = ["version"]
-description = "Abstracts Explorer - A package to download NeurIPS conference data and load it into a SQLite database"
+description = "Abstracts Explorer - A package to download conference data and search it with a LLM-based semantic search including document retrieval and question answering."
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "Apache-2.0"}
 authors = [
     {name = "Your Name", email = "your.email@example.com"}
 ]
-keywords = ["neurips", "database", "sqlite", "conference"]
+keywords = ["abstracts", "database", "sqlite", "conference"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
