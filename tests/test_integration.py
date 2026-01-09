@@ -7,10 +7,8 @@ See test_authors.py for comprehensive tests of the new schema.
 """
 
 import pytest
-from unittest.mock import patch
 
-from abstracts_explorer import download_json, DatabaseManager
-from abstracts_explorer.downloader import download_neurips_data
+from abstracts_explorer import DatabaseManager
 from abstracts_explorer.plugin import LightweightPaper, convert_to_lightweight_schema
 from tests.helpers import requires_lm_studio
 
@@ -23,65 +21,6 @@ pytestmark = pytest.mark.integration
 
 class TestIntegration:
     """Integration tests for the complete workflow."""
-
-    def test_download_and_load_workflow(self, tmp_path, mock_response, sample_neurips_data):
-        """Test the complete workflow: download and load into database."""
-        # Setup paths
-        json_file = tmp_path / "neurips_data.json"
-        db_file = tmp_path / "neurips.db"
-
-        # Step 1: Download JSON
-        with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response):
-            data = download_json(
-                "https://neurips.cc/static/virtual/data/neurips-2025-orals-posters.json", output_path=json_file
-            )
-
-        assert data == sample_neurips_data
-        assert json_file.exists()
-
-        # Step 2: Convert JSON data to LightweightPaper objects and load into database
-        # Note: convert_to_lightweight_schema extracts year/conference from paper data
-        lightweight_dicts = convert_to_lightweight_schema(data)
-        papers = [LightweightPaper(**paper_dict) for paper_dict in lightweight_dicts]
-
-        with DatabaseManager(db_file) as db:
-            db.create_tables()
-            count = db.add_papers(papers)
-
-            assert count == 2
-            assert db.get_paper_count() == 2
-
-            # Step 3: Query the data by session (lightweight schema)
-            # Note: conftest.py sample data has papers in "Session A" and "Session B"
-            session_a_papers = db.search_papers(session="Session A")
-            assert len(session_a_papers) == 1
-            assert session_a_papers[0]["title"] == "Deep Learning with Neural Networks"
-
-            session_b_papers = db.search_papers(session="Session B")
-            assert len(session_b_papers) == 1
-            assert session_b_papers[0]["title"] == "Advances in Computer Vision"
-
-    def test_download_neurips_and_load(self, tmp_path, mock_response, sample_neurips_data):
-        """Test using the convenience function for NeurIPS data."""
-        db_file = tmp_path / "neurips.db"
-
-        # Download NeurIPS data
-        with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response):
-            data = download_neurips_data(year=2025)
-
-        # Convert JSON data to LightweightPaper objects and load into database
-        lightweight_dicts = convert_to_lightweight_schema(data)
-        papers = [LightweightPaper(**paper_dict) for paper_dict in lightweight_dicts]
-
-        with DatabaseManager(db_file) as db:
-            db.create_tables()
-            count = db.add_papers(papers)
-
-            assert count == 2
-
-            # Search for papers - both papers have "neural" or "vision" keywords
-            results = db.search_papers(keyword="neural")
-            assert len(results) >= 1  # At least one paper matches
 
     def test_empty_database_queries(self, tmp_path):
         """Test querying an empty database."""
@@ -97,34 +36,6 @@ class TestIntegration:
 
             results = db.search_papers(session="Session A")
             assert len(results) == 0
-
-    def test_database_persistence(self, tmp_path, mock_response, sample_neurips_data):
-        """Test that database persists across connections."""
-        db_file = tmp_path / "persistent.db"
-
-        # Load data in first connection
-        with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response):
-            data = download_neurips_data()
-
-        # Convert JSON data to LightweightPaper objects
-        lightweight_dicts = convert_to_lightweight_schema(data)
-        papers = [LightweightPaper(**paper_dict) for paper_dict in lightweight_dicts]
-
-        with DatabaseManager(db_file) as db:
-            db.create_tables()
-            db.add_papers(papers)
-
-        # Query in second connection
-        with DatabaseManager(db_file) as db:
-            assert db.get_paper_count() == 2
-
-            # Search for "deep" which appears in first paper's keywords and title
-            results = db.search_papers(keyword="deep")
-            assert len(results) == 1
-
-            # Search for papers - both papers exist
-            all_results = db.search_papers()
-            assert len(all_results) == 2
 
     def _get_real_neurips_subset(self):
         """

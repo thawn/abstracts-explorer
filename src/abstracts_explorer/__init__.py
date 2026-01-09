@@ -6,7 +6,6 @@ Abstracts Explorer - A Python package for downloading conference data and loadin
 
 Main Components
 ---------------
-- downloader: Download JSON data from configurable URLs
 - database: Load JSON data into SQLite database
 - embeddings: Generate and store text embeddings for papers
 - plugins: Extensible plugin system for different data sources
@@ -108,7 +107,6 @@ For simpler use cases, use `LightweightDownloaderPlugin` which only requires ess
 """
 
 from .config import Config, get_config
-from .downloader import download_json, download_neurips_data
 from .database import DatabaseManager
 from .embeddings import EmbeddingsManager
 from .rag import RAGChat
@@ -129,8 +127,6 @@ __version__ = "0.1.0"
 __all__ = [
     "Config",
     "get_config",
-    "download_json",
-    "download_neurips_data",
     "DatabaseManager",
     "EmbeddingsManager",
     "RAGChat",

@@ -97,18 +97,21 @@ See [CONFIGURATION.md](CONFIGURATION.md) for complete documentation.
 
 ### Download NeurIPS Data
 
+Use the plugin system to download conference data:
+
 ```python
-from abstracts_explorer import download_json, download_neurips_data
+from abstracts_explorer.plugins import get_plugin
+from abstracts_explorer.plugin import LightweightPaper
 
-# Download from a specific URL
-data = download_json("https://neurips.cc/static/virtual/data/neurips-2025-orals-posters.json")
+# Get the NeurIPS plugin
+neurips_plugin = get_plugin('neurips')
 
-# Or use the convenience function
-data = download_neurips_data(year=2025)
+# Download from a specific year
+papers_data = neurips_plugin.download(year=2025)
 
 # Save to a file
-data = download_json(
-    "https://neurips.cc/static/virtual/data/neurips-2025-orals-posters.json",
+papers_data = neurips_plugin.download(
+    year=2025,
     output_path="data/neurips_2025.json"
 )
 ```
@@ -211,20 +214,28 @@ with DatabaseManager("data/abstracts.db") as db:
 Here's a complete example that downloads NeurIPS 2025 data and loads it into a database:
 
 ```python
-from abstracts_explorer import download_neurips_data, DatabaseManager
+from abstracts_explorer.plugins import get_plugin
+from abstracts_explorer import DatabaseManager
+from abstracts_explorer.plugin import LightweightPaper
+
+# Get the NeurIPS plugin
+neurips_plugin = get_plugin('neurips')
 
 # Download data
 print("Downloading NeurIPS 2025 data...")
-data = download_neurips_data(
+papers_data = neurips_plugin.download(
     year=2025,
     output_path="data/neurips_2025.json"
 )
+
+# Convert to LightweightPaper objects
+papers = [LightweightPaper(**paper) for paper in papers_data]
 
 # Load into database
 print("Loading data into database...")
 with DatabaseManager("data/abstracts.db") as db:
     db.create_tables()
-    count = db.load_json_data(data)
+    count = db.add_papers(papers)
     print(f"Loaded {count} papers")
     
     # Search for papers about deep learning
@@ -415,22 +426,21 @@ Indexes are created on commonly queried fields for efficient searches. See `SCHE
 
 ## Configuration
 
-### Custom Download URL
+### Using Different Plugins
 
-You can download from any URL that returns JSON data:
+You can download from different conference sources using plugins:
 
 ```python
-from abstracts_explorer import download_json
+from abstracts_explorer.plugins import get_plugin, list_plugins
 
-# Custom URL
-data = download_json("https://your-custom-url.com/data.json")
+# List available plugins
+plugins = list_plugins()
+for plugin in plugins:
+    print(f"{plugin['name']}: {plugin['description']}")
 
-# With custom timeout and SSL verification
-data = download_json(
-    "https://your-custom-url.com/data.json",
-    timeout=60,
-    verify_ssl=False
-)
+# Use a specific plugin
+ml4ps_plugin = get_plugin('ml4ps')
+data = ml4ps_plugin.download(year=2025)
 ```
 
 ### Database Location
@@ -476,7 +486,7 @@ uv run pytest
 uv run pytest --cov=abstracts_explorer --cov-report=html
 
 # Run specific test file
-uv run pytest tests/test_downloader.py
+uv run pytest tests/test_database.py
 
 # Run specific test
 uv run pytest tests/test_database.py::TestDatabaseManager::test_connect
@@ -564,16 +574,20 @@ See [docs/vendor-auto-update.md](docs/vendor-auto-update.md) for more informatio
 ### Code Structure
 
 ```
-neurips-abstracts/
+abstracts-explorer/
 ├── src/
 │   └── abstracts_explorer/
 │       ├── __init__.py         # Package initialization
-│       ├── downloader.py       # Download functionality
-│       └── database.py         # Database management
+│       ├── database.py         # Database management
+│       ├── embeddings.py       # Vector embeddings
+│       ├── rag.py              # RAG chat interface
+│       ├── plugin.py           # Plugin system
+│       └── plugins/            # Plugin implementations
 ├── tests/
 │   ├── __init__.py
-│   ├── test_downloader.py      # Downloader tests
 │   ├── test_database.py        # Database tests
+│   ├── test_embeddings.py      # Embeddings tests
+│   ├── test_plugin.py          # Plugin system tests
 │   └── test_integration.py     # Integration tests
 ├── pyproject.toml              # Package configuration
 └── README.md                   # This file
@@ -584,14 +598,8 @@ neurips-abstracts/
 The package provides custom exceptions for better error handling:
 
 ```python
-from abstracts_explorer import download_json, DatabaseManager
-from abstracts_explorer.downloader import DownloadError
+from abstracts_explorer import DatabaseManager
 from abstracts_explorer.database import DatabaseError
-
-try:
-    data = download_json("https://invalid-url.com/data.json")
-except DownloadError as e:
-    print(f"Download failed: {e}")
 
 try:
     with DatabaseManager("data/abstracts.db") as db:
@@ -611,8 +619,9 @@ import logging
 logging.basicConfig(level=logging.INFO)
 
 # Now use the package
-from abstracts_explorer import download_neurips_data
-data = download_neurips_data()
+from abstracts_explorer.plugins import get_plugin
+neurips_plugin = get_plugin('neurips')
+data = neurips_plugin.download(year=2025)
 ```
 
 ## License

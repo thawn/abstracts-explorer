@@ -73,7 +73,6 @@ cli_reference
 
 api/modules
 api/database
-api/downloader
 api/embeddings
 api/rag
 api/config

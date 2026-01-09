@@ -13,7 +13,6 @@
    cli
    config
    database
-   downloader
    embeddings
    paper_utils
    plugin

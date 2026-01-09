@@ -84,19 +84,26 @@ authors = db.get_authors_for_paper(paper_id)
 
 ### Downloading Papers
 
+Use the plugin system to download papers from different conferences:
+
 ```python
-from abstracts_explorer.downloader import NeurIPSDownloader
+from abstracts_explorer.plugins import get_plugin
+from abstracts_explorer import DatabaseManager
+from abstracts_explorer.plugin import LightweightPaper
 
-# Initialize downloader
-downloader = NeurIPSDownloader()
+# Get the NeurIPS plugin
+neurips_plugin = get_plugin('neurips')
 
-# Download papers
-papers = downloader.get_neurips_papers(year=2025)
+# Download papers for 2025
+papers_data = neurips_plugin.download(year=2025, output_path='neurips_2025.json')
+
+# Convert to LightweightPaper objects
+papers = [LightweightPaper(**paper) for paper in papers_data]
 
 # Save to database
 db = DatabaseManager("data/abstracts.db")
-for paper in papers:
-    db.add_paper(paper)
+db.create_tables()
+db.add_papers(papers)
 ```
 
 ### Embeddings
