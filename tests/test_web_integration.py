@@ -27,6 +27,8 @@ from tests.helpers import requires_lm_studio, find_free_port
 # Constants for tests
 MOCK_EMBEDDING_DIMENSION = 4096  # Standard dimension for test embeddings
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture(scope="module")
 def test_database(tmp_path_factory, web_test_papers):

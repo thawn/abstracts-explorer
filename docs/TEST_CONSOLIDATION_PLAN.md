@@ -28,16 +28,19 @@ Consolidated these files into `tests/test_web_ui.py`:
 **Result:** Created `test_web_ui.py` (917 lines) with all 40 web UI unit tests passing.
 
 **Kept separate (as documented):**
-- `test_web_integration.py` - Integration tests with real server
-- `test_web_e2e.py` - End-to-end browser tests
+- `test_web_integration.py` - Integration tests with real server (marked with `@pytest.mark.integration`)
+- `test_web_e2e.py` - End-to-end browser tests (marked with `@pytest.mark.e2e`)
 
-#### 3. ChromaDB Tests → Kept Separate
+#### 3. ChromaDB Tests → Fixture Conflicts Resolved ✅
 
-**Decision:** `test_chromadb_metadata.py` is kept as a separate file.
+**Decision:** `test_chromadb_metadata.py` is kept as a separate file with resolved fixture conflicts.
 
-**Rationale:** This file has specialized fixtures that conflict with the general embeddings fixtures in conftest.py. The ChromaDB metadata tests require module-scoped fixtures and custom setup that would break if merged into test_embeddings.py. This follows the "one test file per module" principle with a documented exception for specialized test suites requiring incompatible fixtures.
+**Fixture Conflict Resolution:** Renamed the local `embeddings_manager` fixture to `chroma_embeddings_manager` to avoid conflicts with the general `embeddings_manager` fixture in conftest.py. This follows best coding practices by:
+- Using descriptive, non-conflicting fixture names
+- Keeping test-specific fixtures localized
+- Maintaining clear separation between general and specialized test fixtures
 
-**Documentation added:** Updated test_chromadb_metadata.py docstring to explain why it's separate.
+**Documentation updated:** Updated test_chromadb_metadata.py docstring to explain the specialized fixture approach.
 
 ## Final Test Structure
 
@@ -57,10 +60,22 @@ Consolidated these files into `tests/test_web_ui.py`:
 - ✅ test_plugins_ml4ps.py → plugins/ml4ps_downloader.py
 
 ### Special Cases
-- ✅ test_chromadb_metadata.py - ChromaDB-specific embeddings tests (kept separate due to fixture conflicts)
-- ✅ test_integration.py - Cross-module integration tests
-- ✅ test_web_integration.py - Web UI integration tests
-- ✅ test_web_e2e.py - End-to-end browser tests
+- ✅ test_chromadb_metadata.py - ChromaDB-specific embeddings tests (fixture conflicts resolved)
+- ✅ test_integration.py - Cross-module integration tests (marked with `@pytest.mark.integration`)
+- ✅ test_web_integration.py - Web UI integration tests (marked with `@pytest.mark.integration`)
+- ✅ test_web_e2e.py - End-to-end browser tests (marked with `@pytest.mark.e2e`)
+
+## Test Markers
+
+**PyTest markers applied:**
+- `@pytest.mark.integration` - Applied to test_integration.py and test_web_integration.py
+- `@pytest.mark.e2e` - Already applied to test_web_e2e.py
+- `@pytest.mark.slow` - Already applied to LM Studio tests
+
+These markers allow selective test execution:
+- `pytest -m integration` - Run only integration tests
+- `pytest -m "not integration"` - Skip integration tests (default behavior with `-m not slow`)
+- `pytest -m e2e` - Run only e2e tests
 
 ## Results
 
@@ -74,5 +89,7 @@ Consolidated these files into `tests/test_web_ui.py`:
 1. **Easier navigation:** Each module has one corresponding test file
 2. **Reduced duplication:** Eliminated duplicate fixtures and helper functions
 3. **Clear organization:** Tests are organized by the module they test
-4. **Documented exceptions:** Special cases (integration, e2e, fixture conflicts) are clearly documented
+4. **Documented exceptions:** Special cases (integration, e2e) clearly marked with pytest markers
 5. **Maintained coverage:** No tests lost, all functionality still tested
+6. **Resolved fixture conflicts:** ChromaDB tests use non-conflicting fixture names following best practices
+7. **Selective test execution:** Pytest markers enable running specific test types (unit, integration, e2e)

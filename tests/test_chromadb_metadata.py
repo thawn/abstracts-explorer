@@ -4,11 +4,9 @@ Tests for ChromaDB metadata filtering functionality.
 Tests verify that lightweight schema metadata fields (session, year, conference, etc.)
 are correctly stored in ChromaDB and can be used for filtering search results.
 
-Note: This file is kept separate from test_embeddings.py due to fixture conflicts.
-The ChromaDB metadata tests require their own specialized fixtures that would conflict
-with the general embeddings fixtures in conftest.py. This separation follows the
-"one test file per module" principle with an exception for specialized test suites
-that require incompatible fixture setups.
+Note: This file uses specialized fixtures (chroma_embeddings_manager, chroma_collection)
+that are scoped specifically for ChromaDB metadata testing. The fixture names have been
+chosen to avoid conflicts with the general embeddings fixtures in conftest.py.
 """
 
 import pytest
@@ -154,17 +152,18 @@ def chroma_collection(test_chroma_collection):
 
 
 @pytest.fixture
-def embeddings_manager(test_chroma_collection):
+def chroma_embeddings_manager(test_chroma_collection):
     """
-    Get the EmbeddingsManager for semantic search tests.
+    Get the EmbeddingsManager for ChromaDB semantic search tests.
 
     This fixture provides an EmbeddingsManager instance with a mock OpenAI client
-    that returns consistent embeddings.
+    that returns consistent embeddings. Renamed to avoid conflict with the general
+    embeddings_manager fixture in conftest.py.
 
     Returns
     -------
     EmbeddingsManager
-        Configured embeddings manager instance.
+        Configured embeddings manager instance for ChromaDB tests.
     """
     _, mock_client, em = test_chroma_collection
     # Ensure mock client is still injected
@@ -416,7 +415,7 @@ class TestChromaDBMetadata:
             missing_authors < sample_size * 0.5
         ), f"Too many documents missing authors metadata: {missing_authors}/{sample_size}"
 
-    def test_semantic_search_with_filter(self, embeddings_manager, chroma_collection):
+    def test_semantic_search_with_filter(self, chroma_embeddings_manager, chroma_collection):
         """
         Test semantic search combined with metadata filtering.
 
@@ -437,7 +436,7 @@ class TestChromaDBMetadata:
 
         # Use EmbeddingsManager to perform semantic search with filter
         query = "neural networks machine learning"
-        results = embeddings_manager.search_similar(query, n_results=5, where=where_filter)
+        results = chroma_embeddings_manager.search_similar(query, n_results=5, where=where_filter)
 
         # Verify results structure
         assert "ids" in results, "Results should contain 'ids' key"

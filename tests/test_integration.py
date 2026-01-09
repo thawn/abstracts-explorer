@@ -6,6 +6,7 @@ and proper author relationships. Tests using the old schema have been removed.
 See test_authors.py for comprehensive tests of the new schema.
 """
 
+import pytest
 from unittest.mock import patch
 
 from neurips_abstracts import download_json, DatabaseManager
@@ -16,6 +17,8 @@ from tests.helpers import requires_lm_studio
 # Fixtures imported from conftest.py:
 # - sample_neurips_data: List of 2 papers with authors
 # - mock_response: Mock HTTP response with sample data
+
+pytestmark = pytest.mark.integration
 
 
 class TestIntegration:
