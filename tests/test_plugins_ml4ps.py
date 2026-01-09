@@ -10,8 +10,8 @@ import pytest
 from unittest.mock import Mock, patch
 import requests
 
-from neurips_abstracts.plugins.ml4ps_downloader import ML4PSDownloaderPlugin
-from neurips_abstracts.plugins import (
+from abstracts_explorer.plugins.ml4ps_downloader import ML4PSDownloaderPlugin
+from abstracts_explorer.plugins import (
     LightweightDownloaderPlugin,
     DownloaderPlugin,
     get_plugin,
@@ -474,7 +474,7 @@ class TestML4PSEndToEnd:
     def test_plugin_registration(self):
         """Test that plugin is registered correctly."""
         # Import to trigger registration
-        import neurips_abstracts.plugins.ml4ps_downloader  # noqa: F401
+        import abstracts_explorer.plugins.ml4ps_downloader  # noqa: F401
 
         plugins = list_plugins()
         plugin_names = [p["name"] for p in plugins]
@@ -483,7 +483,7 @@ class TestML4PSEndToEnd:
     def test_get_plugin(self):
         """Test retrieving plugin from registry."""
         # Import to trigger registration
-        import neurips_abstracts.plugins.ml4ps_downloader  # noqa: F401
+        import abstracts_explorer.plugins.ml4ps_downloader  # noqa: F401
 
         plugin = get_plugin("ml4ps")
         assert plugin is not None

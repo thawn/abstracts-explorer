@@ -7,7 +7,7 @@ with custom data downloaders.
 
 The framework consists of:
 - Base classes for plugin implementation (DownloaderPlugin, LightweightDownloaderPlugin)
-- Schema conversion utilities (convert_neurips_to_lightweight_schema)
+- Schema conversion utilities (convert_to_lightweight_schema)
 - Plugin registry for managing plugins (PluginRegistry)
 - Pydantic models for data validation (LightweightPaper)
 """
@@ -139,7 +139,7 @@ Utilities for converting between lightweight and full NeurIPS schema formats.
 """
 
 
-def convert_neurips_to_lightweight_schema(papers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def convert_to_lightweight_schema(papers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Convert full NeurIPS schema to lightweight paper format.
 
@@ -192,7 +192,7 @@ def convert_neurips_to_lightweight_schema(papers: List[Dict[str, Any]]) -> List[
     ...         'conference': 'NeurIPS'
     ...     }
     ... ]
-    >>> lightweight = convert_neurips_to_lightweight_schema(neurips_papers)
+    >>> lightweight = convert_to_lightweight_schema(neurips_papers)
     >>> lightweight[0]['authors']
     ['John Doe', 'Jane Smith']
 
@@ -689,7 +689,7 @@ __all__ = [
     "list_plugins",
     "list_plugin_names",
     # Conversion utilities
-    "convert_neurips_to_lightweight_schema",
+    "convert_to_lightweight_schema",
     # Pydantic models
     "LightweightPaper",
     # Validation functions

@@ -30,7 +30,7 @@ Clone the repository and install in development mode:
 
 ```bash
 git clone <repository-url>
-cd neurips-abstracts
+cd abstracts-explorer
 
 # Create virtual environment and install dependencies with uv
 uv sync
@@ -150,7 +150,7 @@ uv sync --all-extras
 Check that the package is installed correctly:
 
 ```bash
-neurips-abstracts --help
+abstracts-explorer --help
 ```
 
 You should see the available commands listed.
@@ -158,7 +158,7 @@ You should see the available commands listed.
 Test the web UI:
 
 ```bash
-neurips-abstracts web-ui
+abstracts-explorer web-ui
 ```
 
 The web interface should start at <http://127.0.0.1:5000>.

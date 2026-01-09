@@ -171,17 +171,17 @@ See full schema documentation for ~35 additional fields including URLs, timestam
 ### List Plugins
 
 ```bash
-neurips-abstracts download --list-plugins
+abstracts-explorer download --list-plugins
 ```
 
 ### Download with Plugin
 
 ```bash
 # Basic
-neurips-abstracts download --plugin myplugin --year 2025 --db-path output.db
+abstracts-explorer download --plugin myplugin --year 2025 --db-path output.db
 
 # With options
-neurips-abstracts download \
+abstracts-explorer download \
     --plugin ml4ps \
     --year 2025 \
     --db-path data/ml4ps_2025.db \

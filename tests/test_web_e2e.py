@@ -24,8 +24,8 @@ from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.firefox import GeckoDriverManager
 from webdriver_manager.core.os_manager import ChromeType
-from neurips_abstracts.database import DatabaseManager
-from neurips_abstracts.config import Config
+from abstracts_explorer.database import DatabaseManager
+from abstracts_explorer.config import Config
 from tests.helpers import find_free_port
 
 # Add src to path for imports
@@ -169,7 +169,7 @@ def test_embeddings(test_database, tmp_path_factory):
     tuple
         Tuple of (embeddings_manager, embeddings_path, collection_name, mock_client)
     """
-    from neurips_abstracts.embeddings import EmbeddingsManager
+    from abstracts_explorer.embeddings import EmbeddingsManager
     from unittest.mock import Mock
     import chromadb.api.shared_system_client
     import uuid
@@ -262,13 +262,13 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     tuple
         Tuple of (base_url, port)
     """
-    from neurips_abstracts.database import DatabaseManager
+    from abstracts_explorer.database import DatabaseManager
 
     # Import the module, not the app object
     import sys
 
     # Get the actual module
-    app_module = sys.modules["neurips_abstracts.web_ui.app"]
+    app_module = sys.modules["abstracts_explorer.web_ui.app"]
     # Get the Flask app instance
     flask_app = app_module.app
 

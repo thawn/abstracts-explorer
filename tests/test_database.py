@@ -10,8 +10,8 @@ using the new schema with integer IDs and proper author relationships.
 import pytest
 import sqlite3
 
-from neurips_abstracts.database import DatabaseManager, DatabaseError
-from neurips_abstracts.plugin import LightweightPaper
+from abstracts_explorer.database import DatabaseManager, DatabaseError
+from abstracts_explorer.plugin import LightweightPaper
 
 # Fixtures are now imported from conftest.py:
 # - db_manager: DatabaseManager instance with temporary database

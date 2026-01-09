@@ -7,8 +7,8 @@ This module tests the configuration loading and management functionality.
 import os
 from pathlib import Path
 
-from neurips_abstracts.config import Config, get_config, load_env_file
-from neurips_abstracts import config as config_module
+from abstracts_explorer.config import Config, get_config, load_env_file
+from abstracts_explorer import config as config_module
 
 
 class TestLoadEnvFile:
@@ -293,7 +293,7 @@ CHAT_MAX_TOKENS=500
         assert config.data_dir == "/custom/data"
         # Paths should be resolved relative to custom data_dir
         assert config.embedding_db_path == str((Path("/custom/data") / "chroma_db").absolute())
-        assert config.paper_db_path == str((Path("/custom/data") / "neurips_2025.db").absolute())
+        assert config.paper_db_path == str((Path("/custom/data") / "papers.db").absolute())
 
     def test_config_absolute_paths_unchanged(self, tmp_path):
         """Test that absolute paths are not modified."""

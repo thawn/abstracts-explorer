@@ -42,7 +42,7 @@ pip install uv
 ```bash
 # Clone the repository
 git clone https://github.com/yourusername/neurips-abstracts.git
-cd neurips-abstracts
+cd abstracts-explorer
 
 # Create virtual environment and install dependencies with uv
 uv sync
@@ -246,31 +246,31 @@ The package includes a powerful CLI for common tasks:
 
 ```bash
 # Download NeurIPS 2025 data and create database
-neurips-abstracts download --year 2025 --output neurips_2025.db
+abstracts-explorer download --year 2025 --output neurips_2025.db
 
 # Force re-download
-neurips-abstracts download --year 2025 --output neurips_2025.db --force
+abstracts-explorer download --year 2025 --output neurips_2025.db --force
 ```
 
 ### Generate Embeddings
 
 ```bash
 # Generate embeddings for all papers
-neurips-abstracts create-embeddings --db-path neurips_2025.db
+abstracts-explorer create-embeddings --db-path neurips_2025.db
 
 # Use custom output directory
-neurips-abstracts create-embeddings \
+abstracts-explorer create-embeddings \
   --db-path neurips_2025.db \
   --output embeddings/ \
   --collection neurips_2025
 
 # Generate embeddings only for accepted papers
-neurips-abstracts create-embeddings \
+abstracts-explorer create-embeddings \
   --db-path neurips_2025.db \
   --where "decision LIKE '%Accept%'"
 
 # Use custom settings
-neurips-abstracts create-embeddings \
+abstracts-explorer create-embeddings \
   --db-path neurips_2025.db \
   --batch-size 50 \
   --lm-studio-url http://localhost:5000 \
@@ -281,18 +281,18 @@ neurips-abstracts create-embeddings \
 
 ```bash
 # Start the web UI with default settings
-neurips-abstracts web-ui
+abstracts-explorer web-ui
 
 # Use custom host and port
-neurips-abstracts web-ui --host 0.0.0.0 --port 8080
+abstracts-explorer web-ui --host 0.0.0.0 --port 8080
 
 # Specify database and embeddings location
-neurips-abstracts web-ui \
+abstracts-explorer web-ui \
   --db-path neurips_2025.db \
   --embeddings-path chroma_db
 
 # Enable debug mode
-neurips-abstracts web-ui --debug
+abstracts-explorer web-ui --debug
 ```
 
 The web interface provides:
@@ -454,7 +454,7 @@ db = DatabaseManager("data/neurips.db")
 ```bash
 # Clone the repository
 git clone https://github.com/yourusername/neurips-abstracts.git
-cd neurips-abstracts
+cd abstracts-explorer
 
 # Install uv if you haven't already
 curl -LsSf https://astral.sh/uv/install.sh | sh

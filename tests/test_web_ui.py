@@ -18,8 +18,8 @@ from unittest.mock import Mock, patch
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from neurips_abstracts.web_ui import app as flask_app
-from neurips_abstracts.database import DatabaseManager
+from abstracts_explorer.web_ui import app as flask_app
+from abstracts_explorer.database import DatabaseManager
 
 
 # ============================================================
@@ -151,7 +151,7 @@ class TestSearchEndpoint:
         import sys
 
         # Get the actual app module (not the Flask app object)
-        app_module = sys.modules["neurips_abstracts.web_ui.app"]
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
 
         # Create a mock database
         mock_db = MagicMock()
@@ -197,7 +197,7 @@ class TestSearchEndpoint:
         import sys
 
         # Get the actual app module (not the Flask app object)
-        app_module = sys.modules["neurips_abstracts.web_ui.app"]
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
 
         # Create a mock database
         mock_db = MagicMock()
@@ -358,12 +358,12 @@ class TestWebUISemanticSearchDetails:
     def test_semantic_search_transforms_chromadb_results(self):
         """Test that semantic search correctly transforms ChromaDB results to paper format."""
         # Import inside test to avoid import-time issues
-        from neurips_abstracts.web_ui.app import app
+        from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
             # Mock the get_embeddings_manager and get_database functions
-            with patch("neurips_abstracts.web_ui.app.get_embeddings_manager") as mock_get_em:
-                with patch("neurips_abstracts.web_ui.app.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
+                with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                     # Setup mock embeddings manager with STRING UIDs
                     mock_em = Mock()
                     mock_em.search_similar.return_value = {
@@ -427,10 +427,10 @@ class TestWebUISemanticSearchDetails:
 
     def test_semantic_search_handles_empty_results(self):
         """Test semantic search with no results."""
-        from neurips_abstracts.web_ui.app import app
+        from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("neurips_abstracts.web_ui.app.get_embeddings_manager") as mock_get_em:
+            with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
                 mock_em = Mock()
                 mock_em.search_similar.return_value = {
                     "ids": [[]],
@@ -455,11 +455,11 @@ class TestWebUIChatEndpointSuccess:
 
     def test_chat_with_valid_message_success(self):
         """Test successful chat response."""
-        from neurips_abstracts.web_ui.app import app
+        from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("neurips_abstracts.web_ui.app.get_rag_chat") as mock_get_rag:
-                with patch("neurips_abstracts.web_ui.app.get_config") as mock_get_config:
+            with patch("abstracts_explorer.web_ui.app.get_rag_chat") as mock_get_rag:
+                with patch("abstracts_explorer.web_ui.app.get_config") as mock_get_config:
                     # Setup mocks
                     mock_config = Mock()
                     mock_config.max_context_papers = 3
@@ -492,11 +492,11 @@ class TestWebUIChatEndpointSuccess:
 
     def test_chat_with_custom_n_papers(self):
         """Test chat with custom n_papers parameter."""
-        from neurips_abstracts.web_ui.app import app
+        from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("neurips_abstracts.web_ui.app.get_rag_chat") as mock_get_rag:
-                with patch("neurips_abstracts.web_ui.app.get_config") as mock_get_config:
+            with patch("abstracts_explorer.web_ui.app.get_rag_chat") as mock_get_rag:
+                with patch("abstracts_explorer.web_ui.app.get_config") as mock_get_config:
                     mock_config = Mock()
                     mock_config.max_context_papers = 3
                     mock_get_config.return_value = mock_config
@@ -520,11 +520,11 @@ class TestWebUIChatEndpointSuccess:
 
     def test_chat_with_reset_flag(self):
         """Test chat with reset=True (lines 249-253)."""
-        from neurips_abstracts.web_ui.app import app
+        from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("neurips_abstracts.web_ui.app.get_rag_chat") as mock_get_rag:
-                with patch("neurips_abstracts.web_ui.app.get_config") as mock_get_config:
+            with patch("abstracts_explorer.web_ui.app.get_rag_chat") as mock_get_rag:
+                with patch("abstracts_explorer.web_ui.app.get_config") as mock_get_config:
                     mock_config = Mock()
                     mock_config.max_context_papers = 3
                     mock_get_config.return_value = mock_config
@@ -552,10 +552,10 @@ class TestWebUIErrorHandlingDetails:
 
     def test_chat_reset_exception_handling(self):
         """Test chat reset endpoint handles exceptions (lines 287-288)."""
-        from neurips_abstracts.web_ui.app import app
+        from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("neurips_abstracts.web_ui.app.get_rag_chat") as mock_get_rag:
+            with patch("abstracts_explorer.web_ui.app.get_rag_chat") as mock_get_rag:
                 mock_rag = Mock()
                 mock_rag.reset_conversation.side_effect = Exception("Reset failed")
                 mock_get_rag.return_value = mock_rag
@@ -569,10 +569,10 @@ class TestWebUIErrorHandlingDetails:
 
     def test_stats_endpoint_exception_handling(self):
         """Test stats endpoint handles exceptions (lines 304-305)."""
-        from neurips_abstracts.web_ui.app import app
+        from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("neurips_abstracts.web_ui.app.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 mock_db = Mock()
                 mock_db.get_paper_count.side_effect = Exception("Database error")
                 mock_get_db.return_value = mock_db
@@ -590,10 +590,10 @@ class TestWebUIGetPaperDetails:
 
     def test_get_paper_with_authors_list(self):
         """Test that paper details include authors as list."""
-        from neurips_abstracts.web_ui.app import app
+        from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("neurips_abstracts.web_ui.app.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 mock_db = Mock()
 
                 # Mock paper data with lightweight schema (authors as semicolon-separated string)
@@ -626,10 +626,10 @@ class TestWebUIStatsEndpoint:
 
     def test_stats_returns_paper_count(self):
         """Test that stats endpoint returns paper count."""
-        from neurips_abstracts.web_ui.app import app
+        from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("neurips_abstracts.web_ui.app.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 mock_db = Mock()
                 mock_db.get_paper_count.return_value = 42
                 mock_get_db.return_value = mock_db
@@ -648,10 +648,10 @@ class TestWebUISearchExceptionHandling:
 
     def test_search_handles_database_exception(self):
         """Test that search endpoint handles database exceptions."""
-        from neurips_abstracts.web_ui.app import app
+        from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("neurips_abstracts.web_ui.app.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 mock_db = Mock()
                 mock_db.search_papers.side_effect = Exception("Database connection failed")
                 mock_db.get_paper_authors.return_value = []
@@ -668,10 +668,10 @@ class TestWebUISearchExceptionHandling:
 
     def test_search_handles_embeddings_exception(self):
         """Test that semantic search handles embeddings exceptions."""
-        from neurips_abstracts.web_ui.app import app
+        from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("neurips_abstracts.web_ui.app.get_embeddings_manager") as mock_get_em:
+            with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
                 mock_em = Mock()
                 mock_em.search_similar.side_effect = Exception("Embeddings error")
                 mock_get_em.return_value = mock_em
@@ -691,12 +691,12 @@ class TestWebUIDatabaseNotFound:
 
     def test_get_database_file_not_found(self):
         """Test that get_database raises FileNotFoundError when database doesn't exist."""
-        from neurips_abstracts.web_ui.app import app
+        from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
             # Patch os.path.exists to return False for the database path
-            with patch("neurips_abstracts.web_ui.app.os.path.exists", return_value=False):
-                with patch("neurips_abstracts.web_ui.app.get_config") as mock_get_config:
+            with patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=False):
+                with patch("abstracts_explorer.web_ui.app.get_config") as mock_get_config:
                     mock_config = Mock()
                     mock_config.paper_db_path = "/nonexistent/database.db"
                     mock_get_config.return_value = mock_config
@@ -717,11 +717,11 @@ class TestWebUIChatExceptionLines:
 
     def test_chat_exception_returns_500(self):
         """Test that chat exceptions return 500 with error message (lines 269-270)."""
-        from neurips_abstracts.web_ui.app import app
+        from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("neurips_abstracts.web_ui.app.get_rag_chat") as mock_get_rag:
-                with patch("neurips_abstracts.web_ui.app.get_config") as mock_get_config:
+            with patch("abstracts_explorer.web_ui.app.get_rag_chat") as mock_get_rag:
+                with patch("abstracts_explorer.web_ui.app.get_config") as mock_get_config:
                     mock_config = Mock()
                     mock_config.max_context_papers = 3
                     mock_get_config.return_value = mock_config
@@ -746,10 +746,10 @@ class TestWebUIGetPaperException:
 
     def test_get_paper_not_found_returns_404(self):
         """Test that missing paper returns 404."""
-        from neurips_abstracts.web_ui.app import app
+        from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("neurips_abstracts.web_ui.app.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 mock_db = Mock()
                 mock_db.query.return_value = []  # No paper found
                 mock_get_db.return_value = mock_db
@@ -767,10 +767,10 @@ class TestWebUIGetPaperException:
         This is by design - our new API fails early and converts all database errors
         to PaperFormattingError which returns 404 (not found).
         """
-        from neurips_abstracts.web_ui.app import app
+        from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("neurips_abstracts.web_ui.app.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 mock_db = Mock()
                 # Simulate a database exception - gets wrapped as PaperFormattingError
                 mock_db.query.side_effect = RuntimeError("Database connection lost")
@@ -790,10 +790,10 @@ class TestWebUIStatsExceptionHandling:
 
     def test_stats_paper_count_calculation(self):
         """Test that stats correctly calls get_paper_count (line 319)."""
-        from neurips_abstracts.web_ui.app import app
+        from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("neurips_abstracts.web_ui.app.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 mock_db = Mock()
                 mock_db.get_paper_count.return_value = 100
                 mock_get_db.return_value = mock_db
@@ -813,11 +813,11 @@ class TestWebUIRunServer:
 
     def test_run_server_starts_flask_app(self):
         """Test that run_server starts the Flask app."""
-        from neurips_abstracts.web_ui import run_server, app
+        from abstracts_explorer.web_ui import run_server, app
 
         with patch.object(app, "run") as mock_run:
-            with patch("neurips_abstracts.web_ui.app.os.path.exists", return_value=True):
-                with patch("neurips_abstracts.web_ui.app.get_config") as mock_config:
+            with patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=True):
+                with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
                     mock_cfg = Mock()
                     mock_cfg.paper_db_path = "/some/path/test.db"
                     mock_cfg.embedding_db_path = "/some/path/chroma_db"
@@ -830,11 +830,11 @@ class TestWebUIRunServer:
 
     def test_run_server_with_debug_mode(self):
         """Test run_server with debug=True."""
-        from neurips_abstracts.web_ui import run_server, app
+        from abstracts_explorer.web_ui import run_server, app
 
         with patch.object(app, "run") as mock_run:
-            with patch("neurips_abstracts.web_ui.app.os.path.exists", return_value=True):
-                with patch("neurips_abstracts.web_ui.app.get_config") as mock_config:
+            with patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=True):
+                with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
                     mock_cfg = Mock()
                     mock_cfg.paper_db_path = "/some/path/test.db"
                     mock_cfg.embedding_db_path = "/some/path/chroma_db"
@@ -846,10 +846,10 @@ class TestWebUIRunServer:
 
     def test_run_server_database_not_found(self, capsys):
         """Test that run_server raises FileNotFoundError when database doesn't exist."""
-        from neurips_abstracts.web_ui import run_server
+        from abstracts_explorer.web_ui import run_server
 
-        with patch("neurips_abstracts.web_ui.app.os.path.exists", return_value=False):
-            with patch("neurips_abstracts.web_ui.app.get_config") as mock_config:
+        with patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=False):
+            with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
                 mock_cfg = Mock()
                 mock_cfg.paper_db_path = "/nonexistent/test.db"
                 mock_cfg.embedding_db_path = "/some/path/chroma_db"
@@ -873,7 +873,7 @@ class TestConferencePluginMapping:
 
     def test_ml4ps_conference_name_maps_to_plugin(self):
         """Test that 'ML4PS@Neurips' conference name correctly maps to 'ml4ps' plugin."""
-        from neurips_abstracts.plugins import get_plugin, list_plugins
+        from abstracts_explorer.plugins import get_plugin, list_plugins
         
         # Get all plugins and build mapping
         plugins = list_plugins()
@@ -896,7 +896,7 @@ class TestConferencePluginMapping:
 
     def test_all_conferences_map_to_plugins(self):
         """Test that all conference names can be mapped to valid plugins."""
-        from neurips_abstracts.plugins import get_plugin, list_plugins
+        from abstracts_explorer.plugins import get_plugin, list_plugins
         
         # Get all plugins
         plugins = list_plugins()

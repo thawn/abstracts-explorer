@@ -9,7 +9,7 @@ This guide covers common usage patterns for Abstracts Explorer.
 Download papers for a specific year:
 
 ```bash
-uv run neurips-abstracts download --year 2025 --db-path data/neurips_2025.db
+uv run abstracts-explorer download --year 2025 --db-path data/neurips_2025.db
 ```
 
 Options:
@@ -22,7 +22,7 @@ Options:
 Generate vector embeddings for semantic search:
 
 ```bash
-uv run neurips-abstracts create-embeddings --db-path data/neurips_2025.db
+uv run abstracts-explorer create-embeddings --db-path data/neurips_2025.db
 ```
 
 Options:
@@ -37,13 +37,13 @@ Search papers by keyword or semantic similarity:
 
 ```bash
 # Simple search
-uv run neurips-abstracts search "transformer architecture" --db-path data/neurips_2025.db
+uv run abstracts-explorer search "transformer architecture" --db-path data/neurips_2025.db
 
 # Limit results
-uv run neurips-abstracts search "reinforcement learning" --db-path data/neurips_2025.db --limit 10
+uv run abstracts-explorer search "reinforcement learning" --db-path data/neurips_2025.db --limit 10
 
 # Filter by year
-uv run neurips-abstracts search "neural networks" --db-path data/neurips_2025.db --year 2025
+uv run abstracts-explorer search "neural networks" --db-path data/neurips_2025.db --year 2025
 ```
 
 ### 4. Chat with Papers (RAG)
@@ -51,7 +51,7 @@ uv run neurips-abstracts search "neural networks" --db-path data/neurips_2025.db
 Interactive chat interface powered by RAG:
 
 ```bash
-uv run neurips-abstracts chat --db-path data/neurips_2025.db
+uv run abstracts-explorer chat --db-path data/neurips_2025.db
 ```
 
 In the chat interface:
@@ -167,8 +167,8 @@ Process multiple years:
 ```bash
 #!/bin/bash
 for year in 2023 2024 2025; do
-    uv run neurips-abstracts download --year $year --db-path data/neurips_${year}.db
-    uv run neurips-abstracts create-embeddings --db-path data/neurips_${year}.db
+    uv run abstracts-explorer download --year $year --db-path data/neurips_${year}.db
+    uv run abstracts-explorer create-embeddings --db-path data/neurips_${year}.db
 done
 ```
 

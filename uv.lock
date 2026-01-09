@@ -7,6 +7,59 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "abstracts-explorer"
+source = { editable = "." }
+dependencies = [
+    { name = "beautifulsoup4" },
+    { name = "chromadb" },
+    { name = "openai" },
+    { name = "pydantic" },
+    { name = "requests" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-mock" },
+    { name = "selenium" },
+    { name = "webdriver-manager" },
+]
+docs = [
+    { name = "linkify-it-py" },
+    { name = "myst-parser" },
+    { name = "sphinx" },
+    { name = "sphinx-autodoc-typehints" },
+    { name = "sphinx-rtd-theme" },
+]
+web = [
+    { name = "flask" },
+    { name = "flask-cors" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "beautifulsoup4", specifier = ">=4.12.0" },
+    { name = "chromadb", specifier = ">=0.4.0" },
+    { name = "flask", marker = "extra == 'web'", specifier = ">=3.0.0" },
+    { name = "flask-cors", marker = "extra == 'web'", specifier = ">=4.0.0" },
+    { name = "linkify-it-py", marker = "extra == 'docs'", specifier = ">=2.0.0" },
+    { name = "myst-parser", marker = "extra == 'docs'", specifier = ">=2.0.0" },
+    { name = "openai", specifier = ">=1.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4.0" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
+    { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.11.0" },
+    { name = "requests", specifier = ">=2.31.0" },
+    { name = "selenium", marker = "extra == 'dev'", specifier = ">=4.0.0" },
+    { name = "sphinx", marker = "extra == 'docs'", specifier = ">=7.0.0" },
+    { name = "sphinx-autodoc-typehints", marker = "extra == 'docs'", specifier = ">=1.25.0" },
+    { name = "sphinx-rtd-theme", marker = "extra == 'docs'", specifier = ">=1.3.0" },
+    { name = "webdriver-manager", marker = "extra == 'dev'", specifier = ">=4.0.0" },
+]
+provides-extras = ["dev", "docs", "web"]
+
+[[package]]
 name = "alabaster"
 version = "1.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1192,59 +1245,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/66/a5/9626ba4f73555b373
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5f/df/76d0321c3797b54b60fef9ec3bd6f4cfd124b9e422182156a1dd418722cf/myst_parser-4.0.1-py3-none-any.whl", hash = "sha256:9134e88959ec3b5780aedf8a99680ea242869d012e8821db3126d427edc9c95d", size = 84579, upload-time = "2025-02-12T10:53:02.078Z" },
 ]
-
-[[package]]
-name = "neurips-abstracts"
-source = { editable = "." }
-dependencies = [
-    { name = "beautifulsoup4" },
-    { name = "chromadb" },
-    { name = "openai" },
-    { name = "pydantic" },
-    { name = "requests" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "pytest-mock" },
-    { name = "selenium" },
-    { name = "webdriver-manager" },
-]
-docs = [
-    { name = "linkify-it-py" },
-    { name = "myst-parser" },
-    { name = "sphinx" },
-    { name = "sphinx-autodoc-typehints" },
-    { name = "sphinx-rtd-theme" },
-]
-web = [
-    { name = "flask" },
-    { name = "flask-cors" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "beautifulsoup4", specifier = ">=4.12.0" },
-    { name = "chromadb", specifier = ">=0.4.0" },
-    { name = "flask", marker = "extra == 'web'", specifier = ">=3.0.0" },
-    { name = "flask-cors", marker = "extra == 'web'", specifier = ">=4.0.0" },
-    { name = "linkify-it-py", marker = "extra == 'docs'", specifier = ">=2.0.0" },
-    { name = "myst-parser", marker = "extra == 'docs'", specifier = ">=2.0.0" },
-    { name = "openai", specifier = ">=1.0.0" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4.0" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
-    { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.11.0" },
-    { name = "requests", specifier = ">=2.31.0" },
-    { name = "selenium", marker = "extra == 'dev'", specifier = ">=4.0.0" },
-    { name = "sphinx", marker = "extra == 'docs'", specifier = ">=7.0.0" },
-    { name = "sphinx-autodoc-typehints", marker = "extra == 'docs'", specifier = ">=1.25.0" },
-    { name = "sphinx-rtd-theme", marker = "extra == 'docs'", specifier = ">=1.3.0" },
-    { name = "webdriver-manager", marker = "extra == 'dev'", specifier = ">=4.0.0" },
-]
-provides-extras = ["dev", "docs", "web"]
 
 [[package]]
 name = "numpy"

@@ -8,9 +8,9 @@ to reduce code duplication and ensure consistency.
 import socket
 import requests
 import pytest
-from neurips_abstracts.config import get_config
-from neurips_abstracts.embeddings import EmbeddingsManager
-from neurips_abstracts.database import DatabaseManager
+from abstracts_explorer.config import get_config
+from abstracts_explorer.embeddings import EmbeddingsManager
+from abstracts_explorer.database import DatabaseManager
 
 # Cache for LM Studio availability check to avoid multiple API calls during test collection
 _lm_studio_available_cache = None

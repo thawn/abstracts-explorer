@@ -116,7 +116,7 @@ def download_json(
     return data
 
 
-def download_neurips_data(
+def download_conference_data(
     year: int = 2025,
     output_path: Optional[Union[str, Path]] = None,
     timeout: int = 30,
@@ -149,17 +149,17 @@ def download_neurips_data(
 
     Examples
     --------
-    >>> data = download_neurips_data(2025)
+    >>> data = download_conference_data(2025)
     >>> papers = data.get('results', [])
     >>> print(f"Found {len(papers)} papers")
 
     >>> # Save to file and reuse on subsequent calls
-    >>> data = download_neurips_data(2025, output_path="data/neurips_2025.json")
+    >>> data = download_conference_data(2025, output_path="data/neurips_2025.json")
     >>> # Next call will load from local file without downloading
-    >>> data = download_neurips_data(2025, output_path="data/neurips_2025.json")
+    >>> data = download_conference_data(2025, output_path="data/neurips_2025.json")
 
     >>> # Force re-download
-    >>> data = download_neurips_data(2025, output_path="data/neurips_2025.json", force_download=True)
+    >>> data = download_conference_data(2025, output_path="data/neurips_2025.json", force_download=True)
     """
     url = f"https://neurips.cc/static/virtual/data/neurips-{year}-orals-posters.json"
     return download_json(url, output_path=output_path, timeout=timeout, force_download=force_download)

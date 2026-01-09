@@ -48,7 +48,7 @@ class EmbeddingsManager:
     chroma_path : str or Path, optional
         Path to the ChromaDB persistent storage, by default "./chroma_db"
     collection_name : str, optional
-        Name of the ChromaDB collection, by default "neurips_papers"
+        Name of the ChromaDB collection, by default "conference_papers"
 
     Attributes
     ----------

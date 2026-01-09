@@ -45,7 +45,7 @@ class RAGChat:
 
     Examples
     --------
-    >>> from neurips_abstracts.embeddings import EmbeddingsManager
+    >>> from abstracts_explorer.embeddings import EmbeddingsManager
     >>> em = EmbeddingsManager("chroma_db")
     >>> em.connect()
     >>> chat = RAGChat(em)

@@ -12,7 +12,7 @@ import logging
 import json
 import requests
 
-from neurips_abstracts.plugin import DownloaderPlugin, convert_neurips_to_lightweight_schema, LightweightPaper
+from abstracts_explorer.plugin import DownloaderPlugin, convert_to_lightweight_schema, LightweightPaper
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +149,7 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
                 paper["conference"] = self.conference_name
 
             # Convert to lightweight schema (returns list of dicts)
-            papers_data = convert_neurips_to_lightweight_schema(data["results"])
+            papers_data = convert_to_lightweight_schema(data["results"])
 
         # Convert to LightweightPaper objects
         papers = [LightweightPaper(**paper) for paper in papers_data]

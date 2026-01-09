@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Union
 
 
 # Import Pydantic models from plugin framework
-from neurips_abstracts.plugin import LightweightPaper
+from abstracts_explorer.plugin import LightweightPaper
 
 logger = logging.getLogger(__name__)
 
@@ -221,7 +221,7 @@ class DatabaseManager:
 
         Examples
         --------
-        >>> from neurips_abstracts.plugin import LightweightPaper
+        >>> from abstracts_explorer.plugin import LightweightPaper
         >>> db = DatabaseManager("neurips.db")
         >>> with db:
         ...     db.create_tables()
@@ -351,7 +351,7 @@ class DatabaseManager:
 
         Examples
         --------
-        >>> from neurips_abstracts.plugin import LightweightPaper
+        >>> from abstracts_explorer.plugin import LightweightPaper
         >>> db = DatabaseManager("neurips.db")
         >>> with db:
         ...     db.create_tables()

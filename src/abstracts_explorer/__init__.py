@@ -1,8 +1,8 @@
 """
-NeurIPS Abstracts Package
-==========================
+Abstracts Explorer Package
+===========================
 
-Abstracts Explorer - A Python package for downloading NeurIPS conference data and loading it into a SQLite database.
+Abstracts Explorer - A Python package for downloading conference data and loading it into a SQLite database.
 
 Main Components
 ---------------
@@ -20,7 +20,7 @@ The package includes a plugin system for downloading papers from different sourc
 
 Example usage with plugins::
 
-    from neurips_abstracts.plugins import get_plugin, list_plugins
+    from abstracts_explorer.plugins import get_plugin, list_plugins
 
     # List available plugins
     plugins = list_plugins()
@@ -41,7 +41,7 @@ You can create custom downloader plugins by subclassing `DownloaderPlugin` for f
 or `LightweightDownloaderPlugin` for a simpler interface::
 
     # Full schema plugin
-    from neurips_abstracts.plugins import DownloaderPlugin, register_plugin
+    from abstracts_explorer.plugins import DownloaderPlugin, register_plugin
 
     class MyCustomPlugin(DownloaderPlugin):
         plugin_name = "mycustom"
@@ -66,7 +66,7 @@ Lightweight Plugin API
 -----------------------
 For simpler use cases, use `LightweightDownloaderPlugin` which only requires essential fields::
 
-    from neurips_abstracts.plugins import (
+    from abstracts_explorer.plugins import (
         LightweightDownloaderPlugin,
         LightweightPaper,
         register_plugin
@@ -108,7 +108,7 @@ For simpler use cases, use `LightweightDownloaderPlugin` which only requires ess
 """
 
 from .config import Config, get_config
-from .downloader import download_json, download_neurips_data
+from .downloader import download_json, download_conference_data
 from .database import DatabaseManager
 from .embeddings import EmbeddingsManager
 from .rag import RAGChat
@@ -130,7 +130,7 @@ __all__ = [
     "Config",
     "get_config",
     "download_json",
-    "download_neurips_data",
+    "download_conference_data",
     "DatabaseManager",
     "EmbeddingsManager",
     "RAGChat",

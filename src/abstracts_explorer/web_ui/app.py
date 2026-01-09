@@ -15,11 +15,11 @@ from flask import Flask, render_template, request, jsonify, g, send_file
 from flask_cors import CORS
 import requests
 
-from neurips_abstracts.database import DatabaseManager
-from neurips_abstracts.embeddings import EmbeddingsManager
-from neurips_abstracts.rag import RAGChat
-from neurips_abstracts.config import get_config
-from neurips_abstracts.paper_utils import get_paper_with_authors, format_search_results, PaperFormattingError
+from abstracts_explorer.database import DatabaseManager
+from abstracts_explorer.embeddings import EmbeddingsManager
+from abstracts_explorer.rag import RAGChat
+from abstracts_explorer.config import get_config
+from abstracts_explorer.paper_utils import get_paper_with_authors, format_search_results, PaperFormattingError
 
 logger = logging.getLogger(__name__)
 
@@ -286,7 +286,7 @@ def get_available_filters():
         - conference_years: dict mapping conference names to their supported years
     """
     try:
-        from neurips_abstracts.plugins import list_plugins
+        from abstracts_explorer.plugins import list_plugins
 
         # Get all registered plugins
         plugins = list_plugins()

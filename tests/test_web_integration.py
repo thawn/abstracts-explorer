@@ -16,7 +16,7 @@ from unittest.mock import patch, Mock
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from neurips_abstracts.database import DatabaseManager
+from abstracts_explorer.database import DatabaseManager
 from tests.helpers import requires_lm_studio, find_free_port
 
 # Helper functions imported from test_helpers:
@@ -123,7 +123,7 @@ def web_server(test_database, tmp_path_factory):
 
     # Mock the OpenAI API for embedding generation
     # Integration tests should not require a real API connection
-    mock_openai_patcher = patch("neurips_abstracts.embeddings.OpenAI")
+    mock_openai_patcher = patch("abstracts_explorer.embeddings.OpenAI")
     mock_openai_class = mock_openai_patcher.start()
     
     try:
@@ -143,9 +143,9 @@ def web_server(test_database, tmp_path_factory):
         mock_client.embeddings.create.return_value = mock_embedding_response
 
         # Import after setting environment variables and mocking
-        from neurips_abstracts.web_ui import app as flask_app
-        from neurips_abstracts.embeddings import EmbeddingsManager
-        from neurips_abstracts.config import get_config
+        from abstracts_explorer.web_ui import app as flask_app
+        from abstracts_explorer.embeddings import EmbeddingsManager
+        from abstracts_explorer.config import get_config
 
         # Force reload config to pick up environment variables
         get_config(reload=True)
@@ -156,7 +156,7 @@ def web_server(test_database, tmp_path_factory):
         em.create_collection(reset=True)
 
         # Add embeddings for test papers
-        from neurips_abstracts.database import DatabaseManager
+        from abstracts_explorer.database import DatabaseManager
         db = DatabaseManager(str(test_database))
         db.connect()
         cursor = db.connection.cursor()
@@ -169,7 +169,7 @@ def web_server(test_database, tmp_path_factory):
         db.close()
 
         # Inject the pre-created embeddings manager directly
-        import neurips_abstracts.web_ui.app as app_module
+        import abstracts_explorer.web_ui.app as app_module
         app_module.embeddings_manager = em
         app_module.rag_chat = None
 
@@ -679,7 +679,7 @@ class TestWebUICommand:
 
     def test_web_ui_command_exists(self):
         """Test that the web-ui command is registered."""
-        from neurips_abstracts.cli import main
+        from abstracts_explorer.cli import main
 
         # Test that calling with web-ui shows help or runs
         # We can't actually run it here, but we can check it's registered
@@ -690,7 +690,7 @@ class TestWebUICommand:
     def test_web_ui_import(self):
         """Test that web_ui module can be imported."""
         try:
-            from neurips_abstracts.web_ui import run_server, app
+            from abstracts_explorer.web_ui import run_server, app
 
             assert callable(run_server)
             assert app is not None

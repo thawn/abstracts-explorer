@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.abspath("../src"))
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = "neurips-abstracts"
+project = "abstracts-explorer"
 copyright = "2025, Abstracts Explorer Contributors"
 author = "Abstracts Explorer Contributors"
 release = "0.1.0"

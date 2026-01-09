@@ -18,7 +18,7 @@ from urllib.parse import urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
-from neurips_abstracts.plugin import (
+from abstracts_explorer.plugin import (
     LightweightDownloaderPlugin,
     LightweightPaper,
 )
@@ -513,7 +513,7 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
 # Auto-register the plugin when imported
 def _register():
     """Auto-register the ML4PS plugin."""
-    from neurips_abstracts.plugins import register_plugin
+    from abstracts_explorer.plugins import register_plugin
 
     plugin = ML4PSDownloaderPlugin()
     register_plugin(plugin)

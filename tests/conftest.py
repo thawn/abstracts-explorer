@@ -10,10 +10,10 @@ import pytest
 from pathlib import Path
 from unittest.mock import Mock
 
-from neurips_abstracts.database import DatabaseManager
-from neurips_abstracts.embeddings import EmbeddingsManager
-from neurips_abstracts.plugin import LightweightPaper
-from neurips_abstracts.config import load_env_file
+from abstracts_explorer.database import DatabaseManager
+from abstracts_explorer.embeddings import EmbeddingsManager
+from abstracts_explorer.plugin import LightweightPaper
+from abstracts_explorer.config import load_env_file
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -28,7 +28,7 @@ def test_config():
     
     The fixture runs automatically for all tests (autouse=True) at session scope.
     """
-    from neurips_abstracts.config import get_config
+    from abstracts_explorer.config import get_config
     
     # Find .env.example file
     repo_root = Path(__file__).parent.parent
@@ -184,8 +184,8 @@ def test_database(tmp_path):
     Creates a database with 3 papers using the lightweight schema
     via DatabaseManager for testing search and retrieval functionality.
     """
-    from neurips_abstracts.database import DatabaseManager
-    from neurips_abstracts.plugin import LightweightPaper
+    from abstracts_explorer.database import DatabaseManager
+    from abstracts_explorer.plugin import LightweightPaper
     
     db_path = tmp_path / "test.db"
     
@@ -256,7 +256,7 @@ def mock_lm_studio():
     """
     from unittest.mock import patch, Mock
 
-    with patch("neurips_abstracts.embeddings.OpenAI") as mock_openai_class:
+    with patch("abstracts_explorer.embeddings.OpenAI") as mock_openai_class:
         # Create mock OpenAI client instance
         mock_client = Mock()
         mock_openai_class.return_value = mock_client
@@ -291,7 +291,7 @@ def mock_rag_openai():
     """
     from unittest.mock import patch, Mock
 
-    with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+    with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
         # Create mock OpenAI client instance
         mock_client = Mock()
         mock_openai_class.return_value = mock_client

@@ -9,9 +9,9 @@ See test_authors.py for comprehensive tests of the new schema.
 import pytest
 from unittest.mock import patch
 
-from neurips_abstracts import download_json, DatabaseManager
-from neurips_abstracts.downloader import download_neurips_data
-from neurips_abstracts.plugin import LightweightPaper, convert_neurips_to_lightweight_schema
+from abstracts_explorer import download_json, DatabaseManager
+from abstracts_explorer.downloader import download_conference_data
+from abstracts_explorer.plugin import LightweightPaper, convert_to_lightweight_schema
 from tests.helpers import requires_lm_studio
 
 # Fixtures imported from conftest.py:
@@ -31,7 +31,7 @@ class TestIntegration:
         db_file = tmp_path / "neurips.db"
 
         # Step 1: Download JSON
-        with patch("neurips_abstracts.downloader.requests.get", return_value=mock_response):
+        with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response):
             data = download_json(
                 "https://neurips.cc/static/virtual/data/neurips-2025-orals-posters.json", output_path=json_file
             )
@@ -40,8 +40,8 @@ class TestIntegration:
         assert json_file.exists()
 
         # Step 2: Convert JSON data to LightweightPaper objects and load into database
-        # Note: convert_neurips_to_lightweight_schema extracts year/conference from paper data
-        lightweight_dicts = convert_neurips_to_lightweight_schema(data)
+        # Note: convert_to_lightweight_schema extracts year/conference from paper data
+        lightweight_dicts = convert_to_lightweight_schema(data)
         papers = [LightweightPaper(**paper_dict) for paper_dict in lightweight_dicts]
 
         with DatabaseManager(db_file) as db:
@@ -66,11 +66,11 @@ class TestIntegration:
         db_file = tmp_path / "neurips.db"
 
         # Download NeurIPS data
-        with patch("neurips_abstracts.downloader.requests.get", return_value=mock_response):
-            data = download_neurips_data(year=2025)
+        with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response):
+            data = download_conference_data(year=2025)
 
         # Convert JSON data to LightweightPaper objects and load into database
-        lightweight_dicts = convert_neurips_to_lightweight_schema(data)
+        lightweight_dicts = convert_to_lightweight_schema(data)
         papers = [LightweightPaper(**paper_dict) for paper_dict in lightweight_dicts]
 
         with DatabaseManager(db_file) as db:
@@ -103,11 +103,11 @@ class TestIntegration:
         db_file = tmp_path / "persistent.db"
 
         # Load data in first connection
-        with patch("neurips_abstracts.downloader.requests.get", return_value=mock_response):
-            data = download_neurips_data()
+        with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response):
+            data = download_conference_data()
 
         # Convert JSON data to LightweightPaper objects
-        lightweight_dicts = convert_neurips_to_lightweight_schema(data)
+        lightweight_dicts = convert_to_lightweight_schema(data)
         papers = [LightweightPaper(**paper_dict) for paper_dict in lightweight_dicts]
 
         with DatabaseManager(db_file) as db:
@@ -509,7 +509,7 @@ class TestIntegration:
             paper["year"] = 2025
             paper["conference"] = "NeurIPS"
 
-        lightweight_dicts = convert_neurips_to_lightweight_schema(raw_papers)
+        lightweight_dicts = convert_to_lightweight_schema(raw_papers)
         papers = [LightweightPaper(**paper_dict) for paper_dict in lightweight_dicts]
 
         with DatabaseManager(db_file) as db:
@@ -603,7 +603,7 @@ class TestIntegration:
         mocked versions of embedding operations (e.g., test_embed_from_database,
         test_search_similar, test_add_paper, etc.).
         """
-        from neurips_abstracts import DatabaseManager, EmbeddingsManager
+        from abstracts_explorer import DatabaseManager, EmbeddingsManager
 
         # Use the same real data subset from test_real_neurips_data_subset
         real_data = self._get_real_neurips_subset()
@@ -619,7 +619,7 @@ class TestIntegration:
             paper["year"] = 2025
             paper["conference"] = "NeurIPS"
 
-        lightweight_dicts = convert_neurips_to_lightweight_schema(raw_papers)
+        lightweight_dicts = convert_to_lightweight_schema(raw_papers)
         papers = [LightweightPaper(**paper_dict) for paper_dict in lightweight_dicts]
 
         # Step 1: Load papers into database

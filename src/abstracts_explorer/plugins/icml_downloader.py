@@ -7,7 +7,7 @@ Plugin for downloading papers from the official ICML conference data.
 
 import logging
 
-from neurips_abstracts.plugins.json_conference_downloader import JSONConferenceDownloaderPlugin
+from abstracts_explorer.plugins.json_conference_downloader import JSONConferenceDownloaderPlugin
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ class ICMLDownloaderPlugin(JSONConferenceDownloaderPlugin):
 # Auto-register the plugin when imported
 def _register():
     """Auto-register the ICML plugin."""
-    from neurips_abstracts.plugins import register_plugin
+    from abstracts_explorer.plugins import register_plugin
 
     plugin = ICMLDownloaderPlugin()
     register_plugin(plugin)

@@ -3,7 +3,7 @@ requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
-name = "neurips-abstracts"
+name = "abstracts-explorer"
 dynamic = ["version"]
 description = "Abstracts Explorer - A package to download NeurIPS conference data and load it into a SQLite database"
 readme = "README.md"
@@ -51,22 +51,22 @@ web = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/neurips-abstracts"
+Homepage = "https://github.com/thawn/neurips-abstracts"
 Documentation = "https://neurips-abstracts.readthedocs.io"
-Repository = "https://github.com/yourusername/neurips-abstracts.git"
-Issues = "https://github.com/yourusername/neurips-abstracts/issues"
+Repository = "https://github.com/thawn/neurips-abstracts.git"
+Issues = "https://github.com/thawn/neurips-abstracts/issues"
 
 [project.scripts]
-neurips-abstracts = "neurips_abstracts.cli:main"
+abstracts-explorer = "abstracts_explorer.cli:main"
 
 [tool.hatch.version]
 source = "vcs"
 
 [tool.hatch.build.hooks.vcs]
-version-file = "src/neurips_abstracts/_version.py"
+version-file = "src/abstracts_explorer/_version.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/neurips_abstracts"]
+packages = ["src/abstracts_explorer"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -80,7 +80,7 @@ markers = [
 ]
 addopts = [
     "--verbose",
-    "--cov=neurips_abstracts",
+    "--cov=abstracts_explorer",
     "--cov-report=term-missing",
     "--cov-report=html",
     "-m not slow",

@@ -9,9 +9,9 @@ import json
 import pytest
 from unittest.mock import Mock, patch
 
-from neurips_abstracts.rag import RAGChat, RAGError
-from neurips_abstracts.embeddings import EmbeddingsManager
-from neurips_abstracts.config import get_config
+from abstracts_explorer.rag import RAGChat, RAGError
+from abstracts_explorer.embeddings import EmbeddingsManager
+from abstracts_explorer.config import get_config
 from tests.helpers import requires_lm_studio, create_test_db_with_paper
 
 # Fixtures imported from conftest.py:
@@ -83,7 +83,7 @@ def mock_embeddings_manager_empty():
 @pytest.fixture
 def mock_lm_studio_response():
     """Mock LM Studio API response."""
-    with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+    with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
         mock_client = Mock()
         mock_openai_class.return_value = mock_client
         
@@ -224,7 +224,7 @@ class TestRAGChatQuery:
 
     def test_query_api_timeout(self, mock_embeddings_manager, mock_database):
         """Test query with API timeout."""
-        with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
             mock_client = Mock()
             mock_openai_class.return_value = mock_client
             mock_client.chat.completions.create.side_effect = Exception("Timeout")
@@ -236,7 +236,7 @@ class TestRAGChatQuery:
 
     def test_query_api_http_error(self, mock_embeddings_manager, mock_database):
         """Test query with HTTP error."""
-        with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
             mock_client = Mock()
             mock_openai_class.return_value = mock_client
             mock_client.chat.completions.create.side_effect = Exception("API error")
@@ -248,7 +248,7 @@ class TestRAGChatQuery:
 
     def test_query_invalid_response(self, mock_embeddings_manager, mock_database):
         """Test query with invalid API response format."""
-        with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
             mock_client = Mock()
             mock_openai_class.return_value = mock_client
             # Mock an invalid response structure
@@ -425,7 +425,7 @@ class TestRAGChatIntegration:
         """
         # This test requires LM Studio to be running with the configured chat model
         # Create real embeddings manager
-        from neurips_abstracts.embeddings import EmbeddingsManager
+        from abstracts_explorer.embeddings import EmbeddingsManager
 
         config = get_config()
 
@@ -491,7 +491,7 @@ class TestRAGChatIntegration:
         For unit testing without LM Studio, see TestRAGChatChat.test_chat_with_context
         and TestRAGChatConversation.test_conversation_history_accumulates.
         """
-        from neurips_abstracts.embeddings import EmbeddingsManager
+        from abstracts_explorer.embeddings import EmbeddingsManager
 
         config = get_config()
 
@@ -557,7 +557,7 @@ class TestRAGChatIntegration:
         This integration test verifies conversation export with real API.
         For unit testing without LM Studio, see TestRAGChatExport.test_export_conversation.
         """
-        from neurips_abstracts.embeddings import EmbeddingsManager
+        from abstracts_explorer.embeddings import EmbeddingsManager
 
         config = get_config()
 
@@ -623,7 +623,7 @@ class TestRAGChatQueryRewriting:
 
     def test_rewrite_query_success(self, mock_embeddings_manager, mock_database):
         """Test successful query rewriting."""
-        with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
             mock_client = Mock()
             mock_openai_class.return_value = mock_client
             
@@ -645,7 +645,7 @@ class TestRAGChatQueryRewriting:
 
     def test_rewrite_query_with_conversation_history(self, mock_embeddings_manager, mock_database):
         """Test query rewriting with conversation history."""
-        with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
             mock_client = Mock()
             mock_openai_class.return_value = mock_client
             
@@ -675,7 +675,7 @@ class TestRAGChatQueryRewriting:
 
     def test_rewrite_query_timeout_fallback(self, mock_embeddings_manager, mock_database):
         """Test query rewriting falls back to original on timeout."""
-        with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
             mock_client = Mock()
             mock_openai_class.return_value = mock_client
             mock_client.chat.completions.create.side_effect = Exception("Timeout")
@@ -689,7 +689,7 @@ class TestRAGChatQueryRewriting:
 
     def test_rewrite_query_http_error_fallback(self, mock_embeddings_manager, mock_database):
         """Test query rewriting falls back to original on HTTP error."""
-        with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
             mock_client = Mock()
             mock_openai_class.return_value = mock_client
             mock_client.chat.completions.create.side_effect = Exception("API error")
@@ -703,7 +703,7 @@ class TestRAGChatQueryRewriting:
 
     def test_rewrite_query_invalid_response_fallback(self, mock_embeddings_manager, mock_database):
         """Test query rewriting falls back to original on invalid response."""
-        with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
             mock_client = Mock()
             mock_openai_class.return_value = mock_client
             # Mock an invalid response structure
@@ -750,7 +750,7 @@ class TestRAGChatQueryRewriting:
 
     def test_query_with_rewriting_enabled(self, mock_embeddings_manager, mock_database):
         """Test query with query rewriting enabled."""
-        with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
             mock_client = Mock()
             mock_openai_class.return_value = mock_client
             
@@ -796,7 +796,7 @@ class TestRAGChatQueryRewriting:
 
     def test_query_caching_similar_queries(self, mock_embeddings_manager, mock_database):
         """Test that similar follow-up queries reuse cached papers."""
-        with patch("neurips_abstracts.rag.OpenAI") as mock_openai_class:
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
             mock_client = Mock()
             mock_openai_class.return_value = mock_client
 

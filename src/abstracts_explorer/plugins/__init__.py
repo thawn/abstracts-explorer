@@ -10,11 +10,11 @@ Available plugins:
 - ML4PSDownloaderPlugin: ML4PS workshop data
 - NeurIPSDownloaderPlugin: Official NeurIPS conference data
 
-The plugin framework is provided by the neurips_abstracts.plugin module.
+The plugin framework is provided by the abstracts_explorer.plugin module.
 """
 
-# Re-export plugin framework from neurips_abstracts.plugin
-from neurips_abstracts.plugin import (
+# Re-export plugin framework from abstracts_explorer.plugin
+from abstracts_explorer.plugin import (
     # Plugin base classes
     DownloaderPlugin,
     LightweightDownloaderPlugin,
@@ -25,7 +25,7 @@ from neurips_abstracts.plugin import (
     list_plugins,
     list_plugin_names,
     # Conversion utilities
-    convert_neurips_to_lightweight_schema,
+    convert_to_lightweight_schema,
     # Pydantic models
     LightweightPaper,
     # Validation functions
@@ -51,7 +51,7 @@ __all__ = [
     "list_plugins",
     "list_plugin_names",
     # Conversion utilities
-    "convert_neurips_to_lightweight_schema",
+    "convert_to_lightweight_schema",
     # Pydantic models
     "LightweightPaper",
     # Validation functions

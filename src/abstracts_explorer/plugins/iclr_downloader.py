@@ -7,7 +7,7 @@ Plugin for downloading papers from the official ICLR conference data.
 
 import logging
 
-from neurips_abstracts.plugins.json_conference_downloader import JSONConferenceDownloaderPlugin
+from abstracts_explorer.plugins.json_conference_downloader import JSONConferenceDownloaderPlugin
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ class ICLRDownloaderPlugin(JSONConferenceDownloaderPlugin):
 # Auto-register the plugin when imported
 def _register():
     """Auto-register the ICLR plugin."""
-    from neurips_abstracts.plugins import register_plugin
+    from abstracts_explorer.plugins import register_plugin
 
     plugin = ICLRDownloaderPlugin()
     register_plugin(plugin)

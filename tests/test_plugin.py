@@ -2,7 +2,7 @@
 Tests for plugin.py module.
 
 This module tests all plugin-related functionality including:
-- Plugin helper functions (sanitize_author_names, convert_neurips_to_lightweight_schema)
+- Plugin helper functions (sanitize_author_names, convert_to_lightweight_schema)
 - Plugin data models (LightweightPaper, validation)
 - Plugin base classes and interfaces  
 - Year/conference field handling
@@ -14,19 +14,19 @@ from pathlib import Path
 from pydantic import ValidationError
 from unittest.mock import patch, Mock
 
-from neurips_abstracts.database import DatabaseManager
-from neurips_abstracts.plugin import (
+from abstracts_explorer.database import DatabaseManager
+from abstracts_explorer.plugin import (
     sanitize_author_names,
-    convert_neurips_to_lightweight_schema,
+    convert_to_lightweight_schema,
     validate_lightweight_paper,
     LightweightPaper,
 )
-from neurips_abstracts.plugins import (
+from abstracts_explorer.plugins import (
     validate_lightweight_papers,
 )
-from neurips_abstracts.plugins.neurips_downloader import NeurIPSDownloaderPlugin
-from neurips_abstracts.plugins.icml_downloader import ICMLDownloaderPlugin
-from neurips_abstracts.plugins.ml4ps_downloader import ML4PSDownloaderPlugin
+from abstracts_explorer.plugins.neurips_downloader import NeurIPSDownloaderPlugin
+from abstracts_explorer.plugins.icml_downloader import ICMLDownloaderPlugin
+from abstracts_explorer.plugins.ml4ps_downloader import ML4PSDownloaderPlugin
 
 
 # ============================================================
@@ -98,7 +98,7 @@ class TestSanitizeAuthorNames:
 
 
 class TestConvertNeuripsToLightweightSchema:
-    """Tests for convert_neurips_to_lightweight_schema helper function."""
+    """Tests for convert_to_lightweight_schema helper function."""
 
     def test_basic_conversion(self):
         """Test basic conversion with all required fields."""
@@ -116,7 +116,7 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_neurips_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(neurips_papers)
 
         assert len(result) == 1
         assert result[0]["title"] == "Test Paper"
@@ -139,7 +139,7 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_neurips_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(neurips_papers)
 
         assert result[0]["title"] == "Legacy Paper"
         assert "name" not in result[0]
@@ -157,7 +157,7 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_neurips_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(neurips_papers)
 
         assert result[0]["authors"] == ["John Doe", "Jane Smith"]
 
@@ -174,7 +174,7 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_neurips_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(neurips_papers)
 
         assert result[0]["authors"] == ["John Doe", "Jane Smith", "Bob Johnson"]
 
@@ -200,7 +200,7 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_neurips_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(neurips_papers)
 
         assert result[0]["paper_pdf_url"] == "https://example.com/paper.pdf"
         assert result[0]["poster_image_url"] == "https://example.com/poster.png"
@@ -226,7 +226,7 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_neurips_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(neurips_papers)
 
         assert result[0]["keywords"] == ["machine learning", "deep learning", "AI"]
 
@@ -244,7 +244,7 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_neurips_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(neurips_papers)
 
         assert result[0]["award"] == "Best Paper Award"
 
@@ -262,7 +262,7 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_neurips_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(neurips_papers)
 
         assert result[0]["award"] == "Outstanding Paper"
 
@@ -280,7 +280,7 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_neurips_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(neurips_papers)
 
         assert "award" not in result[0]
 
@@ -298,7 +298,7 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_neurips_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(neurips_papers)
 
         assert "award" not in result[0]
         # Should not raise AttributeError
@@ -316,7 +316,7 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_neurips_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(neurips_papers)
 
         # All None values should be converted to appropriate defaults
         assert result[0]["abstract"] == ""
@@ -340,7 +340,7 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_neurips_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(neurips_papers)
 
         # Semicolons should be replaced with spaces
         assert result[0]["authors"] == ["John Doe", "Jane Smith"]
@@ -375,7 +375,7 @@ class TestConvertNeuripsToLightweightSchema:
             },
         ]
 
-        result = convert_neurips_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(neurips_papers)
 
         assert len(result) == 3
         assert result[0]["title"] == "Paper 1"
@@ -403,7 +403,7 @@ class TestConvertNeuripsToLightweightSchema:
             },
         ]
 
-        result = convert_neurips_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(neurips_papers)
 
         # First paper should be skipped
         assert len(result) == 1
@@ -422,7 +422,7 @@ class TestConvertNeuripsToLightweightSchema:
             },
         ]
 
-        result = convert_neurips_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(neurips_papers)
 
         assert len(result) == 0
 
@@ -441,7 +441,7 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_neurips_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(neurips_papers)
 
         assert result[0]["authors"] == ["John Doe"]
 
@@ -462,7 +462,7 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_neurips_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(neurips_papers)
 
         assert result[0]["authors"] == ["John Doe", "Jane Smith"]
 
@@ -490,7 +490,7 @@ class TestConvertNeuripsToLightweightSchema:
             }
         ]
 
-        result = convert_neurips_to_lightweight_schema(neurips_papers)
+        result = convert_to_lightweight_schema(neurips_papers)
 
         # Ensure extra fields are not present
         assert "topic" not in result[0]
@@ -506,7 +506,7 @@ class TestConvertNeuripsToLightweightSchema:
 
     def test_empty_list(self):
         """Test conversion of empty paper list."""
-        result = convert_neurips_to_lightweight_schema([])
+        result = convert_to_lightweight_schema([])
         assert result == []
 
 
@@ -550,7 +550,7 @@ class TestIntegration:
             }
         ]
 
-        lightweight = convert_neurips_to_lightweight_schema(neurips_papers)
+        lightweight = convert_to_lightweight_schema(neurips_papers)
 
         # Should validate successfully
         validated = validate_lightweight_paper(lightweight[0])
@@ -575,7 +575,7 @@ class TestIntegration:
         ]
 
         # Convert
-        lightweight = convert_neurips_to_lightweight_schema(neurips_papers)
+        lightweight = convert_to_lightweight_schema(neurips_papers)
 
         # Sanitize authors
         lightweight[0]["authors"] = sanitize_author_names(lightweight[0]["authors"])
@@ -589,10 +589,10 @@ class TestIntegration:
 # Tests from test_plugin_year_conference.py
 # ============================================================
 
-class TestNeurIPSPluginYearConference:
+class TestConferencePluginYearFields:
     """Test that NeurIPS plugin sets year and conference fields."""
 
-    @patch("neurips_abstracts.plugins.json_conference_downloader.requests.get")
+    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
     def test_neurips_plugin_adds_year_and_conference(self, mock_get):
         """Test that NeurIPS plugin adds year and conference to each paper."""
         # Mock the requests.get to return test data
@@ -634,7 +634,7 @@ class TestNeurIPSPluginYearConference:
             assert paper.year == 2024
             assert paper.conference == "NeurIPS"
 
-    @patch("neurips_abstracts.plugins.json_conference_downloader.requests.get")
+    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
     def test_neurips_plugin_preserves_existing_fields(self, mock_get):
         """Test that NeurIPS plugin preserves existing paper fields."""
         # Mock the requests.get to return test data with existing fields
@@ -679,7 +679,7 @@ class TestNeurIPSPluginYearConference:
 class TestICMLPluginYearConference:
     """Test that ICML plugin sets year and conference fields."""
 
-    @patch("neurips_abstracts.plugins.json_conference_downloader.requests.get")
+    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
     def test_icml_plugin_adds_year_and_conference(self, mock_get):
         """Test that ICML plugin adds year and conference to each paper."""
         # Mock the requests.get to return test data
@@ -721,7 +721,7 @@ class TestICMLPluginYearConference:
             assert paper.year == 2025
             assert paper.conference == "ICML"
 
-    @patch("neurips_abstracts.plugins.json_conference_downloader.requests.get")
+    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
     def test_icml_plugin_preserves_existing_fields(self, mock_get):
         """Test that ICML plugin preserves existing paper fields."""
         # Mock the requests.get to return test data with existing fields
@@ -824,7 +824,7 @@ class TestML4PSPluginYearConference:
 class TestDatabaseYearConferenceIntegration:
     """Test that year and conference fields are properly stored in the database."""
 
-    @patch("neurips_abstracts.plugins.json_conference_downloader.requests.get")
+    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
     def test_neurips_year_conference_in_database(self, mock_get):
         """Test that year and conference are stored in database from NeurIPS plugin."""
         # Mock the requests.get to return test data
@@ -916,7 +916,7 @@ class TestDatabaseYearConferenceIntegration:
         lightweight_papers = plugin._convert_to_lightweight_format(papers)
 
         # Convert to LightweightPaper objects for insertion
-        from neurips_abstracts.plugin import LightweightPaper
+        from abstracts_explorer.plugin import LightweightPaper
 
         papers_to_insert = [LightweightPaper(**paper_dict) for paper_dict in lightweight_papers]
 

@@ -424,8 +424,8 @@ def chat_command(args: argparse.Namespace) -> int:
         print(f"\n📊 Loaded {stats['count']:,} papers from collection '{stats['name']}'")
 
         # Initialize database connection
-        from neurips_abstracts.database import DatabaseManager
-        from neurips_abstracts.config import get_config
+        from abstracts_explorer.database import DatabaseManager
+        from abstracts_explorer.config import get_config
 
         config_obj = get_config()
         db = DatabaseManager(config_obj.paper_db_path)
@@ -626,7 +626,7 @@ def web_ui_command(args: argparse.Namespace) -> int:
     try:
         # Try to import Flask - if it fails, give helpful error
         try:
-            from neurips_abstracts.web_ui import run_server
+            from abstracts_explorer.web_ui import run_server
         except ImportError:
             print("\n❌ Web UI dependencies not installed!", file=sys.stderr)
             print("\nThe web UI requires Flask. Install it with:", file=sys.stderr)
@@ -666,7 +666,7 @@ def main() -> int:
     config = get_config()
 
     parser = argparse.ArgumentParser(
-        prog="neurips-abstracts",
+        prog="abstracts-explorer",
         description="Abstracts Explorer - Tools for working with conference abstracts",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""

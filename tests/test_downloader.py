@@ -7,7 +7,7 @@ import pytest
 from unittest.mock import Mock, patch
 import requests
 
-from neurips_abstracts.downloader import download_json, download_neurips_data, DownloadError
+from abstracts_explorer.downloader import download_json, download_conference_data, DownloadError
 
 
 @pytest.fixture
@@ -41,7 +41,7 @@ class TestDownloadJson:
 
     def test_download_json_success(self, mock_response, sample_json_data):
         """Test successful JSON download."""
-        with patch("neurips_abstracts.downloader.requests.get", return_value=mock_response):
+        with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response):
             result = download_json("https://example.com/data.json")
             assert result == sample_json_data
 
@@ -49,7 +49,7 @@ class TestDownloadJson:
         """Test downloading JSON with output path."""
         output_file = tmp_path / "output.json"
 
-        with patch("neurips_abstracts.downloader.requests.get", return_value=mock_response):
+        with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response):
             result = download_json("https://example.com/data.json", output_path=output_file)
 
             assert result == sample_json_data
@@ -63,7 +63,7 @@ class TestDownloadJson:
         """Test that download_json creates parent directories."""
         output_file = tmp_path / "subdir" / "another" / "output.json"
 
-        with patch("neurips_abstracts.downloader.requests.get", return_value=mock_response):
+        with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response):
             download_json("https://example.com/data.json", output_path=output_file)
 
             assert output_file.exists()
@@ -81,7 +81,7 @@ class TestDownloadJson:
 
     def test_download_json_request_exception(self):
         """Test download_json when request fails."""
-        with patch("neurips_abstracts.downloader.requests.get") as mock_get:
+        with patch("abstracts_explorer.downloader.requests.get") as mock_get:
             mock_get.side_effect = requests.exceptions.RequestException("Connection error")
 
             with pytest.raises(DownloadError, match="Failed to download"):
@@ -92,7 +92,7 @@ class TestDownloadJson:
         mock_response = Mock()
         mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("404 Not Found")
 
-        with patch("neurips_abstracts.downloader.requests.get", return_value=mock_response):
+        with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response):
             with pytest.raises(DownloadError, match="Failed to download"):
                 download_json("https://example.com/data.json")
 
@@ -102,69 +102,69 @@ class TestDownloadJson:
         mock_response.raise_for_status = Mock()
         mock_response.json.side_effect = json.JSONDecodeError("Invalid JSON", "", 0)
 
-        with patch("neurips_abstracts.downloader.requests.get", return_value=mock_response):
+        with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response):
             with pytest.raises(DownloadError, match="Invalid JSON response"):
                 download_json("https://example.com/data.json")
 
     def test_download_json_custom_timeout(self, mock_response):
         """Test download_json with custom timeout."""
-        with patch("neurips_abstracts.downloader.requests.get", return_value=mock_response) as mock_get:
+        with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response) as mock_get:
             download_json("https://example.com/data.json", timeout=60)
             mock_get.assert_called_once_with("https://example.com/data.json", timeout=60, verify=True)
 
     def test_download_json_verify_ssl_false(self, mock_response):
         """Test download_json with SSL verification disabled."""
-        with patch("neurips_abstracts.downloader.requests.get", return_value=mock_response) as mock_get:
+        with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response) as mock_get:
             download_json("https://example.com/data.json", verify_ssl=False)
             mock_get.assert_called_once_with("https://example.com/data.json", timeout=30, verify=False)
 
 
-class TestDownloadNeuripsData:
-    """Tests for download_neurips_data function."""
+class TestDownloadConferenceData:
+    """Tests for download_conference_data function."""
 
-    def test_download_neurips_data_default_year(self, mock_response, sample_json_data):
+    def test_download_conference_data_default_year(self, mock_response, sample_json_data):
         """Test downloading NeurIPS data with default year."""
-        with patch("neurips_abstracts.downloader.requests.get", return_value=mock_response) as mock_get:
-            result = download_neurips_data()
+        with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response) as mock_get:
+            result = download_conference_data()
 
             assert result == sample_json_data
             expected_url = "https://neurips.cc/static/virtual/data/neurips-2025-orals-posters.json"
             mock_get.assert_called_once_with(expected_url, timeout=30, verify=True)
 
-    def test_download_neurips_data_custom_year(self, mock_response, sample_json_data):
+    def test_download_conference_data_custom_year(self, mock_response, sample_json_data):
         """Test downloading NeurIPS data with custom year."""
-        with patch("neurips_abstracts.downloader.requests.get", return_value=mock_response) as mock_get:
-            result = download_neurips_data(year=2024)
+        with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response) as mock_get:
+            result = download_conference_data(year=2024)
 
             assert result == sample_json_data
             expected_url = "https://neurips.cc/static/virtual/data/neurips-2024-orals-posters.json"
             mock_get.assert_called_once_with(expected_url, timeout=30, verify=True)
 
-    def test_download_neurips_data_with_output(self, mock_response, sample_json_data, tmp_path):
+    def test_download_conference_data_with_output(self, mock_response, sample_json_data, tmp_path):
         """Test downloading NeurIPS data with output path."""
         output_file = tmp_path / "neurips_2025.json"
 
-        with patch("neurips_abstracts.downloader.requests.get", return_value=mock_response):
-            result = download_neurips_data(output_path=output_file)
+        with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response):
+            result = download_conference_data(output_path=output_file)
 
             assert result == sample_json_data
             assert output_file.exists()
 
-    def test_download_neurips_data_custom_timeout(self, mock_response):
+    def test_download_conference_data_custom_timeout(self, mock_response):
         """Test downloading NeurIPS data with custom timeout."""
-        with patch("neurips_abstracts.downloader.requests.get", return_value=mock_response) as mock_get:
-            download_neurips_data(timeout=120)
+        with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response) as mock_get:
+            download_conference_data(timeout=120)
 
             expected_url = "https://neurips.cc/static/virtual/data/neurips-2025-orals-posters.json"
             mock_get.assert_called_once_with(expected_url, timeout=120, verify=True)
 
-    def test_download_neurips_data_failure(self):
-        """Test download_neurips_data when download fails."""
-        with patch("neurips_abstracts.downloader.requests.get") as mock_get:
+    def test_download_conference_data_failure(self):
+        """Test download_conference_data when download fails."""
+        with patch("abstracts_explorer.downloader.requests.get") as mock_get:
             mock_get.side_effect = requests.exceptions.RequestException("Network error")
 
             with pytest.raises(DownloadError):
-                download_neurips_data()
+                download_conference_data()
 
 
 class TestLocalCaching:
@@ -179,7 +179,7 @@ class TestLocalCaching:
             json.dump(sample_json_data, f)
 
         # Download should load from local file, not make HTTP request
-        with patch("neurips_abstracts.downloader.requests.get") as mock_get:
+        with patch("abstracts_explorer.downloader.requests.get") as mock_get:
             result = download_json("https://example.com/data.json", output_path=output_file)
 
             assert result == sample_json_data
@@ -196,7 +196,7 @@ class TestLocalCaching:
             json.dump(old_data, f)
 
         # Force download should ignore local file and download fresh data
-        with patch("neurips_abstracts.downloader.requests.get", return_value=mock_response):
+        with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response):
             result = download_json("https://example.com/data.json", output_path=output_file, force_download=True)
 
             assert result == sample_json_data
@@ -216,7 +216,7 @@ class TestLocalCaching:
             f.write("{invalid json content")
 
         # Should detect corrupted file and download fresh data
-        with patch("neurips_abstracts.downloader.requests.get", return_value=mock_response):
+        with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response):
             result = download_json("https://example.com/data.json", output_path=output_file)
 
             assert result == sample_json_data
@@ -226,8 +226,8 @@ class TestLocalCaching:
                 saved_data = json.load(f)
             assert saved_data == sample_json_data
 
-    def test_download_neurips_data_uses_cache(self, sample_json_data, tmp_path):
-        """Test that download_neurips_data uses cached file."""
+    def test_download_conference_data_uses_cache(self, sample_json_data, tmp_path):
+        """Test that download_conference_data uses cached file."""
         output_file = tmp_path / "neurips_2025.json"
 
         # Create a cached file
@@ -235,15 +235,15 @@ class TestLocalCaching:
             json.dump(sample_json_data, f)
 
         # Should load from cache
-        with patch("neurips_abstracts.downloader.requests.get") as mock_get:
-            result = download_neurips_data(output_path=output_file)
+        with patch("abstracts_explorer.downloader.requests.get") as mock_get:
+            result = download_conference_data(output_path=output_file)
 
             assert result == sample_json_data
             # No HTTP request should be made
             mock_get.assert_not_called()
 
-    def test_download_neurips_data_force_download(self, mock_response, sample_json_data, tmp_path):
-        """Test that download_neurips_data with force_download ignores cache."""
+    def test_download_conference_data_force_download(self, mock_response, sample_json_data, tmp_path):
+        """Test that download_conference_data with force_download ignores cache."""
         output_file = tmp_path / "neurips_2025.json"
 
         # Create a cached file
@@ -252,8 +252,8 @@ class TestLocalCaching:
             json.dump(old_data, f)
 
         # Force download should ignore cache
-        with patch("neurips_abstracts.downloader.requests.get", return_value=mock_response):
-            result = download_neurips_data(output_path=output_file, force_download=True)
+        with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response):
+            result = download_conference_data(output_path=output_file, force_download=True)
 
             assert result == sample_json_data
             assert result != old_data
@@ -261,7 +261,7 @@ class TestLocalCaching:
     def test_download_json_no_output_path_always_downloads(self, mock_response, sample_json_data):
         """Test that without output_path, data is always downloaded."""
         # Without output_path, should always download (no caching)
-        with patch("neurips_abstracts.downloader.requests.get", return_value=mock_response) as mock_get:
+        with patch("abstracts_explorer.downloader.requests.get", return_value=mock_response) as mock_get:
             result = download_json("https://example.com/data.json")
 
             assert result == sample_json_data

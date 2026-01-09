@@ -5,7 +5,7 @@ Tests for the embeddings module.
 import pytest
 from unittest.mock import Mock
 
-from neurips_abstracts.embeddings import EmbeddingsError, EmbeddingsManager
+from abstracts_explorer.embeddings import EmbeddingsError, EmbeddingsManager
 
 # Fixtures imported from conftest.py:
 # - mock_lm_studio: Mock LM Studio API responses
@@ -304,7 +304,7 @@ class TestEmbeddingsManager:
 
     def test_embed_from_database_empty_result(self, embeddings_manager, tmp_path, mock_lm_studio):
         """Test embedding from database with no matching papers."""
-        from neurips_abstracts.database import DatabaseManager
+        from abstracts_explorer.database import DatabaseManager
 
         # Create empty database using DatabaseManager
         db_path = tmp_path / "empty.db"
@@ -324,8 +324,8 @@ class TestEmbeddingsManager:
 
     def test_embed_from_database_all_empty_abstracts(self, embeddings_manager, tmp_path, mock_lm_studio):
         """Test embedding from database where all papers have empty abstracts."""
-        from neurips_abstracts.database import DatabaseManager
-        from neurips_abstracts.plugin import LightweightPaper
+        from abstracts_explorer.database import DatabaseManager
+        from abstracts_explorer.plugin import LightweightPaper
 
         db_path = tmp_path / "test.db"
         with DatabaseManager(db_path) as db:
@@ -355,7 +355,7 @@ class TestEmbeddingsManager:
 
     def test_embed_from_database_sql_error(self, embeddings_manager, tmp_path):
         """Test embedding from database with SQL error."""
-        from neurips_abstracts.database import DatabaseManager
+        from abstracts_explorer.database import DatabaseManager
         
         # Create database with only embeddings_metadata, but missing papers table
         db_path = tmp_path / "bad.db"
@@ -484,7 +484,7 @@ def test_check_model_compatibility_no_database(embeddings_manager, tmp_path):
 
 def test_check_model_compatibility_no_model_stored(embeddings_manager, tmp_path):
     """Test checking model compatibility when no model is stored in database."""
-    from neurips_abstracts.database import DatabaseManager
+    from abstracts_explorer.database import DatabaseManager
     
     db_path = tmp_path / "test.db"
     with DatabaseManager(db_path) as db:
@@ -499,7 +499,7 @@ def test_check_model_compatibility_no_model_stored(embeddings_manager, tmp_path)
 
 def test_check_model_compatibility_matching_models(embeddings_manager, tmp_path):
     """Test checking model compatibility when models match."""
-    from neurips_abstracts.database import DatabaseManager
+    from abstracts_explorer.database import DatabaseManager
     
     db_path = tmp_path / "test.db"
     with DatabaseManager(db_path) as db:
@@ -515,7 +515,7 @@ def test_check_model_compatibility_matching_models(embeddings_manager, tmp_path)
 
 def test_check_model_compatibility_mismatched_models(embeddings_manager, tmp_path):
     """Test checking model compatibility when models differ."""
-    from neurips_abstracts.database import DatabaseManager
+    from abstracts_explorer.database import DatabaseManager
     
     db_path = tmp_path / "test.db"
     different_model = "different-embedding-model"
@@ -533,7 +533,7 @@ def test_check_model_compatibility_mismatched_models(embeddings_manager, tmp_pat
 
 def test_embed_from_database_stores_model(embeddings_manager, test_database):
     """Test that embed_from_database stores the embedding model in the database."""
-    from neurips_abstracts.database import DatabaseManager
+    from abstracts_explorer.database import DatabaseManager
     
     embeddings_manager.connect()
     embeddings_manager.create_collection()

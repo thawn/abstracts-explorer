@@ -8,11 +8,11 @@ including the download and create-embeddings commands.
 import sys
 from unittest.mock import Mock, patch
 import pytest
-from neurips_abstracts.cli import (
+from abstracts_explorer.cli import (
     main,
     search_command,
 )
-from neurips_abstracts.plugin import LightweightPaper
+from abstracts_explorer.plugin import LightweightPaper
 
 
 class TestCLI:
@@ -69,7 +69,7 @@ class TestCLI:
         ]
         mock_plugin.download.return_value = mock_papers
 
-        with patch("neurips_abstracts.cli.get_plugin") as mock_get_plugin:
+        with patch("abstracts_explorer.cli.get_plugin") as mock_get_plugin:
             mock_get_plugin.return_value = mock_plugin
 
             with patch.object(
@@ -95,7 +95,7 @@ class TestCLI:
         mock_plugin.plugin_description = "NeurIPS Test Plugin"
         mock_plugin.download.side_effect = Exception("Network error")
 
-        with patch("neurips_abstracts.cli.get_plugin") as mock_get_plugin:
+        with patch("abstracts_explorer.cli.get_plugin") as mock_get_plugin:
             mock_get_plugin.return_value = mock_plugin
 
             with patch.object(
@@ -127,7 +127,7 @@ class TestCLI:
     def test_create_embeddings_lm_studio_not_available(self, tmp_path, capsys):
         """Test create-embeddings when OpenAI API is not available."""
         # Create a test database
-        from neurips_abstracts import DatabaseManager
+        from abstracts_explorer import DatabaseManager
 
         db_path = tmp_path / "test.db"
         with DatabaseManager(db_path) as db:
@@ -146,7 +146,7 @@ class TestCLI:
             db.add_papers(papers)
 
         # Mock OpenAI API connection failure
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
             mock_em.test_lm_studio_connection.return_value = False
@@ -172,7 +172,7 @@ class TestCLI:
 
     def test_create_embeddings_success(self, tmp_path, capsys):
         """Test create-embeddings command completes successfully."""
-        from neurips_abstracts import DatabaseManager
+        from abstracts_explorer import DatabaseManager
 
         # Create a test database
         db_path = tmp_path / "test.db"
@@ -201,7 +201,7 @@ class TestCLI:
             db.add_papers(papers)
 
         # Mock embeddings manager
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
             mock_em.test_lm_studio_connection.return_value = True
@@ -232,7 +232,7 @@ class TestCLI:
 
     def test_create_embeddings_with_where_clause(self, tmp_path, capsys):
         """Test create-embeddings with WHERE clause filter."""
-        from neurips_abstracts import DatabaseManager
+        from abstracts_explorer import DatabaseManager
 
         # Create a test database
         db_path = tmp_path / "test.db"
@@ -263,7 +263,7 @@ class TestCLI:
             db.add_papers(papers)
 
         # Mock embeddings manager
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
             mock_em.test_lm_studio_connection.return_value = True
@@ -296,7 +296,7 @@ class TestCLI:
 
     def test_create_embeddings_force_flag(self, tmp_path, capsys):
         """Test create-embeddings with --force flag."""
-        from neurips_abstracts import DatabaseManager
+        from abstracts_explorer import DatabaseManager
 
         # Create a test database
         db_path = tmp_path / "test.db"
@@ -319,7 +319,7 @@ class TestCLI:
         embeddings_path.mkdir()
 
         # Mock embeddings manager
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
             mock_em.test_lm_studio_connection.return_value = True
@@ -353,7 +353,7 @@ class TestCLI:
 
     def test_create_embeddings_custom_model(self, tmp_path, capsys):
         """Test create-embeddings with custom model settings."""
-        from neurips_abstracts import DatabaseManager
+        from abstracts_explorer import DatabaseManager
 
         # Create a test database
         db_path = tmp_path / "test.db"
@@ -376,7 +376,7 @@ class TestCLI:
         custom_model = "custom-embedding-model"
 
         # Mock embeddings manager
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, custom_model)
             mock_em.test_lm_studio_connection.return_value = True
@@ -412,8 +412,8 @@ class TestCLI:
 
     def test_create_embeddings_embeddings_error(self, tmp_path, capsys):
         """Test create-embeddings handles EmbeddingsError gracefully."""
-        from neurips_abstracts import DatabaseManager
-        from neurips_abstracts.embeddings import EmbeddingsError
+        from abstracts_explorer import DatabaseManager
+        from abstracts_explorer.embeddings import EmbeddingsError
 
         # Create a test database
         db_path = tmp_path / "test.db"
@@ -433,7 +433,7 @@ class TestCLI:
             db.add_papers(papers)
 
         # Mock embeddings manager to raise error
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
             mock_em.test_lm_studio_connection.return_value = True
@@ -479,7 +479,7 @@ class TestCLI:
         embeddings_path.mkdir()
 
         # Mock embeddings manager with OpenAI API unavailable
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.test_lm_studio_connection.return_value = False
             MockEM.return_value = mock_em
@@ -507,7 +507,7 @@ class TestCLI:
         embeddings_path.mkdir()
 
         # Mock embeddings manager with results
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.test_lm_studio_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 100}
@@ -563,7 +563,7 @@ class TestCLI:
         embeddings_path.mkdir()
 
         # Mock embeddings manager
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.test_lm_studio_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 10}
@@ -602,7 +602,7 @@ class TestCLI:
         embeddings_path.mkdir()
 
         # Mock embeddings manager
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.test_lm_studio_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 50}
@@ -650,7 +650,7 @@ class TestCLI:
         embeddings_path.mkdir()
 
         # Mock embeddings manager with empty results
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.test_lm_studio_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 100}
@@ -678,7 +678,7 @@ class TestCLI:
 
     def test_search_with_db_path_author_names(self, tmp_path, capsys):
         """Test search command with database path to resolve author names."""
-        from neurips_abstracts import DatabaseManager
+        from abstracts_explorer import DatabaseManager
 
         # Create a test database with lightweight schema
         db_path = tmp_path / "test.db"
@@ -702,7 +702,7 @@ class TestCLI:
         embeddings_path.mkdir()
 
         # Mock embeddings manager
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.test_lm_studio_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
@@ -757,7 +757,7 @@ class TestCLI:
         nonexistent_db = tmp_path / "nonexistent.db"
 
         # Mock embeddings manager
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.test_lm_studio_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
@@ -792,7 +792,7 @@ class TestCLI:
 
     def test_search_with_db_path_lookup_error(self, tmp_path, capsys):
         """Test search command when database connection fails."""
-        from neurips_abstracts.database import DatabaseManager
+        from abstracts_explorer.database import DatabaseManager
         
         embeddings_path = tmp_path / "embeddings"
         embeddings_path.mkdir()
@@ -804,7 +804,7 @@ class TestCLI:
         db.close()
 
         # Mock embeddings manager
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.test_lm_studio_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
@@ -818,7 +818,7 @@ class TestCLI:
             MockEM.return_value = mock_em
 
             # Mock DatabaseManager to raise exception on connect
-            with patch("neurips_abstracts.cli.DatabaseManager") as MockDB:
+            with patch("abstracts_explorer.cli.DatabaseManager") as MockDB:
                 mock_db = Mock()
                 mock_db.connect.side_effect = Exception("Connection failed")
                 MockDB.return_value = mock_db
@@ -850,7 +850,7 @@ class TestCLI:
         embeddings_path.mkdir()
 
         # Mock embeddings manager to raise unexpected exception
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.test_lm_studio_connection.return_value = True
             mock_em.get_collection_stats.side_effect = Exception("Unexpected error")
@@ -881,7 +881,7 @@ class TestChatCommand:
 
     def test_chat_embeddings_not_found(self, tmp_path, capsys):
         """Test chat command when embeddings don't exist."""
-        from neurips_abstracts.cli import chat_command
+        from abstracts_explorer.cli import chat_command
         import argparse
 
         args = argparse.Namespace(
@@ -904,7 +904,7 @@ class TestChatCommand:
 
     def test_chat_lm_studio_not_available(self, tmp_path, capsys):
         """Test chat command when OpenAI API is not available."""
-        from neurips_abstracts.cli import chat_command
+        from abstracts_explorer.cli import chat_command
         import argparse
 
         embeddings_path = tmp_path / "chroma_db"
@@ -922,7 +922,7 @@ class TestChatCommand:
             export=None,
         )
 
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.test_lm_studio_connection.return_value = False
             MockEM.return_value = mock_em
@@ -935,8 +935,8 @@ class TestChatCommand:
 
     def test_chat_rag_error(self, tmp_path, capsys):
         """Test chat command with RAG error."""
-        from neurips_abstracts.cli import chat_command
-        from neurips_abstracts.rag import RAGError
+        from abstracts_explorer.cli import chat_command
+        from abstracts_explorer.rag import RAGError
         import argparse
 
         embeddings_path = tmp_path / "chroma_db"
@@ -954,13 +954,13 @@ class TestChatCommand:
             export=None,
         )
 
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.test_lm_studio_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 100}
             MockEM.return_value = mock_em
 
-            with patch("neurips_abstracts.cli.RAGChat") as MockRAG:
+            with patch("abstracts_explorer.cli.RAGChat") as MockRAG:
                 MockRAG.side_effect = RAGError("Test RAG error")
 
                 exit_code = chat_command(args)
@@ -975,17 +975,17 @@ class TestWebUICommand:
 
     def test_web_ui_flask_not_installed(self, capsys):
         """Test web-ui command when Flask is not installed."""
-        from neurips_abstracts.cli import web_ui_command
+        from abstracts_explorer.cli import web_ui_command
         import argparse
 
         args = argparse.Namespace(host="127.0.0.1", port=5000, debug=False)
 
         # Mock the import at the location where it happens (inside web_ui_command)
-        with patch.dict("sys.modules", {"neurips_abstracts.web_ui": None}):
+        with patch.dict("sys.modules", {"abstracts_explorer.web_ui": None}):
             # Make importing web_ui raise ImportError
 
             def mock_import(name, *args, **kwargs):
-                if name == "neurips_abstracts.web_ui":
+                if name == "abstracts_explorer.web_ui":
                     raise ImportError("No module named 'flask'")
                 return __import__(name, *args, **kwargs)
 
@@ -998,13 +998,13 @@ class TestWebUICommand:
 
     def test_web_ui_keyboard_interrupt(self, capsys):
         """Test web-ui command handles keyboard interrupt gracefully."""
-        from neurips_abstracts.cli import web_ui_command
+        from abstracts_explorer.cli import web_ui_command
         import argparse
 
         args = argparse.Namespace(host="127.0.0.1", port=5000, debug=False)
 
         # Mock run_server at the location where it's used after import
-        with patch("neurips_abstracts.web_ui.run_server", side_effect=KeyboardInterrupt()):
+        with patch("abstracts_explorer.web_ui.run_server", side_effect=KeyboardInterrupt()):
             exit_code = web_ui_command(args)
 
         assert exit_code == 0
@@ -1013,13 +1013,13 @@ class TestWebUICommand:
 
     def test_web_ui_unexpected_error(self, capsys):
         """Test web-ui command handles unexpected errors."""
-        from neurips_abstracts.cli import web_ui_command
+        from abstracts_explorer.cli import web_ui_command
         import argparse
 
         args = argparse.Namespace(host="127.0.0.1", port=5000, debug=False)
 
         # Mock run_server at the location where it's used after import
-        with patch("neurips_abstracts.web_ui.run_server", side_effect=Exception("Test error")):
+        with patch("abstracts_explorer.web_ui.run_server", side_effect=Exception("Test error")):
             exit_code = web_ui_command(args)
 
         assert exit_code == 1
@@ -1028,13 +1028,13 @@ class TestWebUICommand:
 
     def test_web_ui_database_not_found(self, capsys):
         """Test web-ui command handles database not found error gracefully."""
-        from neurips_abstracts.cli import web_ui_command
+        from abstracts_explorer.cli import web_ui_command
         import argparse
 
         args = argparse.Namespace(host="127.0.0.1", port=5000, debug=False)
 
         # Mock run_server to raise FileNotFoundError (as it would when database is missing)
-        with patch("neurips_abstracts.web_ui.run_server", side_effect=FileNotFoundError("Database not found: /nonexistent/test.db")):
+        with patch("abstracts_explorer.web_ui.run_server", side_effect=FileNotFoundError("Database not found: /nonexistent/test.db")):
             exit_code = web_ui_command(args)
 
         # Should exit with code 1 but not show traceback
@@ -1054,7 +1054,7 @@ class TestMainDispatch:
         embeddings_path.mkdir()
 
         with patch.object(sys, "argv", ["neurips-abstracts", "chat", "--embeddings-path", str(embeddings_path)]):
-            with patch("neurips_abstracts.cli.chat_command") as mock_chat:
+            with patch("abstracts_explorer.cli.chat_command") as mock_chat:
                 mock_chat.return_value = 0
                 exit_code = main()
 
@@ -1064,7 +1064,7 @@ class TestMainDispatch:
     def test_main_web_ui_command(self):
         """Test main() dispatches web-ui command."""
         with patch.object(sys, "argv", ["neurips-abstracts", "web-ui"]):
-            with patch("neurips_abstracts.cli.web_ui_command") as mock_web:
+            with patch("abstracts_explorer.cli.web_ui_command") as mock_web:
                 mock_web.return_value = 0
                 exit_code = main()
 
@@ -1094,7 +1094,7 @@ class TestCLISearchErrorHandling:
             db_path=None,
         )
 
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.connect.return_value = None
             mock_em.create_collection.return_value = None
@@ -1131,7 +1131,7 @@ class TestCLISearchErrorHandling:
             db_path=None,
         )
 
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             # Make EmbeddingsManager raise unexpected exception
             MockEM.side_effect = RuntimeError("Unexpected error")
 
@@ -1147,12 +1147,12 @@ class TestCLIEmbeddingsProgressAndStats:
 
     def test_create_embeddings_success_displays_stats(self, tmp_path, capsys):
         """Test that successful embedding displays stats (lines 131-136, 147-152)."""
-        from neurips_abstracts.cli import main
+        from abstracts_explorer.cli import main
 
         db_path = tmp_path / "test.db"
 
         # Create test database
-        from neurips_abstracts.database import DatabaseManager
+        from abstracts_explorer.database import DatabaseManager
 
         db = DatabaseManager(str(db_path))
         with db:
@@ -1165,7 +1165,7 @@ class TestCLIEmbeddingsProgressAndStats:
                 )
             db.connection.commit()
 
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
             mock_em.test_lm_studio_connection.return_value = True
@@ -1214,7 +1214,7 @@ class TestCLIChatInteractiveLoop:
 
     def test_chat_empty_input_continues(self, tmp_path, capsys):
         """Test that empty input is skipped in chat loop."""
-        from neurips_abstracts.cli import chat_command
+        from abstracts_explorer.cli import chat_command
         import argparse
 
         embeddings_path = tmp_path / "chroma_db"
@@ -1232,13 +1232,13 @@ class TestCLIChatInteractiveLoop:
             export=None,
         )
 
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.connect.return_value = None
             mock_em.create_collection.return_value = None
             mock_em.get_collection_stats.return_value = {"name": "test_collection", "count": 100}
 
-            with patch("neurips_abstracts.cli.RAGChat"):
+            with patch("abstracts_explorer.cli.RAGChat"):
 
                 # Simulate: empty input, then exit
                 with patch("builtins.input", side_effect=["", "   ", "exit"]):
@@ -1249,7 +1249,7 @@ class TestCLIChatInteractiveLoop:
 
     def test_chat_quit_command(self, tmp_path, capsys):
         """Test chat exits on 'quit' command."""
-        from neurips_abstracts.cli import chat_command
+        from abstracts_explorer.cli import chat_command
         import argparse
 
         embeddings_path = tmp_path / "chroma_db"
@@ -1267,13 +1267,13 @@ class TestCLIChatInteractiveLoop:
             export=None,
         )
 
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.connect.return_value = None
             mock_em.create_collection.return_value = None
             mock_em.get_collection_stats.return_value = {"name": "test_collection", "count": 100}
 
-            with patch("neurips_abstracts.cli.RAGChat"):
+            with patch("abstracts_explorer.cli.RAGChat"):
                 # Test 'quit' command
                 with patch("builtins.input", side_effect=["quit"]):
                     exit_code = chat_command(args)
@@ -1284,7 +1284,7 @@ class TestCLIChatInteractiveLoop:
 
     def test_chat_q_command(self, tmp_path, capsys):
         """Test chat exits on 'q' command."""
-        from neurips_abstracts.cli import chat_command
+        from abstracts_explorer.cli import chat_command
         import argparse
 
         embeddings_path = tmp_path / "chroma_db"
@@ -1302,13 +1302,13 @@ class TestCLIChatInteractiveLoop:
             export=None,
         )
 
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.connect.return_value = None
             mock_em.create_collection.return_value = None
             mock_em.get_collection_stats.return_value = {"name": "test_collection", "count": 100}
 
-            with patch("neurips_abstracts.cli.RAGChat"):
+            with patch("abstracts_explorer.cli.RAGChat"):
                 # Test 'q' command
                 with patch("builtins.input", side_effect=["q"]):
                     exit_code = chat_command(args)
@@ -1319,7 +1319,7 @@ class TestCLIChatInteractiveLoop:
 
     def test_chat_reset_command(self, tmp_path, capsys):
         """Test chat reset command works."""
-        from neurips_abstracts.cli import chat_command
+        from abstracts_explorer.cli import chat_command
         import argparse
 
         embeddings_path = tmp_path / "chroma_db"
@@ -1337,13 +1337,13 @@ class TestCLIChatInteractiveLoop:
             export=None,
         )
 
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.connect.return_value = None
             mock_em.create_collection.return_value = None
             mock_em.get_collection_stats.return_value = {"name": "test_collection", "count": 100}
 
-            with patch("neurips_abstracts.cli.RAGChat") as MockRAG:
+            with patch("abstracts_explorer.cli.RAGChat") as MockRAG:
                 mock_rag = MockRAG.return_value
 
                 # Test reset then exit
@@ -1357,7 +1357,7 @@ class TestCLIChatInteractiveLoop:
 
     def test_chat_help_command(self, tmp_path, capsys):
         """Test chat help command displays help."""
-        from neurips_abstracts.cli import chat_command
+        from abstracts_explorer.cli import chat_command
         import argparse
 
         embeddings_path = tmp_path / "chroma_db"
@@ -1375,13 +1375,13 @@ class TestCLIChatInteractiveLoop:
             export=None,
         )
 
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.connect.return_value = None
             mock_em.create_collection.return_value = None
             mock_em.get_collection_stats.return_value = {"name": "test_collection", "count": 100}
 
-            with patch("neurips_abstracts.cli.RAGChat"):
+            with patch("abstracts_explorer.cli.RAGChat"):
                 # Test help then exit
                 with patch("builtins.input", side_effect=["help", "exit"]):
                     exit_code = chat_command(args)
@@ -1394,7 +1394,7 @@ class TestCLIChatInteractiveLoop:
 
     def test_chat_with_query_and_show_sources(self, tmp_path, capsys):
         """Test chat processes query and shows sources."""
-        from neurips_abstracts.cli import chat_command
+        from abstracts_explorer.cli import chat_command
         import argparse
 
         embeddings_path = tmp_path / "chroma_db"
@@ -1412,13 +1412,13 @@ class TestCLIChatInteractiveLoop:
             export=None,
         )
 
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.connect.return_value = None
             mock_em.create_collection.return_value = None
             mock_em.get_collection_stats.return_value = {"name": "test_collection", "count": 100}
 
-            with patch("neurips_abstracts.cli.RAGChat") as MockRAG:
+            with patch("abstracts_explorer.cli.RAGChat") as MockRAG:
                 mock_rag = MockRAG.return_value
                 mock_rag.query.return_value = {
                     "response": "Test response about transformers",
@@ -1443,7 +1443,7 @@ class TestCLIChatInteractiveLoop:
 
     def test_chat_with_export(self, tmp_path, capsys):
         """Test chat exports conversation at end."""
-        from neurips_abstracts.cli import chat_command
+        from abstracts_explorer.cli import chat_command
         import argparse
 
         embeddings_path = tmp_path / "chroma_db"
@@ -1462,13 +1462,13 @@ class TestCLIChatInteractiveLoop:
             export=str(export_file),  # Export enabled
         )
 
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.connect.return_value = None
             mock_em.create_collection.return_value = None
             mock_em.get_collection_stats.return_value = {"name": "test_collection", "count": 100}
 
-            with patch("neurips_abstracts.cli.RAGChat") as MockRAG:
+            with patch("abstracts_explorer.cli.RAGChat") as MockRAG:
                 mock_rag = MockRAG.return_value
 
                 # Exit immediately
@@ -1482,7 +1482,7 @@ class TestCLIChatInteractiveLoop:
 
     def test_chat_keyboard_interrupt(self, tmp_path, capsys):
         """Test chat handles Ctrl+C gracefully."""
-        from neurips_abstracts.cli import chat_command
+        from abstracts_explorer.cli import chat_command
         import argparse
 
         embeddings_path = tmp_path / "chroma_db"
@@ -1500,13 +1500,13 @@ class TestCLIChatInteractiveLoop:
             export=None,
         )
 
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.connect.return_value = None
             mock_em.create_collection.return_value = None
             mock_em.get_collection_stats.return_value = {"name": "test_collection", "count": 100}
 
-            with patch("neurips_abstracts.cli.RAGChat"):
+            with patch("abstracts_explorer.cli.RAGChat"):
                 # Simulate Ctrl+C
                 with patch("builtins.input", side_effect=KeyboardInterrupt()):
                     exit_code = chat_command(args)
@@ -1517,7 +1517,7 @@ class TestCLIChatInteractiveLoop:
 
     def test_chat_eoferror(self, tmp_path, capsys):
         """Test chat handles EOF (Ctrl+D) gracefully."""
-        from neurips_abstracts.cli import chat_command
+        from abstracts_explorer.cli import chat_command
         import argparse
 
         embeddings_path = tmp_path / "chroma_db"
@@ -1535,13 +1535,13 @@ class TestCLIChatInteractiveLoop:
             export=None,
         )
 
-        with patch("neurips_abstracts.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.connect.return_value = None
             mock_em.create_collection.return_value = None
             mock_em.get_collection_stats.return_value = {"name": "test_collection", "count": 100}
 
-            with patch("neurips_abstracts.cli.RAGChat"):
+            with patch("abstracts_explorer.cli.RAGChat"):
                 # Simulate EOF
                 with patch("builtins.input", side_effect=EOFError()):
                     exit_code = chat_command(args)

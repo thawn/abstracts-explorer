@@ -96,7 +96,7 @@ CHAT_MODEL=llama-3.2-3b-instruct
 export CHAT_MODEL=diffbot-small-xl-2508
 
 # 4. CLI argument (overrides all)
-neurips-abstracts chat --model custom-model
+abstracts-explorer chat --model custom-model
 ```
 
 ## .env File Format

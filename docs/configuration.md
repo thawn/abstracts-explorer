@@ -104,7 +104,7 @@ You can also set configuration via environment variables:
 ```bash
 export CHAT_MODEL=llama-3.2-3b-instruct
 export LLM_BACKEND_URL=http://localhost:8080
-neurips-abstracts chat
+abstracts-explorer chat
 ```
 
 ## Security Best Practices

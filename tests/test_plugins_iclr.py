@@ -12,8 +12,8 @@ from pathlib import Path
 from unittest.mock import patch, Mock
 import requests
 
-from neurips_abstracts.plugins.iclr_downloader import ICLRDownloaderPlugin
-from neurips_abstracts.database import DatabaseManager
+from abstracts_explorer.plugins.iclr_downloader import ICLRDownloaderPlugin
+from abstracts_explorer.database import DatabaseManager
 
 
 class TestICLRPlugin:
@@ -55,7 +55,7 @@ class TestICLRPlugin:
         with pytest.raises(ValueError, match="Year 1800 not supported"):
             plugin.validate_year(1800)
 
-    @patch("neurips_abstracts.plugins.json_conference_downloader.requests.get")
+    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
     def test_download_success(self, mock_get):
         """Test successful download of ICLR data."""
         # Mock the requests.get response
@@ -98,7 +98,7 @@ class TestICLRPlugin:
             assert paper.year == 2025
             assert paper.conference == "ICLR"
 
-    @patch("neurips_abstracts.plugins.json_conference_downloader.requests.get")
+    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
     def test_download_with_default_year(self, mock_get):
         """Test download with default year (2025)."""
         mock_response = Mock()
@@ -122,7 +122,7 @@ class TestICLRPlugin:
         assert len(data) == 1
         assert data[0].year == 2025
 
-    @patch("neurips_abstracts.plugins.json_conference_downloader.requests.get")
+    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
     def test_download_with_save_to_file(self, mock_get):
         """Test download with saving to file."""
         mock_response = Mock()
@@ -177,7 +177,7 @@ class TestICLRPlugin:
 
             # Download without force_download should load from file
             plugin = ICLRDownloaderPlugin()
-            with patch("neurips_abstracts.plugins.json_conference_downloader.requests.get") as mock_get:
+            with patch("abstracts_explorer.plugins.json_conference_downloader.requests.get") as mock_get:
                 data = plugin.download(year=2025, output_path=str(output_path))
 
                 # requests.get should NOT have been called
@@ -188,7 +188,7 @@ class TestICLRPlugin:
                 assert len(data) == 1
                 assert data[0].title == "Cached Paper"
 
-    @patch("neurips_abstracts.plugins.json_conference_downloader.requests.get")
+    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
     def test_download_force_redownload(self, mock_get):
         """Test force re-download even when file exists."""
         mock_response = Mock()
@@ -219,7 +219,7 @@ class TestICLRPlugin:
             assert len(data) == 1
             assert data[0].title == "Fresh Paper"
 
-    @patch("neurips_abstracts.plugins.json_conference_downloader.requests.get")
+    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
     def test_download_request_exception(self, mock_get):
         """Test handling of request exceptions."""
         mock_get.side_effect = requests.exceptions.RequestException("Connection error")
@@ -229,7 +229,7 @@ class TestICLRPlugin:
         with pytest.raises(RuntimeError, match="Failed to download"):
             plugin.download(year=2025)
 
-    @patch("neurips_abstracts.plugins.json_conference_downloader.requests.get")
+    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
     def test_download_invalid_json(self, mock_get):
         """Test handling of invalid JSON response."""
         mock_response = Mock()
@@ -241,7 +241,7 @@ class TestICLRPlugin:
         with pytest.raises(RuntimeError, match="Invalid JSON response"):
             plugin.download(year=2025)
 
-    @patch("neurips_abstracts.plugins.json_conference_downloader.requests.get")
+    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
     def test_download_custom_timeout(self, mock_get):
         """Test download with custom timeout."""
         mock_response = Mock()
@@ -255,7 +255,7 @@ class TestICLRPlugin:
         call_kwargs = mock_get.call_args[1]
         assert call_kwargs["timeout"] == 60
 
-    @patch("neurips_abstracts.plugins.json_conference_downloader.requests.get")
+    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
     def test_download_kwargs_override(self, mock_get):
         """Test that kwargs can override default timeout and verify_ssl."""
         mock_response = Mock()
@@ -274,7 +274,7 @@ class TestICLRPlugin:
 class TestICLRPluginDatabaseIntegration:
     """Test ICLR plugin integration with database."""
 
-    @patch("neurips_abstracts.plugins.json_conference_downloader.requests.get")
+    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
     def test_iclr_data_in_database(self, mock_get):
         """Test that ICLR data can be stored in the database."""
         # Mock the ICLR API response
@@ -335,7 +335,7 @@ class TestICLRPluginRegistration:
 
     def test_plugin_auto_registers(self):
         """Test that ICLR plugin auto-registers on import."""
-        from neurips_abstracts.plugins import get_plugin
+        from abstracts_explorer.plugins import get_plugin
 
         plugin = get_plugin("iclr")
         assert plugin is not None
@@ -343,7 +343,7 @@ class TestICLRPluginRegistration:
 
     def test_plugin_in_list(self):
         """Test that ICLR plugin appears in plugin list."""
-        from neurips_abstracts.plugins import list_plugin_names
+        from abstracts_explorer.plugins import list_plugin_names
 
         plugin_names = list_plugin_names()
         assert "iclr" in plugin_names
