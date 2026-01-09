@@ -101,7 +101,7 @@ coverage/
 
 # Web UI vendor files (installed via npm)
 # Ignore all files in vendor directory except README.md
-src/neurips_abstracts/web_ui/static/vendor/
+src/abstracts_explorer/web_ui/static/vendor/
 # Ignore all webfonts
-src/neurips_abstracts/web_ui/static/webfonts/
+src/abstracts_explorer/web_ui/static/webfonts/
 
