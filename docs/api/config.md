@@ -1,6 +1,6 @@
 # Config Module
 
-The config module provides configuration management for the NeurIPS Abstracts package.
+The config module provides configuration management for Abstracts Explorer.
 
 ## Overview
 

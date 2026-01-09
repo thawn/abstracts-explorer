@@ -1,4 +1,4 @@
-# NeurIPS Abstracts
+# Abstracts Explorer
 
 A Python package for downloading NeurIPS conference data and loading it into a SQLite database.
 

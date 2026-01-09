@@ -1,7 +1,7 @@
 """
 Command-line interface for neurips-abstracts package.
 
-This module provides CLI commands for working with NeurIPS abstracts,
+This module provides CLI commands for Abstracts Explorer,
 including downloading data, creating databases, and generating embeddings.
 """
 
@@ -44,7 +44,7 @@ def setup_logging(verbosity: int) -> None:
 
 def create_embeddings_command(args: argparse.Namespace) -> int:
     """
-    Create embeddings database for NeurIPS abstracts.
+    Create embeddings database for abstracts.
 
     Parameters
     ----------
@@ -73,7 +73,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         print(f"  neurips-abstracts download --output {db_path}", file=sys.stderr)
         return 1
 
-    print("NeurIPS Embeddings Generator")
+    print("Abstracts Explorer - Embeddings Generator")
     print("=" * 70)
     print(f"Database: {db_path}")
     print(f"Output:   {output_path}")
@@ -355,7 +355,7 @@ def search_command(args: argparse.Namespace) -> int:
 
 def chat_command(args: argparse.Namespace) -> int:
     """
-    Interactive RAG chat with NeurIPS papers.
+    Interactive RAG chat with papers.
 
     Parameters
     ----------
@@ -764,7 +764,7 @@ Examples:
     # Create embeddings command
     embeddings_parser = subparsers.add_parser(
         "create-embeddings",
-        help="Generate embeddings for NeurIPS abstracts",
+        help="Generate embeddings for abstracts",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     embeddings_parser.add_argument(

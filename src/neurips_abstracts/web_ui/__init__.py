@@ -1,8 +1,8 @@
 """
-Web UI module for NeurIPS Abstracts.
+Web UI module for Abstracts Explorer.
 
 This module provides a Flask-based web interface for exploring
-the NeurIPS abstracts database.
+the abstracts database.
 
 Note: This module requires Flask and related dependencies.
 Install with: pip install neurips-abstracts[web]

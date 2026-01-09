@@ -1,6 +1,6 @@
 # Plugin System
 
-The NeurIPS Abstracts package includes an extensible plugin system that allows you to download papers from multiple sources beyond the official NeurIPS conference.
+Abstracts Explorer includes an extensible plugin system that allows you to download papers from multiple sources beyond the official NeurIPS conference.
 
 ## Overview
 

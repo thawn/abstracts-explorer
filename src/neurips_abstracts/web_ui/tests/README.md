@@ -2,7 +2,7 @@
 
 ## Summary
 
-✅ **39 JavaScript unit tests** created for the NeurIPS Abstracts web UI  
+✅ **39 JavaScript unit tests** created for the Abstracts Explorer web UI  
 ✅ **All tests passing** (~0.8s execution time)  
 ✅ **Complete function coverage** - All 10 JavaScript functions tested  
 ✅ **XSS protection verified** - Security testing included

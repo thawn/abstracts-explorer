@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for your interest in contributing to the NeurIPS Abstracts package!
+Thank you for your interest in contributing to Abstracts Explorer!
 
 ## Development Setup
 

@@ -1,6 +1,6 @@
 # Plugin API Quick Reference
 
-Quick reference for the NeurIPS Abstracts plugin APIs.
+Quick reference for the Abstracts Explorer plugin APIs.
 
 ## Lightweight API
 

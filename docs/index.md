@@ -1,6 +1,6 @@
-# NeurIPS Abstracts Documentation
+# Abstracts Explorer Documentation
 
-Welcome to the documentation for the NeurIPS Abstracts package! This package provides tools for downloading, storing, and analyzing NeurIPS conference paper abstracts.
+Welcome to the documentation for Abstracts Explorer! This package provides tools for downloading, storing, and analyzing NeurIPS conference paper abstracts.
 
 ## Features
 

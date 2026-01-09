@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "neurips-abstracts"
 dynamic = ["version"]
-description = "A package to download NeurIPS conference data and load it into a SQLite database"
+description = "Abstracts Explorer - A package to download NeurIPS conference data and load it into a SQLite database"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "Apache-2.0"}

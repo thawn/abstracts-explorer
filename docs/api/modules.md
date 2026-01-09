@@ -1,6 +1,6 @@
 # API Reference
 
-Complete API documentation for the NeurIPS Abstracts package.
+Complete API documentation for Abstracts Explorer.
 
 ## Modules
 

@@ -2,7 +2,7 @@
 NeurIPS Abstracts Package
 ==========================
 
-A Python package for downloading NeurIPS conference data and loading it into a SQLite database.
+Abstracts Explorer - A Python package for downloading NeurIPS conference data and loading it into a SQLite database.
 
 Main Components
 ---------------

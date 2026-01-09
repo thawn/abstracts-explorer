@@ -1,6 +1,6 @@
 # Documentation
 
-This directory contains the Sphinx documentation for the NeurIPS Abstracts package.
+This directory contains the Sphinx documentation for Abstracts Explorer.
 
 ## Building the Documentation
 

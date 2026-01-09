@@ -1,6 +1,6 @@
 # Configuration
 
-The NeurIPS Abstracts package uses a flexible configuration system that supports environment variables, `.env` files, and command-line arguments.
+Abstracts Explorer uses a flexible configuration system that supports environment variables, `.env` files, and command-line arguments.
 
 ## Configuration Priority
 

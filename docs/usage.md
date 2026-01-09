@@ -1,6 +1,6 @@
 # Usage Guide
 
-This guide covers common usage patterns for the NeurIPS Abstracts package.
+This guide covers common usage patterns for Abstracts Explorer.
 
 ## Basic Workflow
 
