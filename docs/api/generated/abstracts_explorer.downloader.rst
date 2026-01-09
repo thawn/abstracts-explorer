@@ -1,15 +1,15 @@
-neurips\_abstracts.downloader
-=============================
+abstracts\_explorer.downloader
+==============================
 
-.. automodule:: neurips_abstracts.downloader
+.. automodule:: abstracts_explorer.downloader
 
    
    .. rubric:: Functions
 
    .. autosummary::
    
+      download_conference_data
       download_json
-      download_neurips_data
    
    .. rubric:: Exceptions
 

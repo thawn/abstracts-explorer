@@ -15,7 +15,7 @@ The configuration system supports:
 ## Class Reference
 
 ```{eval-rst}
-.. automodule:: neurips_abstracts.config
+.. automodule:: abstracts_explorer.config
    :members:
    :undoc-members:
    :show-inheritance:
@@ -27,7 +27,7 @@ The configuration system supports:
 ### Getting Configuration
 
 ```python
-from neurips_abstracts.config import get_config
+from abstracts_explorer.config import get_config
 
 # Get singleton instance
 config = get_config()
@@ -63,7 +63,7 @@ config.max_context_papers           # int
 ### Custom .env File
 
 ```python
-from neurips_abstracts.config import load_env_file
+from abstracts_explorer.config import load_env_file
 
 # Load from specific file
 env_vars = load_env_file("/path/to/custom.env")
@@ -175,7 +175,7 @@ Tests use configuration from environment:
 
 ```python
 import pytest
-from neurips_abstracts.config import get_config
+from abstracts_explorer.config import get_config
 
 def test_with_config():
     config = get_config()

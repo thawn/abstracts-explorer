@@ -1,33 +1,33 @@
 {
-    "name": "neurips-abstracts-webui-tests",
+    "name": "abstracts-explorer-webui-tests",
     "version": "1.0.0",
-    "description": "Unit tests for NeurIPS Abstracts Web UI",
+    "description": "Unit tests for Abstracts Explorer Web UI",
     "scripts": {
         "test": "jest",
         "test:watch": "jest --watch",
         "test:coverage": "jest --coverage",
-        "build:tailwind": "npx tailwindcss -i src/neurips_abstracts/web_ui/static/tailwind.input.css -o src/neurips_abstracts/web_ui/static/vendor/tailwind.css --minify",
-        "watch:tailwind": "npx tailwindcss -i src/neurips_abstracts/web_ui/static/tailwind.input.css -o src/neurips_abstracts/web_ui/static/vendor/tailwind.css --watch",
+        "build:tailwind": "npx tailwindcss -i src/abstracts_explorer/web_ui/static/tailwind.input.css -o src/abstracts_explorer/web_ui/static/vendor/tailwind.css --minify",
+        "watch:tailwind": "npx tailwindcss -i src/abstracts_explorer/web_ui/static/tailwind.input.css -o src/abstracts_explorer/web_ui/static/vendor/tailwind.css --watch",
         "postinstall": "npm run install:vendor && npm run setup:hooks",
         "setup:hooks": "cp .githooks/pre-commit .git/hooks/pre-commit && cp .githooks/post-checkout .git/hooks/post-checkout && cp .githooks/post-merge .git/hooks/post-merge && chmod +x .git/hooks/pre-commit .git/hooks/post-checkout .git/hooks/post-merge",
         "install:vendor": "npm run install:vendor:fontawesome && npm run install:vendor:marked && npm run install:vendor:katex && npm run install:vendor:marked-katex && npm run build:tailwind",
-        "install:vendor:fontawesome": "mkdir -p src/neurips_abstracts/web_ui/static/vendor && cp node_modules/@fortawesome/fontawesome-free/css/all.min.css src/neurips_abstracts/web_ui/static/vendor/fontawesome.min.css && cp -r node_modules/@fortawesome/fontawesome-free/webfonts src/neurips_abstracts/web_ui/static/",
-        "install:vendor:marked": "mkdir -p src/neurips_abstracts/web_ui/static/vendor && cp node_modules/marked/lib/marked.umd.js src/neurips_abstracts/web_ui/static/vendor/marked.min.js && cp node_modules/marked/lib/marked.umd.js.map src/neurips_abstracts/web_ui/static/vendor/marked.min.js.map",
-        "install:vendor:katex": "mkdir -p src/neurips_abstracts/web_ui/static/vendor && cp node_modules/katex/dist/katex.min.js src/neurips_abstracts/web_ui/static/vendor/katex.min.js && cp node_modules/katex/dist/katex.min.css src/neurips_abstracts/web_ui/static/vendor/katex.min.css && cp -r node_modules/katex/dist/fonts src/neurips_abstracts/web_ui/static/vendor/",
-        "install:vendor:marked-katex": "mkdir -p src/neurips_abstracts/web_ui/static/vendor && cp node_modules/marked-katex-extension/lib/index.umd.js src/neurips_abstracts/web_ui/static/vendor/marked-katex-extension.min.js"
+        "install:vendor:fontawesome": "mkdir -p src/abstracts_explorer/web_ui/static/vendor && cp node_modules/@fortawesome/fontawesome-free/css/all.min.css src/abstracts_explorer/web_ui/static/vendor/fontawesome.min.css && cp -r node_modules/@fortawesome/fontawesome-free/webfonts src/abstracts_explorer/web_ui/static/",
+        "install:vendor:marked": "mkdir -p src/abstracts_explorer/web_ui/static/vendor && cp node_modules/marked/lib/marked.umd.js src/abstracts_explorer/web_ui/static/vendor/marked.min.js && cp node_modules/marked/lib/marked.umd.js.map src/abstracts_explorer/web_ui/static/vendor/marked.min.js.map",
+        "install:vendor:katex": "mkdir -p src/abstracts_explorer/web_ui/static/vendor && cp node_modules/katex/dist/katex.min.js src/abstracts_explorer/web_ui/static/vendor/katex.min.js && cp node_modules/katex/dist/katex.min.css src/abstracts_explorer/web_ui/static/vendor/katex.min.css && cp -r node_modules/katex/dist/fonts src/abstracts_explorer/web_ui/static/vendor/",
+        "install:vendor:marked-katex": "mkdir -p src/abstracts_explorer/web_ui/static/vendor && cp node_modules/marked-katex-extension/lib/index.umd.js src/abstracts_explorer/web_ui/static/vendor/marked-katex-extension.min.js"
     },
     "jest": {
         "testEnvironment": "jsdom",
         "coverageDirectory": "./coverage",
         "collectCoverageFrom": [
-            "src/neurips_abstracts/web_ui/static/**/*.js",
-            "!src/neurips_abstracts/web_ui/static/**/*.test.js"
+            "src/abstracts_explorer/web_ui/static/**/*.js",
+            "!src/abstracts_explorer/web_ui/static/**/*.test.js"
         ],
         "setupFilesAfterEnv": [
-            "<rootDir>/src/neurips_abstracts/web_ui/tests/setup.js"
+            "<rootDir>/src/abstracts_explorer/web_ui/tests/setup.js"
         ],
         "testMatch": [
-            "**/src/neurips_abstracts/web_ui/tests/**/*.test.js"
+            "**/src/abstracts_explorer/web_ui/tests/**/*.test.js"
         ]
     },
     "devDependencies": {

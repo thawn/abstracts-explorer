@@ -1,7 +1,7 @@
-neurips\_abstracts.embeddings
-=============================
+abstracts\_explorer.embeddings
+==============================
 
-.. automodule:: neurips_abstracts.embeddings
+.. automodule:: abstracts_explorer.embeddings
 
    
    .. rubric:: Classes

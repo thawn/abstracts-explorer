@@ -1,7 +1,7 @@
-neurips\_abstracts.database
-===========================
+abstracts\_explorer.database
+============================
 
-.. automodule:: neurips_abstracts.database
+.. automodule:: abstracts_explorer.database
 
    
    .. rubric:: Classes

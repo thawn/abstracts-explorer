@@ -14,7 +14,7 @@ The `RAGChat` class implements:
 ## Class Reference
 
 ```{eval-rst}
-.. automodule:: neurips_abstracts.rag
+.. automodule:: abstracts_explorer.rag
    :members:
    :undoc-members:
    :show-inheritance:
@@ -26,8 +26,8 @@ The `RAGChat` class implements:
 ### Basic Setup
 
 ```python
-from neurips_abstracts.embeddings import EmbeddingsManager
-from neurips_abstracts.rag import RAGChat
+from abstracts_explorer.embeddings import EmbeddingsManager
+from abstracts_explorer.rag import RAGChat
 
 # Initialize embeddings manager
 em = EmbeddingsManager(

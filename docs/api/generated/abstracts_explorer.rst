@@ -1,7 +1,7 @@
-﻿neurips\_abstracts
-==================
+﻿abstracts\_explorer
+===================
 
-.. automodule:: neurips_abstracts
+.. automodule:: abstracts_explorer
 
    
 .. rubric:: Modules
@@ -15,4 +15,8 @@
    database
    downloader
    embeddings
+   paper_utils
+   plugin
+   plugins
    rag
+   web_ui

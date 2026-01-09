@@ -14,7 +14,7 @@ The `NeurIPSDatabase` class handles all database operations including:
 ## Class Reference
 
 ```{eval-rst}
-.. automodule:: neurips_abstracts.database
+.. automodule:: abstracts_explorer.database
    :members:
    :undoc-members:
    :show-inheritance:
@@ -26,7 +26,7 @@ The `NeurIPSDatabase` class handles all database operations including:
 ### Basic Operations
 
 ```python
-from neurips_abstracts.database import NeurIPSDatabase
+from abstracts_explorer.database import NeurIPSDatabase
 
 # Initialize database
 db = NeurIPSDatabase("data/neurips_2025.db")

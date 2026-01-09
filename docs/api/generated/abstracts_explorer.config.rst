@@ -1,7 +1,7 @@
-neurips\_abstracts.config
-=========================
+abstracts\_explorer.config
+==========================
 
-.. automodule:: neurips_abstracts.config
+.. automodule:: abstracts_explorer.config
 
    
    .. rubric:: Functions

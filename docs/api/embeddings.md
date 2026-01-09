@@ -14,7 +14,7 @@ The `EmbeddingsManager` class handles:
 ## Class Reference
 
 ```{eval-rst}
-.. automodule:: neurips_abstracts.embeddings
+.. automodule:: abstracts_explorer.embeddings
    :members:
    :undoc-members:
    :show-inheritance:
@@ -26,7 +26,7 @@ The `EmbeddingsManager` class handles:
 ### Basic Setup
 
 ```python
-from neurips_abstracts.embeddings import EmbeddingsManager
+from abstracts_explorer.embeddings import EmbeddingsManager
 
 # Initialize with database paths
 em = EmbeddingsManager(
@@ -104,7 +104,7 @@ The module supports any embedding model available through LM Studio:
 
 ```python
 # Via configuration
-from neurips_abstracts.config import get_config
+from abstracts_explorer.config import get_config
 config = get_config()
 # Set EMBEDDING_MODEL in .env file
 

@@ -1,7 +1,7 @@
-neurips\_abstracts.cli
-======================
+abstracts\_explorer.cli
+=======================
 
-.. automodule:: neurips_abstracts.cli
+.. automodule:: abstracts_explorer.cli
 
    
    .. rubric:: Functions
@@ -13,4 +13,6 @@ neurips\_abstracts.cli
       download_command
       main
       search_command
+      setup_logging
+      web_ui_command
    

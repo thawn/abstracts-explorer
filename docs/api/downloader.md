@@ -14,7 +14,7 @@ The `NeurIPSDownloader` class provides methods for:
 ## Class Reference
 
 ```{eval-rst}
-.. automodule:: neurips_abstracts.downloader
+.. automodule:: abstracts_explorer.downloader
    :members:
    :undoc-members:
    :show-inheritance:
@@ -26,7 +26,7 @@ The `NeurIPSDownloader` class provides methods for:
 ### Basic Download
 
 ```python
-from neurips_abstracts.downloader import NeurIPSDownloader
+from abstracts_explorer.downloader import NeurIPSDownloader
 
 # Initialize downloader
 downloader = NeurIPSDownloader()

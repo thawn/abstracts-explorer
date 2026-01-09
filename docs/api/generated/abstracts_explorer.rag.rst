@@ -1,7 +1,7 @@
-neurips\_abstracts.rag
-======================
+abstracts\_explorer.rag
+=======================
 
-.. automodule:: neurips_abstracts.rag
+.. automodule:: abstracts_explorer.rag
 
    
    .. rubric:: Classes

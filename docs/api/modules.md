@@ -9,7 +9,7 @@ Complete API documentation for Abstracts Explorer.
    :toctree: generated
    :recursive:
 
-   neurips_abstracts
+   abstracts_explorer
 ```
 
 ## Quick Links
