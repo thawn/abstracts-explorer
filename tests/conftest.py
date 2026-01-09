@@ -196,7 +196,7 @@ def test_database(tmp_path):
         # Create sample papers using LightweightPaper model
         papers = [
             LightweightPaper(
-                original_id="paper1",
+                original_id=1,
                 title="Deep Learning Paper",
                 abstract="This paper presents a novel deep learning approach.",
                 authors=["John Doe", "Jane Smith"],
@@ -208,7 +208,7 @@ def test_database(tmp_path):
                 conference="NeurIPS",
             ),
             LightweightPaper(
-                original_id="paper2",
+                original_id=2,
                 title="NLP Paper",
                 abstract="We introduce a new natural language processing method.",
                 authors=["Alice Johnson"],
@@ -220,7 +220,7 @@ def test_database(tmp_path):
                 conference="NeurIPS",
             ),
             LightweightPaper(
-                original_id="paper3",
+                original_id=3,
                 title="Computer Vision Paper",
                 abstract="",  # Empty abstract to test edge case
                 authors=["Bob Wilson"],
