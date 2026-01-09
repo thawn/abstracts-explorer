@@ -1,6 +1,6 @@
 # CI Setup Scripts
 
-This directory contains scripts for setting up the CI environment for the NeurIPS Abstracts project.
+This directory contains scripts for setting up the CI environment for the Abstracts Explorer project.
 
 ## Scripts
 
@@ -93,7 +93,7 @@ You can run these scripts locally to set up your development environment:
 ```bash
 # Clone the repository
 git clone https://github.com/thawn/neurips-abstracts.git
-cd neurips-abstracts
+cd abstracts-explorer
 
 # Install uv first (if not already installed)
 curl -LsSf https://astral.sh/uv/install.sh | sh

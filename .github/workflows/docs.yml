@@ -27,7 +27,7 @@ jobs:
               with:
                   fetch-depth: 0 # Needed for hatch-vcs to determine version
 
-            - name: Setup NeurIPS Abstracts Environment
+            - name: Setup Abstracts Explorer Environment
               uses: ./.github/actions/setup-environment
               with:
                   python-version: '3.12'

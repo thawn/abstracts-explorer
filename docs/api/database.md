@@ -1,6 +1,6 @@
 # Database Module
 
-The database module provides an interface for storing and retrieving NeurIPS papers in SQLite.
+The database module provides an interface for storing and retrieving conference papers in SQLite.
 
 ## Overview
 

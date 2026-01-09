@@ -22,7 +22,7 @@ jobs:
               with:
                   fetch-depth: 0 # Needed for hatch-vcs to determine version
 
-            - name: Setup NeurIPS Abstracts Environment
+            - name: Setup Abstracts Explorer Environment
               uses: ./.github/actions/setup-environment
               with:
                   python-version: "3.12"
@@ -32,7 +32,7 @@ jobs:
             - name: Verify Python environment
               run: |
                   uv run python --version
-                  uv run python -c "import neurips_abstracts; print(f'Package version: {neurips_abstracts.__version__}')"
+                  uv run python -c "import abstracts_explorer; print(f'Package version: {abstracts_explorer.__version__}')"
 
             - name: Verify Node.js environment
               run: |

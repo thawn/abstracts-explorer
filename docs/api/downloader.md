@@ -1,6 +1,6 @@
 # Downloader Module
 
-The downloader module handles downloading NeurIPS papers from the OpenReview API.
+The downloader module handles downloading conference papers from various sources.
 
 ## Overview
 

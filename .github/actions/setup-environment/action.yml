@@ -1,4 +1,4 @@
-name: 'Setup NeurIPS Abstracts Environment'
+name: 'Setup Abstracts Explorer Environment'
 description: 'Sets up Python, uv, Node.js, and installs dependencies for CI'
 
 inputs:

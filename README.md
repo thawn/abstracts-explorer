@@ -1,10 +1,10 @@
 # Abstracts Explorer
 
-A Python package for downloading NeurIPS conference data and loading it into a SQLite database.
+Abstracts Explorer - A package to download conference data and search it with a LLM-based semantic search including document retrieval and question answering.
 
 ## Features
 
-- 📥 Download NeurIPS conference data from configurable URLs
+- 📥 Download conference data from various sources
 - 💾 Store data in a SQLite database with efficient indexing
 - 🔍 Search and query papers by keywords, track, and other attributes
 - 🤖 **NEW**: Generate text embeddings and store in vector database for semantic search
@@ -41,7 +41,7 @@ pip install uv
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/neurips-abstracts.git
+git clone https://github.com/thawn/neurips-abstracts.git
 cd abstracts-explorer
 
 # Create virtual environment and install dependencies with uv
@@ -98,7 +98,7 @@ See [CONFIGURATION.md](CONFIGURATION.md) for complete documentation.
 ### Download NeurIPS Data
 
 ```python
-from neurips_abstracts import download_json, download_neurips_data
+from abstracts_explorer import download_json, download_neurips_data
 
 # Download from a specific URL
 data = download_json("https://neurips.cc/static/virtual/data/neurips-2025-orals-posters.json")
@@ -116,7 +116,7 @@ data = download_json(
 ### Load Data into Database
 
 ```python
-from neurips_abstracts import DatabaseManager
+from abstracts_explorer import DatabaseManager
 
 # Create and connect to database
 with DatabaseManager("data/neurips_2025.db") as db:
@@ -135,7 +135,7 @@ with DatabaseManager("data/neurips_2025.db") as db:
 ### Search Papers
 
 ```python
-from neurips_abstracts import DatabaseManager
+from abstracts_explorer import DatabaseManager
 
 with DatabaseManager("data/neurips_2025.db") as db:
     # Search by keyword
@@ -165,7 +165,7 @@ with DatabaseManager("data/neurips_2025.db") as db:
 ### Query Authors
 
 ```python
-from neurips_abstracts import DatabaseManager
+from abstracts_explorer import DatabaseManager
 
 with DatabaseManager("data/neurips_2025.db") as db:
     # Search authors by name
@@ -193,7 +193,7 @@ with DatabaseManager("data/neurips_2025.db") as db:
 ### Custom Queries
 
 ```python
-from neurips_abstracts import DatabaseManager
+from abstracts_explorer import DatabaseManager
 
 with DatabaseManager("data/neurips_2025.db") as db:
     # Execute custom SQL queries
@@ -211,7 +211,7 @@ with DatabaseManager("data/neurips_2025.db") as db:
 Here's a complete example that downloads NeurIPS 2025 data and loads it into a database:
 
 ```python
-from neurips_abstracts import download_neurips_data, DatabaseManager
+from abstracts_explorer import download_neurips_data, DatabaseManager
 
 # Download data
 print("Downloading NeurIPS 2025 data...")
@@ -322,7 +322,7 @@ See `CLI_REFERENCE.md` for complete CLI documentation and examples.
 ### Generate Embeddings
 
 ```python
-from neurips_abstracts import EmbeddingsManager
+from abstracts_explorer import EmbeddingsManager
 
 # Initialize embeddings manager
 with EmbeddingsManager() as em:
@@ -339,7 +339,7 @@ with EmbeddingsManager() as em:
 ### Search Similar Papers
 
 ```python
-from neurips_abstracts import EmbeddingsManager
+from abstracts_explorer import EmbeddingsManager
 
 with EmbeddingsManager() as em:
     em.create_collection()
@@ -420,7 +420,7 @@ Indexes are created on commonly queried fields for efficient searches. See `SCHE
 You can download from any URL that returns JSON data:
 
 ```python
-from neurips_abstracts import download_json
+from abstracts_explorer import download_json
 
 # Custom URL
 data = download_json("https://your-custom-url.com/data.json")
@@ -438,7 +438,7 @@ data = download_json(
 Specify any path for your database:
 
 ```python
-from neurips_abstracts import DatabaseManager
+from abstracts_explorer import DatabaseManager
 
 # Use a specific path
 db = DatabaseManager("/path/to/your/database.db")
@@ -453,7 +453,7 @@ db = DatabaseManager("data/neurips.db")
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/neurips-abstracts.git
+git clone https://github.com/thawn/neurips-abstracts.git
 cd abstracts-explorer
 
 # Install uv if you haven't already
@@ -473,7 +473,7 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 uv run pytest
 
 # Run with coverage report
-uv run pytest --cov=neurips_abstracts --cov-report=html
+uv run pytest --cov=abstracts_explorer --cov-report=html
 
 # Run specific test file
 uv run pytest tests/test_downloader.py
@@ -566,7 +566,7 @@ See [docs/vendor-auto-update.md](docs/vendor-auto-update.md) for more informatio
 ```
 neurips-abstracts/
 ├── src/
-│   └── neurips_abstracts/
+│   └── abstracts_explorer/
 │       ├── __init__.py         # Package initialization
 │       ├── downloader.py       # Download functionality
 │       └── database.py         # Database management
@@ -584,9 +584,9 @@ neurips-abstracts/
 The package provides custom exceptions for better error handling:
 
 ```python
-from neurips_abstracts import download_json, DatabaseManager
-from neurips_abstracts.downloader import DownloadError
-from neurips_abstracts.database import DatabaseError
+from abstracts_explorer import download_json, DatabaseManager
+from abstracts_explorer.downloader import DownloadError
+from abstracts_explorer.database import DatabaseError
 
 try:
     data = download_json("https://invalid-url.com/data.json")
@@ -611,7 +611,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 
 # Now use the package
-from neurips_abstracts import download_neurips_data
+from abstracts_explorer import download_neurips_data
 data = download_neurips_data()
 ```
 
@@ -632,7 +632,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## Support
 
 For issues, questions, or contributions, please visit:
-https://github.com/yourusername/neurips-abstracts/issues
+https://github.com/thawn/neurips-abstracts/issues
 
 ## Query Rewriting Feature
 
@@ -646,7 +646,7 @@ The RAG system now includes intelligent query rewriting to improve search result
 
 Example:
 ```python
-from neurips_abstracts import RAGChat, EmbeddingsManager, DatabaseManager
+from abstracts_explorer import RAGChat, EmbeddingsManager, DatabaseManager
 
 with EmbeddingsManager() as em, DatabaseManager("data/neurips_2025.db") as db:
     chat = RAGChat(em, db)

@@ -62,8 +62,8 @@ jobs:
                   # Database paths
                   DATA_DIR=data
                   EMBEDDING_DB_PATH=chroma_db
-                  PAPER_DB_PATH=neurips_2025.db
-                  COLLECTION_NAME=neurips_papers
+                  PAPER_DB_PATH=abstracts.db
+                  COLLECTION_NAME=papers
                   MAX_CONTEXT_PAPERS=5
                   
                   # Chat settings
@@ -83,4 +83,4 @@ jobs:
 
             - name: Run slow tests
               run: |
-                  uv run pytest tests/ -v --cov=neurips_abstracts --cov-report=xml --cov-report=term-missing -m "slow"
+                  uv run pytest tests/ -v --cov=abstracts_explorer --cov-report=xml --cov-report=term-missing -m "slow"

@@ -8,7 +8,7 @@ This file contains instructions and conventions for AI assistants working on thi
 
 ## Project Overview
 
-**neurips-abstracts** is a Python package for downloading, storing, and analyzing NeurIPS conference paper abstracts with vector embeddings and RAG (Retrieval-Augmented Generation) capabilities.
+**abstracts-explorer** is a Python package to download conference data and search it with a LLM-based semantic search including document retrieval and question answering.
 
 ## Package Manager: uv
 
@@ -17,7 +17,7 @@ This file contains instructions and conventions for AI assistants working on thi
 ### Quick Reference
 
 - **Install dependencies**: `uv sync` or `uv sync --all-extras`
-- **Run commands**: `uv run pytest`, `uv run neurips-abstracts`, etc.
+- **Run commands**: `uv run pytest`, `uv run abstracts-explorer`, etc.
 - **Add dependencies**: `uv add package-name`
 - **Virtual environment**: Automatically created in `.venv/`
 
@@ -100,7 +100,7 @@ def example_function(param1: str, param2: int = 10) -> bool:
 ### Code Organization
 
 ```
-src/neurips_abstracts/    # Main package
+src/abstracts_explorer/    # Main package
 ├── __init__.py           # Package initialization
 ├── database.py           # SQLite database operations
 ├── downloader.py         # OpenReview API integration
@@ -155,9 +155,9 @@ docs/                      # Sphinx documentation
 **One test file per source module**: Each source module should have exactly one corresponding test file with the same base name. This keeps tests organized and easy to find.
 
 Examples:
-- `src/neurips_abstracts/database.py` → `tests/test_database.py`
-- `src/neurips_abstracts/plugin.py` → `tests/test_plugin.py` (includes all plugin-related tests)
-- `src/neurips_abstracts/web_ui/app.py` → `tests/test_web_ui.py` (unit tests)
+- `src/abstracts_explorer/database.py` → `tests/test_database.py`
+- `src/abstracts_explorer/plugin.py` → `tests/test_plugin.py` (includes all plugin-related tests)
+- `src/abstracts_explorer/web_ui/app.py` → `tests/test_web_ui.py` (unit tests)
 
 **Exception for test types**: Different types of tests (unit, integration, e2e) may have separate files:
 - `test_integration.py` - Cross-module integration tests
@@ -175,7 +175,7 @@ Examples:
 
 ```python
 import pytest
-from neurips_abstracts.database import NeurIPSDatabase
+from abstracts_explorer.database import NeurIPSDatabase
 
 @pytest.fixture
 def temp_db(tmp_path):
@@ -217,7 +217,7 @@ def test_add_paper(temp_db):
 uv run pytest
 
 # Run with coverage
-uv run pytest --cov=src/neurips_abstracts --cov-report=html
+uv run pytest --cov=src/abstracts_explorer --cov-report=html
 
 # Run specific test file
 uv run pytest tests/test_database.py
@@ -264,7 +264,7 @@ uv add --dev pytest
 # Run commands in the virtual environment
 uv run python script.py
 uv run pytest
-uv run neurips-abstracts --help
+uv run abstracts-explorer --help
 
 # Activate the virtual environment manually (optional)
 source .venv/bin/activate  # Unix/macOS
@@ -322,7 +322,7 @@ MAX_CONTEXT_PAPERS=5
 ### Using Configuration
 
 ```python
-from neurips_abstracts.config import get_config
+from abstracts_explorer.config import get_config
 
 config = get_config()
 print(config.chat_model)
@@ -489,7 +489,7 @@ See `.gitignore`:
 2. Implement feature with type hints and docstrings
 3. Write comprehensive tests (unit + integration)
 4. Update documentation (docstrings + user guide)
-5. Run tests: `uv run pytest --cov=src/neurips_abstracts`
+5. Run tests: `uv run pytest --cov=src/abstracts_explorer`
 6. Build docs: `cd docs && uv run make html`
 7. Commit and create pull request
 
@@ -543,11 +543,11 @@ See `.gitignore`:
 
 ## Package Information
 
-- **Name**: neurips-abstracts
+- **Name**: abstracts-explorer
 - **Version**: 0.1.0
 - **Python**: >=3.11
 - **License**: Apache-2.0
-- **CLI Command**: `neurips-abstracts`
+- **CLI Command**: `abstracts-explorer`
 
 ## Key Design Decisions
 
