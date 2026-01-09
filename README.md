@@ -486,7 +486,7 @@ uv run pytest
 uv run pytest --cov=abstracts_explorer --cov-report=html
 
 # Run specific test file
-uv run pytest tests/test_downloader.py
+uv run pytest tests/test_database.py
 
 # Run specific test
 uv run pytest tests/test_database.py::TestDatabaseManager::test_connect
@@ -574,16 +574,20 @@ See [docs/vendor-auto-update.md](docs/vendor-auto-update.md) for more informatio
 ### Code Structure
 
 ```
-neurips-abstracts/
+abstracts-explorer/
 ├── src/
 │   └── abstracts_explorer/
 │       ├── __init__.py         # Package initialization
-│       ├── downloader.py       # Download functionality
-│       └── database.py         # Database management
+│       ├── database.py         # Database management
+│       ├── embeddings.py       # Vector embeddings
+│       ├── rag.py              # RAG chat interface
+│       ├── plugin.py           # Plugin system
+│       └── plugins/            # Plugin implementations
 ├── tests/
 │   ├── __init__.py
-│   ├── test_downloader.py      # Downloader tests
 │   ├── test_database.py        # Database tests
+│   ├── test_embeddings.py      # Embeddings tests
+│   ├── test_plugin.py          # Plugin system tests
 │   └── test_integration.py     # Integration tests
 ├── pyproject.toml              # Package configuration
 └── README.md                   # This file
