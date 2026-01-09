@@ -8,7 +8,6 @@ to reduce code duplication and ensure consistency.
 import socket
 import requests
 import pytest
-from pathlib import Path
 from neurips_abstracts.config import get_config
 from neurips_abstracts.embeddings import EmbeddingsManager
 from neurips_abstracts.database import DatabaseManager
