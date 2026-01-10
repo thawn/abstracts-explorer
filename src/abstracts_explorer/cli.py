@@ -15,6 +15,7 @@ from tqdm import tqdm
 from .config import get_config
 from .database import DatabaseManager
 from .embeddings import EmbeddingsManager, EmbeddingsError
+from .clustering import perform_clustering, ClusteringError
 from .rag import RAGChat, RAGError
 from .plugins import get_plugin, list_plugins, list_plugin_names
 
@@ -653,6 +654,107 @@ def web_ui_command(args: argparse.Namespace) -> int:
         return 1
 
 
+def cluster_embeddings_command(args: argparse.Namespace) -> int:
+    """
+    Cluster embeddings and optionally export results.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments containing:
+        - embeddings_path: Path to ChromaDB vector database
+        - collection: Name of the ChromaDB collection
+        - reduction_method: Dimensionality reduction method
+        - n_components: Number of components for reduction
+        - clustering_method: Clustering algorithm to use
+        - n_clusters: Number of clusters (for kmeans/agglomerative)
+        - eps: DBSCAN eps parameter
+        - min_samples: DBSCAN min_samples parameter
+        - output: Path to export JSON results
+        - limit: Maximum number of embeddings to process
+
+    Returns
+    -------
+    int
+        Exit code (0 for success, non-zero for failure)
+    """
+    embeddings_path = Path(args.embeddings_path)
+
+    # Validate embeddings database exists
+    if not embeddings_path.exists():
+        print(f"❌ Error: Embeddings database not found: {embeddings_path}", file=sys.stderr)
+        print("\nYou can create embeddings using:", file=sys.stderr)
+        print("  abstracts-explorer create-embeddings --db-path <database.db>", file=sys.stderr)
+        return 1
+
+    print("Abstracts Explorer - Clustering")
+    print("=" * 70)
+    print(f"Embeddings:  {embeddings_path}")
+    print(f"Collection:  {args.collection}")
+    print(f"Reduction:   {args.reduction_method} (n_components={args.n_components})")
+    print(f"Clustering:  {args.clustering_method}", end="")
+    
+    if args.clustering_method.lower() == "kmeans" or args.clustering_method.lower() == "agglomerative":
+        print(f" (n_clusters={args.n_clusters})")
+    elif args.clustering_method.lower() == "dbscan":
+        print(f" (eps={args.eps}, min_samples={args.min_samples})")
+    else:
+        print()
+    
+    if args.limit:
+        print(f"Limit:       {args.limit} papers")
+    print("=" * 70)
+
+    try:
+        # Prepare kwargs for clustering
+        kwargs = {}
+        if args.clustering_method.lower() == "dbscan":
+            kwargs["eps"] = args.eps
+            kwargs["min_samples"] = args.min_samples
+
+        # Perform clustering
+        print("\n🚀 Starting clustering pipeline...")
+        results = perform_clustering(
+            embeddings_path=embeddings_path,
+            collection_name=args.collection,
+            reduction_method=args.reduction_method,
+            n_components=args.n_components,
+            clustering_method=args.clustering_method,
+            n_clusters=args.n_clusters,
+            output_path=args.output,
+            limit=args.limit,
+            **kwargs
+        )
+
+        # Display statistics
+        stats = results["statistics"]
+        print("\n📊 Clustering Results:")
+        print(f"   Total papers:  {stats['total_papers']:,}")
+        print(f"   Clusters:      {stats['n_clusters']}")
+        if stats['n_noise'] > 0:
+            print(f"   Noise points:  {stats['n_noise']}")
+        print("\n   Cluster sizes:")
+        for cluster_id, size in sorted(stats['cluster_sizes'].items()):
+            print(f"      Cluster {cluster_id}: {size:,} papers")
+
+        if args.output:
+            print(f"\n💾 Results exported to: {args.output}")
+            print("\nYou can use the web UI to visualize the clusters!")
+        else:
+            print("\n💡 Tip: Use --output to export results for visualization")
+
+        return 0
+
+    except ClusteringError as e:
+        print(f"\n❌ Clustering error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"\n❌ Unexpected error: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
 def main() -> int:
     """
     Main entry point for the CLI.
@@ -954,6 +1056,76 @@ Examples:
         help="Enable debug mode",
     )
 
+    # Cluster embeddings command
+    cluster_parser = subparsers.add_parser(
+        "cluster-embeddings",
+        help="Cluster embeddings for visualization",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Perform dimensionality reduction and clustering on paper embeddings.",
+    )
+    cluster_parser.add_argument(
+        "--embeddings-path",
+        type=str,
+        default=config.embedding_db_path,
+        help=f"Path to ChromaDB vector database (default: {config.embedding_db_path})",
+    )
+    cluster_parser.add_argument(
+        "--collection",
+        type=str,
+        default=config.collection_name,
+        help=f"Name of the ChromaDB collection (default: {config.collection_name})",
+    )
+    cluster_parser.add_argument(
+        "--reduction-method",
+        type=str,
+        choices=["pca", "tsne"],
+        default="pca",
+        help="Dimensionality reduction method (default: pca)",
+    )
+    cluster_parser.add_argument(
+        "--n-components",
+        type=int,
+        default=2,
+        help="Number of components for dimensionality reduction (default: 2)",
+    )
+    cluster_parser.add_argument(
+        "--clustering-method",
+        type=str,
+        choices=["kmeans", "dbscan", "agglomerative"],
+        default="kmeans",
+        help="Clustering algorithm (default: kmeans)",
+    )
+    cluster_parser.add_argument(
+        "--n-clusters",
+        type=int,
+        default=5,
+        help="Number of clusters for kmeans/agglomerative (default: 5)",
+    )
+    cluster_parser.add_argument(
+        "--eps",
+        type=float,
+        default=0.5,
+        help="DBSCAN epsilon parameter (default: 0.5)",
+    )
+    cluster_parser.add_argument(
+        "--min-samples",
+        type=int,
+        default=5,
+        help="DBSCAN min_samples parameter (default: 5)",
+    )
+    cluster_parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Path to export clustering results as JSON (optional)",
+    )
+    cluster_parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Maximum number of embeddings to process (optional)",
+    )
+
     args = parser.parse_args()
 
     # Setup logging based on verbosity
@@ -973,6 +1145,8 @@ Examples:
         return chat_command(args)
     elif args.command == "web-ui":
         return web_ui_command(args)
+    elif args.command == "cluster-embeddings":
+        return cluster_embeddings_command(args)
     else:
         parser.print_help()
         return 1
