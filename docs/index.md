@@ -8,7 +8,10 @@ Welcome to the documentation for Abstracts Explorer! This package provides tools
 - **Plugin system** for downloading from workshops and other conferences
 - **Store abstracts** in a SQLite database with full metadata
 - **Create vector embeddings** for semantic search
+- **Cluster and visualize** paper embeddings with multiple algorithms
+- **MCP server** for LLM-based cluster analysis and topic exploration
 - **RAG (Retrieval-Augmented Generation)** chat interface for querying papers
+- **Web interface** for browsing and searching papers
 - **Command-line interface** for easy interaction
 - **Configuration system** with .env file support
 
@@ -65,6 +68,7 @@ configuration
 usage
 plugins
 cli_reference
+mcp_server
 ```
 
 ```{toctree}

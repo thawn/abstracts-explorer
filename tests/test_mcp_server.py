@@ -1,0 +1,369 @@
+"""
+Tests for MCP server functionality.
+"""
+
+import json
+import pytest
+from unittest.mock import Mock, patch
+import numpy as np
+
+from abstracts_explorer.mcp_server import (
+    load_clustering_data,
+    analyze_cluster_topics,
+    ClusterAnalysisError,
+)
+from abstracts_explorer.clustering import ClusteringManager
+from abstracts_explorer.database import DatabaseManager
+
+
+class TestLoadClusteringData:
+    """Tests for load_clustering_data function."""
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.ClusteringManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_load_with_defaults(self, mock_config, mock_cm_class, mock_db_class, mock_em_class):
+        """Test loading clustering data with default config values."""
+        # Setup mocks
+        mock_config_obj = Mock()
+        mock_config_obj.embedding_db_path = "chroma_db"
+        mock_config_obj.collection_name = "papers"
+        mock_config_obj.paper_db_path = "abstracts.db"
+        mock_config.return_value = mock_config_obj
+
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+        mock_cm = Mock()
+        mock_cm_class.return_value = mock_cm
+
+        # Call function
+        cm, db = load_clustering_data()
+
+        # Verify calls
+        mock_em_class.assert_called_once_with(
+            chroma_path="chroma_db",
+            collection_name="papers",
+        )
+        mock_em.connect.assert_called_once()
+        mock_em.create_collection.assert_called_once()
+
+        mock_db_class.assert_called_once_with("abstracts.db")
+        mock_db.connect.assert_called_once()
+
+        mock_cm_class.assert_called_once_with(mock_em, mock_db)
+
+        assert cm == mock_cm
+        assert db == mock_db
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_load_with_custom_paths(self, mock_config, mock_em_class):
+        """Test loading with custom paths overriding config."""
+        mock_config_obj = Mock()
+        mock_config.return_value = mock_config_obj
+
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+
+        with patch("abstracts_explorer.mcp_server.DatabaseManager") as mock_db_class, \
+             patch("abstracts_explorer.mcp_server.ClusteringManager") as mock_cm_class:
+            mock_db = Mock()
+            mock_db_class.return_value = mock_db
+            mock_cm = Mock()
+            mock_cm_class.return_value = mock_cm
+
+            # Call with custom paths
+            cm, db = load_clustering_data(
+                embeddings_path="custom_chroma",
+                collection_name="custom_papers",
+                db_path="custom.db",
+            )
+
+            # Verify custom paths were used
+            mock_em_class.assert_called_once_with(
+                chroma_path="custom_chroma",
+                collection_name="custom_papers",
+            )
+            mock_db_class.assert_called_once_with("custom.db")
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_load_failure(self, mock_config, mock_em_class):
+        """Test error handling when loading fails."""
+        mock_config_obj = Mock()
+        mock_config.return_value = mock_config_obj
+
+        mock_em_class.side_effect = Exception("Connection failed")
+
+        with pytest.raises(ClusterAnalysisError) as exc_info:
+            load_clustering_data()
+
+        assert "Failed to load clustering data" in str(exc_info.value)
+
+
+class TestAnalyzeClusterTopics:
+    """Tests for analyze_cluster_topics function."""
+
+    def test_analyze_cluster(self):
+        """Test analyzing topics in a cluster."""
+        # Create mock clustering manager
+        cm = Mock(spec=ClusteringManager)
+        cm.cluster_labels = np.array([0, 0, 1, 0, 1, 2])
+        cm.paper_ids = ["p1", "p2", "p3", "p4", "p5", "p6"]
+        cm.metadatas = [
+            {"title": "Paper 1", "keywords": "ml, ai", "session": "ML Track", "year": 2023},
+            {"title": "Paper 2", "keywords": "dl, nn", "session": "ML Track", "year": 2023},
+            {"title": "Paper 3", "keywords": "nlp, transformers", "session": "NLP Track", "year": 2024},
+            {"title": "Paper 4", "keywords": "ml, dl", "session": "ML Track", "year": 2024},
+            {"title": "Paper 5", "keywords": "nlp, bert", "session": "NLP Track", "year": 2024},
+            {"title": "Paper 6", "keywords": "cv, vision", "session": "CV Track", "year": 2025},
+        ]
+
+        db = Mock(spec=DatabaseManager)
+
+        # Analyze cluster 0 (papers 0, 1, 3)
+        result = analyze_cluster_topics(cm, db, cluster_id=0)
+
+        assert result["cluster_id"] == 0
+        assert result["paper_count"] == 3
+        assert len(result["sample_titles"]) == 3
+        assert result["sample_titles"][0] == "Paper 1"
+        
+        # Check keywords
+        keyword_dict = {k["keyword"]: k["count"] for k in result["keywords"]}
+        assert keyword_dict["ml"] == 2  # appears in papers 0 and 3
+        assert keyword_dict["dl"] == 2  # appears in papers 1 and 3
+
+        # Check sessions
+        session_dict = {s["session"]: s["count"] for s in result["sessions"]}
+        assert session_dict["ML Track"] == 3
+
+        # Check years
+        assert result["years"][2023] == 2
+        assert result["years"][2024] == 1
+
+    def test_analyze_empty_cluster(self):
+        """Test analyzing a cluster with no papers."""
+        cm = Mock(spec=ClusteringManager)
+        cm.cluster_labels = np.array([0, 0, 1, 1])
+        cm.paper_ids = ["p1", "p2", "p3", "p4"]
+        cm.metadatas = [
+            {"title": "Paper 1", "keywords": "ml", "session": "ML", "year": 2023},
+            {"title": "Paper 2", "keywords": "dl", "session": "DL", "year": 2023},
+            {"title": "Paper 3", "keywords": "nlp", "session": "NLP", "year": 2024},
+            {"title": "Paper 4", "keywords": "cv", "session": "CV", "year": 2024},
+        ]
+
+        db = Mock(spec=DatabaseManager)
+
+        # Analyze cluster 5 (doesn't exist)
+        result = analyze_cluster_topics(cm, db, cluster_id=5)
+
+        assert result["cluster_id"] == 5
+        assert result["paper_count"] == 0
+        assert result["keywords"] == []
+        assert result["sessions"] == []
+        assert result["years"] == {}
+        assert result["sample_titles"] == []
+
+    def test_analyze_without_clustering(self):
+        """Test error when clustering data not loaded."""
+        cm = Mock(spec=ClusteringManager)
+        cm.cluster_labels = None
+        cm.paper_ids = None
+        cm.metadatas = None
+
+        db = Mock(spec=DatabaseManager)
+
+        with pytest.raises(ClusterAnalysisError) as exc_info:
+            analyze_cluster_topics(cm, db, cluster_id=0)
+
+        assert "Clustering data not loaded" in str(exc_info.value)
+
+    def test_analyze_with_missing_metadata(self):
+        """Test analyzing cluster with some missing metadata fields."""
+        cm = Mock(spec=ClusteringManager)
+        cm.cluster_labels = np.array([0, 0])
+        cm.paper_ids = ["p1", "p2"]
+        cm.metadatas = [
+            {"title": "Paper 1"},  # Missing keywords, session, year
+            {"title": "Paper 2", "keywords": "ml", "year": 2023},  # Missing session
+        ]
+
+        db = Mock(spec=DatabaseManager)
+
+        result = analyze_cluster_topics(cm, db, cluster_id=0)
+
+        assert result["cluster_id"] == 0
+        assert result["paper_count"] == 2
+        assert len(result["sample_titles"]) == 2
+        # Should handle missing fields gracefully
+        assert isinstance(result["keywords"], list)
+        assert isinstance(result["sessions"], list)
+        assert isinstance(result["years"], dict)
+
+
+class TestMCPTools:
+    """Tests for MCP tool functions."""
+
+    @patch("abstracts_explorer.mcp_server.load_clustering_data")
+    @patch("abstracts_explorer.mcp_server.analyze_cluster_topics")
+    def test_get_cluster_topics(self, mock_analyze, mock_load):
+        """Test get_cluster_topics tool."""
+        # Setup mocks
+        mock_cm = Mock()
+        mock_cm.embeddings_manager = Mock()
+        mock_db = Mock()
+        mock_load.return_value = (mock_cm, mock_db)
+
+        mock_cm.load_embeddings.return_value = 100
+        mock_cm.cluster.return_value = np.array([0, 0, 1, 1])
+        mock_cm.reduce_dimensions.return_value = np.array([[0, 0], [1, 1], [2, 2], [3, 3]])
+        mock_cm.get_cluster_statistics.return_value = {
+            "n_clusters": 2,
+            "n_noise": 0,
+            "cluster_sizes": {0: 2, 1: 2},
+            "total_papers": 4,
+        }
+
+        mock_analyze.side_effect = [
+            {
+                "cluster_id": 0,
+                "paper_count": 2,
+                "keywords": [{"keyword": "ml", "count": 2}],
+                "sessions": [{"session": "ML Track", "count": 2}],
+                "years": {2023: 2},
+                "sample_titles": ["Paper 1", "Paper 2"],
+            },
+            {
+                "cluster_id": 1,
+                "paper_count": 2,
+                "keywords": [{"keyword": "nlp", "count": 2}],
+                "sessions": [{"session": "NLP Track", "count": 2}],
+                "years": {2024: 2},
+                "sample_titles": ["Paper 3", "Paper 4"],
+            },
+        ]
+
+        # Import and call the tool
+        from abstracts_explorer.mcp_server import get_cluster_topics
+
+        result_str = get_cluster_topics(n_clusters=2)
+        result = json.loads(result_str)
+
+        # Verify result
+        assert "statistics" in result
+        assert result["statistics"]["n_clusters"] == 2
+        assert "clusters" in result
+        assert len(result["clusters"]) == 2
+        assert result["clusters"][0]["cluster_id"] == 0
+        assert result["clusters"][1]["cluster_id"] == 1
+
+        # Verify cleanup
+        mock_cm.embeddings_manager.close.assert_called_once()
+        mock_db.close.assert_called_once()
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_topic_evolution(self, mock_config, mock_db_class, mock_em_class):
+        """Test get_topic_evolution tool."""
+        # Setup config mock
+        mock_config_obj = Mock()
+        mock_config_obj.embedding_db_path = "chroma_db"
+        mock_config_obj.collection_name = "papers"
+        mock_config_obj.paper_db_path = "abstracts.db"
+        mock_config.return_value = mock_config_obj
+
+        # Setup embeddings manager mock
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+        mock_em.search_similar.return_value = {
+            "ids": [["p1", "p2", "p3"]],
+            "metadatas": [[
+                {"title": "Paper 1", "year": 2023, "session": "ML"},
+                {"title": "Paper 2", "year": 2023, "session": "DL"},
+                {"title": "Paper 3", "year": 2024, "session": "ML"},
+            ]],
+            "distances": [[0.1, 0.2, 0.3]],
+        }
+
+        # Setup database mock
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+
+        # Import and call the tool
+        from abstracts_explorer.mcp_server import get_topic_evolution
+
+        result_str = get_topic_evolution(topic_keywords="transformers")
+        result = json.loads(result_str)
+
+        # Verify result
+        assert result["topic"] == "transformers"
+        assert result["total_papers"] == 3
+        assert result["year_counts"]["2023"] == 2  # Keys are strings after JSON conversion
+        assert result["year_counts"]["2024"] == 1
+        assert "2023" in result["papers_by_year"]
+        assert "2024" in result["papers_by_year"]
+
+        # Verify cleanup
+        mock_em.close.assert_called_once()
+        mock_db.close.assert_called_once()
+
+    @patch("abstracts_explorer.mcp_server.perform_clustering")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_cluster_visualization(self, mock_config, mock_perform):
+        """Test get_cluster_visualization tool."""
+        # Setup config mock
+        mock_config_obj = Mock()
+        mock_config_obj.embedding_db_path = "chroma_db"
+        mock_config_obj.collection_name = "papers"
+        mock_config_obj.paper_db_path = "abstracts.db"
+        mock_config.return_value = mock_config_obj
+
+        # Setup clustering mock
+        mock_perform.return_value = {
+            "points": [
+                {"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0, "title": "Paper 1"},
+                {"id": "p2", "x": 1.0, "y": 1.0, "cluster": 1, "title": "Paper 2"},
+            ],
+            "statistics": {
+                "n_clusters": 2,
+                "n_noise": 0,
+                "cluster_sizes": {0: 1, 1: 1},
+                "total_papers": 2,
+            },
+            "n_dimensions": 2,
+        }
+
+        # Import and call the tool
+        from abstracts_explorer.mcp_server import get_cluster_visualization
+
+        result_str = get_cluster_visualization(n_clusters=2)
+        result = json.loads(result_str)
+
+        # Verify result
+        assert result["n_dimensions"] == 2
+        assert result["n_points"] == 2
+        assert "statistics" in result
+        assert result["statistics"]["n_clusters"] == 2
+        assert len(result["points"]) == 2
+
+
+class TestMCPServerIntegration:
+    """Integration tests for MCP server."""
+
+    def test_mcp_server_initialization(self):
+        """Test that MCP server initializes correctly."""
+        from abstracts_explorer.mcp_server import mcp
+
+        assert mcp is not None
+        # Verify tools are registered
+        # Note: We can't easily test tool registration without running the server
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
