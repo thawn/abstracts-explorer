@@ -10,6 +10,7 @@ A package to download conference data and search it with LLM-based semantic sear
 - 🤖 Generate text embeddings for semantic search
 - 🔎 Find similar papers using AI-powered semantic similarity
 - 💬 Interactive RAG chat to ask questions about papers
+- 🎨 **NEW: Cluster and visualize paper embeddings with interactive plots**
 - 🌐 Web interface for browsing and searching papers
 - ⚙️ Environment-based configuration with `.env` file support
 
@@ -62,6 +63,23 @@ abstracts-explorer download --year 2025 --output data/abstracts.db
 abstracts-explorer create-embeddings --db-path data/abstracts.db
 ```
 
+### Cluster and Visualize Embeddings
+
+```bash
+# Cluster embeddings using K-Means (PCA reduction)
+abstracts-explorer cluster-embeddings --n-clusters 8 --output clusters.json
+
+# Cluster using t-SNE and DBSCAN
+abstracts-explorer cluster-embeddings \
+  --reduction-method tsne \
+  --clustering-method dbscan \
+  --eps 0.5 \
+  --min-samples 5 \
+  --output clusters.json
+
+# The web UI includes an interactive cluster visualization tab!
+```
+
 ### Start Web Interface
 
 ```bash
@@ -81,6 +99,7 @@ The web UI provides an intuitive interface for browsing and searching papers:
 - 💬 **Chat**: Interactive RAG chat with query rewriting
 - ⭐ **Ratings**: Save and organize interesting papers
 - 📊 **Filters**: Filter by track, decision, event type, and more
+- 🎨 **Clusters**: Interactive visualization of paper embeddings (NEW!)
 
 ```bash
 abstracts-explorer web-ui
@@ -127,6 +146,27 @@ with EmbeddingsManager() as em:
         "transformers for natural language processing",
         n_results=5
     )
+```
+
+### Cluster and Visualize Embeddings
+
+```python
+from abstracts_explorer.clustering import perform_clustering
+
+# Perform complete clustering pipeline
+results = perform_clustering(
+    embeddings_path="chroma_db",
+    reduction_method="tsne",      # or "pca"
+    n_components=2,
+    clustering_method="kmeans",    # or "dbscan", "agglomerative"
+    n_clusters=8,
+    output_path="clusters.json"
+)
+
+# Access clustering results
+print(f"Found {results['statistics']['n_clusters']} clusters")
+for point in results['points']:
+    print(f"Paper: {point['title']} -> Cluster {point['cluster']}")
 ```
 
 📖 **[Complete Usage Guide](docs/usage.md)** - More examples and workflows
