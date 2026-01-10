@@ -189,12 +189,12 @@ class ClusteringManager:
             elif method.lower() == "tsne":
                 # t-SNE parameters
                 perplexity = kwargs.pop("perplexity", min(30, len(self.embeddings) - 1))
-                n_iter = kwargs.pop("n_iter", 1000)
+                max_iter = kwargs.pop("max_iter", 1000)
                 reducer = TSNE(
                     n_components=n_components,
                     random_state=random_state,
                     perplexity=perplexity,
-                    n_iter=n_iter,
+                    max_iter=max_iter,
                     **kwargs
                 )
                 logger.info(f"Applying t-SNE to reduce to {n_components} dimensions (perplexity={perplexity})")
@@ -441,8 +441,19 @@ class ClusteringManager:
             output_path = Path(output_path)
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
+            # Custom JSON encoder to handle numpy types
+            class NumpyEncoder(json.JSONEncoder):
+                def default(self, obj):
+                    if isinstance(obj, np.integer):
+                        return int(obj)
+                    elif isinstance(obj, np.floating):
+                        return float(obj)
+                    elif isinstance(obj, np.ndarray):
+                        return obj.tolist()
+                    return super().default(obj)
+
             with open(output_path, "w", encoding="utf-8") as f:
-                json.dump(results, f, indent=2, ensure_ascii=False)
+                json.dump(results, f, indent=2, ensure_ascii=False, cls=NumpyEncoder)
 
             logger.info(f"Exported clustering results to {output_path}")
 
