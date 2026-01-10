@@ -2107,7 +2107,7 @@ function visualizeClusters() {
     document.getElementById('cluster-plot').on('plotly_click', function(data) {
         const point = data.points[0];
         const customdata = point.customdata;
-        showPaperDetails(customdata.id, customdata);
+        showClusterPaperDetails(customdata.id, customdata);
     });
 }
 
@@ -2184,17 +2184,22 @@ function filterClusterPlot() {
         document.getElementById('cluster-plot').on('plotly_click', function(data) {
             const point = data.points[0];
             const customdata = point.customdata;
-            showPaperDetails(customdata.id, customdata);
+            showClusterPaperDetails(customdata.id, customdata);
         });
     }
 }
 
 /**
- * Show details of selected paper
+ * Show details of selected paper from cluster
  */
-async function showPaperDetails(paperId, basicInfo) {
+async function showClusterPaperDetails(paperId, basicInfo) {
     const detailsDiv = document.getElementById('selected-paper-details');
     const contentDiv = document.getElementById('selected-paper-content');
+    
+    if (!detailsDiv || !contentDiv) {
+        console.warn('Cluster paper details elements not found');
+        return;
+    }
     
     detailsDiv.classList.remove('hidden');
     
@@ -2413,30 +2418,34 @@ function exportClusters() {
 }
 
 /**
- * Show loading message
+ * Show loading message in cluster visualization
  */
-function showLoading(elementId, message) {
+function showClusterLoading(elementId, message) {
     const element = document.getElementById(elementId);
-    element.innerHTML = `
-        <div class="text-center text-gray-500 py-12">
-            <i class="fas fa-spinner fa-spin text-6xl mb-4 opacity-20"></i>
-            <p class="text-lg">${message}</p>
-        </div>
-    `;
+    if (element) {
+        element.innerHTML = `
+            <div class="text-center text-gray-500 py-12">
+                <i class="fas fa-spinner fa-spin text-6xl mb-4 opacity-20"></i>
+                <p class="text-lg">${message}</p>
+            </div>
+        `;
+    }
 }
 
 /**
- * Show error message
+ * Show error message in cluster visualization
  */
-function showError(elementId, message) {
+function showClusterError(elementId, message) {
     const element = document.getElementById(elementId);
-    element.innerHTML = `
-        <div class="text-center text-red-500 py-12">
-            <i class="fas fa-exclamation-triangle text-6xl mb-4 opacity-20"></i>
-            <p class="text-lg font-semibold">Error</p>
-            <p class="text-sm mt-2">${message}</p>
-        </div>
-    `;
+    if (element) {
+        element.innerHTML = `
+            <div class="text-center text-red-500 py-12">
+                <i class="fas fa-exclamation-triangle text-6xl mb-4 opacity-20"></i>
+                <p class="text-lg font-semibold">Error</p>
+                <p class="text-sm mt-2">${message}</p>
+            </div>
+        `;
+    }
 }
 
 // Initialize clusters when tab is opened
