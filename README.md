@@ -12,6 +12,7 @@ A package to download conference data and search it with LLM-based semantic sear
 - 💬 Interactive RAG chat to ask questions about papers
 - 🎨 **NEW: Cluster and visualize paper embeddings with interactive plots**
 - 🌐 Web interface for browsing and searching papers
+- 🔌 **NEW: MCP server for LLM-based cluster analysis**
 - ⚙️ Environment-based configuration with `.env` file support
 
 ## Installation
@@ -78,6 +79,19 @@ abstracts-explorer cluster-embeddings \
   --output clusters.json
 
 # The web UI includes an interactive cluster visualization tab!
+```
+
+### Start MCP Server for Cluster Analysis
+
+```bash
+# Start MCP server for LLM-based cluster analysis
+abstracts-explorer mcp-server
+
+# The MCP server provides tools to analyze clustered papers:
+# - Get most frequently mentioned topics
+# - Analyze topic evolution over years
+# - Find recent developments in topics
+# - Generate cluster visualizations
 ```
 
 ### Start Web Interface

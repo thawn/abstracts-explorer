@@ -18,6 +18,7 @@ from .embeddings import EmbeddingsManager, EmbeddingsError
 from .clustering import perform_clustering, ClusteringError
 from .rag import RAGChat, RAGError
 from .plugins import get_plugin, list_plugins, list_plugin_names
+from .mcp_server import run_mcp_server
 
 
 def setup_logging(verbosity: int) -> None:
@@ -755,6 +756,52 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
         return 1
 
 
+def mcp_server_command(args: argparse.Namespace) -> int:
+    """
+    Start the MCP server for cluster analysis.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments containing:
+        - host: Host to bind to
+        - port: Port to bind to
+        - transport: Transport method (sse or stdio)
+
+    Returns
+    -------
+    int
+        Exit code (0 for success, non-zero for failure)
+    """
+    try:
+        print("Abstracts Explorer - MCP Server")
+        print("=" * 70)
+        print(f"Host:      {args.host}")
+        print(f"Port:      {args.port}")
+        print(f"Transport: {args.transport}")
+        print("=" * 70)
+        print("\nStarting MCP server...")
+        print("\nAvailable tools:")
+        print("  - get_cluster_topics: Get most frequently mentioned topics from clusters")
+        print("  - get_topic_evolution: Analyze how topics evolved over years")
+        print("  - get_recent_developments: Find recent developments in topics")
+        print("  - get_cluster_visualization: Generate cluster visualization data")
+        print("\nPress Ctrl+C to stop the server\n")
+        
+        # Start the MCP server
+        run_mcp_server(host=args.host, port=args.port, transport=args.transport)
+        return 0
+
+    except KeyboardInterrupt:
+        print("\n\n👋 Server stopped")
+        return 0
+    except Exception as e:
+        print(f"\n❌ Error starting MCP server: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
 def main() -> int:
     """
     Main entry point for the CLI.
@@ -1126,6 +1173,51 @@ Examples:
         help="Maximum number of embeddings to process (optional)",
     )
 
+    # MCP Server command
+    mcp_parser = subparsers.add_parser(
+        "mcp-server",
+        help="Start MCP server for cluster analysis",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+Start a Model Context Protocol (MCP) server for cluster analysis.
+
+The MCP server exposes tools that allow LLM-based assistants to:
+- Get most frequently mentioned topics from clusters
+- Analyze how topics evolved over years for conferences
+- Find recent developments in specific topics
+- Generate cluster visualizations
+
+Examples:
+  # Start MCP server on default port (8000)
+  abstracts-explorer mcp-server
+  
+  # Start on custom host and port
+  abstracts-explorer mcp-server --host 0.0.0.0 --port 8080
+  
+  # Use stdio transport (for local CLI integration)
+  abstracts-explorer mcp-server --transport stdio
+        """,
+    )
+    mcp_parser.add_argument(
+        "--host",
+        type=str,
+        default="127.0.0.1",
+        help="Host to bind to (default: 127.0.0.1)",
+    )
+    mcp_parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port to listen on (default: 8000)",
+    )
+    mcp_parser.add_argument(
+        "--transport",
+        type=str,
+        choices=["sse", "stdio"],
+        default="sse",
+        help="Transport method: sse (HTTP/SSE) or stdio (default: sse)",
+    )
+
     args = parser.parse_args()
 
     # Setup logging based on verbosity
@@ -1147,6 +1239,8 @@ Examples:
         return web_ui_command(args)
     elif args.command == "cluster-embeddings":
         return cluster_embeddings_command(args)
+    elif args.command == "mcp-server":
+        return mcp_server_command(args)
     else:
         parser.print_help()
         return 1
