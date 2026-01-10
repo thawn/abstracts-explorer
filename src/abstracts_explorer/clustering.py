@@ -214,7 +214,7 @@ class ClusteringManager:
         method: str = "kmeans",
         n_clusters: int = 5,
         random_state: int = 42,
-        use_reduced: bool = True,
+        use_reduced: bool = False,
         **kwargs
     ) -> np.ndarray:
         """
@@ -229,7 +229,7 @@ class ClusteringManager:
         random_state : int, optional
             Random state for reproducibility, by default 42
         use_reduced : bool, optional
-            Whether to cluster reduced embeddings or original embeddings, by default True
+            Whether to cluster reduced embeddings or original embeddings, by default False
         **kwargs
             Additional arguments passed to the clustering algorithm
 
@@ -476,7 +476,11 @@ def perform_clustering(
     """
     Perform complete clustering pipeline and optionally export results.
 
-    This is a convenience function that handles the full clustering workflow.
+    This is a convenience function that handles the full clustering workflow:
+    1. Load embeddings from ChromaDB
+    2. Cluster on full embeddings
+    3. Apply dimensionality reduction for visualization
+    4. Export results if requested
 
     Parameters
     ----------
@@ -485,7 +489,7 @@ def perform_clustering(
     collection_name : str, optional
         Name of the ChromaDB collection, by default "papers"
     reduction_method : str, optional
-        Dimensionality reduction method ('pca' or 'tsne'), by default 'pca'
+        Dimensionality reduction method ('pca' or 'tsne') for visualization, by default 'pca'
     n_components : int, optional
         Number of components for dimensionality reduction, by default 2
     clustering_method : str, optional
@@ -538,21 +542,22 @@ def perform_clustering(
         logger.info("Loading embeddings...")
         cm.load_embeddings(limit=limit)
 
-        # Reduce dimensions
-        logger.info(f"Reducing dimensions using {reduction_method}...")
-        cm.reduce_dimensions(
-            method=reduction_method,
-            n_components=n_components,
-            random_state=random_state,
-        )
-
-        # Perform clustering
-        logger.info(f"Clustering using {clustering_method}...")
+        # Perform clustering on full embeddings
+        logger.info(f"Clustering using {clustering_method} on full embeddings...")
         cm.cluster(
             method=clustering_method,
             n_clusters=n_clusters,
             random_state=random_state,
+            use_reduced=False,  # Cluster on full embeddings
             **kwargs
+        )
+
+        # Reduce dimensions for visualization
+        logger.info(f"Reducing dimensions using {reduction_method} for visualization...")
+        cm.reduce_dimensions(
+            method=reduction_method,
+            n_components=n_components,
+            random_state=random_state,
         )
 
         # Get results

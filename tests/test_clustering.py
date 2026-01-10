@@ -100,13 +100,13 @@ class TestClusteringManager:
             cm.cluster()
 
     def test_cluster_kmeans(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test K-Means clustering."""
+        """Test K-Means clustering on full embeddings."""
         mock_embeddings_manager.collection = mock_collection_with_data
         cm = ClusteringManager(mock_embeddings_manager)
         cm.load_embeddings()
-        cm.reduce_dimensions(method='pca', n_components=2)
         
-        labels = cm.cluster(method='kmeans', n_clusters=3)
+        # Cluster on full embeddings (not reduced)
+        labels = cm.cluster(method='kmeans', n_clusters=3, use_reduced=False)
         
         assert labels.shape == (10,)
         assert cm.cluster_labels is not None
@@ -116,25 +116,25 @@ class TestClusteringManager:
         assert np.all(labels >= 0)
 
     def test_cluster_dbscan(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test DBSCAN clustering."""
+        """Test DBSCAN clustering on full embeddings."""
         mock_embeddings_manager.collection = mock_collection_with_data
         cm = ClusteringManager(mock_embeddings_manager)
         cm.load_embeddings()
-        cm.reduce_dimensions(method='pca', n_components=2)
         
-        labels = cm.cluster(method='dbscan', eps=0.5, min_samples=2)
+        # Cluster on full embeddings (not reduced)
+        labels = cm.cluster(method='dbscan', eps=0.5, min_samples=2, use_reduced=False)
         
         assert labels.shape == (10,)
         assert cm.cluster_labels is not None
 
     def test_cluster_agglomerative(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test Agglomerative clustering."""
+        """Test Agglomerative clustering on full embeddings."""
         mock_embeddings_manager.collection = mock_collection_with_data
         cm = ClusteringManager(mock_embeddings_manager)
         cm.load_embeddings()
-        cm.reduce_dimensions(method='pca', n_components=2)
         
-        labels = cm.cluster(method='agglomerative', n_clusters=3)
+        # Cluster on full embeddings (not reduced)
+        labels = cm.cluster(method='agglomerative', n_clusters=3, use_reduced=False)
         
         assert labels.shape == (10,)
         assert cm.cluster_labels is not None
@@ -153,8 +153,8 @@ class TestClusteringManager:
         mock_embeddings_manager.collection = mock_collection_with_data
         cm = ClusteringManager(mock_embeddings_manager)
         cm.load_embeddings()
-        cm.reduce_dimensions(method='pca', n_components=2)
-        cm.cluster(method='kmeans', n_clusters=3)
+        # Cluster first on full embeddings
+        cm.cluster(method='kmeans', n_clusters=3, use_reduced=False)
         
         stats = cm.get_cluster_statistics()
         
@@ -169,8 +169,9 @@ class TestClusteringManager:
         mock_embeddings_manager.collection = mock_collection_with_data
         cm = ClusteringManager(mock_embeddings_manager)
         cm.load_embeddings()
+        # Cluster first, then reduce for visualization
+        cm.cluster(method='kmeans', n_clusters=3, use_reduced=False)
         cm.reduce_dimensions(method='pca', n_components=2)
-        cm.cluster(method='kmeans', n_clusters=3)
         
         results = cm.get_clustering_results()
         
@@ -185,8 +186,9 @@ class TestClusteringManager:
         mock_embeddings_manager.collection = mock_collection_with_data
         cm = ClusteringManager(mock_embeddings_manager)
         cm.load_embeddings()
+        # Cluster first, then reduce for visualization
+        cm.cluster(method='kmeans', n_clusters=3, use_reduced=False)
         cm.reduce_dimensions(method='pca', n_components=2)
-        cm.cluster(method='kmeans', n_clusters=3)
         
         output_path = tmp_path / "clusters.json"
         cm.export_to_json(output_path)

@@ -613,15 +613,8 @@ def compute_clusters():
         logger.info(f"Loading embeddings (limit={limit})...")
         cm.load_embeddings(limit=limit)
 
-        # Reduce dimensions
-        logger.info(f"Reducing dimensions using {reduction_method}...")
-        cm.reduce_dimensions(
-            method=reduction_method,
-            n_components=n_components,
-        )
-
-        # Perform clustering
-        logger.info(f"Clustering using {clustering_method}...")
+        # Perform clustering on full embeddings first
+        logger.info(f"Clustering using {clustering_method} on full embeddings...")
         kwargs = {}
         if clustering_method.lower() == "dbscan":
             kwargs["eps"] = data.get("eps", 0.5)
@@ -630,7 +623,15 @@ def compute_clusters():
         cm.cluster(
             method=clustering_method,
             n_clusters=n_clusters,
+            use_reduced=False,  # Cluster on full embeddings
             **kwargs
+        )
+
+        # Reduce dimensions for visualization
+        logger.info(f"Reducing dimensions using {reduction_method} for visualization...")
+        cm.reduce_dimensions(
+            method=reduction_method,
+            n_components=n_components,
         )
 
         # Get results
