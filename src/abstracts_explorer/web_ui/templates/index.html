@@ -23,6 +23,9 @@
     <!-- Marked-KaTeX extension for LaTeX in Markdown -->
     <script src="{{ url_for('static', filename='vendor/marked-katex-extension.min.js') }}"></script>
 
+    <!-- Plotly for cluster visualization -->
+    <script src="{{ url_for('static', filename='vendor/plotly.min.js') }}"></script>
+
     <!-- Custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 
@@ -328,6 +331,10 @@
                     class="tab-btn flex-1 py-4 px-6 font-semibold text-gray-500 border-b-2 border-transparent hover:text-gray-700">
                     <i class="fas fa-star mr-2"></i>Interesting Papers (<span id="interesting-count">0</span>)
                 </button>
+                <button onclick="switchTab('clusters')" id="tab-clusters"
+                    class="tab-btn flex-1 py-4 px-6 font-semibold text-gray-500 border-b-2 border-transparent hover:text-gray-700">
+                    <i class="fas fa-project-diagram mr-2"></i>Clusters (alpha)
+                </button>
             </nav>
         </div>
 
@@ -505,6 +512,69 @@
 <!-- Hidden file input for loading JSON -->
 <input type="file" id="json-file-input" accept=".json" style="display: none;" onchange="handleJSONFileLoad(event)">
 </div>
+
+        <!-- Clusters Tab -->
+        <div id="clusters-tab" class="tab-content hidden">
+            <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <div class="flex justify-between items-start gap-6">
+                    <div class="flex flex-col">
+                        <h2 class="text-2xl font-bold text-gray-800 mb-4">
+                            <i class="fas fa-project-diagram text-purple-600 mr-2"></i>Embedding Clusters
+                        </h2>
+                        <p class="text-sm text-gray-600">
+                            Visualize papers clustered by their semantic embeddings using dimensionality reduction.
+                        </p>
+                    </div>
+                    <div class="flex flex-col items-end space-y-2">
+                        <button onclick="openClusterSettings()"
+                            class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 focus:ring-2 focus:ring-purple-600">
+                            <i class="fas fa-cog mr-2"></i>Configure Clustering
+                        </button>
+                        <button onclick="exportClusters()"
+                            class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-600">
+                            <i class="fas fa-download mr-2"></i>Export Data
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cluster Controls -->
+            <div class="bg-white rounded-lg shadow-md p-4 mb-6">
+                <div class="flex items-center justify-between gap-4">
+                    <div class="flex items-center gap-4 flex-wrap">
+                        <div>
+                            <label class="text-sm font-medium text-gray-700 mr-2">Filter by Cluster:</label>
+                            <select id="cluster-filter" onchange="filterClusterPlot()"
+                                class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-600">
+                                <option value="">All Clusters</option>
+                            </select>
+                        </div>
+                        <div id="cluster-stats" class="text-sm text-gray-600">
+                            <!-- Stats will be dynamically populated -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cluster Visualization -->
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <div id="cluster-plot" style="min-height: 600px;">
+                    <div class="text-center text-gray-500 py-12">
+                        <i class="fas fa-spinner fa-spin text-6xl mb-4 opacity-20"></i>
+                        <p class="text-lg">Loading cluster visualization...</p>
+                        <p class="text-sm mt-2">This may take a moment</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Selected Paper Details -->
+            <div id="selected-paper-details" class="hidden bg-white rounded-lg shadow-md p-6 mt-6">
+                <h3 class="text-xl font-bold text-gray-800 mb-4">Selected Paper</h3>
+                <div id="selected-paper-content">
+                    <!-- Paper details will be populated here -->
+                </div>
+            </div>
+        </div>
     </main>
 
     <!-- Footer -->

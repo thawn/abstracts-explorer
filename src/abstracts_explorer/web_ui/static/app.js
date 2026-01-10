@@ -1900,3 +1900,553 @@ function updateYearsForConference() {
         yearSelect.value = ''; // Reset to "All Years" if previous selection not available
     }
 }
+
+// ============================================================================
+// Clustering Visualization
+// ============================================================================
+
+let clusterData = null;
+let currentClusterConfig = {
+    reduction_method: 'pca',
+    n_components: 2,
+    clustering_method: 'kmeans',
+    n_clusters: 5,
+    eps: 0.5,
+    min_samples: 5,
+    limit: null
+};
+
+/**
+ * Load and visualize clusters
+ */
+async function loadClusters() {
+    try {
+        showLoading('cluster-plot', 'Loading clusters...');
+        
+        // Try to load cached clusters first
+        let response = await fetch('/api/clusters/cached');
+        
+        if (!response.ok) {
+            // If no cache, compute on demand
+            console.log('No cached clusters found, computing...');
+            response = await fetch('/api/clusters/compute', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(currentClusterConfig)
+            });
+        }
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        clusterData = await response.json();
+        
+        if (clusterData.error) {
+            showError('cluster-plot', clusterData.error);
+            return;
+        }
+        
+        // Update cluster stats
+        updateClusterStats();
+        
+        // Populate cluster filter
+        populateClusterFilter();
+        
+        // Create visualization
+        visualizeClusters();
+        
+    } catch (error) {
+        console.error('Error loading clusters:', error);
+        showError('cluster-plot', `Failed to load clusters: ${error.message}`);
+    }
+}
+
+/**
+ * Update cluster statistics display
+ */
+function updateClusterStats() {
+    if (!clusterData || !clusterData.statistics) return;
+    
+    const stats = clusterData.statistics;
+    const statsDiv = document.getElementById('cluster-stats');
+    
+    let statsHTML = `
+        <span class="font-semibold">${stats.total_papers}</span> papers in 
+        <span class="font-semibold">${stats.n_clusters}</span> clusters
+    `;
+    
+    if (stats.n_noise > 0) {
+        statsHTML += ` (<span class="text-red-600">${stats.n_noise}</span> noise)`;
+    }
+    
+    statsDiv.innerHTML = statsHTML;
+}
+
+/**
+ * Populate cluster filter dropdown
+ */
+function populateClusterFilter() {
+    if (!clusterData || !clusterData.statistics) return;
+    
+    const select = document.getElementById('cluster-filter');
+    const stats = clusterData.statistics;
+    
+    // Clear existing options except "All Clusters"
+    select.innerHTML = '<option value="">All Clusters</option>';
+    
+    // Add option for each cluster
+    Object.entries(stats.cluster_sizes).sort((a, b) => parseInt(a[0]) - parseInt(b[0])).forEach(([clusterId, size]) => {
+        const option = document.createElement('option');
+        option.value = clusterId;
+        option.textContent = `Cluster ${clusterId} (${size} papers)`;
+        select.appendChild(option);
+    });
+    
+    // Add noise option if present
+    if (stats.n_noise > 0) {
+        const option = document.createElement('option');
+        option.value = '-1';
+        option.textContent = `Noise (-1) (${stats.n_noise} papers)`;
+        select.appendChild(option);
+    }
+}
+
+/**
+ * Visualize clusters using Plotly
+ */
+function visualizeClusters() {
+    if (!clusterData || !clusterData.points) {
+        console.error('No cluster data to visualize');
+        return;
+    }
+    
+    const points = clusterData.points;
+    
+    // Group points by cluster
+    const clusterGroups = {};
+    points.forEach(point => {
+        const cluster = point.cluster;
+        if (!clusterGroups[cluster]) {
+            clusterGroups[cluster] = [];
+        }
+        clusterGroups[cluster].push(point);
+    });
+    
+    // Create traces for each cluster
+    const traces = Object.entries(clusterGroups).map(([clusterId, clusterPoints]) => {
+        return {
+            x: clusterPoints.map(p => p.x),
+            y: clusterPoints.map(p => p.y),
+            mode: 'markers',
+            type: 'scatter',
+            name: clusterId === '-1' ? 'Noise' : `Cluster ${clusterId}`,
+            text: clusterPoints.map(p => p.title || p.id),
+            customdata: clusterPoints.map(p => ({
+                id: p.id,
+                title: p.title || '',
+                year: p.year || '',
+                conference: p.conference || '',
+                session: p.session || ''
+            })),
+            marker: {
+                size: 8,
+                opacity: 0.7,
+                line: {
+                    color: 'white',
+                    width: 0.5
+                }
+            },
+            hovertemplate: '<b>%{text}</b><br>' +
+                          'Year: %{customdata.year}<br>' +
+                          'Conference: %{customdata.conference}<br>' +
+                          '<extra></extra>'
+        };
+    });
+    
+    // Layout configuration
+    const layout = {
+        title: 'Paper Embeddings Clusters',
+        xaxis: {
+            title: 'Component 1',
+            zeroline: false
+        },
+        yaxis: {
+            title: 'Component 2',
+            zeroline: false
+        },
+        hovermode: 'closest',
+        showlegend: true,
+        legend: {
+            orientation: 'v',
+            x: 1.02,
+            y: 1
+        },
+        plot_bgcolor: '#f8f9fa',
+        paper_bgcolor: 'white',
+        margin: {
+            l: 50,
+            r: 150,
+            t: 50,
+            b: 50
+        }
+    };
+    
+    // Config
+    const config = {
+        responsive: true,
+        displayModeBar: true,
+        modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+        displaylogo: false
+    };
+    
+    // Create plot
+    Plotly.newPlot('cluster-plot', traces, layout, config);
+    
+    // Add click handler for point selection
+    document.getElementById('cluster-plot').on('plotly_click', function(data) {
+        const point = data.points[0];
+        const customdata = point.customdata;
+        showPaperDetails(customdata.id, customdata);
+    });
+}
+
+/**
+ * Filter cluster plot by selected cluster
+ */
+function filterClusterPlot() {
+    const selectedCluster = document.getElementById('cluster-filter').value;
+    
+    if (!clusterData || !clusterData.points) return;
+    
+    if (selectedCluster === '') {
+        // Show all clusters
+        visualizeClusters();
+    } else {
+        // Filter to selected cluster
+        const filteredPoints = clusterData.points.filter(p => 
+            String(p.cluster) === selectedCluster
+        );
+        
+        const trace = {
+            x: filteredPoints.map(p => p.x),
+            y: filteredPoints.map(p => p.y),
+            mode: 'markers',
+            type: 'scatter',
+            name: selectedCluster === '-1' ? 'Noise' : `Cluster ${selectedCluster}`,
+            text: filteredPoints.map(p => p.title || p.id),
+            customdata: filteredPoints.map(p => ({
+                id: p.id,
+                title: p.title || '',
+                year: p.year || '',
+                conference: p.conference || '',
+                session: p.session || ''
+            })),
+            marker: {
+                size: 10,
+                opacity: 0.8,
+                line: {
+                    color: 'white',
+                    width: 1
+                }
+            },
+            hovertemplate: '<b>%{text}</b><br>' +
+                          'Year: %{customdata.year}<br>' +
+                          'Conference: %{customdata.conference}<br>' +
+                          '<extra></extra>'
+        };
+        
+        const layout = {
+            title: `Cluster ${selectedCluster} (${filteredPoints.length} papers)`,
+            xaxis: {
+                title: 'Component 1',
+                zeroline: false
+            },
+            yaxis: {
+                title: 'Component 2',
+                zeroline: false
+            },
+            hovermode: 'closest',
+            showlegend: false,
+            plot_bgcolor: '#f8f9fa',
+            paper_bgcolor: 'white'
+        };
+        
+        const config = {
+            responsive: true,
+            displayModeBar: true,
+            displaylogo: false
+        };
+        
+        Plotly.newPlot('cluster-plot', [trace], layout, config);
+        
+        // Re-add click handler
+        document.getElementById('cluster-plot').on('plotly_click', function(data) {
+            const point = data.points[0];
+            const customdata = point.customdata;
+            showPaperDetails(customdata.id, customdata);
+        });
+    }
+}
+
+/**
+ * Show details of selected paper
+ */
+async function showPaperDetails(paperId, basicInfo) {
+    const detailsDiv = document.getElementById('selected-paper-details');
+    const contentDiv = document.getElementById('selected-paper-content');
+    
+    detailsDiv.classList.remove('hidden');
+    
+    // Show basic info immediately
+    contentDiv.innerHTML = `
+        <div class="space-y-2">
+            <h4 class="text-lg font-semibold">${basicInfo.title}</h4>
+            <p class="text-sm text-gray-600">
+                <strong>Year:</strong> ${basicInfo.year} | 
+                <strong>Conference:</strong> ${basicInfo.conference}
+            </p>
+            <p class="text-sm text-gray-500">Loading full details...</p>
+        </div>
+    `;
+    
+    // Try to fetch full paper details
+    try {
+        const response = await fetch(`/api/papers/${paperId}`);
+        if (response.ok) {
+            const paper = await response.json();
+            contentDiv.innerHTML = `
+                <div class="space-y-4">
+                    <div>
+                        <h4 class="text-lg font-semibold text-gray-800">${paper.title}</h4>
+                        ${paper.authors ? `<p class="text-sm text-gray-600 mt-1">${paper.authors.join(', ')}</p>` : ''}
+                    </div>
+                    <div class="flex items-center gap-4 text-sm text-gray-600">
+                        <span><strong>Year:</strong> ${paper.year || 'N/A'}</span>
+                        <span><strong>Conference:</strong> ${paper.conference || 'N/A'}</span>
+                        ${paper.session ? `<span><strong>Session:</strong> ${paper.session}</span>` : ''}
+                    </div>
+                    ${paper.abstract ? `
+                        <div>
+                            <h5 class="font-semibold text-gray-700 mb-2">Abstract</h5>
+                            <p class="text-sm text-gray-700 leading-relaxed">${paper.abstract}</p>
+                        </div>
+                    ` : ''}
+                    ${paper.url ? `
+                        <div>
+                            <a href="${paper.url}" target="_blank" 
+                               class="inline-flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+                                <i class="fas fa-external-link-alt mr-2"></i>View on OpenReview
+                            </a>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Error fetching paper details:', error);
+    }
+}
+
+/**
+ * Open cluster settings modal
+ */
+function openClusterSettings() {
+    // Create modal HTML
+    const modalHTML = `
+        <div id="cluster-settings-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full">
+                <div class="bg-purple-600 text-white px-6 py-4 flex justify-between items-center rounded-t-lg">
+                    <h3 class="text-xl font-semibold">
+                        <i class="fas fa-cog mr-2"></i>Clustering Settings
+                    </h3>
+                    <button onclick="closeClusterSettings()" class="text-white hover:text-gray-200 text-2xl">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="p-6 space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Dimensionality Reduction</label>
+                        <select id="cluster-reduction-method" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                            <option value="pca" ${currentClusterConfig.reduction_method === 'pca' ? 'selected' : ''}>PCA</option>
+                            <option value="tsne" ${currentClusterConfig.reduction_method === 'tsne' ? 'selected' : ''}>t-SNE</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Clustering Method</label>
+                        <select id="cluster-method" class="w-full px-4 py-2 border border-gray-300 rounded-lg" onchange="toggleClusterParams()">
+                            <option value="kmeans" ${currentClusterConfig.clustering_method === 'kmeans' ? 'selected' : ''}>K-Means</option>
+                            <option value="dbscan" ${currentClusterConfig.clustering_method === 'dbscan' ? 'selected' : ''}>DBSCAN</option>
+                            <option value="agglomerative" ${currentClusterConfig.clustering_method === 'agglomerative' ? 'selected' : ''}>Agglomerative</option>
+                        </select>
+                    </div>
+                    <div id="kmeans-params" class="${currentClusterConfig.clustering_method === 'kmeans' || currentClusterConfig.clustering_method === 'agglomerative' ? '' : 'hidden'}">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Number of Clusters</label>
+                        <input type="number" id="cluster-n-clusters" value="${currentClusterConfig.n_clusters}" min="2" max="20" 
+                               class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                    </div>
+                    <div id="dbscan-params" class="${currentClusterConfig.clustering_method === 'dbscan' ? '' : 'hidden'}">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Epsilon (eps)</label>
+                        <input type="number" id="cluster-eps" value="${currentClusterConfig.eps}" step="0.1" min="0.1" 
+                               class="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Min Samples</label>
+                        <input type="number" id="cluster-min-samples" value="${currentClusterConfig.min_samples}" min="2" 
+                               class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Max Papers (optional)</label>
+                        <input type="number" id="cluster-limit" value="${currentClusterConfig.limit || ''}" placeholder="All papers" 
+                               class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                        <p class="text-xs text-gray-500 mt-1">Limit number of papers for faster computation</p>
+                    </div>
+                </div>
+                <div class="px-6 py-4 bg-gray-50 flex justify-end gap-3 rounded-b-lg">
+                    <button onclick="closeClusterSettings()" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-100">
+                        Cancel
+                    </button>
+                    <button onclick="applyClusterSettings()" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+                        Apply & Recompute
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+/**
+ * Toggle cluster parameter visibility
+ */
+function toggleClusterParams() {
+    const method = document.getElementById('cluster-method').value;
+    const kmeansParams = document.getElementById('kmeans-params');
+    const dbscanParams = document.getElementById('dbscan-params');
+    
+    if (method === 'kmeans' || method === 'agglomerative') {
+        kmeansParams.classList.remove('hidden');
+        dbscanParams.classList.add('hidden');
+    } else if (method === 'dbscan') {
+        kmeansParams.classList.add('hidden');
+        dbscanParams.classList.remove('hidden');
+    }
+}
+
+/**
+ * Close cluster settings modal
+ */
+function closeClusterSettings() {
+    const modal = document.getElementById('cluster-settings-modal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+/**
+ * Apply cluster settings and recompute
+ */
+async function applyClusterSettings() {
+    // Get settings from modal
+    currentClusterConfig = {
+        reduction_method: document.getElementById('cluster-reduction-method').value,
+        clustering_method: document.getElementById('cluster-method').value,
+        n_clusters: parseInt(document.getElementById('cluster-n-clusters').value) || 5,
+        eps: parseFloat(document.getElementById('cluster-eps').value) || 0.5,
+        min_samples: parseInt(document.getElementById('cluster-min-samples').value) || 5,
+        limit: parseInt(document.getElementById('cluster-limit').value) || null
+    };
+    
+    // Close modal
+    closeClusterSettings();
+    
+    // Show loading
+    showLoading('cluster-plot', 'Recomputing clusters with new settings...');
+    
+    try {
+        // Compute clusters with new settings
+        const response = await fetch('/api/clusters/compute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(currentClusterConfig)
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        clusterData = await response.json();
+        
+        if (clusterData.error) {
+            showError('cluster-plot', clusterData.error);
+            return;
+        }
+        
+        // Update visualization
+        updateClusterStats();
+        populateClusterFilter();
+        visualizeClusters();
+        
+    } catch (error) {
+        console.error('Error recomputing clusters:', error);
+        showError('cluster-plot', `Failed to recompute clusters: ${error.message}`);
+    }
+}
+
+/**
+ * Export cluster data as JSON
+ */
+function exportClusters() {
+    if (!clusterData) {
+        alert('No cluster data to export');
+        return;
+    }
+    
+    const dataStr = JSON.stringify(clusterData, null, 2);
+    const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
+    
+    const exportFileDefaultName = 'clusters.json';
+    
+    const linkElement = document.createElement('a');
+    linkElement.setAttribute('href', dataUri);
+    linkElement.setAttribute('download', exportFileDefaultName);
+    linkElement.click();
+}
+
+/**
+ * Show loading message
+ */
+function showLoading(elementId, message) {
+    const element = document.getElementById(elementId);
+    element.innerHTML = `
+        <div class="text-center text-gray-500 py-12">
+            <i class="fas fa-spinner fa-spin text-6xl mb-4 opacity-20"></i>
+            <p class="text-lg">${message}</p>
+        </div>
+    `;
+}
+
+/**
+ * Show error message
+ */
+function showError(elementId, message) {
+    const element = document.getElementById(elementId);
+    element.innerHTML = `
+        <div class="text-center text-red-500 py-12">
+            <i class="fas fa-exclamation-triangle text-6xl mb-4 opacity-20"></i>
+            <p class="text-lg font-semibold">Error</p>
+            <p class="text-sm mt-2">${message}</p>
+        </div>
+    `;
+}
+
+// Initialize clusters when tab is opened
+document.addEventListener('DOMContentLoaded', function() {
+    const originalSwitchTab = window.switchTab;
+    window.switchTab = function(tabName) {
+        originalSwitchTab(tabName);
+        
+        if (tabName === 'clusters' && !clusterData) {
+            loadClusters();
+        }
+    };
+});
