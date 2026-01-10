@@ -10,11 +10,12 @@
         "watch:tailwind": "npx tailwindcss -i src/abstracts_explorer/web_ui/static/tailwind.input.css -o src/abstracts_explorer/web_ui/static/vendor/tailwind.css --watch",
         "postinstall": "npm run install:vendor && npm run setup:hooks",
         "setup:hooks": "cp .githooks/pre-commit .git/hooks/pre-commit && cp .githooks/post-checkout .git/hooks/post-checkout && cp .githooks/post-merge .git/hooks/post-merge && chmod +x .git/hooks/pre-commit .git/hooks/post-checkout .git/hooks/post-merge",
-        "install:vendor": "npm run install:vendor:fontawesome && npm run install:vendor:marked && npm run install:vendor:katex && npm run install:vendor:marked-katex && npm run build:tailwind",
+        "install:vendor": "npm run install:vendor:fontawesome && npm run install:vendor:marked && npm run install:vendor:katex && npm run install:vendor:marked-katex && npm run install:vendor:plotly && npm run build:tailwind",
         "install:vendor:fontawesome": "mkdir -p src/abstracts_explorer/web_ui/static/vendor && cp node_modules/@fortawesome/fontawesome-free/css/all.min.css src/abstracts_explorer/web_ui/static/vendor/fontawesome.min.css && cp -r node_modules/@fortawesome/fontawesome-free/webfonts src/abstracts_explorer/web_ui/static/",
         "install:vendor:marked": "mkdir -p src/abstracts_explorer/web_ui/static/vendor && cp node_modules/marked/lib/marked.umd.js src/abstracts_explorer/web_ui/static/vendor/marked.min.js && cp node_modules/marked/lib/marked.umd.js.map src/abstracts_explorer/web_ui/static/vendor/marked.min.js.map",
         "install:vendor:katex": "mkdir -p src/abstracts_explorer/web_ui/static/vendor && cp node_modules/katex/dist/katex.min.js src/abstracts_explorer/web_ui/static/vendor/katex.min.js && cp node_modules/katex/dist/katex.min.css src/abstracts_explorer/web_ui/static/vendor/katex.min.css && cp -r node_modules/katex/dist/fonts src/abstracts_explorer/web_ui/static/vendor/",
-        "install:vendor:marked-katex": "mkdir -p src/abstracts_explorer/web_ui/static/vendor && cp node_modules/marked-katex-extension/lib/index.umd.js src/abstracts_explorer/web_ui/static/vendor/marked-katex-extension.min.js"
+        "install:vendor:marked-katex": "mkdir -p src/abstracts_explorer/web_ui/static/vendor && cp node_modules/marked-katex-extension/lib/index.umd.js src/abstracts_explorer/web_ui/static/vendor/marked-katex-extension.min.js",
+        "install:vendor:plotly": "mkdir -p src/abstracts_explorer/web_ui/static/vendor && cp node_modules/plotly.js-dist-min/plotly.min.js src/abstracts_explorer/web_ui/static/vendor/plotly.min.js"
     },
     "jest": {
         "testEnvironment": "jsdom",
@@ -42,6 +43,7 @@
         "@fortawesome/fontawesome-free": "^7.1.0",
         "katex": "^0.16.25",
         "marked": "^17.0.1",
-        "marked-katex-extension": "^5.1.6"
+        "marked-katex-extension": "^5.1.6",
+        "plotly.js-dist-min": "^2.35.2"
     }
 }

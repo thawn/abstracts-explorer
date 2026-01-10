@@ -9,6 +9,7 @@ import os
 import sys
 import logging
 import zipfile
+import json
 from pathlib import Path
 from io import BytesIO
 from flask import Flask, render_template, request, jsonify, g, send_file
@@ -565,6 +566,123 @@ def reset_chat():
         rag.reset_conversation()
         return jsonify({"success": True, "message": "Conversation reset"})
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/clusters/compute", methods=["POST"])
+def compute_clusters():
+    """
+    Compute clusters on demand with specified parameters.
+
+    Request Body
+    ------------
+    {
+        "reduction_method": str (optional, default: "pca"),
+        "n_components": int (optional, default: 2),
+        "clustering_method": str (optional, default: "kmeans"),
+        "n_clusters": int (optional, default: 5),
+        "eps": float (optional, default: 0.5, for DBSCAN),
+        "min_samples": int (optional, default: 5, for DBSCAN),
+        "limit": int (optional, max embeddings to process)
+    }
+
+    Returns
+    -------
+    dict
+        Clustering results with points, statistics, and metadata
+    """
+    try:
+        from abstracts_explorer.clustering import ClusteringManager, ClusteringError
+
+        data = request.get_json() or {}
+
+        # Get parameters
+        reduction_method = data.get("reduction_method", "pca")
+        n_components = data.get("n_components", 2)
+        clustering_method = data.get("clustering_method", "kmeans")
+        n_clusters = data.get("n_clusters", 5)
+        limit = data.get("limit")
+
+        # Get embeddings manager
+        em = get_embeddings_manager()
+
+        # Create clustering manager
+        cm = ClusteringManager(em)
+
+        # Load embeddings
+        logger.info(f"Loading embeddings (limit={limit})...")
+        cm.load_embeddings(limit=limit)
+
+        # Perform clustering on full embeddings first
+        logger.info(f"Clustering using {clustering_method} on full embeddings...")
+        kwargs = {}
+        if clustering_method.lower() == "dbscan":
+            kwargs["eps"] = data.get("eps", 0.5)
+            kwargs["min_samples"] = data.get("min_samples", 5)
+
+        cm.cluster(
+            method=clustering_method,
+            n_clusters=n_clusters,
+            use_reduced=False,  # Cluster on full embeddings
+            **kwargs
+        )
+
+        # Reduce dimensions for visualization
+        logger.info(f"Reducing dimensions using {reduction_method} for visualization...")
+        cm.reduce_dimensions(
+            method=reduction_method,
+            n_components=n_components,
+        )
+
+        # Get results
+        results = cm.get_clustering_results()
+
+        return jsonify(results)
+
+    except ClusteringError as e:
+        logger.error(f"Clustering error: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        logger.error(f"Error computing clusters: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/clusters/cached")
+def get_cached_clusters():
+    """
+    Get previously computed clusters from cache file.
+
+    Query Parameters
+    ----------------
+    file : str (optional)
+        Path to cached clustering results JSON file
+        Default: "clusters.json" in current directory
+
+    Returns
+    -------
+    dict
+        Clustering results from cache file
+    """
+    try:
+        cache_file = request.args.get("file", "clusters.json")
+        cache_path = Path(cache_file)
+
+        if not cache_path.exists():
+            return jsonify({
+                "error": f"Cached clusters file not found: {cache_file}",
+                "hint": "Run 'abstracts-explorer cluster-embeddings --output clusters.json' first"
+            }), 404
+
+        with open(cache_path, "r", encoding="utf-8") as f:
+            results = json.load(f)
+
+        return jsonify(results)
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Error parsing cached clusters: {e}", exc_info=True)
+        return jsonify({"error": f"Invalid JSON in cache file: {str(e)}"}), 500
+    except Exception as e:
+        logger.error(f"Error loading cached clusters: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 

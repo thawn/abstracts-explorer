@@ -109,6 +109,7 @@ For simpler use cases, use `LightweightDownloaderPlugin` which only requires ess
 from .config import Config, get_config
 from .database import DatabaseManager
 from .embeddings import EmbeddingsManager
+from .clustering import ClusteringManager, ClusteringError, perform_clustering
 from .rag import RAGChat
 from .plugins import (
     DownloaderPlugin,
@@ -129,6 +130,9 @@ __all__ = [
     "get_config",
     "DatabaseManager",
     "EmbeddingsManager",
+    "ClusteringManager",
+    "ClusteringError",
+    "perform_clustering",
     "RAGChat",
     "DownloaderPlugin",
     "LightweightDownloaderPlugin",
