@@ -7,7 +7,6 @@ including PostgreSQL. PostgreSQL tests are skipped if PostgreSQL is not availabl
 
 import pytest
 import os
-from pathlib import Path
 
 from abstracts_explorer.database import DatabaseManager, DatabaseError
 from abstracts_explorer.plugin import LightweightPaper

@@ -6,7 +6,7 @@ This module defines SQLAlchemy ORM models for the database tables.
 These models support both SQLite and PostgreSQL backends.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column,
@@ -90,7 +90,7 @@ class Paper(Base):
     award = Column(String, nullable=True)
     year = Column(Integer, nullable=True, index=True)
     conference = Column(String, nullable=True, index=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now())
 
     def __repr__(self) -> str:
         """String representation of Paper."""
@@ -119,8 +119,8 @@ class EmbeddingsMetadata(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     embedding_model = Column(String, nullable=False)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, server_default=func.now())
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
 
     def __repr__(self) -> str:
         """String representation of EmbeddingsMetadata."""

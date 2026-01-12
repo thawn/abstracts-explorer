@@ -8,7 +8,7 @@ Supports both SQLite and PostgreSQL backends via SQLAlchemy.
 
 import hashlib
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -866,7 +866,7 @@ class DatabaseManager:
                 )
                 latest = self._session.execute(latest_stmt).scalar_one()
                 latest.embedding_model = model_name
-                latest.updated_at = datetime.utcnow()
+                latest.updated_at = datetime.now(timezone.utc)
             else:
                 # Insert new record
                 new_metadata = EmbeddingsMetadata(embedding_model=model_name)
