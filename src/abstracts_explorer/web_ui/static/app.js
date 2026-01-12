@@ -1777,6 +1777,42 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// Utility: Show loading message in a specific element
+function showLoading(elementId, message) {
+    const element = document.getElementById(elementId);
+    if (!element) {
+        console.error(`Element with id '${elementId}' not found`);
+        return;
+    }
+    element.innerHTML = `
+        <div class="text-center text-gray-500 py-12">
+            <i class="fas fa-spinner fa-spin text-6xl mb-4 opacity-20"></i>
+            <p class="text-lg">${escapeHtml(message)}</p>
+            <p class="text-sm mt-2">This may take a moment</p>
+        </div>
+    `;
+}
+
+// Utility: Show error message in a specific element (overloaded version)
+function showErrorInElement(elementId, message) {
+    const element = document.getElementById(elementId);
+    if (!element) {
+        console.error(`Element with id '${elementId}' not found`);
+        return;
+    }
+    element.innerHTML = `
+        <div class="bg-red-50 border border-red-200 rounded-lg p-6">
+            <div class="flex items-center">
+                <i class="fas fa-exclamation-circle text-red-500 text-2xl mr-3"></i>
+                <div>
+                    <h3 class="text-red-800 font-semibold">Error</h3>
+                    <p class="text-red-700 text-sm mt-1">${escapeHtml(message)}</p>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 // Configure marked with KaTeX extension (run once on load)
 if (typeof markedKatex !== 'undefined') {
     marked.use(markedKatex({
@@ -1943,7 +1979,7 @@ async function loadClusters() {
         clusterData = await response.json();
         
         if (clusterData.error) {
-            showError('cluster-plot', clusterData.error);
+            showErrorInElement('cluster-plot', clusterData.error);
             return;
         }
         
@@ -1958,7 +1994,7 @@ async function loadClusters() {
         
     } catch (error) {
         console.error('Error loading clusters:', error);
-        showError('cluster-plot', `Failed to load clusters: ${error.message}`);
+        showErrorInElement('cluster-plot', `Failed to load clusters: ${error.message}`);
     }
 }
 
@@ -2382,7 +2418,7 @@ async function applyClusterSettings() {
         clusterData = await response.json();
         
         if (clusterData.error) {
-            showError('cluster-plot', clusterData.error);
+            showErrorInElement('cluster-plot', clusterData.error);
             return;
         }
         
@@ -2393,7 +2429,7 @@ async function applyClusterSettings() {
         
     } catch (error) {
         console.error('Error recomputing clusters:', error);
-        showError('cluster-plot', `Failed to recompute clusters: ${error.message}`);
+        showErrorInElement('cluster-plot', `Failed to recompute clusters: ${error.message}`);
     }
 }
 
