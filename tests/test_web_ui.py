@@ -809,40 +809,52 @@ class TestWebUIStatsExceptionHandling:
 
 
 class TestWebUIRunServer:
-    """Test run_server function (lines 335-342)."""
+    """Test run_server function with Waitress production server."""
 
-    def test_run_server_starts_flask_app(self):
-        """Test that run_server starts the Flask app."""
-        from abstracts_explorer.web_ui import run_server, app
+    def test_run_server_starts_waitress_server(self):
+        """Test that run_server starts Waitress server by default."""
+        from abstracts_explorer.web_ui import run_server
 
-        with patch.object(app, "run") as mock_run:
-            with patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=True):
-                with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
-                    mock_cfg = Mock()
-                    mock_cfg.paper_db_path = "/some/path/test.db"
-                    mock_cfg.embedding_db_path = "/some/path/chroma_db"
-                    mock_config.return_value = mock_cfg
+        with patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=True):
+            with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
+                mock_cfg = Mock()
+                mock_cfg.paper_db_path = "/some/path/test.db"
+                mock_cfg.embedding_db_path = "/some/path/chroma_db"
+                mock_config.return_value = mock_cfg
+                
+                # Mock Waitress serve with timeout
+                with patch("waitress.serve") as mock_serve:
+                    mock_serve.side_effect = KeyboardInterrupt()  # Simulate server stop
                     
-                    run_server(host="127.0.0.1", port=5000, debug=False)
+                    with pytest.raises(KeyboardInterrupt):
+                        run_server(host="127.0.0.1", port=5000, debug=False)
 
-            # Verify app.run was called with correct parameters
-            mock_run.assert_called_once_with(host="127.0.0.1", port=5000, debug=False)
+                    # Verify Waitress serve was called with correct parameters
+                    mock_serve.assert_called_once()
+                    call_args = mock_serve.call_args
+                    assert call_args[1]["host"] == "127.0.0.1"
+                    assert call_args[1]["port"] == 5000
 
     def test_run_server_with_debug_mode(self):
-        """Test run_server with debug=True."""
+        """Test run_server with debug=True uses Flask dev server."""
         from abstracts_explorer.web_ui import run_server, app
 
-        with patch.object(app, "run") as mock_run:
-            with patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=True):
-                with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
-                    mock_cfg = Mock()
-                    mock_cfg.paper_db_path = "/some/path/test.db"
-                    mock_cfg.embedding_db_path = "/some/path/chroma_db"
-                    mock_config.return_value = mock_cfg
+        with patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=True):
+            with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
+                mock_cfg = Mock()
+                mock_cfg.paper_db_path = "/some/path/test.db"
+                mock_cfg.embedding_db_path = "/some/path/chroma_db"
+                mock_config.return_value = mock_cfg
+                
+                # Mock Flask app.run with timeout
+                with patch.object(app, "run") as mock_run:
+                    mock_run.side_effect = KeyboardInterrupt()  # Simulate server stop
                     
-                    run_server(host="0.0.0.0", port=8080, debug=True)
+                    with pytest.raises(KeyboardInterrupt):
+                        run_server(host="0.0.0.0", port=8080, debug=True)
 
-            mock_run.assert_called_once_with(host="0.0.0.0", port=8080, debug=True)
+                    # Verify Flask dev server was called with correct parameters
+                    mock_run.assert_called_once_with(host="0.0.0.0", port=8080, debug=True)
 
     def test_run_server_database_not_found(self, capsys):
         """Test that run_server raises FileNotFoundError when database doesn't exist."""
