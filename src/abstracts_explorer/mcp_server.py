@@ -18,6 +18,7 @@ import logging
 import json
 from typing import Any, Dict, Optional
 from collections import defaultdict, Counter
+from copy import deepcopy
 
 from mcp.server.fastmcp import FastMCP
 
@@ -301,9 +302,9 @@ def merge_where_clause_with_conference(
     if where is not None and not isinstance(where, dict):
         raise ValueError(f"WHERE clause must be a dict, got {type(where).__name__}")
     
-    # If no conference, just return the WHERE clause (or None)
+    # If no conference, just return a deep copy of WHERE clause (or None)
     if not conference:
-        return where.copy() if where else None
+        return deepcopy(where) if where else None
     
     # If no WHERE clause, just return conference filter
     if not where:
@@ -325,12 +326,12 @@ def merge_where_clause_with_conference(
                     return True
         return False
     
-    # If conference already in WHERE clause, don't add again
+    # If conference already in WHERE clause, don't add again - return deep copy
     if has_conference_filter(where):
-        return where.copy()
+        return deepcopy(where)
     
-    # Need to merge conference with WHERE clause
-    where_filter = where.copy()
+    # Need to merge conference with WHERE clause - use deep copy to prevent mutations
+    where_filter = deepcopy(where)
     
     # If WHERE already has $and, append to it
     if "$and" in where_filter:

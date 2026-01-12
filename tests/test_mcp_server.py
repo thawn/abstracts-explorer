@@ -35,7 +35,19 @@ class TestMergeWhereClauseWithConference:
         where = {"year": 2024}
         result = merge_where_clause_with_conference(where, None)
         assert result == {"year": 2024}
-        assert result is not where  # Should be a copy
+        assert result is not where  # Should be a deep copy
+
+    def test_deep_copy_prevents_mutation(self):
+        """Test that deep copy prevents mutations to nested structures."""
+        where = {"$and": [{"year": 2024}, {"session": "Oral"}]}
+        result = merge_where_clause_with_conference(where, "NeurIPS")
+        
+        # Modify result
+        result["$and"].append({"modified": True})
+        
+        # Original should be unchanged
+        assert len(where["$and"]) == 2
+        assert {"modified": True} not in where["$and"]
 
     def test_simple_merge(self):
         """Test merging simple WHERE clause with conference."""
@@ -49,6 +61,9 @@ class TestMergeWhereClauseWithConference:
         result = merge_where_clause_with_conference(where, "NeurIPS")
         assert "$and" in result
         assert len(result["$and"]) == 3
+        # Verify all items are present
+        assert {"year": 2024} in result["$and"]
+        assert {"session": "Oral"} in result["$and"]
         assert {"conference": "NeurIPS"} in result["$and"]
 
     def test_conference_already_in_where_top_level(self):
