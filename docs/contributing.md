@@ -408,6 +408,32 @@ python -m cProfile -o profile.stats script.py
 python -c "import pstats; p = pstats.Stats('profile.stats'); p.sort_stats('cumulative'); p.print_stats(20)"
 ```
 
+## Security Considerations
+
+### Debug Mode and Production Server
+
+The web UI uses a production-ready WSGI server (Waitress) by default to avoid security risks associated with Flask's development server.
+
+**Key Points:**
+- **Production mode (default)**: Uses Waitress WSGI server (secure)
+- **Development mode**: Use `--dev` flag to enable Flask development server for easier debugging
+- **Debug mode**: Use `-vv` (double verbose) to enable Flask debug mode, which works with either server
+- Debug mode should only be used during development, never in production
+
+**Example:**
+```bash
+# Production (secure, default)
+abstracts-explorer web-ui
+
+# Development with debug mode  
+abstracts-explorer web-ui --dev -vv
+
+# Production with debug logging (still secure)
+abstracts-explorer web-ui -vv
+```
+
+**Security Note:** Flask's debug mode includes an interactive debugger that could allow arbitrary code execution if exposed. The production server (Waitress) is always recommended for deployed applications, even when debugging is needed.
+
 ## Questions?
 
 - Open an issue for questions

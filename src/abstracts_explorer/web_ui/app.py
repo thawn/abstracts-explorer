@@ -1410,27 +1410,31 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False):
     print(f"Embeddings: {config.embedding_db_path}")
     print(f"Server: http://{host}:{port}")
     
-    # Use Flask development server if explicitly requested or if debug mode is enabled
-    if dev or debug:
+    # Use Flask development server if explicitly requested
+    if dev:
         print("\n⚠️  Using Flask development server (not suitable for production)")
-        print("   Use without --dev or --debug flags for production server")
+        print("   Use without --dev flag for production server")
         print("\nPress CTRL+C to stop the server")
-        # LGTM: Debug mode only used when explicitly requested via --dev or --debug flags
+        # LGTM: Debug mode only used when explicitly requested via --dev flag or -vv
         # This is intentionally for development/debugging purposes only
         app.run(host=host, port=port, debug=debug)
     else:
-        # Use Waitress production server
+        # Use Waitress production server (debug mode works with Waitress too)
         try:
             from waitress import serve  # type: ignore[import-untyped]
             print("\n✅ Using Waitress production WSGI server")
+            if debug:
+                print("⚠️  Debug mode enabled (use -vv or --verbose --verbose)")
             print("\nPress CTRL+C to stop the server")
+            # Set Flask debug mode even with Waitress for better error messages
+            app.debug = debug
             serve(app, host=host, port=port)
         except ImportError:
             print("\n⚠️  Waitress not installed, falling back to Flask development server", file=sys.stderr)
             print("   Install Waitress with: pip install waitress", file=sys.stderr)
             print("   Or install web extras: pip install abstracts-explorer[web]", file=sys.stderr)
             print("\nPress CTRL+C to stop the server")
-            app.run(host=host, port=port, debug=False)
+            app.run(host=host, port=port, debug=debug)
 
 
 if __name__ == "__main__":

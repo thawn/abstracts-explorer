@@ -836,7 +836,7 @@ class TestWebUIRunServer:
                     assert call_args[1]["port"] == 5000
 
     def test_run_server_with_debug_mode(self):
-        """Test run_server with debug=True uses Flask dev server."""
+        """Test run_server with debug=True uses Waitress with debug enabled."""
         from abstracts_explorer.web_ui import run_server, app
 
         with patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=True):
@@ -846,15 +846,20 @@ class TestWebUIRunServer:
                 mock_cfg.embedding_db_path = "/some/path/chroma_db"
                 mock_config.return_value = mock_cfg
                 
-                # Mock Flask app.run with timeout
-                with patch.object(app, "run") as mock_run:
-                    mock_run.side_effect = KeyboardInterrupt()  # Simulate server stop
+                # Mock Waitress serve with timeout (debug mode now works with Waitress)
+                with patch("waitress.serve") as mock_serve:
+                    mock_serve.side_effect = KeyboardInterrupt()  # Simulate server stop
                     
                     with pytest.raises(KeyboardInterrupt):
                         run_server(host="0.0.0.0", port=8080, debug=True)
 
-                    # Verify Flask dev server was called with correct parameters
-                    mock_run.assert_called_once_with(host="0.0.0.0", port=8080, debug=True)
+                    # Verify Waitress was called (debug mode works with production server)
+                    mock_serve.assert_called_once()
+                    call_args = mock_serve.call_args
+                    assert call_args[1]["host"] == "0.0.0.0"
+                    assert call_args[1]["port"] == 8080
+                    # Verify Flask debug flag was set
+                    assert app.debug
 
     def test_run_server_database_not_found(self, capsys):
         """Test that run_server raises FileNotFoundError when database doesn't exist."""
@@ -990,7 +995,7 @@ class TestServerInitialization:
                 mock_run.assert_called_once_with(host="127.0.0.1", port=5000, debug=False)
 
     def test_run_server_with_debug_flag(self, tmp_path, monkeypatch):
-        """Test that run_server uses Flask dev server when debug=True."""
+        """Test that run_server uses Waitress with debug enabled when debug=True."""
         from abstracts_explorer.web_ui.app import run_server, app
         from abstracts_explorer.database import DatabaseManager
         
@@ -1007,15 +1012,20 @@ class TestServerInitialization:
                 embedding_db_path="chroma_db"
             )
             
-            # Mock app.run
-            with patch.object(app, "run") as mock_run:
-                mock_run.side_effect = KeyboardInterrupt()  # Simulate Ctrl+C
+            # Mock Waitress serve (debug mode now works with Waitress)
+            with patch("waitress.serve") as mock_serve:
+                mock_serve.side_effect = KeyboardInterrupt()  # Simulate Ctrl+C
                 
                 with pytest.raises(KeyboardInterrupt):
                     run_server(host="127.0.0.1", port=5000, debug=True, dev=False)
                 
-                # Verify Flask dev server was called with debug=True
-                mock_run.assert_called_once_with(host="127.0.0.1", port=5000, debug=True)
+                # Verify Waitress was called (debug mode works with production server)
+                mock_serve.assert_called_once()
+                call_args = mock_serve.call_args
+                assert call_args[1]["host"] == "127.0.0.1"
+                assert call_args[1]["port"] == 5000
+                # Verify Flask debug flag was set
+                assert app.debug
 
     def test_run_server_waitress_not_available(self, tmp_path, monkeypatch):
         """Test that run_server falls back to Flask when Waitress is not available."""
