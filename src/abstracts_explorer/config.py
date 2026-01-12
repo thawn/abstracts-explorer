@@ -108,6 +108,10 @@ class Config:
         Whether to enable query rewriting for better semantic search.
     query_similarity_threshold : float
         Similarity threshold for determining when to retrieve new papers (0.0-1.0).
+    database_url : str
+        SQLAlchemy database URL (supports SQLite, PostgreSQL, etc.).
+    paper_db_path : str
+        Legacy: Path to SQLite paper database (used when DATABASE_URL not set).
 
     Examples
     --------
@@ -116,6 +120,9 @@ class Config:
     'diffbot-small-xl-2508'
     >>> config.llm_backend_url
     'http://localhost:1234'
+    >>> # Using DATABASE_URL for PostgreSQL
+    >>> config.database_url
+    'postgresql://user:password@localhost/abstracts'
     """
 
     def __init__(self, env_path: Optional[Path] = None):
@@ -153,9 +160,22 @@ class Config:
         self.llm_backend_url = self._get_env("LLM_BACKEND_URL", default="http://localhost:1234")
         self.llm_backend_auth_token = self._get_env("LLM_BACKEND_AUTH_TOKEN", default="")
 
-        # Database Paths (resolved relative to data_dir if not absolute)
+        # Database Configuration
+        # DATABASE_URL takes precedence for multi-database support
+        # Falls back to PAPER_DB_PATH for backward compatibility (SQLite only)
+        database_url = self._get_env("DATABASE_URL", default="")
+        if database_url:
+            self.database_url = database_url
+            self.paper_db_path = ""  # Not used when DATABASE_URL is set
+        else:
+            # Legacy SQLite path configuration
+            paper_db_path = self._resolve_path(self._get_env("PAPER_DB_PATH", default="abstracts.db"))
+            self.paper_db_path = paper_db_path
+            # Convert to SQLAlchemy URL format
+            self.database_url = f"sqlite:///{paper_db_path}"
+
+        # Embedding database path (ChromaDB, not affected by SQL backend)
         self.embedding_db_path = self._resolve_path(self._get_env("EMBEDDING_DB_PATH", default="chroma_db"))
-        self.paper_db_path = self._resolve_path(self._get_env("PAPER_DB_PATH", default="abstracts.db"))
 
         # Collection Settings
         self.collection_name = self._get_env("COLLECTION_NAME", default="papers")
@@ -301,10 +321,45 @@ class Config:
             "llm_backend_url": self.llm_backend_url,
             "llm_backend_auth_token": "***" if self.llm_backend_auth_token else "",
             "embedding_db_path": self.embedding_db_path,
+            "database_url": self._mask_database_url(self.database_url),
             "paper_db_path": self.paper_db_path,
             "collection_name": self.collection_name,
             "max_context_papers": self.max_context_papers,
         }
+
+    def _mask_database_url(self, url: str) -> str:
+        """
+        Mask password in database URL for display.
+
+        Parameters
+        ----------
+        url : str
+            Database URL that may contain password.
+
+        Returns
+        -------
+        str
+            URL with password masked.
+        """
+        if not url or "://" not in url:
+            return url
+
+        # For URLs with password (e.g., postgresql://user:password@host/db)
+        # Mask the password part
+        if "@" in url and ":" in url.split("://")[1].split("@")[0]:
+            parts = url.split("://")
+            protocol = parts[0]
+            rest = parts[1]
+            # Split at @ to separate credentials from host
+            creds_and_host = rest.split("@")
+            if len(creds_and_host) == 2:
+                creds = creds_and_host[0]
+                host = creds_and_host[1]
+                # Mask password in credentials
+                if ":" in creds:
+                    user = creds.split(":")[0]
+                    return f"{protocol}://{user}:***@{host}"
+        return url
 
     def __repr__(self) -> str:
         """String representation of configuration."""

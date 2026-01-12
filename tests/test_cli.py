@@ -1153,17 +1153,22 @@ class TestCLIEmbeddingsProgressAndStats:
 
         # Create test database
         from abstracts_explorer.database import DatabaseManager
+        from abstracts_explorer.plugin import LightweightPaper
 
         db = DatabaseManager(str(db_path))
         with db:
             db.create_tables()
-            cursor = db.connection.cursor()
             for i in range(3):
-                cursor.execute(
-                    "INSERT INTO papers (uid, title, abstract) VALUES (?, ?, ?)",
-                    (f"test{i}", f"Paper {i}", f"Abstract {i}"),
+                paper = LightweightPaper(
+                    title=f"Paper {i}",
+                    abstract=f"Abstract {i}",
+                    authors=["Test Author"],
+                    session="Session",
+                    poster_position="P1",
+                    year=2025,
+                    conference="TestConf",
                 )
-            db.connection.commit()
+                db.add_paper(paper)
 
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value

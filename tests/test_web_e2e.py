@@ -67,84 +67,71 @@ def test_database(tmp_path_factory):
     db_path = tmp_dir / "test_web_e2e.db"
 
     # Create database and add test data
+    from abstracts_explorer.plugin import LightweightPaper
     db = DatabaseManager(str(db_path))
 
     with db:
         db.create_tables()
 
-        cursor = db.connection.cursor()
-
         # Add test papers with realistic data (lightweight schema)
         papers_data = [
-            (
-                "paper1",
-                "Attention is All You Need",
-                "Ashish Vaswani, Noam Shazeer",
-                "We propose the Transformer, a model architecture eschewing recurrence and instead "
-                "relying entirely on an attention mechanism to draw global dependencies between input and output.",
-                "Oral Session 1",
-                "A1",
-                "attention, transformer, neural networks",
-                2025,
-                "NeurIPS",
-            ),
-            (
-                "paper2",
-                "BERT: Pre-training of Deep Bidirectional Transformers",
-                "Jacob Devlin, Ming-Wei Chang",
-                "We introduce a new language representation model called BERT, which stands for "
-                "Bidirectional Encoder Representations from Transformers.",
-                "Poster Session A",
-                "P1",
-                "bert, nlp, transformers",
-                2025,
-                "NeurIPS",
-            ),
-            (
-                "paper3",
-                "Deep Residual Learning for Image Recognition",
-                "Kaiming He, Xiangyu Zhang",
-                "Deep residual nets are foundations of our submissions to ILSVRC & COCO 2015 competitions.",
-                "Oral Session 2",
-                "A2",
-                "resnet, computer vision, deep learning",
-                2025,
-                "NeurIPS",
-            ),
-            (
-                "paper4",
-                "Generative Adversarial Networks",
-                "Ian Goodfellow, Yoshua Bengio",
-                "We propose a new framework for estimating generative models via an adversarial process.",
-                "Poster Session B",
-                "P2",
-                "gan, generative models, adversarial",
-                2025,
-                "NeurIPS",
-            ),
-            (
-                "paper5",
-                "Neural Machine Translation by Jointly Learning to Align and Translate",
-                "Dzmitry Bahdanau, Yoshua Bengio",
-                "Neural machine translation is a recently proposed approach to machine translation.",
-                "Spotlight Session",
-                "S1",
-                "nmt, translation, attention",
-                2025,
-                "NeurIPS",
-            ),
+            {
+                "title": "Attention is All You Need",
+                "authors": ["Ashish Vaswani", "Noam Shazeer"],
+                "abstract": "We propose the Transformer, a model architecture eschewing recurrence and instead "
+                           "relying entirely on an attention mechanism to draw global dependencies between input and output.",
+                "session": "Oral Session 1",
+                "poster_position": "A1",
+                "keywords": ["attention", "transformer", "neural networks"],
+                "year": 2025,
+                "conference": "NeurIPS",
+            },
+            {
+                "title": "BERT: Pre-training of Deep Bidirectional Transformers",
+                "authors": ["Jacob Devlin", "Ming-Wei Chang"],
+                "abstract": "We introduce a new language representation model called BERT, which stands for "
+                           "Bidirectional Encoder Representations from Transformers.",
+                "session": "Poster Session A",
+                "poster_position": "P1",
+                "keywords": ["bert", "nlp", "transformers"],
+                "year": 2025,
+                "conference": "NeurIPS",
+            },
+            {
+                "title": "Deep Residual Learning for Image Recognition",
+                "authors": ["Kaiming He", "Xiangyu Zhang"],
+                "abstract": "Deep residual nets are foundations of our submissions to ILSVRC & COCO 2015 competitions.",
+                "session": "Oral Session 2",
+                "poster_position": "A2",
+                "keywords": ["resnet", "computer vision", "deep learning"],
+                "year": 2025,
+                "conference": "NeurIPS",
+            },
+            {
+                "title": "Generative Adversarial Networks",
+                "authors": ["Ian Goodfellow", "Yoshua Bengio"],
+                "abstract": "We propose a new framework for estimating generative models via an adversarial process.",
+                "session": "Poster Session B",
+                "poster_position": "P2",
+                "keywords": ["gan", "generative models", "adversarial"],
+                "year": 2025,
+                "conference": "NeurIPS",
+            },
+            {
+                "title": "Neural Machine Translation by Jointly Learning to Align and Translate",
+                "authors": ["Dzmitry Bahdanau", "Yoshua Bengio"],
+                "abstract": "Neural machine translation is a recently proposed approach to machine translation.",
+                "session": "Spotlight Session",
+                "poster_position": "S1",
+                "keywords": ["nmt", "translation", "attention"],
+                "year": 2025,
+                "conference": "NeurIPS",
+            },
         ]
 
-        for uid, title, authors, abstract, session, poster_position, keywords, year, conference in papers_data:
-            cursor.execute(
-                """
-                INSERT INTO papers (uid, title, authors, abstract, session, poster_position, keywords, year, conference)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (uid, title, authors, abstract, session, poster_position, keywords, year, conference),
-            )
-
-        db.connection.commit()
+        for paper_data in papers_data:
+            paper = LightweightPaper(**paper_data)
+            db.add_paper(paper)
 
     return db_path
 
@@ -221,14 +208,11 @@ def test_embeddings(test_database, tmp_path_factory):
     # Add embeddings for all test papers from the database
     db = DatabaseManager(str(test_database))
     db.connect()
-    cursor = db.connection.cursor()
-    cursor.execute("SELECT * FROM papers")
-    papers = cursor.fetchall()
+    papers = db.query("SELECT * FROM papers")
 
     # Add each paper to the embeddings database
     for paper in papers:
-        paper_dict = dict(paper)
-        em.add_paper(paper_dict)
+        em.add_paper(paper)
 
     db.close()
 

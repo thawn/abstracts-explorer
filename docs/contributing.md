@@ -302,6 +302,65 @@ git push origin feature/my-new-feature
 3. Address feedback
 4. Final approval and merge
 
+## Database Backend Support
+
+Abstracts Explorer supports both SQLite and PostgreSQL backends through SQLAlchemy.
+
+### Architecture
+
+**Core Components:**
+- `db_models.py` - SQLAlchemy ORM models (Paper, EmbeddingsMetadata)
+- `database.py` - DatabaseManager with SQLAlchemy session management
+- `config.py` - Database URL configuration
+
+**Configuration:**
+```bash
+# SQLite (default)
+PAPER_DB_PATH=data/abstracts.db
+
+# PostgreSQL
+DATABASE_URL=postgresql://user:pass@localhost/abstracts
+```
+
+### Working with Databases
+
+**Using DatabaseManager:**
+```python
+from abstracts_explorer.database import DatabaseManager
+
+# SQLite (legacy)
+db = DatabaseManager(db_path="abstracts.db")
+
+# Any backend via URL
+db = DatabaseManager(database_url="postgresql://...")
+
+with db:
+    db.create_tables()
+    # Database operations...
+```
+
+**Adding Database Fields:**
+1. Update ORM model in `db_models.py`
+2. Create migration if needed (manual for now)
+3. Update `DatabaseManager` methods if necessary
+4. Add tests for new fields
+
+**Testing Different Backends:**
+```bash
+# SQLite tests (always run)
+uv run pytest tests/test_database.py
+
+# PostgreSQL tests (requires server)
+export POSTGRES_TEST_URL=postgresql://localhost/test_db
+uv run pytest tests/test_multi_database.py
+```
+
+**Best Practices:**
+- Use SQLAlchemy ORM for new queries
+- Maintain backward compatibility with existing API
+- Test with both SQLite and PostgreSQL when possible
+- Use timezone-aware datetime (Python 3.12+)
+
 ## Development Guidelines
 
 ### Adding New Features
