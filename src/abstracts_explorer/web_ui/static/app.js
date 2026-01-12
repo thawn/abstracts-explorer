@@ -1777,6 +1777,42 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// Utility: Show loading message in a specific element
+function showLoading(elementId, message) {
+    const element = document.getElementById(elementId);
+    if (!element) {
+        console.error(`Element with id '${elementId}' not found`);
+        return;
+    }
+    element.innerHTML = `
+        <div class="text-center text-gray-500 py-12">
+            <i class="fas fa-spinner fa-spin text-6xl mb-4 opacity-20"></i>
+            <p class="text-lg">${escapeHtml(message)}</p>
+            <p class="text-sm mt-2">This may take a moment</p>
+        </div>
+    `;
+}
+
+// Utility: Show error message in a specific element (overloaded version)
+function showErrorInElement(elementId, message) {
+    const element = document.getElementById(elementId);
+    if (!element) {
+        console.error(`Element with id '${elementId}' not found`);
+        return;
+    }
+    element.innerHTML = `
+        <div class="bg-red-50 border border-red-200 rounded-lg p-6">
+            <div class="flex items-center">
+                <i class="fas fa-exclamation-circle text-red-500 text-2xl mr-3"></i>
+                <div>
+                    <h3 class="text-red-800 font-semibold">Error</h3>
+                    <p class="text-red-700 text-sm mt-1">${escapeHtml(message)}</p>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 // Configure marked with KaTeX extension (run once on load)
 if (typeof markedKatex !== 'undefined') {
     marked.use(markedKatex({
@@ -1907,10 +1943,10 @@ function updateYearsForConference() {
 
 let clusterData = null;
 let currentClusterConfig = {
-    reduction_method: 'pca',
+    reduction_method: 'tsne',
     n_components: 2,
     clustering_method: 'kmeans',
-    n_clusters: 5,
+    n_clusters: 30,
     eps: 0.5,
     min_samples: 5,
     limit: null
@@ -1943,7 +1979,7 @@ async function loadClusters() {
         clusterData = await response.json();
         
         if (clusterData.error) {
-            showError('cluster-plot', clusterData.error);
+            showErrorInElement('cluster-plot', clusterData.error);
             return;
         }
         
@@ -1958,7 +1994,7 @@ async function loadClusters() {
         
     } catch (error) {
         console.error('Error loading clusters:', error);
-        showError('cluster-plot', `Failed to load clusters: ${error.message}`);
+        showErrorInElement('cluster-plot', `Failed to load clusters: ${error.message}`);
     }
 }
 
@@ -2089,6 +2125,10 @@ function visualizeClusters() {
             r: 150,
             t: 50,
             b: 50
+        },
+        hoverlabel: {
+            namelength: -1,
+            align: 'left'
         }
     };
     
@@ -2097,11 +2137,22 @@ function visualizeClusters() {
         responsive: true,
         displayModeBar: true,
         modeBarButtonsToRemove: ['lasso2d', 'select2d'],
-        displaylogo: false
+        displaylogo: false,
+        scrollZoom: true
     };
     
-    // Create plot
-    Plotly.newPlot('cluster-plot', traces, layout, config);
+    // Clear the loading spinner before creating the plot
+    const plotElement = document.getElementById('cluster-plot');
+    plotElement.innerHTML = '';
+    
+    // Create plot with no animation
+    Plotly.newPlot('cluster-plot', traces, layout, config).then(function() {
+        // Disable hover animations after plot is created
+        Plotly.relayout('cluster-plot', {
+            'xaxis.fixedrange': false,
+            'yaxis.fixedrange': false
+        });
+    });
     
     // Add click handler for point selection
     document.getElementById('cluster-plot').on('plotly_click', function(data) {
@@ -2169,16 +2220,31 @@ function filterClusterPlot() {
             hovermode: 'closest',
             showlegend: false,
             plot_bgcolor: '#f8f9fa',
-            paper_bgcolor: 'white'
+            paper_bgcolor: 'white',
+            hoverlabel: {
+                namelength: -1,
+                align: 'left'
+            }
         };
         
         const config = {
             responsive: true,
             displayModeBar: true,
-            displaylogo: false
+            displaylogo: false,
+            scrollZoom: true
         };
         
-        Plotly.newPlot('cluster-plot', [trace], layout, config);
+        // Clear the loading spinner before creating the plot
+        const plotElement = document.getElementById('cluster-plot');
+        plotElement.innerHTML = '';
+        
+        Plotly.newPlot('cluster-plot', [trace], layout, config).then(function() {
+            // Disable hover animations after plot is created
+            Plotly.relayout('cluster-plot', {
+                'xaxis.fixedrange': false,
+                'yaxis.fixedrange': false
+            });
+        });
         
         // Re-add click handler
         document.getElementById('cluster-plot').on('plotly_click', function(data) {
@@ -2382,7 +2448,7 @@ async function applyClusterSettings() {
         clusterData = await response.json();
         
         if (clusterData.error) {
-            showError('cluster-plot', clusterData.error);
+            showErrorInElement('cluster-plot', clusterData.error);
             return;
         }
         
@@ -2393,7 +2459,7 @@ async function applyClusterSettings() {
         
     } catch (error) {
         console.error('Error recomputing clusters:', error);
-        showError('cluster-plot', `Failed to recompute clusters: ${error.message}`);
+        showErrorInElement('cluster-plot', `Failed to recompute clusters: ${error.message}`);
     }
 }
 

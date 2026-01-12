@@ -315,8 +315,8 @@ class ClusteringManager:
 
         try:
             unique_labels = np.unique(self.cluster_labels)
-            n_noise = np.sum(self.cluster_labels == -1)
-            n_clusters = len(unique_labels[unique_labels >= 0])
+            n_noise = int(np.sum(self.cluster_labels == -1))
+            n_clusters = int(len(unique_labels[unique_labels >= 0]))
 
             # Count papers in each cluster
             cluster_sizes = {}
@@ -328,7 +328,7 @@ class ClusteringManager:
                 "n_clusters": n_clusters,
                 "n_noise": n_noise,
                 "cluster_sizes": cluster_sizes,
-                "total_papers": len(self.cluster_labels),
+                "total_papers": int(len(self.cluster_labels)),
             }
 
             logger.info(f"Cluster statistics: {n_clusters} clusters, {n_noise} noise points")
@@ -407,7 +407,7 @@ class ClusteringManager:
             results = {
                 "points": points,
                 "statistics": stats,
-                "n_dimensions": self.reduced_embeddings.shape[1],
+                "n_dimensions": int(self.reduced_embeddings.shape[1]),
             }
 
             logger.info(f"Generated clustering results with {len(points)} points")
