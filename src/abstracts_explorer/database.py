@@ -2,17 +2,25 @@
 Database Module
 ===============
 
-This module provides functionality to load JSON data into a SQLite database.
+This module provides functionality to load JSON data into a SQL database.
+Supports both SQLite and PostgreSQL backends via SQLAlchemy.
 """
 
+import hashlib
 import logging
-import sqlite3
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
+from sqlalchemy import create_engine, select, func, or_, and_, text
+from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.engine import Engine
 
 # Import Pydantic models from plugin framework
 from abstracts_explorer.plugin import LightweightPaper
+
+# Import SQLAlchemy models
+from abstracts_explorer.db_models import Base, Paper, EmbeddingsMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -25,45 +33,81 @@ class DatabaseError(Exception):
 
 class DatabaseManager:
     """
-    Manager for SQLite database operations.
+    Manager for SQL database operations using SQLAlchemy.
+
+    Supports SQLite and PostgreSQL backends through SQLAlchemy connection URLs.
 
     Parameters
     ----------
-    db_path : str or Path
-        Path to the SQLite database file.
+    db_path : str or Path or None
+        Path to the SQLite database file (legacy parameter).
+        Use database_url for non-SQLite databases.
+    database_url : str, optional
+        SQLAlchemy database URL (e.g., "postgresql://user:pass@localhost/db").
+        If provided, takes precedence over db_path.
 
     Attributes
     ----------
-    db_path : Path
-        Path to the SQLite database file.
-    connection : sqlite3.Connection or None
-        Active database connection if connected.
+    database_url : str
+        SQLAlchemy database URL.
+    engine : Engine or None
+        SQLAlchemy engine instance.
+    SessionLocal : sessionmaker or None
+        SQLAlchemy session factory.
+    _session : Session or None
+        Active database session if connected.
 
     Examples
     --------
+    >>> # SQLite (legacy)
     >>> db = DatabaseManager("neurips.db")
+    >>> db.connect()
+    >>> db.create_tables()
+    >>> db.close()
+
+    >>> # PostgreSQL
+    >>> db = DatabaseManager(database_url="postgresql://user:pass@localhost/abstracts")
     >>> db.connect()
     >>> db.create_tables()
     >>> db.close()
     """
 
-    def __init__(self, db_path: Union[str, Path]):
+    def __init__(
+        self,
+        db_path: Optional[Union[str, Path]] = None,
+        database_url: Optional[str] = None,
+    ):
         """
         Initialize the DatabaseManager.
 
         Parameters
         ----------
-        db_path : str or Path
-            Path to the SQLite database file.
+        db_path : str or Path, optional
+            Path to the SQLite database file (legacy parameter).
+        database_url : str, optional
+            SQLAlchemy database URL. Takes precedence over db_path.
         """
-        self.db_path = Path(db_path)
-        self.connection: Optional[sqlite3.Connection] = None
+        if database_url:
+            self.database_url = database_url
+            self.db_path = None  # Legacy attribute for backward compatibility
+        elif db_path:
+            # Convert file path to SQLite URL
+            db_path_obj = Path(db_path)
+            self.db_path = db_path_obj  # Legacy attribute for backward compatibility
+            self.database_url = f"sqlite:///{db_path_obj.absolute()}"
+        else:
+            raise DatabaseError("Either db_path or database_url must be provided")
+
+        self.engine: Optional[Engine] = None
+        self.SessionLocal: Optional[sessionmaker] = None
+        self._session: Optional[Session] = None
+        self.connection = None  # Legacy attribute for backward compatibility (always None now)
 
     def connect(self) -> None:
         """
-        Connect to the SQLite database.
+        Connect to the database.
 
-        Creates the database file if it doesn't exist.
+        Creates the database file if it doesn't exist (SQLite only).
 
         Raises
         ------
@@ -71,12 +115,53 @@ class DatabaseManager:
             If connection fails.
         """
         try:
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            self.connection = sqlite3.connect(str(self.db_path))
-            self.connection.row_factory = sqlite3.Row
-            logger.info(f"Connected to database: {self.db_path}")
-        except sqlite3.Error as e:
+            # Create parent directories for SQLite
+            if self.database_url.startswith("sqlite:///"):
+                db_path_str = self.database_url.replace("sqlite:///", "")
+                db_path = Path(db_path_str)
+                db_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Create engine with appropriate settings
+            connect_args = {}
+            if self.database_url.startswith("sqlite"):
+                # SQLite-specific settings
+                connect_args = {"check_same_thread": False}
+
+            self.engine = create_engine(
+                self.database_url,
+                connect_args=connect_args,
+                echo=False,  # Set to True for SQL debugging
+            )
+
+            # Create session factory
+            self.SessionLocal = sessionmaker(
+                autocommit=False,
+                autoflush=False,
+                bind=self.engine,
+            )
+
+            # Create a session
+            self._session = self.SessionLocal()
+            
+            # Set legacy connection attribute to provide raw database connection for backward compatibility
+            # This allows tests to use .connection.cursor() 
+            self._raw_connection = self.engine.raw_connection()
+            self.connection = self._raw_connection.driver_connection
+
+            logger.info(f"Connected to database: {self._mask_url(self.database_url)}")
+        except Exception as e:
             raise DatabaseError(f"Failed to connect to database: {str(e)}") from e
+
+    def _mask_url(self, url: str) -> str:
+        """Mask password in URL for logging."""
+        if "@" in url and ":" in url:
+            parts = url.split("@")
+            if len(parts) == 2:
+                before_at = parts[0]
+                if "://" in before_at:
+                    protocol_user = before_at.rsplit(":", 1)[0]
+                    return f"{protocol_user}:***@{parts[1]}"
+        return url
 
     def close(self) -> None:
         """
@@ -84,10 +169,18 @@ class DatabaseManager:
 
         Does nothing if not connected.
         """
-        if self.connection:
-            self.connection.close()
-            self.connection = None
-            logger.info("Database connection closed")
+        if self._session:
+            self._session.close()
+            self._session = None
+        if hasattr(self, '_raw_connection') and self._raw_connection:
+            self._raw_connection.close()
+            self._raw_connection = None
+        if self.engine:
+            self.engine.dispose()
+            self.engine = None
+        self.SessionLocal = None
+        self.connection = None
+        logger.info("Database connection closed")
 
     def __enter__(self):
         """Context manager entry."""
@@ -100,7 +193,7 @@ class DatabaseManager:
 
     def create_tables(self) -> None:
         """
-        Create database tables for NeurIPS data.
+        Create database tables for papers and embeddings metadata.
 
         Creates the following tables:
         - papers: Main table for paper information with lightweight ML4PS schema
@@ -111,93 +204,13 @@ class DatabaseManager:
         DatabaseError
             If table creation fails.
         """
-        if not self.connection:
+        if not self.engine:
             raise DatabaseError("Not connected to database")
 
         try:
-            cursor = self.connection.cursor()
-
-            # Create papers table with lightweight ML4PS schema
-            # Based on LightweightPaper model fields
-            cursor.execute(
-                """
-                CREATE TABLE IF NOT EXISTS papers (
-                    uid TEXT PRIMARY KEY,
-                    original_id TEXT,
-                    title TEXT NOT NULL,
-                    authors TEXT,
-                    abstract TEXT,
-                    session TEXT,
-                    poster_position TEXT,
-                    paper_pdf_url TEXT,
-                    poster_image_url TEXT,
-                    url TEXT,
-                    room_name TEXT,
-                    keywords TEXT,
-                    starttime TEXT,
-                    endtime TEXT,
-                    award TEXT,
-                    year INTEGER,
-                    conference TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """
-            )
-
-            # Create embeddings metadata table to track which model was used
-            cursor.execute(
-                """
-                CREATE TABLE IF NOT EXISTS embeddings_metadata (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    embedding_model TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """
-            )
-
-            # Create index on original_id
-            cursor.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_original_id 
-                ON papers(original_id)
-            """
-            )
-
-            # Create index on title for searching
-            cursor.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_title 
-                ON papers(title)
-            """
-            )
-
-            cursor.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_session 
-                ON papers(session)
-            """
-            )
-
-            cursor.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_year 
-                ON papers(year)
-            """
-            )
-
-            cursor.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_conference 
-                ON papers(conference)
-            """
-            )
-
-            self.connection.commit()
+            Base.metadata.create_all(bind=self.engine)
             logger.info("Database tables created successfully")
-
-        except sqlite3.Error as e:
-            self.connection.rollback()
+        except Exception as e:
             raise DatabaseError(f"Failed to create tables: {str(e)}") from e
 
     def add_paper(self, paper: LightweightPaper) -> Optional[str]:
@@ -237,14 +250,10 @@ class DatabaseManager:
         ...     paper_uid = db.add_paper(paper)
         >>> print(f"Inserted paper with UID: {paper_uid}")
         """
-        if not self.connection:
+        if not self._session:
             raise DatabaseError("Not connected to database")
 
         try:
-            import hashlib
-
-            cursor = self.connection.cursor()
-
             # Extract validated fields from LightweightPaper
             paper_id = paper.original_id if paper.original_id else None
             title = paper.title
@@ -262,23 +271,13 @@ class DatabaseManager:
             uid = hashlib.sha256(uid_source.encode("utf-8")).hexdigest()[:16]
 
             # Check if paper already exists (by UID)
-            existing = cursor.execute("SELECT uid FROM papers WHERE uid = ?", (uid,)).fetchone()
+            existing = self._session.execute(
+                select(Paper).where(Paper.uid == uid)
+            ).scalar_one_or_none()
+
             if existing:
                 logger.debug(f"Skipping duplicate paper: {title} (uid: {uid})")
                 return None
-
-            # Extract lightweight schema fields
-            session = paper.session
-            poster_position = paper.poster_position
-            paper_pdf_url = paper.paper_pdf_url
-            poster_image_url = paper.poster_image_url
-            url = paper.url
-            room_name = paper.room_name
-            starttime = paper.starttime
-            endtime = paper.endtime
-            award = paper.award
-            year = paper.year
-            conference = paper.conference
 
             # Handle keywords (could be list or None)
             keywords_list = paper.keywords
@@ -290,44 +289,37 @@ class DatabaseManager:
             else:
                 keywords_str = ""
 
-            # Use paper's original_id if available, otherwise use uid
+            # Use paper's original_id if available
             original_id = str(paper.original_id) if paper.original_id else None
 
-            # Insert paper with lightweight schema
-            cursor.execute(
-                """
-                INSERT INTO papers 
-                (uid, original_id, title, authors, abstract, session, poster_position,
-                 paper_pdf_url, poster_image_url, url, room_name, keywords, starttime, endtime,
-                 award, year, conference)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-                (
-                    uid,
-                    original_id,
-                    title,
-                    authors_str,
-                    abstract,
-                    session,
-                    poster_position,
-                    paper_pdf_url,
-                    poster_image_url,
-                    url,
-                    room_name,
-                    keywords_str,
-                    starttime,
-                    endtime,
-                    award,
-                    year,
-                    conference,
-                ),
+            # Create Paper ORM object
+            new_paper = Paper(
+                uid=uid,
+                original_id=original_id,
+                title=title,
+                authors=authors_str,
+                abstract=abstract,
+                session=paper.session,
+                poster_position=paper.poster_position,
+                paper_pdf_url=paper.paper_pdf_url,
+                poster_image_url=paper.poster_image_url,
+                url=paper.url,
+                room_name=paper.room_name,
+                keywords=keywords_str,
+                starttime=paper.starttime,
+                endtime=paper.endtime,
+                award=paper.award,
+                year=paper.year,
+                conference=paper.conference,
             )
 
-            self.connection.commit()
+            self._session.add(new_paper)
+            self._session.commit()
+
             return uid
 
-        except sqlite3.Error as e:
-            self.connection.rollback()
+        except Exception as e:
+            self._session.rollback()
             raise DatabaseError(f"Failed to add paper: {str(e)}") from e
 
     def add_papers(self, papers: List[LightweightPaper]) -> int:
@@ -378,7 +370,7 @@ class DatabaseManager:
         ...     count = db.add_papers(papers)
         >>> print(f"Inserted {count} papers")
         """
-        if not self.connection:
+        if not self._session:
             raise DatabaseError("Not connected to database")
 
         inserted_count = 0
@@ -391,21 +383,24 @@ class DatabaseManager:
         logger.info(f"Successfully inserted {inserted_count} of {len(papers)} papers")
         return inserted_count
 
-    def query(self, sql: str, parameters: tuple = ()) -> List[sqlite3.Row]:
+    def query(self, sql: str, parameters: tuple = ()) -> List[Dict[str, Any]]:
         """
         Execute a SQL query and return results.
+
+        Note: This method provides backward compatibility with raw SQL queries.
+        For new code, prefer using SQLAlchemy ORM methods.
 
         Parameters
         ----------
         sql : str
-            SQL query to execute.
+            SQL query to execute (use named parameters like :param1, :param2).
         parameters : tuple, optional
             Query parameters for parameterized queries.
 
         Returns
         -------
-        list of sqlite3.Row
-            Query results.
+        list of dict
+            Query results as list of dictionaries.
 
         Raises
         ------
@@ -416,18 +411,38 @@ class DatabaseManager:
         --------
         >>> db = DatabaseManager("neurips.db")
         >>> with db:
-        ...     results = db.query("SELECT * FROM papers WHERE eventtype = ?", ("Poster",))
+        ...     results = db.query("SELECT * FROM papers WHERE session = ?", ("Poster",))
         >>> for row in results:
         ...     print(row['title'])
         """
-        if not self.connection:
+        if not self._session:
             raise DatabaseError("Not connected to database")
 
         try:
-            cursor = self.connection.cursor()
-            cursor.execute(sql, parameters)
-            return cursor.fetchall()
-        except sqlite3.Error as e:
+            # Convert ? placeholders to :0, :1, :2 for SQLAlchemy
+            # Count the number of ? placeholders
+            param_count = sql.count("?")
+            
+            # Replace ? with numbered parameters
+            converted_sql = sql
+            for i in range(param_count):
+                converted_sql = converted_sql.replace("?", f":param{i}", 1)
+            
+            # Create parameter dict
+            param_dict = {f"param{i}": parameters[i] for i in range(len(parameters))}
+            
+            # Execute raw SQL using text()
+            result = self._session.execute(text(converted_sql), param_dict)
+            
+            # Convert result to list of dicts
+            rows = []
+            for row in result:
+                # Convert row to dict
+                row_dict = dict(row._mapping)
+                rows.append(row_dict)
+            
+            return rows
+        except Exception as e:
             raise DatabaseError(f"Query failed: {str(e)}") from e
 
     def get_paper_count(self) -> int:
@@ -444,8 +459,16 @@ class DatabaseManager:
         DatabaseError
             If query fails.
         """
-        result = self.query("SELECT COUNT(*) as count FROM papers")
-        return result[0]["count"] if result else 0
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            count = self._session.execute(
+                select(func.count()).select_from(Paper)
+            ).scalar()
+            return count or 0
+        except Exception as e:
+            raise DatabaseError(f"Failed to count papers: {str(e)}") from e
 
     def search_papers(
         self,
@@ -457,7 +480,7 @@ class DatabaseManager:
         conference: Optional[str] = None,
         conferences: Optional[List[str]] = None,
         limit: int = 100,
-    ) -> List[sqlite3.Row]:
+    ) -> List[Dict[str, Any]]:
         """
         Search for papers by various criteria (lightweight schema).
 
@@ -482,8 +505,8 @@ class DatabaseManager:
 
         Returns
         -------
-        list of sqlite3.Row
-            Matching papers.
+        list of dict
+            Matching papers as dictionaries.
 
         Raises
         ------
@@ -504,42 +527,76 @@ class DatabaseManager:
         >>> # Search with years
         >>> papers = db.search_papers(years=[2024, 2025])
         """
-        conditions = []
-        parameters: List[Any] = []
+        if not self._session:
+            raise DatabaseError("Not connected to database")
 
-        if keyword:
-            conditions.append("(title LIKE ? OR abstract LIKE ? OR keywords LIKE ?)")
-            search_term = f"%{keyword}%"
-            parameters.extend([search_term, search_term, search_term])
+        try:
+            # Build query conditions
+            conditions = []
 
-        # Handle sessions (prefer list form, fall back to single)
-        session_list = sessions if sessions else ([session] if session else [])
-        if session_list:
-            placeholders = ",".join("?" * len(session_list))
-            conditions.append(f"session IN ({placeholders})")
-            parameters.extend(session_list)
+            if keyword:
+                search_pattern = f"%{keyword}%"
+                conditions.append(
+                    or_(
+                        Paper.title.ilike(search_pattern),
+                        Paper.abstract.ilike(search_pattern),
+                        Paper.keywords.ilike(search_pattern),
+                    )
+                )
 
-        # Handle years (prefer list form, fall back to single)
-        year_list = years if years else ([year] if year else [])
-        if year_list:
-            placeholders = ",".join("?" * len(year_list))
-            conditions.append(f"year IN ({placeholders})")
-            parameters.extend(year_list)
+            # Handle sessions (prefer list form, fall back to single)
+            session_list = sessions if sessions else ([session] if session else [])
+            if session_list:
+                conditions.append(Paper.session.in_(session_list))
 
-        # Handle conferences (prefer list form, fall back to single)
-        conference_list = conferences if conferences else ([conference] if conference else [])
-        if conference_list:
-            placeholders = ",".join("?" * len(conference_list))
-            conditions.append(f"conference IN ({placeholders})")
-            parameters.extend(conference_list)
+            # Handle years (prefer list form, fall back to single)
+            year_list = years if years else ([year] if year else [])
+            if year_list:
+                conditions.append(Paper.year.in_(year_list))
 
-        where_clause = " AND ".join(conditions) if conditions else "1=1"
-        sql = f"SELECT * FROM papers WHERE {where_clause}"
-        if limit:
-            sql += " LIMIT ?"
-            parameters.append(limit)
+            # Handle conferences (prefer list form, fall back to single)
+            conference_list = conferences if conferences else ([conference] if conference else [])
+            if conference_list:
+                conditions.append(Paper.conference.in_(conference_list))
 
-        return self.query(sql, tuple(parameters))
+            # Build query
+            stmt = select(Paper)
+            if conditions:
+                stmt = stmt.where(and_(*conditions))
+            if limit:
+                stmt = stmt.limit(limit)
+
+            # Execute query
+            results = self._session.execute(stmt).scalars().all()
+
+            # Convert ORM objects to dicts
+            return [self._paper_to_dict(paper) for paper in results]
+
+        except Exception as e:
+            raise DatabaseError(f"Search failed: {str(e)}") from e
+
+    def _paper_to_dict(self, paper: Paper) -> Dict[str, Any]:
+        """Convert Paper ORM object to dictionary."""
+        return {
+            "uid": paper.uid,
+            "original_id": paper.original_id,
+            "title": paper.title,
+            "authors": paper.authors,
+            "abstract": paper.abstract,
+            "session": paper.session,
+            "poster_position": paper.poster_position,
+            "paper_pdf_url": paper.paper_pdf_url,
+            "poster_image_url": paper.poster_image_url,
+            "url": paper.url,
+            "room_name": paper.room_name,
+            "keywords": paper.keywords,
+            "starttime": paper.starttime,
+            "endtime": paper.endtime,
+            "award": paper.award,
+            "year": paper.year,
+            "conference": paper.conference,
+            "created_at": paper.created_at,
+        }
 
     def search_authors_in_papers(
         self,
@@ -574,22 +631,27 @@ class DatabaseManager:
         >>> for author in authors:
         ...     print(author['name'])
         """
-        if not name:
+        if not name or not self._session:
             return []
 
         try:
             # Search for authors in the semicolon-separated authors field
-            sql = "SELECT DISTINCT authors FROM papers WHERE authors LIKE ? LIMIT ?"
-            parameters = [f"%{name}%", limit * 10]  # Get more papers to extract unique authors
+            search_pattern = f"%{name}%"
+            stmt = (
+                select(Paper.authors)
+                .where(Paper.authors.ilike(search_pattern))
+                .distinct()
+                .limit(limit * 10)  # Get more papers to extract unique authors
+            )
 
-            rows = self.query(sql, tuple(parameters))
+            results = self._session.execute(stmt).scalars().all()
 
             # Extract unique author names
             author_names = set()
-            for row in rows:
-                if row["authors"]:
+            for authors_str in results:
+                if authors_str:
                     # Split semicolon-separated authors
-                    for author in row["authors"].split(";"):
+                    for author in authors_str.split(";"):
                         author = author.strip()
                         if name.lower() in author.lower():
                             author_names.add(author)
@@ -599,7 +661,7 @@ class DatabaseManager:
                     break
 
             return [{"name": name} for name in sorted(author_names)[:limit]]
-        except sqlite3.Error as e:
+        except Exception as e:
             raise DatabaseError(f"Author search failed: {str(e)}") from e
 
     def get_author_count(self) -> int:
@@ -619,19 +681,25 @@ class DatabaseManager:
         DatabaseError
             If query fails.
         """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
         try:
             # Get all author fields
-            rows = self.query("SELECT authors FROM papers WHERE authors IS NOT NULL AND authors != ''")
+            stmt = select(Paper.authors).where(
+                and_(Paper.authors.isnot(None), Paper.authors != "")
+            )
+            results = self._session.execute(stmt).scalars().all()
 
             # Extract unique author names
             author_names = set()
-            for row in rows:
-                if row["authors"]:
-                    for author in row["authors"].split(";"):
+            for authors_str in results:
+                if authors_str:
+                    for author in authors_str.split(";"):
                         author_names.add(author.strip())
 
             return len(author_names)
-        except sqlite3.Error as e:
+        except Exception as e:
             raise DatabaseError(f"Failed to count authors: {str(e)}") from e
 
     def get_filter_options(self, year: Optional[int] = None, conference: Optional[str] = None) -> dict:
@@ -672,44 +740,52 @@ class DatabaseManager:
         >>> # Get filters for specific year
         >>> filters = db.get_filter_options(year=2025)
         """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
         try:
-            # Build WHERE clause based on filters
+            # Build WHERE conditions
             conditions = []
-            parameters: List[Any] = []
-
             if year is not None:
-                conditions.append("year = ?")
-                parameters.append(year)
-
+                conditions.append(Paper.year == year)
             if conference is not None:
-                conditions.append("conference = ?")
-                parameters.append(conference)
+                conditions.append(Paper.conference == conference)
 
-            where_clause = " AND ".join(conditions) if conditions else "1=1"
+            # Get distinct sessions (with filters)
+            stmt = select(Paper.session).distinct()
+            if conditions:
+                stmt = stmt.where(and_(*conditions))
+            stmt = stmt.where(and_(Paper.session.isnot(None), Paper.session != "")).order_by(Paper.session)
 
-            # Get distinct sessions
-            sessions_result = self.query(
-                f"SELECT DISTINCT session FROM papers WHERE {where_clause} AND session IS NOT NULL AND session != '' ORDER BY session",
-                tuple(parameters) if parameters else (),
-            )
-            sessions = [row["session"] for row in sessions_result]
+            sessions_result = self._session.execute(stmt).scalars().all()
+            sessions = list(sessions_result)
 
             # Get distinct years (not filtered)
-            years_result = self.query("SELECT DISTINCT year FROM papers WHERE year IS NOT NULL ORDER BY year DESC")
-            years = [row["year"] for row in years_result]
+            years_stmt = (
+                select(Paper.year)
+                .distinct()
+                .where(Paper.year.isnot(None))
+                .order_by(Paper.year.desc())
+            )
+            years_result = self._session.execute(years_stmt).scalars().all()
+            years = list(years_result)
 
             # Get distinct conferences (not filtered)
-            conferences_result = self.query(
-                "SELECT DISTINCT conference FROM papers WHERE conference IS NOT NULL AND conference != '' ORDER BY conference"
+            conferences_stmt = (
+                select(Paper.conference)
+                .distinct()
+                .where(and_(Paper.conference.isnot(None), Paper.conference != ""))
+                .order_by(Paper.conference)
             )
-            conferences = [row["conference"] for row in conferences_result]
+            conferences_result = self._session.execute(conferences_stmt).scalars().all()
+            conferences = list(conferences_result)
 
             return {
                 "sessions": sessions,
                 "years": years,
                 "conferences": conferences,
             }
-        except sqlite3.Error as e:
+        except Exception as e:
             raise DatabaseError(f"Failed to get filter options: {str(e)}") from e
 
     def get_embedding_model(self) -> Optional[str]:
@@ -734,22 +810,19 @@ class DatabaseManager:
         >>> print(model)
         'text-embedding-qwen3-embedding-4b'
         """
-        if not self.connection:
+        if not self._session:
             raise DatabaseError("Not connected to database")
 
         try:
-            cursor = self.connection.cursor()
             # Get the most recent embedding model entry
-            cursor.execute(
-                """
-                SELECT embedding_model FROM embeddings_metadata 
-                ORDER BY updated_at DESC 
-                LIMIT 1
-            """
+            stmt = (
+                select(EmbeddingsMetadata.embedding_model)
+                .order_by(EmbeddingsMetadata.updated_at.desc())
+                .limit(1)
             )
-            result = cursor.fetchone()
-            return result["embedding_model"] if result else None
-        except sqlite3.Error as e:
+            result = self._session.execute(stmt).scalar_one_or_none()
+            return result
+        except Exception as e:
             raise DatabaseError(f"Failed to get embedding model: {str(e)}") from e
 
     def set_embedding_model(self, model_name: str) -> None:
@@ -775,39 +848,32 @@ class DatabaseManager:
         >>> with db:
         ...     db.set_embedding_model("text-embedding-qwen3-embedding-4b")
         """
-        if not self.connection:
+        if not self._session:
             raise DatabaseError("Not connected to database")
 
         try:
-            cursor = self.connection.cursor()
-            
             # Check if any record exists
-            cursor.execute("SELECT COUNT(*) as count FROM embeddings_metadata")
-            result = cursor.fetchone()
-            count = result["count"] if result else 0
+            count_stmt = select(func.count()).select_from(EmbeddingsMetadata)
+            count = self._session.execute(count_stmt).scalar()
 
-            if count > 0:
+            if count and count > 0:
                 # Update the most recent record
-                cursor.execute(
-                    """
-                    UPDATE embeddings_metadata 
-                    SET embedding_model = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = (SELECT id FROM embeddings_metadata ORDER BY updated_at DESC LIMIT 1)
-                """,
-                    (model_name,),
+                # Get the most recent entry
+                latest_stmt = (
+                    select(EmbeddingsMetadata)
+                    .order_by(EmbeddingsMetadata.updated_at.desc())
+                    .limit(1)
                 )
+                latest = self._session.execute(latest_stmt).scalar_one()
+                latest.embedding_model = model_name
+                latest.updated_at = datetime.utcnow()
             else:
                 # Insert new record
-                cursor.execute(
-                    """
-                    INSERT INTO embeddings_metadata (embedding_model)
-                    VALUES (?)
-                """,
-                    (model_name,),
-                )
+                new_metadata = EmbeddingsMetadata(embedding_model=model_name)
+                self._session.add(new_metadata)
 
-            self.connection.commit()
+            self._session.commit()
             logger.info(f"Set embedding model to: {model_name}")
-        except sqlite3.Error as e:
-            self.connection.rollback()
+        except Exception as e:
+            self._session.rollback()
             raise DatabaseError(f"Failed to set embedding model: {str(e)}") from e
