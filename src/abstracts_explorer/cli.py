@@ -638,8 +638,8 @@ def web_ui_command(args: argparse.Namespace) -> int:
             print("  pip install flask flask-cors", file=sys.stderr)
             return 1
 
-        # Start the server
-        run_server(host=args.host, port=args.port, debug=args.debug, dev=args.dev)
+        # Start the server (dev defaults to False for production server)
+        run_server(host=args.host, port=args.port, debug=args.debug, dev=getattr(args, 'dev', False))
         return 0
 
     except KeyboardInterrupt:
