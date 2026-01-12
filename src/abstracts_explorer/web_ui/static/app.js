@@ -2125,6 +2125,12 @@ function visualizeClusters() {
             r: 150,
             t: 50,
             b: 50
+        },
+        transition: {
+            duration: 0
+        },
+        hoverlabel: {
+            namelength: -1
         }
     };
     
@@ -2205,7 +2211,13 @@ function filterClusterPlot() {
             hovermode: 'closest',
             showlegend: false,
             plot_bgcolor: '#f8f9fa',
-            paper_bgcolor: 'white'
+            paper_bgcolor: 'white',
+            transition: {
+                duration: 0
+            },
+            hoverlabel: {
+                namelength: -1
+            }
         };
         
         const config = {
