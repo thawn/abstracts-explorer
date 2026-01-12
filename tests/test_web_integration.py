@@ -970,6 +970,65 @@ class TestWebUIErrorHandlingPaths:
         if response.status_code == 500:
             assert "error" in data
 
+    def test_clusters_compute_endpoint(self, web_server):
+        """Test that clusters compute endpoint works correctly."""
+        host, port, base_url = web_server
+
+        # Request cluster computation with default parameters
+        cluster_data = {
+            "reduction_method": "pca",
+            "n_components": 2,
+            "clustering_method": "kmeans",
+            "n_clusters": 3,
+        }
+
+        response = requests.post(f"{base_url}/api/clusters/compute", json=cluster_data, timeout=30)
+
+        # Should return 200 OK
+        assert response.status_code == 200
+
+        data = response.json()
+        assert isinstance(data, dict)
+
+        # Should have points, statistics, and n_dimensions
+        assert "points" in data
+        assert "statistics" in data
+        assert "n_dimensions" in data
+
+        # Verify statistics structure
+        stats = data["statistics"]
+        assert "n_clusters" in stats
+        assert "total_papers" in stats
+        assert "cluster_sizes" in stats
+
+        # Verify we got the expected number of clusters (or fewer if not enough data)
+        assert stats["n_clusters"] > 0
+        assert stats["n_clusters"] <= 3
+
+        # Verify points structure
+        points = data["points"]
+        assert isinstance(points, list)
+        assert len(points) > 0
+
+        # Each point should have required fields
+        for point in points:
+            assert "id" in point
+            assert "x" in point
+            assert "y" in point
+            assert "cluster" in point
+
+    def test_clusters_cached_endpoint_not_found(self, web_server):
+        """Test that cached clusters endpoint returns 404 when no cache exists."""
+        host, port, base_url = web_server
+
+        response = requests.get(f"{base_url}/api/clusters/cached", timeout=10)
+
+        # Should return 404 when no cached file exists
+        assert response.status_code == 404
+
+        data = response.json()
+        assert "error" in data
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])
