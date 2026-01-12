@@ -144,8 +144,12 @@ def health():
         db = get_database()
         db.get_paper_count()
         return jsonify({"status": "healthy", "service": "abstracts-explorer"}), 200
-    except Exception as e:
-        return jsonify({"status": "unhealthy", "error": str(e)}), 503
+    except FileNotFoundError:
+        # Database file doesn't exist - provide helpful message
+        return jsonify({"status": "unhealthy", "error": "Database not initialized"}), 503
+    except Exception:
+        # Other errors - return generic message for security
+        return jsonify({"status": "unhealthy", "error": "Service unavailable"}), 503
 
 
 @app.route("/api/stats")
