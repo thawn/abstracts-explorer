@@ -76,19 +76,11 @@ ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONPATH="/app/src:${PYTHONPATH}" \
     PYTHONUNBUFFERED=1
 
+# Copy default .env configuration
+COPY --chown=abstracts:abstracts .env.docker /app/.env
+
 # Switch to non-root user
 USER abstracts
-
-# Create default .env file (can be overridden by volume mount)
-RUN echo "# Abstracts Explorer Configuration\n\
-DATA_DIR=/app/data\n\
-PAPER_DB_PATH=/app/data/abstracts.db\n\
-EMBEDDING_DB_PATH=/app/chroma_db\n\
-# LLM Backend (configure based on your setup)\n\
-LLM_BACKEND_URL=http://localhost:1234\n\
-CHAT_MODEL=gemma-3-4b-it-qat\n\
-EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b\n\
-" > /app/.env
 
 # Expose web UI port
 EXPOSE 5000

@@ -63,6 +63,8 @@ temp/
 .env
 .env.local
 .env.*.local
+# But include .env.docker as it's the default configuration
+!.env.docker
 
 # Test files (not needed in container)
 tests/
