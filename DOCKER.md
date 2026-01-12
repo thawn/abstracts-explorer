@@ -2,7 +2,27 @@
 
 Get Abstracts Explorer running in minutes with Docker or Podman!
 
-## Prerequisites
+## Using Pre-built Images
+
+The fastest way to get started:
+
+```bash
+# Pull and run from GitHub Container Registry
+podman run -p 5000:5000 -v abstracts-data:/app/data ghcr.io/thawn/abstracts-explorer:latest
+
+# Or with Docker
+docker run -p 5000:5000 -v abstracts-data:/app/data ghcr.io/thawn/abstracts-explorer:latest
+```
+
+Then access at **http://localhost:5000**
+
+Available images:
+- **GitHub Container Registry**: `ghcr.io/thawn/abstracts-explorer:latest`
+- **Docker Hub** (releases): `thawn/abstracts-explorer:latest`
+
+## Building from Source
+
+### Prerequisites
 
 - **Podman** (recommended): [Install Podman](https://podman.io/getting-started/installation)
 - **Docker** (alternative): [Install Docker](https://docs.docker.com/get-docker/)

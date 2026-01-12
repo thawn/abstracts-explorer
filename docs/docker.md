@@ -2,6 +2,28 @@
 
 This guide explains how to run Abstracts Explorer using containers with Podman (recommended) or Docker.
 
+## Pre-built Images
+
+Pre-built container images are available from:
+- **GitHub Container Registry**: `ghcr.io/thawn/abstracts-explorer:latest`
+- **Docker Hub** (releases only): `thawn/abstracts-explorer:latest`
+
+```bash
+# Pull and run from GitHub Container Registry
+podman pull ghcr.io/thawn/abstracts-explorer:latest
+podman run -p 5000:5000 ghcr.io/thawn/abstracts-explorer:latest
+
+# Or from Docker Hub (for releases)
+docker pull thawn/abstracts-explorer:latest
+docker run -p 5000:5000 thawn/abstracts-explorer:latest
+```
+
+Available tags:
+- `latest` - Latest stable release or main branch
+- `main` - Latest main branch build
+- `develop` - Latest develop branch build
+- `v*.*.*` - Specific version releases (e.g., `v0.1.0`)
+
 ## Prerequisites
 
 ### Podman (Recommended)
