@@ -2139,8 +2139,13 @@ function visualizeClusters() {
         responsive: true,
         displayModeBar: true,
         modeBarButtonsToRemove: ['lasso2d', 'select2d'],
-        displaylogo: false
+        displaylogo: false,
+        scrollZoom: true
     };
+    
+    // Clear the loading spinner before creating the plot
+    const plotElement = document.getElementById('cluster-plot');
+    plotElement.innerHTML = '';
     
     // Create plot
     Plotly.newPlot('cluster-plot', traces, layout, config);
@@ -2223,8 +2228,13 @@ function filterClusterPlot() {
         const config = {
             responsive: true,
             displayModeBar: true,
-            displaylogo: false
+            displaylogo: false,
+            scrollZoom: true
         };
+        
+        // Clear the loading spinner before creating the plot
+        const plotElement = document.getElementById('cluster-plot');
+        plotElement.innerHTML = '';
         
         Plotly.newPlot('cluster-plot', [trace], layout, config);
         
