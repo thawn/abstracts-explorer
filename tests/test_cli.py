@@ -978,7 +978,7 @@ class TestWebUICommand:
         from abstracts_explorer.cli import web_ui_command
         import argparse
 
-        args = argparse.Namespace(host="127.0.0.1", port=5000, debug=False)
+        args = argparse.Namespace(host="127.0.0.1", port=5000, debug=False, dev=False)
 
         # Mock the import at the location where it happens (inside web_ui_command)
         with patch.dict("sys.modules", {"abstracts_explorer.web_ui": None}):
@@ -1001,7 +1001,7 @@ class TestWebUICommand:
         from abstracts_explorer.cli import web_ui_command
         import argparse
 
-        args = argparse.Namespace(host="127.0.0.1", port=5000, debug=False)
+        args = argparse.Namespace(host="127.0.0.1", port=5000, debug=False, dev=False)
 
         # Mock run_server at the location where it's used after import
         with patch("abstracts_explorer.web_ui.run_server", side_effect=KeyboardInterrupt()):
@@ -1016,7 +1016,7 @@ class TestWebUICommand:
         from abstracts_explorer.cli import web_ui_command
         import argparse
 
-        args = argparse.Namespace(host="127.0.0.1", port=5000, debug=False)
+        args = argparse.Namespace(host="127.0.0.1", port=5000, debug=False, dev=False)
 
         # Mock run_server at the location where it's used after import
         with patch("abstracts_explorer.web_ui.run_server", side_effect=Exception("Test error")):
@@ -1031,7 +1031,7 @@ class TestWebUICommand:
         from abstracts_explorer.cli import web_ui_command
         import argparse
 
-        args = argparse.Namespace(host="127.0.0.1", port=5000, debug=False)
+        args = argparse.Namespace(host="127.0.0.1", port=5000, debug=False, dev=False)
 
         # Mock run_server to raise FileNotFoundError (as it would when database is missing)
         with patch("abstracts_explorer.web_ui.run_server", side_effect=FileNotFoundError("Database not found: /nonexistent/test.db")):
