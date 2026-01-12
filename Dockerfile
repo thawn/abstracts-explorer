@@ -13,7 +13,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 # Copy source files needed for vendor installation
-COPY src/abstracts_explorer/web_ui/static/tailwind.input.css src/abstracts_explorer/web_ui/static/
+COPY src/abstracts_explorer/web_ui/static/ src/abstracts_explorer/web_ui/static/
 COPY tailwind.config.js ./
 
 # Install vendor dependencies (fonts, CSS libraries, etc.)
@@ -52,6 +52,7 @@ WORKDIR /app
 # Install runtime dependencies only
 RUN apt-get update && apt-get install -y --no-install-recommends \
     sqlite3 \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
@@ -63,7 +64,7 @@ RUN useradd -m -u 1000 abstracts && \
 COPY --from=python-builder --chown=abstracts:abstracts /app/.venv /app/.venv
 COPY --from=python-builder --chown=abstracts:abstracts /app/src /app/src
 
-# Copy Node.js vendor files from builder
+# Copy Node.js vendor files from builder (overwrite existing)
 COPY --from=node-builder --chown=abstracts:abstracts /app/src/abstracts_explorer/web_ui/static/vendor /app/src/abstracts_explorer/web_ui/static/vendor
 COPY --from=node-builder --chown=abstracts:abstracts /app/src/abstracts_explorer/web_ui/static/webfonts /app/src/abstracts_explorer/web_ui/static/webfonts
 
@@ -92,9 +93,9 @@ EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b\n\
 # Expose web UI port
 EXPOSE 5000
 
-# Health check
+# Health check (requires requests library, which is already installed)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:5000/health', timeout=5)" || exit 1
+    CMD curl -f http://localhost:5000/health || exit 1
 
 # Default command: start web UI
 CMD ["abstracts-explorer", "web-ui", "--host", "0.0.0.0", "--port", "5000"]

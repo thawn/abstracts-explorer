@@ -32,7 +32,7 @@ docker-compose up -d
 # Access at http://localhost:5000
 ```
 
-📖 **[Docker/Podman Setup Guide](docs/docker.md)** - Complete containerization guide
+📖 **[Docker Quick Start](DOCKER.md)** | **[Complete Docker/Podman Guide](docs/docker.md)**
 
 ### Traditional Installation
 
