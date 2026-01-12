@@ -618,7 +618,8 @@ def web_ui_command(args: argparse.Namespace) -> int:
         Command-line arguments containing:
         - host: Host to bind to
         - port: Port to bind to
-        - debug: Enable debug mode
+        - verbose: Verbosity level (0=WARNING, 1=INFO, 2+=DEBUG)
+        - dev: Use Flask development server
 
     Returns
     -------
@@ -637,8 +638,11 @@ def web_ui_command(args: argparse.Namespace) -> int:
             print("  pip install flask flask-cors", file=sys.stderr)
             return 1
 
-        # Start the server
-        run_server(host=args.host, port=args.port, debug=args.debug)
+        # Determine debug mode from verbosity level (2+ = DEBUG)
+        debug = getattr(args, 'verbose', 0) >= 2
+        
+        # Start the server (dev defaults to False for production server)
+        run_server(host=args.host, port=args.port, debug=debug, dev=getattr(args, 'dev', False))
         return 0
 
     except KeyboardInterrupt:
@@ -1098,9 +1102,9 @@ Examples:
         help="Port to bind to (default: 5000)",
     )
     web_parser.add_argument(
-        "--debug",
+        "--dev",
         action="store_true",
-        help="Enable debug mode",
+        help="Use Flask development server instead of production server (Waitress). Note: Use -vv to enable debug mode with any server.",
     )
 
     # Cluster embeddings command

@@ -809,40 +809,57 @@ class TestWebUIStatsExceptionHandling:
 
 
 class TestWebUIRunServer:
-    """Test run_server function (lines 335-342)."""
+    """Test run_server function with Waitress production server."""
 
-    def test_run_server_starts_flask_app(self):
-        """Test that run_server starts the Flask app."""
-        from abstracts_explorer.web_ui import run_server, app
+    def test_run_server_starts_waitress_server(self):
+        """Test that run_server starts Waitress server by default."""
+        from abstracts_explorer.web_ui import run_server
 
-        with patch.object(app, "run") as mock_run:
-            with patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=True):
-                with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
-                    mock_cfg = Mock()
-                    mock_cfg.paper_db_path = "/some/path/test.db"
-                    mock_cfg.embedding_db_path = "/some/path/chroma_db"
-                    mock_config.return_value = mock_cfg
+        with patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=True):
+            with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
+                mock_cfg = Mock()
+                mock_cfg.paper_db_path = "/some/path/test.db"
+                mock_cfg.embedding_db_path = "/some/path/chroma_db"
+                mock_config.return_value = mock_cfg
+                
+                # Mock Waitress serve with timeout
+                with patch("waitress.serve") as mock_serve:
+                    mock_serve.side_effect = KeyboardInterrupt()  # Simulate server stop
                     
-                    run_server(host="127.0.0.1", port=5000, debug=False)
+                    with pytest.raises(KeyboardInterrupt):
+                        run_server(host="127.0.0.1", port=5000, debug=False)
 
-            # Verify app.run was called with correct parameters
-            mock_run.assert_called_once_with(host="127.0.0.1", port=5000, debug=False)
+                    # Verify Waitress serve was called with correct parameters
+                    mock_serve.assert_called_once()
+                    call_args = mock_serve.call_args
+                    assert call_args[1]["host"] == "127.0.0.1"
+                    assert call_args[1]["port"] == 5000
 
     def test_run_server_with_debug_mode(self):
-        """Test run_server with debug=True."""
+        """Test run_server with debug=True uses Waitress with debug enabled."""
         from abstracts_explorer.web_ui import run_server, app
 
-        with patch.object(app, "run") as mock_run:
-            with patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=True):
-                with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
-                    mock_cfg = Mock()
-                    mock_cfg.paper_db_path = "/some/path/test.db"
-                    mock_cfg.embedding_db_path = "/some/path/chroma_db"
-                    mock_config.return_value = mock_cfg
+        with patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=True):
+            with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
+                mock_cfg = Mock()
+                mock_cfg.paper_db_path = "/some/path/test.db"
+                mock_cfg.embedding_db_path = "/some/path/chroma_db"
+                mock_config.return_value = mock_cfg
+                
+                # Mock Waitress serve with timeout (debug mode now works with Waitress)
+                with patch("waitress.serve") as mock_serve:
+                    mock_serve.side_effect = KeyboardInterrupt()  # Simulate server stop
                     
-                    run_server(host="0.0.0.0", port=8080, debug=True)
+                    with pytest.raises(KeyboardInterrupt):
+                        run_server(host="0.0.0.0", port=8080, debug=True)
 
-            mock_run.assert_called_once_with(host="0.0.0.0", port=8080, debug=True)
+                    # Verify Waitress was called (debug mode works with production server)
+                    mock_serve.assert_called_once()
+                    call_args = mock_serve.call_args
+                    assert call_args[1]["host"] == "0.0.0.0"
+                    assert call_args[1]["port"] == 8080
+                    # Verify Flask debug flag was set
+                    assert app.debug
 
     def test_run_server_database_not_found(self, capsys):
         """Test that run_server raises FileNotFoundError when database doesn't exist."""
@@ -914,4 +931,155 @@ class TestConferencePluginMapping:
                 # Verify conference name and plugin name match
                 assert plugin.conference_name == conf_name
 
+
+class TestServerInitialization:
+    """Test server initialization with production and development modes."""
+
+    def test_run_server_with_waitress_available(self, tmp_path, monkeypatch):
+        """Test that run_server uses Waitress by default when available."""
+        from abstracts_explorer.web_ui.app import run_server
+        from abstracts_explorer.database import DatabaseManager
+        
+        # Create a test database
+        db_path = tmp_path / "test.db"
+        db = DatabaseManager(str(db_path))
+        with db:
+            db.create_tables()
+        
+        # Mock config to use our test database
+        with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
+            mock_config.return_value = Mock(
+                paper_db_path=str(db_path),
+                embedding_db_path="chroma_db"
+            )
+            
+            # Mock Waitress serve - need to patch the import inside the function
+            with patch("waitress.serve") as mock_serve:
+                mock_serve.side_effect = KeyboardInterrupt()  # Simulate Ctrl+C
+                
+                with pytest.raises(KeyboardInterrupt):
+                    run_server(host="127.0.0.1", port=5000, debug=False, dev=False)
+                
+                # Verify Waitress was called
+                mock_serve.assert_called_once()
+                call_args = mock_serve.call_args
+                assert call_args[1]["host"] == "127.0.0.1"
+                assert call_args[1]["port"] == 5000
+
+    def test_run_server_with_dev_flag(self, tmp_path, monkeypatch):
+        """Test that run_server uses Flask dev server when dev=True."""
+        from abstracts_explorer.web_ui.app import run_server, app
+        from abstracts_explorer.database import DatabaseManager
+        
+        # Create a test database
+        db_path = tmp_path / "test.db"
+        db = DatabaseManager(str(db_path))
+        with db:
+            db.create_tables()
+        
+        # Mock config to use our test database
+        with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
+            mock_config.return_value = Mock(
+                paper_db_path=str(db_path),
+                embedding_db_path="chroma_db"
+            )
+            
+            # Mock app.run
+            with patch.object(app, "run") as mock_run:
+                mock_run.side_effect = KeyboardInterrupt()  # Simulate Ctrl+C
+                
+                with pytest.raises(KeyboardInterrupt):
+                    run_server(host="127.0.0.1", port=5000, debug=False, dev=True)
+                
+                # Verify Flask dev server was called
+                mock_run.assert_called_once_with(host="127.0.0.1", port=5000, debug=False)
+
+    def test_run_server_with_debug_flag(self, tmp_path, monkeypatch):
+        """Test that run_server uses Waitress with debug enabled when debug=True."""
+        from abstracts_explorer.web_ui.app import run_server, app
+        from abstracts_explorer.database import DatabaseManager
+        
+        # Create a test database
+        db_path = tmp_path / "test.db"
+        db = DatabaseManager(str(db_path))
+        with db:
+            db.create_tables()
+        
+        # Mock config to use our test database
+        with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
+            mock_config.return_value = Mock(
+                paper_db_path=str(db_path),
+                embedding_db_path="chroma_db"
+            )
+            
+            # Mock Waitress serve (debug mode now works with Waitress)
+            with patch("waitress.serve") as mock_serve:
+                mock_serve.side_effect = KeyboardInterrupt()  # Simulate Ctrl+C
+                
+                with pytest.raises(KeyboardInterrupt):
+                    run_server(host="127.0.0.1", port=5000, debug=True, dev=False)
+                
+                # Verify Waitress was called (debug mode works with production server)
+                mock_serve.assert_called_once()
+                call_args = mock_serve.call_args
+                assert call_args[1]["host"] == "127.0.0.1"
+                assert call_args[1]["port"] == 5000
+                # Verify Flask debug flag was set
+                assert app.debug
+
+    def test_run_server_waitress_not_available(self, tmp_path, monkeypatch):
+        """Test that run_server falls back to Flask when Waitress is not available."""
+        from abstracts_explorer.web_ui.app import run_server, app
+        from abstracts_explorer.database import DatabaseManager
+        
+        # Create a test database
+        db_path = tmp_path / "test.db"
+        db = DatabaseManager(str(db_path))
+        with db:
+            db.create_tables()
+        
+        # Mock config to use our test database
+        with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
+            mock_config.return_value = Mock(
+                paper_db_path=str(db_path),
+                embedding_db_path="chroma_db"
+            )
+            
+            # Mock waitress import to fail
+            import builtins
+            real_import = builtins.__import__
+            
+            def mock_import(name, *args, **kwargs):
+                if name == "waitress":
+                    raise ImportError("Waitress not installed")
+                return real_import(name, *args, **kwargs)
+            
+            # Mock app.run
+            with patch.object(app, "run") as mock_run:
+                mock_run.side_effect = KeyboardInterrupt()
+                
+                with patch("builtins.__import__", side_effect=mock_import):
+                    with pytest.raises(KeyboardInterrupt):
+                        run_server(host="127.0.0.1", port=5000, debug=False, dev=False)
+                
+                # Verify Flask was called as fallback
+                mock_run.assert_called_once_with(host="127.0.0.1", port=5000, debug=False)
+
+    def test_run_server_missing_database(self, tmp_path):
+        """Test that run_server raises FileNotFoundError when database is missing."""
+        from abstracts_explorer.web_ui.app import run_server
+        
+        # Use a non-existent database path
+        db_path = tmp_path / "nonexistent.db"
+        
+        # Mock config to use non-existent database
+        with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
+            mock_config.return_value = Mock(
+                paper_db_path=str(db_path),
+                embedding_db_path="chroma_db"
+            )
+            
+            # Should raise FileNotFoundError
+            with pytest.raises(FileNotFoundError, match="Database not found"):
+                run_server(host="127.0.0.1", port=5000)
 

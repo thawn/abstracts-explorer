@@ -1368,7 +1368,7 @@ def internal_error(e):
     return jsonify({"error": "Internal server error"}), 500
 
 
-def run_server(host="127.0.0.1", port=5000, debug=False):
+def run_server(host="127.0.0.1", port=5000, debug=False, dev=False):
     """
     Run the Flask web server.
 
@@ -1380,6 +1380,8 @@ def run_server(host="127.0.0.1", port=5000, debug=False):
         Port to bind to (default: 5000)
     debug : bool
         Enable debug mode (default: False)
+    dev : bool
+        Use Flask development server instead of production server (default: False)
     
     Raises
     ------
@@ -1407,9 +1409,32 @@ def run_server(host="127.0.0.1", port=5000, debug=False):
     print(f"Database: {config.paper_db_path}")
     print(f"Embeddings: {config.embedding_db_path}")
     print(f"Server: http://{host}:{port}")
-    print("\nPress CTRL+C to stop the server")
-
-    app.run(host=host, port=port, debug=debug)
+    
+    # Use Flask development server if explicitly requested
+    if dev:
+        print("\n⚠️  Using Flask development server (not suitable for production)")
+        print("   Use without --dev flag for production server")
+        print("\nPress CTRL+C to stop the server")
+        # LGTM: Debug mode only used when explicitly requested via --dev flag or -vv
+        # This is intentionally for development/debugging purposes only
+        app.run(host=host, port=port, debug=debug)
+    else:
+        # Use Waitress production server (debug mode works with Waitress too)
+        try:
+            from waitress import serve  # type: ignore[import-untyped]
+            print("\n✅ Using Waitress production WSGI server")
+            if debug:
+                print("⚠️  Debug mode enabled (logging level set to DEBUG via -vv)")
+            print("\nPress CTRL+C to stop the server")
+            # Set Flask debug mode even with Waitress for better error messages
+            app.debug = debug
+            serve(app, host=host, port=port)
+        except ImportError:
+            print("\n⚠️  Waitress not installed, falling back to Flask development server", file=sys.stderr)
+            print("   Install Waitress with: pip install waitress", file=sys.stderr)
+            print("   Or install web extras: pip install abstracts-explorer[web]", file=sys.stderr)
+            print("\nPress CTRL+C to stop the server")
+            app.run(host=host, port=port, debug=debug)
 
 
 if __name__ == "__main__":
@@ -1418,8 +1443,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Abstracts Explorer Web Interface")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind to")
     parser.add_argument("--port", type=int, default=5000, help="Port to bind to")
-    parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+    parser.add_argument("--debug", action="store_true", help="Enable debug mode (uses Flask dev server)")
+    parser.add_argument("--dev", action="store_true", help="Use Flask development server instead of production server")
 
     args = parser.parse_args()
 
-    run_server(host=args.host, port=args.port, debug=args.debug)
+    run_server(host=args.host, port=args.port, debug=args.debug, dev=args.dev)
