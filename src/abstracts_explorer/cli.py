@@ -108,13 +108,13 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         # Check for model mismatch
         print("🔍 Checking embedding model compatibility...")
         compatible, stored_model, current_model = em.check_model_compatibility(db_path)
-        
+
         if not compatible:
             print("\n⚠️  WARNING: Embedding model mismatch detected!")
             print(f"   Stored model:  {stored_model}")
             print(f"   Current model: {current_model}")
             print("\n   Embeddings created with different models are incompatible.")
-            
+
             if not args.force:
                 print("\n   Use --force to recreate embeddings with the new model.")
                 print("   This will delete existing embeddings and recreate them.\n")
@@ -185,7 +185,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         em.close()
 
         print(f"\n💾 Vector database saved to: {output_path}")
-        print("\nYou can now use the search_similar() method to find relevant papers!")
+        print("\nYou can now use the 'search' command or the search_similar() method to find relevant papers!")
 
         return 0
 
