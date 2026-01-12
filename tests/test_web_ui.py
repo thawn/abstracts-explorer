@@ -936,10 +936,11 @@ class TestServerInitialization:
                 embedding_db_path="chroma_db"
             )
             
-            # Mock Waitress serve
-            with patch("abstracts_explorer.web_ui.app.serve") as mock_serve:
-                with pytest.raises(SystemExit):  # Simulate Ctrl+C
-                    mock_serve.side_effect = KeyboardInterrupt()
+            # Mock Waitress serve - need to patch the import inside the function
+            with patch("waitress.serve") as mock_serve:
+                mock_serve.side_effect = KeyboardInterrupt()  # Simulate Ctrl+C
+                
+                with pytest.raises(KeyboardInterrupt):
                     run_server(host="127.0.0.1", port=5000, debug=False, dev=False)
                 
                 # Verify Waitress was called
