@@ -57,37 +57,31 @@ def create_test_db_with_paper(db_path, paper_data):
     >>> # Use db...
     >>> db.close()
     """
+    from abstracts_explorer.plugin import LightweightPaper
+    
     db = DatabaseManager(str(db_path))
     db.connect()
     db.create_tables()
     
-    # Provide defaults for optional fields
-    defaults = {
-        "poster_position": "",
-        "keywords": "",
-    }
-    paper_data = {**defaults, **paper_data}
+    # Create LightweightPaper from paper_data
+    # Convert authors if needed
+    authors = paper_data.get("authors", [])
+    if isinstance(authors, str):
+        authors = [authors]
     
-    # Insert paper into database (lightweight schema)
-    cursor = db.connection.cursor()
-    cursor.execute(
-        """
-        INSERT INTO papers (uid, title, abstract, authors, session, poster_position, keywords, year, conference)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            paper_data["uid"],
-            paper_data["title"],
-            paper_data["abstract"],
-            paper_data["authors"],
-            paper_data["session"],
-            paper_data["poster_position"],
-            paper_data["keywords"],
-            paper_data["year"],
-            paper_data["conference"],
-        ),
+    paper = LightweightPaper(
+        original_id=paper_data.get("uid"),
+        title=paper_data["title"],
+        abstract=paper_data.get("abstract", ""),
+        authors=authors,
+        session=paper_data.get("session", "Session"),
+        poster_position=paper_data.get("poster_position", ""),
+        keywords=paper_data.get("keywords", "").split(", ") if paper_data.get("keywords") else None,
+        year=paper_data.get("year", 2025),
+        conference=paper_data.get("conference", "TestConf"),
     )
-    db.connection.commit()
+    
+    db.add_paper(paper)
     
     return db
 

@@ -159,12 +159,10 @@ def web_server(test_database, tmp_path_factory):
         from abstracts_explorer.database import DatabaseManager
         db = DatabaseManager(str(test_database))
         db.connect()
-        cursor = db.connection.cursor()
-        cursor.execute("SELECT * FROM papers")
-        papers = cursor.fetchall()
+        papers = db.query("SELECT * FROM papers")
 
         for paper in papers:
-            em.add_paper(dict(paper))
+            em.add_paper(paper)
 
         db.close()
 
