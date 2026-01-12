@@ -9,14 +9,15 @@ WORKDIR /app
 # Copy package files
 COPY package.json package-lock.json ./
 
-# Install Node.js dependencies
-RUN npm ci --omit=dev
+# Install Node.js dependencies (including dev for tailwindcss)
+# Skip postinstall scripts as they require .git/.githooks which aren't in Docker context
+RUN npm ci --ignore-scripts
 
 # Copy source files needed for vendor installation
 COPY src/abstracts_explorer/web_ui/static/ src/abstracts_explorer/web_ui/static/
 COPY tailwind.config.js ./
 
-# Install vendor dependencies (fonts, CSS libraries, etc.)
+# Manually run vendor installation (without setup:hooks)
 RUN npm run install:vendor
 
 
