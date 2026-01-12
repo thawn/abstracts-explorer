@@ -270,6 +270,78 @@ def get_cluster_topics(
         return json.dumps({"error": str(e)}, indent=2)
 
 
+def merge_where_clause_with_conference(
+    where: Optional[Dict[str, Any]],
+    conference: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """
+    Merge a WHERE clause with a conference filter.
+
+    This helper function properly combines custom WHERE clauses with conference
+    filters, avoiding duplicates and handling nested operators correctly.
+
+    Parameters
+    ----------
+    where : dict, optional
+        Custom WHERE clause from user
+    conference : str, optional
+        Conference name to filter by
+
+    Returns
+    -------
+    dict or None
+        Merged WHERE clause, or None if both inputs are None
+
+    Raises
+    ------
+    ValueError
+        If WHERE clause is not a dict
+    """
+    # Validate where parameter
+    if where is not None and not isinstance(where, dict):
+        raise ValueError(f"WHERE clause must be a dict, got {type(where).__name__}")
+    
+    # If no conference, just return the WHERE clause (or None)
+    if not conference:
+        return where.copy() if where else None
+    
+    # If no WHERE clause, just return conference filter
+    if not where:
+        return {"conference": conference}
+    
+    # Check if conference already exists anywhere in WHERE clause
+    def has_conference_filter(obj: Any) -> bool:
+        """Recursively check if conference filter exists in nested structure."""
+        if isinstance(obj, dict):
+            if "conference" in obj:
+                return True
+            # Check nested values
+            for value in obj.values():
+                if has_conference_filter(value):
+                    return True
+        elif isinstance(obj, list):
+            for item in obj:
+                if has_conference_filter(item):
+                    return True
+        return False
+    
+    # If conference already in WHERE clause, don't add again
+    if has_conference_filter(where):
+        return where.copy()
+    
+    # Need to merge conference with WHERE clause
+    where_filter = where.copy()
+    
+    # If WHERE already has $and, append to it
+    if "$and" in where_filter:
+        where_filter["$and"].append({"conference": conference})
+    else:
+        # Create new $and with existing filter and conference
+        where_filter = {"$and": [where_filter, {"conference": conference}]}
+    
+    return where_filter
+
+
 @mcp.tool()
 def get_topic_evolution(
     topic_keywords: str,
@@ -336,28 +408,12 @@ def get_topic_evolution(
         db = DatabaseManager(db_path)
         db.connect()
         
-        # Build metadata filter
-        where_filter = {}
-        
-        # If custom WHERE clause provided, use it as base
-        if where:
-            where_filter = where.copy() if isinstance(where, dict) else {}
-        
-        # Add conference filter if provided and not already in WHERE clause
-        if conference:
-            # If there's already a WHERE clause, we need to merge
-            if where_filter and "conference" not in where_filter:
-                # Wrap both in $and to combine them
-                if "$and" in where_filter:
-                    # Already has $and, add to it
-                    where_filter["$and"].append({"conference": conference})
-                else:
-                    # Create new $and with existing filter and conference
-                    existing_filter = where_filter.copy()
-                    where_filter = {"$and": [existing_filter, {"conference": conference}]}
-            elif not where_filter:
-                # No WHERE clause yet, just add conference
-                where_filter["conference"] = conference
+        # Build metadata filter using helper function
+        try:
+            where_filter = merge_where_clause_with_conference(where, conference)
+        except ValueError as e:
+            logger.error(f"Invalid WHERE clause: {str(e)}")
+            return json.dumps({"error": f"Invalid WHERE clause: {str(e)}"}, indent=2)
         
         # Search for papers related to topic
         logger.info(f"Searching for papers about: {topic_keywords}")
@@ -366,7 +422,7 @@ def get_topic_evolution(
         results = em.search_similar(
             query=topic_keywords,
             n_results=100,  # Get more results for trend analysis
-            where=where_filter if where_filter else None,
+            where=where_filter,
         )
         
         # Analyze results by year
@@ -496,28 +552,12 @@ def get_recent_developments(
         current_year = datetime.now().year
         year_cutoff = current_year - n_years
         
-        # Build metadata filter
-        where_filter = {}
-        
-        # If custom WHERE clause provided, use it as base
-        if where:
-            where_filter = where.copy() if isinstance(where, dict) else {}
-        
-        # Add conference filter if provided and not already in WHERE clause
-        if conference:
-            # If there's already a WHERE clause, we need to merge
-            if where_filter and "conference" not in where_filter:
-                # Wrap both in $and to combine them
-                if "$and" in where_filter:
-                    # Already has $and, add to it
-                    where_filter["$and"].append({"conference": conference})
-                else:
-                    # Create new $and with existing filter and conference
-                    existing_filter = where_filter.copy()
-                    where_filter = {"$and": [existing_filter, {"conference": conference}]}
-            elif not where_filter:
-                # No WHERE clause yet, just add conference
-                where_filter["conference"] = conference
+        # Build metadata filter using helper function
+        try:
+            where_filter = merge_where_clause_with_conference(where, conference)
+        except ValueError as e:
+            logger.error(f"Invalid WHERE clause: {str(e)}")
+            return json.dumps({"error": f"Invalid WHERE clause: {str(e)}"}, indent=2)
         
         # Search for papers
         logger.info(f"Searching for recent papers about: {topic_keywords}")
@@ -526,7 +566,7 @@ def get_recent_developments(
         results = em.search_similar(
             query=topic_keywords,
             n_results=n_results * 3,  # Get more to filter by year
-            where=where_filter if where_filter else None,
+            where=where_filter,
         )
         
         # Filter and format results

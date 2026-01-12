@@ -10,10 +10,84 @@ import numpy as np
 from abstracts_explorer.mcp_server import (
     load_clustering_data,
     analyze_cluster_topics,
+    merge_where_clause_with_conference,
     ClusterAnalysisError,
 )
 from abstracts_explorer.clustering import ClusteringManager
 from abstracts_explorer.database import DatabaseManager
+
+
+class TestMergeWhereClauseWithConference:
+    """Tests for merge_where_clause_with_conference helper function."""
+
+    def test_both_none(self):
+        """Test merging when both WHERE and conference are None."""
+        result = merge_where_clause_with_conference(None, None)
+        assert result is None
+
+    def test_only_conference(self):
+        """Test merging with only conference filter."""
+        result = merge_where_clause_with_conference(None, "NeurIPS")
+        assert result == {"conference": "NeurIPS"}
+
+    def test_only_where(self):
+        """Test merging with only WHERE clause."""
+        where = {"year": 2024}
+        result = merge_where_clause_with_conference(where, None)
+        assert result == {"year": 2024}
+        assert result is not where  # Should be a copy
+
+    def test_simple_merge(self):
+        """Test merging simple WHERE clause with conference."""
+        where = {"year": 2024}
+        result = merge_where_clause_with_conference(where, "NeurIPS")
+        assert result == {"$and": [{"year": 2024}, {"conference": "NeurIPS"}]}
+
+    def test_merge_with_existing_and(self):
+        """Test merging when WHERE already has $and."""
+        where = {"$and": [{"year": 2024}, {"session": "Oral"}]}
+        result = merge_where_clause_with_conference(where, "NeurIPS")
+        assert "$and" in result
+        assert len(result["$and"]) == 3
+        assert {"conference": "NeurIPS"} in result["$and"]
+
+    def test_conference_already_in_where_top_level(self):
+        """Test when conference already exists at top level."""
+        where = {"conference": "ICML"}
+        result = merge_where_clause_with_conference(where, "NeurIPS")
+        # Should not add duplicate, just return existing
+        assert result == {"conference": "ICML"}
+
+    def test_conference_in_nested_and(self):
+        """Test when conference exists in nested $and."""
+        where = {"$and": [{"conference": "ICML"}, {"year": 2024}]}
+        result = merge_where_clause_with_conference(where, "NeurIPS")
+        # Should detect existing conference and not add duplicate
+        assert result == {"$and": [{"conference": "ICML"}, {"year": 2024}]}
+
+    def test_conference_in_deeply_nested_structure(self):
+        """Test conference detection in deeply nested structure."""
+        where = {
+            "$or": [
+                {"$and": [{"conference": "ICML"}, {"year": 2024}]},
+                {"session": "Oral"}
+            ]
+        }
+        result = merge_where_clause_with_conference(where, "NeurIPS")
+        # Should detect conference in nested structure
+        assert result == where
+
+    def test_invalid_where_type(self):
+        """Test that invalid WHERE type raises ValueError."""
+        with pytest.raises(ValueError) as exc_info:
+            merge_where_clause_with_conference("invalid", "NeurIPS")
+        assert "must be a dict" in str(exc_info.value)
+
+    def test_where_is_list(self):
+        """Test that list WHERE raises ValueError."""
+        with pytest.raises(ValueError) as exc_info:
+            merge_where_clause_with_conference([{"year": 2024}], "NeurIPS")
+        assert "must be a dict" in str(exc_info.value)
 
 
 class TestLoadClusteringData:
@@ -522,6 +596,37 @@ class TestMCPTools:
         assert "$and" in where_arg
         assert {"year": {"$gte": 2024}} in where_arg["$and"]
         assert {"session": {"$in": ["Oral Session 1", "Spotlight Session"]}} in where_arg["$and"]
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_topic_evolution_invalid_where_type(self, mock_config, mock_db_class, mock_em_class):
+        """Test get_topic_evolution with invalid WHERE clause type."""
+        # Setup config mock
+        mock_config_obj = Mock()
+        mock_config_obj.embedding_db_path = "chroma_db"
+        mock_config_obj.collection_name = "papers"
+        mock_config_obj.paper_db_path = "abstracts.db"
+        mock_config.return_value = mock_config_obj
+
+        # Setup mocks
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+
+        # Import and call the tool with invalid WHERE type
+        from abstracts_explorer.mcp_server import get_topic_evolution
+
+        result_str = get_topic_evolution(
+            topic_keywords="transformers",
+            where="invalid string"  # Invalid: should be dict or None
+        )
+        result = json.loads(result_str)
+
+        # Should return error
+        assert "error" in result
+        assert "Invalid WHERE clause" in result["error"]
 
     @patch("abstracts_explorer.mcp_server.perform_clustering")
     @patch("abstracts_explorer.mcp_server.get_config")
