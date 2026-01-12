@@ -619,6 +619,7 @@ def web_ui_command(args: argparse.Namespace) -> int:
         - host: Host to bind to
         - port: Port to bind to
         - debug: Enable debug mode
+        - dev: Use Flask development server
 
     Returns
     -------
@@ -638,7 +639,7 @@ def web_ui_command(args: argparse.Namespace) -> int:
             return 1
 
         # Start the server
-        run_server(host=args.host, port=args.port, debug=args.debug)
+        run_server(host=args.host, port=args.port, debug=args.debug, dev=args.dev)
         return 0
 
     except KeyboardInterrupt:
@@ -1100,7 +1101,12 @@ Examples:
     web_parser.add_argument(
         "--debug",
         action="store_true",
-        help="Enable debug mode",
+        help="Enable debug mode (uses Flask development server)",
+    )
+    web_parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="Use Flask development server instead of production server (Waitress)",
     )
 
     # Cluster embeddings command
