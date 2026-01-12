@@ -276,6 +276,7 @@ def get_topic_evolution(
     conference: Optional[str] = None,
     start_year: Optional[int] = None,
     end_year: Optional[int] = None,
+    where: Optional[Dict[str, Any]] = None,
     embeddings_path: Optional[str] = None,
     collection_name: Optional[str] = None,
     db_path: Optional[str] = None,
@@ -296,6 +297,15 @@ def get_topic_evolution(
         Start year for analysis (inclusive)
     end_year : int, optional
         End year for analysis (inclusive)
+    where : dict, optional
+        Custom ChromaDB WHERE clause for filtering results by metadata.
+        Supports ChromaDB query operators like $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin.
+        Logical operators $and, $or are also supported.
+        Examples:
+          {"year": 2025}  # Filter by specific year
+          {"session": {"$in": ["Oral Session 1", "Oral Session 2"]}}  # Multiple sessions
+          {"$and": [{"year": {"$gte": 2024}}, {"conference": "NeurIPS"}]}  # Multiple conditions
+        Note: If 'conference' parameter is provided, it will be merged with this WHERE clause.
     embeddings_path : str, optional
         Path to ChromaDB embeddings database
     collection_name : str, optional
@@ -328,11 +338,31 @@ def get_topic_evolution(
         
         # Build metadata filter
         where_filter = {}
+        
+        # If custom WHERE clause provided, use it as base
+        if where:
+            where_filter = where.copy() if isinstance(where, dict) else {}
+        
+        # Add conference filter if provided and not already in WHERE clause
         if conference:
-            where_filter["conference"] = conference
+            # If there's already a WHERE clause, we need to merge
+            if where_filter and "conference" not in where_filter:
+                # Wrap both in $and to combine them
+                if "$and" in where_filter:
+                    # Already has $and, add to it
+                    where_filter["$and"].append({"conference": conference})
+                else:
+                    # Create new $and with existing filter and conference
+                    existing_filter = where_filter.copy()
+                    where_filter = {"$and": [existing_filter, {"conference": conference}]}
+            elif not where_filter:
+                # No WHERE clause yet, just add conference
+                where_filter["conference"] = conference
         
         # Search for papers related to topic
         logger.info(f"Searching for papers about: {topic_keywords}")
+        if where_filter:
+            logger.info(f"Applying WHERE filter: {where_filter}")
         results = em.search_similar(
             query=topic_keywords,
             n_results=100,  # Get more results for trend analysis
@@ -401,6 +431,7 @@ def get_recent_developments(
     n_years: int = 2,
     n_results: int = 10,
     conference: Optional[str] = None,
+    where: Optional[Dict[str, Any]] = None,
     embeddings_path: Optional[str] = None,
     collection_name: Optional[str] = None,
     db_path: Optional[str] = None,
@@ -421,6 +452,15 @@ def get_recent_developments(
         Number of papers to return (default: 10)
     conference : str, optional
         Filter by conference name
+    where : dict, optional
+        Custom ChromaDB WHERE clause for filtering results by metadata.
+        Supports ChromaDB query operators like $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin.
+        Logical operators $and, $or are also supported.
+        Examples:
+          {"year": 2025}  # Filter by specific year
+          {"session": {"$in": ["Oral Session 1", "Oral Session 2"]}}  # Multiple sessions
+          {"$and": [{"year": {"$gte": 2024}}, {"conference": "NeurIPS"}]}  # Multiple conditions
+        Note: If 'conference' parameter is provided, it will be merged with this WHERE clause.
     embeddings_path : str, optional
         Path to ChromaDB embeddings database
     collection_name : str, optional
@@ -458,11 +498,31 @@ def get_recent_developments(
         
         # Build metadata filter
         where_filter = {}
+        
+        # If custom WHERE clause provided, use it as base
+        if where:
+            where_filter = where.copy() if isinstance(where, dict) else {}
+        
+        # Add conference filter if provided and not already in WHERE clause
         if conference:
-            where_filter["conference"] = conference
+            # If there's already a WHERE clause, we need to merge
+            if where_filter and "conference" not in where_filter:
+                # Wrap both in $and to combine them
+                if "$and" in where_filter:
+                    # Already has $and, add to it
+                    where_filter["$and"].append({"conference": conference})
+                else:
+                    # Create new $and with existing filter and conference
+                    existing_filter = where_filter.copy()
+                    where_filter = {"$and": [existing_filter, {"conference": conference}]}
+            elif not where_filter:
+                # No WHERE clause yet, just add conference
+                where_filter["conference"] = conference
         
         # Search for papers
         logger.info(f"Searching for recent papers about: {topic_keywords}")
+        if where_filter:
+            logger.info(f"Applying WHERE filter: {where_filter}")
         results = em.search_similar(
             query=topic_keywords,
             n_results=n_results * 3,  # Get more to filter by year
