@@ -1104,7 +1104,7 @@ Examples:
     web_parser.add_argument(
         "--dev",
         action="store_true",
-        help="Use Flask development server instead of production server (Waitress). Use -vv for debug mode.",
+        help="Use Flask development server instead of production server (Waitress). Note: Use -vv to enable debug mode with any server.",
     )
 
     # Cluster embeddings command

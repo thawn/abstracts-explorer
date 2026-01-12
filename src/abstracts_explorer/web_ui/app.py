@@ -1424,7 +1424,7 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False):
             from waitress import serve  # type: ignore[import-untyped]
             print("\n✅ Using Waitress production WSGI server")
             if debug:
-                print("⚠️  Debug mode enabled (use -vv or --verbose --verbose)")
+                print("⚠️  Debug mode enabled (logging level set to DEBUG via -vv)")
             print("\nPress CTRL+C to stop the server")
             # Set Flask debug mode even with Waitress for better error messages
             app.debug = debug
