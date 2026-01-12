@@ -1,0 +1,114 @@
+version: '3.8'
+
+services:
+  # Main Abstracts Explorer application
+  abstracts-explorer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: abstracts-explorer
+    ports:
+      - "5000:5000"
+    volumes:
+      # Persist database and embeddings
+      - abstracts-data:/app/data
+      - abstracts-chroma:/app/chroma_db
+      # Optional: mount custom .env file
+      # - ./.env:/app/.env:ro
+    environment:
+      # Database configuration
+      - DATA_DIR=/app/data
+      - PAPER_DB_PATH=/app/data/abstracts.db
+      - EMBEDDING_DB_PATH=/app/chroma_db
+      
+      # LLM Backend configuration
+      # Option 1: Use host's LM Studio (requires host.docker.internal or host network)
+      - LLM_BACKEND_URL=http://host.docker.internal:1234
+      
+      # Option 2: Use external service (e.g., blablador)
+      # - LLM_BACKEND_URL=https://api.blablador.com
+      # - LLM_BACKEND_AUTH_TOKEN=your_token_here
+      
+      # Models
+      - CHAT_MODEL=gemma-3-4b-it-qat
+      - EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b
+      
+      # Optional: RAG settings
+      - MAX_CONTEXT_PAPERS=5
+      - ENABLE_QUERY_REWRITING=true
+      - QUERY_SIMILARITY_THRESHOLD=0.7
+    
+    # Use host network mode for easier access to host's LM Studio
+    # Uncomment if using LM Studio on host
+    # network_mode: host
+    
+    depends_on:
+      - chromadb
+      # Uncomment if using PostgreSQL
+      # - postgres
+    
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ChromaDB vector database (optional, standalone service)
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: abstracts-chromadb
+    ports:
+      - "8000:8000"
+    volumes:
+      - chromadb-data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  # PostgreSQL database (optional, alternative to SQLite)
+  postgres:
+    image: postgres:16-alpine
+    container_name: abstracts-postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=abstracts
+      - POSTGRES_USER=abstracts
+      - POSTGRES_PASSWORD=abstracts_password
+      # Change password in production!
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U abstracts"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  # Named volumes for persistent data
+  abstracts-data:
+    driver: local
+  abstracts-chroma:
+    driver: local
+  chromadb-data:
+    driver: local
+  postgres-data:
+    driver: local
+
+networks:
+  default:
+    name: abstracts-network

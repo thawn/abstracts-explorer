@@ -129,6 +129,25 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/health")
+def health():
+    """
+    Health check endpoint for container orchestration.
+
+    Returns
+    -------
+    tuple
+        JSON response with status and HTTP status code
+    """
+    try:
+        # Check if database is accessible
+        db = get_database()
+        db.get_paper_count()
+        return jsonify({"status": "healthy", "service": "abstracts-explorer"}), 200
+    except Exception as e:
+        return jsonify({"status": "unhealthy", "error": str(e)}), 503
+
+
 @app.route("/api/stats")
 def stats():
     """
