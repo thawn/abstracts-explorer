@@ -1943,10 +1943,10 @@ function updateYearsForConference() {
 
 let clusterData = null;
 let currentClusterConfig = {
-    reduction_method: 'pca',
+    reduction_method: 'tsne',
     n_components: 2,
     clustering_method: 'kmeans',
-    n_clusters: 5,
+    n_clusters: 30,
     eps: 0.5,
     min_samples: 5,
     limit: null
@@ -2126,11 +2126,9 @@ function visualizeClusters() {
             t: 50,
             b: 50
         },
-        transition: {
-            duration: 0
-        },
         hoverlabel: {
-            namelength: -1
+            namelength: -1,
+            align: 'left'
         }
     };
     
@@ -2147,8 +2145,14 @@ function visualizeClusters() {
     const plotElement = document.getElementById('cluster-plot');
     plotElement.innerHTML = '';
     
-    // Create plot
-    Plotly.newPlot('cluster-plot', traces, layout, config);
+    // Create plot with no animation
+    Plotly.newPlot('cluster-plot', traces, layout, config).then(function() {
+        // Disable hover animations after plot is created
+        Plotly.relayout('cluster-plot', {
+            'xaxis.fixedrange': false,
+            'yaxis.fixedrange': false
+        });
+    });
     
     // Add click handler for point selection
     document.getElementById('cluster-plot').on('plotly_click', function(data) {
@@ -2217,11 +2221,9 @@ function filterClusterPlot() {
             showlegend: false,
             plot_bgcolor: '#f8f9fa',
             paper_bgcolor: 'white',
-            transition: {
-                duration: 0
-            },
             hoverlabel: {
-                namelength: -1
+                namelength: -1,
+                align: 'left'
             }
         };
         
@@ -2236,7 +2238,13 @@ function filterClusterPlot() {
         const plotElement = document.getElementById('cluster-plot');
         plotElement.innerHTML = '';
         
-        Plotly.newPlot('cluster-plot', [trace], layout, config);
+        Plotly.newPlot('cluster-plot', [trace], layout, config).then(function() {
+            // Disable hover animations after plot is created
+            Plotly.relayout('cluster-plot', {
+                'xaxis.fixedrange': false,
+                'yaxis.fixedrange': false
+            });
+        });
         
         // Re-add click handler
         document.getElementById('cluster-plot').on('plotly_click', function(data) {

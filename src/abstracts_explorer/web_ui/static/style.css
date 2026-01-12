@@ -5,6 +5,15 @@ html {
     scroll-behavior: smooth;
 }
 
+/* Disable Plotly hover label transitions */
+.hoverlayer .hovertext {
+    transition: none !important;
+}
+
+.hoverlayer {
+    transition: none !important;
+}
+
 /* Paper card transitions */
 .paper-card {
     transition: transform 0.2s ease, box-shadow 0.2s ease;
