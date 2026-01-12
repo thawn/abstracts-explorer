@@ -18,6 +18,7 @@ import logging
 import json
 from typing import Any, Dict, Optional
 from collections import defaultdict, Counter
+from copy import deepcopy
 
 from mcp.server.fastmcp import FastMCP
 
@@ -270,12 +271,85 @@ def get_cluster_topics(
         return json.dumps({"error": str(e)}, indent=2)
 
 
+def merge_where_clause_with_conference(
+    where: Optional[Dict[str, Any]],
+    conference: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """
+    Merge a WHERE clause with a conference filter.
+
+    This helper function properly combines custom WHERE clauses with conference
+    filters, avoiding duplicates and handling nested operators correctly.
+
+    Parameters
+    ----------
+    where : dict, optional
+        Custom WHERE clause from user
+    conference : str, optional
+        Conference name to filter by
+
+    Returns
+    -------
+    dict or None
+        Merged WHERE clause, or None if both inputs are None
+
+    Raises
+    ------
+    ValueError
+        If WHERE clause is not a dict
+    """
+    # Validate where parameter
+    if where is not None and not isinstance(where, dict):
+        raise ValueError(f"WHERE clause must be a dict, got {type(where).__name__}")
+    
+    # If no conference, just return a deep copy of WHERE clause (or None)
+    if not conference:
+        return deepcopy(where) if where else None
+    
+    # If no WHERE clause, just return conference filter
+    if not where:
+        return {"conference": conference}
+    
+    # Check if conference already exists anywhere in WHERE clause
+    def has_conference_filter(obj: Any) -> bool:
+        """Recursively check if conference filter exists in nested structure."""
+        if isinstance(obj, dict):
+            if "conference" in obj:
+                return True
+            # Check nested values
+            for value in obj.values():
+                if has_conference_filter(value):
+                    return True
+        elif isinstance(obj, list):
+            for item in obj:
+                if has_conference_filter(item):
+                    return True
+        return False
+    
+    # If conference already in WHERE clause, don't add again - return deep copy
+    if has_conference_filter(where):
+        return deepcopy(where)
+    
+    # Need to merge conference with WHERE clause - use deep copy to prevent mutations
+    where_filter = deepcopy(where)
+    
+    # If WHERE already has $and, append to it
+    if "$and" in where_filter:
+        where_filter["$and"].append({"conference": conference})
+    else:
+        # Create new $and with existing filter and conference
+        where_filter = {"$and": [where_filter, {"conference": conference}]}
+    
+    return where_filter
+
+
 @mcp.tool()
 def get_topic_evolution(
     topic_keywords: str,
     conference: Optional[str] = None,
     start_year: Optional[int] = None,
     end_year: Optional[int] = None,
+    where: Optional[Dict[str, Any]] = None,
     embeddings_path: Optional[str] = None,
     collection_name: Optional[str] = None,
     db_path: Optional[str] = None,
@@ -296,6 +370,15 @@ def get_topic_evolution(
         Start year for analysis (inclusive)
     end_year : int, optional
         End year for analysis (inclusive)
+    where : dict, optional
+        Custom ChromaDB WHERE clause for filtering results by metadata.
+        Supports ChromaDB query operators like $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin.
+        Logical operators $and, $or are also supported.
+        Examples:
+          {"year": 2025}  # Filter by specific year
+          {"session": {"$in": ["Oral Session 1", "Oral Session 2"]}}  # Multiple sessions
+          {"$and": [{"year": {"$gte": 2024}}, {"conference": "NeurIPS"}]}  # Multiple conditions
+        Note: If 'conference' parameter is provided, it will be merged with this WHERE clause.
     embeddings_path : str, optional
         Path to ChromaDB embeddings database
     collection_name : str, optional
@@ -326,17 +409,21 @@ def get_topic_evolution(
         db = DatabaseManager(db_path)
         db.connect()
         
-        # Build metadata filter
-        where_filter = {}
-        if conference:
-            where_filter["conference"] = conference
+        # Build metadata filter using helper function
+        try:
+            where_filter = merge_where_clause_with_conference(where, conference)
+        except ValueError as e:
+            logger.error(f"Invalid WHERE clause: {str(e)}")
+            return json.dumps({"error": f"Invalid WHERE clause: {str(e)}"}, indent=2)
         
         # Search for papers related to topic
         logger.info(f"Searching for papers about: {topic_keywords}")
+        if where_filter:
+            logger.info(f"Applying WHERE filter: {where_filter}")
         results = em.search_similar(
             query=topic_keywords,
             n_results=100,  # Get more results for trend analysis
-            where=where_filter if where_filter else None,
+            where=where_filter,
         )
         
         # Analyze results by year
@@ -401,6 +488,7 @@ def get_recent_developments(
     n_years: int = 2,
     n_results: int = 10,
     conference: Optional[str] = None,
+    where: Optional[Dict[str, Any]] = None,
     embeddings_path: Optional[str] = None,
     collection_name: Optional[str] = None,
     db_path: Optional[str] = None,
@@ -421,6 +509,15 @@ def get_recent_developments(
         Number of papers to return (default: 10)
     conference : str, optional
         Filter by conference name
+    where : dict, optional
+        Custom ChromaDB WHERE clause for filtering results by metadata.
+        Supports ChromaDB query operators like $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin.
+        Logical operators $and, $or are also supported.
+        Examples:
+          {"year": 2025}  # Filter by specific year
+          {"session": {"$in": ["Oral Session 1", "Oral Session 2"]}}  # Multiple sessions
+          {"$and": [{"year": {"$gte": 2024}}, {"conference": "NeurIPS"}]}  # Multiple conditions
+        Note: If 'conference' parameter is provided, it will be merged with this WHERE clause.
     embeddings_path : str, optional
         Path to ChromaDB embeddings database
     collection_name : str, optional
@@ -456,17 +553,21 @@ def get_recent_developments(
         current_year = datetime.now().year
         year_cutoff = current_year - n_years
         
-        # Build metadata filter
-        where_filter = {}
-        if conference:
-            where_filter["conference"] = conference
+        # Build metadata filter using helper function
+        try:
+            where_filter = merge_where_clause_with_conference(where, conference)
+        except ValueError as e:
+            logger.error(f"Invalid WHERE clause: {str(e)}")
+            return json.dumps({"error": f"Invalid WHERE clause: {str(e)}"}, indent=2)
         
         # Search for papers
         logger.info(f"Searching for recent papers about: {topic_keywords}")
+        if where_filter:
+            logger.info(f"Applying WHERE filter: {where_filter}")
         results = em.search_similar(
             query=topic_keywords,
             n_results=n_results * 3,  # Get more to filter by year
-            where=where_filter if where_filter else None,
+            where=where_filter,
         )
         
         # Filter and format results

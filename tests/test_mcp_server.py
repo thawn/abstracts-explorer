@@ -10,10 +10,99 @@ import numpy as np
 from abstracts_explorer.mcp_server import (
     load_clustering_data,
     analyze_cluster_topics,
+    merge_where_clause_with_conference,
     ClusterAnalysisError,
 )
 from abstracts_explorer.clustering import ClusteringManager
 from abstracts_explorer.database import DatabaseManager
+
+
+class TestMergeWhereClauseWithConference:
+    """Tests for merge_where_clause_with_conference helper function."""
+
+    def test_both_none(self):
+        """Test merging when both WHERE and conference are None."""
+        result = merge_where_clause_with_conference(None, None)
+        assert result is None
+
+    def test_only_conference(self):
+        """Test merging with only conference filter."""
+        result = merge_where_clause_with_conference(None, "NeurIPS")
+        assert result == {"conference": "NeurIPS"}
+
+    def test_only_where(self):
+        """Test merging with only WHERE clause."""
+        where = {"year": 2024}
+        result = merge_where_clause_with_conference(where, None)
+        assert result == {"year": 2024}
+        assert result is not where  # Should be a deep copy
+
+    def test_deep_copy_prevents_mutation(self):
+        """Test that deep copy prevents mutations to nested structures."""
+        where = {"$and": [{"year": 2024}, {"session": "Oral"}]}
+        result = merge_where_clause_with_conference(where, "NeurIPS")
+        
+        # Modify result
+        result["$and"].append({"modified": True})
+        
+        # Original should be unchanged
+        assert len(where["$and"]) == 2
+        assert {"modified": True} not in where["$and"]
+
+    def test_simple_merge(self):
+        """Test merging simple WHERE clause with conference."""
+        where = {"year": 2024}
+        result = merge_where_clause_with_conference(where, "NeurIPS")
+        assert result == {"$and": [{"year": 2024}, {"conference": "NeurIPS"}]}
+
+    def test_merge_with_existing_and(self):
+        """Test merging when WHERE already has $and."""
+        where = {"$and": [{"year": 2024}, {"session": "Oral"}]}
+        result = merge_where_clause_with_conference(where, "NeurIPS")
+        assert "$and" in result
+        assert len(result["$and"]) == 3
+        # Verify all items are present
+        assert {"year": 2024} in result["$and"]
+        assert {"session": "Oral"} in result["$and"]
+        assert {"conference": "NeurIPS"} in result["$and"]
+
+    def test_conference_already_in_where_top_level(self):
+        """Test when conference already exists at top level."""
+        where = {"conference": "ICML"}
+        result = merge_where_clause_with_conference(where, "NeurIPS")
+        # Should not add duplicate, just return existing
+        assert result == {"conference": "ICML"}
+
+    def test_conference_in_nested_and(self):
+        """Test when conference exists in nested $and."""
+        where = {"$and": [{"conference": "ICML"}, {"year": 2024}]}
+        result = merge_where_clause_with_conference(where, "NeurIPS")
+        # Should detect existing conference and not add duplicate
+        assert result == {"$and": [{"conference": "ICML"}, {"year": 2024}]}
+
+    def test_conference_in_deeply_nested_structure(self):
+        """Test conference detection in deeply nested structure."""
+        where = {
+            "$or": [
+                {"$and": [{"conference": "ICML"}, {"year": 2024}]},
+                {"session": "Oral"}
+            ]
+        }
+        result = merge_where_clause_with_conference(where, "NeurIPS")
+        # Should detect conference in nested structure
+        assert result == where
+
+    def test_invalid_where_type(self):
+        """Test that invalid WHERE type raises ValueError."""
+        with pytest.raises(ValueError) as exc_info:
+            merge_where_clause_with_conference("invalid", "NeurIPS")
+        assert "must be a dict" in str(exc_info.value)
+
+    def test_where_is_list(self):
+        """Test that list WHERE raises ValueError."""
+        with pytest.raises(ValueError) as exc_info:
+            merge_where_clause_with_conference([{"year": 2024}], "NeurIPS")
+        assert "must be a dict" in str(exc_info.value)
 
 
 class TestLoadClusteringData:
@@ -312,6 +401,247 @@ class TestMCPTools:
         # Verify cleanup
         mock_em.close.assert_called_once()
         mock_db.close.assert_called_once()
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_topic_evolution_with_where_clause(self, mock_config, mock_db_class, mock_em_class):
+        """Test get_topic_evolution tool with custom WHERE clause."""
+        # Setup config mock
+        mock_config_obj = Mock()
+        mock_config_obj.embedding_db_path = "chroma_db"
+        mock_config_obj.collection_name = "papers"
+        mock_config_obj.paper_db_path = "abstracts.db"
+        mock_config.return_value = mock_config_obj
+
+        # Setup embeddings manager mock
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+        mock_em.search_similar.return_value = {
+            "ids": [["p1", "p2"]],
+            "metadatas": [[
+                {"title": "Paper 1", "year": 2024, "session": "Oral Session 1"},
+                {"title": "Paper 2", "year": 2024, "session": "Oral Session 1"},
+            ]],
+            "distances": [[0.1, 0.2]],
+        }
+
+        # Setup database mock
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+
+        # Import and call the tool with WHERE clause
+        from abstracts_explorer.mcp_server import get_topic_evolution
+
+        where_clause = {"session": {"$in": ["Oral Session 1"]}}
+        result_str = get_topic_evolution(
+            topic_keywords="transformers",
+            where=where_clause
+        )
+        result = json.loads(result_str)
+
+        # Verify result
+        assert result["topic"] == "transformers"
+        assert result["total_papers"] == 2
+
+        # Verify search_similar was called with WHERE clause
+        mock_em.search_similar.assert_called_once()
+        call_args = mock_em.search_similar.call_args
+        assert call_args[1]["where"] == where_clause
+
+        # Verify cleanup
+        mock_em.close.assert_called_once()
+        mock_db.close.assert_called_once()
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_topic_evolution_with_where_and_conference(self, mock_config, mock_db_class, mock_em_class):
+        """Test get_topic_evolution merges WHERE clause with conference parameter."""
+        # Setup config mock
+        mock_config_obj = Mock()
+        mock_config_obj.embedding_db_path = "chroma_db"
+        mock_config_obj.collection_name = "papers"
+        mock_config_obj.paper_db_path = "abstracts.db"
+        mock_config.return_value = mock_config_obj
+
+        # Setup embeddings manager mock
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+        mock_em.search_similar.return_value = {
+            "ids": [["p1"]],
+            "metadatas": [[{"title": "Paper 1", "year": 2024, "session": "Oral"}]],
+            "distances": [[0.1]],
+        }
+
+        # Setup database mock
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+
+        # Import and call the tool
+        from abstracts_explorer.mcp_server import get_topic_evolution
+
+        where_clause = {"year": {"$gte": 2024}}
+        result_str = get_topic_evolution(
+            topic_keywords="transformers",
+            conference="NeurIPS",
+            where=where_clause
+        )
+        
+        # Verify result is valid JSON
+        result = json.loads(result_str)
+        assert result["topic"] == "transformers"
+
+        # Verify search_similar was called with merged WHERE clause
+        mock_em.search_similar.assert_called_once()
+        call_args = mock_em.search_similar.call_args
+        where_arg = call_args[1]["where"]
+        
+        # Should contain $and with both conditions
+        assert "$and" in where_arg
+        assert {"year": {"$gte": 2024}} in where_arg["$and"]
+        assert {"conference": "NeurIPS"} in where_arg["$and"]
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_recent_developments_with_where_clause(self, mock_config, mock_db_class, mock_em_class):
+        """Test get_recent_developments tool with custom WHERE clause."""
+        # Setup config mock
+        mock_config_obj = Mock()
+        mock_config_obj.embedding_db_path = "chroma_db"
+        mock_config_obj.collection_name = "papers"
+        mock_config_obj.paper_db_path = "abstracts.db"
+        mock_config.return_value = mock_config_obj
+
+        # Setup embeddings manager mock
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+        
+        # Mock search results with recent papers
+        from datetime import datetime
+        current_year = datetime.now().year
+        mock_em.search_similar.return_value = {
+            "ids": [["p1", "p2"]],
+            "metadatas": [[
+                {"title": "Paper 1", "year": current_year, "conference": "NeurIPS", "session": "Oral"},
+                {"title": "Paper 2", "year": current_year - 1, "conference": "NeurIPS", "session": "Oral"},
+            ]],
+            "documents": [["Abstract 1", "Abstract 2"]],
+            "distances": [[0.1, 0.2]],
+        }
+
+        # Setup database mock
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+
+        # Import and call the tool with WHERE clause
+        from abstracts_explorer.mcp_server import get_recent_developments
+
+        where_clause = {"session": "Oral"}
+        result_str = get_recent_developments(
+            topic_keywords="llm",
+            where=where_clause,
+            n_years=2
+        )
+        result = json.loads(result_str)
+
+        # Verify result
+        assert result["topic"] == "llm"
+        assert result["papers_found"] >= 1
+
+        # Verify search_similar was called with WHERE clause
+        mock_em.search_similar.assert_called_once()
+        call_args = mock_em.search_similar.call_args
+        assert call_args[1]["where"] == where_clause
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_recent_developments_complex_where_clause(self, mock_config, mock_db_class, mock_em_class):
+        """Test get_recent_developments with complex WHERE clause using $and."""
+        # Setup config mock
+        mock_config_obj = Mock()
+        mock_config_obj.embedding_db_path = "chroma_db"
+        mock_config_obj.collection_name = "papers"
+        mock_config_obj.paper_db_path = "abstracts.db"
+        mock_config.return_value = mock_config_obj
+
+        # Setup embeddings manager mock
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+        
+        from datetime import datetime
+        current_year = datetime.now().year
+        mock_em.search_similar.return_value = {
+            "ids": [["p1"]],
+            "metadatas": [[{"title": "Paper 1", "year": current_year, "conference": "NeurIPS"}]],
+            "documents": [["Abstract 1"]],
+            "distances": [[0.1]],
+        }
+
+        # Setup database mock
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+
+        # Import and call the tool with complex WHERE clause
+        from abstracts_explorer.mcp_server import get_recent_developments
+
+        where_clause = {
+            "$and": [
+                {"year": {"$gte": 2024}},
+                {"session": {"$in": ["Oral Session 1", "Spotlight Session"]}}
+            ]
+        }
+        result_str = get_recent_developments(
+            topic_keywords="deep learning",
+            where=where_clause
+        )
+        
+        # Verify result is valid JSON
+        result = json.loads(result_str)
+        assert result["topic"] == "deep learning"
+
+        # Verify search_similar was called with complex WHERE clause
+        mock_em.search_similar.assert_called_once()
+        call_args = mock_em.search_similar.call_args
+        where_arg = call_args[1]["where"]
+        
+        # Should preserve the complex $and structure
+        assert "$and" in where_arg
+        assert {"year": {"$gte": 2024}} in where_arg["$and"]
+        assert {"session": {"$in": ["Oral Session 1", "Spotlight Session"]}} in where_arg["$and"]
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_topic_evolution_invalid_where_type(self, mock_config, mock_db_class, mock_em_class):
+        """Test get_topic_evolution with invalid WHERE clause type."""
+        # Setup config mock
+        mock_config_obj = Mock()
+        mock_config_obj.embedding_db_path = "chroma_db"
+        mock_config_obj.collection_name = "papers"
+        mock_config_obj.paper_db_path = "abstracts.db"
+        mock_config.return_value = mock_config_obj
+
+        # Setup mocks
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+
+        # Import and call the tool with invalid WHERE type
+        from abstracts_explorer.mcp_server import get_topic_evolution
+
+        result_str = get_topic_evolution(
+            topic_keywords="transformers",
+            where="invalid string"  # Invalid: should be dict or None
+        )
+        result = json.loads(result_str)
+
+        # Should return error
+        assert "error" in result
+        assert "Invalid WHERE clause" in result["error"]
 
     @patch("abstracts_explorer.mcp_server.perform_clustering")
     @patch("abstracts_explorer.mcp_server.get_config")
