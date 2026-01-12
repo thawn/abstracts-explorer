@@ -5,7 +5,7 @@ A package to download conference data and search it with LLM-based semantic sear
 ## Features
 
 - 📥 Download conference data from various sources (NeurIPS, ICLR, ICML, ML4PS)
-- 💾 Store data in SQLite database with efficient indexing
+- 💾 Store data in SQL database (SQLite or PostgreSQL) with efficient indexing
 - 🔍 Search papers by keywords, track, and other attributes
 - 🤖 Generate text embeddings for semantic search
 - 🔎 Find similar papers using AI-powered semantic similarity
@@ -13,6 +13,7 @@ A package to download conference data and search it with LLM-based semantic sear
 - 🎨 **NEW: Cluster and visualize paper embeddings with interactive plots**
 - 🌐 Web interface for browsing and searching papers
 - 🔌 **NEW: MCP server for LLM-based cluster analysis**
+- 🗄️ **NEW: Multi-database backend support (SQLite and PostgreSQL)**
 - ⚙️ Environment-based configuration with `.env` file support
 
 ## Installation
@@ -47,6 +48,33 @@ cp .env.example .env
 ```
 
 📖 **[Configuration Guide](docs/configuration.md)** - Complete list of settings and options
+
+### Database Backend
+
+Abstracts Explorer supports both SQLite and PostgreSQL backends:
+
+```bash
+# Option 1: SQLite (default, no additional setup required)
+PAPER_DB_PATH=data/abstracts.db
+
+# Option 2: PostgreSQL (requires PostgreSQL server)
+DATABASE_URL=postgresql://user:password@localhost/abstracts
+```
+
+**PostgreSQL Setup:**
+
+```bash
+# Install PostgreSQL support
+uv sync --extra postgres
+
+# Create database
+createdb abstracts
+
+# Configure in .env
+DATABASE_URL=postgresql://user:password@localhost/abstracts
+```
+
+📖 See [Configuration Guide](docs/configuration.md) for more database options
 
 ## Quick Start
 
