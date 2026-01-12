@@ -1415,6 +1415,8 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False):
         print("\n⚠️  Using Flask development server (not suitable for production)")
         print("   Use without --dev or --debug flags for production server")
         print("\nPress CTRL+C to stop the server")
+        # LGTM: Debug mode only used when explicitly requested via --dev or --debug flags
+        # This is intentionally for development/debugging purposes only
         app.run(host=host, port=port, debug=debug)
     else:
         # Use Waitress production server
