@@ -209,9 +209,17 @@ The `docker-compose.yml` defines three services:
 - **Purpose:** Standalone ChromaDB server (alternative to embedded)
 - **Volumes:** `chromadb-data`
 
-**Note:** By default, the app uses an embedded ChromaDB. Use this service if you want a separate ChromaDB server.
+**Note:** By default, the app uses an embedded ChromaDB and this service is not started. Use this service if you want a separate ChromaDB server.
 
-To use the standalone ChromaDB service, update the configuration:
+To use the standalone ChromaDB service:
+
+1. Uncomment the chromadb dependency in `docker-compose.yml`:
+```yaml
+depends_on:
+  - chromadb
+```
+
+2. Update the configuration:
 ```yaml
 environment:
   - EMBEDDING_DB_PATH=http://chromadb:8000
