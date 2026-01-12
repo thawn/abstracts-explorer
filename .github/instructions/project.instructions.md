@@ -102,38 +102,49 @@ def example_function(param1: str, param2: int = 10) -> bool:
 ```
 src/abstracts_explorer/    # Main package
 ├── __init__.py           # Package initialization
-├── database.py           # SQLite database operations
-├── downloader.py         # OpenReview API integration
-├── embeddings.py         # ChromaDB embeddings management
-├── rag.py                # RAG chat interface
-├── config.py             # Configuration management
 ├── cli.py                # Command-line interface
-├── plugin.py             # Plugin system and helpers
+├── clustering.py         # Clustering and visualization of embeddings
+├── config.py             # Configuration management
+├── database.py           # Database operations (SQLite/PostgreSQL)
+├── db_models.py          # SQLAlchemy ORM models
+├── embeddings.py         # ChromaDB embeddings management
+├── mcp_server.py         # MCP server for cluster analysis
 ├── paper_utils.py        # Paper formatting utilities
-└── plugins/              # Plugin implementations
+├── plugin.py             # Plugin system and helpers
+├── rag.py                # RAG chat interface
+├── plugins/              # Plugin implementations
+│   ├── __init__.py
+│   ├── iclr_downloader.py
+│   ├── icml_downloader.py
+│   ├── json_conference_downloader.py
+│   ├── ml4ps_downloader.py
+│   └── neurips_downloader.py
+└── web_ui/               # Web interface
     ├── __init__.py
-    ├── neurips_downloader.py
-    ├── iclr_downloader.py
-    ├── icml_downloader.py
-    └── ml4ps_downloader.py
+    ├── app.py            # Flask application
+    ├── static/           # CSS, JS, images
+    └── templates/        # HTML templates
 
 tests/                     # Test suite (one test file per module)
 ├── conftest.py           # Shared fixtures
 ├── helpers.py            # Shared helper functions
+├── test_chromadb_metadata.py # Tests for ChromaDB metadata handling
 ├── test_cli.py           # Tests for cli.py
+├── test_clustering.py    # Tests for clustering.py
 ├── test_config.py        # Tests for config.py
 ├── test_database.py      # Tests for database.py
-├── test_downloader.py    # Tests for downloader.py
-├── test_embeddings.py    # Tests for embeddings.py (includes ChromaDB)
+├── test_embeddings.py    # Tests for embeddings.py
+├── test_integration.py   # Integration tests across modules
+├── test_mcp_server.py    # Tests for mcp_server.py
+├── test_multi_database.py # Tests for multi-database support
 ├── test_paper_utils.py   # Tests for paper_utils.py
 ├── test_plugin.py        # Tests for plugin.py (all plugin functionality)
 ├── test_plugins_iclr.py  # Tests for plugins/iclr_downloader.py
 ├── test_plugins_ml4ps.py # Tests for plugins/ml4ps_downloader.py
 ├── test_rag.py           # Tests for rag.py
-├── test_web_ui.py        # Tests for web_ui/app.py
-├── test_integration.py   # Integration tests across modules
+├── test_web_e2e.py       # Web UI end-to-end tests
 ├── test_web_integration.py # Web UI integration tests
-└── test_web_e2e.py       # Web UI end-to-end tests
+└── test_web_ui.py        # Tests for web_ui/app.py
 
 docs/                      # Sphinx documentation
 ├── conf.py               # Sphinx configuration
@@ -298,8 +309,11 @@ The package uses a flexible configuration system:
 ### Configuration File (.env)
 
 ```bash
+# Data Directory
+DATA_DIR=data
+
 # Chat/LLM Settings
-CHAT_MODEL=gemma-3-4b-it-qat
+CHAT_MODEL=diffbot-small-xl-2508
 CHAT_TEMPERATURE=0.7
 CHAT_MAX_TOKENS=1000
 
@@ -310,13 +324,22 @@ EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b
 LLM_BACKEND_URL=http://localhost:1234
 LLM_BACKEND_AUTH_TOKEN=
 
-# Database Paths
-EMBEDDING_DB_PATH=chroma_db
+# Database Configuration
+# Option 1: Use DATABASE_URL for any database backend
+# DATABASE_URL=postgresql://user:password@localhost/abstracts
+# DATABASE_URL=sqlite:///data/abstracts.db
+
+# Option 2: Use PAPER_DB_PATH for SQLite only (legacy)
 PAPER_DB_PATH=abstracts.db
+EMBEDDING_DB_PATH=chroma_db
 
 # RAG Settings
 COLLECTION_NAME=papers
 MAX_CONTEXT_PAPERS=5
+
+# Query Rewriting Settings
+ENABLE_QUERY_REWRITING=true
+QUERY_SIMILARITY_THRESHOLD=0.7
 ```
 
 ### Using Configuration
@@ -333,11 +356,15 @@ print(config.llm_backend_url)
 
 ### Core Dependencies
 
-- **requests**: API calls to OpenReview
+- **requests**: API calls to conference data sources
 - **chromadb**: Vector embeddings storage
 - **pydantic**: Data validation
 - **beautifulsoup4**: HTML parsing
-- **sqlite3**: Built-in, for paper database
+- **openai**: OpenAI-compatible LLM API client
+- **sqlalchemy**: ORM for database operations
+- **scikit-learn**: Clustering and dimensionality reduction
+- **numpy**: Numerical operations
+- **mcp**: Model Context Protocol server
 
 ### Development Dependencies
 
@@ -355,6 +382,7 @@ Install with `uv sync --extra web`:
 
 - **flask**: Web framework
 - **flask-cors**: CORS support
+- **waitress**: Production WSGI server
 
 ### Documentation Dependencies
 
@@ -365,6 +393,12 @@ Install with `uv sync --extra docs`:
 - **myst-parser**: Markdown support
 - **sphinx-autodoc-typehints**: Type hints in docs
 - **linkify-it-py**: URL auto-linking
+
+### PostgreSQL Support (Optional)
+
+Install with `uv sync --extra postgres`:
+
+- **psycopg2-binary**: PostgreSQL adapter
 
 ## Documentation
 
@@ -425,23 +459,25 @@ See `.gitignore`:
 - `_build/`: Documentation build
 - `.pytest_cache/`: Test cache
 - `htmlcov/`: Coverage reports
-- `uv.lock`: Lock file (should be committed for applications, optional for libraries)
+- `node_modules/`: Node.js dependencies
+- `uv.lock`: Lock file (committed for reproducibility)
 
 ## External Integrations
 
-### LM Studio
+### LM Studio / OpenAI-Compatible APIs
 
 - **Purpose**: LLM backend for embeddings and chat
-- **URL**: http://localhost:1234 (default)
+- **Default URL**: http://localhost:1234
 - **API**: OpenAI-compatible endpoints
 - **Models**: Configurable via CHAT_MODEL and EMBEDDING_MODEL
+- **Alternative**: Can use any OpenAI-compatible API (e.g., blablador)
 
-### OpenReview API
+### Conference Data Sources
 
-- **Purpose**: Download NeurIPS paper data
-- **Base URL**: https://api.openreview.net
-- **Rate Limits**: Respect API rate limits
-- **Caching**: Use caching to reduce API calls
+- **OpenReview API**: NeurIPS, ICLR, ICML papers
+- **JSON Data**: Custom conference data in JSON format
+- **ML4PS**: Machine Learning for Physical Sciences workshop
+- **Rate Limits**: Respect API rate limits and use caching
 
 ### ChromaDB
 
@@ -450,6 +486,12 @@ See `.gitignore`:
 - **Collections**: Papers stored in collections
 - **Persistence**: Automatic disk persistence
 
+### Database Backends
+
+- **SQLite**: Default, file-based database (PAPER_DB_PATH)
+- **PostgreSQL**: Production database (DATABASE_URL)
+- **ORM**: SQLAlchemy models support both backends
+
 ## Best Practices
 
 ### Code Quality
@@ -457,22 +499,22 @@ See `.gitignore`:
 1. **Type hints**: Use for all function signatures
 2. **Docstrings**: NumPy-style for all public APIs
 3. **Error handling**: Use try-except with specific exceptions
-4. **Logging**: Use informative log messages (not implemented yet)
+4. **Logging**: Use Python logging module for informative messages
 5. **Constants**: Define at module level, use uppercase
 
 ### Performance
 
 1. **Batch operations**: Process in batches where possible
 2. **Caching**: Cache API responses and embeddings
-3. **Database**: Use indexes for frequent queries
-4. **Memory**: Be mindful of large datasets
+3. **Database**: Use indexes for frequent queries, connection pooling
+4. **Memory**: Be mindful of large datasets, especially in clustering
 
 ### Security
 
 1. **No secrets in code**: Use environment variables
 2. **No .env in git**: Keep configuration private
 3. **Input validation**: Validate user inputs
-4. **SQL injection**: Use parameterized queries
+4. **SQL injection**: Use parameterized queries (SQLAlchemy handles this)
 
 ### Testing
 
@@ -521,10 +563,17 @@ See `.gitignore`:
 
 ### LM Studio Integration Tests Skipping
 
-- Ensure LM Studio is running
+- Ensure LM Studio (or compatible API) is running
 - Load the configured chat model (CHAT_MODEL)
 - Load the configured embedding model (EMBEDDING_MODEL)
-- Verify URL in .env matches LM Studio (default: http://localhost:1234)
+- Verify URL in .env matches your LLM backend (default: http://localhost:1234)
+
+### PostgreSQL Connection Issues
+
+- Verify PostgreSQL server is running
+- Check DATABASE_URL format: `postgresql://user:password@localhost/dbname`
+- Install postgres extra: `uv sync --extra postgres`
+- Ensure database exists and user has permissions
 
 ### Documentation Build Errors
 
@@ -544,19 +593,31 @@ See `.gitignore`:
 ## Package Information
 
 - **Name**: abstracts-explorer
-- **Version**: 0.1.0
+- **Version**: Dynamic (from git tags via hatch-vcs)
 - **Python**: >=3.11
 - **License**: Apache-2.0
 - **CLI Command**: `abstracts-explorer`
 
+### CLI Commands
+
+- `download`: Download conference data and create database
+- `create-embeddings`: Generate embeddings for abstracts
+- `search`: Search the vector database for similar papers
+- `chat`: Interactive RAG chat with papers
+- `web-ui`: Start the web interface
+- `cluster-embeddings`: Cluster embeddings for visualization
+- `mcp-server`: Start MCP server for cluster analysis
+
 ## Key Design Decisions
 
-### Database Schema
+### Database Architecture
 
-- **Integer IDs**: Papers use integer primary keys
-- **Authors table**: Separate table with position tracking
+- **Multi-backend support**: SQLAlchemy ORM supports SQLite and PostgreSQL
+- **Lightweight schema**: Simplified paper model for better performance
+- **Integer IDs**: Papers use integer primary keys (uid is hash-based)
+- **Authors storage**: Semicolon-separated in papers table
 - **Timestamps**: Track creation time for papers
-- **Indexes**: On year, openreview_id for fast queries
+- **Indexes**: On year, original_id for fast queries
 
 ### Configuration Priority
 
@@ -569,15 +630,24 @@ See `.gitignore`:
 
 - **Unit tests**: Mock all external dependencies
 - **Integration tests**: Conditional on LM Studio availability
+- **E2E tests**: Browser automation for web UI
 - **Skip conditions**: Tests skip gracefully when dependencies unavailable
 - **Coverage target**: >80% code coverage
+
+### Feature Architecture
+
+- **Clustering**: Scikit-learn for dimensionality reduction and clustering
+- **MCP Server**: FastMCP for LLM tool integration
+- **Web UI**: Flask with static assets, separate from main package
+- **Query Rewriting**: Optional feature to improve semantic search
+- **Plugin System**: Modular downloaders for different conferences
 
 ### Documentation Approach
 
 - **Markdown first**: Use Markdown for all user-facing docs
 - **Auto-generate API**: Extract from docstrings
 - **Examples included**: Every feature has usage examples
-- **Multiple formats**: Support HTML, PDF, ePub
+- **MCP documentation**: Separate guide for MCP server usage
 
 ## Contact & Resources
 
@@ -587,6 +657,6 @@ See `.gitignore`:
 
 ---
 
-**Last Updated**: December 21, 2025
+**Last Updated**: January 12, 2026
 
 This file should be kept up-to-date as the project evolves. When making significant changes to conventions or structure, update this file accordingly.
