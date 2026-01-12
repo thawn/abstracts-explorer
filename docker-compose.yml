@@ -1,4 +1,5 @@
-version: '3.8'
+# Docker Compose configuration for Abstracts Explorer
+# Compatible with Docker Compose v2+ and Podman Compose
 
 services:
   # Main Abstracts Explorer application

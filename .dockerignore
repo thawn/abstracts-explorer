@@ -36,6 +36,9 @@ chroma_db/
 # Documentation
 docs/_build/
 *.md
+# But include README and DOCKER quick start
+!README.md
+!DOCKER.md
 
 # IDE
 .vscode/
