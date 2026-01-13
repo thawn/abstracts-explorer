@@ -18,7 +18,27 @@ A package to download conference data and search it with LLM-based semantic sear
 
 ## Installation
 
-**Requirements:** Python 3.11+, [uv](https://docs.astral.sh/uv/) package manager, Node.js 14+ (for web UI)
+### Quick Start with Docker/Podman 🐳
+
+The easiest way to get started:
+
+```bash
+# Using Podman (recommended)
+podman-compose up -d
+
+# Or using Docker
+docker-compose up -d
+
+# Access at http://localhost:5000
+```
+
+📖 **[Complete Docker/Podman Guide](docs/docker.md)**
+
+**Note:** The container images use pre-built static vendor files. Node.js is only needed for local development if you want to rebuild CSS/JS libraries.
+
+### Traditional Installation
+
+**Requirements:** Python 3.11+, [uv](https://docs.astral.sh/uv/) package manager, Node.js 14+ (for web UI development)
 
 ```bash
 # Install uv (if not already installed)
@@ -220,6 +240,7 @@ for point in results['points']:
 ### Quick Links
 
 - **[Installation Guide](docs/installation.md)** - Detailed installation instructions
+- **[Docker/Podman Guide](docs/docker.md)** - Container deployment with Docker and Podman
 - **[Usage Guide](docs/usage.md)** - Examples and workflows  
 - **[Configuration Guide](docs/configuration.md)** - Environment variables and settings
 - **[CLI Reference](docs/cli_reference.md)** - Command-line interface documentation

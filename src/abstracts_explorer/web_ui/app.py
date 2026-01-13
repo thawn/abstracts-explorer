@@ -129,6 +129,29 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/health")
+def health():
+    """
+    Health check endpoint for container orchestration.
+
+    Returns
+    -------
+    tuple
+        JSON response with status and HTTP status code
+    """
+    try:
+        # Check if database is accessible
+        db = get_database()
+        db.get_paper_count()
+        return jsonify({"status": "healthy", "service": "abstracts-explorer"}), 200
+    except FileNotFoundError:
+        # Database file doesn't exist - provide helpful message
+        return jsonify({"status": "unhealthy", "error": "Database not initialized"}), 503
+    except Exception:
+        # Other errors - return generic message for security
+        return jsonify({"status": "unhealthy", "error": "Service unavailable"}), 503
+
+
 @app.route("/api/stats")
 def stats():
     """

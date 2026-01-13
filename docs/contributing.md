@@ -43,6 +43,46 @@ cp .env.example .env
 # Edit .env with your settings
 ```
 
+## Docker Development Setup
+
+For containerized development with Podman or Docker:
+
+**Note:** The Docker image uses pre-built static vendor files (CSS/JS libraries) that are committed to the repository. Node.js is **not required** for production containers - it's only needed for local development if you want to rebuild these vendor files.
+
+### Quick Start
+
+```bash
+# Build and start with Podman
+podman-compose up -d
+
+# Or with Docker
+docker compose up -d
+
+# Access at http://localhost:5000
+```
+
+### Running Commands in Container
+
+```bash
+# Execute CLI commands
+podman-compose exec abstracts-explorer abstracts-explorer download --year 2025
+
+# Run tests
+podman-compose exec abstracts-explorer pytest
+
+# Interactive shell
+podman-compose exec -it abstracts-explorer /bin/bash
+```
+
+### Development Workflow
+
+1. Make code changes locally
+2. Rebuild container: `podman-compose build`
+3. Restart services: `podman-compose up -d`
+4. Test changes in container
+
+See the [Docker Guide](docker.md) for more details.
+
 ## Code Style
 
 ### Python Style
