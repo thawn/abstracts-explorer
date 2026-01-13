@@ -22,13 +22,12 @@ WORKDIR /app
 
 # Install runtime dependencies only
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    sqlite3 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
 RUN useradd -m -u 1000 abstracts && \
-    mkdir -p /app/data /app/chroma_db && \
+    mkdir -p /app/data && \
     chown -R abstracts:abstracts /app
 
 # Copy Python virtual environment from builder

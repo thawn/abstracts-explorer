@@ -11,16 +11,18 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      # Persist database and embeddings
+      # Persist data directory
       - abstracts-data:/app/data
-      - abstracts-chroma:/app/chroma_db
       # Optional: mount custom .env file
       # - ./.env:/app/.env:ro
     environment:
-      # Database configuration
+      # Database configuration - using PostgreSQL
       - DATA_DIR=/app/data
-      - PAPER_DB_PATH=/app/data/abstracts.db
-      - EMBEDDING_DB_PATH=/app/chroma_db
+      - PAPER_DB_URL=postgresql://abstracts:abstracts_password@postgres:5432/abstracts
+      
+      # Embeddings configuration - using ChromaDB service
+      - EMBEDDING_DB_URL=http://chromadb:8000
+      - COLLECTION_NAME=papers
       
       # LLM Backend configuration
       # Option 1: Use host's LM Studio (requires host.docker.internal or host network)
@@ -34,7 +36,7 @@ services:
       - CHAT_MODEL=gemma-3-4b-it-qat
       - EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b
       
-      # Optional: RAG settings
+      # RAG settings
       - MAX_CONTEXT_PAPERS=5
       - ENABLE_QUERY_REWRITING=true
       - QUERY_SIMILARITY_THRESHOLD=0.7
@@ -43,12 +45,12 @@ services:
     # Uncomment if using LM Studio on host
     # network_mode: host
     
-    # Optional: Uncomment to use standalone ChromaDB service
-    # depends_on:
-    #   - chromadb
-    # Uncomment if using PostgreSQL backend
-    # depends_on:
-    #   - postgres
+    # Depends on database services
+    depends_on:
+      chromadb:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     
     restart: unless-stopped
     
@@ -59,7 +61,7 @@ services:
       retries: 3
       start_period: 10s
 
-  # ChromaDB vector database (optional, standalone service)
+  # ChromaDB vector database service
   chromadb:
     image: chromadb/chroma:latest
     container_name: abstracts-chromadb
@@ -79,7 +81,7 @@ services:
       retries: 3
       start_period: 5s
 
-  # PostgreSQL database (optional, alternative to SQLite)
+  # PostgreSQL database service
   postgres:
     image: postgres:16-alpine
     container_name: abstracts-postgres
@@ -104,8 +106,6 @@ services:
 volumes:
   # Named volumes for persistent data
   abstracts-data:
-    driver: local
-  abstracts-chroma:
     driver: local
   chromadb-data:
     driver: local
