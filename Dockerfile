@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /
 COPY .git/ ./.git/
 
 # Copy Python project files
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY src/ ./src/
 
 # Install Python dependencies with uv
