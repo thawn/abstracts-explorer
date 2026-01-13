@@ -6,6 +6,9 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS python-builder
 
 WORKDIR /app
 
+# Install git for version detection (hatch-vcs needs git to read .git directory)
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+
 # Copy .git directory for version detection (setuptools-scm/hatch-vcs)
 COPY .git/ ./.git/
 
