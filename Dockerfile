@@ -6,6 +6,9 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS python-builder
 
 WORKDIR /app
 
+# Copy .git directory for version detection (setuptools-scm/hatch-vcs)
+COPY .git/ ./.git/
+
 # Copy Python project files
 COPY pyproject.toml uv.lock ./
 COPY src/ ./src/

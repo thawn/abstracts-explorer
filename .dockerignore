@@ -1,5 +1,6 @@
 # Version control
-.git
+# .git is needed in builder stage for version detection (hatch-vcs)
+# but won't be copied to final image
 .gitignore
 .github
 
