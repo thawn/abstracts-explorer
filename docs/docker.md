@@ -2,6 +2,8 @@
 
 This guide explains how to run Abstracts Explorer using containers with Podman (recommended) or Docker.
 
+**Note:** The container images are production-optimized and use pre-built static vendor files (CSS/JS libraries). Node.js is **not required** for production containers - it's only needed for local development if you want to rebuild vendor files.
+
 ## Pre-built Images
 
 Pre-built container images are available from:

@@ -32,11 +32,13 @@ docker-compose up -d
 # Access at http://localhost:5000
 ```
 
-📖 **[Docker Quick Start](DOCKER.md)** | **[Complete Docker/Podman Guide](docs/docker.md)**
+📖 **[Complete Docker/Podman Guide](docs/docker.md)**
+
+**Note:** The container images use pre-built static vendor files. Node.js is only needed for local development if you want to rebuild CSS/JS libraries.
 
 ### Traditional Installation
 
-**Requirements:** Python 3.11+, [uv](https://docs.astral.sh/uv/) package manager, Node.js 14+ (for web UI)
+**Requirements:** Python 3.11+, [uv](https://docs.astral.sh/uv/) package manager, Node.js 14+ (for web UI development)
 
 ```bash
 # Install uv (if not already installed)

@@ -47,6 +47,8 @@ cp .env.example .env
 
 For containerized development with Podman or Docker:
 
+**Note:** The Docker image uses pre-built static vendor files (CSS/JS libraries) that are committed to the repository. Node.js is **not required** for production containers - it's only needed for local development if you want to rebuild these vendor files.
+
 ### Quick Start
 
 ```bash
