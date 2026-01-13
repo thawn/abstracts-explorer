@@ -9,18 +9,14 @@ WORKDIR /app
 # Copy package files
 COPY package.json package-lock.json ./
 
-# Copy source files first (needed for postinstall vendor installation)
+# Install Node.js dependencies (production only, skip postinstall)
+# Skip postinstall scripts as they try to build vendor files and setup git hooks
+# Vendor files (including tailwind.css) are already committed to the repo
+RUN npm ci --omit=dev --ignore-scripts
+
+# Copy source files with pre-built vendor files
 COPY src/abstracts_explorer/web_ui/static/ src/abstracts_explorer/web_ui/static/
 COPY tailwind.config.js ./
-
-# Create dummy git hooks to prevent postinstall script failures
-RUN mkdir -p .git/hooks .githooks && \
-    touch .githooks/pre-commit .githooks/post-checkout .githooks/post-merge
-
-# Install Node.js dependencies
-# Note: Despite npm error "Exit handler never called", packages install successfully
-# The postinstall will run install:vendor and setup:hooks
-RUN npm install --production=false || true
 
 
 # Stage 2: Build Python application
