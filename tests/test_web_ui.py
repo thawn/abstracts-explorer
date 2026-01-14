@@ -1111,7 +1111,7 @@ class TestClusteringEndpoints:
             db.add_paper(paper)
         
         # Now test that get_database calls create_tables
-        with app.test_client() as client:
+        with app.test_client():
             with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
                 mock_config.return_value = Mock(
                     paper_db_path=str(db_path),

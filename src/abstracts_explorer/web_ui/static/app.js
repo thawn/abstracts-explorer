@@ -2083,9 +2083,18 @@ function visualizeClusters() {
     const labels = clusterData.cluster_labels || {};
     const traces = [];
     
+    // Define Plotly default colors to match what Plotly would assign automatically
+    const plotlyColors = [
+        '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+        '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
+    ];
+    
     // For each cluster, create both the points trace and center trace with matching colors
     Object.entries(clusterGroups).forEach(([clusterId, clusterPoints], idx) => {
         const label = labels[clusterId] || `Cluster ${clusterId}`;
+        
+        // Assign explicit color from Plotly's default palette
+        const clusterColor = plotlyColors[idx % plotlyColors.length];
         
         // Main cluster points trace
         const pointsTrace = {
@@ -2103,6 +2112,7 @@ function visualizeClusters() {
                 session: p.session || ''
             })),
             marker: {
+                color: clusterColor,  // Explicitly set color
                 size: 8,
                 opacity: 0.7,
                 line: {
@@ -2128,7 +2138,7 @@ function visualizeClusters() {
                 type: 'scatter',
                 name: `${label} (center)`,
                 marker: {
-                    ...pointsTrace.marker,  // Inherit color from cluster points
+                    color: clusterColor,  // Same explicit color as cluster points
                     symbol: 'star',
                     size: 16,
                     opacity: 1.0,
@@ -2232,6 +2242,25 @@ function filterClusterPlot() {
             String(p.cluster) === selectedCluster
         );
         
+        // Define Plotly default colors
+        const plotlyColors = [
+            '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+            '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
+        ];
+        
+        // Get the cluster index to use the same color as in the full view
+        const clusterGroups = {};
+        clusterData.points.forEach(point => {
+            const cluster = point.cluster;
+            if (!clusterGroups[cluster]) {
+                clusterGroups[cluster] = [];
+            }
+            clusterGroups[cluster].push(point);
+        });
+        const clusterIds = Object.keys(clusterGroups).sort((a, b) => parseInt(a) - parseInt(b));
+        const clusterIndex = clusterIds.indexOf(String(selectedCluster));
+        const clusterColor = plotlyColors[clusterIndex % plotlyColors.length];
+        
         const label = labels[selectedCluster] || `Cluster ${selectedCluster}`;
         const trace = {
             x: filteredPoints.map(p => p.x),
@@ -2248,6 +2277,7 @@ function filterClusterPlot() {
                 session: p.session || ''
             })),
             marker: {
+                color: clusterColor,  // Use same color as in full view
                 size: 10,
                 opacity: 0.8,
                 line: {
@@ -2272,7 +2302,7 @@ function filterClusterPlot() {
                 type: 'scatter',
                 name: 'Center',
                 marker: {
-                    ...trace.marker,  // Inherit color from cluster points
+                    color: clusterColor,  // Same color as cluster points
                     symbol: 'star',
                     size: 20,
                     opacity: 1.0,
