@@ -1293,7 +1293,8 @@ function formatPaperCard(paper, options = {}) {
         showNumber = null,
         abstractLength = compact ? 200 : 300,
         idPrefix = '',
-        showSearchTerm = false
+        showSearchTerm = false,
+        enableClick = true  // New option to control onclick behavior
     } = options;
 
     const title = paper.title || 'Untitled';
@@ -1351,9 +1352,13 @@ function formatPaperCard(paper, options = {}) {
     }
 
     const cardId = idPrefix ? `id="${idPrefix}"` : '';
+    const cursorClass = enableClick ? 'cursor-pointer' : '';
     const cardClasses = compact
-        ? 'paper-card bg-white rounded-lg shadow-sm p-3 hover:shadow-md cursor-pointer border border-gray-200'
-        : 'paper-card bg-white rounded-lg shadow-md p-6 hover:shadow-lg cursor-pointer';
+        ? `paper-card bg-white rounded-lg shadow-sm p-3 hover:shadow-md ${cursorClass} border border-gray-200`
+        : `paper-card bg-white rounded-lg shadow-md p-6 hover:shadow-lg ${cursorClass}`;
+    
+    // Only add onclick if enableClick is true
+    const cardOnclick = enableClick ? `onclick="showPaperDetails('${paper.uid}')"` : '';
 
     // Get current priority for this paper
     const currentPriority = paperPriorities[paper.uid]?.priority || 0;
@@ -1373,7 +1378,7 @@ function formatPaperCard(paper, options = {}) {
     starsHtml += '</div>';
 
     return `
-        <div ${cardId} class="${cardClasses}" onclick="showPaperDetails('${paper.uid}')">
+        <div ${cardId} class="${cardClasses}" ${cardOnclick}>
             ${showNumber !== null ? `
                 <div class="flex items-start justify-between mb-1">
                     <span class="text-xs font-semibold text-purple-600">#${showNumber}</span>
@@ -2398,74 +2403,66 @@ async function showClusterPaperDetails(paperId, basicInfo) {
     
     detailsDiv.classList.remove('hidden');
     
-    // Get current rating for this paper
-    const currentPriority = paperPriorities[paperId]?.priority || 0;
-    
-    // Generate star rating HTML
-    const generateStars = () => {
-        let starsHTML = '<div class="flex items-center gap-1 mb-2">';
-        for (let i = 1; i <= 3; i++) {
-            const isFilled = i <= currentPriority;
-            const starClass = isFilled ? 'fas fa-star text-yellow-400' : 'far fa-star text-gray-300';
-            starsHTML += `
-                <i class="${starClass} hover:text-yellow-400 cursor-pointer" 
-                   onclick="setPaperPriority('${paperId}', ${i})"
-                   title="Rate ${i} star${i > 1 ? 's' : ''}"></i>
-            `;
-        }
-        starsHTML += '<span class="text-xs text-gray-500 ml-2">Click to rate</span></div>';
-        return starsHTML;
+    // Show loading state with basic info using formatPaperCard
+    const loadingPaper = {
+        uid: paperId,
+        title: basicInfo.title,
+        authors: ['Loading...'],
+        year: basicInfo.year,
+        conference: basicInfo.conference,
+        abstract: 'Loading full details...'
     };
     
-    // Show basic info immediately with rating stars
-    contentDiv.innerHTML = `
-        <div class="space-y-2">
-            ${generateStars()}
-            <h4 class="text-lg font-semibold">${basicInfo.title}</h4>
-            <p class="text-sm text-gray-600">
-                <strong>Year:</strong> ${basicInfo.year} | 
-                <strong>Conference:</strong> ${basicInfo.conference}
-            </p>
-            <p class="text-sm text-gray-500">Loading full details...</p>
-        </div>
-    `;
+    try {
+        // Use formatPaperCard for consistent styling with search results
+        contentDiv.innerHTML = formatPaperCard(loadingPaper, { 
+            compact: false,
+            idPrefix: 'cluster-paper-detail',
+            enableClick: false  // Disable onclick since paper is already selected
+        });
+    } catch (error) {
+        console.error('Error formatting loading state:', error);
+        contentDiv.innerHTML = `
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <h4 class="text-lg font-semibold text-gray-800">${basicInfo.title}</h4>
+                <p class="text-sm text-gray-500 mt-2">Loading full details...</p>
+            </div>
+        `;
+    }
     
     // Try to fetch full paper details
     try {
         const response = await fetch(`/api/paper/${paperId}`);
         if (response.ok) {
             const paper = await response.json();
-            contentDiv.innerHTML = `
-                <div class="space-y-4">
-                    ${generateStars()}
-                    <div>
-                        <h4 class="text-lg font-semibold text-gray-800">${paper.title}</h4>
-                        ${paper.authors ? `<p class="text-sm text-gray-600 mt-1">${paper.authors.join(', ')}</p>` : ''}
-                    </div>
-                    <div class="flex items-center gap-4 text-sm text-gray-600">
-                        <span><strong>Year:</strong> ${paper.year || 'N/A'}</span>
-                        <span><strong>Conference:</strong> ${paper.conference || 'N/A'}</span>
-                        ${paper.session ? `<span><strong>Session:</strong> ${paper.session}</span>` : ''}
-                    </div>
-                    ${paper.abstract ? `
-                        <div>
-                            <h5 class="font-semibold text-gray-700 mb-2">Abstract</h5>
-                            <p class="text-sm text-gray-700 leading-relaxed">${paper.abstract}</p>
-                        </div>
-                    ` : ''}
-                    ${paper.url ? `
-                        <div>
-                            <a href="${paper.url}" target="_blank" 
-                               class="inline-flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
-                                <i class="fas fa-external-link-alt mr-2"></i>View on OpenReview
-                            </a>
-                        </div>
-                    ` : ''}
-                </div>
-            `;
+            
+            // Transform the paper data to match formatPaperCard's expected format
+            const formattedPaper = {
+                uid: paperId,
+                title: paper.title,
+                authors: paper.authors || [],
+                year: paper.year,
+                conference: paper.conference,
+                session: paper.session,
+                poster_position: paper.poster_position,
+                abstract: paper.abstract,
+                paper_url: paper.url,
+                keywords: paper.keywords
+            };
+            
+            // Use formatPaperCard for consistent styling with search results
+            contentDiv.innerHTML = formatPaperCard(formattedPaper, { 
+                compact: false,
+                idPrefix: 'cluster-paper-detail',
+                enableClick: false  // Disable onclick since paper is already selected
+            });
+        } else {
+            // If fetch fails, keep the loading state or show error
+            console.error('Failed to fetch paper details:', response.status);
         }
     } catch (error) {
         console.error('Error fetching paper details:', error);
+        // Keep the basic info displayed on error
     }
 }
 
