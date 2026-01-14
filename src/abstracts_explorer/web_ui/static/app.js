@@ -2020,7 +2020,7 @@ function updateClusterStats() {
     
     // Add cluster labels info if available
     if (Object.keys(labels).length > 0) {
-        statsHTML += `<br><span class="text-xs text-green-600">✓ Cluster labels generated</span>`;
+        statsHTML += `<br><span class="text-xs text-green-600" role="status" aria-label="Cluster labels generated successfully">Success: Cluster labels generated</span>`;
     }
     
     statsDiv.innerHTML = statsHTML;

@@ -586,7 +586,14 @@ class ClusteringManager:
         # Get a few representative paper titles from the cluster
         cluster_indices = np.where(self.cluster_labels == cluster_id)[0]
         sample_size = min(5, len(cluster_indices))
-        sample_indices = np.random.choice(cluster_indices, size=sample_size, replace=False)
+        
+        # Use replacement if there are fewer papers than sample size
+        replace = len(cluster_indices) < sample_size
+        sample_indices = np.random.choice(
+            cluster_indices, 
+            size=sample_size, 
+            replace=replace
+        )
         
         sample_titles = []
         if self.metadatas:
@@ -596,17 +603,22 @@ class ClusteringManager:
                     sample_titles.append(title)
 
         # Construct prompt for LLM
+        sample_titles_str = "\n".join(f"- {title}" for title in sample_titles)
         prompt = f"""Given a cluster of research papers with the following characteristics:
 
 Top keywords: {', '.join(keywords)}
 
 Sample paper titles:
-{chr(10).join(f"- {title}" for title in sample_titles)}
+{sample_titles_str}
 
 Generate a concise, descriptive label (3-5 words) that captures the main theme of this cluster. 
 Only respond with the label, nothing else."""
 
         try:
+            # Check if OpenAI client is available
+            if not hasattr(self.embeddings_manager, 'openai_client'):
+                raise AttributeError("OpenAI client not available in embeddings manager")
+            
             # Use the embeddings manager's OpenAI client
             from .config import get_config
             config = get_config()
