@@ -1090,15 +1090,21 @@ class TestClusteringEndpoints:
     def test_clustering_colors_defined_in_javascript(self):
         """Test that the clustering visualization JavaScript has explicit color definitions."""
         # Read the JavaScript file
-        js_path = Path(__file__).parent.parent / "src" / "abstracts_explorer" / "web_ui" / "static" / "app.js"
-        with open(js_path, 'r', encoding='utf-8') as f:
-            js_content = f.read()
+        # Check constants file for PLOTLY_COLORS
+        constants_path = Path(__file__).parent.parent / "src" / "abstracts_explorer" / "web_ui" / "static" / "modules" / "utils" / "constants.js"
+        with open(constants_path, 'r', encoding='utf-8') as f:
+            constants_content = f.read()
         
         # Check that Plotly colors are defined (using constant naming convention)
-        assert "PLOTLY_COLORS = [" in js_content, "Plotly colors should be explicitly defined"
+        assert "PLOTLY_COLORS = [" in constants_content, "Plotly colors should be explicitly defined in constants.js"
+        
+        # Check clustering module for color assignment
+        clustering_path = Path(__file__).parent.parent / "src" / "abstracts_explorer" / "web_ui" / "static" / "modules" / "clustering.js"
+        with open(clustering_path, 'r', encoding='utf-8') as f:
+            clustering_content = f.read()
         
         # Check that colors are explicitly assigned to markers
-        assert "color: clusterColor" in js_content, "Cluster color should be explicitly assigned to markers"
+        assert "color: clusterColor" in clustering_content, "Cluster color should be explicitly assigned to markers"
         
         # Verify the Plotly Dark24 and Light24 color palettes are present
         # Check a few representative colors from both palettes
@@ -1106,7 +1112,7 @@ class TestClusteringEndpoints:
         light24_sample_colors = ['#83BCFF', '#FFC3E0', '#8DFFB7', '#FF8F8F']
         
         for color in dark24_sample_colors + light24_sample_colors:
-            assert color in js_content, f"Plotly color {color} should be in the JavaScript"
+            assert color in constants_content, f"Plotly color {color} should be in the constants.js"
 
     def test_compute_clusters_creates_tables_on_first_connection(self, tmp_path):
         """Test that create_tables is called when connecting to database."""
