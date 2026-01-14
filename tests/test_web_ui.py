@@ -1094,8 +1094,8 @@ class TestClusteringEndpoints:
         with open(js_path, 'r', encoding='utf-8') as f:
             js_content = f.read()
         
-        # Check that Plotly colors are defined
-        assert "plotlyColors = [" in js_content, "Plotly colors should be explicitly defined"
+        # Check that Plotly colors are defined (using constant naming convention)
+        assert "PLOTLY_COLORS = [" in js_content, "Plotly colors should be explicitly defined"
         
         # Check that colors are explicitly assigned to markers
         assert "color: clusterColor" in js_content, "Cluster color should be explicitly assigned to markers"
