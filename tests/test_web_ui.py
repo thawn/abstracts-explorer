@@ -1087,6 +1087,30 @@ class TestServerInitialization:
 class TestClusteringEndpoints:
     """Test clustering endpoints and caching functionality."""
 
+    def test_clustering_colors_defined_in_javascript(self):
+        """Test that the clustering visualization JavaScript has explicit color definitions."""
+        import re
+        
+        # Read the JavaScript file
+        js_path = Path(__file__).parent.parent / "src" / "abstracts_explorer" / "web_ui" / "static" / "app.js"
+        with open(js_path, 'r') as f:
+            js_content = f.read()
+        
+        # Check that Plotly colors are defined
+        assert "plotlyColors = [" in js_content, "Plotly colors should be explicitly defined"
+        
+        # Check that colors are explicitly assigned to markers
+        assert "color: clusterColor" in js_content, "Cluster color should be explicitly assigned to markers"
+        
+        # Verify the Plotly default color palette is present
+        plotly_colors = [
+            '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+            '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
+        ]
+        
+        for color in plotly_colors:
+            assert color in js_content, f"Plotly color {color} should be in the JavaScript"
+
     def test_compute_clusters_creates_tables_on_first_connection(self, tmp_path):
         """Test that create_tables is called when connecting to database."""
         from abstracts_explorer.web_ui.app import app, get_database
