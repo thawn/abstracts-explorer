@@ -1,6 +1,12 @@
 // API base URL
 const API_BASE = '';
 
+// Constants: Plotly default color palette
+const PLOTLY_COLORS = [
+    '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+    '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
+];
+
 // State
 let currentTab = 'search';
 let chatHistory = [];
@@ -30,6 +36,28 @@ function naturalSortPosterPosition(a, b) {
     
     // Fallback to string comparison if no numbers or numbers are equal
     return aPos.localeCompare(bPos);
+}
+
+// Utility: Sort clusters by size (descending), then by ID (ascending) as tiebreaker
+// Takes an array of [clusterId, items] entries where items is either an array or a count
+function sortClustersBySizeDesc(clusterEntries) {
+    return clusterEntries.sort((a, b) => {
+        // Get size - either length of array or the value itself if it's a number
+        const sizeA = Array.isArray(a[1]) ? a[1].length : a[1];
+        const sizeB = Array.isArray(b[1]) ? b[1].length : b[1];
+        
+        if (sizeB !== sizeA) {
+            return sizeB - sizeA;  // Sort by size descending
+        }
+        return parseInt(a[0]) - parseInt(b[0]);  // Tiebreaker: sort by ID ascending
+    });
+}
+
+// Utility: Get cluster label with paper count
+// Returns formatted string like "Cluster Name (N)" or "Cluster N (N)"
+function getClusterLabelWithCount(clusterId, labels, paperCount) {
+    const label = labels[clusterId] || `Cluster ${clusterId}`;
+    return `${label} (${paperCount})`;
 }
 
 // Initialize app
@@ -2056,22 +2084,13 @@ function populateClusterFilter() {
     select.innerHTML = '<option value="">All Clusters</option>';
     
     // Sort clusters by size (descending), then by ID (ascending) as tiebreaker
-    const sortedClusters = Object.entries(stats.cluster_sizes)
-        .sort((a, b) => {
-            const sizeA = a[1];
-            const sizeB = b[1];
-            if (sizeB !== sizeA) {
-                return sizeB - sizeA;  // Sort by size descending
-            }
-            return parseInt(a[0]) - parseInt(b[0]);  // Tiebreaker: sort by ID ascending
-        });
+    const sortedClusters = sortClustersBySizeDesc(Object.entries(stats.cluster_sizes));
     
     // Add option for each cluster
     sortedClusters.forEach(([clusterId, size]) => {
         const option = document.createElement('option');
         option.value = clusterId;
-        const label = labels[clusterId] || `Cluster ${clusterId}`;
-        option.textContent = `${label} (${size} papers)`;
+        option.textContent = `${getClusterLabelWithCount(clusterId, labels, size)} papers`;
         select.appendChild(option);
     });
     
@@ -2107,33 +2126,18 @@ function visualizeClusters() {
     });
     
     // Sort clusters by size (descending), then by ID (ascending) as tiebreaker
-    const sortedClusterEntries = Object.entries(clusterGroups)
-        .sort((a, b) => {
-            const sizeA = a[1].length;
-            const sizeB = b[1].length;
-            if (sizeB !== sizeA) {
-                return sizeB - sizeA;  // Sort by size descending
-            }
-            return parseInt(a[0]) - parseInt(b[0]);  // Tiebreaker: sort by ID ascending
-        });
+    const sortedClusterEntries = sortClustersBySizeDesc(Object.entries(clusterGroups));
     
     // Create traces for each cluster
     const labels = clusterData.cluster_labels || {};
     const traces = [];
     
-    // Define Plotly default colors to match what Plotly would assign automatically
-    const plotlyColors = [
-        '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
-        '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
-    ];
-    
     // For each cluster, create both the points trace and center trace with matching colors
     sortedClusterEntries.forEach(([clusterId, clusterPoints], idx) => {
-        const label = labels[clusterId] || `Cluster ${clusterId}`;
         const paperCount = clusterPoints.length;
         
         // Assign explicit color from Plotly's default palette
-        const clusterColor = plotlyColors[idx % plotlyColors.length];
+        const clusterColor = PLOTLY_COLORS[idx % PLOTLY_COLORS.length];
         
         // Main cluster points trace
         const pointsTrace = {
@@ -2141,7 +2145,7 @@ function visualizeClusters() {
             y: clusterPoints.map(p => p.y),
             mode: 'markers',
             type: 'scatter',
-            name: clusterId === '-1' ? `Noise (${paperCount})` : `${label} (${paperCount})`,
+            name: getClusterLabelWithCount(clusterId, labels, paperCount),
             text: clusterPoints.map(p => p.title || p.id),
             customdata: clusterPoints.map(p => ({
                 id: p.id,
@@ -2281,12 +2285,6 @@ function filterClusterPlot() {
             String(p.cluster) === selectedCluster
         );
         
-        // Define Plotly default colors
-        const plotlyColors = [
-            '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
-            '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
-        ];
-        
         // Get the cluster index to use the same color as in the full view
         const clusterGroups = {};
         clusterData.points.forEach(point => {
@@ -2298,28 +2296,19 @@ function filterClusterPlot() {
         });
         
         // Sort clusters by size (descending), then by ID (ascending) as tiebreaker - same as visualizeClusters
-        const sortedClusterIds = Object.entries(clusterGroups)
-            .sort((a, b) => {
-                const sizeA = a[1].length;
-                const sizeB = b[1].length;
-                if (sizeB !== sizeA) {
-                    return sizeB - sizeA;
-                }
-                return parseInt(a[0]) - parseInt(b[0]);
-            })
+        const sortedClusterIds = sortClustersBySizeDesc(Object.entries(clusterGroups))
             .map(([id]) => id);
         
         const clusterIndex = sortedClusterIds.indexOf(String(selectedCluster));
-        const clusterColor = plotlyColors[clusterIndex % plotlyColors.length];
+        const clusterColor = PLOTLY_COLORS[clusterIndex % PLOTLY_COLORS.length];
         
-        const label = labels[selectedCluster] || `Cluster ${selectedCluster}`;
         const paperCount = filteredPoints.length;
         const trace = {
             x: filteredPoints.map(p => p.x),
             y: filteredPoints.map(p => p.y),
             mode: 'markers',
             type: 'scatter',
-            name: selectedCluster === '-1' ? `Noise (${paperCount})` : `${label} (${paperCount})`,
+            name: getClusterLabelWithCount(selectedCluster, labels, paperCount),
             text: filteredPoints.map(p => p.title || p.id),
             customdata: filteredPoints.map(p => ({
                 id: p.id,
