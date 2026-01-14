@@ -20,7 +20,7 @@ from sqlalchemy.engine import Engine
 from abstracts_explorer.plugin import LightweightPaper
 
 # Import SQLAlchemy models
-from abstracts_explorer.db_models import Base, Paper, EmbeddingsMetadata
+from abstracts_explorer.db_models import Base, Paper, EmbeddingsMetadata, ClusteringCache
 
 logger = logging.getLogger(__name__)
 
@@ -877,3 +877,191 @@ class DatabaseManager:
         except Exception as e:
             self._session.rollback()
             raise DatabaseError(f"Failed to set embedding model: {str(e)}") from e
+
+    def get_clustering_cache(
+        self,
+        embedding_model: str,
+        reduction_method: str,
+        n_components: int,
+        clustering_method: str,
+        n_clusters: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get cached clustering results matching the parameters.
+
+        Parameters
+        ----------
+        embedding_model : str
+            Name of the embedding model.
+        reduction_method : str
+            Dimensionality reduction method.
+        n_components : int
+            Number of components after reduction.
+        clustering_method : str
+            Clustering algorithm used.
+        n_clusters : int, optional
+            Number of clusters (for kmeans/agglomerative).
+
+        Returns
+        -------
+        dict or None
+            Cached clustering results as dictionary, or None if not found.
+
+        Raises
+        ------
+        DatabaseError
+            If query fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            # Build query conditions
+            stmt = select(ClusteringCache).where(
+                and_(
+                    ClusteringCache.embedding_model == embedding_model,
+                    ClusteringCache.reduction_method == reduction_method,
+                    ClusteringCache.n_components == n_components,
+                    ClusteringCache.clustering_method == clustering_method,
+                )
+            )
+
+            # Add n_clusters condition if provided
+            if n_clusters is not None:
+                stmt = stmt.where(ClusteringCache.n_clusters == n_clusters)
+
+            # Get most recent matching cache
+            stmt = stmt.order_by(ClusteringCache.created_at.desc()).limit(1)
+
+            result = self._session.execute(stmt).scalar_one_or_none()
+
+            if result:
+                import json
+                return json.loads(result.results_json)
+
+            return None
+
+        except Exception as e:
+            raise DatabaseError(f"Failed to get clustering cache: {str(e)}") from e
+
+    def save_clustering_cache(
+        self,
+        embedding_model: str,
+        reduction_method: str,
+        n_components: int,
+        clustering_method: str,
+        results: Dict[str, Any],
+        n_clusters: Optional[int] = None,
+        clustering_params: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Save clustering results to cache.
+
+        Parameters
+        ----------
+        embedding_model : str
+            Name of the embedding model.
+        reduction_method : str
+            Dimensionality reduction method.
+        n_components : int
+            Number of components after reduction.
+        clustering_method : str
+            Clustering algorithm used.
+        results : dict
+            Clustering results to cache.
+        n_clusters : int, optional
+            Number of clusters (for kmeans/agglomerative).
+        clustering_params : dict, optional
+            Additional clustering parameters.
+
+        Raises
+        ------
+        DatabaseError
+            If save fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            import json
+
+            # Serialize results and params to JSON
+            results_json = json.dumps(results)
+            params_json = json.dumps(clustering_params) if clustering_params else None
+
+            # Create new cache entry
+            cache_entry = ClusteringCache(
+                embedding_model=embedding_model,
+                reduction_method=reduction_method,
+                n_components=n_components,
+                clustering_method=clustering_method,
+                n_clusters=n_clusters,
+                clustering_params=params_json,
+                results_json=results_json,
+            )
+
+            self._session.add(cache_entry)
+            self._session.commit()
+
+            logger.info(
+                f"Saved clustering cache: {clustering_method} with {n_clusters} clusters, "
+                f"model={embedding_model}, reduction={reduction_method}"
+            )
+
+        except Exception as e:
+            self._session.rollback()
+            raise DatabaseError(f"Failed to save clustering cache: {str(e)}") from e
+
+    def clear_clustering_cache(self, embedding_model: Optional[str] = None) -> int:
+        """
+        Clear clustering cache, optionally filtered by embedding model.
+
+        This is useful when embeddings change or cache becomes stale.
+
+        Parameters
+        ----------
+        embedding_model : str, optional
+            If provided, only clear cache for this embedding model.
+            If None, clear all cache entries.
+
+        Returns
+        -------
+        int
+            Number of cache entries deleted.
+
+        Raises
+        ------
+        DatabaseError
+            If deletion fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            if embedding_model:
+                # Delete only for specific model
+                stmt = select(ClusteringCache).where(
+                    ClusteringCache.embedding_model == embedding_model
+                )
+            else:
+                # Delete all
+                stmt = select(ClusteringCache)
+
+            entries = self._session.execute(stmt).scalars().all()
+            count = len(entries)
+
+            for entry in entries:
+                self._session.delete(entry)
+
+            self._session.commit()
+
+            if embedding_model:
+                logger.info(f"Cleared {count} clustering cache entries for model: {embedding_model}")
+            else:
+                logger.info(f"Cleared all {count} clustering cache entries")
+
+            return count
+
+        except Exception as e:
+            self._session.rollback()
+            raise DatabaseError(f"Failed to clear clustering cache: {str(e)}") from e

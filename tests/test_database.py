@@ -428,3 +428,164 @@ class TestEmbeddingModelMetadata:
             retrieved_model = db2.get_embedding_model()
             assert retrieved_model == model_name
 
+
+class TestClusteringCache:
+    """Tests for clustering cache functionality."""
+
+    def test_get_clustering_cache_none_when_not_set(self, connected_db):
+        """Test that get_clustering_cache returns None when no cache exists."""
+        cache = connected_db.get_clustering_cache(
+            embedding_model="test-model",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            n_clusters=5,
+        )
+        assert cache is None
+
+    def test_save_and_get_clustering_cache(self, connected_db):
+        """Test saving and retrieving clustering cache."""
+        # Create sample clustering results
+        results = {
+            "points": [
+                {"id": "paper1", "x": 1.0, "y": 2.0, "cluster": 0},
+                {"id": "paper2", "x": 3.0, "y": 4.0, "cluster": 1},
+            ],
+            "statistics": {"n_clusters": 2, "total_papers": 2},
+            "cluster_centers": {0: {"x": 1.0, "y": 2.0}, 1: {"x": 3.0, "y": 4.0}},
+        }
+
+        # Save cache
+        connected_db.save_clustering_cache(
+            embedding_model="test-model",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            results=results,
+            n_clusters=2,
+        )
+
+        # Retrieve cache
+        cached = connected_db.get_clustering_cache(
+            embedding_model="test-model",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            n_clusters=2,
+        )
+
+        assert cached is not None
+        assert cached["points"] == results["points"]
+        assert cached["statistics"] == results["statistics"]
+        # JSON serialization converts int keys to strings
+        assert cached["cluster_centers"]["0"] == results["cluster_centers"][0]
+        assert cached["cluster_centers"]["1"] == results["cluster_centers"][1]
+
+    def test_cache_invalidation_by_embedding_model(self, connected_db):
+        """Test that cache is invalidated when embedding model changes."""
+        results = {
+            "points": [{"id": "p1", "x": 1.0, "y": 2.0, "cluster": 0}],
+            "statistics": {"n_clusters": 1},
+        }
+
+        # Save with model1
+        connected_db.save_clustering_cache(
+            embedding_model="model1",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            results=results,
+            n_clusters=5,
+        )
+
+        # Try to get with model2 - should return None
+        cached = connected_db.get_clustering_cache(
+            embedding_model="model2",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            n_clusters=5,
+        )
+        assert cached is None
+
+    def test_clear_clustering_cache(self, connected_db):
+        """Test clearing clustering cache."""
+        results = {"points": [], "statistics": {}}
+
+        # Save two cache entries
+        connected_db.save_clustering_cache(
+            embedding_model="model1",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            results=results,
+            n_clusters=5,
+        )
+        connected_db.save_clustering_cache(
+            embedding_model="model1",
+            reduction_method="tsne",
+            n_components=2,
+            clustering_method="kmeans",
+            results=results,
+            n_clusters=5,
+        )
+
+        # Clear all cache
+        count = connected_db.clear_clustering_cache()
+        assert count == 2
+
+        # Verify cache is empty
+        cached = connected_db.get_clustering_cache(
+            embedding_model="model1",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            n_clusters=5,
+        )
+        assert cached is None
+
+    def test_clear_clustering_cache_by_model(self, connected_db):
+        """Test clearing clustering cache for specific model."""
+        results = {"points": [], "statistics": {}}
+
+        # Save cache for two models
+        connected_db.save_clustering_cache(
+            embedding_model="model1",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            results=results,
+            n_clusters=5,
+        )
+        connected_db.save_clustering_cache(
+            embedding_model="model2",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            results=results,
+            n_clusters=5,
+        )
+
+        # Clear only model1 cache
+        count = connected_db.clear_clustering_cache(embedding_model="model1")
+        assert count == 1
+
+        # Verify model1 cache is cleared but model2 remains
+        cached1 = connected_db.get_clustering_cache(
+            embedding_model="model1",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            n_clusters=5,
+        )
+        assert cached1 is None
+
+        cached2 = connected_db.get_clustering_cache(
+            embedding_model="model2",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            n_clusters=5,
+        )
+        assert cached2 is not None
+

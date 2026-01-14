@@ -1,6 +1,22 @@
 // API base URL
 const API_BASE = '';
 
+// Constants: Plotly Dark24 and Light24 color palettes for better cluster distinction
+// Combined 48 colors from Dark24 (first 24) and Light24 (next 24)
+// Reference: https://plotly.com/python/discrete-color/#color-sequences-in-plotly-express
+const PLOTLY_COLORS = [
+    // Dark24 palette (24 colors)
+    '#2E91E5', '#E15F99', '#1CA71C', '#FB0D0D', '#DA16FF', '#222A2A',
+    '#B68100', '#750D86', '#EB663B', '#511CFB', '#00A08B', '#FB00D1',
+    '#FC0080', '#B2828D', '#6C7C32', '#778AAE', '#862A16', '#A777F1',
+    '#620042', '#1616A7', '#DA60CA', '#6C4516', '#0D2A63', '#AF0038',
+    // Light24 palette (24 colors)
+    '#83BCFF', '#FFC3E0', '#8DFFB7', '#FF8F8F', '#F5B3FF', '#8A8A8A',
+    '#FFD88A', '#D18AE5', '#FFC28A', '#B38AFF', '#8AFFDD', '#FF8AE5',
+    '#FF8ACC', '#FFCCE0', '#D6FF8A', '#D1C8FF', '#FF8A8A', '#E5C3FF',
+    '#FF8AC3', '#8A8AFF', '#FFC3FF', '#FFD18A', '#8ACCFF', '#FF8ABF'
+];
+
 // State
 let currentTab = 'search';
 let chatHistory = [];
@@ -30,6 +46,28 @@ function naturalSortPosterPosition(a, b) {
     
     // Fallback to string comparison if no numbers or numbers are equal
     return aPos.localeCompare(bPos);
+}
+
+// Utility: Sort clusters by size (descending), then by ID (ascending) as tiebreaker
+// Takes an array of [clusterId, items] entries where items is either an array or a count
+function sortClustersBySizeDesc(clusterEntries) {
+    return clusterEntries.sort((a, b) => {
+        // Get size - either length of array or the value itself if it's a number
+        const sizeA = Array.isArray(a[1]) ? a[1].length : a[1];
+        const sizeB = Array.isArray(b[1]) ? b[1].length : b[1];
+        
+        if (sizeB !== sizeA) {
+            return sizeB - sizeA;  // Sort by size descending
+        }
+        return parseInt(a[0]) - parseInt(b[0]);  // Tiebreaker: sort by ID ascending
+    });
+}
+
+// Utility: Get cluster label with paper count
+// Returns formatted string like "Cluster Name (N)" or "Cluster N (N)"
+function getClusterLabelWithCount(clusterId, labels, paperCount) {
+    const label = labels[clusterId] || `Cluster ${clusterId}`;
+    return `${label} (${paperCount})`;
 }
 
 // Initialize app
@@ -251,7 +289,7 @@ function setPaperPriority(paperId, priority) {
 function updateStarDisplay(paperId) {
     const priority = paperPriorities[paperId]?.priority || 0;
 
-    // Find all star elements for this paper
+    // Find all star elements for this paper in search results
     const paperCard = document.querySelector(`[onclick*="showPaperDetails('${paperId}')"]`);
     if (paperCard) {
         const stars = paperCard.querySelectorAll('i[class*="fa-star"]');
@@ -265,6 +303,22 @@ function updateStarDisplay(paperId) {
                 // Empty star
                 star.className = star.className.replace('fas fa-star text-yellow-400', 'far fa-star text-gray-300');
                 star.className = star.className.replace('hover:text-yellow-500', 'hover:text-yellow-400');
+            }
+        });
+    }
+    
+    // Also update stars in the cluster details panel if it's showing this paper
+    const clusterDetailsContent = document.getElementById('selected-paper-content');
+    if (clusterDetailsContent) {
+        const clusterStars = clusterDetailsContent.querySelectorAll(`i[onclick*="'${paperId}'"]`);
+        clusterStars.forEach((star, index) => {
+            const starNumber = index + 1;
+            if (starNumber <= priority) {
+                // Filled star
+                star.className = 'fas fa-star text-yellow-400 hover:text-yellow-400 cursor-pointer';
+            } else {
+                // Empty star
+                star.className = 'far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer';
             }
         });
     }
@@ -2039,12 +2093,14 @@ function populateClusterFilter() {
     // Clear existing options except "All Clusters"
     select.innerHTML = '<option value="">All Clusters</option>';
     
+    // Sort clusters by size (descending), then by ID (ascending) as tiebreaker
+    const sortedClusters = sortClustersBySizeDesc(Object.entries(stats.cluster_sizes));
+    
     // Add option for each cluster
-    Object.entries(stats.cluster_sizes).sort((a, b) => parseInt(a[0]) - parseInt(b[0])).forEach(([clusterId, size]) => {
+    sortedClusters.forEach(([clusterId, size]) => {
         const option = document.createElement('option');
         option.value = clusterId;
-        const label = labels[clusterId] || `Cluster ${clusterId}`;
-        option.textContent = `${label} (${size} papers)`;
+        option.textContent = `${getClusterLabelWithCount(clusterId, labels, size)} papers`;
         select.appendChild(option);
     });
     
@@ -2067,6 +2123,7 @@ function visualizeClusters() {
     }
     
     const points = clusterData.points;
+    const centers = clusterData.cluster_centers || {};
     
     // Group points by cluster
     const clusterGroups = {};
@@ -2078,16 +2135,30 @@ function visualizeClusters() {
         clusterGroups[cluster].push(point);
     });
     
+    // Sort clusters by size (descending), then by ID (ascending) as tiebreaker
+    const sortedClusterEntries = sortClustersBySizeDesc(Object.entries(clusterGroups));
+    
     // Create traces for each cluster
     const labels = clusterData.cluster_labels || {};
-    const traces = Object.entries(clusterGroups).map(([clusterId, clusterPoints]) => {
-        const label = labels[clusterId] || `Cluster ${clusterId}`;
-        return {
+    const traces = [];
+    
+    // For each cluster, create both the points trace and center trace with matching colors
+    sortedClusterEntries.forEach(([clusterId, clusterPoints], idx) => {
+        const paperCount = clusterPoints.length;
+        
+        // Assign explicit color from Plotly's default palette
+        const clusterColor = PLOTLY_COLORS[idx % PLOTLY_COLORS.length];
+        
+        // Get the label with count for this cluster
+        const label = getClusterLabelWithCount(clusterId, labels, paperCount);
+        
+        // Main cluster points trace
+        const pointsTrace = {
             x: clusterPoints.map(p => p.x),
             y: clusterPoints.map(p => p.y),
             mode: 'markers',
             type: 'scatter',
-            name: clusterId === '-1' ? 'Noise' : label,
+            name: label,
             text: clusterPoints.map(p => p.title || p.id),
             customdata: clusterPoints.map(p => ({
                 id: p.id,
@@ -2097,6 +2168,7 @@ function visualizeClusters() {
                 session: p.session || ''
             })),
             marker: {
+                color: clusterColor,  // Explicitly set color
                 size: 8,
                 opacity: 0.7,
                 line: {
@@ -2107,9 +2179,42 @@ function visualizeClusters() {
             hovertemplate: '<b>%{text}</b><br>' +
                           'Year: %{customdata.year}<br>' +
                           'Conference: %{customdata.conference}<br>' +
-                          '<extra></extra>'
+                          '<extra></extra>',
+            legendgroup: `cluster-${clusterId}`
         };
+        traces.push(pointsTrace);
+        
+        // Add cluster center as star marker with same color
+        const center = centers[clusterId];
+        if (center) {
+            const centerTrace = {
+                x: [center.x],
+                y: [center.y],
+                mode: 'markers',
+                type: 'scatter',
+                name: `${label} (center)`,
+                marker: {
+                    color: clusterColor,  // Same explicit color as cluster points
+                    symbol: 'star',
+                    size: 16,
+                    opacity: 1.0,
+                    line: {
+                        color: 'white',
+                        width: 2
+                    }
+                },
+                hovertemplate: '<b>Cluster Center</b><br>' +
+                              label + '<br>' +
+                              '<extra></extra>',
+                showlegend: false,  // Don't show in legend to avoid clutter
+                legendgroup: `cluster-${clusterId}`  // Group with corresponding cluster
+            };
+            traces.push(centerTrace);
+        }
     });
+    
+    // Combine all traces
+    const allTraces = traces;
     
     // Layout configuration
     const layout = {
@@ -2156,8 +2261,8 @@ function visualizeClusters() {
     const plotElement = document.getElementById('cluster-plot');
     plotElement.innerHTML = '';
     
-    // Create plot with no animation
-    Plotly.newPlot('cluster-plot', traces, layout, config).then(function() {
+    // Create plot with no animation - use allTraces instead of traces
+    Plotly.newPlot('cluster-plot', allTraces, layout, config).then(function() {
         // Disable hover animations after plot is created
         Plotly.relayout('cluster-plot', {
             'xaxis.fixedrange': false,
@@ -2182,6 +2287,7 @@ function filterClusterPlot() {
     if (!clusterData || !clusterData.points) return;
     
     const labels = clusterData.cluster_labels || {};
+    const centers = clusterData.cluster_centers || {};
     
     if (selectedCluster === '') {
         // Show all clusters
@@ -2192,13 +2298,30 @@ function filterClusterPlot() {
             String(p.cluster) === selectedCluster
         );
         
-        const label = labels[selectedCluster] || `Cluster ${selectedCluster}`;
+        // Get the cluster index to use the same color as in the full view
+        const clusterGroups = {};
+        clusterData.points.forEach(point => {
+            const cluster = point.cluster;
+            if (!clusterGroups[cluster]) {
+                clusterGroups[cluster] = [];
+            }
+            clusterGroups[cluster].push(point);
+        });
+        
+        // Sort clusters by size (descending), then by ID (ascending) as tiebreaker - same as visualizeClusters
+        const sortedClusterIds = sortClustersBySizeDesc(Object.entries(clusterGroups))
+            .map(([id]) => id);
+        
+        const clusterIndex = sortedClusterIds.indexOf(String(selectedCluster));
+        const clusterColor = PLOTLY_COLORS[clusterIndex % PLOTLY_COLORS.length];
+        
+        const paperCount = filteredPoints.length;
         const trace = {
             x: filteredPoints.map(p => p.x),
             y: filteredPoints.map(p => p.y),
             mode: 'markers',
             type: 'scatter',
-            name: selectedCluster === '-1' ? 'Noise' : label,
+            name: getClusterLabelWithCount(selectedCluster, labels, paperCount),
             text: filteredPoints.map(p => p.title || p.id),
             customdata: filteredPoints.map(p => ({
                 id: p.id,
@@ -2208,6 +2331,7 @@ function filterClusterPlot() {
                 session: p.session || ''
             })),
             marker: {
+                color: clusterColor,  // Use same color as in full view
                 size: 10,
                 opacity: 0.8,
                 line: {
@@ -2220,6 +2344,34 @@ function filterClusterPlot() {
                           'Conference: %{customdata.conference}<br>' +
                           '<extra></extra>'
         };
+        
+        // Add cluster center if available
+        const traces = [trace];
+        const center = centers[selectedCluster];
+        if (center) {
+            const centerTrace = {
+                x: [center.x],
+                y: [center.y],
+                mode: 'markers',
+                type: 'scatter',
+                name: 'Center',
+                marker: {
+                    color: clusterColor,  // Same color as cluster points
+                    symbol: 'star',
+                    size: 20,
+                    opacity: 1.0,
+                    line: {
+                        color: 'white',
+                        width: 2
+                    }
+                },
+                hovertemplate: '<b>Cluster Center</b><br>' +
+                              label + '<br>' +
+                              '<extra></extra>',
+                showlegend: false
+            };
+            traces.push(centerTrace);
+        }
         
         const layout = {
             title: `${label} (${filteredPoints.length} papers)`,
@@ -2252,7 +2404,8 @@ function filterClusterPlot() {
         const plotElement = document.getElementById('cluster-plot');
         plotElement.innerHTML = '';
         
-        Plotly.newPlot('cluster-plot', [trace], layout, config).then(function() {
+        // Create filtered plot with cluster center
+        Plotly.newPlot('cluster-plot', traces, layout, config).then(function() {
             // Disable hover animations after plot is created
             Plotly.relayout('cluster-plot', {
                 'xaxis.fixedrange': false,
@@ -2283,53 +2436,64 @@ async function showClusterPaperDetails(paperId, basicInfo) {
     
     detailsDiv.classList.remove('hidden');
     
-    // Show basic info immediately
-    contentDiv.innerHTML = `
-        <div class="space-y-2">
-            <h4 class="text-lg font-semibold">${basicInfo.title}</h4>
-            <p class="text-sm text-gray-600">
-                <strong>Year:</strong> ${basicInfo.year} | 
-                <strong>Conference:</strong> ${basicInfo.conference}
-            </p>
-            <p class="text-sm text-gray-500">Loading full details...</p>
-        </div>
-    `;
+    // Show loading state with basic info using formatPaperCard
+    const loadingPaper = {
+        uid: paperId,
+        title: basicInfo.title,
+        authors: ['Loading...'],
+        year: basicInfo.year,
+        conference: basicInfo.conference,
+        abstract: 'Loading full details...'
+    };
+    
+    try {
+        // Use formatPaperCard for consistent styling with search results
+        contentDiv.innerHTML = formatPaperCard(loadingPaper, { 
+            compact: false,
+            idPrefix: 'cluster-paper-detail'
+        });
+    } catch (error) {
+        console.error('Error formatting loading state:', error);
+        contentDiv.innerHTML = `
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <h4 class="text-lg font-semibold text-gray-800">${basicInfo.title}</h4>
+                <p class="text-sm text-gray-500 mt-2">Loading full details...</p>
+            </div>
+        `;
+    }
     
     // Try to fetch full paper details
     try {
-        const response = await fetch(`/api/papers/${paperId}`);
+        const response = await fetch(`/api/paper/${paperId}`);
         if (response.ok) {
             const paper = await response.json();
-            contentDiv.innerHTML = `
-                <div class="space-y-4">
-                    <div>
-                        <h4 class="text-lg font-semibold text-gray-800">${paper.title}</h4>
-                        ${paper.authors ? `<p class="text-sm text-gray-600 mt-1">${paper.authors.join(', ')}</p>` : ''}
-                    </div>
-                    <div class="flex items-center gap-4 text-sm text-gray-600">
-                        <span><strong>Year:</strong> ${paper.year || 'N/A'}</span>
-                        <span><strong>Conference:</strong> ${paper.conference || 'N/A'}</span>
-                        ${paper.session ? `<span><strong>Session:</strong> ${paper.session}</span>` : ''}
-                    </div>
-                    ${paper.abstract ? `
-                        <div>
-                            <h5 class="font-semibold text-gray-700 mb-2">Abstract</h5>
-                            <p class="text-sm text-gray-700 leading-relaxed">${paper.abstract}</p>
-                        </div>
-                    ` : ''}
-                    ${paper.url ? `
-                        <div>
-                            <a href="${paper.url}" target="_blank" 
-                               class="inline-flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
-                                <i class="fas fa-external-link-alt mr-2"></i>View on OpenReview
-                            </a>
-                        </div>
-                    ` : ''}
-                </div>
-            `;
+            
+            // Transform the paper data to match formatPaperCard's expected format
+            const formattedPaper = {
+                uid: paperId,
+                title: paper.title,
+                authors: paper.authors || [],
+                year: paper.year,
+                conference: paper.conference,
+                session: paper.session,
+                poster_position: paper.poster_position,
+                abstract: paper.abstract,
+                paper_url: paper.url,
+                keywords: paper.keywords
+            };
+            
+            // Use formatPaperCard for consistent styling with search results
+            contentDiv.innerHTML = formatPaperCard(formattedPaper, { 
+                compact: false,
+                idPrefix: 'cluster-paper-detail'
+            });
+        } else {
+            // If fetch fails, keep the loading state or show error
+            console.error('Failed to fetch paper details:', response.status);
         }
     } catch (error) {
         console.error('Error fetching paper details:', error);
+        // Keep the basic info displayed on error
     }
 }
 
