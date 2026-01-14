@@ -251,7 +251,7 @@ function setPaperPriority(paperId, priority) {
 function updateStarDisplay(paperId) {
     const priority = paperPriorities[paperId]?.priority || 0;
 
-    // Find all star elements for this paper
+    // Find all star elements for this paper in search results
     const paperCard = document.querySelector(`[onclick*="showPaperDetails('${paperId}')"]`);
     if (paperCard) {
         const stars = paperCard.querySelectorAll('i[class*="fa-star"]');
@@ -265,6 +265,22 @@ function updateStarDisplay(paperId) {
                 // Empty star
                 star.className = star.className.replace('fas fa-star text-yellow-400', 'far fa-star text-gray-300');
                 star.className = star.className.replace('hover:text-yellow-500', 'hover:text-yellow-400');
+            }
+        });
+    }
+    
+    // Also update stars in the cluster details panel if it's showing this paper
+    const clusterDetailsContent = document.getElementById('selected-paper-content');
+    if (clusterDetailsContent) {
+        const clusterStars = clusterDetailsContent.querySelectorAll(`i[onclick*="'${paperId}'"]`);
+        clusterStars.forEach((star, index) => {
+            const starNumber = index + 1;
+            if (starNumber <= priority) {
+                // Filled star
+                star.className = 'fas fa-star text-yellow-400 hover:text-yellow-400 cursor-pointer';
+            } else {
+                // Empty star
+                star.className = 'far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer';
             }
         });
     }
@@ -2382,9 +2398,29 @@ async function showClusterPaperDetails(paperId, basicInfo) {
     
     detailsDiv.classList.remove('hidden');
     
-    // Show basic info immediately
+    // Get current rating for this paper
+    const currentPriority = paperPriorities[paperId]?.priority || 0;
+    
+    // Generate star rating HTML
+    const generateStars = () => {
+        let starsHTML = '<div class="flex items-center gap-1 mb-2">';
+        for (let i = 1; i <= 3; i++) {
+            const isFilled = i <= currentPriority;
+            const starClass = isFilled ? 'fas fa-star text-yellow-400' : 'far fa-star text-gray-300';
+            starsHTML += `
+                <i class="${starClass} hover:text-yellow-400 cursor-pointer" 
+                   onclick="setPaperPriority('${paperId}', ${i})"
+                   title="Rate ${i} star${i > 1 ? 's' : ''}"></i>
+            `;
+        }
+        starsHTML += '<span class="text-xs text-gray-500 ml-2">Click to rate</span></div>';
+        return starsHTML;
+    };
+    
+    // Show basic info immediately with rating stars
     contentDiv.innerHTML = `
         <div class="space-y-2">
+            ${generateStars()}
             <h4 class="text-lg font-semibold">${basicInfo.title}</h4>
             <p class="text-sm text-gray-600">
                 <strong>Year:</strong> ${basicInfo.year} | 
@@ -2401,6 +2437,7 @@ async function showClusterPaperDetails(paperId, basicInfo) {
             const paper = await response.json();
             contentDiv.innerHTML = `
                 <div class="space-y-4">
+                    ${generateStars()}
                     <div>
                         <h4 class="text-lg font-semibold text-gray-800">${paper.title}</h4>
                         ${paper.authors ? `<p class="text-sm text-gray-600 mt-1">${paper.authors.join(', ')}</p>` : ''}
