@@ -1100,13 +1100,12 @@ class TestClusteringEndpoints:
         # Check that colors are explicitly assigned to markers
         assert "color: clusterColor" in js_content, "Cluster color should be explicitly assigned to markers"
         
-        # Verify the Plotly default color palette is present
-        plotly_colors = [
-            '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
-            '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
-        ]
+        # Verify the Plotly Dark24 and Light24 color palettes are present
+        # Check a few representative colors from both palettes
+        dark24_sample_colors = ['#2E91E5', '#E15F99', '#1CA71C', '#FB0D0D']
+        light24_sample_colors = ['#83BCFF', '#FFC3E0', '#8DFFB7', '#FF8F8F']
         
-        for color in plotly_colors:
+        for color in dark24_sample_colors + light24_sample_colors:
             assert color in js_content, f"Plotly color {color} should be in the JavaScript"
 
     def test_compute_clusters_creates_tables_on_first_connection(self, tmp_path):

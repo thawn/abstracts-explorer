@@ -1,10 +1,20 @@
 // API base URL
 const API_BASE = '';
 
-// Constants: Plotly default color palette
+// Constants: Plotly Dark24 and Light24 color palettes for better cluster distinction
+// Combined 48 colors from Dark24 (first 24) and Light24 (next 24)
+// Reference: https://plotly.com/python/discrete-color/#color-sequences-in-plotly-express
 const PLOTLY_COLORS = [
-    '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
-    '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
+    // Dark24 palette (24 colors)
+    '#2E91E5', '#E15F99', '#1CA71C', '#FB0D0D', '#DA16FF', '#222A2A',
+    '#B68100', '#750D86', '#EB663B', '#511CFB', '#00A08B', '#FB00D1',
+    '#FC0080', '#B2828D', '#6C7C32', '#778AAE', '#862A16', '#A777F1',
+    '#620042', '#1616A7', '#DA60CA', '#6C4516', '#0D2A63', '#AF0038',
+    // Light24 palette (24 colors)
+    '#83BCFF', '#FFC3E0', '#8DFFB7', '#FF8F8F', '#F5B3FF', '#8A8A8A',
+    '#FFD88A', '#D18AE5', '#FFC28A', '#B38AFF', '#8AFFDD', '#FF8AE5',
+    '#FF8ACC', '#FFCCE0', '#D6FF8A', '#D1C8FF', '#FF8A8A', '#E5C3FF',
+    '#FF8AC3', '#8A8AFF', '#FFC3FF', '#FFD18A', '#8ACCFF', '#FF8ABF'
 ];
 
 // State
