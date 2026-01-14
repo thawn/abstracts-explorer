@@ -8,7 +8,42 @@ using dimensionality reduction and clustering algorithms from scikit-learn.
 Features:
 - Dimensionality reduction using PCA and t-SNE
 - Clustering using K-Means, DBSCAN, and Agglomerative clustering
+- **NEW: Automatic cluster labeling using TF-IDF and LLM-based methods**
+- **NEW: Keyword extraction for each cluster**
+- **NEW: Representative paper selection based on cluster centroids**
 - Export clustering results to JSON for visualization
+
+Cluster Labeling
+----------------
+The module now includes state-of-the-art cluster labeling functionality that:
+1. Extracts distinctive keywords for each cluster using TF-IDF analysis
+2. Generates human-readable labels using LLM (Large Language Model) integration
+3. Identifies representative papers closest to each cluster's centroid
+
+Example
+-------
+>>> from abstracts_explorer.clustering import ClusteringManager
+>>> from abstracts_explorer.embeddings import EmbeddingsManager
+>>> 
+>>> # Initialize managers
+>>> em = EmbeddingsManager()
+>>> em.connect()
+>>> em.create_collection()
+>>> cm = ClusteringManager(em)
+>>> 
+>>> # Load and cluster embeddings
+>>> cm.load_embeddings()
+>>> cm.cluster(method='kmeans', n_clusters=5)
+>>> cm.reduce_dimensions(method='pca', n_components=2)
+>>> 
+>>> # Generate cluster labels
+>>> cm.extract_cluster_keywords(n_keywords=10)
+>>> cm.generate_cluster_labels(use_llm=True)
+>>> 
+>>> # Get results with labels
+>>> results = cm.get_clustering_results()
+>>> print(results['cluster_labels'])  # Shows generated labels
+>>> print(results['cluster_keywords'])  # Shows extracted keywords
 """
 
 import logging
@@ -42,6 +77,9 @@ class ClusteringManager:
     - Loading embeddings from ChromaDB
     - Dimensionality reduction (PCA, t-SNE)
     - Clustering (K-Means, DBSCAN, Agglomerative)
+    - **Automatic cluster labeling using TF-IDF and LLM**
+    - **Keyword extraction for clusters**
+    - **Representative paper selection**
     - Export of results for visualization
 
     Parameters
@@ -63,6 +101,16 @@ class ClusteringManager:
         The paper IDs corresponding to embeddings
     metadatas : list or None
         The paper metadata corresponding to embeddings
+    reduced_embeddings : np.ndarray or None
+        The reduced dimensionality embeddings
+    cluster_labels : np.ndarray or None
+        The cluster assignment labels
+    cluster_label_names : dict or None
+        Human-readable names for each cluster
+    cluster_keywords : dict or None
+        Keywords extracted for each cluster
+    cluster_summaries : dict or None
+        Summaries generated for each cluster
 
     Examples
     --------
@@ -73,6 +121,8 @@ class ClusteringManager:
     >>> cm.load_embeddings()
     >>> reduced = cm.reduce_dimensions(method='pca', n_components=2)
     >>> labels = cm.cluster(method='kmeans', n_clusters=5)
+    >>> cm.extract_cluster_keywords()
+    >>> cm.generate_cluster_labels(use_llm=True)
     >>> results = cm.get_clustering_results()
     """
 
@@ -686,6 +736,8 @@ Only respond with the label, nothing else."""
             - points: List of points with coordinates, cluster labels, and metadata
             - statistics: Cluster statistics
             - n_dimensions: Number of dimensions in reduced embeddings
+            - cluster_labels: Human-readable names for clusters (if generated)
+            - cluster_keywords: Keywords for each cluster (if extracted)
 
         Raises
         ------
