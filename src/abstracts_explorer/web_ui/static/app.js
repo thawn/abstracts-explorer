@@ -2130,6 +2130,7 @@ function visualizeClusters() {
     // For each cluster, create both the points trace and center trace with matching colors
     sortedClusterEntries.forEach(([clusterId, clusterPoints], idx) => {
         const label = labels[clusterId] || `Cluster ${clusterId}`;
+        const paperCount = clusterPoints.length;
         
         // Assign explicit color from Plotly's default palette
         const clusterColor = plotlyColors[idx % plotlyColors.length];
@@ -2140,7 +2141,7 @@ function visualizeClusters() {
             y: clusterPoints.map(p => p.y),
             mode: 'markers',
             type: 'scatter',
-            name: clusterId === '-1' ? 'Noise' : label,
+            name: clusterId === '-1' ? `Noise (${paperCount})` : `${label} (${paperCount})`,
             text: clusterPoints.map(p => p.title || p.id),
             customdata: clusterPoints.map(p => ({
                 id: p.id,
@@ -2312,12 +2313,13 @@ function filterClusterPlot() {
         const clusterColor = plotlyColors[clusterIndex % plotlyColors.length];
         
         const label = labels[selectedCluster] || `Cluster ${selectedCluster}`;
+        const paperCount = filteredPoints.length;
         const trace = {
             x: filteredPoints.map(p => p.x),
             y: filteredPoints.map(p => p.y),
             mode: 'markers',
             type: 'scatter',
-            name: selectedCluster === '-1' ? 'Noise' : label,
+            name: selectedCluster === '-1' ? `Noise (${paperCount})` : `${label} (${paperCount})`,
             text: filteredPoints.map(p => p.title || p.id),
             customdata: filteredPoints.map(p => ({
                 id: p.id,
