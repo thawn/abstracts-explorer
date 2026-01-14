@@ -1089,11 +1089,9 @@ class TestClusteringEndpoints:
 
     def test_clustering_colors_defined_in_javascript(self):
         """Test that the clustering visualization JavaScript has explicit color definitions."""
-        import re
-        
         # Read the JavaScript file
         js_path = Path(__file__).parent.parent / "src" / "abstracts_explorer" / "web_ui" / "static" / "app.js"
-        with open(js_path, 'r') as f:
+        with open(js_path, 'r', encoding='utf-8') as f:
             js_content = f.read()
         
         # Check that Plotly colors are defined
