@@ -439,7 +439,7 @@ def search():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/api/papers/<string:paper_uid>")
+@app.route("/api/paper/<string:paper_uid>")
 def get_paper(paper_uid):
     """
     Get a specific paper by UID.

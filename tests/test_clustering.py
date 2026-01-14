@@ -178,8 +178,22 @@ class TestClusteringManager:
         assert 'points' in results
         assert 'statistics' in results
         assert 'n_dimensions' in results
+        assert 'cluster_centers' in results
         assert len(results['points']) == 10
         assert results['n_dimensions'] == 2
+        
+        # Verify cluster centers are calculated correctly
+        assert isinstance(results['cluster_centers'], dict)
+        # Should have centers for each non-noise cluster
+        n_clusters = results['statistics']['n_clusters']
+        assert len(results['cluster_centers']) <= n_clusters
+        
+        # Each center should have x and y coordinates
+        for cluster_id, center in results['cluster_centers'].items():
+            assert 'x' in center
+            assert 'y' in center
+            assert isinstance(center['x'], (int, float))
+            assert isinstance(center['y'], (int, float))
 
     def test_export_to_json(self, mock_embeddings_manager, mock_collection_with_data, tmp_path):
         """Test exporting clustering results to JSON."""

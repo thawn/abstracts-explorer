@@ -2356,7 +2356,7 @@ async function showClusterPaperDetails(paperId, basicInfo) {
     
     // Try to fetch full paper details
     try {
-        const response = await fetch(`/api/papers/${paperId}`);
+        const response = await fetch(`/api/paper/${paperId}`);
         if (response.ok) {
             const paper = await response.json();
             contentDiv.innerHTML = `
