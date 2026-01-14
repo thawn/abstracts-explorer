@@ -1293,8 +1293,7 @@ function formatPaperCard(paper, options = {}) {
         showNumber = null,
         abstractLength = compact ? 200 : 300,
         idPrefix = '',
-        showSearchTerm = false,
-        enableClick = true  // New option to control onclick behavior
+        showSearchTerm = false
     } = options;
 
     const title = paper.title || 'Untitled';
@@ -1352,13 +1351,9 @@ function formatPaperCard(paper, options = {}) {
     }
 
     const cardId = idPrefix ? `id="${idPrefix}"` : '';
-    const cursorClass = enableClick ? 'cursor-pointer' : '';
     const cardClasses = compact
-        ? `paper-card bg-white rounded-lg shadow-sm p-3 hover:shadow-md ${cursorClass} border border-gray-200`
-        : `paper-card bg-white rounded-lg shadow-md p-6 hover:shadow-lg ${cursorClass}`;
-    
-    // Only add onclick if enableClick is true
-    const cardOnclick = enableClick ? `onclick="showPaperDetails('${paper.uid}')"` : '';
+        ? 'paper-card bg-white rounded-lg shadow-sm p-3 hover:shadow-md cursor-pointer border border-gray-200'
+        : 'paper-card bg-white rounded-lg shadow-md p-6 hover:shadow-lg cursor-pointer';
 
     // Get current priority for this paper
     const currentPriority = paperPriorities[paper.uid]?.priority || 0;
@@ -1378,7 +1373,7 @@ function formatPaperCard(paper, options = {}) {
     starsHtml += '</div>';
 
     return `
-        <div ${cardId} class="${cardClasses}" ${cardOnclick}>
+        <div ${cardId} class="${cardClasses}" onclick="showPaperDetails('${paper.uid}')">
             ${showNumber !== null ? `
                 <div class="flex items-start justify-between mb-1">
                     <span class="text-xs font-semibold text-purple-600">#${showNumber}</span>
@@ -2417,8 +2412,7 @@ async function showClusterPaperDetails(paperId, basicInfo) {
         // Use formatPaperCard for consistent styling with search results
         contentDiv.innerHTML = formatPaperCard(loadingPaper, { 
             compact: false,
-            idPrefix: 'cluster-paper-detail',
-            enableClick: false  // Disable onclick since paper is already selected
+            idPrefix: 'cluster-paper-detail'
         });
     } catch (error) {
         console.error('Error formatting loading state:', error);
@@ -2453,8 +2447,7 @@ async function showClusterPaperDetails(paperId, basicInfo) {
             // Use formatPaperCard for consistent styling with search results
             contentDiv.innerHTML = formatPaperCard(formattedPaper, { 
                 compact: false,
-                idPrefix: 'cluster-paper-detail',
-                enableClick: false  // Disable onclick since paper is already selected
+                idPrefix: 'cluster-paper-detail'
             });
         } else {
             // If fetch fails, keep the loading state or show error
