@@ -234,9 +234,25 @@ def mock_collection_with_data(mocker):
     # Create 10 sample embeddings (128-dimensional)
     embeddings = np.random.randn(10, 128).tolist()
     ids = [f'paper_{i}' for i in range(10)]
+    
+    # Create more realistic metadata with varied abstracts
+    abstracts = [
+        "This paper presents a novel deep learning approach for image classification using convolutional neural networks.",
+        "We propose a new transformer architecture for natural language processing tasks with improved efficiency.",
+        "An analysis of reinforcement learning algorithms for robotic control and autonomous navigation systems.",
+        "This work introduces a generative adversarial network for high-resolution image synthesis and style transfer.",
+        "We study the application of convolutional neural networks in computer vision and object detection tasks.",
+        "A comprehensive survey of attention mechanisms in transformer models for sequence-to-sequence learning.",
+        "This paper explores policy gradient methods in reinforcement learning for continuous control problems.",
+        "We present a novel architecture combining transformers and attention for machine translation applications.",
+        "An investigation of deep Q-networks and actor-critic methods for game playing and decision making.",
+        "This work proposes improvements to generative models for realistic image generation and manipulation."
+    ]
+    
     metadatas = [
         {
             'title': f'Paper {i}',
+            'abstract': abstracts[i],
             'year': '2025',
             'conference': 'TestConf',
             'session': 'Session A'
@@ -251,3 +267,115 @@ def mock_collection_with_data(mocker):
     }
     
     return collection
+
+
+class TestClusterLabeling:
+    """Test suite for cluster labeling functionality."""
+
+    def test_extract_cluster_keywords(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test extracting keywords for each cluster."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        cm.cluster(method='kmeans', n_clusters=3, use_reduced=False)
+        
+        keywords = cm.extract_cluster_keywords(n_keywords=5)
+        
+        assert isinstance(keywords, dict)
+        assert len(keywords) > 0
+        # Check that each cluster has keywords
+        for cluster_id, kw_list in keywords.items():
+            assert isinstance(kw_list, list)
+            assert len(kw_list) <= 5
+
+    def test_extract_cluster_keywords_no_clustering(self, mock_embeddings_manager):
+        """Test that keyword extraction fails without clustering."""
+        cm = ClusteringManager(mock_embeddings_manager)
+        
+        with pytest.raises(ClusteringError, match="No clustering performed"):
+            cm.extract_cluster_keywords()
+
+    def test_generate_cluster_labels_keyword_based(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test generating cluster labels without LLM."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        cm.cluster(method='kmeans', n_clusters=3, use_reduced=False)
+        
+        labels = cm.generate_cluster_labels(use_llm=False)
+        
+        assert isinstance(labels, dict)
+        assert len(labels) > 0
+        # Check that each cluster has a label
+        for cluster_id, label in labels.items():
+            assert isinstance(label, str)
+            assert len(label) > 0
+
+    def test_generate_cluster_labels_with_llm(self, mock_embeddings_manager, mock_collection_with_data, mocker):
+        """Test generating cluster labels with LLM."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        
+        # Mock the OpenAI client response
+        mock_response = mocker.MagicMock()
+        mock_response.choices = [mocker.MagicMock()]
+        mock_response.choices[0].message.content = "Machine Learning Models"
+        
+        mock_openai_client = mocker.MagicMock()
+        mock_openai_client.chat.completions.create.return_value = mock_response
+        mock_embeddings_manager.openai_client = mock_openai_client
+        
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        cm.cluster(method='kmeans', n_clusters=3, use_reduced=False)
+        
+        labels = cm.generate_cluster_labels(use_llm=True)
+        
+        assert isinstance(labels, dict)
+        assert len(labels) > 0
+        # At least one cluster should have the LLM-generated label
+        assert any("Machine Learning" in label for label in labels.values())
+
+    def test_get_cluster_representative_papers(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test finding representative papers for each cluster."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        cm.cluster(method='kmeans', n_clusters=3, use_reduced=False)
+        
+        representatives = cm.get_cluster_representative_papers(n_papers=3)
+        
+        assert isinstance(representatives, dict)
+        assert len(representatives) > 0
+        # Check that each cluster has representative papers
+        for cluster_id, papers in representatives.items():
+            assert isinstance(papers, list)
+            assert len(papers) <= 3
+            # Check that each paper has required fields
+            for paper in papers:
+                assert 'paper_id' in paper
+                assert 'distance_to_centroid' in paper
+                assert 'title' in paper
+
+    def test_get_cluster_representative_papers_no_clustering(self, mock_embeddings_manager):
+        """Test that finding representatives fails without clustering."""
+        cm = ClusteringManager(mock_embeddings_manager)
+        
+        with pytest.raises(ClusteringError, match="No clustering performed"):
+            cm.get_cluster_representative_papers()
+
+    def test_clustering_results_with_labels(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test that clustering results include labels when available."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        cm.cluster(method='kmeans', n_clusters=3, use_reduced=False)
+        cm.reduce_dimensions(method='pca', n_components=2)
+        cm.extract_cluster_keywords(n_keywords=5)
+        cm.generate_cluster_labels(use_llm=False)
+        
+        results = cm.get_clustering_results()
+        
+        assert 'cluster_labels' in results
+        assert 'cluster_keywords' in results
+        assert isinstance(results['cluster_labels'], dict)
+        assert isinstance(results['cluster_keywords'], dict)

@@ -2005,6 +2005,8 @@ function updateClusterStats() {
     if (!clusterData || !clusterData.statistics) return;
     
     const stats = clusterData.statistics;
+    const labels = clusterData.cluster_labels || {};
+    const keywords = clusterData.cluster_keywords || {};
     const statsDiv = document.getElementById('cluster-stats');
     
     let statsHTML = `
@@ -2014,6 +2016,11 @@ function updateClusterStats() {
     
     if (stats.n_noise > 0) {
         statsHTML += ` (<span class="text-red-600">${stats.n_noise}</span> noise)`;
+    }
+    
+    // Add cluster labels info if available
+    if (Object.keys(labels).length > 0) {
+        statsHTML += `<br><span class="text-xs text-green-600">✓ Cluster labels generated</span>`;
     }
     
     statsDiv.innerHTML = statsHTML;
@@ -2027,6 +2034,7 @@ function populateClusterFilter() {
     
     const select = document.getElementById('cluster-filter');
     const stats = clusterData.statistics;
+    const labels = clusterData.cluster_labels || {};
     
     // Clear existing options except "All Clusters"
     select.innerHTML = '<option value="">All Clusters</option>';
@@ -2035,7 +2043,8 @@ function populateClusterFilter() {
     Object.entries(stats.cluster_sizes).sort((a, b) => parseInt(a[0]) - parseInt(b[0])).forEach(([clusterId, size]) => {
         const option = document.createElement('option');
         option.value = clusterId;
-        option.textContent = `Cluster ${clusterId} (${size} papers)`;
+        const label = labels[clusterId] || `Cluster ${clusterId}`;
+        option.textContent = `${label} (${size} papers)`;
         select.appendChild(option);
     });
     
@@ -2070,13 +2079,15 @@ function visualizeClusters() {
     });
     
     // Create traces for each cluster
+    const labels = clusterData.cluster_labels || {};
     const traces = Object.entries(clusterGroups).map(([clusterId, clusterPoints]) => {
+        const label = labels[clusterId] || `Cluster ${clusterId}`;
         return {
             x: clusterPoints.map(p => p.x),
             y: clusterPoints.map(p => p.y),
             mode: 'markers',
             type: 'scatter',
-            name: clusterId === '-1' ? 'Noise' : `Cluster ${clusterId}`,
+            name: clusterId === '-1' ? 'Noise' : label,
             text: clusterPoints.map(p => p.title || p.id),
             customdata: clusterPoints.map(p => ({
                 id: p.id,
@@ -2170,6 +2181,8 @@ function filterClusterPlot() {
     
     if (!clusterData || !clusterData.points) return;
     
+    const labels = clusterData.cluster_labels || {};
+    
     if (selectedCluster === '') {
         // Show all clusters
         visualizeClusters();
@@ -2179,12 +2192,13 @@ function filterClusterPlot() {
             String(p.cluster) === selectedCluster
         );
         
+        const label = labels[selectedCluster] || `Cluster ${selectedCluster}`;
         const trace = {
             x: filteredPoints.map(p => p.x),
             y: filteredPoints.map(p => p.y),
             mode: 'markers',
             type: 'scatter',
-            name: selectedCluster === '-1' ? 'Noise' : `Cluster ${selectedCluster}`,
+            name: selectedCluster === '-1' ? 'Noise' : label,
             text: filteredPoints.map(p => p.title || p.id),
             customdata: filteredPoints.map(p => ({
                 id: p.id,
@@ -2208,7 +2222,7 @@ function filterClusterPlot() {
         };
         
         const layout = {
-            title: `Cluster ${selectedCluster} (${filteredPoints.length} papers)`,
+            title: `${label} (${filteredPoints.length} papers)`,
             xaxis: {
                 title: 'Component 1',
                 zeroline: false

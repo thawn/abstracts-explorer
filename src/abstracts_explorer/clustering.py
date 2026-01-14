@@ -21,6 +21,7 @@ from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
 from sklearn.preprocessing import StandardScaler
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 from .embeddings import EmbeddingsManager
 from .database import DatabaseManager
@@ -98,6 +99,9 @@ class ClusteringManager:
         self.reduced_embeddings: Optional[np.ndarray] = None
         self.cluster_labels: Optional[np.ndarray] = None
         self.scaler: Optional[StandardScaler] = None
+        self.cluster_label_names: Optional[Dict[int, str]] = None
+        self.cluster_keywords: Optional[Dict[int, List[str]]] = None
+        self.cluster_summaries: Optional[Dict[int, str]] = None
 
     def load_embeddings(self, limit: Optional[int] = None) -> int:
         """
@@ -337,6 +341,329 @@ class ClusteringManager:
         except Exception as e:
             raise ClusteringError(f"Failed to compute cluster statistics: {str(e)}") from e
 
+    def extract_cluster_keywords(
+        self,
+        n_keywords: int = 10,
+        min_df: int = 2,
+    ) -> Dict[int, List[str]]:
+        """
+        Extract distinctive keywords for each cluster using TF-IDF.
+
+        Parameters
+        ----------
+        n_keywords : int, optional
+            Number of top keywords to extract per cluster, by default 10
+        min_df : int, optional
+            Minimum document frequency for a term to be considered, by default 2
+
+        Returns
+        -------
+        Dict[int, List[str]]
+            Dictionary mapping cluster labels to lists of keywords
+
+        Raises
+        ------
+        ClusteringError
+            If clustering has not been performed or metadata is missing
+
+        Examples
+        --------
+        >>> cm = ClusteringManager(em)
+        >>> cm.load_embeddings()
+        >>> cm.cluster(method='kmeans', n_clusters=5)
+        >>> keywords = cm.extract_cluster_keywords(n_keywords=10)
+        >>> print(f"Cluster 0 keywords: {keywords[0]}")
+        """
+        if self.cluster_labels is None:
+            raise ClusteringError("No clustering performed. Call cluster() first.")
+        if self.metadatas is None:
+            raise ClusteringError("No metadata available.")
+
+        try:
+            # Get unique cluster labels (excluding noise)
+            unique_labels = np.unique(self.cluster_labels)
+            cluster_ids = [int(label) for label in unique_labels if label >= 0]
+
+            self.cluster_keywords = {}
+
+            for cluster_id in cluster_ids:
+                # Get indices of papers in this cluster
+                cluster_indices = np.where(self.cluster_labels == cluster_id)[0]
+                
+                # Collect documents (titles and abstracts) for this cluster
+                cluster_docs = []
+                for idx in cluster_indices:
+                    metadata = self.metadatas[idx]
+                    title = metadata.get('title', '')
+                    abstract = metadata.get('abstract', '')
+                    doc_text = f"{title} {abstract}".strip()
+                    if doc_text:
+                        cluster_docs.append(doc_text)
+
+                if not cluster_docs:
+                    logger.warning(f"No documents found for cluster {cluster_id}")
+                    self.cluster_keywords[cluster_id] = []
+                    continue
+
+                # Use TF-IDF to extract keywords
+                # Compare cluster documents against all documents to find distinctive terms
+                all_docs = []
+                for metadata in self.metadatas:
+                    title = metadata.get('title', '')
+                    abstract = metadata.get('abstract', '')
+                    doc_text = f"{title} {abstract}".strip()
+                    if doc_text:
+                        all_docs.append(doc_text)
+
+                # Fit TF-IDF on all documents
+                tfidf = TfidfVectorizer(
+                    max_features=1000,
+                    min_df=min_df,
+                    stop_words='english',
+                    ngram_range=(1, 2)  # Include unigrams and bigrams
+                )
+                tfidf_matrix = tfidf.fit_transform(all_docs)
+                feature_names = tfidf.get_feature_names_out()
+
+                # Calculate mean TF-IDF for cluster documents
+                cluster_tfidf = tfidf_matrix[cluster_indices].mean(axis=0).A1
+                
+                # Get top keywords by TF-IDF score
+                top_indices = cluster_tfidf.argsort()[-n_keywords:][::-1]
+                keywords = [feature_names[i] for i in top_indices if cluster_tfidf[i] > 0]
+                
+                self.cluster_keywords[cluster_id] = keywords[:n_keywords]
+                logger.debug(f"Cluster {cluster_id}: {len(keywords)} keywords extracted")
+
+            logger.info(f"Extracted keywords for {len(self.cluster_keywords)} clusters")
+            return self.cluster_keywords
+
+        except Exception as e:
+            raise ClusteringError(f"Failed to extract cluster keywords: {str(e)}") from e
+
+    def generate_cluster_labels(
+        self,
+        use_llm: bool = True,
+        max_keywords: int = 5,
+    ) -> Dict[int, str]:
+        """
+        Generate descriptive labels for clusters.
+
+        This method can either use an LLM to generate meaningful labels based on
+        cluster keywords and representative papers, or simply concatenate keywords.
+
+        Parameters
+        ----------
+        use_llm : bool, optional
+            Whether to use LLM for label generation, by default True
+        max_keywords : int, optional
+            Maximum number of keywords to use in label generation, by default 5
+
+        Returns
+        -------
+        Dict[int, str]
+            Dictionary mapping cluster labels to descriptive names
+
+        Raises
+        ------
+        ClusteringError
+            If clustering or keyword extraction has not been performed
+
+        Examples
+        --------
+        >>> cm = ClusteringManager(em)
+        >>> cm.load_embeddings()
+        >>> cm.cluster(method='kmeans', n_clusters=5)
+        >>> cm.extract_cluster_keywords()
+        >>> labels = cm.generate_cluster_labels(use_llm=True)
+        >>> print(f"Cluster 0 label: {labels[0]}")
+        """
+        if self.cluster_labels is None:
+            raise ClusteringError("No clustering performed. Call cluster() first.")
+        
+        # Extract keywords if not already done
+        if self.cluster_keywords is None:
+            logger.info("Extracting cluster keywords first...")
+            self.extract_cluster_keywords()
+
+        try:
+            self.cluster_label_names = {}
+            unique_labels = np.unique(self.cluster_labels)
+            cluster_ids = [int(label) for label in unique_labels if label >= 0]
+
+            for cluster_id in cluster_ids:
+                keywords = (self.cluster_keywords or {}).get(cluster_id, [])[:max_keywords]
+                
+                if not keywords:
+                    self.cluster_label_names[cluster_id] = f"Cluster {cluster_id}"
+                    continue
+
+                if use_llm and self.embeddings_manager:
+                    try:
+                        # Generate label using LLM
+                        label = self._generate_llm_label(cluster_id, keywords)
+                        self.cluster_label_names[cluster_id] = label
+                    except Exception as e:
+                        logger.warning(f"LLM label generation failed for cluster {cluster_id}: {e}")
+                        # Fallback to keyword-based label
+                        self.cluster_label_names[cluster_id] = ", ".join(keywords[:3])
+                else:
+                    # Use keyword-based label
+                    self.cluster_label_names[cluster_id] = ", ".join(keywords[:3])
+
+            logger.info(f"Generated labels for {len(self.cluster_label_names)} clusters")
+            return self.cluster_label_names
+
+        except Exception as e:
+            raise ClusteringError(f"Failed to generate cluster labels: {str(e)}") from e
+
+    def _generate_llm_label(self, cluster_id: int, keywords: List[str]) -> str:
+        """
+        Generate a cluster label using LLM.
+
+        Parameters
+        ----------
+        cluster_id : int
+            Cluster identifier
+        keywords : List[str]
+            List of keywords for the cluster
+
+        Returns
+        -------
+        str
+            Generated label
+        """
+        # Get a few representative paper titles from the cluster
+        cluster_indices = np.where(self.cluster_labels == cluster_id)[0]
+        sample_size = min(5, len(cluster_indices))
+        sample_indices = np.random.choice(cluster_indices, size=sample_size, replace=False)
+        
+        sample_titles = []
+        if self.metadatas:
+            for idx in sample_indices:
+                title = self.metadatas[idx].get('title', '')
+                if title:
+                    sample_titles.append(title)
+
+        # Construct prompt for LLM
+        prompt = f"""Given a cluster of research papers with the following characteristics:
+
+Top keywords: {', '.join(keywords)}
+
+Sample paper titles:
+{chr(10).join(f"- {title}" for title in sample_titles)}
+
+Generate a concise, descriptive label (3-5 words) that captures the main theme of this cluster. 
+Only respond with the label, nothing else."""
+
+        try:
+            # Use the embeddings manager's OpenAI client
+            from .config import get_config
+            config = get_config()
+            
+            response = self.embeddings_manager.openai_client.chat.completions.create(
+                model=config.chat_model,
+                messages=[
+                    {"role": "system", "content": "You are a research paper categorization expert. Generate concise, descriptive labels for clusters of papers."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=50
+            )
+            
+            label = response.choices[0].message.content.strip()
+            # Remove quotes if present
+            label = label.strip('"\'')
+            return label
+
+        except Exception as e:
+            logger.warning(f"LLM API call failed: {e}")
+            # Fallback to keyword-based label
+            return ", ".join(keywords[:3])
+
+    def get_cluster_representative_papers(
+        self,
+        n_papers: int = 5,
+    ) -> Dict[int, List[Dict[str, Any]]]:
+        """
+        Find representative papers for each cluster.
+
+        Representative papers are those closest to the cluster centroid
+        in the embedding space.
+
+        Parameters
+        ----------
+        n_papers : int, optional
+            Number of representative papers per cluster, by default 5
+
+        Returns
+        -------
+        Dict[int, List[Dict[str, Any]]]
+            Dictionary mapping cluster labels to lists of representative paper metadata
+
+        Raises
+        ------
+        ClusteringError
+            If clustering has not been performed
+
+        Examples
+        --------
+        >>> cm = ClusteringManager(em)
+        >>> cm.load_embeddings()
+        >>> cm.cluster(method='kmeans', n_clusters=5)
+        >>> representatives = cm.get_cluster_representative_papers(n_papers=3)
+        >>> print(f"Cluster 0 representatives: {representatives[0]}")
+        """
+        if self.cluster_labels is None:
+            raise ClusteringError("No clustering performed. Call cluster() first.")
+        if self.embeddings is None:
+            raise ClusteringError("No embeddings loaded.")
+
+        try:
+            representatives: Dict[int, List[Dict[str, Any]]] = {}
+            unique_labels = np.unique(self.cluster_labels)
+            cluster_ids = [int(label) for label in unique_labels if label >= 0]
+
+            for cluster_id in cluster_ids:
+                # Get indices of papers in this cluster
+                cluster_indices = np.where(self.cluster_labels == cluster_id)[0]
+                
+                if len(cluster_indices) == 0:
+                    representatives[cluster_id] = []
+                    continue
+
+                # Get embeddings for this cluster
+                cluster_embeddings = self.embeddings[cluster_indices]
+                
+                # Calculate cluster centroid
+                centroid = cluster_embeddings.mean(axis=0)
+                
+                # Calculate distances to centroid
+                distances = np.linalg.norm(cluster_embeddings - centroid, axis=1)
+                
+                # Get indices of papers closest to centroid
+                n_repr = min(n_papers, len(cluster_indices))
+                closest_indices = distances.argsort()[:n_repr]
+                
+                # Collect representative paper metadata
+                repr_papers = []
+                if self.metadatas and self.paper_ids:
+                    for idx in closest_indices:
+                        paper_idx = cluster_indices[idx]
+                        paper_meta = self.metadatas[paper_idx].copy()
+                        paper_meta['paper_id'] = self.paper_ids[paper_idx]
+                        paper_meta['distance_to_centroid'] = float(distances[idx])
+                        repr_papers.append(paper_meta)
+                
+                representatives[cluster_id] = repr_papers
+                logger.debug(f"Found {len(repr_papers)} representative papers for cluster {cluster_id}")
+
+            logger.info(f"Found representative papers for {len(representatives)} clusters")
+            return representatives
+
+        except Exception as e:
+            raise ClusteringError(f"Failed to find representative papers: {str(e)}") from e
+
     def get_clustering_results(
         self,
         include_metadata: bool = True,
@@ -409,6 +736,14 @@ class ClusteringManager:
                 "statistics": stats,
                 "n_dimensions": int(self.reduced_embeddings.shape[1]),
             }
+
+            # Add cluster labels if available
+            if self.cluster_label_names:
+                results["cluster_labels"] = self.cluster_label_names
+            
+            # Add cluster keywords if available
+            if self.cluster_keywords:
+                results["cluster_keywords"] = self.cluster_keywords
 
             logger.info(f"Generated clustering results with {len(points)} points")
             return results
@@ -559,6 +894,15 @@ def perform_clustering(
             n_components=n_components,
             random_state=random_state,
         )
+
+        # Generate cluster labels
+        logger.info("Generating cluster labels...")
+        try:
+            cm.extract_cluster_keywords(n_keywords=10)
+            cm.generate_cluster_labels(use_llm=True, max_keywords=5)
+        except Exception as e:
+            logger.warning(f"Failed to generate cluster labels: {e}")
+            # Continue without labels
 
         # Get results
         results = cm.get_clustering_results()

@@ -657,6 +657,15 @@ def compute_clusters():
             n_components=n_components,
         )
 
+        # Generate cluster labels
+        logger.info("Generating cluster labels...")
+        try:
+            cm.extract_cluster_keywords(n_keywords=10)
+            cm.generate_cluster_labels(use_llm=True, max_keywords=5)
+        except Exception as e:
+            logger.warning(f"Failed to generate cluster labels: {e}")
+            # Continue without labels
+
         # Get results
         results = cm.get_clustering_results()
 
