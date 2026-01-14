@@ -443,12 +443,12 @@ class ClusteringManager:
                 # Collect documents (titles and abstracts) for this cluster
                 cluster_docs = []
                 for idx in cluster_indices:
-                    metadata = self.metadatas[idx]
-                    title = metadata.get('title', '')
-                    abstract = metadata.get('abstract', '')
-                    doc_text = f"{title} {abstract}".strip()
-                    if doc_text:
+                    try:
+                        doc_text = EmbeddingsManager.embedding_text_from_paper(self.metadatas[idx])
                         cluster_docs.append(doc_text)
+                    except (ValueError, KeyError):
+                        # Skip papers without title or abstract
+                        continue
 
                 if not cluster_docs:
                     logger.warning(f"No documents found for cluster {cluster_id}")
@@ -459,11 +459,12 @@ class ClusteringManager:
                 # Compare cluster documents against all documents to find distinctive terms
                 all_docs = []
                 for metadata in self.metadatas:
-                    title = metadata.get('title', '')
-                    abstract = metadata.get('abstract', '')
-                    doc_text = f"{title} {abstract}".strip()
-                    if doc_text:
+                    try:
+                        doc_text = EmbeddingsManager.embedding_text_from_paper(metadata)
                         all_docs.append(doc_text)
+                    except (ValueError, KeyError):
+                        # Skip papers without title or abstract
+                        continue
 
                 # Fit TF-IDF on all documents
                 tfidf = TfidfVectorizer(
