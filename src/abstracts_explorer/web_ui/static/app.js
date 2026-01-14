@@ -2055,8 +2055,19 @@ function populateClusterFilter() {
     // Clear existing options except "All Clusters"
     select.innerHTML = '<option value="">All Clusters</option>';
     
+    // Sort clusters by size (descending), then by ID (ascending) as tiebreaker
+    const sortedClusters = Object.entries(stats.cluster_sizes)
+        .sort((a, b) => {
+            const sizeA = a[1];
+            const sizeB = b[1];
+            if (sizeB !== sizeA) {
+                return sizeB - sizeA;  // Sort by size descending
+            }
+            return parseInt(a[0]) - parseInt(b[0]);  // Tiebreaker: sort by ID ascending
+        });
+    
     // Add option for each cluster
-    Object.entries(stats.cluster_sizes).sort((a, b) => parseInt(a[0]) - parseInt(b[0])).forEach(([clusterId, size]) => {
+    sortedClusters.forEach(([clusterId, size]) => {
         const option = document.createElement('option');
         option.value = clusterId;
         const label = labels[clusterId] || `Cluster ${clusterId}`;
@@ -2095,6 +2106,17 @@ function visualizeClusters() {
         clusterGroups[cluster].push(point);
     });
     
+    // Sort clusters by size (descending), then by ID (ascending) as tiebreaker
+    const sortedClusterEntries = Object.entries(clusterGroups)
+        .sort((a, b) => {
+            const sizeA = a[1].length;
+            const sizeB = b[1].length;
+            if (sizeB !== sizeA) {
+                return sizeB - sizeA;  // Sort by size descending
+            }
+            return parseInt(a[0]) - parseInt(b[0]);  // Tiebreaker: sort by ID ascending
+        });
+    
     // Create traces for each cluster
     const labels = clusterData.cluster_labels || {};
     const traces = [];
@@ -2106,7 +2128,7 @@ function visualizeClusters() {
     ];
     
     // For each cluster, create both the points trace and center trace with matching colors
-    Object.entries(clusterGroups).forEach(([clusterId, clusterPoints], idx) => {
+    sortedClusterEntries.forEach(([clusterId, clusterPoints], idx) => {
         const label = labels[clusterId] || `Cluster ${clusterId}`;
         
         // Assign explicit color from Plotly's default palette
@@ -2273,8 +2295,20 @@ function filterClusterPlot() {
             }
             clusterGroups[cluster].push(point);
         });
-        const clusterIds = Object.keys(clusterGroups).sort((a, b) => parseInt(a) - parseInt(b));
-        const clusterIndex = clusterIds.indexOf(String(selectedCluster));
+        
+        // Sort clusters by size (descending), then by ID (ascending) as tiebreaker - same as visualizeClusters
+        const sortedClusterIds = Object.entries(clusterGroups)
+            .sort((a, b) => {
+                const sizeA = a[1].length;
+                const sizeB = b[1].length;
+                if (sizeB !== sizeA) {
+                    return sizeB - sizeA;
+                }
+                return parseInt(a[0]) - parseInt(b[0]);
+            })
+            .map(([id]) => id);
+        
+        const clusterIndex = sortedClusterIds.indexOf(String(selectedCluster));
         const clusterColor = plotlyColors[clusterIndex % plotlyColors.length];
         
         const label = labels[selectedCluster] || `Cluster ${selectedCluster}`;
