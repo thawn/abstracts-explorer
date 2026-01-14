@@ -2081,9 +2081,14 @@ function visualizeClusters() {
     
     // Create traces for each cluster
     const labels = clusterData.cluster_labels || {};
-    const traces = Object.entries(clusterGroups).map(([clusterId, clusterPoints]) => {
+    const traces = [];
+    
+    // For each cluster, create both the points trace and center trace with matching colors
+    Object.entries(clusterGroups).forEach(([clusterId, clusterPoints], idx) => {
         const label = labels[clusterId] || `Cluster ${clusterId}`;
-        return {
+        
+        // Main cluster points trace
+        const pointsTrace = {
             x: clusterPoints.map(p => p.x),
             y: clusterPoints.map(p => p.y),
             mode: 'markers',
@@ -2108,38 +2113,51 @@ function visualizeClusters() {
             hovertemplate: '<b>%{text}</b><br>' +
                           'Year: %{customdata.year}<br>' +
                           'Conference: %{customdata.conference}<br>' +
-                          '<extra></extra>'
-        };
-    });
-    
-    // Add cluster centers as star markers
-    const centerTraces = Object.entries(centers).map(([clusterId, center]) => {
-        const label = labels[clusterId] || `Cluster ${clusterId}`;
-        return {
-            x: [center.x],
-            y: [center.y],
-            mode: 'markers',
-            type: 'scatter',
-            name: `${label} (center)`,
-            marker: {
-                symbol: 'star',
-                size: 16,
-                opacity: 1.0,
-                line: {
-                    color: 'white',
-                    width: 2
-                }
-            },
-            hovertemplate: '<b>Cluster Center</b><br>' +
-                          label + '<br>' +
                           '<extra></extra>',
-            showlegend: false,  // Don't show in legend to avoid clutter
-            legendgroup: clusterId  // Group with corresponding cluster
+            legendgroup: `cluster-${clusterId}`
         };
+        traces.push(pointsTrace);
+        
+        // Add cluster center as star marker with same color
+        const center = centers[clusterId];
+        if (center) {
+            const centerTrace = {
+                x: [center.x],
+                y: [center.y],
+                mode: 'markers',
+                type: 'scatter',
+                name: `${label} (center)`,
+                marker: {
+                    symbol: 'star',
+                    size: 16,
+                    opacity: 1.0,
+                    line: {
+                        color: 'white',
+                        width: 2
+                    }
+                },
+                hovertemplate: '<b>Cluster Center</b><br>' +
+                              label + '<br>' +
+                              '<extra></extra>',
+                showlegend: false,  // Don't show in legend to avoid clutter
+                legendgroup: `cluster-${clusterId}`,  // Group with corresponding cluster
+                marker: {
+                    ...pointsTrace.marker,  // Inherit color from cluster points
+                    symbol: 'star',
+                    size: 16,
+                    opacity: 1.0,
+                    line: {
+                        color: 'white',
+                        width: 2
+                    }
+                }
+            };
+            traces.push(centerTrace);
+        }
     });
     
     // Combine all traces
-    const allTraces = [...traces, ...centerTraces];
+    const allTraces = traces;
     
     // Layout configuration
     const layout = {
@@ -2263,6 +2281,7 @@ function filterClusterPlot() {
                 type: 'scatter',
                 name: 'Center',
                 marker: {
+                    ...trace.marker,  // Inherit color from cluster points
                     symbol: 'star',
                     size: 20,
                     opacity: 1.0,
