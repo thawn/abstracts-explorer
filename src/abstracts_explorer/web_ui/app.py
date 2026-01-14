@@ -439,7 +439,7 @@ def search():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/api/paper/<string:paper_uid>")
+@app.route("/api/papers/<string:paper_uid>")
 def get_paper(paper_uid):
     """
     Get a specific paper by UID.
@@ -597,6 +597,9 @@ def compute_clusters():
     """
     Compute clusters on demand with specified parameters.
 
+    Checks cache first, computes only if needed. Invalidates cache if
+    embedding model has changed.
+
     Request Body
     ------------
     {
@@ -606,7 +609,8 @@ def compute_clusters():
         "n_clusters": int (optional, default: 5),
         "eps": float (optional, default: 0.5, for DBSCAN),
         "min_samples": int (optional, default: 5, for DBSCAN),
-        "limit": int (optional, max embeddings to process)
+        "limit": int (optional, max embeddings to process),
+        "force": bool (optional, default: False, force recompute)
     }
 
     Returns
@@ -625,9 +629,32 @@ def compute_clusters():
         clustering_method = data.get("clustering_method", "kmeans")
         n_clusters = data.get("n_clusters", 5)
         limit = data.get("limit")
+        force = data.get("force", False)
 
-        # Get embeddings manager
+        # Get config and database
+        config = get_config()
+        database = get_database()
         em = get_embeddings_manager()
+
+        # Get current embedding model
+        current_model = config.embedding_model
+
+        # Check if cache exists and is valid
+        if not force and not limit:  # Only use cache if not limiting results
+            cached_results = database.get_clustering_cache(
+                embedding_model=current_model,
+                reduction_method=reduction_method,
+                n_components=n_components,
+                clustering_method=clustering_method,
+                n_clusters=n_clusters if clustering_method.lower() != "dbscan" else None,
+            )
+
+            if cached_results:
+                logger.info("Using cached clustering results")
+                return jsonify(cached_results)
+
+        # Cache miss or forced recompute - compute clusters
+        logger.info("Computing new clustering results...")
 
         # Create clustering manager
         cm = ClusteringManager(em)
@@ -668,6 +695,21 @@ def compute_clusters():
 
         # Get results
         results = cm.get_clustering_results()
+
+        # Save to cache if no limit was applied
+        if not limit:
+            try:
+                database.save_clustering_cache(
+                    embedding_model=current_model,
+                    reduction_method=reduction_method,
+                    n_components=n_components,
+                    clustering_method=clustering_method,
+                    results=results,
+                    n_clusters=n_clusters if clustering_method.lower() != "dbscan" else None,
+                    clustering_params=kwargs if kwargs else None,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to save clustering cache: {e}")
 
         return jsonify(results)
 

@@ -2067,6 +2067,7 @@ function visualizeClusters() {
     }
     
     const points = clusterData.points;
+    const centers = clusterData.cluster_centers || {};
     
     // Group points by cluster
     const clusterGroups = {};
@@ -2110,6 +2111,35 @@ function visualizeClusters() {
                           '<extra></extra>'
         };
     });
+    
+    // Add cluster centers as star markers
+    const centerTraces = Object.entries(centers).map(([clusterId, center]) => {
+        const label = labels[clusterId] || `Cluster ${clusterId}`;
+        return {
+            x: [center.x],
+            y: [center.y],
+            mode: 'markers',
+            type: 'scatter',
+            name: `${label} (center)`,
+            marker: {
+                symbol: 'star',
+                size: 16,
+                opacity: 1.0,
+                line: {
+                    color: 'white',
+                    width: 2
+                }
+            },
+            hovertemplate: '<b>Cluster Center</b><br>' +
+                          label + '<br>' +
+                          '<extra></extra>',
+            showlegend: false,  // Don't show in legend to avoid clutter
+            legendgroup: clusterId  // Group with corresponding cluster
+        };
+    });
+    
+    // Combine all traces
+    const allTraces = [...traces, ...centerTraces];
     
     // Layout configuration
     const layout = {
@@ -2156,8 +2186,8 @@ function visualizeClusters() {
     const plotElement = document.getElementById('cluster-plot');
     plotElement.innerHTML = '';
     
-    // Create plot with no animation
-    Plotly.newPlot('cluster-plot', traces, layout, config).then(function() {
+    // Create plot with no animation - use allTraces instead of traces
+    Plotly.newPlot('cluster-plot', allTraces, layout, config).then(function() {
         // Disable hover animations after plot is created
         Plotly.relayout('cluster-plot', {
             'xaxis.fixedrange': false,
@@ -2182,6 +2212,7 @@ function filterClusterPlot() {
     if (!clusterData || !clusterData.points) return;
     
     const labels = clusterData.cluster_labels || {};
+    const centers = clusterData.cluster_centers || {};
     
     if (selectedCluster === '') {
         // Show all clusters
@@ -2221,6 +2252,33 @@ function filterClusterPlot() {
                           '<extra></extra>'
         };
         
+        // Add cluster center if available
+        const traces = [trace];
+        const center = centers[selectedCluster];
+        if (center) {
+            const centerTrace = {
+                x: [center.x],
+                y: [center.y],
+                mode: 'markers',
+                type: 'scatter',
+                name: 'Center',
+                marker: {
+                    symbol: 'star',
+                    size: 20,
+                    opacity: 1.0,
+                    line: {
+                        color: 'white',
+                        width: 2
+                    }
+                },
+                hovertemplate: '<b>Cluster Center</b><br>' +
+                              label + '<br>' +
+                              '<extra></extra>',
+                showlegend: false
+            };
+            traces.push(centerTrace);
+        }
+        
         const layout = {
             title: `${label} (${filteredPoints.length} papers)`,
             xaxis: {
@@ -2252,7 +2310,8 @@ function filterClusterPlot() {
         const plotElement = document.getElementById('cluster-plot');
         plotElement.innerHTML = '';
         
-        Plotly.newPlot('cluster-plot', [trace], layout, config).then(function() {
+        // Create filtered plot with cluster center
+        Plotly.newPlot('cluster-plot', traces, layout, config).then(function() {
             // Disable hover animations after plot is created
             Plotly.relayout('cluster-plot', {
                 'xaxis.fixedrange': false,

@@ -125,3 +125,48 @@ class EmbeddingsMetadata(Base):
     def __repr__(self) -> str:
         """String representation of EmbeddingsMetadata."""
         return f"<EmbeddingsMetadata(id={self.id}, model='{self.embedding_model}')>"
+
+
+class ClusteringCache(Base):
+    """
+    Clustering cache model.
+
+    Stores cached clustering results with parameters and metadata.
+
+    Attributes
+    ----------
+    id : int
+        Auto-incrementing primary key.
+    embedding_model : str
+        Name of the embedding model used.
+    reduction_method : str
+        Dimensionality reduction method used (e.g., 'pca', 'tsne').
+    n_components : int
+        Number of dimensions after reduction.
+    clustering_method : str
+        Clustering algorithm used (e.g., 'kmeans', 'dbscan').
+    n_clusters : int, optional
+        Number of clusters (for kmeans/agglomerative).
+    clustering_params : str
+        JSON string of additional clustering parameters.
+    results_json : str
+        JSON string containing full clustering results.
+    created_at : datetime
+        Timestamp when cache was created.
+    """
+
+    __tablename__ = "clustering_cache"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    embedding_model = Column(String, nullable=False, index=True)
+    reduction_method = Column(String, nullable=False)
+    n_components = Column(Integer, nullable=False)
+    clustering_method = Column(String, nullable=False, index=True)
+    n_clusters = Column(Integer, nullable=True)
+    clustering_params = Column(Text, nullable=True)
+    results_json = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now())
+
+    def __repr__(self) -> str:
+        """String representation of ClusteringCache."""
+        return f"<ClusteringCache(id={self.id}, method='{self.clustering_method}', n_clusters={self.n_clusters})>"

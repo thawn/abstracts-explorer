@@ -788,10 +788,14 @@ Only respond with the label, nothing else."""
 
             stats = self.get_cluster_statistics()
 
+            # Calculate cluster centers in reduced space
+            cluster_centers = self._calculate_cluster_centers()
+
             results = {
                 "points": points,
                 "statistics": stats,
                 "n_dimensions": int(self.reduced_embeddings.shape[1]),
+                "cluster_centers": cluster_centers,
             }
 
             # Add cluster labels if available
@@ -807,6 +811,55 @@ Only respond with the label, nothing else."""
 
         except Exception as e:
             raise ClusteringError(f"Failed to generate clustering results: {str(e)}") from e
+
+    def _calculate_cluster_centers(self) -> Dict[int, Dict[str, float]]:
+        """
+        Calculate cluster centers in the reduced embedding space.
+
+        Returns
+        -------
+        Dict[int, Dict[str, float]]
+            Dictionary mapping cluster IDs to center coordinates.
+            Each center has 'x', 'y', and optionally 'z' coordinates.
+
+        Raises
+        ------
+        ClusteringError
+            If required data is not available.
+        """
+        if self.reduced_embeddings is None:
+            raise ClusteringError("No reduced embeddings available")
+        if self.cluster_labels is None:
+            raise ClusteringError("No cluster labels available")
+
+        try:
+            centers = {}
+            unique_labels = np.unique(self.cluster_labels)
+            cluster_ids = [int(label) for label in unique_labels if label >= 0]
+
+            for cluster_id in cluster_ids:
+                # Get indices of points in this cluster
+                cluster_mask = self.cluster_labels == cluster_id
+                cluster_points = self.reduced_embeddings[cluster_mask]
+
+                # Calculate centroid
+                centroid = cluster_points.mean(axis=0)
+
+                center = {
+                    "x": float(centroid[0]),
+                    "y": float(centroid[1]),
+                }
+
+                # Add z coordinate if available
+                if len(centroid) > 2:
+                    center["z"] = float(centroid[2])
+
+                centers[cluster_id] = center
+
+            return centers
+
+        except Exception as e:
+            raise ClusteringError(f"Failed to calculate cluster centers: {str(e)}") from e
 
     def export_to_json(
         self,
