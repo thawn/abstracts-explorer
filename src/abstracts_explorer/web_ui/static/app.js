@@ -2139,13 +2139,16 @@ function visualizeClusters() {
         // Assign explicit color from Plotly's default palette
         const clusterColor = PLOTLY_COLORS[idx % PLOTLY_COLORS.length];
         
+        // Get the label with count for this cluster
+        const label = getClusterLabelWithCount(clusterId, labels, paperCount);
+        
         // Main cluster points trace
         const pointsTrace = {
             x: clusterPoints.map(p => p.x),
             y: clusterPoints.map(p => p.y),
             mode: 'markers',
             type: 'scatter',
-            name: getClusterLabelWithCount(clusterId, labels, paperCount),
+            name: label,
             text: clusterPoints.map(p => p.title || p.id),
             customdata: clusterPoints.map(p => ({
                 id: p.id,
