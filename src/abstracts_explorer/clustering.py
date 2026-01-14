@@ -439,16 +439,12 @@ class ClusteringManager:
             for cluster_id in cluster_ids:
                 # Get indices of papers in this cluster
                 cluster_indices = np.where(self.cluster_labels == cluster_id)[0]
-                
+
                 # Collect documents (titles and abstracts) for this cluster
                 cluster_docs = []
                 for idx in cluster_indices:
-                    try:
-                        doc_text = EmbeddingsManager.embedding_text_from_paper(self.metadatas[idx])
-                        cluster_docs.append(doc_text)
-                    except (ValueError, KeyError):
-                        # Skip papers without title or abstract
-                        continue
+                    doc_text = EmbeddingsManager.embedding_text_from_paper(self.metadatas[idx])
+                    cluster_docs.append(doc_text)
 
                 if not cluster_docs:
                     logger.warning(f"No documents found for cluster {cluster_id}")
@@ -459,12 +455,8 @@ class ClusteringManager:
                 # Compare cluster documents against all documents to find distinctive terms
                 all_docs = []
                 for metadata in self.metadatas:
-                    try:
-                        doc_text = EmbeddingsManager.embedding_text_from_paper(metadata)
-                        all_docs.append(doc_text)
-                    except (ValueError, KeyError):
-                        # Skip papers without title or abstract
-                        continue
+                    doc_text = EmbeddingsManager.embedding_text_from_paper(metadata)
+                    all_docs.append(doc_text)
 
                 # Fit TF-IDF on all documents
                 tfidf = TfidfVectorizer(
@@ -478,11 +470,11 @@ class ClusteringManager:
 
                 # Calculate mean TF-IDF for cluster documents
                 cluster_tfidf = tfidf_matrix[cluster_indices].mean(axis=0).A1
-                
+
                 # Get top keywords by TF-IDF score
                 top_indices = cluster_tfidf.argsort()[-n_keywords:][::-1]
                 keywords = [feature_names[i] for i in top_indices if cluster_tfidf[i] > 0]
-                
+
                 self.cluster_keywords[cluster_id] = keywords[:n_keywords]
                 logger.debug(f"Cluster {cluster_id}: {len(keywords)} keywords extracted")
 
@@ -531,7 +523,7 @@ class ClusteringManager:
         """
         if self.cluster_labels is None:
             raise ClusteringError("No clustering performed. Call cluster() first.")
-        
+
         # Extract keywords if not already done
         if self.cluster_keywords is None:
             logger.info("Extracting cluster keywords first...")
@@ -544,7 +536,7 @@ class ClusteringManager:
 
             for cluster_id in cluster_ids:
                 keywords = (self.cluster_keywords or {}).get(cluster_id, [])[:max_keywords]
-                
+
                 if not keywords:
                     self.cluster_label_names[cluster_id] = f"Cluster {cluster_id}"
                     continue
@@ -587,7 +579,7 @@ class ClusteringManager:
         # Get a few representative paper titles from the cluster
         cluster_indices = np.where(self.cluster_labels == cluster_id)[0]
         sample_size = min(5, len(cluster_indices))
-        
+
         # Use replacement if there are fewer papers than sample size
         replace = len(cluster_indices) < sample_size
         sample_indices = np.random.choice(
@@ -595,7 +587,7 @@ class ClusteringManager:
             size=sample_size, 
             replace=replace
         )
-        
+
         sample_titles = []
         if self.metadatas:
             for idx in sample_indices:
@@ -619,11 +611,11 @@ Only respond with the label, nothing else."""
             # Check if OpenAI client is available
             if not hasattr(self.embeddings_manager, 'openai_client'):
                 raise AttributeError("OpenAI client not available in embeddings manager")
-            
+
             # Use the embeddings manager's OpenAI client
             from .config import get_config
             config = get_config()
-            
+
             response = self.embeddings_manager.openai_client.chat.completions.create(
                 model=config.chat_model,
                 messages=[
@@ -633,7 +625,7 @@ Only respond with the label, nothing else."""
                 temperature=0.3,
                 max_tokens=50
             )
-            
+
             label = response.choices[0].message.content.strip()
             # Remove quotes if present
             label = label.strip('"\'')
@@ -690,24 +682,24 @@ Only respond with the label, nothing else."""
             for cluster_id in cluster_ids:
                 # Get indices of papers in this cluster
                 cluster_indices = np.where(self.cluster_labels == cluster_id)[0]
-                
+
                 if len(cluster_indices) == 0:
                     representatives[cluster_id] = []
                     continue
 
                 # Get embeddings for this cluster
                 cluster_embeddings = self.embeddings[cluster_indices]
-                
+
                 # Calculate cluster centroid
                 centroid = cluster_embeddings.mean(axis=0)
-                
+
                 # Calculate distances to centroid
                 distances = np.linalg.norm(cluster_embeddings - centroid, axis=1)
-                
+
                 # Get indices of papers closest to centroid
                 n_repr = min(n_papers, len(cluster_indices))
                 closest_indices = distances.argsort()[:n_repr]
-                
+
                 # Collect representative paper metadata
                 repr_papers = []
                 if self.metadatas and self.paper_ids:
@@ -717,7 +709,7 @@ Only respond with the label, nothing else."""
                         paper_meta['paper_id'] = self.paper_ids[paper_idx]
                         paper_meta['distance_to_centroid'] = float(distances[idx])
                         repr_papers.append(paper_meta)
-                
+
                 representatives[cluster_id] = repr_papers
                 logger.debug(f"Found {len(repr_papers)} representative papers for cluster {cluster_id}")
 
@@ -786,7 +778,7 @@ Only respond with the label, nothing else."""
                     title = metadata.get("title", "")
                     if len(title) > max_title_length:
                         title = title[:max_title_length] + "..."
-                    
+
                     point["title"] = title
                     point["year"] = metadata.get("year", "")
                     point["conference"] = metadata.get("conference", "")
@@ -805,7 +797,7 @@ Only respond with the label, nothing else."""
             # Add cluster labels if available
             if self.cluster_label_names:
                 results["cluster_labels"] = self.cluster_label_names
-            
+
             # Add cluster keywords if available
             if self.cluster_keywords:
                 results["cluster_keywords"] = self.cluster_keywords
