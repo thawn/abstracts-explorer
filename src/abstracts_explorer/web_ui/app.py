@@ -54,6 +54,7 @@ def get_database():
             )
         g.db = DatabaseManager(db_path)
         g.db.connect()  # Explicitly connect to the database
+        g.db.create_tables()  # Ensure all tables exist (including new ones like clustering_cache)
     return g.db
 
 
