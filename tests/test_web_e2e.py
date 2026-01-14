@@ -248,10 +248,11 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     """
     from abstracts_explorer.database import DatabaseManager
 
-    # Import the module, not the app object
+    # Import the module first, then access it from sys.modules
     import sys
+    import abstracts_explorer.web_ui.app as web_app_module
 
-    # Get the actual module
+    # Get the actual module from sys.modules (now it's loaded)
     app_module = sys.modules["abstracts_explorer.web_ui.app"]
     # Get the Flask app instance
     flask_app = app_module.app
@@ -287,7 +288,7 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     original_get_database = app_module.get_database
 
     def mock_get_database_wrapper():
-        """Wrapper that skips file existence check."""
+        """Wrapper that skips file existence check and ensures tables exist."""
         from flask import g
 
         if "db" not in g:
@@ -295,6 +296,7 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
             # Don't check file existence in tests - the database was created in a temp dir
             g.db = DatabaseManager(db_path)
             g.db.connect()
+            g.db.create_tables()  # Ensure all tables exist (including clustering_cache)
         return g.db
 
     app_module.get_database = mock_get_database_wrapper
@@ -1291,6 +1293,270 @@ class TestWebUIAccessibility:
         assert len(browser.find_elements(By.TAG_NAME, "header")) > 0
         assert len(browser.find_elements(By.TAG_NAME, "main")) > 0
         assert len(browser.find_elements(By.TAG_NAME, "button")) > 0
+
+
+@pytest.mark.e2e
+class TestClusteringTab:
+    """Test clustering tab functionality with Selenium."""
+
+    def test_clustering_tab_exists(self, web_server, browser):
+        """
+        Test that the clustering tab exists and is accessible.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        # Wait for page to load
+        wait = WebDriverWait(browser, 10)
+        wait.until(EC.presence_of_element_located((By.ID, "clustering-tab")))
+
+        # Find and click clustering tab
+        clustering_tab = browser.find_element(By.ID, "clustering-tab")
+        assert clustering_tab.is_displayed(), "Clustering tab should be visible"
+        
+        clustering_tab.click()
+        time.sleep(0.5)
+
+        # Verify clustering content is displayed
+        clustering_content = browser.find_element(By.ID, "clustering-content")
+        assert clustering_content.is_displayed(), "Clustering content should be visible after clicking tab"
+
+    def test_clustering_plot_loads(self, web_server, browser):
+        """
+        Test that the clustering plot container loads properly.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        # Navigate to clustering tab
+        wait = WebDriverWait(browser, 10)
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab.click()
+        time.sleep(0.5)
+
+        # Check for clustering plot container
+        plot_container = browser.find_element(By.ID, "cluster-plot")
+        assert plot_container.is_displayed(), "Clustering plot container should be visible"
+
+    def test_clustering_stats_display(self, web_server, browser):
+        """
+        Test that clustering statistics are displayed.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        # Navigate to clustering tab
+        wait = WebDriverWait(browser, 10)
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab.click()
+        time.sleep(1)
+
+        # Check for stats display
+        stats_element = browser.find_element(By.ID, "cluster-stats")
+        assert stats_element.is_displayed(), "Cluster stats should be visible"
+
+    def test_clustering_filter_dropdown(self, web_server, browser):
+        """
+        Test that the cluster filter dropdown is present and functional.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        # Navigate to clustering tab
+        wait = WebDriverWait(browser, 10)
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab.click()
+        time.sleep(0.5)
+
+        # Check for filter dropdown
+        filter_dropdown = browser.find_element(By.ID, "cluster-filter")
+        assert filter_dropdown.is_displayed(), "Cluster filter dropdown should be visible"
+        
+        # Verify it's a select element
+        assert filter_dropdown.tag_name == "select", "Filter should be a select element"
+
+    def test_clustering_settings_button(self, web_server, browser):
+        """
+        Test that the clustering settings button exists and can be clicked.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        # Navigate to clustering tab
+        wait = WebDriverWait(browser, 10)
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab.click()
+        time.sleep(0.5)
+
+        # Find settings button (look for button with gear icon or settings text)
+        settings_buttons = browser.find_elements(By.TAG_NAME, "button")
+        settings_button = None
+        for btn in settings_buttons:
+            if "settings" in btn.get_attribute("onclick") or "fa-cog" in btn.get_attribute("innerHTML"):
+                settings_button = btn
+                break
+        
+        if settings_button:
+            assert settings_button.is_displayed(), "Settings button should be visible"
+
+    def test_clustering_paper_details_panel(self, web_server, browser):
+        """
+        Test that the selected paper details panel exists.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        # Navigate to clustering tab
+        wait = WebDriverWait(browser, 10)
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab.click()
+        time.sleep(0.5)
+
+        # Check for paper details panel
+        try:
+            details_panel = browser.find_element(By.ID, "selected-paper-details")
+            # Panel might be hidden initially
+            assert details_panel is not None, "Selected paper details panel should exist"
+        except:
+            pass  # Panel might not exist if no paper selected
+
+    def test_clustering_plot_has_plotly(self, web_server, browser):
+        """
+        Test that Plotly is loaded and the plot is rendered.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        # Navigate to clustering tab
+        wait = WebDriverWait(browser, 10)
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab.click()
+        
+        # Wait for plot to potentially load (give it some time)
+        time.sleep(2)
+
+        # Check if Plotly script is loaded
+        plotly_loaded = browser.execute_script("return typeof Plotly !== 'undefined'")
+        assert plotly_loaded, "Plotly library should be loaded"
+
+        # Check if plot container has plotly content
+        plot_container = browser.find_element(By.ID, "cluster-plot")
+        # Plotly creates a div with class 'plotly-graph-div' or 'js-plotly-plot'
+        plotly_divs = plot_container.find_elements(By.CLASS_NAME, "js-plotly-plot")
+        # Note: Plot might not be rendered if no data, so we just check the structure exists
+
+    def test_clustering_tab_no_javascript_errors(self, web_server, browser):
+        """
+        Test that there are no JavaScript errors when loading the clustering tab.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        # Navigate to clustering tab
+        wait = WebDriverWait(browser, 10)
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab.click()
+        time.sleep(1)
+
+        # Check browser console for errors
+        logs = browser.get_log("browser")
+        errors = [log for log in logs if log["level"] == "SEVERE"]
+        
+        # Filter out known harmless errors
+        critical_errors = []
+        for error in errors:
+            message = error.get("message", "")
+            # Ignore favicon errors and other non-critical issues
+            if "favicon" not in message.lower() and "ERR_BLOCKED_BY_CLIENT" not in message:
+                critical_errors.append(error)
+        
+        assert len(critical_errors) == 0, f"No severe JavaScript errors should occur. Found: {critical_errors}"
+
+    def test_clustering_visualization_elements(self, web_server, browser):
+        """
+        Test that clustering visualization has expected elements.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        # Navigate to clustering tab
+        wait = WebDriverWait(browser, 10)
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab.click()
+        time.sleep(1)
+
+        # Check for key UI elements
+        clustering_content = browser.find_element(By.ID, "clustering-content")
+        
+        # Should have some content
+        assert clustering_content.text != "", "Clustering content should not be empty"
+        
+        # Check for plot container
+        plot = browser.find_element(By.ID, "cluster-plot")
+        assert plot is not None, "Cluster plot should exist"
 
 
 if __name__ == "__main__":

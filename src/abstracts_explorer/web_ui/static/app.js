@@ -2128,6 +2128,7 @@ function visualizeClusters() {
                 type: 'scatter',
                 name: `${label} (center)`,
                 marker: {
+                    ...pointsTrace.marker,  // Inherit color from cluster points
                     symbol: 'star',
                     size: 16,
                     opacity: 1.0,
@@ -2140,17 +2141,7 @@ function visualizeClusters() {
                               label + '<br>' +
                               '<extra></extra>',
                 showlegend: false,  // Don't show in legend to avoid clutter
-                legendgroup: `cluster-${clusterId}`,  // Group with corresponding cluster
-                marker: {
-                    ...pointsTrace.marker,  // Inherit color from cluster points
-                    symbol: 'star',
-                    size: 16,
-                    opacity: 1.0,
-                    line: {
-                        color: 'white',
-                        width: 2
-                    }
-                }
+                legendgroup: `cluster-${clusterId}`  // Group with corresponding cluster
             };
             traces.push(centerTrace);
         }
