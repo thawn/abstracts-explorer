@@ -195,21 +195,14 @@ export function visualizeClusters() {
             ticks: ''  // Remove ticks
         },
         hovermode: 'closest',
-        showlegend: true,
-        legend: {
-            orientation: 'h',  // Horizontal orientation
-            x: 0.5,  // Center horizontally
-            xanchor: 'center',
-            y: -0.15,  // Position below the plot
-            yanchor: 'top'
-        },
+        showlegend: false,  // Hide built-in legend, we'll create custom one
         plot_bgcolor: 'white',  // White background
         paper_bgcolor: 'white',
         margin: {
             l: 50,
             r: 50,
             t: 50,
-            b: 120  // Increase bottom margin for legend
+            b: 50  // Standard bottom margin
         },
         hoverlabel: {
             namelength: -1,
@@ -238,12 +231,127 @@ export function visualizeClusters() {
         });
     });
     
+    // Create custom legend in separate container
+    createCustomLegend(sortedClusterEntries, labels);
+    
     // Add click handler for point selection
     document.getElementById('cluster-plot').on('plotly_click', function(data) {
         const point = data.points[0];
         const customdata = point.customdata;
         showClusterPaperDetails(customdata.id, customdata);
     });
+}
+
+/**
+ * Create custom legend in separate container
+ * @param {Array} sortedClusterEntries - Sorted cluster entries [clusterId, clusterPoints]
+ * @param {Object} labels - Cluster labels
+ */
+function createCustomLegend(sortedClusterEntries, labels) {
+    const legendContainer = document.getElementById('cluster-legend');
+    if (!legendContainer) return;
+    
+    // Clear existing legend
+    legendContainer.innerHTML = '';
+    
+    // Create legend title
+    const title = document.createElement('h4');
+    title.className = 'text-sm font-semibold text-gray-700 mb-3';
+    title.textContent = 'Clusters';
+    legendContainer.appendChild(title);
+    
+    // Create legend items container with scrolling
+    const itemsContainer = document.createElement('div');
+    itemsContainer.className = 'space-y-2 max-h-[600px] overflow-y-auto pr-2';
+    
+    sortedClusterEntries.forEach(([clusterId, clusterPoints], idx) => {
+        const paperCount = clusterPoints.length;
+        const clusterColor = PLOTLY_COLORS[idx % PLOTLY_COLORS.length];
+        const label = getClusterLabelWithCount(clusterId, labels, paperCount);
+        
+        // Create legend item
+        const item = document.createElement('div');
+        item.className = 'flex items-center gap-2 p-2 rounded hover:bg-gray-50 cursor-pointer transition-colors';
+        item.title = `Click to filter to ${label}`;
+        
+        // Color box
+        const colorBox = document.createElement('div');
+        colorBox.className = 'w-4 h-4 rounded flex-shrink-0';
+        colorBox.style.backgroundColor = clusterColor;
+        
+        // Label text
+        const labelText = document.createElement('span');
+        labelText.className = 'text-sm text-gray-700 flex-1';
+        labelText.textContent = label;
+        
+        item.appendChild(colorBox);
+        item.appendChild(labelText);
+        
+        // Add click handler to filter to this cluster
+        item.addEventListener('click', () => {
+            const clusterFilter = document.getElementById('cluster-filter');
+            if (clusterFilter) {
+                clusterFilter.value = clusterId;
+                filterClusterPlot();
+            }
+        });
+        
+        itemsContainer.appendChild(item);
+    });
+    
+    legendContainer.appendChild(itemsContainer);
+}
+
+/**
+ * Create legend for filtered (single cluster) view
+ * @param {string} clusterId - Cluster ID
+ * @param {string} label - Cluster label with count
+ * @param {string} color - Cluster color
+ * @param {number} paperCount - Number of papers in cluster
+ */
+function createFilteredLegend(clusterId, label, color, paperCount) {
+    const legendContainer = document.getElementById('cluster-legend');
+    if (!legendContainer) return;
+    
+    // Clear existing legend
+    legendContainer.innerHTML = '';
+    
+    // Create legend title
+    const title = document.createElement('h4');
+    title.className = 'text-sm font-semibold text-gray-700 mb-3';
+    title.textContent = 'Filtered View';
+    legendContainer.appendChild(title);
+    
+    // Create single legend item
+    const item = document.createElement('div');
+    item.className = 'flex items-center gap-2 p-2 rounded bg-gray-50';
+    
+    // Color box
+    const colorBox = document.createElement('div');
+    colorBox.className = 'w-4 h-4 rounded flex-shrink-0';
+    colorBox.style.backgroundColor = color;
+    
+    // Label text
+    const labelText = document.createElement('span');
+    labelText.className = 'text-sm text-gray-700 flex-1';
+    labelText.textContent = label;
+    
+    item.appendChild(colorBox);
+    item.appendChild(labelText);
+    legendContainer.appendChild(item);
+    
+    // Add "Show All Clusters" button
+    const showAllBtn = document.createElement('button');
+    showAllBtn.className = 'mt-4 w-full px-3 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors';
+    showAllBtn.textContent = 'Show All Clusters';
+    showAllBtn.addEventListener('click', () => {
+        const clusterFilter = document.getElementById('cluster-filter');
+        if (clusterFilter) {
+            clusterFilter.value = '';
+            filterClusterPlot();
+        }
+    });
+    legendContainer.appendChild(showAllBtn);
 }
 
 /**
@@ -387,6 +495,9 @@ export function filterClusterPlot() {
                 'yaxis.fixedrange': false
             });
         });
+        
+        // Update custom legend for filtered view
+        createFilteredLegend(selectedCluster, label, clusterColor, paperCount);
         
         // Re-add click handler
         document.getElementById('cluster-plot').on('plotly_click', function(data) {
