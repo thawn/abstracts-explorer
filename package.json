@@ -1,11 +1,12 @@
 {
     "name": "abstracts-explorer-webui-tests",
     "version": "1.0.0",
+    "type": "module",
     "description": "Unit tests for Abstracts Explorer Web UI",
     "scripts": {
-        "test": "jest",
-        "test:watch": "jest --watch",
-        "test:coverage": "jest --coverage",
+        "test": "NODE_OPTIONS=--experimental-vm-modules jest",
+        "test:watch": "NODE_OPTIONS=--experimental-vm-modules jest --watch",
+        "test:coverage": "NODE_OPTIONS=--experimental-vm-modules jest --coverage",
         "build:tailwind": "npx tailwindcss -i src/abstracts_explorer/web_ui/static/tailwind.input.css -o src/abstracts_explorer/web_ui/static/vendor/tailwind.css --minify",
         "watch:tailwind": "npx tailwindcss -i src/abstracts_explorer/web_ui/static/tailwind.input.css -o src/abstracts_explorer/web_ui/static/vendor/tailwind.css --watch",
         "postinstall": "npm run install:vendor && npm run setup:hooks",
@@ -22,14 +23,16 @@
         "coverageDirectory": "./coverage",
         "collectCoverageFrom": [
             "src/abstracts_explorer/web_ui/static/**/*.js",
-            "!src/abstracts_explorer/web_ui/static/**/*.test.js"
+            "!src/abstracts_explorer/web_ui/static/**/*.test.js",
+            "!src/abstracts_explorer/web_ui/static/app.js.backup"
         ],
         "setupFilesAfterEnv": [
             "<rootDir>/src/abstracts_explorer/web_ui/tests/setup.js"
         ],
         "testMatch": [
             "**/src/abstracts_explorer/web_ui/tests/**/*.test.js"
-        ]
+        ],
+        "transform": {}
     },
     "devDependencies": {
         "@tailwindcss/cli": "^4.1.17",

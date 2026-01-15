@@ -2,8 +2,8 @@
  * Jest setup file for DOM testing
  */
 
-// Add custom matchers from @testing-library/jest-dom
-require('@testing-library/jest-dom');
+import { jest } from '@jest/globals';
+import '@testing-library/jest-dom';
 
 // Mock fetch globally
 global.fetch = jest.fn();
