@@ -193,7 +193,9 @@ export function visualizeClusters() {
             zeroline: false,
             showgrid: false,  // Remove grid
             showticklabels: false,  // Remove tick labels
-            ticks: ''  // Remove ticks
+            ticks: '',  // Remove ticks
+            scaleanchor: 'x',  // Lock aspect ratio to x-axis
+            scaleratio: 2  // height is 2x width (aspect ratio 1:2)
         },
         hovermode: 'closest',
         showlegend: true,
@@ -358,7 +360,9 @@ export function filterClusterPlot() {
                 zeroline: false,
                 showgrid: false,  // Remove grid
                 showticklabels: false,  // Remove tick labels
-                ticks: ''  // Remove ticks
+                ticks: '',  // Remove ticks
+                scaleanchor: 'x',  // Lock aspect ratio to x-axis
+                scaleratio: 2  // height is 2x width (aspect ratio 1:2)
             },
             hovermode: 'closest',
             showlegend: false,
