@@ -7,6 +7,7 @@
 import { API_BASE } from './utils/constants.js';
 import { setCurrentTab, getCurrentTab } from './state.js';
 import { getInterestingPapersSortOrder } from './state.js';
+import { areClustersLoaded } from './clustering.js';
 
 /**
  * Switch to a different tab
@@ -40,8 +41,8 @@ export function switchTab(tab) {
         }
     }
 
-    // Load clusters when switching to that tab
-    if (tab === 'clusters' && window.clusterData === null) {
+    // Load clusters when switching to that tab (only if not already loaded)
+    if (tab === 'clusters' && !areClustersLoaded()) {
         if (window.loadClusters) {
             window.loadClusters();
         }

@@ -24,6 +24,14 @@ let currentClusterConfig = {
 };
 
 /**
+ * Check if clusters are loaded
+ * @returns {boolean} True if clusters are loaded
+ */
+export function areClustersLoaded() {
+    return clusterData !== null;
+}
+
+/**
  * Load and visualize clusters
  * @async
  */
