@@ -5,7 +5,6 @@
  */
 
 import { API_BASE, PLOTLY_COLORS } from './utils/constants.js';
-import { escapeHtml } from './utils/dom-utils.js';
 import { showLoading, showErrorInElement } from './utils/ui-utils.js';
 import { sortClustersBySizeDesc } from './utils/sort-utils.js';
 import { getClusterLabelWithCount } from './utils/cluster-utils.js';
