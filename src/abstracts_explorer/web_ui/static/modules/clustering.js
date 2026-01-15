@@ -304,10 +304,11 @@ function createCustomLegend(sortedClusterEntries, labels) {
     
     legendContainer.appendChild(header);
     
-    // Create legend items container with scrolling - match plot height
+    // Create legend items container with scrolling
     const itemsContainer = document.createElement('div');
     itemsContainer.className = 'space-y-1 overflow-y-auto pr-2 flex-1';
     itemsContainer.style.minHeight = '0'; // Allow flex child to shrink
+    itemsContainer.style.maxHeight = '100%'; // Ensure scrolling works in grid
     
     sortedClusterEntries.forEach(([clusterId, clusterPoints], idx) => {
         const paperCount = clusterPoints.length;
