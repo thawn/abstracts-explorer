@@ -14,6 +14,18 @@ export let currentInterestingSession = null; // Track the current selected sessi
 export let interestingPapersSortOrder = 'search-rating-poster'; // Sort order
 
 /**
+ * Reset all state to initial values (for testing)
+ */
+export function resetState() {
+    currentTab = 'search';
+    chatHistory = [];
+    paperPriorities = {};
+    currentSearchTerm = '';
+    currentInterestingSession = null;
+    interestingPapersSortOrder = 'search-rating-poster';
+}
+
+/**
  * Set the current tab
  * @param {string} tab - Tab name
  */

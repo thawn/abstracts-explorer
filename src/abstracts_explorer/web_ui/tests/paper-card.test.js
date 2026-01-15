@@ -13,6 +13,8 @@ describe('Paper Card Module', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         localStorage.clear();
+        // Reset state properly
+        State.resetState();
         State.loadPriorities();
         // Mock global event for onclick handlers
         global.event = {
@@ -30,8 +32,10 @@ describe('Paper Card Module', () => {
                 <div id="modal-pdf-link"></div>
             </div>
             <button id="tab-interesting" class="tab-btn">
-                <span class="interesting-count"></span>
+                <span id="interesting-count" class="interesting-count"></span>
             </button>
+            <select id="year-selector"><option value="">All</option></select>
+            <select id="conference-selector"><option value="">All</option></select>
         `;
     });
 
@@ -80,8 +84,9 @@ describe('Paper Card Module', () => {
 
             const html = formatPaperCard(paper);
 
-            expect(html).toContain('<details>');
-            expect(html).toContain('<summary>');
+            // Check for details and summary elements (with attributes)
+            expect(html).toMatch(/<details/);
+            expect(html).toMatch(/<summary/);
         });
 
         it('should handle missing PDF URL', () => {
@@ -216,38 +221,20 @@ describe('Paper Card Module', () => {
             State.setPaperPriority('p1', 5);
             State.setPaperPriority('p2', 4);
 
-            global.fetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({
-                    papers: [
-                        { uid: 'p1', year: 2025 },
-                        { uid: 'p2', year: 2025 }
-                    ]
-                })
-            });
-
+            // No filters selected, so it should just count the priorities
             await updateInterestingPapersCount();
 
-            const countSpan = document.querySelector('.interesting-count');
-            // The function updates textContent
+            const countSpan = document.getElementById('interesting-count');
             expect(countSpan).not.toBeNull();
-            expect(parseInt(countSpan.textContent)).toBeGreaterThan(0);
+            expect(countSpan.textContent).toBe('2');
         });
 
         it('should show 0 when no rated papers', async () => {
-            // Even with no priorities, the function still runs
-            global.fetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({
-                    papers: []
-                })
-            });
-
+            // No priorities set
             await updateInterestingPapersCount();
 
-            const countSpan = document.querySelector('.interesting-count');
+            const countSpan = document.getElementById('interesting-count');
             expect(countSpan).not.toBeNull();
-            // The span should exist and have been updated
             expect(countSpan.textContent).toBe('0');
         });
     });

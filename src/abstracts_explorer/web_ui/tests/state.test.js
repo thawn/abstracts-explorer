@@ -10,12 +10,16 @@ describe('State Management Module', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         localStorage.clear();
-        // Reset state to initial values
-        State.setCurrentTab('search');
-        State.setCurrentSearchTerm('');
-        State.setCurrentInterestingSession(null);
-        State.setInterestingPapersSortOrder('search-rating-poster');
+        // Reset all state to initial values
+        State.resetState();
+        // Reload priorities from (now empty) localStorage
         State.loadPriorities();
+    });
+
+    afterEach(() => {
+        // Clean up after each test
+        localStorage.clear();
+        State.resetState();
     });
 
     describe('Tab Management', () => {
@@ -365,8 +369,8 @@ describe('State Management Module', () => {
                 State.setPaperPriority('rapid', (i % 5) + 1);
             }
             
-            // Should end with priority 1 (100 % 5 + 1)
-            expect(State.getPaperPriority('rapid')).toBe(1);
+            // Last iteration: i=99, priority = (99 % 5) + 1 = 4 + 1 = 5
+            expect(State.getPaperPriority('rapid')).toBe(5);
         });
 
         it('should handle many papers', () => {
