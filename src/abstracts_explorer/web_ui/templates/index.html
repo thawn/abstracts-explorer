@@ -555,15 +555,15 @@
 
             <!-- Cluster Visualization -->
             <div class="bg-white rounded-lg shadow-md p-6">
-                <div class="flex flex-col lg:flex-row gap-4">
-                    <div id="cluster-plot" style="width: 100%; aspect-ratio: 1; min-height: 600px;" class="flex-1">
+                <div class="flex flex-col lg:flex-row gap-4" style="min-height: 600px;">
+                    <div id="cluster-plot" style="width: 100%; aspect-ratio: 1;" class="flex-1">
                         <div class="text-center text-gray-500 py-12">
                             <i class="fas fa-spinner fa-spin text-6xl mb-4 opacity-20"></i>
                             <p class="text-lg">Loading cluster visualization...</p>
                             <p class="text-sm mt-2">This may take a moment</p>
                         </div>
                     </div>
-                    <div id="cluster-legend" class="lg:w-64 w-full" style="min-height: 600px;"></div>
+                    <div id="cluster-legend" class="lg:w-64 w-full flex flex-col" style="height: 100%;"></div>
                 </div>
             </div>
 
