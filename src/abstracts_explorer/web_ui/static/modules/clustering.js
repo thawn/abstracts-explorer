@@ -106,9 +106,6 @@ export function visualizeClusters() {
     
     // Initialize selected clusters with all clusters
     selectedClusters.clear();
-    sortedClusterEntries.forEach(([clusterId]) => {
-        selectedClusters.add(String(clusterId));
-    });
     
     // Create traces for each cluster
     const labels = clusterData.cluster_labels || {};
