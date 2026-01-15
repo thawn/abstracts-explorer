@@ -21,6 +21,8 @@ let currentClusterConfig = {
     min_samples: 5,
     limit: null
 };
+// Track selected clusters for multi-select
+let selectedClusters = new Set();
 
 /**
  * Check if clusters are loaded
@@ -65,8 +67,8 @@ export async function loadClusters() {
         // Update cluster stats
         updateClusterStats();
         
-        // Populate cluster filter
-        populateClusterFilter();
+        // Initialize selected clusters (start with all selected)
+        selectedClusters.clear();
         
         // Create visualization
         visualizeClusters();
@@ -101,6 +103,12 @@ export function visualizeClusters() {
     
     // Sort clusters by size (descending), then by ID (ascending) as tiebreaker
     const sortedClusterEntries = sortClustersBySizeDesc(Object.entries(clusterGroups));
+    
+    // Initialize selected clusters with all clusters
+    selectedClusters.clear();
+    sortedClusterEntries.forEach(([clusterId]) => {
+        selectedClusters.add(String(clusterId));
+    });
     
     // Create traces for each cluster
     const labels = clusterData.cluster_labels || {};
@@ -179,7 +187,7 @@ export function visualizeClusters() {
     
     // Layout configuration
     const layout = {
-        title: 'Paper Embeddings Clusters',
+        title: 'All Clusters',
         xaxis: {
             title: '',  // Remove axis label
             zeroline: false,
@@ -247,6 +255,11 @@ export function visualizeClusters() {
  * @param {Array} sortedClusterEntries - Sorted cluster entries [clusterId, clusterPoints]
  * @param {Object} labels - Cluster labels
  */
+/**
+ * Create custom legend with multi-select support
+ * @param {Array} sortedClusterEntries - Array of [clusterId, points[]] entries
+ * @param {Object} labels - Cluster labels object
+ */
 function createCustomLegend(sortedClusterEntries, labels) {
     const legendContainer = document.getElementById('cluster-legend');
     if (!legendContainer) return;
@@ -254,25 +267,64 @@ function createCustomLegend(sortedClusterEntries, labels) {
     // Clear existing legend
     legendContainer.innerHTML = '';
     
-    // Create legend title
-    const title = document.createElement('h4');
-    title.className = 'text-sm font-semibold text-gray-700 mb-3';
-    title.textContent = 'Clusters';
-    legendContainer.appendChild(title);
+    // Create legend header with title and action buttons
+    const header = document.createElement('div');
+    header.className = 'mb-3';
     
-    // Create legend items container with scrolling
+    const title = document.createElement('h4');
+    title.className = 'text-sm font-semibold text-gray-700 mb-2';
+    title.textContent = 'Clusters';
+    header.appendChild(title);
+    
+    // Create button container
+    const buttonContainer = document.createElement('div');
+    buttonContainer.className = 'flex gap-2';
+    
+    // "Select All" button
+    const selectAllBtn = document.createElement('button');
+    selectAllBtn.className = 'px-2 py-1 text-xs bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition-colors';
+    selectAllBtn.textContent = 'All';
+    selectAllBtn.addEventListener('click', () => {
+        selectedClusters.clear();
+        sortedClusterEntries.forEach(([clusterId]) => {
+            selectedClusters.add(String(clusterId));
+        });
+        updateClusterVisualization();
+    });
+    
+    // "Clear All" button
+    const clearAllBtn = document.createElement('button');
+    clearAllBtn.className = 'px-2 py-1 text-xs bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition-colors';
+    clearAllBtn.textContent = 'None';
+    clearAllBtn.addEventListener('click', () => {
+        selectedClusters.clear();
+        updateClusterVisualization();
+    });
+    
+    buttonContainer.appendChild(selectAllBtn);
+    buttonContainer.appendChild(clearAllBtn);
+    header.appendChild(buttonContainer);
+    
+    legendContainer.appendChild(header);
+    
+    // Create legend items container with scrolling - match plot height
     const itemsContainer = document.createElement('div');
-    itemsContainer.className = 'space-y-2 max-h-[600px] overflow-y-auto pr-2';
+    itemsContainer.className = 'space-y-2 overflow-y-auto pr-2';
+    itemsContainer.style.maxHeight = '550px'; // Adjust for header height
     
     sortedClusterEntries.forEach(([clusterId, clusterPoints], idx) => {
         const paperCount = clusterPoints.length;
         const clusterColor = PLOTLY_COLORS[idx % PLOTLY_COLORS.length];
         const label = getClusterLabelWithCount(clusterId, labels, paperCount);
+        const isSelected = selectedClusters.has(String(clusterId));
         
         // Create legend item
         const item = document.createElement('div');
-        item.className = 'flex items-center gap-2 p-2 rounded hover:bg-gray-50 cursor-pointer transition-colors';
-        item.title = `Click to filter to ${label}`;
+        item.className = 'flex items-center gap-2 p-2 rounded cursor-pointer transition-all';
+        item.style.opacity = isSelected ? '1' : '0.4';
+        item.style.backgroundColor = isSelected ? 'rgb(249 250 251)' : 'transparent';
+        item.title = `Click to ${isSelected ? 'deselect' : 'select'} ${label}`;
+        item.dataset.clusterId = clusterId;
         
         // Color box
         const colorBox = document.createElement('div');
@@ -287,12 +339,26 @@ function createCustomLegend(sortedClusterEntries, labels) {
         item.appendChild(colorBox);
         item.appendChild(labelText);
         
-        // Add click handler to filter to this cluster
+        // Add click handler for multi-select
         item.addEventListener('click', () => {
-            const clusterFilter = document.getElementById('cluster-filter');
-            if (clusterFilter) {
-                clusterFilter.value = clusterId;
-                filterClusterPlot();
+            const clusterIdStr = String(clusterId);
+            if (selectedClusters.has(clusterIdStr)) {
+                selectedClusters.delete(clusterIdStr);
+            } else {
+                selectedClusters.add(clusterIdStr);
+            }
+            updateClusterVisualization();
+        });
+        
+        // Hover effect
+        item.addEventListener('mouseenter', () => {
+            if (!selectedClusters.has(String(clusterId))) {
+                item.style.backgroundColor = 'rgb(243 244 246)';
+            }
+        });
+        item.addEventListener('mouseleave', () => {
+            if (!selectedClusters.has(String(clusterId))) {
+                item.style.backgroundColor = 'transparent';
             }
         });
         
@@ -303,105 +369,51 @@ function createCustomLegend(sortedClusterEntries, labels) {
 }
 
 /**
- * Create legend for filtered (single cluster) view
- * @param {string} clusterId - Cluster ID
- * @param {string} label - Cluster label with count
- * @param {string} color - Cluster color
- * @param {number} paperCount - Number of papers in cluster
+ * Update cluster visualization based on selected clusters
  */
-function createFilteredLegend(clusterId, label, color, paperCount) {
-    const legendContainer = document.getElementById('cluster-legend');
-    if (!legendContainer) return;
-    
-    // Clear existing legend
-    legendContainer.innerHTML = '';
-    
-    // Create legend title
-    const title = document.createElement('h4');
-    title.className = 'text-sm font-semibold text-gray-700 mb-3';
-    title.textContent = 'Filtered View';
-    legendContainer.appendChild(title);
-    
-    // Create single legend item
-    const item = document.createElement('div');
-    item.className = 'flex items-center gap-2 p-2 rounded bg-gray-50';
-    
-    // Color box
-    const colorBox = document.createElement('div');
-    colorBox.className = 'w-4 h-4 rounded flex-shrink-0';
-    colorBox.style.backgroundColor = color;
-    
-    // Label text
-    const labelText = document.createElement('span');
-    labelText.className = 'text-sm text-gray-700 flex-1';
-    labelText.textContent = label;
-    
-    item.appendChild(colorBox);
-    item.appendChild(labelText);
-    legendContainer.appendChild(item);
-    
-    // Add "Show All Clusters" button
-    const showAllBtn = document.createElement('button');
-    showAllBtn.className = 'mt-4 w-full px-3 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors';
-    showAllBtn.textContent = 'Show All Clusters';
-    showAllBtn.addEventListener('click', () => {
-        const clusterFilter = document.getElementById('cluster-filter');
-        if (clusterFilter) {
-            clusterFilter.value = '';
-            filterClusterPlot();
-        }
-    });
-    legendContainer.appendChild(showAllBtn);
-}
-
-/**
- * Filter cluster plot by selected cluster
- */
-export function filterClusterPlot() {
-    const selectedCluster = document.getElementById('cluster-filter').value;
-    
+function updateClusterVisualization() {
     if (!clusterData || !clusterData.points) return;
     
-    const labels = clusterData.cluster_labels || {};
+    const points = clusterData.points;
     const centers = clusterData.cluster_centers || {};
+    const labels = clusterData.cluster_labels || {};
     
-    if (selectedCluster === '') {
-        // Show all clusters
-        visualizeClusters();
-    } else {
-        // Filter to selected cluster
-        const filteredPoints = clusterData.points.filter(p => 
-            String(p.cluster) === selectedCluster
-        );
+    // Group points by cluster
+    const clusterGroups = {};
+    points.forEach(point => {
+        const cluster = point.cluster;
+        if (!clusterGroups[cluster]) {
+            clusterGroups[cluster] = [];
+        }
+        clusterGroups[cluster].push(point);
+    });
+    
+    // Sort clusters
+    const sortedClusterEntries = sortClustersBySizeDesc(Object.entries(clusterGroups));
+    
+    // If no clusters selected, show all
+    const clustersToShow = selectedClusters.size === 0 
+        ? new Set(sortedClusterEntries.map(([id]) => String(id)))
+        : selectedClusters;
+    
+    // Create traces for selected clusters
+    const traces = [];
+    sortedClusterEntries.forEach(([clusterId, clusterPoints], idx) => {
+        const clusterIdStr = String(clusterId);
+        if (!clustersToShow.has(clusterIdStr)) return;
         
-        // Get the cluster index to use the same color as in the full view
-        const clusterGroups = {};
-        clusterData.points.forEach(point => {
-            const cluster = point.cluster;
-            if (!clusterGroups[cluster]) {
-                clusterGroups[cluster] = [];
-            }
-            clusterGroups[cluster].push(point);
-        });
-        
-        // Sort clusters by size (descending), then by ID (ascending) as tiebreaker
-        const sortedClusterIds = sortClustersBySizeDesc(Object.entries(clusterGroups))
-            .map(([id]) => id);
-        
-        const clusterIndex = sortedClusterIds.indexOf(String(selectedCluster));
-        const clusterColor = PLOTLY_COLORS[clusterIndex % PLOTLY_COLORS.length];
-        
-        const paperCount = filteredPoints.length;
-        const label = getClusterLabelWithCount(selectedCluster, labels, paperCount);
+        const paperCount = clusterPoints.length;
+        const clusterColor = PLOTLY_COLORS[idx % PLOTLY_COLORS.length];
+        const label = getClusterLabelWithCount(clusterId, labels, paperCount);
         
         const trace = {
-            x: filteredPoints.map(p => p.x),
-            y: filteredPoints.map(p => p.y),
+            x: clusterPoints.map(p => p.x),
+            y: clusterPoints.map(p => p.y),
             mode: 'markers',
             type: 'scatter',
             name: label,
-            text: filteredPoints.map(p => p.title || p.id),
-            customdata: filteredPoints.map(p => ({
+            text: clusterPoints.map(p => p.title || p.id),
+            customdata: clusterPoints.map(p => ({
                 id: p.id,
                 title: p.title || '',
                 year: p.year || '',
@@ -410,22 +422,24 @@ export function filterClusterPlot() {
             })),
             marker: {
                 color: clusterColor,
-                size: 10,
-                opacity: 0.8,
+                size: 8,
+                opacity: 0.7,
                 line: {
                     color: 'white',
                     width: 1
                 }
             },
             hovertemplate: '<b>%{text}</b><br>' +
+                          'Cluster: ' + label + '<br>' +
                           'Year: %{customdata.year}<br>' +
                           'Conference: %{customdata.conference}<br>' +
                           '<extra></extra>'
         };
         
+        traces.push(trace);
+        
         // Add cluster center if available
-        const traces = [trace];
-        const center = centers[selectedCluster];
+        const center = centers[clusterId];
         if (center) {
             const centerTrace = {
                 x: [center.x],
@@ -436,7 +450,7 @@ export function filterClusterPlot() {
                 marker: {
                     color: clusterColor,
                     symbol: 'star',
-                    size: 20,
+                    size: 15,
                     opacity: 1.0,
                     line: {
                         color: 'white',
@@ -450,62 +464,72 @@ export function filterClusterPlot() {
             };
             traces.push(centerTrace);
         }
-        
-        const layout = {
-            title: `${label} (${filteredPoints.length} papers)`,
-            xaxis: {
-                title: '',  // Remove axis label
-                zeroline: false,
-                showgrid: false,  // Remove grid
-                showticklabels: false,  // Remove tick labels
-                ticks: ''  // Remove ticks
-            },
-            yaxis: {
-                title: '',  // Remove axis label
-                zeroline: false,
-                showgrid: false,  // Remove grid
-                showticklabels: false,  // Remove tick labels
-                ticks: ''  // Remove ticks
-            },
-            hovermode: 'closest',
-            showlegend: false,
-            plot_bgcolor: 'white',  // White background
-            paper_bgcolor: 'white',
-            hoverlabel: {
-                namelength: -1,
-                align: 'left'
-            }
-        };
-        
-        const config = {
-            responsive: true,
-            displayModeBar: true,
-            displaylogo: false,
-            scrollZoom: true
-        };
-        
-        // Clear the loading spinner before creating the plot
-        const plotElement = document.getElementById('cluster-plot');
-        plotElement.innerHTML = '';
-        
-        // Create filtered plot
-        Plotly.newPlot('cluster-plot', traces, layout, config).then(function() {
-            Plotly.relayout('cluster-plot', {
-                'xaxis.fixedrange': false,
-                'yaxis.fixedrange': false
-            });
+    });
+    
+    // Update plot with new data
+    const layout = {
+        title: selectedClusters.size > 0 && selectedClusters.size < sortedClusterEntries.length
+            ? `Clusters (${selectedClusters.size} selected)`
+            : 'All Clusters',
+        xaxis: {
+            title: '',
+            zeroline: false,
+            showgrid: false,
+            showticklabels: false,
+            ticks: ''
+        },
+        yaxis: {
+            title: '',
+            zeroline: false,
+            showgrid: false,
+            showticklabels: false,
+            ticks: ''
+        },
+        hovermode: 'closest',
+        showlegend: false,
+        plot_bgcolor: 'white',
+        paper_bgcolor: 'white',
+        margin: { l: 50, r: 50, t: 50, b: 50 },
+        hoverlabel: {
+            namelength: -1,
+            align: 'left'
+        }
+    };
+    
+    const config = {
+        responsive: true,
+        displayModeBar: true,
+        displaylogo: false,
+        scrollZoom: true
+    };
+    
+    // Clear and recreate plot
+    const plotElement = document.getElementById('cluster-plot');
+    plotElement.innerHTML = '';
+    
+    Plotly.newPlot('cluster-plot', traces, layout, config).then(function() {
+        Plotly.relayout('cluster-plot', {
+            'xaxis.fixedrange': false,
+            'yaxis.fixedrange': false
         });
-        
-        // Update custom legend for filtered view
-        createFilteredLegend(selectedCluster, label, clusterColor, paperCount);
-        
-        // Re-add click handler
-        document.getElementById('cluster-plot').on('plotly_click', function(data) {
-            const point = data.points[0];
-            const customdata = point.customdata;
-            showClusterPaperDetails(customdata.id, customdata);
-        });
-    }
+    });
+    
+    // Re-add click handler
+    document.getElementById('cluster-plot').on('plotly_click', function(data) {
+        const point = data.points[0];
+        const customdata = point.customdata;
+        showClusterPaperDetails(customdata.id, customdata);
+    });
+    
+    // Update legend to reflect selection state
+    const legendItems = document.querySelectorAll('#cluster-legend [data-cluster-id]');
+    legendItems.forEach(item => {
+        const clusterId = item.dataset.clusterId;
+        const isSelected = selectedClusters.has(String(clusterId));
+        item.style.opacity = isSelected ? '1' : '0.4';
+        item.style.backgroundColor = isSelected ? 'rgb(249 250 251)' : 'transparent';
+        item.title = `Click to ${isSelected ? 'deselect' : 'select'} ${item.querySelector('span').textContent}`;
+    });
 }
 
 /**
@@ -695,7 +719,6 @@ export async function applyClusterSettings() {
         }
         
         updateClusterStats();
-        populateClusterFilter();
         visualizeClusters();
         
     } catch (error) {
@@ -748,35 +771,6 @@ export function updateClusterStats() {
     }
     
     statsDiv.innerHTML = statsHTML;
-}
-
-/**
- * Populate cluster filter dropdown
- */
-export function populateClusterFilter() {
-    if (!clusterData || !clusterData.statistics) return;
-    
-    const select = document.getElementById('cluster-filter');
-    const stats = clusterData.statistics;
-    const labels = clusterData.cluster_labels || {};
-    
-    select.innerHTML = '<option value="">All Clusters</option>';
-    
-    const sortedClusters = sortClustersBySizeDesc(Object.entries(stats.cluster_sizes));
-    
-    sortedClusters.forEach(([clusterId, size]) => {
-        const option = document.createElement('option');
-        option.value = clusterId;
-        option.textContent = `${getClusterLabelWithCount(clusterId, labels, size)} papers`;
-        select.appendChild(option);
-    });
-    
-    if (stats.n_noise > 0) {
-        const option = document.createElement('option');
-        option.value = '-1';
-        option.textContent = `Noise (-1) (${stats.n_noise} papers)`;
-        select.appendChild(option);
-    }
 }
 
 /**

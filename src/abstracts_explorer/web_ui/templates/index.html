@@ -538,17 +538,10 @@
                 </div>
             </div>
 
-            <!-- Cluster Controls -->
+            <!-- Cluster Stats -->
             <div class="bg-white rounded-lg shadow-md p-4 mb-6">
                 <div class="flex items-center justify-between gap-4">
                     <div class="flex items-center gap-4 flex-wrap">
-                        <div>
-                            <label class="text-sm font-medium text-gray-700 mr-2">Filter by Cluster:</label>
-                            <select id="cluster-filter" onchange="filterClusterPlot()"
-                                class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-600">
-                                <option value="">All Clusters</option>
-                            </select>
-                        </div>
                         <div id="cluster-stats" class="text-sm text-gray-600">
                             <!-- Stats will be dynamically populated -->
                         </div>
@@ -566,7 +559,7 @@
                             <p class="text-sm mt-2">This may take a moment</p>
                         </div>
                     </div>
-                    <div id="cluster-legend" class="lg:w-64 w-full"></div>
+                    <div id="cluster-legend" class="lg:w-64 w-full" style="min-height: 600px;"></div>
                 </div>
             </div>
 
