@@ -27,7 +27,6 @@ import {
 } from './modules/interesting-papers.js';
 import {
     loadClusters,
-    filterClusterPlot,
     openClusterSettings,
     closeClusterSettings,
     applyClusterSettings,
@@ -128,7 +127,6 @@ function attachToWindow() {
 
     // Clustering module
     window.loadClusters = loadClusters;
-    window.filterClusterPlot = filterClusterPlot;
     window.openClusterSettings = openClusterSettings;
     window.closeClusterSettings = closeClusterSettings;
     window.applyClusterSettings = applyClusterSettings;
