@@ -4,7 +4,7 @@
  * Handles cluster visualization, analysis, and management using Plotly.
  */
 
-import { PLOTLY_COLORS } from './utils/constants.js';
+import { API_BASE, PLOTLY_COLORS } from './utils/constants.js';
 import { escapeHtml } from './utils/dom-utils.js';
 import { showLoading, showErrorInElement } from './utils/ui-utils.js';
 import { sortClustersBySizeDesc } from './utils/sort-utils.js';
@@ -32,12 +32,12 @@ export async function loadClusters() {
         showLoading('cluster-plot', 'Loading clusters...');
         
         // Try to load cached clusters first
-        let response = await fetch('/api/clusters/cached');
+        let response = await fetch(`${API_BASE}/api/clusters/cached`);
         
         if (!response.ok) {
             // If no cache, compute on demand
             console.log('No cached clusters found, computing...');
-            response = await fetch('/api/clusters/compute', {
+            response = await fetch(`${API_BASE}/api/clusters/compute`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(currentClusterConfig)
@@ -420,7 +420,7 @@ export async function showClusterPaperDetails(paperId, basicInfo) {
     
     // Fetch full paper details
     try {
-        const response = await fetch(`/api/paper/${paperId}`);
+        const response = await fetch(`${API_BASE}/api/paper/${paperId}`);
         if (response.ok) {
             const paper = await response.json();
             
@@ -545,7 +545,7 @@ export async function applyClusterSettings() {
     showLoading('cluster-plot', 'Recomputing clusters with new settings...');
     
     try {
-        const response = await fetch('/api/clusters/compute', {
+        const response = await fetch(`${API_BASE}/api/clusters/compute`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(currentClusterConfig)
