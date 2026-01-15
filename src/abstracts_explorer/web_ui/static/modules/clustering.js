@@ -182,27 +182,35 @@ export function visualizeClusters() {
     const layout = {
         title: 'Paper Embeddings Clusters',
         xaxis: {
-            title: 'Component 1',
-            zeroline: false
+            title: '',  // Remove axis label
+            zeroline: false,
+            showgrid: false,  // Remove grid
+            showticklabels: false,  // Remove tick labels
+            ticks: ''  // Remove ticks
         },
         yaxis: {
-            title: 'Component 2',
-            zeroline: false
+            title: '',  // Remove axis label
+            zeroline: false,
+            showgrid: false,  // Remove grid
+            showticklabels: false,  // Remove tick labels
+            ticks: ''  // Remove ticks
         },
         hovermode: 'closest',
         showlegend: true,
         legend: {
-            orientation: 'v',
-            x: 1.02,
-            y: 1
+            orientation: 'h',  // Horizontal orientation
+            x: 0.5,  // Center horizontally
+            xanchor: 'center',
+            y: -0.15,  // Position below the plot
+            yanchor: 'top'
         },
-        plot_bgcolor: '#f8f9fa',
+        plot_bgcolor: 'white',  // White background
         paper_bgcolor: 'white',
         margin: {
             l: 50,
-            r: 150,
+            r: 50,
             t: 50,
-            b: 50
+            b: 120  // Increase bottom margin for legend
         },
         hoverlabel: {
             namelength: -1,
@@ -339,16 +347,22 @@ export function filterClusterPlot() {
         const layout = {
             title: `${label} (${filteredPoints.length} papers)`,
             xaxis: {
-                title: 'Component 1',
-                zeroline: false
+                title: '',  // Remove axis label
+                zeroline: false,
+                showgrid: false,  // Remove grid
+                showticklabels: false,  // Remove tick labels
+                ticks: ''  // Remove ticks
             },
             yaxis: {
-                title: 'Component 2',
-                zeroline: false
+                title: '',  // Remove axis label
+                zeroline: false,
+                showgrid: false,  // Remove grid
+                showticklabels: false,  // Remove tick labels
+                ticks: ''  // Remove ticks
             },
             hovermode: 'closest',
             showlegend: false,
-            plot_bgcolor: '#f8f9fa',
+            plot_bgcolor: 'white',  // White background
             paper_bgcolor: 'white',
             hoverlabel: {
                 namelength: -1,
