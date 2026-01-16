@@ -53,9 +53,11 @@ This workflow follows container image tagging best practices:
 The workflow automatically cleans up old container images:
 
 1. **Untagged images**: Deleted immediately after new build
-2. **Old branch images**: Deleted after 7 days
-3. **Protected tags**: Never deleted (latest, main, develop, release versions)
+2. **Old images (including SHA tags)**: Deleted after 7 days
+3. **Protected tags**: Never deleted (latest, main, develop, release versions like v*.*.*)
 4. **Minimum kept**: Always keeps at least 10 most recent versions
+
+**Note**: SHA tags (`sha-*`) are cleaned up after 7 days since they're primarily for debugging and development. For long-term reproducibility, use release version tags (`v*.*.*`).
 
 ## Required Secrets
 
