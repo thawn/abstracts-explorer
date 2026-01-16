@@ -90,6 +90,7 @@ export function visualizeClusters() {
     
     const points = clusterData.points;
     const centers = clusterData.cluster_centers || {};
+    const is3D = clusterData.n_dimensions === 3;
     
     // Group points by cluster
     const clusterGroups = {};
@@ -126,7 +127,7 @@ export function visualizeClusters() {
             x: clusterPoints.map(p => p.x),
             y: clusterPoints.map(p => p.y),
             mode: 'markers',
-            type: 'scatter',
+            type: is3D ? 'scatter3d' : 'scatter',
             name: label,
             text: clusterPoints.map(p => p.title || p.id),
             customdata: clusterPoints.map(p => ({
@@ -138,11 +139,11 @@ export function visualizeClusters() {
             })),
             marker: {
                 color: clusterColor,
-                size: 8,
+                size: is3D ? 4 : 8,
                 opacity: 0.7,
                 line: {
                     color: 'white',
-                    width: 0.5
+                    width: is3D ? 0.2 : 0.5
                 }
             },
             hovertemplate: '<b>%{text}</b><br>' +
@@ -151,6 +152,12 @@ export function visualizeClusters() {
                           '<extra></extra>',
             legendgroup: `cluster-${clusterId}`
         };
+        
+        // Add z-coordinates for 3D
+        if (is3D) {
+            pointsTrace.z = clusterPoints.map(p => p.z || 0);
+        }
+        
         traces.push(pointsTrace);
         
         // Add cluster center as star marker with same color
@@ -160,12 +167,12 @@ export function visualizeClusters() {
                 x: [center.x],
                 y: [center.y],
                 mode: 'markers',
-                type: 'scatter',
+                type: is3D ? 'scatter3d' : 'scatter',
                 name: `${label} (center)`,
                 marker: {
                     color: clusterColor,
-                    symbol: 'star',
-                    size: 16,
+                    symbol: is3D ? 'diamond' : 'star',
+                    size: is3D ? 8 : 16,
                     opacity: 1.0,
                     line: {
                         color: 'white',
@@ -178,36 +185,28 @@ export function visualizeClusters() {
                 showlegend: false,
                 legendgroup: `cluster-${clusterId}`
             };
+            
+            // Add z-coordinate for 3D
+            if (is3D) {
+                centerTrace.z = [center.z || 0];
+            }
+            
             traces.push(centerTrace);
         }
     });
     
     // Layout configuration
     const layout = {
-        title: 'All Clusters',
-        xaxis: {
-            title: '',  // Remove axis label
-            zeroline: false,
-            showgrid: false,  // Remove grid
-            showticklabels: false,  // Remove tick labels
-            ticks: ''  // Remove ticks
-        },
-        yaxis: {
-            title: '',  // Remove axis label
-            zeroline: false,
-            showgrid: false,  // Remove grid
-            showticklabels: false,  // Remove tick labels
-            ticks: ''  // Remove ticks
-        },
+        title: is3D ? 'All Clusters (3D)' : 'All Clusters',
         hovermode: 'closest',
         showlegend: false,  // Hide built-in legend, we'll create custom one
-        plot_bgcolor: 'white',  // White background
+        plot_bgcolor: 'white',
         paper_bgcolor: 'white',
         margin: {
             l: 50,
             r: 50,
             t: 50,
-            b: 50  // Standard bottom margin
+            b: 50
         },
         hoverlabel: {
             namelength: -1,
@@ -215,11 +214,56 @@ export function visualizeClusters() {
         }
     };
     
+    // Configure axes based on dimensionality
+    if (is3D) {
+        layout.scene = {
+            xaxis: {
+                title: '',
+                zeroline: false,
+                showgrid: false,
+                showticklabels: false,
+                showspikes: false
+            },
+            yaxis: {
+                title: '',
+                zeroline: false,
+                showgrid: false,
+                showticklabels: false,
+                showspikes: false
+            },
+            zaxis: {
+                title: '',
+                zeroline: false,
+                showgrid: false,
+                showticklabels: false,
+                showspikes: false
+            },
+            camera: {
+                eye: { x: 1.5, y: 1.5, z: 1.5 }
+            }
+        };
+    } else {
+        layout.xaxis = {
+            title: '',
+            zeroline: false,
+            showgrid: false,
+            showticklabels: false,
+            ticks: ''
+        };
+        layout.yaxis = {
+            title: '',
+            zeroline: false,
+            showgrid: false,
+            showticklabels: false,
+            ticks: ''
+        };
+    }
+    
     // Config
     const config = {
         responsive: true,
         displayModeBar: true,
-        modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+        modeBarButtonsToRemove: is3D ? ['lasso2d', 'select2d'] : ['lasso2d', 'select2d'],
         displaylogo: false,
         scrollZoom: true
     };
@@ -230,10 +274,12 @@ export function visualizeClusters() {
     
     // Create plot
     Plotly.newPlot('cluster-plot', traces, layout, config).then(function() {
-        Plotly.relayout('cluster-plot', {
-            'xaxis.fixedrange': false,
-            'yaxis.fixedrange': false
-        });
+        if (!is3D) {
+            Plotly.relayout('cluster-plot', {
+                'xaxis.fixedrange': false,
+                'yaxis.fixedrange': false
+            });
+        }
     });
     
     // Create custom legend in separate container
@@ -375,6 +421,7 @@ function updateClusterVisualization() {
     const points = clusterData.points;
     const centers = clusterData.cluster_centers || {};
     const labels = clusterData.cluster_labels || {};
+    const is3D = clusterData.n_dimensions === 3;
     
     // Group points by cluster
     const clusterGroups = {};
@@ -408,7 +455,7 @@ function updateClusterVisualization() {
             x: clusterPoints.map(p => p.x),
             y: clusterPoints.map(p => p.y),
             mode: 'markers',
-            type: 'scatter',
+            type: is3D ? 'scatter3d' : 'scatter',
             name: label,
             text: clusterPoints.map(p => p.title || p.id),
             customdata: clusterPoints.map(p => ({
@@ -420,11 +467,11 @@ function updateClusterVisualization() {
             })),
             marker: {
                 color: clusterColor,
-                size: 8,
+                size: is3D ? 4 : 8,
                 opacity: 0.7,
                 line: {
                     color: 'white',
-                    width: 1
+                    width: is3D ? 0.2 : 1
                 }
             },
             hovertemplate: '<b>%{text}</b><br>' +
@@ -433,6 +480,11 @@ function updateClusterVisualization() {
                           'Conference: %{customdata.conference}<br>' +
                           '<extra></extra>'
         };
+        
+        // Add z-coordinates for 3D
+        if (is3D) {
+            trace.z = clusterPoints.map(p => p.z || 0);
+        }
         
         traces.push(trace);
         
@@ -443,12 +495,12 @@ function updateClusterVisualization() {
                 x: [center.x],
                 y: [center.y],
                 mode: 'markers',
-                type: 'scatter',
+                type: is3D ? 'scatter3d' : 'scatter',
                 name: 'Center',
                 marker: {
                     color: clusterColor,
-                    symbol: 'star',
-                    size: 15,
+                    symbol: is3D ? 'diamond' : 'star',
+                    size: is3D ? 8 : 15,
                     opacity: 1.0,
                     line: {
                         color: 'white',
@@ -460,6 +512,12 @@ function updateClusterVisualization() {
                               '<extra></extra>',
                 showlegend: false
             };
+            
+            // Add z-coordinate for 3D
+            if (is3D) {
+                centerTrace.z = [center.z || 0];
+            }
+            
             traces.push(centerTrace);
         }
     });
@@ -467,22 +525,8 @@ function updateClusterVisualization() {
     // Update plot with new data
     const layout = {
         title: selectedClusters.size > 0 && selectedClusters.size < sortedClusterEntries.length
-            ? `Clusters (${selectedClusters.size} selected)`
-            : 'All Clusters',
-        xaxis: {
-            title: '',
-            zeroline: false,
-            showgrid: false,
-            showticklabels: false,
-            ticks: ''
-        },
-        yaxis: {
-            title: '',
-            zeroline: false,
-            showgrid: false,
-            showticklabels: false,
-            ticks: ''
-        },
+            ? (is3D ? `Clusters (${selectedClusters.size} selected, 3D)` : `Clusters (${selectedClusters.size} selected)`)
+            : (is3D ? 'All Clusters (3D)' : 'All Clusters'),
         hovermode: 'closest',
         showlegend: false,
         plot_bgcolor: 'white',
@@ -493,6 +537,51 @@ function updateClusterVisualization() {
             align: 'left'
         }
     };
+    
+    // Configure axes based on dimensionality
+    if (is3D) {
+        layout.scene = {
+            xaxis: {
+                title: '',
+                zeroline: false,
+                showgrid: false,
+                showticklabels: false,
+                showspikes: false
+            },
+            yaxis: {
+                title: '',
+                zeroline: false,
+                showgrid: false,
+                showticklabels: false,
+                showspikes: false
+            },
+            zaxis: {
+                title: '',
+                zeroline: false,
+                showgrid: false,
+                showticklabels: false,
+                showspikes: false
+            },
+            camera: {
+                eye: { x: 1.5, y: 1.5, z: 1.5 }
+            }
+        };
+    } else {
+        layout.xaxis = {
+            title: '',
+            zeroline: false,
+            showgrid: false,
+            showticklabels: false,
+            ticks: ''
+        };
+        layout.yaxis = {
+            title: '',
+            zeroline: false,
+            showgrid: false,
+            showticklabels: false,
+            ticks: ''
+        };
+    }
     
     const config = {
         responsive: true,
@@ -506,10 +595,12 @@ function updateClusterVisualization() {
     plotElement.innerHTML = '';
     
     Plotly.newPlot('cluster-plot', traces, layout, config).then(function() {
-        Plotly.relayout('cluster-plot', {
-            'xaxis.fixedrange': false,
-            'yaxis.fixedrange': false
-        });
+        if (!is3D) {
+            Plotly.relayout('cluster-plot', {
+                'xaxis.fixedrange': false,
+                'yaxis.fixedrange': false
+            });
+        }
     });
     
     // Re-add click handler
@@ -627,6 +718,14 @@ export function openClusterSettings() {
                         </select>
                     </div>
                     <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Visualization Dimensions</label>
+                        <select id="cluster-n-components" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                            <option value="2" ${currentClusterConfig.n_components === 2 ? 'selected' : ''}>2D</option>
+                            <option value="3" ${currentClusterConfig.n_components === 3 ? 'selected' : ''}>3D</option>
+                        </select>
+                        <p class="text-xs text-gray-500 mt-1">Choose 3D for more detailed clustering visualization</p>
+                    </div>
+                    <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Clustering Method</label>
                         <select id="cluster-method" class="w-full px-4 py-2 border border-gray-300 rounded-lg" onchange="toggleClusterParams()">
                             <option value="kmeans" ${currentClusterConfig.clustering_method === 'kmeans' ? 'selected' : ''}>K-Means</option>
@@ -687,6 +786,7 @@ export async function applyClusterSettings() {
     // Get settings from modal
     currentClusterConfig = {
         reduction_method: document.getElementById('cluster-reduction-method').value,
+        n_components: parseInt(document.getElementById('cluster-n-components').value) || 2,
         clustering_method: document.getElementById('cluster-method').value,
         n_clusters: parseInt(document.getElementById('cluster-n-clusters').value) || 5,
         eps: parseFloat(document.getElementById('cluster-eps').value) || 0.5,

@@ -83,6 +83,18 @@ class TestClusteringManager:
         assert reduced.shape == (10, 2)
         assert cm.reduced_embeddings is not None
 
+    def test_reduce_dimensions_3d(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test 3D dimensionality reduction with PCA."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        
+        reduced = cm.reduce_dimensions(method='pca', n_components=3)
+        
+        assert reduced.shape == (10, 3)
+        assert cm.reduced_embeddings is not None
+        assert cm.reduced_embeddings.shape == (10, 3)
+
     def test_reduce_dimensions_invalid_method(self, mock_embeddings_manager, mock_collection_with_data):
         """Test invalid dimensionality reduction method."""
         mock_embeddings_manager.collection = mock_collection_with_data
@@ -194,6 +206,42 @@ class TestClusteringManager:
             assert 'y' in center
             assert isinstance(center['x'], (int, float))
             assert isinstance(center['y'], (int, float))
+
+    def test_get_clustering_results_3d(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test getting complete clustering results with 3D visualization."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        # Cluster first, then reduce to 3D for visualization
+        cm.cluster(method='kmeans', n_clusters=3, use_reduced=False)
+        cm.reduce_dimensions(method='pca', n_components=3)
+        
+        results = cm.get_clustering_results()
+        
+        assert 'points' in results
+        assert 'statistics' in results
+        assert 'n_dimensions' in results
+        assert 'cluster_centers' in results
+        assert len(results['points']) == 10
+        assert results['n_dimensions'] == 3
+        
+        # Verify points have z-coordinates
+        for point in results['points']:
+            assert 'x' in point
+            assert 'y' in point
+            assert 'z' in point
+            assert isinstance(point['x'], (int, float))
+            assert isinstance(point['y'], (int, float))
+            assert isinstance(point['z'], (int, float))
+        
+        # Verify cluster centers have z-coordinates
+        for cluster_id, center in results['cluster_centers'].items():
+            assert 'x' in center
+            assert 'y' in center
+            assert 'z' in center
+            assert isinstance(center['x'], (int, float))
+            assert isinstance(center['y'], (int, float))
+            assert isinstance(center['z'], (int, float))
 
     def test_export_to_json(self, mock_embeddings_manager, mock_collection_with_data, tmp_path):
         """Test exporting clustering results to JSON."""
