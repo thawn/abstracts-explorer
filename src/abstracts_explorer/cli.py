@@ -632,15 +632,15 @@ def web_ui_command(args: argparse.Namespace) -> int:
             from abstracts_explorer.web_ui import run_server
         except ImportError:
             print("\n❌ Web UI dependencies not installed!", file=sys.stderr)
-            print("\nThe web UI requires Flask. Install it with:", file=sys.stderr)
-            print("  pip install neurips-abstracts[web]", file=sys.stderr)
+            print("\nThe web UI requires Waitress and Flask. Install them with:", file=sys.stderr)
+            print("  uv sync --extra web", file=sys.stderr)
             print("\nOr install Flask manually:", file=sys.stderr)
             print("  pip install flask flask-cors", file=sys.stderr)
             return 1
 
         # Determine debug mode from verbosity level (2+ = DEBUG)
         debug = getattr(args, 'verbose', 0) >= 2
-        
+
         # Start the server (dev defaults to False for production server)
         run_server(host=args.host, port=args.port, debug=debug, dev=getattr(args, 'dev', False))
         return 0
