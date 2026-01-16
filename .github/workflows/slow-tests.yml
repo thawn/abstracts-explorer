@@ -3,8 +3,30 @@ name: Slow Tests
 on:
     push:
         branches: [main, develop]
+        paths:
+            - 'src/**/*.py'
+            - 'tests/**/*.py'
+            - 'src/abstracts_explorer/web_ui/static/**/*.js'
+            - 'src/abstracts_explorer/web_ui/templates/**'
+            - 'pyproject.toml'
+            - 'uv.lock'
+            - 'package.json'
+            - 'package-lock.json'
+            - '.github/workflows/slow-tests.yml'
+            - '.github/scripts/setup-ci.sh'
     pull_request:
         branches: [main, develop]
+        paths:
+            - 'src/**/*.py'
+            - 'tests/**/*.py'
+            - 'src/abstracts_explorer/web_ui/static/**/*.js'
+            - 'src/abstracts_explorer/web_ui/templates/**'
+            - 'pyproject.toml'
+            - 'uv.lock'
+            - 'package.json'
+            - 'package-lock.json'
+            - '.github/workflows/slow-tests.yml'
+            - '.github/scripts/setup-ci.sh'
     workflow_dispatch:
     schedule:
         # Run daily at 2 AM UTC

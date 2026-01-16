@@ -7,10 +7,32 @@ on:
       - develop
     tags:
       - 'v*.*.*'
+    paths:
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - '.dockerignore'
+      - 'src/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tailwind.config.js'
+      - '.github/workflows/docker.yml'
   pull_request:
     branches:
       - main
       - develop
+    paths:
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - '.dockerignore'
+      - 'src/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tailwind.config.js'
+      - '.github/workflows/docker.yml'
   workflow_dispatch:
 
 env:
