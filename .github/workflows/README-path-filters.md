@@ -79,7 +79,7 @@ Path filters have been added to all workflows to skip unnecessary runs when only
 
 **Skips when**: Only documentation or test files change
 
-**Note**: This workflow also triggers on tags (`v*.*.*`) and always runs for tag pushes regardless of paths.
+**Note**: This workflow also triggers on tags (`v*.*.*`). According to GitHub Actions behavior, path filters are ignored for tag pushes, so the workflow will always run when a version tag is pushed, ensuring releases are properly containerized.
 
 ---
 
@@ -97,11 +97,13 @@ Path filters have been added to all workflows to skip unnecessary runs when only
 - `package.json` - JavaScript dependencies
 - `package-lock.json` - JavaScript dependency lock file
 - `.github/workflows/slow-tests.yml` - The workflow itself
-- `.github/scripts/setup-ci.sh` - CI setup script
+- `.github/scripts/setup-ci.sh` - CI setup script (Unix)
+- `.github/scripts/setup-ci.ps1` - CI setup script (Windows)
+- `.github/actions/setup-environment/**` - Reusable setup action
 
 **Skips when**: Only documentation or Docker files change
 
-**Note**: This workflow also runs on a daily schedule (`cron: '0 2 * * *'`) and always runs for scheduled triggers regardless of paths.
+**Note**: This workflow also runs on a daily schedule (`cron: '0 2 * * *'`). According to GitHub Actions behavior, scheduled runs ignore path filters and always execute. Path filters are identical to `tests.yml` since both run the test suite.
 
 ---
 
@@ -116,11 +118,11 @@ All workflows retain the `workflow_dispatch` trigger, allowing manual runs regar
 
 ### Scheduled Runs
 
-The `slow-tests.yml` workflow has a scheduled trigger that runs daily at 2 AM UTC. Scheduled runs ignore path filters and always execute.
+The `slow-tests.yml` workflow has a scheduled trigger that runs daily at 2 AM UTC. According to GitHub Actions behavior, scheduled runs ignore path filters and always execute.
 
 ### Tag Pushes
 
-The `docker.yml` workflow triggers on version tags (`v*.*.*`). Tag pushes ignore path filters and always execute to ensure releases are properly containerized.
+The `docker.yml` workflow triggers on version tags (`v*.*.*`). According to GitHub Actions behavior, path filters are ignored for tag pushes, so the workflow will always execute to ensure releases are properly containerized.
 
 ## Benefits
 
