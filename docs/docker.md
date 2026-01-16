@@ -20,11 +20,14 @@ docker pull thawn/abstracts-explorer:latest
 docker run -p 5000:5000 thawn/abstracts-explorer:latest
 ```
 
-Available tags:
-- `latest` - Latest stable release or main branch
+Available tags (following container best practices):
+- `latest` - Latest stable release only (never points to branch builds)
 - `main` - Latest main branch build
 - `develop` - Latest develop branch build
 - `v*.*.*` - Specific version releases (e.g., `v0.1.0`)
+- `v*.*` - Major.minor version (e.g., `v0.1`)
+- `v*` - Major version (e.g., `v0`)
+- `sha-*` - Specific commit SHA for traceability (e.g., `sha-5f8567d`)
 
 ## Prerequisites
 
@@ -256,7 +259,7 @@ services:
 3. **Enable HTTPS** with a reverse proxy (nginx, traefik)
 4. **Set resource limits** for memory and CPU
 5. **Configure monitoring** and health checks
-6. **Use specific image tags** instead of `latest`
+6. **Use specific image tags** instead of `latest` (e.g., `v1.0.0` or `sha-5f8567d` for precise version control)
 
 ### Example Production Settings
 ```yaml

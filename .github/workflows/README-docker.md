@@ -26,26 +26,38 @@ The workflow runs on:
 
 ## Image Tags
 
-The workflow creates the following tags:
+The workflow creates the following tags following best practices:
 
-| Tag Pattern | When Created | Example |
-|-------------|--------------|---------|
-| `latest` | Main branch and releases | `latest` |
-| `main` | Main branch | `main` |
-| `develop` | Develop branch | `develop` |
-| `v*.*.*` | Release tags | `v1.0.0` |
-| `v*.*` | Release tags | `v1.0` |
-| `v*` | Release tags | `v1` |
-| `pr-*` | Pull requests | `pr-123` |
+| Tag Pattern | When Created | Example | Notes |
+|-------------|--------------|---------|-------|
+| `latest` | Release tags only | `latest` | Always points to latest release |
+| `main` | Main branch | `main` | Latest main branch build |
+| `develop` | Develop branch | `develop` | Latest develop branch build |
+| `v*.*.*` | Release tags | `v1.0.0` | Full semver version |
+| `v*.*` | Release tags | `v1.0` | Major.minor version |
+| `v*` | Release tags | `v1` | Major version |
+| `sha-*` | All builds | `sha-5f8567d` | Git commit SHA (short) |
+| `pr-*` | Pull requests | `pr-123` | Pull request number |
+
+### Tagging Best Practices
+
+This workflow follows container image tagging best practices:
+
+1. **`latest` tag** - Points ONLY to the latest release, never to branch builds
+2. **Git tags** - Each git tag (`v*.*.*`) creates corresponding container tags
+3. **Git commit SHA** - Every container has a `sha-*` tag for traceability to source code
+4. **Branch tags** - Development branches have their own tags for testing
 
 ## Cleanup Policy
 
 The workflow automatically cleans up old container images:
 
 1. **Untagged images**: Deleted immediately after new build
-2. **Old branch images**: Deleted after 7 days
-3. **Protected tags**: Never deleted (latest, main, develop, release versions)
+2. **Old images (including SHA tags)**: Deleted after 7 days
+3. **Protected tags**: Never deleted (latest, main, develop, release versions like v*.*.*)
 4. **Minimum kept**: Always keeps at least 10 most recent versions
+
+**Note**: SHA tags (`sha-*`) are cleaned up after 7 days since they're primarily for debugging and development. For long-term reproducibility, use release version tags (`v*.*.*`).
 
 ## Required Secrets
 
@@ -90,7 +102,7 @@ Images are built for:
 
 ## Using Published Images
 
-### Pull and run from GHCR
+### Pull and run from GHCR (latest release)
 ```bash
 podman pull ghcr.io/thawn/abstracts-explorer:latest
 podman run -p 5000:5000 -v abstracts-data:/app/data ghcr.io/thawn/abstracts-explorer:latest
@@ -100,6 +112,13 @@ podman run -p 5000:5000 -v abstracts-data:/app/data ghcr.io/thawn/abstracts-expl
 ```bash
 docker pull thawn/abstracts-explorer:v1.0.0
 docker run -p 5000:5000 -v abstracts-data:/app/data thawn/abstracts-explorer:v1.0.0
+```
+
+### Pull specific commit (for debugging or testing)
+```bash
+# Using git SHA tag for precise version control
+docker pull ghcr.io/thawn/abstracts-explorer:sha-5f8567d
+docker run -p 5000:5000 -v abstracts-data:/app/data ghcr.io/thawn/abstracts-explorer:sha-5f8567d
 ```
 
 ### Use with docker-compose
