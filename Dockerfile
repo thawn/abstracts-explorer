@@ -17,7 +17,7 @@ COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY src/ ./src/
 
 # Install Python dependencies with uv
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --extra web
 
 
 # Stage 2: Final runtime image
