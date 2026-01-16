@@ -64,7 +64,7 @@
             animation: fadeIn 0.2s ease;
         }
 
-        #search-settings-modal > div {
+        #search-settings-modal>div {
             animation: slideDown 0.3s ease;
         }
 
@@ -72,6 +72,7 @@
             from {
                 opacity: 0;
             }
+
             to {
                 opacity: 1;
             }
@@ -82,6 +83,7 @@
                 opacity: 0;
                 transform: translateY(-20px);
             }
+
             to {
                 opacity: 1;
                 transform: translateY(0);
@@ -281,7 +283,7 @@
                     <div id="stats" class="text-right">
                         <div class="text-sm opacity-90">Loading stats...</div>
                     </div>
-                    </div>
+                </div>
             </div>
         </div>
     </header>
@@ -307,7 +309,8 @@
                         </p>
                     </div>
                 </div>
-                <button onclick="dismissEmbeddingWarning()" class="flex-shrink-0 ml-3 text-yellow-400 hover:text-yellow-600">
+                <button onclick="dismissEmbeddingWarning()"
+                    class="flex-shrink-0 ml-3 text-yellow-400 hover:text-yellow-600">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
@@ -358,7 +361,7 @@
                         <i class="fas fa-search mr-2"></i>Search
                     </button>
                 </div>
-                
+
                 <!-- Hidden filter elements for search (used by JavaScript) -->
                 <div class="hidden">
                     <select id="session-filter" multiple></select>
@@ -426,7 +429,7 @@
                                 <i class="fas fa-paper-plane"></i>
                             </button>
                         </div>
-                        
+
                         <!-- Hidden filter elements for chat (used by JavaScript) -->
                         <div class="hidden">
                             <select id="chat-session-filter" multiple></select>
@@ -450,68 +453,69 @@
                 </div>
             </div>
         </div>
-<!-- Interesting Papers Tab -->
-<div id="interesting-tab" class="tab-content hidden">
-    <div class="bg-white rounded-lg shadow-md p-6 mb-6">
-        <div class="flex justify-between items-start gap-6">
-            <!-- Left Column: Heading and Description -->
-            <div class="flex flex-col">
-                <h2 class="text-2xl font-bold text-gray-800 mb-4">
-                    <i class="fas fa-star text-yellow-400 mr-2"></i>Interesting Papers
-                </h2>
-                <p class="text-sm text-gray-600">
-                    Papers you've rated are shown here, organized by session, priority, and poster number.
-                </p>
+        <!-- Interesting Papers Tab -->
+        <div id="interesting-tab" class="tab-content hidden">
+            <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <div class="flex justify-between items-start gap-6">
+                    <!-- Left Column: Heading and Description -->
+                    <div class="flex flex-col">
+                        <h2 class="text-2xl font-bold text-gray-800 mb-4">
+                            <i class="fas fa-star text-yellow-400 mr-2"></i>Interesting Papers
+                        </h2>
+                        <p class="text-sm text-gray-600">
+                            Papers you've rated are shown here, organized by session, priority, and poster number.
+                        </p>
+                    </div>
+                    <!-- Right Column: Controls -->
+                    <div class="flex flex-col items-end space-y-4">
+                        <div class="flex items-center space-x-4">
+                            <label for="sort-order" class="text-sm text-gray-600 whitespace-nowrap">Sort by:</label>
+                            <select id="sort-order" onchange="changeInterestingPapersSortOrder(this.value)"
+                                class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-600 focus:border-transparent">
+                                <option value="search-rating-poster">Search Term → Rating → Poster #</option>
+                                <option value="rating-poster-search">Rating → Poster # → Search Term</option>
+                                <option value="poster-search-rating">Poster # → Search Term → Rating</option>
+                            </select>
+                            <button onclick="saveInterestingPapersAsMarkdown(event)"
+                                class="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 focus:ring-2 focus:ring-purple-600 focus:ring-offset-2 w-full">
+                                <i class="fas fa-download mr-2"></i>Export as Zip
+                            </button>
+                        </div>
+                        <div class="flex items-center space-x-4">
+                            <button onclick="saveInterestingPapersAsJSON()"
+                                class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-600 focus:ring-offset-2"
+                                title="Save rated papers as JSON file">
+                                <i class="fas fa-save mr-2"></i>Save JSON
+                            </button>
+                            <button onclick="loadInterestingPapersFromJSON()"
+                                class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:ring-2 focus:ring-green-600 focus:ring-offset-2"
+                                title="Load rated papers from JSON file">
+                                <i class="fas fa-upload mr-2"></i>Load JSON
+                            </button>
+                        </div>
+                    </div>
                 </div>
-                <!-- Right Column: Controls -->
-                <div class="flex flex-col items-end space-y-4">
-                <div class="flex items-center space-x-4">
-                    <label for="sort-order" class="text-sm text-gray-600 whitespace-nowrap">Sort by:</label>
-                    <select id="sort-order" onchange="changeInterestingPapersSortOrder(this.value)"
-                        class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-600 focus:border-transparent">
-                        <option value="search-rating-poster">Search Term → Rating → Poster #</option>
-                        <option value="rating-poster-search">Rating → Poster # → Search Term</option>
-                        <option value="poster-search-rating">Poster # → Search Term → Rating</option>
-                    </select>
-                    <button onclick="saveInterestingPapersAsMarkdown(event)"
-                        class="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 focus:ring-2 focus:ring-purple-600 focus:ring-offset-2 w-full">
-                        <i class="fas fa-download mr-2"></i>Export as Zip
-                    </button>
-                </div>
-                <div class="flex items-center space-x-4">
-                    <button onclick="saveInterestingPapersAsJSON()"
-                        class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-600 focus:ring-offset-2"
-                        title="Save rated papers as JSON file">
-                        <i class="fas fa-save mr-2"></i>Save JSON
-                    </button>
-                    <button onclick="loadInterestingPapersFromJSON()"
-                        class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:ring-2 focus:ring-green-600 focus:ring-offset-2"
-                        title="Load rated papers from JSON file">
-                        <i class="fas fa-upload mr-2"></i>Load JSON
-                    </button>
-                </div>
-                </div>
-        </div>
-    </div>
+            </div>
 
-    <!-- Session Sub-tabs -->
-    <div id="interesting-session-tabs" class="bg-white rounded-lg shadow-md mb-6">
-        <div class="flex border-b border-gray-200 overflow-x-auto" id="interesting-session-tabs-nav">
-            <!-- Sub-tabs will be dynamically generated -->
-        </div>
-    </div>
+            <!-- Session Sub-tabs -->
+            <div id="interesting-session-tabs" class="bg-white rounded-lg shadow-md mb-6">
+                <div class="flex border-b border-gray-200 overflow-x-auto" id="interesting-session-tabs-nav">
+                    <!-- Sub-tabs will be dynamically generated -->
+                </div>
+            </div>
 
-    <!-- Interesting Papers List -->
-    <div id="interesting-papers-list">
-        <div class="text-center text-gray-500 py-12">
-            <i class="fas fa-star text-6xl mb-4 opacity-20"></i>
-            <p class="text-lg">No papers rated yet</p>
-            <p class="text-sm">Rate papers using the stars to add them here</p>
+            <!-- Interesting Papers List -->
+            <div id="interesting-papers-list">
+                <div class="text-center text-gray-500 py-12">
+                    <i class="fas fa-star text-6xl mb-4 opacity-20"></i>
+                    <p class="text-lg">No papers rated yet</p>
+                    <p class="text-sm">Rate papers using the stars to add them here</p>
+                </div>
+            </div>
+            <!-- Hidden file input for loading JSON -->
+            <input type="file" id="json-file-input" accept=".json" style="display: none;"
+                onchange="handleJSONFileLoad(event)">
         </div>
-    </div>
-<!-- Hidden file input for loading JSON -->
-<input type="file" id="json-file-input" accept=".json" style="display: none;" onchange="handleJSONFileLoad(event)">
-</div>
 
         <!-- Clusters Tab -->
         <div id="clusters-tab" class="tab-content hidden">
@@ -538,17 +542,10 @@
                 </div>
             </div>
 
-            <!-- Cluster Controls -->
+            <!-- Cluster Stats -->
             <div class="bg-white rounded-lg shadow-md p-4 mb-6">
                 <div class="flex items-center justify-between gap-4">
                     <div class="flex items-center gap-4 flex-wrap">
-                        <div>
-                            <label class="text-sm font-medium text-gray-700 mr-2">Filter by Cluster:</label>
-                            <select id="cluster-filter" onchange="filterClusterPlot()"
-                                class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-600">
-                                <option value="">All Clusters</option>
-                            </select>
-                        </div>
                         <div id="cluster-stats" class="text-sm text-gray-600">
                             <!-- Stats will be dynamically populated -->
                         </div>
@@ -558,12 +555,16 @@
 
             <!-- Cluster Visualization -->
             <div class="bg-white rounded-lg shadow-md p-6">
-                <div id="cluster-plot" style="min-height: 600px;">
-                    <div class="text-center text-gray-500 py-12">
-                        <i class="fas fa-spinner fa-spin text-6xl mb-4 opacity-20"></i>
-                        <p class="text-lg">Loading cluster visualization...</p>
-                        <p class="text-sm mt-2">This may take a moment</p>
+                <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+                    <div id="cluster-plot" class="col-span-1 lg:col-span-3" style="aspect-ratio: 1/1; width: 100%;">
+                        <div class="text-center text-gray-500 py-12">
+                            <i class="fas fa-spinner fa-spin text-6xl mb-4 opacity-20"></i>
+                            <p class="text-lg">Loading cluster visualization...</p>
+                            <p class="text-sm mt-2">This may take a moment</p>
+                        </div>
                     </div>
+                    <div id="cluster-legend"
+                        class="col-span-1 flex flex-col overflow-y-auto lg:h-170 xl:h-220 2xl:h-270"></div>
                 </div>
             </div>
 
@@ -588,7 +589,8 @@
     </footer>
 
     <!-- Settings Modal (Shared for Search and Chat) -->
-    <div id="settings-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-center justify-center p-4">
+    <div id="settings-modal"
+        class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-center justify-center p-4">
         <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
             <!-- Modal Header -->
             <div class="bg-purple-600 text-white px-6 py-4 flex justify-between items-center">
@@ -599,7 +601,7 @@
                     <i class="fas fa-times"></i>
                 </button>
             </div>
-    
+
             <!-- Modal Content -->
             <div class="p-6 overflow-y-auto max-h-[calc(90vh-8rem)]">
                 <div class="space-y-6">
@@ -616,7 +618,7 @@
                             </select>
                         </div>
                     </div>
-    
+
                     <!-- Chat-specific: Number of papers in context -->
                     <div id="chat-settings-section" class="hidden">
                         <div>
@@ -631,7 +633,7 @@
                             </select>
                         </div>
                     </div>
-    
+
                     <!-- Shared: Sessions Filter -->
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">
@@ -653,7 +655,7 @@
                     </div>
                 </div>
             </div>
-    
+
             <!-- Modal Footer -->
             <div class="bg-gray-50 px-6 py-4 flex justify-end gap-3 border-t">
                 <button onclick="closeSettings()"
@@ -665,7 +667,7 @@
     </div>
 
     <!-- JavaScript -->
-    <script src="{{ url_for('static', filename='app.js') }}"></script>
+    <script type="module" src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 
 </html>
