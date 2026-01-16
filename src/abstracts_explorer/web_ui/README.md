@@ -141,7 +141,7 @@ If Flask is not installed, you'll see a helpful error message:
 ```
 ❌ Web UI dependencies not installed!
 
-The web UI requires Flask. Install it with:
+The web UI requires Waitress and Flask. Install them with:
   uv sync --extra web
 
 Or install Flask manually if not using uv:

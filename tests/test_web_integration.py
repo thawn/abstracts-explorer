@@ -65,9 +65,6 @@ def test_database(tmp_path_factory, web_test_papers):
     return db_path
 
 
-
-
-
 @pytest.fixture(scope="module")
 def web_server(test_database, tmp_path_factory):
     """
@@ -90,9 +87,9 @@ def web_server(test_database, tmp_path_factory):
         import importlib.util
 
         if importlib.util.find_spec("flask") is None:
-            pytest.skip("Flask not installed - web UI tests require 'pip install neurips-abstracts[web]'")
+            pytest.skip("Flask not installed - web UI tests require 'uv sync --extra web'")
     except ImportError:
-        pytest.skip("Flask not installed - web UI tests require 'pip install neurips-abstracts[web]'")
+        pytest.skip("Flask not installed - web UI tests require 'uv sync --extra web'")
 
     import os
     import uuid
@@ -125,16 +122,16 @@ def web_server(test_database, tmp_path_factory):
     # Integration tests should not require a real API connection
     mock_openai_patcher = patch("abstracts_explorer.embeddings.OpenAI")
     mock_openai_class = mock_openai_patcher.start()
-    
+
     try:
         # Create mock OpenAI client instance
         mock_client = Mock()
         mock_openai_class.return_value = mock_client
-        
+
         # Mock models.list() for connection test
         mock_models = Mock()
         mock_client.models.list.return_value = mock_models
-        
+
         # Mock embeddings.create() for embedding generation
         mock_embedding_response = Mock()
         mock_embedding_data = Mock()
@@ -174,9 +171,9 @@ def web_server(test_database, tmp_path_factory):
         # Use werkzeug's make_server for better cross-platform compatibility
         # This works more reliably in threads than Flask's app.run()
         from werkzeug.serving import make_server
-        
+
         server = make_server(host, port, flask_app, threaded=True)
-        
+
         # Start server in a thread
         def run_server():
             server.serve_forever()
@@ -198,25 +195,25 @@ def web_server(test_database, tmp_path_factory):
                 time.sleep(0.5)
 
         yield (host, port, base_url)
-        
+
         # Shutdown server gracefully
         server.shutdown()
 
     finally:
         # Ensure mock is always stopped
         mock_openai_patcher.stop()
-        
+
         # Restore original environment variables
         if original_db_path is not None:
             os.environ["PAPER_DB_PATH"] = original_db_path
         elif "PAPER_DB_PATH" in os.environ:
             del os.environ["PAPER_DB_PATH"]
-            
+
         if original_embeddings_path is not None:
             os.environ["EMBEDDING_DB_PATH"] = original_embeddings_path
         elif "EMBEDDING_DB_PATH" in os.environ:
             del os.environ["EMBEDDING_DB_PATH"]
-            
+
         if original_collection_name is not None:
             os.environ["COLLECTION_NAME"] = original_collection_name
         elif "COLLECTION_NAME" in os.environ:
