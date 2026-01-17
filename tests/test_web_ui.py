@@ -690,26 +690,26 @@ class TestWebUIDatabaseNotFound:
     """Test database file not found handling (line 43)."""
 
     def test_get_database_file_not_found(self):
-        """Test that get_database raises FileNotFoundError when database doesn't exist."""
+        """Test that get_database raises error when database doesn't exist."""
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            # Patch os.path.exists to return False for the database path
-            with patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=False):
-                with patch("abstracts_explorer.web_ui.app.get_config") as mock_get_config:
-                    mock_config = Mock()
-                    mock_config.paper_db_path = "/nonexistent/database.db"
-                    mock_get_config.return_value = mock_config
+            # Patch get_config to return a config with nonexistent database
+            with patch("abstracts_explorer.web_ui.app.get_config") as mock_get_config:
+                mock_config = Mock()
+                # Use database_url instead of paper_db_path (new implementation)
+                mock_config.database_url = "sqlite:////nonexistent/database.db"
+                mock_get_config.return_value = mock_config
 
-                    # Try to access endpoint that uses database
-                    response = client.get("/api/stats")
+                # Try to access endpoint that uses database
+                response = client.get("/api/stats")
 
-                    # Should fail because database doesn't exist
-                    assert response.status_code == 500
-                    data = response.get_json()
-                    assert "error" in data
-                    # Should mention the database file not found
-                    assert "not found" in data["error"].lower() or "filenotfounderror" in str(data["error"]).lower()
+                # Should fail because database doesn't exist
+                assert response.status_code == 500
+                data = response.get_json()
+                assert "error" in data
+                # Should mention database connection failure
+                assert "database" in data["error"].lower()
 
 
 class TestWebUIChatExceptionLines:
@@ -1141,7 +1141,7 @@ class TestClusteringEndpoints:
         with app.test_client():
             with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
                 mock_config.return_value = Mock(
-                    paper_db_path=str(db_path),
+                    database_url=f"sqlite:///{str(db_path)}",
                     embedding_db_path="chroma_db",
                     collection_name="papers"
                 )
