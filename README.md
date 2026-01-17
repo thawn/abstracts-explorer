@@ -20,7 +20,7 @@ A package to download conference data and search it with LLM-based semantic sear
 
 ### Quick Start with Docker/Podman 🐳
 
-The easiest way to get started:
+The easiest way to get started with a complete stack (PostgreSQL + ChromaDB):
 
 ```bash
 # Using Podman (recommended)
@@ -31,6 +31,11 @@ docker-compose up -d
 
 # Access at http://localhost:5000
 ```
+
+The Docker Compose setup includes:
+- **Web UI** on port 5000 (exposed)
+- **PostgreSQL** for paper metadata (internal only)
+- **ChromaDB** for semantic search (internal only)
 
 📖 **[Complete Docker/Podman Guide](docs/docker.md)**
 

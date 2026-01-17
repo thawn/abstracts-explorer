@@ -28,6 +28,42 @@ Available tags (following container best practices):
 - `v*.*` - Major.minor version (e.g., `v0.1`)
 - `v*` - Major version (e.g., `v0`)
 - `sha-*` - Specific commit SHA for traceability (e.g., `sha-5f8567d`)
+- `pr-*` - Pull request builds for testing (e.g., `pr-40`)
+
+## Testing Pull Requests
+
+To test changes from a pull request before they're merged:
+
+1. **Find the PR number** (e.g., PR #40)
+2. **Update docker-compose.yml** to use the PR image:
+
+```yaml
+services:
+  abstracts-explorer:
+    image: ghcr.io/thawn/abstracts-explorer:pr-40  # Replace 40 with your PR number
+```
+
+3. **Pull and start services**:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+4. **Verify the setup**:
+
+```bash
+# Check service health
+docker compose ps
+
+# View logs
+docker compose logs abstracts-explorer
+
+# Access web UI
+curl http://localhost:5000/health
+```
+
+**Note:** PR images are automatically built and pushed when commits are made to pull requests. They're tagged with `pr-<number>` for easy testing.
 
 ## Prerequisites
 
@@ -127,11 +163,14 @@ volumes:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
+| `DATABASE_URL` | PostgreSQL connection URL | `postgresql://abstracts:abstracts_password@postgres:5432/abstracts` |
+| `EMBEDDING_DB_URL` | ChromaDB HTTP endpoint | `http://chromadb:8000` |
 | `LLM_BACKEND_URL` | LLM backend URL | `http://host.docker.internal:1234` |
 | `CHAT_MODEL` | Chat model name | `gemma-3-4b-it-qat` |
 | `EMBEDDING_MODEL` | Embedding model name | `text-embedding-qwen3-embedding-4b` |
-| `PAPER_DB_PATH` | SQLite database path | `/app/data/abstracts.db` |
-| `EMBEDDING_DB_PATH` | Embeddings path | `/app/chroma_db` |
+| `COLLECTION_NAME` | ChromaDB collection | `papers` |
+
+**Note:** The setup now uses PostgreSQL and ChromaDB by default. SQLite mode is still supported for local development by setting `PAPER_DB_PATH` instead of `DATABASE_URL`.
 
 ### Connecting to Host LM Studio
 
@@ -158,20 +197,28 @@ services:
 
 ## Services
 
+The Docker Compose setup includes three services that work together:
+
 ### Main Application (abstracts-explorer)
-- **Port:** 5000
-- **Volumes:** `abstracts-data`, `abstracts-chroma`
+- **Port:** 5000 (exposed to host)
+- **Volumes:** `abstracts-data`
 - **Purpose:** Web UI and CLI tools
+- **Image:** `ghcr.io/thawn/abstracts-explorer:latest`
 
-### ChromaDB (Optional)
-- **Port:** 8000
-- **Purpose:** Standalone vector database (app uses embedded by default)
-- **Enable:** Uncomment dependency and set `EMBEDDING_DB_PATH=http://chromadb:8000`
+### ChromaDB
+- **Port:** 8000 (internal only, not exposed to host)
+- **Purpose:** Vector database for semantic search embeddings
+- **Health Check:** TCP check on port 8000
+- **Data:** Persisted in `chromadb-data` volume
 
-### PostgreSQL (Optional)
-- **Port:** 5432
-- **Purpose:** Alternative to SQLite
-- **Enable:** Uncomment dependency and set `DATABASE_URL=postgresql://abstracts:abstracts_password@postgres/abstracts`
+### PostgreSQL
+- **Port:** 5432 (internal only, not exposed to host)
+- **Purpose:** Relational database for paper metadata
+- **Health Check:** `pg_isready` command
+- **Data:** Persisted in `postgres-data` volume
+- **Credentials:** Set in `docker-compose.yml` (change for production!)
+
+**Security Note:** Database ports (5432, 8000) are **not exposed** to the host system. Only the web UI port (5000) is accessible from outside the container network. All inter-service communication happens via Docker's internal network.
 
 ## Common Commands
 
@@ -201,23 +248,30 @@ podman-compose down -v
 ## Data Persistence
 
 All data is stored in named volumes:
-- `abstracts-data` - Paper database
-- `abstracts-chroma` - Embeddings
-- `chromadb-data` - ChromaDB (if enabled)
-- `postgres-data` - PostgreSQL (if enabled)
+- `abstracts-data` - Application data directory
+- `chromadb-data` - ChromaDB vector embeddings
+- `postgres-data` - PostgreSQL database
 
 ### Backup
 ```bash
-podman-compose exec abstracts-explorer \
-  tar czf /tmp/backup.tar.gz /app/data /app/chroma_db
+# Backup PostgreSQL database
+podman-compose exec postgres pg_dump -U abstracts abstracts > backup.sql
 
-podman cp abstracts-explorer:/tmp/backup.tar.gz ./backup.tar.gz
+# Backup ChromaDB data
+podman-compose exec abstracts-explorer \
+  tar czf /tmp/chroma-backup.tar.gz /app/chroma_db
+
+podman cp abstracts-chromadb:/chroma/chroma ./chroma-backup
 ```
 
 ### Restore
 ```bash
-podman cp ./backup.tar.gz abstracts-explorer:/tmp/
-podman-compose exec abstracts-explorer tar xzf /tmp/backup.tar.gz -C /
+# Restore PostgreSQL database
+cat backup.sql | podman-compose exec -T postgres psql -U abstracts
+
+# Restore ChromaDB data
+podman cp ./chroma-backup abstracts-chromadb:/chroma/chroma
+podman-compose restart chromadb
 ```
 
 ## Troubleshooting
@@ -238,8 +292,18 @@ podman unshare chown 1000:1000 /path/to/volume
 ```
 
 ### Database Locked
-- Use PostgreSQL for multi-user scenarios
-- Ensure only one process accesses the database
+- PostgreSQL is now the default for Docker Compose (no locking issues)
+- For SQLite mode, ensure only one process accesses the database
+
+### ChromaDB Health Check Fails
+- The health check uses TCP port checking (bash built-in)
+- If failing, check logs: `podman-compose logs chromadb`
+- Verify ChromaDB container started: `podman-compose ps`
+
+### Cannot Access Databases from Host
+- Database ports (5432, 8000) are **intentionally not exposed** for security
+- Access via application container: `podman-compose exec abstracts-explorer psql`
+- For debugging, temporarily add port mappings to `docker-compose.yml`
 
 ### Out of Memory
 Increase container memory limits:

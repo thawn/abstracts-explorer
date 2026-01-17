@@ -47,12 +47,9 @@ def get_database():
     """
     if "db" not in g:
         config = get_config()  # Get config lazily
-        db_path = config.paper_db_path
-        if not os.path.exists(db_path):
-            raise FileNotFoundError(
-                f"Database not found: {db_path}. " "Please run 'neurips-abstracts download' first."
-            )
-        g.db = DatabaseManager(db_path)
+        
+        # Use database_url (supports both SQLite and PostgreSQL)
+        g.db = DatabaseManager(database_url=config.database_url)
         g.db.connect()  # Explicitly connect to the database
         g.db.create_tables()  # Ensure all tables exist (including new ones like clustering_cache)
     return g.db
@@ -73,7 +70,8 @@ def get_embeddings_manager():
         embeddings_manager = EmbeddingsManager(
             lm_studio_url=config.llm_backend_url,
             model_name=config.embedding_model,
-            chroma_path=config.embedding_db_path,
+            chroma_path=config.embedding_db_path if config.embedding_db_path else None,
+            chroma_url=config.embedding_db_url if config.embedding_db_url else None,
             collection_name=config.collection_name,
         )
         embeddings_manager.connect()  # Connect to ChromaDB
@@ -145,11 +143,10 @@ def health():
         db = get_database()
         db.get_paper_count()
         return jsonify({"status": "healthy", "service": "abstracts-explorer"}), 200
-    except FileNotFoundError:
-        # Database file doesn't exist - provide helpful message
-        return jsonify({"status": "unhealthy", "error": "Database not initialized"}), 503
-    except Exception:
-        # Other errors - return generic message for security
+    except Exception as e:
+        # Log the actual error for debugging
+        logger.error(f"Health check failed: {e}", exc_info=True)
+        # Return generic message for security
         return jsonify({"status": "unhealthy", "error": "Service unavailable"}), 503
 
 
@@ -1465,24 +1462,34 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False):
     """
     config = get_config()  # Get config lazily
     
-    # Check if database exists before starting server
-    if not os.path.exists(config.paper_db_path):
-        print("\n❌ Error: Database not found!", file=sys.stderr)
-        print(f"\nThe database file does not exist: {config.paper_db_path}", file=sys.stderr)
-        print("\nTo create and populate the database, run one of these commands:", file=sys.stderr)
-        print("  # Download NeurIPS papers:", file=sys.stderr)
-        print(f"  neurips-abstracts download --conference neurips --year 2025 --output {config.paper_db_path}", file=sys.stderr)
-        print("\n  # Or use a different conference/year:", file=sys.stderr)
-        print("  neurips-abstracts download --conference iclr --year 2025", file=sys.stderr)
-        print("\n  # List available plugins:", file=sys.stderr)
-        print("  neurips-abstracts list-plugins", file=sys.stderr)
-        print("\nAfter downloading papers, you may also want to create embeddings:", file=sys.stderr)
-        print(f"  neurips-abstracts create-embeddings --db-path {config.paper_db_path}", file=sys.stderr)
-        raise FileNotFoundError(f"Database not found: {config.paper_db_path}")
+    # Check if database is accessible before starting server
+    # For PostgreSQL (database_url), we skip file checks and rely on connection at runtime
+    # For SQLite (paper_db_path), check if the file exists
+    if config.paper_db_path:  # SQLite mode
+        if not os.path.exists(config.paper_db_path):
+            print("\n❌ Error: Database not found!", file=sys.stderr)
+            print(f"\nThe database file does not exist: {config.paper_db_path}", file=sys.stderr)
+            print("\nTo create and populate the database, run one of these commands:", file=sys.stderr)
+            print("  # Download NeurIPS papers:", file=sys.stderr)
+            print(f"  neurips-abstracts download --conference neurips --year 2025 --output {config.paper_db_path}", file=sys.stderr)
+            print("\n  # Or use a different conference/year:", file=sys.stderr)
+            print("  neurips-abstracts download --conference iclr --year 2025", file=sys.stderr)
+            print("\n  # List available plugins:", file=sys.stderr)
+            print("  neurips-abstracts list-plugins", file=sys.stderr)
+            print("\nAfter downloading papers, you may also want to create embeddings:", file=sys.stderr)
+            print(f"  neurips-abstracts create-embeddings --db-path {config.paper_db_path}", file=sys.stderr)
+            raise FileNotFoundError(f"Database not found: {config.paper_db_path}")
+    # For PostgreSQL, we can't check file existence - connection will be validated at runtime
     
     print("Starting Abstracts Explorer Web Interface...")
-    print(f"Database: {config.paper_db_path}")
-    print(f"Embeddings: {config.embedding_db_path}")
+    print(f"Database: {config.database_url}")
+    
+    # Print embeddings configuration
+    if config.embedding_db_url:
+        print(f"Embeddings: {config.embedding_db_url}")
+    else:
+        print(f"Embeddings: {config.embedding_db_path}")
+    
     print(f"Server: http://{host}:{port}")
     
     # Use Flask development server if explicitly requested

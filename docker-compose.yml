@@ -4,9 +4,7 @@
 services:
   # Main Abstracts Explorer application
   abstracts-explorer:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/thawn/abstracts-explorer:latest
     container_name: abstracts-explorer
     ports:
       - "5000:5000"
@@ -18,7 +16,7 @@ services:
     environment:
       # Database configuration - using PostgreSQL
       - DATA_DIR=/app/data
-      - PAPER_DB_URL=postgresql://abstracts:abstracts_password@postgres:5432/abstracts
+      - DATABASE_URL=postgresql://abstracts:abstracts_password@postgres:5432/abstracts
       
       # Embeddings configuration - using ChromaDB service
       - EMBEDDING_DB_URL=http://chromadb:8000
@@ -65,8 +63,6 @@ services:
   chromadb:
     image: chromadb/chroma:latest
     container_name: abstracts-chromadb
-    ports:
-      - "8000:8000"
     volumes:
       - chromadb-data:/chroma/chroma
     environment:
@@ -75,18 +71,16 @@ services:
     restart: unless-stopped
     
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 5s
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/8000' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   # PostgreSQL database service
   postgres:
     image: postgres:16-alpine
     container_name: abstracts-postgres
-    ports:
-      - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     environment:
