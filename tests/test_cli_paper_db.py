@@ -1,8 +1,9 @@
 """
-Test DATABASE_URL configuration support in CLI commands.
+Test PAPER_DB configuration support in CLI commands.
 
-This module tests that CLI commands properly respect the DATABASE_URL
-environment variable for PostgreSQL and other database backends.
+This module tests that CLI commands properly respect the PAPER_DB
+environment variable for database configuration (supports both SQLite paths
+and PostgreSQL URLs).
 """
 
 import sys
@@ -10,7 +11,7 @@ from unittest.mock import Mock, patch
 from abstracts_explorer.cli import main
 
 
-class TestCLIDatabaseURLConfiguration:
+class TestCLIPaperDBConfiguration:
     """Test cases for PAPER_DB configuration support."""
 
     def test_create_embeddings_with_database_url_from_env(self, tmp_path, monkeypatch):

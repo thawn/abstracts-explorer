@@ -8,7 +8,6 @@ using the new schema with integer IDs and proper author relationships.
 """
 
 import pytest
-import sqlite3
 
 from abstracts_explorer.database import DatabaseManager, DatabaseError
 from abstracts_explorer.plugin import LightweightPaper

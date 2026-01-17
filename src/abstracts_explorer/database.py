@@ -240,7 +240,7 @@ class DatabaseManager:
         Examples
         --------
         >>> from abstracts_explorer.plugin import LightweightPaper
-        >>> db = DatabaseManager("neurips.db")
+        >>> from abstracts_explorer.config import get_config; config = get_config(); db = DatabaseManager(database_url=config.database_url)
         >>> with db:
         ...     db.create_tables()
         ...     paper = LightweightPaper(
@@ -349,7 +349,7 @@ class DatabaseManager:
         Examples
         --------
         >>> from abstracts_explorer.plugin import LightweightPaper
-        >>> db = DatabaseManager("neurips.db")
+        >>> from abstracts_explorer.config import get_config; config = get_config(); db = DatabaseManager(database_url=config.database_url)
         >>> with db:
         ...     db.create_tables()
         ...     papers = [
@@ -414,7 +414,7 @@ class DatabaseManager:
 
         Examples
         --------
-        >>> db = DatabaseManager("neurips.db")
+        >>> from abstracts_explorer.config import get_config; config = get_config(); db = DatabaseManager(database_url=config.database_url)
         >>> with db:
         ...     results = db.query("SELECT * FROM papers WHERE session = ?", ("Poster",))
         >>> for row in results:
@@ -520,7 +520,7 @@ class DatabaseManager:
 
         Examples
         --------
-        >>> db = DatabaseManager("neurips.db")
+        >>> from abstracts_explorer.config import get_config; config = get_config(); db = DatabaseManager(database_url=config.database_url)
         >>> with db:
         ...     papers = db.search_papers(keyword="neural network", limit=10)
         >>> for paper in papers:
@@ -630,7 +630,7 @@ class DatabaseManager:
 
         Examples
         --------
-        >>> db = DatabaseManager("neurips.db")
+        >>> from abstracts_explorer.config import get_config; config = get_config(); db = DatabaseManager(database_url=config.database_url)
         >>> with db:
         ...     authors = db.search_authors_in_papers(name="Huang")
         >>> for author in authors:
@@ -735,7 +735,7 @@ class DatabaseManager:
 
         Examples
         --------
-        >>> db = DatabaseManager("neurips.db")
+        >>> from abstracts_explorer.config import get_config; config = get_config(); db = DatabaseManager(database_url=config.database_url)
         >>> with db:
         ...     filters = db.get_filter_options()
         >>> print(filters['sessions'])
@@ -809,7 +809,7 @@ class DatabaseManager:
 
         Examples
         --------
-        >>> db = DatabaseManager("neurips.db")
+        >>> from abstracts_explorer.config import get_config; config = get_config(); db = DatabaseManager(database_url=config.database_url)
         >>> with db:
         ...     model = db.get_embedding_model()
         >>> print(model)
@@ -849,7 +849,7 @@ class DatabaseManager:
 
         Examples
         --------
-        >>> db = DatabaseManager("neurips.db")
+        >>> from abstracts_explorer.config import get_config; config = get_config(); db = DatabaseManager(database_url=config.database_url)
         >>> with db:
         ...     db.set_embedding_model("text-embedding-qwen3-embedding-4b")
         """
