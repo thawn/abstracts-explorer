@@ -275,7 +275,7 @@ class TestICLRPluginDatabaseIntegration:
     """Test ICLR plugin integration with database."""
 
     @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
-    def test_iclr_data_in_database(self, mock_get):
+    def test_iclr_data_in_database(self, mock_get, monkeypatch):
         """Test that ICLR data can be stored in the database."""
         # Mock the ICLR API response
         mock_response = Mock()
@@ -308,7 +308,10 @@ class TestICLRPluginDatabaseIntegration:
             data = plugin.download(year=2025)
 
             # Create database and load data
-            with DatabaseManager(str(db_path)) as db:
+            monkeypatch.setenv("PAPER_DB", str(db_path))
+            from abstracts_explorer.config import get_config
+            get_config(reload=True)
+            with DatabaseManager() as db:
                 db.create_tables()
                 db.add_papers(data)
 

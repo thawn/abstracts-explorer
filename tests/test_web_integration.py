@@ -8,6 +8,7 @@ and handle API requests correctly.
 import pytest
 import sys
 import time
+import os
 import requests
 import threading
 from pathlib import Path
@@ -17,6 +18,7 @@ from unittest.mock import patch, Mock
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from abstracts_explorer.database import DatabaseManager
+from abstracts_explorer.config import get_config
 from tests.helpers import requires_lm_studio, find_free_port
 
 # Helper functions imported from test_helpers:
@@ -56,7 +58,9 @@ def test_database(tmp_path_factory, web_test_papers):
     db_path = tmp_dir / "test_web_integration.db"
 
     # Create database and add test data using LightweightPaper
-    db = DatabaseManager(str(db_path))
+    os.environ["PAPER_DB"] = str(db_path)
+    get_config(reload=True)
+    db = DatabaseManager()
 
     with db:
         db.create_tables()
@@ -154,7 +158,9 @@ def web_server(test_database, tmp_path_factory):
 
         # Add embeddings for test papers
         from abstracts_explorer.database import DatabaseManager
-        db = DatabaseManager(str(test_database))
+        os.environ["PAPER_DB"] = str(test_database)
+        get_config(reload=True)
+        db = DatabaseManager()
         db.connect()
         papers = db.query("SELECT * FROM papers")
 

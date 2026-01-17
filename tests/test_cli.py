@@ -13,6 +13,7 @@ from abstracts_explorer.cli import (
     search_command,
 )
 from abstracts_explorer.plugin import LightweightPaper
+from abstracts_explorer.config import get_config
 
 
 class TestCLI:
@@ -176,13 +177,15 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Database file not found" in captured.err
 
-    def test_create_embeddings_lm_studio_not_available(self, tmp_path, capsys):
+    def test_create_embeddings_lm_studio_not_available(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings when OpenAI API is not available."""
         # Create a test database
         from abstracts_explorer import DatabaseManager
 
         db_path = tmp_path / "test.db"
-        with DatabaseManager(db_path) as db:
+        monkeypatch.setenv("PAPER_DB", str(db_path))
+        get_config(reload=True)
+        with DatabaseManager() as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -222,13 +225,15 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Failed to connect to OpenAI API" in captured.err
 
-    def test_create_embeddings_success(self, tmp_path, capsys):
+    def test_create_embeddings_success(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings command completes successfully."""
         from abstracts_explorer import DatabaseManager
 
         # Create a test database
         db_path = tmp_path / "test.db"
-        with DatabaseManager(db_path) as db:
+        monkeypatch.setenv("PAPER_DB", str(db_path))
+        get_config(reload=True)
+        with DatabaseManager() as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -282,13 +287,15 @@ class TestCLI:
         assert "Successfully generated embeddings for 2 papers" in captured.out
         assert "Vector database saved to" in captured.out
 
-    def test_create_embeddings_with_where_clause(self, tmp_path, capsys):
+    def test_create_embeddings_with_where_clause(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with WHERE clause filter."""
         from abstracts_explorer import DatabaseManager
 
         # Create a test database
         db_path = tmp_path / "test.db"
-        with DatabaseManager(db_path) as db:
+        monkeypatch.setenv("PAPER_DB", str(db_path))
+        get_config(reload=True)
+        with DatabaseManager() as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -346,13 +353,15 @@ class TestCLI:
         assert "Filter will process 1 papers" in captured.out
         assert "Successfully generated embeddings for 1 papers" in captured.out
 
-    def test_create_embeddings_force_flag(self, tmp_path, capsys):
+    def test_create_embeddings_force_flag(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with --force flag."""
         from abstracts_explorer import DatabaseManager
 
         # Create a test database
         db_path = tmp_path / "test.db"
-        with DatabaseManager(db_path) as db:
+        monkeypatch.setenv("PAPER_DB", str(db_path))
+        get_config(reload=True)
+        with DatabaseManager() as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -403,13 +412,15 @@ class TestCLI:
         # Verify create_collection was called with reset=True
         mock_em.create_collection.assert_called_once_with(reset=True)
 
-    def test_create_embeddings_custom_model(self, tmp_path, capsys):
+    def test_create_embeddings_custom_model(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with custom model settings."""
         from abstracts_explorer import DatabaseManager
 
         # Create a test database
         db_path = tmp_path / "test.db"
-        with DatabaseManager(db_path) as db:
+        monkeypatch.setenv("PAPER_DB", str(db_path))
+        get_config(reload=True)
+        with DatabaseManager() as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -462,14 +473,16 @@ class TestCLI:
         assert call_kwargs["lm_studio_url"] == custom_url
         assert call_kwargs["model_name"] == custom_model
 
-    def test_create_embeddings_embeddings_error(self, tmp_path, capsys):
+    def test_create_embeddings_embeddings_error(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings handles EmbeddingsError gracefully."""
         from abstracts_explorer import DatabaseManager
         from abstracts_explorer.embeddings import EmbeddingsError
 
         # Create a test database
         db_path = tmp_path / "test.db"
-        with DatabaseManager(db_path) as db:
+        monkeypatch.setenv("PAPER_DB", str(db_path))
+        get_config(reload=True)
+        with DatabaseManager() as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -728,13 +741,15 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "No results found" in captured.out
 
-    def test_search_with_db_path_author_names(self, tmp_path, capsys):
+    def test_search_with_db_path_author_names(self, tmp_path, capsys, monkeypatch):
         """Test search command with database path to resolve author names."""
         from abstracts_explorer import DatabaseManager
 
         # Create a test database with lightweight schema
         db_path = tmp_path / "test.db"
-        with DatabaseManager(db_path) as db:
+        monkeypatch.setenv("PAPER_DB", str(db_path))
+        get_config(reload=True)
+        with DatabaseManager() as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -842,7 +857,7 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "101,102" in captured.out  # Shows IDs as fallback
 
-    def test_search_with_db_path_lookup_error(self, tmp_path, capsys):
+    def test_search_with_db_path_lookup_error(self, tmp_path, capsys, monkeypatch):
         """Test search command when database connection fails."""
         from abstracts_explorer.database import DatabaseManager
         
@@ -851,7 +866,9 @@ class TestCLI:
 
         # Create an empty database using DatabaseManager
         db_path = tmp_path / "test.db"
-        db = DatabaseManager(str(db_path))
+        monkeypatch.setenv("PAPER_DB", str(db_path))
+        get_config(reload=True)
+        db = DatabaseManager()
         db.connect()
         db.close()
 
@@ -1207,7 +1224,9 @@ class TestCLIEmbeddingsProgressAndStats:
         from abstracts_explorer.database import DatabaseManager
         from abstracts_explorer.plugin import LightweightPaper
 
-        db = DatabaseManager(str(db_path))
+        monkeypatch.setenv("PAPER_DB", str(db_path))
+        get_config(reload=True)
+        db = DatabaseManager()
         with db:
             db.create_tables()
             for i in range(3):

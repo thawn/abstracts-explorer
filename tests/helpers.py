@@ -6,6 +6,7 @@ to reduce code duplication and ensure consistency.
 """
 
 import socket
+import os
 import requests
 import pytest
 from abstracts_explorer.config import get_config
@@ -39,6 +40,9 @@ def create_test_db_with_paper(db_path, paper_data):
     create databases with specific paper data. Default values are provided for
     optional fields if not specified.
     
+    This function temporarily sets the PAPER_DB environment variable to configure
+    the DatabaseManager with the specified path.
+    
     Examples
     --------
     >>> db = create_test_db_with_paper(
@@ -59,7 +63,11 @@ def create_test_db_with_paper(db_path, paper_data):
     """
     from abstracts_explorer.plugin import LightweightPaper
     
-    db = DatabaseManager(str(db_path))
+    # Set environment variable and reload config
+    os.environ["PAPER_DB"] = str(db_path)
+    get_config(reload=True)
+    
+    db = DatabaseManager()
     db.connect()
     db.create_tables()
     

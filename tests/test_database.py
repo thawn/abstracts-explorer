@@ -53,12 +53,17 @@ def sample_paper_minimal():
 class TestDatabaseManager:
     """Tests for DatabaseManager class."""
 
-    def test_init(self, tmp_path):
+    def test_init(self, tmp_path, monkeypatch):
         """Test DatabaseManager initialization."""
+        from abstracts_explorer.config import get_config
+        
         db_path = tmp_path / "test.db"
-        db = DatabaseManager(db_path)
+        monkeypatch.setenv("PAPER_DB", str(db_path))
+        get_config(reload=True)
+        
+        db = DatabaseManager()
 
-        assert db.db_path == db_path
+        assert db.database_url == f"sqlite:///{db_path}"
         assert db.connection is None
 
     def test_connect(self, db_manager):
@@ -70,10 +75,15 @@ class TestDatabaseManager:
 
         db_manager.close()
 
-    def test_connect_creates_directories(self, tmp_path):
+    def test_connect_creates_directories(self, tmp_path, monkeypatch):
         """Test that connect creates parent directories."""
+        from abstracts_explorer.config import get_config
+        
         db_path = tmp_path / "subdir" / "another" / "test.db"
-        db = DatabaseManager(db_path)
+        monkeypatch.setenv("PAPER_DB", str(db_path))
+        get_config(reload=True)
+        
+        db = DatabaseManager()
         db.connect()
 
         assert db_path.parent.exists()
@@ -93,11 +103,15 @@ class TestDatabaseManager:
         db_manager.close()  # Should not raise
         assert db_manager.connection is None
 
-    def test_context_manager(self, tmp_path):
+    def test_context_manager(self, tmp_path, monkeypatch):
         """Test DatabaseManager as context manager."""
+        from abstracts_explorer.config import get_config
+        
         db_path = tmp_path / "test.db"
+        monkeypatch.setenv("PAPER_DB", str(db_path))
+        get_config(reload=True)
 
-        with DatabaseManager(db_path) as db:
+        with DatabaseManager() as db:
             assert db.connection is not None
 
         # Connection should be closed after exiting context
