@@ -585,8 +585,116 @@ See `.gitignore`:
 - **Tests**: `tests/`
 - **Configuration**: `.env` (create from `.env.example`)
 
+## Docker Compose Testing for Pull Requests
+
+When testing changes via Docker Compose during PR development, use the PR-specific image tag instead of `:latest`.
+
+### Quick Reference
+
+```bash
+# 1. Determine your PR number (e.g., PR #40)
+# Look at the PR URL: https://github.com/thawn/abstracts-explorer/pull/40
+
+# 2. Update docker-compose.yml to use PR image
+# Edit line 7 in docker-compose.yml:
+image: ghcr.io/thawn/abstracts-explorer:pr-40
+
+# 3. Pull the latest PR image
+docker compose pull
+
+# 4. Start all services (PostgreSQL, ChromaDB, web UI)
+docker compose up -d
+
+# 5. Wait for services to be healthy (~10 seconds)
+sleep 10
+
+# 6. Check service status
+docker compose ps
+# All services should show "healthy" status
+
+# 7. Test the web UI
+curl http://localhost:5000/health
+# Should return: {"status":"healthy"}
+
+# 8. View logs if needed
+docker compose logs abstracts-explorer
+docker compose logs chromadb
+docker compose logs postgres
+
+# 9. Stop and clean up
+docker compose down -v
+```
+
+### Service Architecture
+
+The Docker Compose setup creates an isolated environment with:
+
+- **abstracts-explorer** (port 5000) - Web UI, accessible from host
+- **postgres** (port 5432) - PostgreSQL database, **internal only**
+- **chromadb** (port 8000) - Vector database, **internal only**
+
+**Security Note:** Database ports are NOT exposed to the host. All inter-service communication happens via Docker's internal network (`abstracts-network`).
+
+### Environment Variables
+
+The setup uses these key environment variables (set in `.env.docker`):
+
+```bash
+DATABASE_URL=postgresql://abstracts:abstracts_password@postgres:5432/abstracts
+EMBEDDING_DB_URL=http://chromadb:8000
+LLM_BACKEND_URL=http://host.docker.internal:1234
+CHAT_MODEL=gemma-3-4b-it-qat
+EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b
+```
+
+### Common Issues & Solutions
+
+**Issue:** ChromaDB health check fails
+- **Cause:** Health check uses TCP port checking (bash built-in)
+- **Solution:** Check logs with `docker compose logs chromadb`
+
+**Issue:** Cannot access PostgreSQL from host
+- **Cause:** Port 5432 is intentionally not exposed
+- **Solution:** Use `docker compose exec abstracts-explorer psql ...` or temporarily add port mapping for debugging
+
+**Issue:** Web UI shows "Service unavailable"
+- **Cause:** Databases haven't started yet or connection failed
+- **Solution:** Wait ~10 seconds for health checks, then check logs
+
+### PR Image Tags
+
+- **Format:** `ghcr.io/thawn/abstracts-explorer:pr-<number>`
+- **Example:** `ghcr.io/thawn/abstracts-explorer:pr-40`
+- **When built:** Automatically on every push to a pull request
+- **Availability:** Images are kept until PR is merged or closed
+
+### Testing Workflow
+
+1. **Make code changes** and push to your PR branch
+2. **Wait for CI** to build and push the PR image (~5 minutes)
+3. **Update docker-compose.yml** with `pr-<number>` tag
+4. **Test locally** with `docker compose up -d`
+5. **Verify functionality** via web UI and logs
+6. **Clean up** with `docker compose down -v`
+
+### Additional Commands
+
+```bash
+# Execute CLI commands inside container
+docker compose exec abstracts-explorer abstracts-explorer --help
+
+# Interactive shell
+docker compose exec -it abstracts-explorer /bin/bash
+
+# Restart a specific service
+docker compose restart abstracts-explorer
+
+# View real-time logs
+docker compose logs -f abstracts-explorer
+```
+
 ---
 
-**Last Updated**: December 21, 2025
+**Last Updated**: January 17, 2026
 
 This file should be kept up-to-date as the project evolves. When making significant changes to conventions or structure, update this file accordingly.
