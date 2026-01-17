@@ -690,22 +690,31 @@ class TestWebUIDatabaseNotFound:
     """Test database file not found handling for both local and URL databases."""
 
     def test_get_database_sqlite_url_not_found(self):
-        """Test that get_database raises error when SQLite database URL points to nonexistent file."""
+        """Test that get_database raises error when SQLite database URL is invalid."""
         from abstracts_explorer.web_ui.app import app
+        import sys
 
         with app.test_client() as client:
-            # Patch get_config to return a config with nonexistent SQLite database URL
+            # Patch get_config to return a config with invalid SQLite database URL
             with patch("abstracts_explorer.web_ui.app.get_config") as mock_get_config:
                 mock_config = Mock()
-                # SQLite database URL (converted from PAPER_DB_PATH)
-                mock_config.database_url = "sqlite:////nonexistent/database.db"
-                mock_config.paper_db_path = "/nonexistent/database.db"
+                # Use a path that would fail on both Unix and Windows
+                # On Unix: /dev/null/database.db (can't create file inside /dev/null)
+                # On Windows: NUL is a reserved device name
+                if sys.platform == "win32":
+                    invalid_path = "NUL/database.db"
+                else:
+                    invalid_path = "/dev/null/database.db"
+                
+                # SQLite database URL with invalid path
+                mock_config.database_url = f"sqlite:///{invalid_path}"
+                mock_config.paper_db_path = invalid_path
                 mock_get_config.return_value = mock_config
 
                 # Try to access endpoint that uses database
                 response = client.get("/api/stats")
 
-                # Should fail because database doesn't exist
+                # Should fail because database path is invalid
                 assert response.status_code == 500
                 data = response.get_json()
                 assert "error" in data
