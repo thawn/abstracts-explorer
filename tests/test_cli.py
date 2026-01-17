@@ -121,7 +121,6 @@ class TestCLI:
     def test_download_command_with_database_url(self, tmp_path, capsys, monkeypatch):
         """Test download command uses PAPER_DB when set."""
         # Create a temporary SQLite database for testing
-        # (simulating PostgreSQL behavior but using SQLite for the test)
         db_path = tmp_path / "test.db"
         
         # Set PAPER_DB environment variable
