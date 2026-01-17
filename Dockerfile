@@ -29,7 +29,6 @@ WORKDIR /app
 # Install runtime dependencies only
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    psycopg2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
