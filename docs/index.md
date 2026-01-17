@@ -64,6 +64,7 @@ uv run abstracts-explorer chat --db-path data/abstracts.db
 :caption: User Guide
 
 installation
+docker
 configuration
 usage
 plugins
