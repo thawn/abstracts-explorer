@@ -7,7 +7,6 @@ including downloading data, creating databases, and generating embeddings.
 
 import argparse
 import logging
-import os
 import sys
 from pathlib import Path
 
@@ -20,31 +19,6 @@ from .clustering import perform_clustering, ClusteringError
 from .rag import RAGChat, RAGError
 from .plugins import get_plugin, list_plugins, list_plugin_names
 from .mcp_server import run_mcp_server
-
-
-def _convert_db_path_to_url(db_path_or_url: str) -> str:
-    """
-    Convert a database path or URL to a proper database URL.
-    
-    If the input is already a URL (contains ://), returns it unchanged.
-    Otherwise, treats it as a SQLite file path and converts to sqlite:/// URL.
-    
-    Parameters
-    ----------
-    db_path_or_url : str
-        Database path or URL
-        
-    Returns
-    -------
-    str
-        Database URL in SQLAlchemy format
-    """
-    if "://" in db_path_or_url:
-        # Already a URL
-        return db_path_or_url
-    else:
-        # Convert file path to SQLite URL
-        return f"sqlite:///{Path(db_path_or_url).absolute()}"
 
 
 def setup_logging(verbosity: int) -> None:
@@ -78,7 +52,6 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     ----------
     args : argparse.Namespace
         Command-line arguments containing:
-        - db_path: Path to the SQLite database with papers (legacy, optional)
         - output: Path for the ChromaDB vector database
         - collection: Name for the ChromaDB collection
         - lm_studio_url: URL for OpenAI-compatible API
@@ -91,27 +64,9 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     int
         Exit code (0 for success, non-zero for failure)
     """
-    # Get config to use database_url as source of truth
+    # Get config - database_url from config is the single source of truth
     config = get_config()
-    
-    # Determine which database to use
-    # Priority: DATABASE_URL env var > explicit --db-path CLI arg > config default
-    if os.environ.get("DATABASE_URL"):
-        # DATABASE_URL environment variable is set - use it (takes precedence)
-        database_url = config.database_url
-    elif args.db_path is not None and args.db_path != config.paper_db_path:
-        # Legacy: --db-path was explicitly provided via CLI (and differs from config default)
-        db_path = Path(args.db_path)
-        # Validate file exists for SQLite paths
-        if not db_path.exists():
-            print(f"❌ Error: Database file not found: {db_path}", file=sys.stderr)
-            print("\nYou can create a database using:", file=sys.stderr)
-            print(f"  abstracts-explorer download --output {db_path}", file=sys.stderr)
-            return 1
-        database_url = _convert_db_path_to_url(str(db_path))
-    else:
-        # Use database_url from config (could be from DATABASE_URL or PAPER_DB_PATH)
-        database_url = config.database_url
+    database_url = config.database_url
     
     output_path = Path(args.output)
 
@@ -334,16 +289,15 @@ def search_command(args: argparse.Namespace) -> int:
         num_results = len(results["ids"][0])
         print(f"✅ Found {num_results} similar paper(s):\n")
 
-        # Try to open database to get author names
+        # Try to open database to get author names (optional - from config)
         db_manager = None
-        if args.db_path:
-            db_path = Path(args.db_path)
-            if db_path.exists():
-                try:
-                    db_manager = DatabaseManager(db_path)
-                    db_manager.connect()
-                except Exception as e:
-                    print(f"⚠️  Could not open database for author names: {e}", file=sys.stderr)
+        try:
+            config = get_config()
+            db_manager = DatabaseManager(database_url=config.database_url)
+            db_manager.connect()
+        except Exception:
+            # Not critical - we can still display results without detailed author info
+            pass
 
         for i in range(num_results):
             paper_id = results["ids"][0][i]
@@ -600,7 +554,6 @@ def download_command(args: argparse.Namespace) -> int:
         print("\n" + "=" * 70)
         return 0
 
-    output_path = Path(args.output)
     plugin_name = getattr(args, "plugin", "neurips")
 
     # Get the plugin
@@ -623,32 +576,25 @@ def download_command(args: argparse.Namespace) -> int:
         if plugin_name == "ml4ps":
             kwargs["max_workers"] = getattr(args, "max_workers", 20)
 
-        # Download data using plugin
-        json_path = output_path.parent / f"{plugin_name}_{args.year}.json"
-        papers = plugin.download(year=args.year, output_path=str(json_path), force_download=args.force, **kwargs)
+        # Get config for database
+        config = get_config()
+        
+        # Create temporary directory for JSON download
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # Download data using plugin
+            json_path = Path(tmp_dir) / f"{plugin_name}_{args.year}.json"
+            papers = plugin.download(year=args.year, output_path=str(json_path), force_download=args.force, **kwargs)
 
         print(f"✅ Downloaded {len(papers):,} papers")
 
-        # Create database
-        # Use config's database URL if DATABASE_URL env var is set,
-        # otherwise use the provided output path (for SQLite)
-        config = get_config()
-        if os.environ.get("DATABASE_URL"):
-            # Using database from DATABASE_URL environment variable
-            print("\n📊 Creating database using DATABASE_URL")
-            with DatabaseManager(database_url=config.database_url) as db:
-                db.create_tables()
-                count = db.add_papers(papers)
-                print(f"✅ Loaded {count:,} papers into database")
-            print(f"\n💾 Database updated: {config.database_url}")
-        else:
-            # Using SQLite with file path from --output argument
-            print(f"\n📊 Creating database: {output_path}")
-            with DatabaseManager(db_path=output_path) as db:
-                db.create_tables()
-                count = db.add_papers(papers)
-                print(f"✅ Loaded {count:,} papers into database")
-            print(f"\n💾 Database saved to: {output_path}")
+        # Create database using config (single source of truth)
+        print(f"\n📊 Creating database using config: {config._mask_database_url(config.database_url)}")
+        with DatabaseManager(database_url=config.database_url) as db:
+            db.create_tables()
+            count = db.add_papers(papers)
+            print(f"✅ Loaded {count:,} papers into database")
+        print(f"\n💾 Database updated: {config._mask_database_url(config.database_url)}")
         return 0
 
     except Exception as e:
@@ -944,12 +890,6 @@ Examples:
         help="Year of conference/workshop (default: 2025)",
     )
     download_parser.add_argument(
-        "--output",
-        type=str,
-        default=config.paper_db_path,
-        help=f"Output database file path (default: {config.paper_db_path})",
-    )
-    download_parser.add_argument(
         "--force",
         action="store_true",
         help="Force re-download even if file exists",
@@ -971,12 +911,6 @@ Examples:
         "create-embeddings",
         help="Generate embeddings for abstracts",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    embeddings_parser.add_argument(
-        "--db-path",
-        type=str,
-        default=config.paper_db_path,
-        help="Path to the SQLite database with papers",
     )
     embeddings_parser.add_argument(
         "--output",
@@ -1053,12 +987,6 @@ Examples:
         "--show-abstract",
         action="store_true",
         help="Show paper abstracts in results",
-    )
-    search_parser.add_argument(
-        "--db-path",
-        type=str,
-        default=None,
-        help="Path to SQLite database file to resolve author names (optional)",
     )
     search_parser.add_argument(
         "--lm-studio-url",

@@ -96,8 +96,6 @@ class Config:
         Path to ChromaDB vector database (for embedded/local ChromaDB).
     embedding_db_url : str
         URL for ChromaDB HTTP service (for remote ChromaDB).
-    paper_db_path : str
-        Path to SQLite paper database.
     collection_name : str
         Name of the ChromaDB collection.
     max_context_papers : int
@@ -112,8 +110,7 @@ class Config:
         Similarity threshold for determining when to retrieve new papers (0.0-1.0).
     database_url : str
         SQLAlchemy database URL (supports SQLite, PostgreSQL, etc.).
-    paper_db_path : str
-        Legacy: Path to SQLite paper database (used when DATABASE_URL not set).
+        Set via PAPER_DB environment variable, which can be either a file path or URL.
 
     Examples
     --------
@@ -122,9 +119,12 @@ class Config:
     'diffbot-small-xl-2508'
     >>> config.llm_backend_url
     'http://localhost:1234'
-    >>> # Using DATABASE_URL for PostgreSQL
+    >>> # Using PAPER_DB with PostgreSQL URL
     >>> config.database_url
     'postgresql://user:password@localhost/abstracts'
+    >>> # Using PAPER_DB with SQLite path
+    >>> config.database_url
+    'sqlite:///data/abstracts.db'
     """
 
     def __init__(self, env_path: Optional[Path] = None):
@@ -163,17 +163,16 @@ class Config:
         self.llm_backend_auth_token = self._get_env("LLM_BACKEND_AUTH_TOKEN", default="")
 
         # Database Configuration
-        # DATABASE_URL takes precedence for multi-database support
-        # Falls back to PAPER_DB_PATH for backward compatibility (SQLite only)
-        database_url = self._get_env("DATABASE_URL", default="")
-        if database_url:
-            self.database_url = database_url
-            self.paper_db_path = ""  # Not used when DATABASE_URL is set
+        # PAPER_DB can be either a SQLite file path or a database URL
+        # If it contains "://", it's treated as a database URL
+        # Otherwise, it's treated as a SQLite file path
+        paper_db = self._get_env("PAPER_DB", default="abstracts.db")
+        if "://" in paper_db:
+            # It's a database URL (e.g., postgresql://...)
+            self.database_url = paper_db
         else:
-            # Legacy SQLite path configuration
-            paper_db_path = self._resolve_path(self._get_env("PAPER_DB_PATH", default="abstracts.db"))
-            self.paper_db_path = paper_db_path
-            # Convert to SQLAlchemy URL format
+            # It's a file path - resolve and convert to SQLite URL
+            paper_db_path = self._resolve_path(paper_db)
             self.database_url = f"sqlite:///{paper_db_path}"
 
         # Embedding database configuration
@@ -339,7 +338,6 @@ class Config:
             "embedding_db_path": self.embedding_db_path,
             "embedding_db_url": self.embedding_db_url,
             "database_url": self._mask_database_url(self.database_url),
-            "paper_db_path": self.paper_db_path,
             "collection_name": self.collection_name,
             "max_context_papers": self.max_context_papers,
         }

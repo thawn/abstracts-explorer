@@ -16,7 +16,6 @@ Features:
 
 import logging
 import json
-from pathlib import Path
 from typing import Any, Dict, Optional
 from collections import defaultdict, Counter
 from copy import deepcopy
@@ -31,31 +30,6 @@ from .config import get_config
 logger = logging.getLogger(__name__)
 
 
-def _convert_db_path_to_url(db_path_or_url: str) -> str:
-    """
-    Convert a database path or URL to a proper database URL.
-    
-    If the input is already a URL (contains ://), returns it unchanged.
-    Otherwise, treats it as a SQLite file path and converts to sqlite:/// URL.
-    
-    Parameters
-    ----------
-    db_path_or_url : str
-        Database path or URL
-        
-    Returns
-    -------
-    str
-        Database URL in SQLAlchemy format
-    """
-    if "://" in db_path_or_url:
-        # Already a URL
-        return db_path_or_url
-    else:
-        # Convert file path to SQLite URL
-        return f"sqlite:///{Path(db_path_or_url).absolute()}"
-
-
 # Initialize FastMCP server
 mcp = FastMCP("Abstracts Explorer Cluster Analysis")
 
@@ -68,7 +42,6 @@ class ClusterAnalysisError(Exception):
 def load_clustering_data(
     embeddings_path: Optional[str] = None,
     collection_name: Optional[str] = None,
-    db_path: Optional[str] = None,
 ) -> tuple[ClusteringManager, DatabaseManager]:
     """
     Load clustering data and database.
@@ -79,8 +52,6 @@ def load_clustering_data(
         Path to ChromaDB embeddings database
     collection_name : str, optional
         Name of the ChromaDB collection
-    db_path : str, optional
-        Path to SQLite database
 
     Returns
     -------
@@ -97,13 +68,7 @@ def load_clustering_data(
     # Use config defaults if not provided
     embeddings_path = embeddings_path or config.embedding_db_path
     collection_name = collection_name or config.collection_name
-    # Use database_url from config if db_path not provided
-    if db_path:
-        # db_path was explicitly provided (legacy path or URL)
-        database_url = _convert_db_path_to_url(db_path)
-    else:
-        # Use database_url from config
-        database_url = config.database_url
+    database_url = config.database_url
     
     try:
         # Initialize embeddings manager
@@ -221,7 +186,6 @@ def get_cluster_topics(
     clustering_method: str = "kmeans",
     embeddings_path: Optional[str] = None,
     collection_name: Optional[str] = None,
-    db_path: Optional[str] = None,
 ) -> str:
     """
     Get the most frequently mentioned topics from clustered embeddings.
@@ -241,8 +205,6 @@ def get_cluster_topics(
         Path to ChromaDB embeddings database (uses config default if not provided)
     collection_name : str, optional
         Name of ChromaDB collection (uses config default if not provided)
-    db_path : str, optional
-        Path to SQLite database (uses config default if not provided)
 
     Returns
     -------
@@ -253,10 +215,9 @@ def get_cluster_topics(
         config = get_config()
         embeddings_path = embeddings_path or config.embedding_db_path
         collection_name = collection_name or config.collection_name
-        db_path = db_path or config.paper_db_path
         
         # Load clustering data
-        cm, db = load_clustering_data(embeddings_path, collection_name, db_path)
+        cm, db = load_clustering_data(embeddings_path, collection_name)
         
         # Load embeddings
         logger.info("Loading embeddings...")
@@ -385,7 +346,6 @@ def get_topic_evolution(
     where: Optional[Dict[str, Any]] = None,
     embeddings_path: Optional[str] = None,
     collection_name: Optional[str] = None,
-    db_path: Optional[str] = None,
 ) -> str:
     """
     Analyze how topics have evolved over the years for a conference.
@@ -416,8 +376,6 @@ def get_topic_evolution(
         Path to ChromaDB embeddings database
     collection_name : str, optional
         Name of ChromaDB collection
-    db_path : str, optional
-        Path to SQLite database
 
     Returns
     -------
@@ -428,12 +386,7 @@ def get_topic_evolution(
         config = get_config()
         embeddings_path = embeddings_path or config.embedding_db_path
         collection_name = collection_name or config.collection_name
-        # Use database_url from config if db_path not provided
-        if db_path:
-            # db_path was explicitly provided (legacy path or URL)
-            database_url = _convert_db_path_to_url(db_path)
-        else:
-            database_url = config.database_url
+        database_url = config.database_url
         
         # Initialize embeddings manager
         em = EmbeddingsManager(
@@ -529,7 +482,6 @@ def get_recent_developments(
     where: Optional[Dict[str, Any]] = None,
     embeddings_path: Optional[str] = None,
     collection_name: Optional[str] = None,
-    db_path: Optional[str] = None,
 ) -> str:
     """
     Find the most important recent developments in a specific topic.
@@ -560,8 +512,6 @@ def get_recent_developments(
         Path to ChromaDB embeddings database
     collection_name : str, optional
         Name of ChromaDB collection
-    db_path : str, optional
-        Path to SQLite database
 
     Returns
     -------
@@ -572,12 +522,7 @@ def get_recent_developments(
         config = get_config()
         embeddings_path = embeddings_path or config.embedding_db_path
         collection_name = collection_name or config.collection_name
-        # Use database_url from config if db_path not provided
-        if db_path:
-            # db_path was explicitly provided (legacy path or URL)
-            database_url = _convert_db_path_to_url(db_path)
-        else:
-            database_url = config.database_url
+        database_url = config.database_url
         
         # Initialize embeddings manager
         em = EmbeddingsManager(
@@ -663,7 +608,6 @@ def get_cluster_visualization(
     output_path: Optional[str] = None,
     embeddings_path: Optional[str] = None,
     collection_name: Optional[str] = None,
-    db_path: Optional[str] = None,
 ) -> str:
     """
     Generate visualization data for clustered embeddings.
@@ -687,8 +631,6 @@ def get_cluster_visualization(
         Path to ChromaDB embeddings database
     collection_name : str, optional
         Name of ChromaDB collection
-    db_path : str, optional
-        Path to SQLite database
 
     Returns
     -------
@@ -699,7 +641,6 @@ def get_cluster_visualization(
         config = get_config()
         embeddings_path = embeddings_path or config.embedding_db_path
         collection_name = collection_name or config.collection_name
-        db_path = db_path or config.paper_db_path
         
         # Perform clustering
         logger.info("Performing clustering for visualization...")

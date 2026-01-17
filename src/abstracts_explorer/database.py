@@ -10,7 +10,7 @@ import hashlib
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import create_engine, select, func, or_, and_, text
 from sqlalchemy.orm import sessionmaker, Session
@@ -40,12 +40,9 @@ class DatabaseManager:
 
     Parameters
     ----------
-    db_path : str or Path or None
-        Path to the SQLite database file (legacy parameter).
-        Use database_url for non-SQLite databases.
-    database_url : str, optional
-        SQLAlchemy database URL (e.g., "postgresql://user:pass@localhost/db").
-        If provided, takes precedence over db_path.
+    database_url : str
+        SQLAlchemy database URL (e.g., "sqlite:///path/to/db.db" or 
+        "postgresql://user:pass@localhost/db").
 
     Attributes
     ----------
@@ -60,8 +57,10 @@ class DatabaseManager:
 
     Examples
     --------
-    >>> # SQLite (legacy)
-    >>> db = DatabaseManager("neurips.db")
+    >>> # SQLite
+    >>> from abstracts_explorer.config import get_config
+    >>> config = get_config()
+    >>> db = DatabaseManager(database_url=config.database_url)
     >>> db.connect()
     >>> db.create_tables()
     >>> db.close()
@@ -73,36 +72,22 @@ class DatabaseManager:
     >>> db.close()
     """
 
-    def __init__(
-        self,
-        db_path: Optional[Union[str, Path]] = None,
-        database_url: Optional[str] = None,
-    ):
+    def __init__(self, database_url: str):
         """
         Initialize the DatabaseManager.
 
         Parameters
         ----------
-        db_path : str or Path, optional
-            Path to the SQLite database file (legacy parameter).
-        database_url : str, optional
-            SQLAlchemy database URL. Takes precedence over db_path.
+        database_url : str
+            SQLAlchemy database URL.
         """
-        if database_url:
-            self.database_url = database_url
-            self.db_path = None  # Legacy attribute for backward compatibility
-        elif db_path:
-            # Convert file path to SQLite URL
-            db_path_obj = Path(db_path)
-            self.db_path = db_path_obj  # Legacy attribute for backward compatibility
-            self.database_url = f"sqlite:///{db_path_obj.absolute()}"
-        else:
-            raise DatabaseError("Either db_path or database_url must be provided")
-
+        if not database_url:
+            raise DatabaseError("database_url must be provided")
+        
+        self.database_url = database_url
         self.engine: Optional[Engine] = None
         self.SessionLocal: Optional[sessionmaker] = None
         self._session: Optional[Session] = None
-        self.connection = None  # Legacy attribute for backward compatibility (always None now)
 
     def connect(self) -> None:
         """
