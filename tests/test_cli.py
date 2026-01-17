@@ -109,6 +109,58 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Error:" in captured.err
 
+    def test_download_command_with_database_url(self, tmp_path, capsys, monkeypatch):
+        """Test download command uses DATABASE_URL when set."""
+        # Create a temporary SQLite database for testing
+        # (simulating PostgreSQL behavior but using SQLite for the test)
+        db_path = tmp_path / "test.db"
+        
+        # Set DATABASE_URL environment variable
+        monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+        
+        # Mock the plugin and its download method
+        mock_plugin = Mock()
+        mock_plugin.plugin_name = "neurips"
+        mock_plugin.plugin_description = "NeurIPS Test Plugin"
+        mock_papers = [
+            LightweightPaper(
+                title="Paper 1",
+                abstract="Abstract 1",
+                authors=["Author 1"],
+                session="Session 1",
+                poster_position="P1",
+                year=2025,
+                conference="NeurIPS",
+            ),
+        ]
+        mock_plugin.download.return_value = mock_papers
+        
+        # Mock get_config to return a fresh config with the new DATABASE_URL
+        with patch("abstracts_explorer.cli.get_plugin") as mock_get_plugin:
+            mock_get_plugin.return_value = mock_plugin
+            
+            # Use a context manager to ensure config is reloaded for this test
+            with patch("abstracts_explorer.cli.get_config") as mock_get_config:
+                from abstracts_explorer.config import Config
+                # Create a fresh config instance that will read the monkeypatched env var
+                test_config = Config()
+                mock_get_config.return_value = test_config
+                
+                with patch.object(
+                    sys,
+                    "argv",
+                    ["neurips-abstracts", "download", "--year", "2025", "--output", "ignored_path.db"],
+                ):
+                    exit_code = main()
+        
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Downloaded 1 papers" in captured.out or "Downloaded 1 paper" in captured.out
+        # Should use DATABASE_URL, not the --output path
+        assert "sqlite:///" in captured.out or "Database saved to" in captured.out
+        # Verify database was created
+        assert db_path.exists()
+
     def test_create_embeddings_db_not_found(self, tmp_path, capsys):
         """Test create-embeddings with non-existent database."""
         nonexistent_db = tmp_path / "nonexistent.db"
