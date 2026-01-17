@@ -397,7 +397,7 @@ class TestIntegration:
             ],
         }
 
-    def test_real_neurips_data_subset(self, tmp_path):
+    def test_real_neurips_data_subset(self, tmp_path, monkeypatch):
         """
         Test with a diverse subset of actual NeurIPS 2025 data.
 
