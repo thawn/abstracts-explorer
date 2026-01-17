@@ -590,13 +590,26 @@ def download_command(args: argparse.Namespace) -> int:
         print(f"✅ Downloaded {len(papers):,} papers")
 
         # Create database
-        print(f"\n📊 Creating database: {output_path}")
-        with DatabaseManager(output_path) as db:
-            db.create_tables()
-            count = db.add_papers(papers)
-            print(f"✅ Loaded {count:,} papers into database")
-
-        print(f"\n💾 Database saved to: {output_path}")
+        # Use config's database URL if DATABASE_URL env var is set,
+        # otherwise use the provided output path (for SQLite)
+        import os
+        config = get_config()
+        if os.environ.get("DATABASE_URL"):
+            # Using database from DATABASE_URL environment variable
+            print("\n📊 Creating database using DATABASE_URL")
+            with DatabaseManager(database_url=config.database_url) as db:
+                db.create_tables()
+                count = db.add_papers(papers)
+                print(f"✅ Loaded {count:,} papers into database")
+            print(f"\n💾 Database updated: {config.database_url}")
+        else:
+            # Using SQLite with file path from --output argument
+            print(f"\n📊 Creating database: {output_path}")
+            with DatabaseManager(db_path=output_path) as db:
+                db.create_tables()
+                count = db.add_papers(papers)
+                print(f"✅ Loaded {count:,} papers into database")
+            print(f"\n💾 Database saved to: {output_path}")
         return 0
 
     except Exception as e:
