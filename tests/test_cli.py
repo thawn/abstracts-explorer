@@ -135,19 +135,23 @@ class TestCLI:
         ]
         mock_plugin.download.return_value = mock_papers
         
+        # Mock get_config to return a fresh config with the new DATABASE_URL
         with patch("abstracts_explorer.cli.get_plugin") as mock_get_plugin:
             mock_get_plugin.return_value = mock_plugin
             
-            # Force reload of config to pick up new environment variable
-            from abstracts_explorer import config as config_module
-            config_module._config = None
-            
-            with patch.object(
-                sys,
-                "argv",
-                ["neurips-abstracts", "download", "--year", "2025", "--output", "ignored_path.db"],
-            ):
-                exit_code = main()
+            # Use a context manager to ensure config is reloaded for this test
+            with patch("abstracts_explorer.cli.get_config") as mock_get_config:
+                from abstracts_explorer.config import Config
+                # Create a fresh config instance that will read the monkeypatched env var
+                test_config = Config()
+                mock_get_config.return_value = test_config
+                
+                with patch.object(
+                    sys,
+                    "argv",
+                    ["neurips-abstracts", "download", "--year", "2025", "--output", "ignored_path.db"],
+                ):
+                    exit_code = main()
         
         assert exit_code == 0
         captured = capsys.readouterr()

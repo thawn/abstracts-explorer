@@ -7,6 +7,7 @@ including downloading data, creating databases, and generating embeddings.
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -592,7 +593,6 @@ def download_command(args: argparse.Namespace) -> int:
         # Create database
         # Use config's database URL if DATABASE_URL env var is set,
         # otherwise use the provided output path (for SQLite)
-        import os
         config = get_config()
         if os.environ.get("DATABASE_URL"):
             # Using database from DATABASE_URL environment variable
