@@ -310,9 +310,9 @@ EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b
 LLM_BACKEND_URL=http://localhost:1234
 LLM_BACKEND_AUTH_TOKEN=
 
-# Database Paths
-EMBEDDING_DB_PATH=chroma_db
-PAPER_DB_PATH=abstracts.db
+# Database Configuration
+EMBEDDING_DB=chroma_db
+PAPER_DB=abstracts.db
 
 # RAG Settings
 COLLECTION_NAME=papers
@@ -446,7 +446,7 @@ See `.gitignore`:
 ### ChromaDB
 
 - **Purpose**: Vector embeddings storage
-- **Path**: Configurable via EMBEDDING_DB_PATH
+- **Path**: Configurable via EMBEDDING_DB
 - **Collections**: Papers stored in collections
 - **Persistence**: Automatic disk persistence
 
@@ -640,8 +640,8 @@ The Docker Compose setup creates an isolated environment with:
 The setup uses these key environment variables (set in `.env.docker`):
 
 ```bash
-DATABASE_URL=postgresql://abstracts:abstracts_password@postgres:5432/abstracts
-EMBEDDING_DB_URL=http://chromadb:8000
+PAPER_DB=postgresql://abstracts:abstracts_password@postgres:5432/abstracts
+EMBEDDING_DB=http://chromadb:8000
 LLM_BACKEND_URL=http://host.docker.internal:1234
 CHAT_MODEL=gemma-3-4b-it-qat
 EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b

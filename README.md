@@ -87,11 +87,11 @@ cp .env.example .env
 Abstracts Explorer supports both SQLite and PostgreSQL backends:
 
 ```bash
-# Option 1: SQLite (default, no additional setup required)
-PAPER_DB_PATH=data/abstracts.db
+# SQLite (default, no additional setup required)
+PAPER_DB=data/abstracts.db
 
-# Option 2: PostgreSQL (requires PostgreSQL server)
-DATABASE_URL=postgresql://user:password@localhost/abstracts
+# PostgreSQL (requires PostgreSQL server)
+PAPER_DB=postgresql://user:password@localhost/abstracts
 ```
 
 **PostgreSQL Setup:**
@@ -104,7 +104,7 @@ uv sync --extra postgres
 createdb abstracts
 
 # Configure in .env
-DATABASE_URL=postgresql://user:password@localhost/abstracts
+PAPER_DB=postgresql://user:password@localhost/abstracts
 ```
 
 📖 See [Configuration Guide](docs/configuration.md) for more database options
@@ -115,14 +115,16 @@ DATABASE_URL=postgresql://user:password@localhost/abstracts
 
 ```bash
 # Download NeurIPS 2025 papers
-abstracts-explorer download --year 2025 --output data/abstracts.db
+# Database location configured via PAPER_DB environment variable
+abstracts-explorer download --year 2025
 ```
 
 ### Generate Embeddings for Semantic Search
 
 ```bash
 # Requires LM Studio running with embedding model loaded
-abstracts-explorer create-embeddings --db-path data/abstracts.db
+# Database and ChromaDB locations configured via environment variables
+abstracts-explorer create-embeddings
 ```
 
 ### Cluster and Visualize Embeddings
