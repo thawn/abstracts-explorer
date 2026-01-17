@@ -56,8 +56,10 @@ class EmbeddingsManager:
         OpenAI-compatible API endpoint URL.
     model_name : str
         Embedding model name.
-    chroma_path : Path
-        Path to ChromaDB storage.
+    chroma_path : Path or None
+        Path to ChromaDB storage (for local/embedded ChromaDB).
+    chroma_url : str or None
+        URL of ChromaDB HTTP service (for remote ChromaDB).
     collection_name : str
         ChromaDB collection name.
     client : chromadb.Client or None
@@ -81,6 +83,7 @@ class EmbeddingsManager:
         auth_token: Optional[str] = None,
         model_name: Optional[str] = None,
         chroma_path: Optional[Union[str, Path]] = None,
+        chroma_url: Optional[str] = None,
         collection_name: Optional[str] = None,
     ):
         """
@@ -96,6 +99,9 @@ class EmbeddingsManager:
             Name of the embedding model. If None, uses config value.
         chroma_path : str or Path, optional
             Path to the ChromaDB persistent storage. If None, uses config value.
+            Ignored if chroma_url is provided.
+        chroma_url : str, optional
+            URL of the ChromaDB HTTP service. If provided, uses HTTP client instead of persistent client.
         collection_name : str, optional
             Name of the ChromaDB collection. If None, uses config value.
         """
@@ -103,7 +109,14 @@ class EmbeddingsManager:
         self.lm_studio_url = (lm_studio_url or config.llm_backend_url).rstrip("/")
         self.llm_backend_auth_token = auth_token or config.llm_backend_auth_token
         self.model_name = model_name or config.embedding_model
-        self.chroma_path = Path(chroma_path or config.embedding_db_path)
+        
+        # ChromaDB configuration: URL takes precedence over path
+        self.chroma_url = chroma_url or config.embedding_db_url
+        if self.chroma_url:
+            self.chroma_path = None
+        else:
+            self.chroma_path = Path(chroma_path or config.embedding_db_path)
+        
         self.collection_name = collection_name or config.collection_name
         self.client: Optional[Any] = None  # chromadb.Client
         self.collection: Optional[Any] = None  # chromadb.Collection
@@ -134,7 +147,8 @@ class EmbeddingsManager:
         """
         Connect to ChromaDB.
 
-        Creates the storage directory if it doesn't exist.
+        Uses HTTP client if chroma_url is set, otherwise uses persistent client
+        with local storage directory.
 
         Raises
         ------
@@ -142,12 +156,24 @@ class EmbeddingsManager:
             If connection fails.
         """
         try:
-            self.chroma_path.mkdir(parents=True, exist_ok=True)
-            self.client = chromadb.PersistentClient(
-                path=str(self.chroma_path),
-                settings=Settings(anonymized_telemetry=False),
-            )
-            logger.info(f"Connected to ChromaDB at: {self.chroma_path}")
+            if self.chroma_url:
+                # Use HTTP client for remote ChromaDB service
+                self.client = chromadb.HttpClient(
+                    host=self.chroma_url.split("://")[1].split(":")[0],
+                    port=int(self.chroma_url.split(":")[-1]) if ":" in self.chroma_url.split("://")[1] else 8000,
+                    settings=Settings(anonymized_telemetry=False),
+                )
+                logger.info(f"Connected to ChromaDB HTTP service at: {self.chroma_url}")
+            else:
+                # Use persistent client for local storage
+                if self.chroma_path is None:
+                    raise EmbeddingsError("Either chroma_url or chroma_path must be provided")
+                self.chroma_path.mkdir(parents=True, exist_ok=True)
+                self.client = chromadb.PersistentClient(
+                    path=str(self.chroma_path),
+                    settings=Settings(anonymized_telemetry=False),
+                )
+                logger.info(f"Connected to ChromaDB at: {self.chroma_path}")
         except Exception as e:
             raise EmbeddingsError(f"Failed to connect to ChromaDB: {str(e)}") from e
 

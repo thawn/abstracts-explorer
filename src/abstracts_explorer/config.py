@@ -93,7 +93,9 @@ class Config:
     llm_backend_auth_token : str
         Authentication token for LLM backend (if required).
     embedding_db_path : str
-        Path to ChromaDB vector database.
+        Path to ChromaDB vector database (for embedded/local ChromaDB).
+    embedding_db_url : str
+        URL for ChromaDB HTTP service (for remote ChromaDB).
     paper_db_path : str
         Path to SQLite paper database.
     collection_name : str
@@ -174,8 +176,17 @@ class Config:
             # Convert to SQLAlchemy URL format
             self.database_url = f"sqlite:///{paper_db_path}"
 
-        # Embedding database path (ChromaDB, not affected by SQL backend)
-        self.embedding_db_path = self._resolve_path(self._get_env("EMBEDDING_DB_PATH", default="chroma_db"))
+        # Embedding database configuration
+        # EMBEDDING_DB_URL takes precedence for HTTP ChromaDB service
+        # Falls back to EMBEDDING_DB_PATH for embedded/local ChromaDB
+        embedding_db_url = self._get_env("EMBEDDING_DB_URL", default="")
+        if embedding_db_url:
+            self.embedding_db_url = embedding_db_url
+            self.embedding_db_path = ""  # Not used when EMBEDDING_DB_URL is set
+        else:
+            # Local ChromaDB path configuration
+            self.embedding_db_path = self._resolve_path(self._get_env("EMBEDDING_DB_PATH", default="chroma_db"))
+            self.embedding_db_url = ""  # Not used when EMBEDDING_DB_PATH is set
 
         # Collection Settings
         self.collection_name = self._get_env("COLLECTION_NAME", default="papers")
