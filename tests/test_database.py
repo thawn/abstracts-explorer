@@ -56,8 +56,6 @@ class TestDatabaseManager:
 
     def test_init(self, tmp_path, monkeypatch):
         """Test DatabaseManager initialization."""
-        from abstracts_explorer.config import get_config
-        
         db_path = tmp_path / "test.db"
         monkeypatch.setenv("PAPER_DB", str(db_path))
         get_config(reload=True)
@@ -78,8 +76,6 @@ class TestDatabaseManager:
 
     def test_connect_creates_directories(self, tmp_path, monkeypatch):
         """Test that connect creates parent directories."""
-        from abstracts_explorer.config import get_config
-        
         db_path = tmp_path / "subdir" / "another" / "test.db"
         monkeypatch.setenv("PAPER_DB", str(db_path))
         get_config(reload=True)
@@ -106,8 +102,6 @@ class TestDatabaseManager:
 
     def test_context_manager(self, tmp_path, monkeypatch):
         """Test DatabaseManager as context manager."""
-        from abstracts_explorer.config import get_config
-        
         db_path = tmp_path / "test.db"
         monkeypatch.setenv("PAPER_DB", str(db_path))
         get_config(reload=True)

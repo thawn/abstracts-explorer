@@ -31,8 +31,6 @@ class TestMultiDatabaseBackend:
 
     def test_sqlite_via_paper_db_path(self, tmp_path, monkeypatch):
         """Test using SQLite via PAPER_DB environment variable (path)."""
-        from abstracts_explorer.config import get_config
-        
         db_path = tmp_path / "test.db"
         monkeypatch.setenv("PAPER_DB", str(db_path))
         get_config(reload=True)
@@ -60,8 +58,6 @@ class TestMultiDatabaseBackend:
 
     def test_sqlite_via_paper_db_url(self, tmp_path, monkeypatch):
         """Test using SQLite via PAPER_DB environment variable (URL)."""
-        from abstracts_explorer.config import get_config
-        
         db_path = tmp_path / "test.db"
         database_url = f"sqlite:///{db_path}"
         monkeypatch.setenv("PAPER_DB", database_url)
@@ -214,8 +210,6 @@ class TestMultiDatabaseBackend:
 
 def test_database_url_in_config(tmp_path, monkeypatch):
     """Test that PAPER_DB with database URL is properly loaded from config."""
-    from abstracts_explorer.config import get_config
-    
     db_path = tmp_path / "test.db"
     database_url = f"sqlite:///{db_path}"
     
@@ -229,8 +223,6 @@ def test_database_url_in_config(tmp_path, monkeypatch):
 
 def test_legacy_paper_db_path_in_config(tmp_path, monkeypatch):
     """Test that PAPER_DB with file path works (converts to SQLite URL)."""
-    from abstracts_explorer.config import get_config
-    
     db_path = tmp_path / "test.db"
     
     # Set environment variable using PAPER_DB with file path
