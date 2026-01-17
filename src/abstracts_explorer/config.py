@@ -179,14 +179,15 @@ class Config:
         # Embedding database configuration
         # EMBEDDING_DB_URL takes precedence for HTTP ChromaDB service
         # Falls back to EMBEDDING_DB_PATH for embedded/local ChromaDB
+        # Note: Only one of these should be set; they are mutually exclusive
         embedding_db_url = self._get_env("EMBEDDING_DB_URL", default="")
         if embedding_db_url:
             self.embedding_db_url = embedding_db_url
-            self.embedding_db_path = ""  # Not used when EMBEDDING_DB_URL is set
+            self.embedding_db_path = ""  # Empty when using URL (mutual exclusion)
         else:
             # Local ChromaDB path configuration
             self.embedding_db_path = self._resolve_path(self._get_env("EMBEDDING_DB_PATH", default="chroma_db"))
-            self.embedding_db_url = ""  # Not used when EMBEDDING_DB_PATH is set
+            self.embedding_db_url = ""  # Empty when using path (mutual exclusion)
 
         # Collection Settings
         self.collection_name = self._get_env("COLLECTION_NAME", default="papers")

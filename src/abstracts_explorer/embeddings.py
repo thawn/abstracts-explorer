@@ -12,6 +12,7 @@ embeddings and stores them in ChromaDB for efficient similarity search.
 import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union, Tuple
+from urllib.parse import urlparse
 
 from openai import OpenAI
 import chromadb
@@ -159,7 +160,6 @@ class EmbeddingsManager:
             if self.chroma_url:
                 # Use HTTP client for remote ChromaDB service
                 # Parse URL properly using urllib
-                from urllib.parse import urlparse
                 parsed = urlparse(self.chroma_url)
                 host = parsed.hostname or "localhost"
                 port = parsed.port or 8000
