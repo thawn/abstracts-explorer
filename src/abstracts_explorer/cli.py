@@ -22,6 +22,31 @@ from .plugins import get_plugin, list_plugins, list_plugin_names
 from .mcp_server import run_mcp_server
 
 
+def _convert_db_path_to_url(db_path_or_url: str) -> str:
+    """
+    Convert a database path or URL to a proper database URL.
+    
+    If the input is already a URL (contains ://), returns it unchanged.
+    Otherwise, treats it as a SQLite file path and converts to sqlite:/// URL.
+    
+    Parameters
+    ----------
+    db_path_or_url : str
+        Database path or URL
+        
+    Returns
+    -------
+    str
+        Database URL in SQLAlchemy format
+    """
+    if "://" in db_path_or_url:
+        # Already a URL
+        return db_path_or_url
+    else:
+        # Convert file path to SQLite URL
+        return f"sqlite:///{Path(db_path_or_url).absolute()}"
+
+
 def setup_logging(verbosity: int) -> None:
     """
     Configure logging based on verbosity level.
@@ -67,17 +92,14 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         Exit code (0 for success, non-zero for failure)
     """
     # Get config to use database_url as source of truth
-    from .config import get_config
     config = get_config()
     
     # Determine which database to use
-    # If DATABASE_URL env var is set, it takes precedence
-    # Otherwise, check if --db-path CLI arg was explicitly provided
-    import os
+    # Priority: DATABASE_URL env var > explicit --db-path CLI arg > config default
     if os.environ.get("DATABASE_URL"):
         # DATABASE_URL environment variable is set - use it (takes precedence)
         database_url = config.database_url
-    elif args.db_path and args.db_path != config.paper_db_path:
+    elif args.db_path is not None and args.db_path != config.paper_db_path:
         # Legacy: --db-path was explicitly provided via CLI (and differs from config default)
         db_path = Path(args.db_path)
         # Validate file exists for SQLite paths
@@ -86,7 +108,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
             print("\nYou can create a database using:", file=sys.stderr)
             print(f"  abstracts-explorer download --output {db_path}", file=sys.stderr)
             return 1
-        database_url = f"sqlite:///{db_path.absolute()}"
+        database_url = _convert_db_path_to_url(str(db_path))
     else:
         # Use database_url from config (could be from DATABASE_URL or PAPER_DB_PATH)
         database_url = config.database_url

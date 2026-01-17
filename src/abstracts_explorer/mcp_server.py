@@ -30,6 +30,32 @@ from .config import get_config
 
 logger = logging.getLogger(__name__)
 
+
+def _convert_db_path_to_url(db_path_or_url: str) -> str:
+    """
+    Convert a database path or URL to a proper database URL.
+    
+    If the input is already a URL (contains ://), returns it unchanged.
+    Otherwise, treats it as a SQLite file path and converts to sqlite:/// URL.
+    
+    Parameters
+    ----------
+    db_path_or_url : str
+        Database path or URL
+        
+    Returns
+    -------
+    str
+        Database URL in SQLAlchemy format
+    """
+    if "://" in db_path_or_url:
+        # Already a URL
+        return db_path_or_url
+    else:
+        # Convert file path to SQLite URL
+        return f"sqlite:///{Path(db_path_or_url).absolute()}"
+
+
 # Initialize FastMCP server
 mcp = FastMCP("Abstracts Explorer Cluster Analysis")
 
@@ -74,11 +100,7 @@ def load_clustering_data(
     # Use database_url from config if db_path not provided
     if db_path:
         # db_path was explicitly provided (legacy path or URL)
-        # Try to determine if it's a path or URL
-        if "://" in db_path:
-            database_url = db_path
-        else:
-            database_url = f"sqlite:///{Path(db_path).absolute()}"
+        database_url = _convert_db_path_to_url(db_path)
     else:
         # Use database_url from config
         database_url = config.database_url
@@ -409,10 +431,7 @@ def get_topic_evolution(
         # Use database_url from config if db_path not provided
         if db_path:
             # db_path was explicitly provided (legacy path or URL)
-            if "://" in db_path:
-                database_url = db_path
-            else:
-                database_url = f"sqlite:///{Path(db_path).absolute()}"
+            database_url = _convert_db_path_to_url(db_path)
         else:
             database_url = config.database_url
         
@@ -556,10 +575,7 @@ def get_recent_developments(
         # Use database_url from config if db_path not provided
         if db_path:
             # db_path was explicitly provided (legacy path or URL)
-            if "://" in db_path:
-                database_url = db_path
-            else:
-                database_url = f"sqlite:///{Path(db_path).absolute()}"
+            database_url = _convert_db_path_to_url(db_path)
         else:
             database_url = config.database_url
         

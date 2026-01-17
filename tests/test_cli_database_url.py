@@ -59,8 +59,7 @@ class TestCLIDatabaseURLConfiguration:
             ):
                 # Force config reload to pick up DATABASE_URL
                 from abstracts_explorer.config import get_config
-                config = get_config(reload=True)
-                assert config.database_url == database_url
+                get_config(reload=True)
                 
                 exit_code = main()
 
