@@ -11,10 +11,10 @@ from abstracts_explorer.cli import main
 
 
 class TestCLIDatabaseURLConfiguration:
-    """Test cases for DATABASE_URL configuration support."""
+    """Test cases for PAPER_DB configuration support."""
 
     def test_create_embeddings_with_database_url_from_env(self, tmp_path, monkeypatch):
-        """Test that create-embeddings respects DATABASE_URL environment variable."""
+        """Test that create-embeddings respects PAPER_DB environment variable."""
         from abstracts_explorer.database import DatabaseManager
         from abstracts_explorer.plugin import LightweightPaper
 
@@ -35,9 +35,9 @@ class TestCLIDatabaseURLConfiguration:
             )
             db.add_paper(paper)
 
-        # Set DATABASE_URL environment variable
+        # Set PAPER_DB environment variable (can be URL or path)
         database_url = f"sqlite:///{db_path.absolute()}"
-        monkeypatch.setenv("DATABASE_URL", database_url)
+        monkeypatch.setenv("PAPER_DB", database_url)
 
         # Mock embeddings manager
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
@@ -58,7 +58,7 @@ class TestCLIDatabaseURLConfiguration:
                     str(tmp_path / "chroma_db"),
                 ],
             ):
-                # Force config reload to pick up DATABASE_URL
+                # Force config reload to pick up PAPER_DB
                 from abstracts_explorer.config import get_config
                 get_config(reload=True)
                 
@@ -71,34 +71,30 @@ class TestCLIDatabaseURLConfiguration:
         assert "database_url" in call_kwargs
         assert database_url in call_kwargs["database_url"]
 
-    def test_create_embeddings_database_url_takes_precedence(self, tmp_path, monkeypatch):
-        """Test that DATABASE_URL takes precedence over --db-path argument."""
+    def test_create_embeddings_paper_db_with_file_path(self, tmp_path, monkeypatch):
+        """Test that PAPER_DB works with file path (not just URL)."""
         from abstracts_explorer.database import DatabaseManager
         from abstracts_explorer.plugin import LightweightPaper
 
-        # Create two databases
-        db_path1 = tmp_path / "test1.db"
-        db_path2 = tmp_path / "test2.db"
-        
-        for db_path in [db_path1, db_path2]:
-            database_url = f"sqlite:///{db_path.absolute()}"
-            db = DatabaseManager(database_url=database_url)
-            with db:
-                db.create_tables()
-                paper = LightweightPaper(
-                    title="Test Paper",
-                    abstract="Test abstract",
-                    authors=["Test Author"],
-                    session="Session",
-                    poster_position="P1",
-                    year=2025,
-                    conference="TestConf",
-                )
-                db.add_paper(paper)
+        # Create test database
+        db_path = tmp_path / "test.db"
+        database_url = f"sqlite:///{db_path.absolute()}"
+        db = DatabaseManager(database_url=database_url)
+        with db:
+            db.create_tables()
+            paper = LightweightPaper(
+                title="Test Paper",
+                abstract="Test abstract",
+                authors=["Test Author"],
+                session="Session",
+                poster_position="P1",
+                year=2025,
+                conference="TestConf",
+            )
+            db.add_paper(paper)
 
-        # Set DATABASE_URL to db_path1 (should take precedence)
-        database_url = f"sqlite:///{db_path1.absolute()}"
-        monkeypatch.setenv("DATABASE_URL", database_url)
+        # Set PAPER_DB to file path (not URL) - should still work
+        monkeypatch.setenv("PAPER_DB", str(db_path))
 
         # Mock embeddings manager
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
@@ -115,22 +111,20 @@ class TestCLIDatabaseURLConfiguration:
                 [
                     "abstracts-explorer",
                     "create-embeddings",
-                    "--db-path",
-                    str(db_path2),  # This should be ignored in favor of DATABASE_URL
                     "--output",
                     str(tmp_path / "chroma_db"),
                 ],
             ):
-                # Force config reload to pick up DATABASE_URL
+                # Force config reload to pick up PAPER_DB
                 from abstracts_explorer.config import get_config
                 get_config(reload=True)
                 
                 exit_code = main()
 
         assert exit_code == 0
-        # Verify that database_url from env was used (not db_path2 from CLI)
+        # Verify that embed_from_database was called with database_url parameter
         mock_em.embed_from_database.assert_called_once()
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
-        # The database_url should be from environment (db_path1)
+        # The database_url should be automatically converted from path
         assert "database_url" in call_kwargs
-        assert str(db_path1.absolute()) in call_kwargs["database_url"]
+        assert str(db_path.absolute()) in call_kwargs["database_url"]
