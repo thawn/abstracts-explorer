@@ -31,9 +31,14 @@ services:
       # - LLM_BACKEND_URL=http://host.docker.internal:1234
       
       # Models
-      - CHAT_MODEL=gemma-3-4b-it-qat
-      - EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b
-      
+      # For Blablador
+      - CHAT_MODEL=alias-fast
+      - EMBEDDING_MODEL=alias-embeddings
+
+      # For host's LM Studio we recommend
+      # - CHAT_MODEL=gemma-3-4b-it-qat
+      # - EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b
+
       # RAG settings
       - MAX_CONTEXT_PAPERS=5
       - ENABLE_QUERY_REWRITING=true
