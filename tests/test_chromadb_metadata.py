@@ -10,7 +10,6 @@ chosen to avoid conflicts with the general embeddings fixtures in conftest.py.
 """
 
 import pytest
-from unittest.mock import Mock
 from abstracts_explorer.plugin import validate_lightweight_paper, prepare_chroma_db_paper_data
 from abstracts_explorer.embeddings import EmbeddingsManager
 

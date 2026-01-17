@@ -52,6 +52,7 @@ def test_database(tmp_path_factory, web_test_papers):
     Uses the shared web_test_papers fixture from conftest.py to ensure
     consistency across web-related tests.
     """
+    import os
     tmp_dir = tmp_path_factory.mktemp("data")
     db_path = tmp_dir / "test_web_integration.db"
 
@@ -60,7 +61,7 @@ def test_database(tmp_path_factory, web_test_papers):
 
     from abstracts_explorer.config import get_config
 
-    monkeypatch.setenv("PAPER_DB", database_url)
+    os.environ["PAPER_DB"] = database_url
 
     get_config(reload=True)
     db = DatabaseManager()

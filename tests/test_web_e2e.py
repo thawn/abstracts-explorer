@@ -63,6 +63,7 @@ def test_database(tmp_path_factory):
     Path
         Path to the test database
     """
+    import os
     tmp_dir = tmp_path_factory.mktemp("data")
     db_path = tmp_dir / "test_web_e2e.db"
 
@@ -72,7 +73,7 @@ def test_database(tmp_path_factory):
 
     from abstracts_explorer.config import get_config
 
-    monkeypatch.setenv("PAPER_DB", database_url)
+    os.environ["PAPER_DB"] = database_url
 
     get_config(reload=True)
     db = DatabaseManager()

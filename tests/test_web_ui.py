@@ -63,7 +63,7 @@ def client(app):
 
 
 @pytest.fixture
-def test_db(tmp_path, web_test_papers):
+def test_db(tmp_path, web_test_papers, monkeypatch):
     """
     Create a test database with sample papers for web testing.
 
@@ -73,6 +73,8 @@ def test_db(tmp_path, web_test_papers):
         Temporary directory path
     web_test_papers : list
         List of test papers from shared fixture
+    monkeypatch : pytest.MonkeyPatch
+        Pytest fixture for setting environment variables
 
     Returns
     -------

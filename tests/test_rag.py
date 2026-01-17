@@ -426,11 +426,9 @@ class TestRAGChatIntegration:
         # This test requires LM Studio to be running with the configured chat model
         # Create real embeddings manager
         from abstracts_explorer.embeddings import EmbeddingsManager
-
-        config = get_config()
+        from abstracts_explorer.config import get_config
 
         chroma_path = tmp_path / "chroma_integration"
-        from abstracts_explorer.config import get_config
         monkeypatch.setenv("EMBEDDING_DB", str(chroma_path))
         get_config(reload=True)
         em = EmbeddingsManager()
@@ -495,11 +493,9 @@ class TestRAGChatIntegration:
         and TestRAGChatConversation.test_conversation_history_accumulates.
         """
         from abstracts_explorer.embeddings import EmbeddingsManager
-
-        config = get_config()
+        from abstracts_explorer.config import get_config
 
         chroma_path = tmp_path / "chroma_conversation"
-        from abstracts_explorer.config import get_config
         monkeypatch.setenv("EMBEDDING_DB", str(chroma_path))
         get_config(reload=True)
         em = EmbeddingsManager()
@@ -564,11 +560,9 @@ class TestRAGChatIntegration:
         For unit testing without LM Studio, see TestRAGChatExport.test_export_conversation.
         """
         from abstracts_explorer.embeddings import EmbeddingsManager
-
-        config = get_config()
+        from abstracts_explorer.config import get_config
 
         chroma_path = tmp_path / "chroma_export"
-        from abstracts_explorer.config import get_config
         monkeypatch.setenv("EMBEDDING_DB", str(chroma_path))
         get_config(reload=True)
         em = EmbeddingsManager()
