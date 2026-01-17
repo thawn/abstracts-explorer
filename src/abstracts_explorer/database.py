@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Union
 from sqlalchemy import create_engine, select, func, or_, and_, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError, ProgrammingError, IntegrityError
 
 # Import Pydantic models from plugin framework
 from abstracts_explorer.plugin import LightweightPaper
@@ -216,14 +217,20 @@ class DatabaseManager:
             # This makes the operation idempotent
             Base.metadata.create_all(bind=self.engine, checkfirst=True)
             logger.info("Database tables created successfully")
-        except Exception as e:
-            # Check if this is a "table already exists" error (can happen with race conditions)
+        except (OperationalError, ProgrammingError, IntegrityError) as e:
+            # These exceptions can occur when tables already exist, especially with:
+            # - Race conditions in concurrent environments
+            # - PostgreSQL's pg_type_typname_nsp_index constraint
+            # - SQLite "table already exists" errors
             error_msg = str(e).lower()
-            if any(x in error_msg for x in ["already exists", "duplicate key", "pg_type_typname_nsp_index"]):
+            if any(x in error_msg for x in ["already exists", "duplicate", "pg_type_typname_nsp_index"]):
                 # Tables already exist - this is fine, just log it
                 logger.debug(f"Tables already exist (this is normal): {str(e)}")
                 return
-            # For other errors, re-raise
+            # For other database errors, re-raise with context
+            raise DatabaseError(f"Failed to create tables: {str(e)}") from e
+        except Exception as e:
+            # Catch any other unexpected errors
             raise DatabaseError(f"Failed to create tables: {str(e)}") from e
 
     def add_paper(self, paper: LightweightPaper) -> Optional[str]:
