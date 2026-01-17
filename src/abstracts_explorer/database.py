@@ -198,6 +198,10 @@ class DatabaseManager:
         Creates the following tables:
         - papers: Main table for paper information with lightweight ML4PS schema
         - embeddings_metadata: Metadata about embeddings (model used, creation date)
+        - clustering_cache: Cache for clustering results
+        
+        This method is idempotent - it can be called multiple times without error.
+        Tables are only created if they don't already exist.
 
         Raises
         ------
@@ -208,9 +212,18 @@ class DatabaseManager:
             raise DatabaseError("Not connected to database")
 
         try:
-            Base.metadata.create_all(bind=self.engine)
+            # Create tables only if they don't exist (checkfirst=True is the default)
+            # This makes the operation idempotent
+            Base.metadata.create_all(bind=self.engine, checkfirst=True)
             logger.info("Database tables created successfully")
         except Exception as e:
+            # Check if this is a "table already exists" error (can happen with race conditions)
+            error_msg = str(e).lower()
+            if any(x in error_msg for x in ["already exists", "duplicate key", "pg_type_typname_nsp_index"]):
+                # Tables already exist - this is fine, just log it
+                logger.debug(f"Tables already exist (this is normal): {str(e)}")
+                return
+            # For other errors, re-raise
             raise DatabaseError(f"Failed to create tables: {str(e)}") from e
 
     def add_paper(self, paper: LightweightPaper) -> Optional[str]:

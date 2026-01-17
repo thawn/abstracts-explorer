@@ -122,6 +122,23 @@ class TestDatabaseManager:
         with pytest.raises(DatabaseError, match="Not connected to database"):
             db_manager.create_tables()
 
+    def test_create_tables_idempotent(self, db_manager):
+        """Test that create_tables can be called multiple times without error."""
+        db_manager.connect()
+        
+        # Call create_tables multiple times - should not raise errors
+        db_manager.create_tables()
+        db_manager.create_tables()
+        db_manager.create_tables()
+        
+        # Check tables still exist and work
+        cursor = db_manager.connection.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = [row[0] for row in cursor.fetchall()]
+        assert "papers" in tables
+        
+        db_manager.close()
+
     def test_query_without_connection(self, db_manager):
         """Test query raises error when not connected."""
         with pytest.raises(DatabaseError, match="Not connected to database"):
