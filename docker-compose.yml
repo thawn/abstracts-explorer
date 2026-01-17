@@ -16,7 +16,7 @@ services:
     environment:
       # Database configuration - using PostgreSQL
       - DATA_DIR=/app/data
-      - DATABASE_URL=postgresql://abstracts:abstracts_password@postgres:5432/abstracts
+      - PAPER_DB=postgresql://abstracts:abstracts_password@postgres:5432/abstracts
       
       # Embeddings configuration - using ChromaDB service
       - EMBEDDING_DB_URL=http://chromadb:8000

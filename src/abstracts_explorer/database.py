@@ -10,7 +10,7 @@ import hashlib
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import create_engine, select, func, or_, and_, text
 from sqlalchemy.orm import sessionmaker, Session
@@ -37,20 +37,12 @@ class DatabaseManager:
     Manager for SQL database operations using SQLAlchemy.
 
     Supports SQLite and PostgreSQL backends through SQLAlchemy connection URLs.
-
-    Parameters
-    ----------
-    db_path : str or Path or None
-        Path to the SQLite database file (legacy parameter).
-        Use database_url for non-SQLite databases.
-    database_url : str, optional
-        SQLAlchemy database URL (e.g., "postgresql://user:pass@localhost/db").
-        If provided, takes precedence over db_path.
+    Database configuration is read from the config file (PAPER_DB variable).
 
     Attributes
     ----------
     database_url : str
-        SQLAlchemy database URL.
+        SQLAlchemy database URL from configuration.
     engine : Engine or None
         SQLAlchemy engine instance.
     SessionLocal : sessionmaker or None
@@ -60,44 +52,23 @@ class DatabaseManager:
 
     Examples
     --------
-    >>> # SQLite (legacy)
-    >>> db = DatabaseManager("neurips.db")
-    >>> db.connect()
-    >>> db.create_tables()
-    >>> db.close()
-
-    >>> # PostgreSQL
-    >>> db = DatabaseManager(database_url="postgresql://user:pass@localhost/abstracts")
+    >>> # Database configuration comes from config file
+    >>> db = DatabaseManager()
     >>> db.connect()
     >>> db.create_tables()
     >>> db.close()
     """
 
-    def __init__(
-        self,
-        db_path: Optional[Union[str, Path]] = None,
-        database_url: Optional[str] = None,
-    ):
+    def __init__(self):
         """
         Initialize the DatabaseManager.
-
-        Parameters
-        ----------
-        db_path : str or Path, optional
-            Path to the SQLite database file (legacy parameter).
-        database_url : str, optional
-            SQLAlchemy database URL. Takes precedence over db_path.
+        
+        Reads database configuration from the config file.
         """
-        if database_url:
-            self.database_url = database_url
-            self.db_path = None  # Legacy attribute for backward compatibility
-        elif db_path:
-            # Convert file path to SQLite URL
-            db_path_obj = Path(db_path)
-            self.db_path = db_path_obj  # Legacy attribute for backward compatibility
-            self.database_url = f"sqlite:///{db_path_obj.absolute()}"
-        else:
-            raise DatabaseError("Either db_path or database_url must be provided")
+        from abstracts_explorer.config import get_config
+        
+        config = get_config()
+        self.database_url = config.database_url
 
         self.engine: Optional[Engine] = None
         self.SessionLocal: Optional[sessionmaker] = None
@@ -255,7 +226,7 @@ class DatabaseManager:
         Examples
         --------
         >>> from abstracts_explorer.plugin import LightweightPaper
-        >>> db = DatabaseManager("neurips.db")
+        >>> db = DatabaseManager()
         >>> with db:
         ...     db.create_tables()
         ...     paper = LightweightPaper(
@@ -364,7 +335,7 @@ class DatabaseManager:
         Examples
         --------
         >>> from abstracts_explorer.plugin import LightweightPaper
-        >>> db = DatabaseManager("neurips.db")
+        >>> db = DatabaseManager()
         >>> with db:
         ...     db.create_tables()
         ...     papers = [
@@ -429,7 +400,7 @@ class DatabaseManager:
 
         Examples
         --------
-        >>> db = DatabaseManager("neurips.db")
+        >>> db = DatabaseManager()
         >>> with db:
         ...     results = db.query("SELECT * FROM papers WHERE session = ?", ("Poster",))
         >>> for row in results:
@@ -645,7 +616,7 @@ class DatabaseManager:
 
         Examples
         --------
-        >>> db = DatabaseManager("neurips.db")
+        >>> db = DatabaseManager()
         >>> with db:
         ...     authors = db.search_authors_in_papers(name="Huang")
         >>> for author in authors:
@@ -750,7 +721,7 @@ class DatabaseManager:
 
         Examples
         --------
-        >>> db = DatabaseManager("neurips.db")
+        >>> db = DatabaseManager()
         >>> with db:
         ...     filters = db.get_filter_options()
         >>> print(filters['sessions'])
@@ -824,7 +795,7 @@ class DatabaseManager:
 
         Examples
         --------
-        >>> db = DatabaseManager("neurips.db")
+        >>> db = DatabaseManager()
         >>> with db:
         ...     model = db.get_embedding_model()
         >>> print(model)
@@ -864,7 +835,7 @@ class DatabaseManager:
 
         Examples
         --------
-        >>> db = DatabaseManager("neurips.db")
+        >>> db = DatabaseManager()
         >>> with db:
         ...     db.set_embedding_model("text-embedding-qwen3-embedding-4b")
         """

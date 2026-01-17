@@ -7,7 +7,6 @@ including downloading data, creating databases, and generating embeddings.
 
 import argparse
 import logging
-import os
 import sys
 from pathlib import Path
 
@@ -53,7 +52,6 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     ----------
     args : argparse.Namespace
         Command-line arguments containing:
-        - db_path: Path to the SQLite database with papers
         - output: Path for the ChromaDB vector database
         - collection: Name for the ChromaDB collection
         - lm_studio_url: URL for OpenAI-compatible API
@@ -66,19 +64,12 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     int
         Exit code (0 for success, non-zero for failure)
     """
-    db_path = Path(args.db_path)
+    config = get_config()
     output_path = Path(args.output)
-
-    # Validate database exists
-    if not db_path.exists():
-        print(f"❌ Error: Database file not found: {db_path}", file=sys.stderr)
-        print("\nYou can create a database using:", file=sys.stderr)
-        print(f"  neurips-abstracts download --output {db_path}", file=sys.stderr)
-        return 1
 
     print("Abstracts Explorer - Embeddings Generator")
     print("=" * 70)
-    print(f"Database: {db_path}")
+    print(f"Database: {config.database_url}")
     print(f"Output:   {output_path}")
     print(f"Collection: {args.collection}")
     print(f"Model:    {args.model}")
@@ -86,7 +77,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     print("=" * 70)
 
     # Check paper count
-    with DatabaseManager(db_path) as db:
+    with DatabaseManager() as db:
         total_papers = db.get_paper_count()
         print(f"\n📊 Found {total_papers:,} papers in database")
 
@@ -108,7 +99,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
 
         # Check for model mismatch
         print("🔍 Checking embedding model compatibility...")
-        compatible, stored_model, current_model = em.check_model_compatibility(db_path)
+        compatible, stored_model, current_model = em.check_model_compatibility()
 
         if not compatible:
             print("\n⚠️  WARNING: Embedding model mismatch detected!")
@@ -153,7 +144,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         print("\n🚀 Generating embeddings...")
 
         # Determine total count for progress bar
-        with DatabaseManager(db_path) as db:
+        with DatabaseManager() as db:
             if args.where:
                 count_result = db.query(f"SELECT COUNT(*) as count FROM papers WHERE {args.where}")
                 total_count = count_result[0]["count"] if count_result else 0
@@ -169,7 +160,6 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
                 pbar.refresh()
 
             embedded_count = em.embed_from_database(
-                db_path=db_path,
                 where_clause=args.where,
                 progress_callback=update_progress,
                 force_recreate=args.force,
@@ -295,17 +285,6 @@ def search_command(args: argparse.Namespace) -> int:
         num_results = len(results["ids"][0])
         print(f"✅ Found {num_results} similar paper(s):\n")
 
-        # Try to open database to get author names
-        db_manager = None
-        if args.db_path:
-            db_path = Path(args.db_path)
-            if db_path.exists():
-                try:
-                    db_manager = DatabaseManager(db_path)
-                    db_manager.connect()
-                except Exception as e:
-                    print(f"⚠️  Could not open database for author names: {e}", file=sys.stderr)
-
         for i in range(num_results):
             paper_id = results["ids"][0][i]
             metadata = results["metadatas"][0][i]
@@ -338,9 +317,6 @@ def search_command(args: argparse.Namespace) -> int:
                 print(f"   Abstract: {abstract}")
 
             print()
-
-        if db_manager:
-            db_manager.close()
 
         em.close()
         return 0
@@ -428,10 +404,8 @@ def chat_command(args: argparse.Namespace) -> int:
 
         # Initialize database connection
         from abstracts_explorer.database import DatabaseManager
-        from abstracts_explorer.config import get_config
 
-        config_obj = get_config()
-        db = DatabaseManager(database_url=config_obj.database_url)
+        db = DatabaseManager()
         db.connect()
 
         # Initialize RAG chat
@@ -590,26 +564,15 @@ def download_command(args: argparse.Namespace) -> int:
 
         print(f"✅ Downloaded {len(papers):,} papers")
 
-        # Create database
-        # Use config's database URL if DATABASE_URL env var is set,
-        # otherwise use the provided output path (for SQLite)
+        # Create database using config
+        print("\n📊 Creating database using configuration")
+        with DatabaseManager() as db:
+            db.create_tables()
+            count = db.add_papers(papers)
+            print(f"✅ Loaded {count:,} papers into database")
+        
         config = get_config()
-        if os.environ.get("DATABASE_URL"):
-            # Using database from DATABASE_URL environment variable
-            print("\n📊 Creating database using DATABASE_URL")
-            with DatabaseManager(database_url=config.database_url) as db:
-                db.create_tables()
-                count = db.add_papers(papers)
-                print(f"✅ Loaded {count:,} papers into database")
-            print(f"\n💾 Database updated: {config.database_url}")
-        else:
-            # Using SQLite with file path from --output argument
-            print(f"\n📊 Creating database: {output_path}")
-            with DatabaseManager(db_path=output_path) as db:
-                db.create_tables()
-                count = db.add_papers(papers)
-                print(f"✅ Loaded {count:,} papers into database")
-            print(f"\n💾 Database saved to: {output_path}")
+        print(f"\n💾 Database updated: {config.database_url}")
         return 0
 
     except Exception as e:
@@ -907,8 +870,8 @@ Examples:
     download_parser.add_argument(
         "--output",
         type=str,
-        default=config.paper_db_path,
-        help=f"Output database file path (default: {config.paper_db_path})",
+        default="data/abstracts.json",
+        help="Output path for intermediate JSON file (default: data/abstracts.json)",
     )
     download_parser.add_argument(
         "--force",
@@ -932,12 +895,6 @@ Examples:
         "create-embeddings",
         help="Generate embeddings for abstracts",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    embeddings_parser.add_argument(
-        "--db-path",
-        type=str,
-        default=config.paper_db_path,
-        help="Path to the SQLite database with papers",
     )
     embeddings_parser.add_argument(
         "--output",
@@ -1014,12 +971,6 @@ Examples:
         "--show-abstract",
         action="store_true",
         help="Show paper abstracts in results",
-    )
-    search_parser.add_argument(
-        "--db-path",
-        type=str,
-        default=None,
-        help="Path to SQLite database file to resolve author names (optional)",
     )
     search_parser.add_argument(
         "--lm-studio-url",
