@@ -186,6 +186,31 @@ class TestMultiDatabaseBackend:
             retrieved_model = db.get_embedding_model()
             assert retrieved_model == new_model
 
+    @skip_without_postgres
+    def test_postgresql_idempotent_create_tables(self):
+        """Test that create_tables can be called multiple times without error."""
+        db = DatabaseManager(database_url=POSTGRES_TEST_URL)
+        
+        with db:
+            # Call create_tables multiple times - should not raise errors
+            db.create_tables()
+            db.create_tables()
+            db.create_tables()
+            
+            # Verify tables still work
+            paper = LightweightPaper(
+                title="Idempotent Test Paper",
+                authors=["Test Author"],
+                abstract="Testing idempotent table creation",
+                session="Session A",
+                poster_position="P1",
+                year=2025,
+                conference="TestConf",
+            )
+            
+            paper_uid = db.add_paper(paper)
+            assert paper_uid is not None
+
 
 def test_database_url_in_config(tmp_path, monkeypatch):
     """Test that DATABASE_URL is properly loaded from config."""

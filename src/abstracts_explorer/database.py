@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Union
 from sqlalchemy import create_engine, select, func, or_, and_, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError, ProgrammingError, IntegrityError
 
 # Import Pydantic models from plugin framework
 from abstracts_explorer.plugin import LightweightPaper
@@ -198,6 +199,10 @@ class DatabaseManager:
         Creates the following tables:
         - papers: Main table for paper information with lightweight ML4PS schema
         - embeddings_metadata: Metadata about embeddings (model used, creation date)
+        - clustering_cache: Cache for clustering results
+        
+        This method is idempotent - it can be called multiple times without error.
+        Tables are only created if they don't already exist.
 
         Raises
         ------
@@ -208,9 +213,24 @@ class DatabaseManager:
             raise DatabaseError("Not connected to database")
 
         try:
-            Base.metadata.create_all(bind=self.engine)
+            # Create tables only if they don't exist (checkfirst=True is the default)
+            # This makes the operation idempotent
+            Base.metadata.create_all(bind=self.engine, checkfirst=True)
             logger.info("Database tables created successfully")
+        except (OperationalError, ProgrammingError, IntegrityError) as e:
+            # These exceptions can occur when tables already exist, especially with:
+            # - Race conditions in concurrent environments
+            # - PostgreSQL's pg_type_typname_nsp_index constraint
+            # - SQLite "table already exists" errors
+            error_msg = str(e).lower()
+            if any(x in error_msg for x in ["already exists", "duplicate", "pg_type_typname_nsp_index"]):
+                # Tables already exist - this is fine, just log it
+                logger.debug(f"Tables already exist (this is normal): {str(e)}")
+                return
+            # For other database errors, re-raise with context
+            raise DatabaseError(f"Failed to create tables: {str(e)}") from e
         except Exception as e:
+            # Catch any other unexpected errors
             raise DatabaseError(f"Failed to create tables: {str(e)}") from e
 
     def add_paper(self, paper: LightweightPaper) -> Optional[str]:
