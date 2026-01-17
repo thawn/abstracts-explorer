@@ -566,14 +566,23 @@ class EmbeddingsManager:
         except Exception as e:
             raise EmbeddingsError(f"Failed to get collection stats: {str(e)}") from e
 
-    def check_model_compatibility(self, db_path: Union[str, Path]) -> Tuple[bool, Optional[str], Optional[str]]:
+    def check_model_compatibility(
+        self, 
+        db_path: Optional[Union[str, Path]] = None,
+        database_url: Optional[str] = None
+    ) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         Check if the current embedding model matches the one stored in the database.
 
+        Supports both SQLite (via db_path) and PostgreSQL (via database_url).
+
         Parameters
         ----------
-        db_path : str or Path
-            Path to the SQLite database file.
+        db_path : str or Path, optional
+            Path to the SQLite database file (legacy parameter).
+        database_url : str, optional
+            SQLAlchemy database URL (e.g., "postgresql://user:pass@localhost/db").
+            Takes precedence over db_path if both are provided.
 
         Returns
         -------
@@ -590,18 +599,28 @@ class EmbeddingsManager:
         Examples
         --------
         >>> em = EmbeddingsManager()
-        >>> compatible, stored, current = em.check_model_compatibility("neurips.db")
+        >>> compatible, stored, current = em.check_model_compatibility(db_path="neurips.db")
         >>> if not compatible:
         ...     print(f"Model mismatch: stored={stored}, current={current}")
+        >>> # Using PostgreSQL
+        >>> compatible, stored, current = em.check_model_compatibility(database_url="postgresql://...")
         """
         try:
-            db_path = Path(db_path)
-            if not db_path.exists():
-                # If database doesn't exist, consider it compatible (no previous embeddings)
-                return True, None, self.model_name
+            # For SQLite, check if file exists
+            if db_path and not database_url:
+                db_path_obj = Path(db_path)
+                if not db_path_obj.exists():
+                    # If database doesn't exist, consider it compatible (no previous embeddings)
+                    return True, None, self.model_name
 
-            # Use DatabaseManager to check the stored model
-            db_manager = DatabaseManager(db_path)
+            # Create DatabaseManager with appropriate parameter
+            if database_url:
+                db_manager = DatabaseManager(database_url=database_url)
+            elif db_path:
+                db_manager = DatabaseManager(db_path=db_path)
+            else:
+                raise EmbeddingsError("Either db_path or database_url must be provided")
+
             db_manager.connect()
 
             stored_model = db_manager.get_embedding_model()
@@ -620,20 +639,25 @@ class EmbeddingsManager:
 
     def embed_from_database(
         self,
-        db_path: Union[str, Path],
+        db_path: Optional[Union[str, Path]] = None,
+        database_url: Optional[str] = None,
         where_clause: Optional[str] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None,
         force_recreate: bool = False,
     ) -> int:
         """
-        Embed papers from a SQLite database.
+        Embed papers from a database.
 
         Reads papers from the database and generates embeddings for their abstracts.
+        Supports both SQLite (via db_path) and PostgreSQL (via database_url).
 
         Parameters
         ----------
-        db_path : str or Path
-            Path to the SQLite database file.
+        db_path : str or Path, optional
+            Path to the SQLite database file (legacy parameter).
+        database_url : str, optional
+            SQLAlchemy database URL (e.g., "postgresql://user:pass@localhost/db").
+            Takes precedence over db_path if both are provided.
         where_clause : str, optional
             SQL WHERE clause to filter papers (e.g., "decision = 'Accept'")
         progress_callback : callable, optional
@@ -656,21 +680,28 @@ class EmbeddingsManager:
         >>> em = EmbeddingsManager()
         >>> em.connect()
         >>> em.create_collection()
-        >>> count = em.embed_from_database("neurips.db")
+        >>> count = em.embed_from_database(db_path="neurips.db")
         >>> print(f"Embedded {count} papers")
         >>> # Only embed accepted papers
-        >>> count = em.embed_from_database("neurips.db", where_clause="decision = 'Accept'")
+        >>> count = em.embed_from_database(db_path="neurips.db", where_clause="decision = 'Accept'")
+        >>> # Using PostgreSQL
+        >>> count = em.embed_from_database(database_url="postgresql://user:pass@localhost/db")
         """
         if not self.collection:
             raise EmbeddingsError("Collection not initialized. Call create_collection() first.")
 
         try:
-            db_path = Path(db_path)
-            if not db_path.exists():
-                raise EmbeddingsError(f"Database not found: {db_path}")
+            # Create DatabaseManager with appropriate parameter
+            if database_url:
+                db_manager = DatabaseManager(database_url=database_url)
+            elif db_path:
+                db_path_obj = Path(db_path)
+                if not db_path_obj.exists():
+                    raise EmbeddingsError(f"Database not found: {db_path}")
+                db_manager = DatabaseManager(db_path=db_path)
+            else:
+                raise EmbeddingsError("Either db_path or database_url must be provided")
 
-            # Use DatabaseManager for database operations
-            db_manager = DatabaseManager(db_path)
             db_manager.connect()
 
             # Store the embedding model in the database

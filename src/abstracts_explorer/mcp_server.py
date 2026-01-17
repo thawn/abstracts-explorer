@@ -16,6 +16,7 @@ Features:
 
 import logging
 import json
+from pathlib import Path
 from typing import Any, Dict, Optional
 from collections import defaultdict, Counter
 from copy import deepcopy
@@ -70,7 +71,17 @@ def load_clustering_data(
     # Use config defaults if not provided
     embeddings_path = embeddings_path or config.embedding_db_path
     collection_name = collection_name or config.collection_name
-    db_path = db_path or config.paper_db_path
+    # Use database_url from config if db_path not provided
+    if db_path:
+        # db_path was explicitly provided (legacy path or URL)
+        # Try to determine if it's a path or URL
+        if "://" in db_path:
+            database_url = db_path
+        else:
+            database_url = f"sqlite:///{Path(db_path).absolute()}"
+    else:
+        # Use database_url from config
+        database_url = config.database_url
     
     try:
         # Initialize embeddings manager
@@ -82,7 +93,7 @@ def load_clustering_data(
         em.create_collection()
         
         # Initialize database manager
-        db = DatabaseManager(db_path)
+        db = DatabaseManager(database_url=database_url)
         db.connect()
         
         # Initialize clustering manager
@@ -395,7 +406,15 @@ def get_topic_evolution(
         config = get_config()
         embeddings_path = embeddings_path or config.embedding_db_path
         collection_name = collection_name or config.collection_name
-        db_path = db_path or config.paper_db_path
+        # Use database_url from config if db_path not provided
+        if db_path:
+            # db_path was explicitly provided (legacy path or URL)
+            if "://" in db_path:
+                database_url = db_path
+            else:
+                database_url = f"sqlite:///{Path(db_path).absolute()}"
+        else:
+            database_url = config.database_url
         
         # Initialize embeddings manager
         em = EmbeddingsManager(
@@ -406,7 +425,7 @@ def get_topic_evolution(
         em.create_collection()
         
         # Initialize database
-        db = DatabaseManager(db_path)
+        db = DatabaseManager(database_url=database_url)
         db.connect()
         
         # Build metadata filter using helper function
@@ -534,7 +553,15 @@ def get_recent_developments(
         config = get_config()
         embeddings_path = embeddings_path or config.embedding_db_path
         collection_name = collection_name or config.collection_name
-        db_path = db_path or config.paper_db_path
+        # Use database_url from config if db_path not provided
+        if db_path:
+            # db_path was explicitly provided (legacy path or URL)
+            if "://" in db_path:
+                database_url = db_path
+            else:
+                database_url = f"sqlite:///{Path(db_path).absolute()}"
+        else:
+            database_url = config.database_url
         
         # Initialize embeddings manager
         em = EmbeddingsManager(
@@ -545,7 +572,7 @@ def get_recent_developments(
         em.create_collection()
         
         # Initialize database
-        db = DatabaseManager(db_path)
+        db = DatabaseManager(database_url=database_url)
         db.connect()
         
         # Calculate year cutoff

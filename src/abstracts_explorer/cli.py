@@ -53,7 +53,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     ----------
     args : argparse.Namespace
         Command-line arguments containing:
-        - db_path: Path to the SQLite database with papers
+        - db_path: Path to the SQLite database with papers (legacy, optional)
         - output: Path for the ChromaDB vector database
         - collection: Name for the ChromaDB collection
         - lm_studio_url: URL for OpenAI-compatible API
@@ -66,19 +66,29 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     int
         Exit code (0 for success, non-zero for failure)
     """
-    db_path = Path(args.db_path)
+    # Get config to use database_url as source of truth
+    from .config import get_config
+    config = get_config()
+    
+    # Use database_url from config (supports both SQLite and PostgreSQL)
+    database_url = config.database_url
+    
+    # Legacy: if db_path is explicitly provided via CLI and differs from config, use it
+    if args.db_path and args.db_path != config.paper_db_path:
+        db_path = Path(args.db_path)
+        # Validate file exists for SQLite paths
+        if not db_path.exists():
+            print(f"❌ Error: Database file not found: {db_path}", file=sys.stderr)
+            print("\nYou can create a database using:", file=sys.stderr)
+            print(f"  abstracts-explorer download --output {db_path}", file=sys.stderr)
+            return 1
+        database_url = f"sqlite:///{db_path.absolute()}"
+    
     output_path = Path(args.output)
-
-    # Validate database exists
-    if not db_path.exists():
-        print(f"❌ Error: Database file not found: {db_path}", file=sys.stderr)
-        print("\nYou can create a database using:", file=sys.stderr)
-        print(f"  neurips-abstracts download --output {db_path}", file=sys.stderr)
-        return 1
 
     print("Abstracts Explorer - Embeddings Generator")
     print("=" * 70)
-    print(f"Database: {db_path}")
+    print(f"Database: {config._mask_database_url(database_url)}")
     print(f"Output:   {output_path}")
     print(f"Collection: {args.collection}")
     print(f"Model:    {args.model}")
@@ -86,7 +96,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     print("=" * 70)
 
     # Check paper count
-    with DatabaseManager(db_path) as db:
+    with DatabaseManager(database_url=database_url) as db:
         total_papers = db.get_paper_count()
         print(f"\n📊 Found {total_papers:,} papers in database")
 
@@ -108,7 +118,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
 
         # Check for model mismatch
         print("🔍 Checking embedding model compatibility...")
-        compatible, stored_model, current_model = em.check_model_compatibility(db_path)
+        compatible, stored_model, current_model = em.check_model_compatibility(database_url=database_url)
 
         if not compatible:
             print("\n⚠️  WARNING: Embedding model mismatch detected!")
@@ -153,7 +163,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         print("\n🚀 Generating embeddings...")
 
         # Determine total count for progress bar
-        with DatabaseManager(db_path) as db:
+        with DatabaseManager(database_url=database_url) as db:
             if args.where:
                 count_result = db.query(f"SELECT COUNT(*) as count FROM papers WHERE {args.where}")
                 total_count = count_result[0]["count"] if count_result else 0
@@ -169,7 +179,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
                 pbar.refresh()
 
             embedded_count = em.embed_from_database(
-                db_path=db_path,
+                database_url=database_url,
                 where_clause=args.where,
                 progress_callback=update_progress,
                 force_recreate=args.force,
