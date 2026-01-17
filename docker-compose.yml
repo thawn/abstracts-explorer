@@ -23,12 +23,12 @@ services:
       - COLLECTION_NAME=papers
       
       # LLM Backend configuration
-      # Option 1: Use host's LM Studio (requires host.docker.internal or host network)
-      - LLM_BACKEND_URL=http://host.docker.internal:1234
-      
-      # Option 2: Use external service (e.g., blablador)
-      # - LLM_BACKEND_URL=https://api.blablador.com
-      # - LLM_BACKEND_AUTH_TOKEN=your_token_here
+      # Option 1: Use external service (e.g., blablador)
+      - LLM_BACKEND_URL=https://api.helmholtz-blablador.fz-juelich.de
+      - LLM_BACKEND_AUTH_TOKEN=${LLM_BACKEND_AUTH_TOKEN}
+
+      # Option 2: Use host's LM Studio (requires host.docker.internal or host network)
+      # - LLM_BACKEND_URL=http://host.docker.internal:1234
       
       # Models
       - CHAT_MODEL=gemma-3-4b-it-qat

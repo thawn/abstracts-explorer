@@ -4,21 +4,11 @@ This guide explains how to run Abstracts Explorer using containers with Podman (
 
 **Note:** The container images are production-optimized and use pre-built static vendor files (CSS/JS libraries). Node.js is **not required** for production containers - it's only needed for local development if you want to rebuild vendor files.
 
-## Pre-built Images
+## Available Images
 
 Pre-built container images are available from:
 - **GitHub Container Registry**: `ghcr.io/thawn/abstracts-explorer:latest`
 - **Docker Hub** (releases only): `thawn/abstracts-explorer:latest`
-
-```bash
-# Pull and run from GitHub Container Registry
-podman pull ghcr.io/thawn/abstracts-explorer:latest
-podman run -p 5000:5000 ghcr.io/thawn/abstracts-explorer:latest
-
-# Or from Docker Hub (for releases)
-docker pull thawn/abstracts-explorer:latest
-docker run -p 5000:5000 thawn/abstracts-explorer:latest
-```
 
 Available tags (following container best practices):
 - `latest` - Latest stable release only (never points to branch builds)
@@ -29,6 +19,53 @@ Available tags (following container best practices):
 - `v*` - Major version (e.g., `v0`)
 - `sha-*` - Specific commit SHA for traceability (e.g., `sha-5f8567d`)
 - `pr-*` - Pull request builds for testing (e.g., `pr-40`)
+
+## Quick Start
+
+### 1. Create .env File
+
+First create a `.env` file with your [blablador token](https://sdlaml.pages.jsc.fz-juelich.de/ai/guides/blablador_api_access/):
+
+```bash
+LLM_BACKEND_AUTH_TOKEN=your_blablador_token_here
+```
+
+### 2. Download the compose file
+
+```bash
+curl -L https://github.com/thawn/abstracts-explorer/raw/main/docker-compose.yml -o docker-compose.yml
+```
+
+### 3. Start Services
+
+```bash
+# Podman
+podman-compose up -d
+
+# Docker
+docker compose up -d
+```
+
+### 4. Download Data
+
+```bash
+# Podman
+podman-compose exec abstracts-explorer \
+  abstracts-explorer download --year 2025 --output /app/data/abstracts.db
+
+# Docker: Replace 'podman-compose' with 'docker compose'
+```
+
+### 5. Generate Embeddings (Optional)
+
+```bash
+podman-compose exec abstracts-explorer \
+  abstracts-explorer create-embeddings --db-path /app/data/abstracts.db
+```
+
+### 6. Access the Web UI
+
+Open http://localhost:5000 in your browser.
 
 ## Testing Pull Requests
 
@@ -94,41 +131,6 @@ podman machine start
 **Linux:** `curl -fsSL https://get.docker.com -o get-docker.sh && sudo sh get-docker.sh`
 
 **macOS/Windows:** Install [Docker Desktop](https://www.docker.com/products/docker-desktop)
-
-## Quick Start
-
-### 1. Start Services
-
-```bash
-# Podman
-podman-compose up -d
-
-# Docker
-docker compose up -d
-```
-
-### 2. Download Data
-
-```bash
-# Podman
-podman-compose exec abstracts-explorer \
-  abstracts-explorer download --year 2025 --output /app/data/abstracts.db
-
-# Docker: Replace 'podman-compose' with 'docker compose'
-```
-
-### 3. Generate Embeddings (Optional)
-
-Requires an LLM backend (like LM Studio) running and accessible.
-
-```bash
-podman-compose exec abstracts-explorer \
-  abstracts-explorer create-embeddings --db-path /app/data/abstracts.db
-```
-
-### 4. Access the Web UI
-
-Open http://localhost:5000 in your browser.
 
 ## Configuration
 
