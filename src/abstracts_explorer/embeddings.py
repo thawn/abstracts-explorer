@@ -158,9 +158,15 @@ class EmbeddingsManager:
         try:
             if self.chroma_url:
                 # Use HTTP client for remote ChromaDB service
+                # Parse URL properly using urllib
+                from urllib.parse import urlparse
+                parsed = urlparse(self.chroma_url)
+                host = parsed.hostname or "localhost"
+                port = parsed.port or 8000
+                
                 self.client = chromadb.HttpClient(
-                    host=self.chroma_url.split("://")[1].split(":")[0],
-                    port=int(self.chroma_url.split(":")[-1]) if ":" in self.chroma_url.split("://")[1] else 8000,
+                    host=host,
+                    port=port,
                     settings=Settings(anonymized_telemetry=False),
                 )
                 logger.info(f"Connected to ChromaDB HTTP service at: {self.chroma_url}")

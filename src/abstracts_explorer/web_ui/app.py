@@ -1463,21 +1463,23 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False):
     config = get_config()  # Get config lazily
     
     # Check if database is accessible before starting server
-    # For PostgreSQL, we can't check file existence, so we'll let it fail at runtime
-    # For SQLite, check if the file exists
-    if config.paper_db_path and not os.path.exists(config.paper_db_path):
-        print("\n❌ Error: Database not found!", file=sys.stderr)
-        print(f"\nThe database file does not exist: {config.paper_db_path}", file=sys.stderr)
-        print("\nTo create and populate the database, run one of these commands:", file=sys.stderr)
-        print("  # Download NeurIPS papers:", file=sys.stderr)
-        print(f"  neurips-abstracts download --conference neurips --year 2025 --output {config.paper_db_path}", file=sys.stderr)
-        print("\n  # Or use a different conference/year:", file=sys.stderr)
-        print("  neurips-abstracts download --conference iclr --year 2025", file=sys.stderr)
-        print("\n  # List available plugins:", file=sys.stderr)
-        print("  neurips-abstracts list-plugins", file=sys.stderr)
-        print("\nAfter downloading papers, you may also want to create embeddings:", file=sys.stderr)
-        print(f"  neurips-abstracts create-embeddings --db-path {config.paper_db_path}", file=sys.stderr)
-        raise FileNotFoundError(f"Database not found: {config.paper_db_path}")
+    # For PostgreSQL (database_url), we skip file checks and rely on connection at runtime
+    # For SQLite (paper_db_path), check if the file exists
+    if config.paper_db_path:  # SQLite mode
+        if not os.path.exists(config.paper_db_path):
+            print("\n❌ Error: Database not found!", file=sys.stderr)
+            print(f"\nThe database file does not exist: {config.paper_db_path}", file=sys.stderr)
+            print("\nTo create and populate the database, run one of these commands:", file=sys.stderr)
+            print("  # Download NeurIPS papers:", file=sys.stderr)
+            print(f"  neurips-abstracts download --conference neurips --year 2025 --output {config.paper_db_path}", file=sys.stderr)
+            print("\n  # Or use a different conference/year:", file=sys.stderr)
+            print("  neurips-abstracts download --conference iclr --year 2025", file=sys.stderr)
+            print("\n  # List available plugins:", file=sys.stderr)
+            print("  neurips-abstracts list-plugins", file=sys.stderr)
+            print("\nAfter downloading papers, you may also want to create embeddings:", file=sys.stderr)
+            print(f"  neurips-abstracts create-embeddings --db-path {config.paper_db_path}", file=sys.stderr)
+            raise FileNotFoundError(f"Database not found: {config.paper_db_path}")
+    # For PostgreSQL, we can't check file existence - connection will be validated at runtime
     
     print("Starting Abstracts Explorer Web Interface...")
     print(f"Database: {config.database_url}")
