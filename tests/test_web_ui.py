@@ -687,18 +687,19 @@ class TestWebUISearchExceptionHandling:
 
 
 class TestWebUIDatabaseNotFound:
-    """Test database file not found handling (line 43)."""
+    """Test database file not found handling for both local and URL databases."""
 
-    def test_get_database_file_not_found(self):
-        """Test that get_database raises error when database doesn't exist."""
+    def test_get_database_sqlite_url_not_found(self):
+        """Test that get_database raises error when SQLite database URL points to nonexistent file."""
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            # Patch get_config to return a config with nonexistent database
+            # Patch get_config to return a config with nonexistent SQLite database URL
             with patch("abstracts_explorer.web_ui.app.get_config") as mock_get_config:
                 mock_config = Mock()
-                # Use database_url instead of paper_db_path (new implementation)
+                # SQLite database URL (converted from PAPER_DB_PATH)
                 mock_config.database_url = "sqlite:////nonexistent/database.db"
+                mock_config.paper_db_path = "/nonexistent/database.db"
                 mock_get_config.return_value = mock_config
 
                 # Try to access endpoint that uses database
@@ -710,6 +711,132 @@ class TestWebUIDatabaseNotFound:
                 assert "error" in data
                 # Should mention database connection failure
                 assert "database" in data["error"].lower()
+
+    def test_get_database_postgresql_url_connection_failed(self):
+        """Test that get_database raises error when PostgreSQL database URL cannot connect."""
+        from abstracts_explorer.web_ui.app import app
+
+        with app.test_client() as client:
+            # Patch get_config to return a config with invalid PostgreSQL URL
+            with patch("abstracts_explorer.web_ui.app.get_config") as mock_get_config:
+                mock_config = Mock()
+                # PostgreSQL database URL (from DATABASE_URL)
+                mock_config.database_url = "postgresql://user:pass@nonexistent-host:5432/db"
+                mock_config.paper_db_path = ""  # Empty when DATABASE_URL is used
+                mock_get_config.return_value = mock_config
+
+                # Try to access endpoint that uses database
+                response = client.get("/api/stats")
+
+                # Should fail because database cannot connect
+                assert response.status_code == 500
+                data = response.get_json()
+                assert "error" in data
+                # Should mention database connection failure
+                assert "database" in data["error"].lower()
+
+
+class TestWebUIDatabaseModes:
+    """Test database initialization with both local SQLite and database URL modes."""
+
+    def test_get_database_with_sqlite_path(self, tmp_path):
+        """Test that get_database works with local SQLite database path."""
+        from abstracts_explorer.web_ui.app import app, get_database
+        from abstracts_explorer.database import DatabaseManager
+
+        # Create a real SQLite database
+        db_path = tmp_path / "test.db"
+        db = DatabaseManager(str(db_path))
+        with db:
+            db.create_tables()
+
+        with app.test_client():
+            with patch("abstracts_explorer.web_ui.app.get_config") as mock_get_config:
+                mock_config = Mock()
+                # Simulate PAPER_DB_PATH mode (legacy)
+                mock_config.paper_db_path = str(db_path)
+                mock_config.database_url = f"sqlite:///{str(db_path)}"
+                mock_get_config.return_value = mock_config
+
+                # Access database within app context
+                with app.app_context():
+                    database = get_database()
+                    
+                    # Verify database is connected and functional
+                    assert database is not None
+                    assert database.database_url == f"sqlite:///{str(db_path)}"
+                    
+                    # Verify we can query the database
+                    count = database.get_paper_count()
+                    assert count == 0  # Empty database
+
+    def test_get_database_with_sqlite_url(self, tmp_path):
+        """Test that get_database works with SQLite database URL (converted from path)."""
+        from abstracts_explorer.web_ui.app import app, get_database
+        from abstracts_explorer.database import DatabaseManager
+
+        # Create a real SQLite database
+        db_path = tmp_path / "test.db"
+        db = DatabaseManager(str(db_path))
+        with db:
+            db.create_tables()
+
+        with app.test_client():
+            with patch("abstracts_explorer.web_ui.app.get_config") as mock_get_config:
+                mock_config = Mock()
+                # Simulate DATABASE_URL with SQLite
+                mock_config.paper_db_path = ""  # Not used when DATABASE_URL is set
+                mock_config.database_url = f"sqlite:///{str(db_path)}"
+                mock_get_config.return_value = mock_config
+
+                # Access database within app context
+                with app.app_context():
+                    database = get_database()
+                    
+                    # Verify database is connected and functional
+                    assert database is not None
+                    assert database.database_url == f"sqlite:///{str(db_path)}"
+                    
+                    # Verify we can query the database
+                    count = database.get_paper_count()
+                    assert count == 0  # Empty database
+
+    def test_stats_endpoint_with_sqlite_database(self, tmp_path):
+        """Test that stats endpoint works with local SQLite database."""
+        from abstracts_explorer.web_ui.app import app
+        from abstracts_explorer.database import DatabaseManager
+        from abstracts_explorer.plugin import LightweightPaper
+
+        # Create a real SQLite database with test data
+        db_path = tmp_path / "test.db"
+        db = DatabaseManager(str(db_path))
+        with db:
+            db.create_tables()
+            # Add test papers
+            paper = LightweightPaper(
+                title="Test Paper",
+                authors=["Author 1"],
+                abstract="Test abstract",
+                session="Session 1",
+                poster_position="P1",
+                year=2025,
+                conference="Test"
+            )
+            db.add_paper(paper)
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_config") as mock_get_config:
+                mock_config = Mock()
+                mock_config.paper_db_path = str(db_path)
+                mock_config.database_url = f"sqlite:///{str(db_path)}"
+                mock_get_config.return_value = mock_config
+
+                response = client.get("/api/stats")
+                
+                assert response.status_code == 200
+                data = response.get_json()
+                assert "total_papers" in data
+                assert data["total_papers"] == 1
 
 
 class TestWebUIChatExceptionLines:
