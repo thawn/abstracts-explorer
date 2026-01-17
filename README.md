@@ -22,6 +22,14 @@ A package to download conference data and search it with LLM-based semantic sear
 
 The easiest way to get started with a complete stack (PostgreSQL + ChromaDB):
 
+First create a `.env` file with your [blablador token](https://sdlaml.pages.jsc.fz-juelich.de/ai/guides/blablador_api_access/):
+
+```bash
+LLM_BACKEND_AUTH_TOKEN=your_blablador_token_here
+```
+
+Then start the services with:
+
 ```bash
 # Using Podman (recommended)
 podman-compose up -d
