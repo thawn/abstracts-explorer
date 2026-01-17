@@ -907,7 +907,7 @@ Only respond with the label, nothing else."""
 
 
 def perform_clustering(
-    embeddings_path: Union[str, Path],
+    embeddings_path: Optional[Union[str, Path]] = None,  # Deprecated, kept for compatibility
     collection_name: str = "papers",
     reduction_method: str = "pca",
     n_components: int = 2,
@@ -974,7 +974,6 @@ def perform_clustering(
     try:
         # Initialize embeddings manager
         em = EmbeddingsManager(
-            chroma_path=embeddings_path,
             collection_name=collection_name,
         )
         em.connect()

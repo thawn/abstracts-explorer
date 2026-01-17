@@ -37,12 +37,7 @@ class DatabaseManager:
     Manager for SQL database operations using SQLAlchemy.
 
     Supports SQLite and PostgreSQL backends through SQLAlchemy connection URLs.
-
-    Parameters
-    ----------
-    database_url : str
-        SQLAlchemy database URL (e.g., "sqlite:///path/to/db.db" or 
-        "postgresql://user:pass@localhost/db").
+    Database configuration is loaded from the PAPER_DB environment variable via config.
 
     Attributes
     ----------
@@ -57,34 +52,23 @@ class DatabaseManager:
 
     Examples
     --------
-    >>> # SQLite
-    >>> from abstracts_explorer.config import get_config
-    >>> config = get_config()
-    >>> db = DatabaseManager(database_url=config.database_url)
-    >>> db.connect()
-    >>> db.create_tables()
-    >>> db.close()
-
-    >>> # PostgreSQL
-    >>> db = DatabaseManager(database_url="postgresql://user:pass@localhost/abstracts")
+    >>> # SQLite or PostgreSQL - automatically configured via PAPER_DB env var
+    >>> db = DatabaseManager()
     >>> db.connect()
     >>> db.create_tables()
     >>> db.close()
     """
 
-    def __init__(self, database_url: str):
+    def __init__(self):
         """
         Initialize the DatabaseManager.
-
-        Parameters
-        ----------
-        database_url : str
-            SQLAlchemy database URL.
-        """
-        if not database_url:
-            raise DatabaseError("database_url must be provided")
         
-        self.database_url = database_url
+        Database URL is loaded from config (PAPER_DB environment variable).
+        """
+        from .config import get_config
+        config = get_config()
+        self.database_url = config.database_url
+        
         self.engine: Optional[Engine] = None
         self.SessionLocal: Optional[sessionmaker] = None
         self._session: Optional[Session] = None
@@ -240,7 +224,7 @@ class DatabaseManager:
         Examples
         --------
         >>> from abstracts_explorer.plugin import LightweightPaper
-        >>> from abstracts_explorer.config import get_config; config = get_config(); db = DatabaseManager(database_url=config.database_url)
+        >>> db = DatabaseManager()
         >>> with db:
         ...     db.create_tables()
         ...     paper = LightweightPaper(
@@ -349,7 +333,7 @@ class DatabaseManager:
         Examples
         --------
         >>> from abstracts_explorer.plugin import LightweightPaper
-        >>> from abstracts_explorer.config import get_config; config = get_config(); db = DatabaseManager(database_url=config.database_url)
+        >>> db = DatabaseManager()
         >>> with db:
         ...     db.create_tables()
         ...     papers = [
@@ -414,7 +398,7 @@ class DatabaseManager:
 
         Examples
         --------
-        >>> from abstracts_explorer.config import get_config; config = get_config(); db = DatabaseManager(database_url=config.database_url)
+        >>> db = DatabaseManager()
         >>> with db:
         ...     results = db.query("SELECT * FROM papers WHERE session = ?", ("Poster",))
         >>> for row in results:
@@ -520,7 +504,7 @@ class DatabaseManager:
 
         Examples
         --------
-        >>> from abstracts_explorer.config import get_config; config = get_config(); db = DatabaseManager(database_url=config.database_url)
+        >>> db = DatabaseManager()
         >>> with db:
         ...     papers = db.search_papers(keyword="neural network", limit=10)
         >>> for paper in papers:
@@ -630,7 +614,7 @@ class DatabaseManager:
 
         Examples
         --------
-        >>> from abstracts_explorer.config import get_config; config = get_config(); db = DatabaseManager(database_url=config.database_url)
+        >>> db = DatabaseManager()
         >>> with db:
         ...     authors = db.search_authors_in_papers(name="Huang")
         >>> for author in authors:
@@ -735,7 +719,7 @@ class DatabaseManager:
 
         Examples
         --------
-        >>> from abstracts_explorer.config import get_config; config = get_config(); db = DatabaseManager(database_url=config.database_url)
+        >>> db = DatabaseManager()
         >>> with db:
         ...     filters = db.get_filter_options()
         >>> print(filters['sessions'])
@@ -809,7 +793,7 @@ class DatabaseManager:
 
         Examples
         --------
-        >>> from abstracts_explorer.config import get_config; config = get_config(); db = DatabaseManager(database_url=config.database_url)
+        >>> db = DatabaseManager()
         >>> with db:
         ...     model = db.get_embedding_model()
         >>> print(model)
@@ -849,7 +833,7 @@ class DatabaseManager:
 
         Examples
         --------
-        >>> from abstracts_explorer.config import get_config; config = get_config(); db = DatabaseManager(database_url=config.database_url)
+        >>> db = DatabaseManager()
         >>> with db:
         ...     db.set_embedding_model("text-embedding-qwen3-embedding-4b")
         """

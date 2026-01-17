@@ -68,19 +68,17 @@ def load_clustering_data(
     # Use config defaults if not provided
     embeddings_path = embeddings_path or config.embedding_db_path
     collection_name = collection_name or config.collection_name
-    database_url = config.database_url
     
     try:
         # Initialize embeddings manager
         em = EmbeddingsManager(
-            chroma_path=embeddings_path,
             collection_name=collection_name,
         )
         em.connect()
         em.create_collection()
         
         # Initialize database manager
-        db = DatabaseManager(database_url=database_url)
+        db = DatabaseManager()
         db.connect()
         
         # Initialize clustering manager
@@ -386,18 +384,17 @@ def get_topic_evolution(
         config = get_config()
         embeddings_path = embeddings_path or config.embedding_db_path
         collection_name = collection_name or config.collection_name
-        database_url = config.database_url
         
         # Initialize embeddings manager
         em = EmbeddingsManager(
-            chroma_path=embeddings_path,
+            
             collection_name=collection_name,
         )
         em.connect()
         em.create_collection()
         
         # Initialize database
-        db = DatabaseManager(database_url=database_url)
+        db = DatabaseManager()
         db.connect()
         
         # Build metadata filter using helper function
@@ -522,18 +519,17 @@ def get_recent_developments(
         config = get_config()
         embeddings_path = embeddings_path or config.embedding_db_path
         collection_name = collection_name or config.collection_name
-        database_url = config.database_url
         
         # Initialize embeddings manager
         em = EmbeddingsManager(
-            chroma_path=embeddings_path,
+            
             collection_name=collection_name,
         )
         em.connect()
         em.create_collection()
         
         # Initialize database
-        db = DatabaseManager(database_url=database_url)
+        db = DatabaseManager()
         db.connect()
         
         # Calculate year cutoff

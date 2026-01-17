@@ -176,21 +176,18 @@ class Config:
             self.database_url = f"sqlite:///{paper_db_path}"
 
         # Embedding database configuration
-        # EMBEDDING_DB_URL takes precedence for HTTP ChromaDB service
-        # Falls back to EMBEDDING_DB_PATH for embedded/local ChromaDB
-        # Note: Only one of these should be set; they are mutually exclusive
-        # Initialize both attributes to ensure they always exist
-        self.embedding_db_url = ""
-        self.embedding_db_path = ""
-        
-        embedding_db_url = self._get_env("EMBEDDING_DB_URL", default="")
-        if embedding_db_url:
-            self.embedding_db_url = embedding_db_url
-            # embedding_db_path remains empty (mutual exclusion)
+        # EMBEDDING_DB can be either a ChromaDB path or HTTP URL
+        # If it contains "://", it's treated as an HTTP URL
+        # Otherwise, it's treated as a local path
+        embedding_db = self._get_env("EMBEDDING_DB", default="chroma_db")
+        if "://" in embedding_db:
+            # It's an HTTP URL (e.g., http://chromadb:8000)
+            self.embedding_db_url = embedding_db
+            self.embedding_db_path = ""
         else:
-            # Local ChromaDB path configuration
-            self.embedding_db_path = self._resolve_path(self._get_env("EMBEDDING_DB_PATH", default="chroma_db"))
-            # embedding_db_url remains empty (mutual exclusion)
+            # It's a local path - resolve it
+            self.embedding_db_path = self._resolve_path(embedding_db)
+            self.embedding_db_url = ""
 
         # Collection Settings
         self.collection_name = self._get_env("COLLECTION_NAME", default="papers")

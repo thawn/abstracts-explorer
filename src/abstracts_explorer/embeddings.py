@@ -11,7 +11,7 @@ embeddings and stores them in ChromaDB for efficient similarity search.
 
 import logging
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Union, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from openai import OpenAI
@@ -83,26 +83,22 @@ class EmbeddingsManager:
         lm_studio_url: Optional[str] = None,
         auth_token: Optional[str] = None,
         model_name: Optional[str] = None,
-        chroma_path: Optional[Union[str, Path]] = None,
-        chroma_url: Optional[str] = None,
         collection_name: Optional[str] = None,
     ):
         """
         Initialize the EmbeddingsManager.
 
         Parameters are optional and will use values from environment/config if not provided.
+        ChromaDB configuration (path or URL) is loaded from EMBEDDING_DB environment variable.
 
         Parameters
         ----------
         lm_studio_url : str, optional
             URL of the OpenAI-compatible API endpoint. If None, uses config value.
+        auth_token : str, optional
+            Authentication token for LLM backend. If None, uses config value.
         model_name : str, optional
             Name of the embedding model. If None, uses config value.
-        chroma_path : str or Path, optional
-            Path to the ChromaDB persistent storage. If None, uses config value.
-            Ignored if chroma_url is provided.
-        chroma_url : str, optional
-            URL of the ChromaDB HTTP service. If provided, uses HTTP client instead of persistent client.
         collection_name : str, optional
             Name of the ChromaDB collection. If None, uses config value.
         """
@@ -111,12 +107,12 @@ class EmbeddingsManager:
         self.llm_backend_auth_token = auth_token or config.llm_backend_auth_token
         self.model_name = model_name or config.embedding_model
         
-        # ChromaDB configuration: URL takes precedence over path
-        self.chroma_url = chroma_url or config.embedding_db_url
+        # ChromaDB configuration from config (EMBEDDING_DB env var)
+        self.chroma_url = config.embedding_db_url
         if self.chroma_url:
             self.chroma_path = None
         else:
-            self.chroma_path = Path(chroma_path or config.embedding_db_path)
+            self.chroma_path = Path(config.embedding_db_path)
         
         self.collection_name = collection_name or config.collection_name
         self.client: Optional[Any] = None  # chromadb.Client
@@ -610,7 +606,7 @@ class EmbeddingsManager:
                     return True, None, self.model_name
 
             # Create DatabaseManager
-            db_manager = DatabaseManager(database_url=database_url)
+            db_manager = DatabaseManager()
             db_manager.connect()
 
             stored_model = db_manager.get_embedding_model()
@@ -685,7 +681,7 @@ class EmbeddingsManager:
                     raise EmbeddingsError(f"Database not found: {db_path}")
 
             # Create DatabaseManager
-            db_manager = DatabaseManager(database_url=database_url)
+            db_manager = DatabaseManager()
             db_manager.connect()
 
             # Store the embedding model in the database

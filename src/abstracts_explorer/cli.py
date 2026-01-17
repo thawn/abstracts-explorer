@@ -68,19 +68,23 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     config = get_config()
     database_url = config.database_url
     
-    output_path = Path(args.output)
+    # ChromaDB output - from config (EMBEDDING_DB env var)
+    if config.embedding_db_url:
+        output_location = config.embedding_db_url
+    else:
+        output_location = config.embedding_db_path
 
     print("Abstracts Explorer - Embeddings Generator")
     print("=" * 70)
     print(f"Database: {config._mask_database_url(database_url)}")
-    print(f"Output:   {output_path}")
+    print(f"Output:   {output_location}")
     print(f"Collection: {args.collection}")
     print(f"Model:    {args.model}")
     print(f"API URL: {args.lm_studio_url}")
     print("=" * 70)
 
     # Check paper count
-    with DatabaseManager(database_url=database_url) as db:
+    with DatabaseManager() as db:
         total_papers = db.get_paper_count()
         print(f"\n📊 Found {total_papers:,} papers in database")
 
@@ -96,7 +100,6 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         em = EmbeddingsManager(
             lm_studio_url=args.lm_studio_url,
             model_name=args.model,
-            chroma_path=output_path,
             collection_name=args.collection,
         )
 
@@ -136,8 +139,12 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         em.connect()
 
         # Create or reset collection
-        if args.force and output_path.exists():
-            print(f"🔄 Resetting existing collection '{args.collection}'...")
+        # Check if chromaDB path exists (for local ChromaDB only)
+        if args.force:
+            if config.embedding_db_path and Path(config.embedding_db_path).exists():
+                print(f"🔄 Resetting existing collection '{args.collection}'...")
+            else:
+                print(f"📁 Creating collection '{args.collection}'...")
         else:
             print(f"📁 Creating collection '{args.collection}'...")
 
@@ -147,7 +154,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         print("\n🚀 Generating embeddings...")
 
         # Determine total count for progress bar
-        with DatabaseManager(database_url=database_url) as db:
+        with DatabaseManager() as db:
             if args.where:
                 count_result = db.query(f"SELECT COUNT(*) as count FROM papers WHERE {args.where}")
                 total_count = count_result[0]["count"] if count_result else 0
@@ -179,7 +186,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
 
         em.close()
 
-        print(f"\n💾 Vector database saved to: {output_path}")
+        print(f"\n💾 Vector database saved to: {output_location}")
         print("\nYou can now use the 'search' command or the search_similar() method to find relevant papers!")
 
         return 0
@@ -217,19 +224,28 @@ def search_command(args: argparse.Namespace) -> int:
     int
         Exit code (0 for success, non-zero for failure)
     """
-    embeddings_path = Path(args.embeddings_path)
+    config = get_config()
+    # ChromaDB location from config
+    if config.embedding_db_url:
+        embeddings_location = config.embedding_db_url
+        # For HTTP ChromaDB, we can't check if it exists locally
+        embeddings_exists = True
+    else:
+        embeddings_path = Path(config.embedding_db_path)
+        embeddings_location = str(embeddings_path)
+        embeddings_exists = embeddings_path.exists()
 
-    # Validate embeddings database exists
-    if not embeddings_path.exists():
-        print(f"❌ Error: Embeddings database not found: {embeddings_path}", file=sys.stderr)
+    # Validate embeddings database exists (only for local paths)
+    if not embeddings_exists:
+        print(f"❌ Error: Embeddings database not found: {embeddings_location}", file=sys.stderr)
         print("\nYou can create embeddings using:", file=sys.stderr)
-        print("  neurips-abstracts create-embeddings --db-path <database.db>", file=sys.stderr)
+        print("  abstracts-explorer create-embeddings", file=sys.stderr)
         return 1
 
     print("NeurIPS Semantic Search")
     print("=" * 70)
     print(f"Query: {args.query}")
-    print(f"Embeddings: {embeddings_path}")
+    print(f"Embeddings: {embeddings_location}")
     print(f"Collection: {args.collection}")
     print(f"Results: {args.n_results}")
     print("=" * 70)
@@ -239,7 +255,6 @@ def search_command(args: argparse.Namespace) -> int:
         em = EmbeddingsManager(
             lm_studio_url=args.lm_studio_url,
             model_name=args.model,
-            chroma_path=embeddings_path,
             collection_name=args.collection,
         )
 
@@ -357,7 +372,6 @@ def chat_command(args: argparse.Namespace) -> int:
     ----------
     args : argparse.Namespace
         Command-line arguments containing:
-        - embeddings_path: Path to ChromaDB database
         - collection: Name of the collection
         - lm_studio_url: LM Studio API URL
         - model: Language model name for chat
@@ -372,28 +386,34 @@ def chat_command(args: argparse.Namespace) -> int:
         Exit code (0 for success, 1 for error).
     """
     try:
-        embeddings_path = Path(args.embeddings_path)
+        config = get_config()
+        # ChromaDB location from config
+        if config.embedding_db_url:
+            embeddings_location = config.embedding_db_url
+        else:
+            embeddings_location = config.embedding_db_path
 
         print("=" * 70)
         print("NeurIPS RAG Chat")
         print("=" * 70)
-        print(f"Embeddings: {embeddings_path}")
+        print(f"Embeddings: {embeddings_location}")
         print(f"Collection: {args.collection}")
         print(f"Chat Model: {args.model}")
         print(f"Embedding Model: {args.embedding_model}")
         print(f"API URL: {args.lm_studio_url}")
         print("=" * 70)
 
-        # Check embeddings exist
-        if not embeddings_path.exists():
-            print(f"\n❌ Error: Embeddings database not found: {embeddings_path}", file=sys.stderr)
-            print("\nYou can create embeddings using:", file=sys.stderr)
-            print("  neurips-abstracts create-embeddings --db-path <database.db>", file=sys.stderr)
-            return 1
+        # Check embeddings exist (only for local paths)
+        if not config.embedding_db_url:
+            embeddings_path = Path(config.embedding_db_path)
+            if not embeddings_path.exists():
+                print(f"\n❌ Error: Embeddings database not found: {embeddings_path}", file=sys.stderr)
+                print("\nYou can create embeddings using:", file=sys.stderr)
+                print("  abstracts-explorer create-embeddings", file=sys.stderr)
+                return 1
 
         # Initialize embeddings manager
         em = EmbeddingsManager(
-            chroma_path=embeddings_path,
             collection_name=args.collection,
             lm_studio_url=args.lm_studio_url,
             model_name=args.embedding_model,
@@ -421,10 +441,8 @@ def chat_command(args: argparse.Namespace) -> int:
 
         # Initialize database connection
         from abstracts_explorer.database import DatabaseManager
-        from abstracts_explorer.config import get_config
 
-        config_obj = get_config()
-        db = DatabaseManager(database_url=config_obj.database_url)
+        db = DatabaseManager()
         db.connect()
 
         # Initialize RAG chat
@@ -665,7 +683,6 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
     ----------
     args : argparse.Namespace
         Command-line arguments containing:
-        - embeddings_path: Path to ChromaDB vector database
         - collection: Name of the ChromaDB collection
         - reduction_method: Dimensionality reduction method
         - n_components: Number of components for reduction
@@ -681,18 +698,27 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
     int
         Exit code (0 for success, non-zero for failure)
     """
-    embeddings_path = Path(args.embeddings_path)
+    config = get_config()
+    # ChromaDB location from config
+    if config.embedding_db_url:
+        embeddings_location = config.embedding_db_url
+        embeddings_path = None  # HTTP ChromaDB doesn't have a path
+        embeddings_exists = True
+    else:
+        embeddings_path = Path(config.embedding_db_path)
+        embeddings_location = str(embeddings_path)
+        embeddings_exists = embeddings_path.exists()
 
-    # Validate embeddings database exists
-    if not embeddings_path.exists():
-        print(f"❌ Error: Embeddings database not found: {embeddings_path}", file=sys.stderr)
+    # Validate embeddings database exists (only for local paths)
+    if not embeddings_exists:
+        print(f"❌ Error: Embeddings database not found: {embeddings_location}", file=sys.stderr)
         print("\nYou can create embeddings using:", file=sys.stderr)
-        print("  abstracts-explorer create-embeddings --db-path <database.db>", file=sys.stderr)
+        print("  abstracts-explorer create-embeddings", file=sys.stderr)
         return 1
 
     print("Abstracts Explorer - Clustering")
     print("=" * 70)
-    print(f"Embeddings:  {embeddings_path}")
+    print(f"Embeddings:  {embeddings_location}")
     print(f"Collection:  {args.collection}")
     print(f"Reduction:   {args.reduction_method} (n_components={args.n_components})")
     print(f"Clustering:  {args.clustering_method}", end="")
@@ -913,12 +939,6 @@ Examples:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     embeddings_parser.add_argument(
-        "--output",
-        type=str,
-        default=config.embedding_db_path,
-        help=f"Output directory for ChromaDB vector database (default: {config.embedding_db_path})",
-    )
-    embeddings_parser.add_argument(
         "--collection",
         type=str,
         default=config.collection_name,
@@ -958,12 +978,6 @@ Examples:
         "query",
         type=str,
         help="Search query text",
-    )
-    search_parser.add_argument(
-        "--embeddings-path",
-        type=str,
-        default=config.embedding_db_path,
-        help=f"Path to ChromaDB vector database (default: {config.embedding_db_path})",
     )
     search_parser.add_argument(
         "--collection",
@@ -1007,12 +1021,6 @@ Examples:
         help="Interactive RAG chat with papers",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Start an interactive chat session using RAG to answer questions about papers.",
-    )
-    chat_parser.add_argument(
-        "--embeddings-path",
-        type=str,
-        default=config.embedding_db_path,
-        help=f"Path to ChromaDB vector database (default: {config.embedding_db_path})",
     )
     chat_parser.add_argument(
         "--collection",
@@ -1093,12 +1101,6 @@ Examples:
         help="Cluster embeddings for visualization",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Perform dimensionality reduction and clustering on paper embeddings.",
-    )
-    cluster_parser.add_argument(
-        "--embeddings-path",
-        type=str,
-        default=config.embedding_db_path,
-        help=f"Path to ChromaDB vector database (default: {config.embedding_db_path})",
     )
     cluster_parser.add_argument(
         "--collection",
