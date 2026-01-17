@@ -214,28 +214,38 @@ class TestMultiDatabaseBackend:
 
 def test_database_url_in_config(tmp_path, monkeypatch):
     """Test that DATABASE_URL is properly loaded from config."""
-    from abstracts_explorer.config import Config
+    from abstracts_explorer.config import get_config
     
     db_path = tmp_path / "test.db"
     database_url = f"sqlite:///{db_path}"
     
+    # Clear any existing PAPER_DB settings
+    monkeypatch.delenv("PAPER_DB", raising=False)
+    monkeypatch.delenv("PAPER_DB_PATH", raising=False)
+    
     # Set environment variable
     monkeypatch.setenv("DATABASE_URL", database_url)
     
-    config = Config()
+    # Reload config to pick up environment variable
+    config = get_config(reload=True)
     assert config.database_url == database_url
 
 
 def test_legacy_paper_db_path_in_config(tmp_path, monkeypatch):
     """Test that PAPER_DB_PATH still works for backward compatibility."""
-    from abstracts_explorer.config import Config
+    from abstracts_explorer.config import get_config
     
     db_path = tmp_path / "test.db"
+    
+    # Clear any existing PAPER_DB and DATABASE_URL settings
+    monkeypatch.delenv("PAPER_DB", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     
     # Set environment variable
     monkeypatch.setenv("PAPER_DB_PATH", str(db_path))
     
-    config = Config()
+    # Reload config to pick up environment variable
+    config = get_config(reload=True)
     # Should be converted to SQLite URL
     assert "sqlite:///" in config.database_url
     assert str(db_path) in config.database_url
