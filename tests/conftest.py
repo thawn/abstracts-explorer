@@ -67,7 +67,7 @@ def test_config():
 
 
 @pytest.fixture
-def db_manager(tmp_path):
+def db_manager(tmp_path, monkeypatch):
     """
     Create a DatabaseManager instance with a temporary database.
 
@@ -75,14 +75,26 @@ def db_manager(tmp_path):
     ----------
     tmp_path : Path
         Pytest's temporary path fixture
+    monkeypatch : MonkeyPatch
+        Pytest's monkeypatch fixture for setting environment variables
 
     Returns
     -------
     DatabaseManager
         Database manager instance with temporary database
+
+    Notes
+    -----
+    Sets PAPER_DB environment variable to point to a temporary database
+    and reloads config to pick up the change.
     """
+    from abstracts_explorer.config import get_config
+    
     db_path = tmp_path / "test.db"
-    return DatabaseManager(db_path)
+    monkeypatch.setenv("PAPER_DB", str(db_path))
+    get_config(reload=True)  # Reload config to pick up the new PAPER_DB
+    
+    return DatabaseManager()
 
 
 @pytest.fixture
@@ -165,7 +177,7 @@ def sample_neurips_data():
 
 
 @pytest.fixture
-def test_database(tmp_path):
+def test_database(tmp_path, monkeypatch):
     """
     Create a test database with sample papers for testing.
 
@@ -173,6 +185,8 @@ def test_database(tmp_path):
     ----------
     tmp_path : Path
         Pytest's temporary path fixture
+    monkeypatch : MonkeyPatch
+        Pytest's monkeypatch fixture for setting environment variables
 
     Returns
     -------
@@ -183,14 +197,20 @@ def test_database(tmp_path):
     -----
     Creates a database with 3 papers using the lightweight schema
     via DatabaseManager for testing search and retrieval functionality.
+    Sets PAPER_DB environment variable to point to the test database.
     """
     from abstracts_explorer.database import DatabaseManager
     from abstracts_explorer.plugin import LightweightPaper
+    from abstracts_explorer.config import get_config
     
     db_path = tmp_path / "test.db"
     
+    # Set PAPER_DB to point to our test database
+    monkeypatch.setenv("PAPER_DB", str(db_path))
+    get_config(reload=True)  # Reload config to pick up the new PAPER_DB
+    
     # Use DatabaseManager to create the database with proper schema
-    with DatabaseManager(db_path) as db:
+    with DatabaseManager() as db:
         db.create_tables()
         
         # Create sample papers using LightweightPaper model

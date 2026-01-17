@@ -403,8 +403,6 @@ def chat_command(args: argparse.Namespace) -> int:
         print(f"\n📊 Loaded {stats['count']:,} papers from collection '{stats['name']}'")
 
         # Initialize database connection
-        from abstracts_explorer.database import DatabaseManager
-
         db = DatabaseManager()
         db.connect()
 
