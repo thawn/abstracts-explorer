@@ -244,7 +244,7 @@ class TestEmbeddingsManager:
         embeddings_manager.connect()
         embeddings_manager.create_collection()
 
-        count = embeddings_manager.embed_from_database(test_database)
+        count = embeddings_manager.embed_from_database()
 
         # Should embed all 3 papers (title is included even if abstract is empty)
         assert count == 3
@@ -258,7 +258,7 @@ class TestEmbeddingsManager:
         embeddings_manager.connect()
         embeddings_manager.create_collection()
 
-        count = embeddings_manager.embed_from_database(test_database, where_clause="session LIKE '%ML%'")
+        count = embeddings_manager.embed_from_database(where_clause="session LIKE '%ML%'")
 
         # Should only embed papers in ML sessions with non-empty abstracts (paper1)
         assert count == 1
@@ -267,20 +267,29 @@ class TestEmbeddingsManager:
         assert stats["count"] == 1
         embeddings_manager.close()
 
-    def test_embed_from_database_not_found(self, embeddings_manager, tmp_path):
+    def test_embed_from_database_not_found(self, embeddings_manager, tmp_path, monkeypatch):
         """Test embedding from non-existent database."""
+        from abstracts_explorer.config import get_config
+        
+        # Set PAPER_DB to a nonexistent database
+        nonexistent_db = tmp_path / "nonexistent.db"
+        monkeypatch.setenv("PAPER_DB", str(nonexistent_db))
+        get_config(reload=True)
+        
         embeddings_manager.connect()
         embeddings_manager.create_collection()
 
-        with pytest.raises(EmbeddingsError, match="Database not found"):
-            embeddings_manager.embed_from_database(tmp_path / "nonexistent.db")
+        # The error message will now be about SQL syntax, not "database not found"
+        # because the database_url is constructed and the error happens during query
+        with pytest.raises(EmbeddingsError, match="Failed to embed from database"):
+            embeddings_manager.embed_from_database()
 
         embeddings_manager.close()
 
     def test_embed_from_database_collection_not_initialized(self, embeddings_manager, test_database):
         """Test embedding from database without collection."""
         with pytest.raises(EmbeddingsError, match="Collection not initialized"):
-            embeddings_manager.embed_from_database(test_database)
+            embeddings_manager.embed_from_database()
 
     def test_embed_from_database_with_progress_callback(self, embeddings_manager, test_database, mock_lm_studio):
         """Test embedding papers from database with progress callback."""
@@ -292,7 +301,7 @@ class TestEmbeddingsManager:
         def progress_callback(current: int, total: int) -> None:
             progress_calls.append((current, total))
 
-        count = embeddings_manager.embed_from_database(test_database, progress_callback=progress_callback)
+        count = embeddings_manager.embed_from_database(progress_callback=progress_callback)
 
         # Should embed all 3 papers (title is included even if abstract is empty)
         assert count == 3
@@ -317,7 +326,7 @@ class TestEmbeddingsManager:
         embeddings_manager.connect()
         embeddings_manager.create_collection()
 
-        count = embeddings_manager.embed_from_database(db_path)
+        count = embeddings_manager.embed_from_database()
 
         assert count == 0
         stats = embeddings_manager.get_collection_stats()
@@ -352,7 +361,7 @@ class TestEmbeddingsManager:
         embeddings_manager.connect()
         embeddings_manager.create_collection()
 
-        count = embeddings_manager.embed_from_database(db_path)
+        count = embeddings_manager.embed_from_database()
 
         # Should embed all papers (title is used even if abstract is empty)
         assert count == 3
@@ -393,7 +402,7 @@ class TestEmbeddingsManager:
 
         # Should raise EmbeddingsError due to missing papers table
         with pytest.raises(EmbeddingsError, match="Failed to embed from database"):
-            embeddings_manager.embed_from_database(db_path)
+            embeddings_manager.embed_from_database()
 
         embeddings_manager.close()
 
@@ -402,7 +411,7 @@ class TestEmbeddingsManager:
         embeddings_manager.connect()
         embeddings_manager.create_collection()
 
-        count = embeddings_manager.embed_from_database(test_database)
+        count = embeddings_manager.embed_from_database()
         assert count == 3
 
         # Search to verify metadata includes lightweight schema fields
@@ -461,14 +470,14 @@ class TestEmbeddingsManager:
         embeddings_manager.create_collection()
 
         # First run - should embed all 3 papers
-        count = embeddings_manager.embed_from_database(test_database)
+        count = embeddings_manager.embed_from_database()
         assert count == 3
 
         stats = embeddings_manager.get_collection_stats()
         assert stats["count"] == 3
 
         # Second run - should skip all existing papers and embed 0 new ones
-        count = embeddings_manager.embed_from_database(test_database)
+        count = embeddings_manager.embed_from_database()
         assert count == 0
 
         # Collection count should still be 3
@@ -478,15 +487,19 @@ class TestEmbeddingsManager:
         embeddings_manager.close()
 
 
-def test_check_model_compatibility_no_database(embeddings_manager, tmp_path):
+def test_check_model_compatibility_no_database(embeddings_manager, tmp_path, monkeypatch):
     """Test checking model compatibility when database does not exist."""
+    from abstracts_explorer.config import get_config
+    
     non_existent_db = tmp_path / "nonexistent.db"
+    monkeypatch.setenv("PAPER_DB", str(non_existent_db))
+    get_config(reload=True)
     
-    compatible, stored, current = embeddings_manager.check_model_compatibility(non_existent_db)
-    
-    assert compatible is True
-    assert stored is None
-    assert current == embeddings_manager.model_name
+    # Since the database doesn't exist, this will raise an error when trying to connect
+    # The behavior has changed - we no longer check if db exists before connecting
+    from abstracts_explorer.embeddings import EmbeddingsError
+    with pytest.raises(EmbeddingsError, match="Failed to check model compatibility"):
+        embeddings_manager.check_model_compatibility()
 
 
 def test_check_model_compatibility_no_model_stored(embeddings_manager, tmp_path, monkeypatch):
@@ -499,7 +512,7 @@ def test_check_model_compatibility_no_model_stored(embeddings_manager, tmp_path,
     with DatabaseManager() as db:
         db.create_tables()
     
-    compatible, stored, current = embeddings_manager.check_model_compatibility(db_path)
+    compatible, stored, current = embeddings_manager.check_model_compatibility()
     
     assert compatible is True
     assert stored is None
@@ -517,7 +530,7 @@ def test_check_model_compatibility_matching_models(embeddings_manager, tmp_path,
         db.create_tables()
         db.set_embedding_model(embeddings_manager.model_name)
     
-    compatible, stored, current = embeddings_manager.check_model_compatibility(db_path)
+    compatible, stored, current = embeddings_manager.check_model_compatibility()
     
     assert compatible is True
     assert stored == embeddings_manager.model_name
@@ -537,7 +550,7 @@ def test_check_model_compatibility_mismatched_models(embeddings_manager, tmp_pat
         db.create_tables()
         db.set_embedding_model(different_model)
     
-    compatible, stored, current = embeddings_manager.check_model_compatibility(db_path)
+    compatible, stored, current = embeddings_manager.check_model_compatibility()
     
     assert compatible is False
     assert stored == different_model
@@ -556,7 +569,7 @@ def test_embed_from_database_stores_model(embeddings_manager, test_database, mon
     embeddings_manager.create_collection()
     
     # Embed papers
-    embeddings_manager.embed_from_database(test_database)
+    embeddings_manager.embed_from_database()
     
     # Check that the model was stored
     with DatabaseManager() as db:
