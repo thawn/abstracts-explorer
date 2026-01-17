@@ -180,14 +180,18 @@ class Config:
         # EMBEDDING_DB_URL takes precedence for HTTP ChromaDB service
         # Falls back to EMBEDDING_DB_PATH for embedded/local ChromaDB
         # Note: Only one of these should be set; they are mutually exclusive
+        # Initialize both attributes to ensure they always exist
+        self.embedding_db_url = ""
+        self.embedding_db_path = ""
+        
         embedding_db_url = self._get_env("EMBEDDING_DB_URL", default="")
         if embedding_db_url:
             self.embedding_db_url = embedding_db_url
-            self.embedding_db_path = ""  # Empty when using URL (mutual exclusion)
+            # embedding_db_path remains empty (mutual exclusion)
         else:
             # Local ChromaDB path configuration
             self.embedding_db_path = self._resolve_path(self._get_env("EMBEDDING_DB_PATH", default="chroma_db"))
-            self.embedding_db_url = ""  # Empty when using path (mutual exclusion)
+            # embedding_db_url remains empty (mutual exclusion)
 
         # Collection Settings
         self.collection_name = self._get_env("COLLECTION_NAME", default="papers")
@@ -333,6 +337,7 @@ class Config:
             "llm_backend_url": self.llm_backend_url,
             "llm_backend_auth_token": "***" if self.llm_backend_auth_token else "",
             "embedding_db_path": self.embedding_db_path,
+            "embedding_db_url": self.embedding_db_url,
             "database_url": self._mask_database_url(self.database_url),
             "paper_db_path": self.paper_db_path,
             "collection_name": self.collection_name,
