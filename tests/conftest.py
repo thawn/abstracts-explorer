@@ -67,7 +67,7 @@ def test_config():
 
 
 @pytest.fixture
-def db_manager(tmp_path):
+def db_manager(tmp_path, monkeypatch):
     """
     Create a DatabaseManager instance with a temporary database.
 
@@ -75,15 +75,24 @@ def db_manager(tmp_path):
     ----------
     tmp_path : Path
         Pytest's temporary path fixture
+    monkeypatch : pytest.MonkeyPatch
+        Pytest's monkeypatch fixture for environment variables
 
     Returns
     -------
     DatabaseManager
         Database manager instance with temporary database
     """
+    from abstracts_explorer.config import get_config
+    
     db_path = tmp_path / "test.db"
     database_url = f"sqlite:///{db_path.absolute()}"
-    return DatabaseManager(database_url=database_url)
+    
+    # Set environment variable and reload config
+    monkeypatch.setenv("PAPER_DB", database_url)
+    get_config(reload=True)
+    
+    return DatabaseManager()
 
 
 @pytest.fixture
@@ -166,7 +175,7 @@ def sample_neurips_data():
 
 
 @pytest.fixture
-def test_database(tmp_path):
+def test_database(tmp_path, monkeypatch):
     """
     Create a test database with sample papers for testing.
 
@@ -174,6 +183,8 @@ def test_database(tmp_path):
     ----------
     tmp_path : Path
         Pytest's temporary path fixture
+    monkeypatch : pytest.MonkeyPatch
+        Pytest's monkeypatch fixture for environment variables
 
     Returns
     -------
@@ -187,12 +198,17 @@ def test_database(tmp_path):
     """
     from abstracts_explorer.database import DatabaseManager
     from abstracts_explorer.plugin import LightweightPaper
+    from abstracts_explorer.config import get_config
     
     db_path = tmp_path / "test.db"
     database_url = f"sqlite:///{db_path.absolute()}"
     
+    # Set environment variable and reload config
+    monkeypatch.setenv("PAPER_DB", database_url)
+    get_config(reload=True)
+    
     # Use DatabaseManager to create the database with proper schema
-    with DatabaseManager(database_url=database_url) as db:
+    with DatabaseManager() as db:
         db.create_tables()
         
         # Create sample papers using LightweightPaper model
@@ -311,7 +327,7 @@ def mock_rag_openai():
 
 
 @pytest.fixture
-def embeddings_manager(tmp_path):
+def embeddings_manager(tmp_path, monkeypatch):
     """
     Create an EmbeddingsManager instance for testing.
 
@@ -319,6 +335,8 @@ def embeddings_manager(tmp_path):
     ----------
     tmp_path : Path
         Pytest's temporary path fixture
+    monkeypatch : pytest.MonkeyPatch
+        Pytest's monkeypatch fixture for environment variables
 
     Returns
     -------
@@ -331,15 +349,16 @@ def embeddings_manager(tmp_path):
     Mocks the OpenAI client to avoid real API calls.
     """
     from unittest.mock import Mock
+    from abstracts_explorer.config import get_config
     
     chroma_path = tmp_path / "test_chroma"
     
+    # Set environment variable and reload config
+    monkeypatch.setenv("EMBEDDING_DB", str(chroma_path))
+    get_config(reload=True)
+    
     # Create the manager
-    em = EmbeddingsManager(
-        lm_studio_url="http://localhost:1234",
-        chroma_path=chroma_path,
-        collection_name="test_collection",
-    )
+    em = EmbeddingsManager(collection_name="test_collection")
     
     # Replace the OpenAI client with a mock
     mock_client = Mock()

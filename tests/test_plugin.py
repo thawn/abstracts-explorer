@@ -825,7 +825,7 @@ class TestDatabaseYearConferenceIntegration:
     """Test that year and conference fields are properly stored in the database."""
 
     @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
-    def test_neurips_year_conference_in_database(self, mock_get):
+    def test_neurips_year_conference_in_database(self, mock_get, monkeypatch):
         """Test that year and conference are stored in database from NeurIPS plugin."""
         # Mock the requests.get to return test data
         mock_response = Mock()
@@ -863,7 +863,14 @@ class TestDatabaseYearConferenceIntegration:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "test.db"
             database_url = f"sqlite:///{db_path.absolute()}"
-            with DatabaseManager(database_url=database_url) as db:
+
+            from abstracts_explorer.config import get_config
+
+            monkeypatch.setenv("PAPER_DB", database_url)
+
+            get_config(reload=True)
+
+            with DatabaseManager() as db:
                 db.create_tables()
                 db.add_papers(data)
 
@@ -889,7 +896,7 @@ class TestDatabaseYearConferenceIntegration:
                 papers = db.query("SELECT * FROM papers WHERE conference = 'NeurIPS'")
                 assert len(papers) == 2
 
-    def test_ml4ps_year_conference_in_database(self):
+    def test_ml4ps_year_conference_in_database(self, monkeypatch):
         """Test that year and conference are stored in database from ML4PS plugin."""
         plugin = ML4PSDownloaderPlugin()
 
@@ -925,7 +932,14 @@ class TestDatabaseYearConferenceIntegration:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "test.db"
             database_url = f"sqlite:///{db_path.absolute()}"
-            with DatabaseManager(database_url=database_url) as db:
+
+            from abstracts_explorer.config import get_config
+
+            monkeypatch.setenv("PAPER_DB", database_url)
+
+            get_config(reload=True)
+
+            with DatabaseManager() as db:
                 db.create_tables()
                 db.add_papers(papers_to_insert)
 

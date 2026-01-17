@@ -416,7 +416,7 @@ class TestRAGChatIntegration:
     """
 
     @requires_lm_studio
-    def test_real_query(self, tmp_path):
+    def test_real_query(self, tmp_path, monkeypatch):
         """
         Test real query with actual LM Studio backend using configured model.
         
@@ -430,7 +430,10 @@ class TestRAGChatIntegration:
         config = get_config()
 
         chroma_path = tmp_path / "chroma_integration"
-        em = EmbeddingsManager(chroma_path=chroma_path)
+        from abstracts_explorer.config import get_config
+        monkeypatch.setenv("EMBEDDING_DB", str(chroma_path))
+        get_config(reload=True)
+        em = EmbeddingsManager()
         em.connect()
         em.create_collection(reset=True)
 
@@ -483,7 +486,7 @@ class TestRAGChatIntegration:
         db.close()
 
     @requires_lm_studio
-    def test_real_conversation(self, tmp_path):
+    def test_real_conversation(self, tmp_path, monkeypatch):
         """
         Test real conversation with actual LM Studio backend using configured model.
         
@@ -496,7 +499,10 @@ class TestRAGChatIntegration:
         config = get_config()
 
         chroma_path = tmp_path / "chroma_conversation"
-        em = EmbeddingsManager(chroma_path=chroma_path)
+        from abstracts_explorer.config import get_config
+        monkeypatch.setenv("EMBEDDING_DB", str(chroma_path))
+        get_config(reload=True)
+        em = EmbeddingsManager()
         em.connect()
         em.create_collection(reset=True)
 
@@ -550,7 +556,7 @@ class TestRAGChatIntegration:
         db.close()
 
     @requires_lm_studio
-    def test_real_export(self, tmp_path):
+    def test_real_export(self, tmp_path, monkeypatch):
         """
         Test exporting real conversation with configured model.
         
@@ -562,7 +568,10 @@ class TestRAGChatIntegration:
         config = get_config()
 
         chroma_path = tmp_path / "chroma_export"
-        em = EmbeddingsManager(chroma_path=chroma_path)
+        from abstracts_explorer.config import get_config
+        monkeypatch.setenv("EMBEDDING_DB", str(chroma_path))
+        get_config(reload=True)
+        em = EmbeddingsManager()
         em.connect()
         em.create_collection(reset=True)
 

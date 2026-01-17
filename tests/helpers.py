@@ -16,7 +16,7 @@ from abstracts_explorer.database import DatabaseManager
 _lm_studio_available_cache = None
 
 
-def create_test_db_with_paper(db_path, paper_data):
+def create_test_db_with_paper(db_path, paper_data, monkeypatch=None):
     """
     Create a test database with a single paper.
     
@@ -27,6 +27,9 @@ def create_test_db_with_paper(db_path, paper_data):
     paper_data : dict
         Dictionary containing paper data with keys: uid, title, abstract, authors,
         session, poster_position, keywords, year, conference
+    monkeypatch : pytest.MonkeyPatch, optional
+        Pytest's monkeypatch fixture. If provided, will be used to set environment variables.
+        If not provided, os.environ will be used directly.
         
     Returns
     -------
@@ -58,9 +61,20 @@ def create_test_db_with_paper(db_path, paper_data):
     >>> db.close()
     """
     from abstracts_explorer.plugin import LightweightPaper
+    import os
     
     database_url = f"sqlite:///{db_path.absolute()}"
-    db = DatabaseManager(database_url=database_url)
+    
+    # Set environment variable
+    if monkeypatch is not None:
+        monkeypatch.setenv("PAPER_DB", database_url)
+    else:
+        os.environ["PAPER_DB"] = database_url
+    
+    # Reload config to pick up changes
+    get_config(reload=True)
+    
+    db = DatabaseManager()
     db.connect()
     db.create_tables()
     

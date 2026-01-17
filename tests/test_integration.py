@@ -22,12 +22,17 @@ pytestmark = pytest.mark.integration
 class TestIntegration:
     """Integration tests for the complete workflow."""
 
-    def test_empty_database_queries(self, tmp_path):
+    def test_empty_database_queries(self, tmp_path, monkeypatch):
         """Test querying an empty database."""
+        from abstracts_explorer.config import get_config
+        
         db_file = tmp_path / "empty.db"
         database_url = f"sqlite:///{db_file.absolute()}"
 
-        with DatabaseManager(database_url=database_url) as db:
+        monkeypatch.setenv("PAPER_DB", database_url)
+        get_config(reload=True)
+        
+        with DatabaseManager() as db:
             db.create_tables()
 
             assert db.get_paper_count() == 0
@@ -395,7 +400,7 @@ class TestIntegration:
             ],
         }
 
-    def test_real_neurips_data_subset(self, tmp_path):
+    def test_real_neurips_data_subset(self, tmp_path, monkeypatch):
         """
         Test with a diverse subset of actual NeurIPS 2025 data.
 
@@ -408,6 +413,8 @@ class TestIntegration:
         6. Spotlight presentation
         7. Paper with author missing institution
         """
+        from abstracts_explorer.config import get_config
+        
         # Actual subset of NeurIPS 2025 data with diverse characteristics
         real_data = self._get_real_neurips_subset()
 
@@ -425,7 +432,10 @@ class TestIntegration:
         papers = [LightweightPaper(**paper_dict) for paper_dict in lightweight_dicts]
 
         database_url = f"sqlite:///{db_file.absolute()}"
-        with DatabaseManager(database_url=database_url) as db:
+        monkeypatch.setenv("PAPER_DB", database_url)
+        get_config(reload=True)
+        
+        with DatabaseManager() as db:
             # Create tables
             db.create_tables()
 
@@ -498,7 +508,7 @@ class TestIntegration:
             assert len(papers_with_keywords) == 2  # Papers 6 and 7 have keywords
 
     @requires_lm_studio
-    def test_embeddings_end_to_end_with_real_data(self, tmp_path):
+    def test_embeddings_end_to_end_with_real_data(self, tmp_path, monkeypatch):
         """
         End-to-end test: Load real NeurIPS data, generate embeddings, and perform semantic search.
 
@@ -517,6 +527,7 @@ class TestIntegration:
         test_search_similar, test_add_paper, etc.).
         """
         from abstracts_explorer import DatabaseManager, EmbeddingsManager
+        from abstracts_explorer.config import get_config
 
         # Use the same real data subset from test_real_neurips_data_subset
         real_data = self._get_real_neurips_subset()
@@ -537,14 +548,20 @@ class TestIntegration:
 
         database_url = f"sqlite:///{db_file.absolute()}"
         # Step 1: Load papers into database
-        with DatabaseManager(database_url=database_url) as db:
+        monkeypatch.setenv("PAPER_DB", database_url)
+        get_config(reload=True)
+        
+        with DatabaseManager() as db:
             db.create_tables()
             count = db.add_papers(papers)
             assert count == 7
             assert db.get_paper_count() == 7
 
         # Step 2: Generate embeddings from database using real LM Studio API
-        with EmbeddingsManager(chroma_path=chroma_path, collection_name="neurips_test") as em:
+        monkeypatch.setenv("EMBEDDING_DB", str(chroma_path))
+        get_config(reload=True)
+        
+        with EmbeddingsManager(collection_name="neurips_test") as em:
             em.create_collection()
 
             # Embed only papers with non-empty abstracts
@@ -590,7 +607,8 @@ class TestIntegration:
             # Step 5: Test metadata filtering - filter by session
             # Get the first session name from our test data to use for filtering
             database_url = f"sqlite:///{db_file.absolute()}"
-            with DatabaseManager(database_url=database_url) as db:
+            # Config is already set from earlier in this test, just use DatabaseManager()
+            with DatabaseManager() as db:
                 results = db.query("SELECT DISTINCT session FROM papers LIMIT 1")
                 first_session = results[0]["session"]
 
@@ -613,7 +631,8 @@ class TestIntegration:
             em.close()
 
         # Reopen and verify data persists
-        with EmbeddingsManager(chroma_path=chroma_path, collection_name="neurips_test") as em:
+        # Config should still have the EMBEDDING_DB set from earlier
+        with EmbeddingsManager(collection_name="neurips_test") as em:
             em.create_collection()
 
             stats = em.get_collection_stats()

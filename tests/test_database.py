@@ -52,11 +52,18 @@ def sample_paper_minimal():
 class TestDatabaseManager:
     """Tests for DatabaseManager class."""
 
-    def test_init(self, tmp_path):
+    def test_init(self, tmp_path, monkeypatch):
         """Test DatabaseManager initialization."""
+        from abstracts_explorer.config import get_config
+        
         db_path = tmp_path / "test.db"
         database_url = f"sqlite:///{db_path.absolute()}"
-        db = DatabaseManager(database_url=database_url)
+        
+        # Set environment variable and reload config
+        monkeypatch.setenv("PAPER_DB", database_url)
+        get_config(reload=True)
+        
+        db = DatabaseManager()
 
         # Verify engine and session are not yet created
         assert db.engine is None
@@ -71,11 +78,18 @@ class TestDatabaseManager:
 
         db_manager.close()
 
-    def test_connect_creates_directories(self, tmp_path):
+    def test_connect_creates_directories(self, tmp_path, monkeypatch):
         """Test that connect creates parent directories."""
+        from abstracts_explorer.config import get_config
+        
         db_path = tmp_path / "subdir" / "another" / "test.db"
         database_url = f"sqlite:///{db_path.absolute()}"
-        db = DatabaseManager(database_url=database_url)
+        
+        # Set environment variable and reload config
+        monkeypatch.setenv("PAPER_DB", database_url)
+        get_config(reload=True)
+        
+        db = DatabaseManager()
         db.connect()
 
         assert db_path.parent.exists()
@@ -95,12 +109,18 @@ class TestDatabaseManager:
         db_manager.close()  # Should not raise
         assert db_manager._session is None
 
-    def test_context_manager(self, tmp_path):
+    def test_context_manager(self, tmp_path, monkeypatch):
         """Test DatabaseManager as context manager."""
+        from abstracts_explorer.config import get_config
+        
         db_path = tmp_path / "test.db"
         database_url = f"sqlite:///{db_path.absolute()}"
+        
+        # Set environment variable and reload config
+        monkeypatch.setenv("PAPER_DB", database_url)
+        get_config(reload=True)
 
-        with DatabaseManager(database_url=database_url) as db:
+        with DatabaseManager() as db:
             assert db._session is not None
 
         # Connection should be closed after exiting context
@@ -433,19 +453,29 @@ class TestEmbeddingModelMetadata:
         connected_db.set_embedding_model(model2)
         assert connected_db.get_embedding_model() == model2
 
-    def test_embedding_model_persists_across_connections(self, tmp_path):
+    def test_embedding_model_persists_across_connections(self, tmp_path, monkeypatch):
         """Test that embedding model persists across database connections."""
+        from abstracts_explorer.config import get_config
+        
         db_path = tmp_path / "test.db"
         database_url = f"sqlite:///{db_path.absolute()}"
+        
+        # Set environment variable and reload config
+        monkeypatch.setenv("PAPER_DB", database_url)
+        get_config(reload=True)
+        
         model_name = "persistent-model"
         
         # First connection: set the model
-        with DatabaseManager(database_url=database_url) as db1:
+        with DatabaseManager() as db1:
             db1.create_tables()
             db1.set_embedding_model(model_name)
         
+        # Reset config to pick up the same database_url
+        get_config(reload=True)
+        
         # Second connection: retrieve the model
-        with DatabaseManager(database_url=database_url) as db2:
+        with DatabaseManager() as db2:
             retrieved_model = db2.get_embedding_model()
             assert retrieved_model == model_name
 

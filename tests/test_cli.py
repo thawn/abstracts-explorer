@@ -39,7 +39,7 @@ class TestCLI:
             assert "usage:" in captured.out
             assert "create-embeddings" in captured.out
 
-    def test_download_command_success(self, tmp_path, capsys):
+    def test_download_command_success(self, tmp_path, capsys, monkeypatch):
         """Test download command completes successfully."""
         output_db = tmp_path / "test.db"
 
@@ -85,7 +85,7 @@ class TestCLI:
         assert "Database saved to" in captured.out
         assert output_db.exists()
 
-    def test_download_command_failure(self, tmp_path, capsys):
+    def test_download_command_failure(self, tmp_path, capsys, monkeypatch):
         """Test download command handles errors gracefully."""
         output_db = tmp_path / "test.db"
 
@@ -161,7 +161,7 @@ class TestCLI:
         # Verify database was created
         assert db_path.exists()
 
-    def test_create_embeddings_db_not_found(self, tmp_path, capsys):
+    def test_create_embeddings_db_not_found(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with non-existent database."""
         nonexistent_db = tmp_path / "nonexistent.db"
 
@@ -176,14 +176,23 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Database file not found" in captured.err
 
-    def test_create_embeddings_lm_studio_not_available(self, tmp_path, capsys):
+    def test_create_embeddings_lm_studio_not_available(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings when OpenAI API is not available."""
         # Create a test database
         from abstracts_explorer import DatabaseManager
 
         db_path = tmp_path / "test.db"
         database_url = f"sqlite:///{db_path.absolute()}"
-        with DatabaseManager(database_url=database_url) as db:
+
+        # Set environment variable and reload config
+
+        from abstracts_explorer.config import get_config
+
+        monkeypatch.setenv("PAPER_DB", database_url)
+
+        get_config(reload=True)
+
+        with DatabaseManager() as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -223,14 +232,23 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Failed to connect to OpenAI API" in captured.err
 
-    def test_create_embeddings_success(self, tmp_path, capsys):
+    def test_create_embeddings_success(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings command completes successfully."""
         from abstracts_explorer import DatabaseManager
 
         # Create a test database
         db_path = tmp_path / "test.db"
         database_url = f"sqlite:///{db_path.absolute()}"
-        with DatabaseManager(database_url=database_url) as db:
+
+        # Set environment variable and reload config
+
+        from abstracts_explorer.config import get_config
+
+        monkeypatch.setenv("PAPER_DB", database_url)
+
+        get_config(reload=True)
+
+        with DatabaseManager() as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -284,14 +302,23 @@ class TestCLI:
         assert "Successfully generated embeddings for 2 papers" in captured.out
         assert "Vector database saved to" in captured.out
 
-    def test_create_embeddings_with_where_clause(self, tmp_path, capsys):
+    def test_create_embeddings_with_where_clause(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with WHERE clause filter."""
         from abstracts_explorer import DatabaseManager
 
         # Create a test database
         db_path = tmp_path / "test.db"
         database_url = f"sqlite:///{db_path.absolute()}"
-        with DatabaseManager(database_url=database_url) as db:
+
+        # Set environment variable and reload config
+
+        from abstracts_explorer.config import get_config
+
+        monkeypatch.setenv("PAPER_DB", database_url)
+
+        get_config(reload=True)
+
+        with DatabaseManager() as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -349,14 +376,23 @@ class TestCLI:
         assert "Filter will process 1 papers" in captured.out
         assert "Successfully generated embeddings for 1 papers" in captured.out
 
-    def test_create_embeddings_force_flag(self, tmp_path, capsys):
+    def test_create_embeddings_force_flag(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with --force flag."""
         from abstracts_explorer import DatabaseManager
 
         # Create a test database
         db_path = tmp_path / "test.db"
         database_url = f"sqlite:///{db_path.absolute()}"
-        with DatabaseManager(database_url=database_url) as db:
+
+        # Set environment variable and reload config
+
+        from abstracts_explorer.config import get_config
+
+        monkeypatch.setenv("PAPER_DB", database_url)
+
+        get_config(reload=True)
+
+        with DatabaseManager() as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -407,14 +443,23 @@ class TestCLI:
         # Verify create_collection was called with reset=True
         mock_em.create_collection.assert_called_once_with(reset=True)
 
-    def test_create_embeddings_custom_model(self, tmp_path, capsys):
+    def test_create_embeddings_custom_model(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with custom model settings."""
         from abstracts_explorer import DatabaseManager
 
         # Create a test database
         db_path = tmp_path / "test.db"
         database_url = f"sqlite:///{db_path.absolute()}"
-        with DatabaseManager(database_url=database_url) as db:
+
+        # Set environment variable and reload config
+
+        from abstracts_explorer.config import get_config
+
+        monkeypatch.setenv("PAPER_DB", database_url)
+
+        get_config(reload=True)
+
+        with DatabaseManager() as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -467,7 +512,7 @@ class TestCLI:
         assert call_kwargs["lm_studio_url"] == custom_url
         assert call_kwargs["model_name"] == custom_model
 
-    def test_create_embeddings_embeddings_error(self, tmp_path, capsys):
+    def test_create_embeddings_embeddings_error(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings handles EmbeddingsError gracefully."""
         from abstracts_explorer import DatabaseManager
         from abstracts_explorer.embeddings import EmbeddingsError
@@ -475,7 +520,16 @@ class TestCLI:
         # Create a test database
         db_path = tmp_path / "test.db"
         database_url = f"sqlite:///{db_path.absolute()}"
-        with DatabaseManager(database_url=database_url) as db:
+
+        # Set environment variable and reload config
+
+        from abstracts_explorer.config import get_config
+
+        monkeypatch.setenv("PAPER_DB", database_url)
+
+        get_config(reload=True)
+
+        with DatabaseManager() as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -509,7 +563,7 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Embeddings error:" in captured.err
 
-    def test_search_embeddings_not_found(self, tmp_path, capsys):
+    def test_search_embeddings_not_found(self, tmp_path, capsys, monkeypatch):
         """Test search command with non-existent embeddings database."""
         nonexistent_path = tmp_path / "nonexistent_embeddings"
 
@@ -530,7 +584,7 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Embeddings database not found" in captured.err
 
-    def test_search_lm_studio_not_available(self, tmp_path, capsys):
+    def test_search_lm_studio_not_available(self, tmp_path, capsys, monkeypatch):
         """Test search command when OpenAI API is not available."""
         # Create embeddings directory
         embeddings_path = tmp_path / "embeddings"
@@ -559,7 +613,7 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Failed to connect to OpenAI API" in captured.err
 
-    def test_search_success(self, tmp_path, capsys):
+    def test_search_success(self, tmp_path, capsys, monkeypatch):
         """Test search command completes successfully."""
         embeddings_path = tmp_path / "embeddings"
         embeddings_path.mkdir()
@@ -615,7 +669,7 @@ class TestCLI:
         assert "Paper 1" in captured.out
         assert "Paper 2" in captured.out
 
-    def test_search_with_abstract(self, tmp_path, capsys):
+    def test_search_with_abstract(self, tmp_path, capsys, monkeypatch):
         """Test search command with --show-abstract flag."""
         embeddings_path = tmp_path / "embeddings"
         embeddings_path.mkdir()
@@ -654,7 +708,7 @@ class TestCLI:
         assert "Test Paper" in captured.out
         assert "Abstract: This is a test abstract" in captured.out
 
-    def test_search_with_filter(self, tmp_path, capsys):
+    def test_search_with_filter(self, tmp_path, capsys, monkeypatch):
         """Test search command with metadata filter."""
         embeddings_path = tmp_path / "embeddings"
         embeddings_path.mkdir()
@@ -702,7 +756,7 @@ class TestCLI:
         assert "Filter: {'decision': 'Accept (poster)'}" in captured.out
         assert "Filtered Paper" in captured.out
 
-    def test_search_no_results(self, tmp_path, capsys):
+    def test_search_no_results(self, tmp_path, capsys, monkeypatch):
         """Test search command with no results."""
         embeddings_path = tmp_path / "embeddings"
         embeddings_path.mkdir()
@@ -734,14 +788,23 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "No results found" in captured.out
 
-    def test_search_with_db_path_author_names(self, tmp_path, capsys):
+    def test_search_with_db_path_author_names(self, tmp_path, capsys, monkeypatch):
         """Test search command with database path to resolve author names."""
         from abstracts_explorer import DatabaseManager
 
         # Create a test database with lightweight schema
         db_path = tmp_path / "test.db"
         database_url = f"sqlite:///{db_path.absolute()}"
-        with DatabaseManager(database_url=database_url) as db:
+
+        # Set environment variable and reload config
+
+        from abstracts_explorer.config import get_config
+
+        monkeypatch.setenv("PAPER_DB", database_url)
+
+        get_config(reload=True)
+
+        with DatabaseManager() as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -809,7 +872,7 @@ class TestCLI:
         assert "https://example.com/paper/1" in captured.out
         assert "A12" in captured.out
 
-    def test_search_with_db_path_missing_database(self, tmp_path, capsys):
+    def test_search_with_db_path_missing_database(self, tmp_path, capsys, monkeypatch):
         """Test search command with non-existent database path."""
         embeddings_path = tmp_path / "embeddings"
         embeddings_path.mkdir()
@@ -849,7 +912,7 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "101,102" in captured.out  # Shows IDs as fallback
 
-    def test_search_with_db_path_lookup_error(self, tmp_path, capsys):
+    def test_search_with_db_path_lookup_error(self, tmp_path, capsys, monkeypatch):
         """Test search command when database connection fails."""
         from abstracts_explorer.database import DatabaseManager
         
@@ -904,7 +967,7 @@ class TestCLI:
         assert "Could not open database for author names" in captured.err
         assert "101" in captured.out  # Falls back to IDs
 
-    def test_search_unexpected_exception(self, tmp_path, capsys):
+    def test_search_unexpected_exception(self, tmp_path, capsys, monkeypatch):
         """Test search command with unexpected exception."""
         embeddings_path = tmp_path / "embeddings"
         embeddings_path.mkdir()
@@ -939,7 +1002,7 @@ class TestCLI:
 class TestChatCommand:
     """Test cases for the chat command."""
 
-    def test_chat_embeddings_not_found(self, tmp_path, capsys):
+    def test_chat_embeddings_not_found(self, tmp_path, capsys, monkeypatch):
         """Test chat command when embeddings don't exist."""
         from abstracts_explorer.cli import chat_command
         import argparse
@@ -962,7 +1025,7 @@ class TestChatCommand:
         captured = capsys.readouterr()
         assert "Embeddings database not found" in captured.err
 
-    def test_chat_lm_studio_not_available(self, tmp_path, capsys):
+    def test_chat_lm_studio_not_available(self, tmp_path, capsys, monkeypatch):
         """Test chat command when OpenAI API is not available."""
         from abstracts_explorer.cli import chat_command
         import argparse
@@ -993,7 +1056,7 @@ class TestChatCommand:
         captured = capsys.readouterr()
         assert "Failed to connect to OpenAI API" in captured.err
 
-    def test_chat_rag_error(self, tmp_path, capsys):
+    def test_chat_rag_error(self, tmp_path, capsys, monkeypatch):
         """Test chat command with RAG error."""
         from abstracts_explorer.cli import chat_command
         from abstracts_explorer.rag import RAGError
@@ -1135,7 +1198,7 @@ class TestMainDispatch:
 class TestCLISearchErrorHandling:
     """Test search command error handling paths."""
 
-    def test_search_command_where_parse_warning(self, tmp_path, capsys):
+    def test_search_command_where_parse_warning(self, tmp_path, capsys, monkeypatch):
         """Test warning when where clause cannot be parsed (lines 229-230)."""
         import argparse
 
@@ -1172,7 +1235,7 @@ class TestCLISearchErrorHandling:
         # Should show warning about filter parsing
         assert "Warning" in captured.err or "Could not parse" in captured.err
 
-    def test_search_command_general_exception(self, tmp_path, capsys):
+    def test_search_command_general_exception(self, tmp_path, capsys, monkeypatch):
         """Test general exception handling in search (lines 308-309)."""
         import argparse
 
@@ -1205,7 +1268,7 @@ class TestCLISearchErrorHandling:
 class TestCLIEmbeddingsProgressAndStats:
     """Test embeddings command progress and stats display."""
 
-    def test_create_embeddings_success_displays_stats(self, tmp_path, capsys):
+    def test_create_embeddings_success_displays_stats(self, tmp_path, capsys, monkeypatch):
         """Test that successful embedding displays stats (lines 131-136, 147-152)."""
         from abstracts_explorer.cli import main
 
@@ -1278,7 +1341,7 @@ class TestCLIEmbeddingsProgressAndStats:
 class TestCLIChatInteractiveLoop:
     """Test chat command interactive loop paths."""
 
-    def test_chat_empty_input_continues(self, tmp_path, capsys):
+    def test_chat_empty_input_continues(self, tmp_path, capsys, monkeypatch):
         """Test that empty input is skipped in chat loop."""
         from abstracts_explorer.cli import chat_command
         import argparse
@@ -1313,7 +1376,7 @@ class TestCLIChatInteractiveLoop:
         assert exit_code == 0
         # Chat should have exited cleanly without processing empty inputs
 
-    def test_chat_quit_command(self, tmp_path, capsys):
+    def test_chat_quit_command(self, tmp_path, capsys, monkeypatch):
         """Test chat exits on 'quit' command."""
         from abstracts_explorer.cli import chat_command
         import argparse
@@ -1348,7 +1411,7 @@ class TestCLIChatInteractiveLoop:
         captured = capsys.readouterr()
         assert "Goodbye" in captured.out
 
-    def test_chat_q_command(self, tmp_path, capsys):
+    def test_chat_q_command(self, tmp_path, capsys, monkeypatch):
         """Test chat exits on 'q' command."""
         from abstracts_explorer.cli import chat_command
         import argparse
@@ -1383,7 +1446,7 @@ class TestCLIChatInteractiveLoop:
         captured = capsys.readouterr()
         assert "Goodbye" in captured.out
 
-    def test_chat_reset_command(self, tmp_path, capsys):
+    def test_chat_reset_command(self, tmp_path, capsys, monkeypatch):
         """Test chat reset command works."""
         from abstracts_explorer.cli import chat_command
         import argparse
@@ -1421,7 +1484,7 @@ class TestCLIChatInteractiveLoop:
         assert "Conversation history cleared" in captured.out
         mock_rag.reset_conversation.assert_called_once()
 
-    def test_chat_help_command(self, tmp_path, capsys):
+    def test_chat_help_command(self, tmp_path, capsys, monkeypatch):
         """Test chat help command displays help."""
         from abstracts_explorer.cli import chat_command
         import argparse
@@ -1458,7 +1521,7 @@ class TestCLIChatInteractiveLoop:
         assert "exit" in captured.out.lower()
         assert "reset" in captured.out.lower()
 
-    def test_chat_with_query_and_show_sources(self, tmp_path, capsys):
+    def test_chat_with_query_and_show_sources(self, tmp_path, capsys, monkeypatch):
         """Test chat processes query and shows sources."""
         from abstracts_explorer.cli import chat_command
         import argparse
@@ -1507,7 +1570,7 @@ class TestCLIChatInteractiveLoop:
         assert "Source papers" in captured.out
         assert "Attention Is All You Need" in captured.out
 
-    def test_chat_with_export(self, tmp_path, capsys):
+    def test_chat_with_export(self, tmp_path, capsys, monkeypatch):
         """Test chat exports conversation at end."""
         from abstracts_explorer.cli import chat_command
         import argparse
@@ -1546,7 +1609,7 @@ class TestCLIChatInteractiveLoop:
         assert "Conversation exported" in captured.out
         mock_rag.export_conversation.assert_called_once()
 
-    def test_chat_keyboard_interrupt(self, tmp_path, capsys):
+    def test_chat_keyboard_interrupt(self, tmp_path, capsys, monkeypatch):
         """Test chat handles Ctrl+C gracefully."""
         from abstracts_explorer.cli import chat_command
         import argparse
@@ -1581,7 +1644,7 @@ class TestCLIChatInteractiveLoop:
         captured = capsys.readouterr()
         assert "Goodbye" in captured.out
 
-    def test_chat_eoferror(self, tmp_path, capsys):
+    def test_chat_eoferror(self, tmp_path, capsys, monkeypatch):
         """Test chat handles EOF (Ctrl+D) gracefully."""
         from abstracts_explorer.cli import chat_command
         import argparse

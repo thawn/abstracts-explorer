@@ -18,11 +18,17 @@ class TestCLIPaperDBConfiguration:
         """Test that create-embeddings respects PAPER_DB environment variable."""
         from abstracts_explorer.database import DatabaseManager
         from abstracts_explorer.plugin import LightweightPaper
+        from abstracts_explorer.config import get_config
 
         # Create test database
         db_path = tmp_path / "test.db"
         database_url = f"sqlite:///{db_path.absolute()}"
-        db = DatabaseManager(database_url=database_url)
+        
+        # Set environment variable and reload config for db creation
+        monkeypatch.setenv("PAPER_DB", database_url)
+        get_config(reload=True)
+        
+        db = DatabaseManager()
         with db:
             db.create_tables()
             paper = LightweightPaper(
@@ -36,9 +42,9 @@ class TestCLIPaperDBConfiguration:
             )
             db.add_paper(paper)
 
-        # Set PAPER_DB environment variable (can be URL or path)
-        database_url = f"sqlite:///{db_path.absolute()}"
-        monkeypatch.setenv("PAPER_DB", database_url)
+        # PAPER_DB is already set via monkeypatch
+        # Also set EMBEDDING_DB for the ChromaDB location
+        monkeypatch.setenv("EMBEDDING_DB", str(tmp_path / "chroma_db"))
 
         # Mock embeddings manager
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
@@ -55,18 +61,15 @@ class TestCLIPaperDBConfiguration:
                 [
                     "abstracts-explorer",
                     "create-embeddings",
-                    "--output",
-                    str(tmp_path / "chroma_db"),
                 ],
             ):
-                # Force config reload to pick up PAPER_DB
-                from abstracts_explorer.config import get_config
+                # Force config reload to pick up env vars
                 get_config(reload=True)
                 
                 exit_code = main()
 
         assert exit_code == 0
-        # Verify that embed_from_database was called with database_url parameter
+        # Verify that embed_from_database was called
         mock_em.embed_from_database.assert_called_once()
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
         assert "database_url" in call_kwargs
@@ -76,11 +79,17 @@ class TestCLIPaperDBConfiguration:
         """Test that PAPER_DB works with file path (not just URL)."""
         from abstracts_explorer.database import DatabaseManager
         from abstracts_explorer.plugin import LightweightPaper
+        from abstracts_explorer.config import get_config
 
         # Create test database
         db_path = tmp_path / "test.db"
         database_url = f"sqlite:///{db_path.absolute()}"
-        db = DatabaseManager(database_url=database_url)
+        
+        # Set environment variable and reload config for db creation
+        monkeypatch.setenv("PAPER_DB", database_url)
+        get_config(reload=True)
+        
+        db = DatabaseManager()
         with db:
             db.create_tables()
             paper = LightweightPaper(
@@ -96,6 +105,8 @@ class TestCLIPaperDBConfiguration:
 
         # Set PAPER_DB to file path (not URL) - should still work
         monkeypatch.setenv("PAPER_DB", str(db_path))
+        # Also set EMBEDDING_DB
+        monkeypatch.setenv("EMBEDDING_DB", str(tmp_path / "chroma_db"))
 
         # Mock embeddings manager
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
@@ -112,12 +123,9 @@ class TestCLIPaperDBConfiguration:
                 [
                     "abstracts-explorer",
                     "create-embeddings",
-                    "--output",
-                    str(tmp_path / "chroma_db"),
                 ],
             ):
                 # Force config reload to pick up PAPER_DB
-                from abstracts_explorer.config import get_config
                 get_config(reload=True)
                 
                 exit_code = main()

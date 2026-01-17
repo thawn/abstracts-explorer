@@ -57,7 +57,13 @@ def test_database(tmp_path_factory, web_test_papers):
 
     # Create database and add test data using LightweightPaper
     database_url = f"sqlite:///{db_path.absolute()}"
-    db = DatabaseManager(database_url=database_url)
+
+    from abstracts_explorer.config import get_config
+
+    monkeypatch.setenv("PAPER_DB", database_url)
+
+    get_config(reload=True)
+    db = DatabaseManager()
 
     with db:
         db.create_tables()
@@ -111,13 +117,11 @@ def web_server(test_database, tmp_path_factory):
 
     # Set environment variables BEFORE importing the app modules
     # This ensures the config is loaded with the correct test paths
-    original_db_path = os.environ.get("PAPER_DB_PATH")
-    original_embeddings_path = os.environ.get("EMBEDDING_DB_PATH")
-    original_collection_name = os.environ.get("COLLECTION_NAME")
+    original_db = os.environ.get("PAPER_DB")
+    original_embeddings = os.environ.get("EMBEDDING_DB")
 
-    os.environ["PAPER_DB_PATH"] = str(test_database)
-    os.environ["EMBEDDING_DB_PATH"] = str(embeddings_path)
-    os.environ["COLLECTION_NAME"] = collection_name
+    os.environ["PAPER_DB"] = f"sqlite:///{test_database.absolute()}"
+    os.environ["EMBEDDING_DB"] = str(embeddings_path)
 
     # Mock the OpenAI API for embedding generation
     # Integration tests should not require a real API connection
@@ -149,14 +153,13 @@ def web_server(test_database, tmp_path_factory):
         get_config(reload=True)
 
         # Initialize embeddings with test data
-        em = EmbeddingsManager(chroma_path=embeddings_path, collection_name=collection_name)
+        em = EmbeddingsManager(collection_name=collection_name)
         em.connect()
         em.create_collection(reset=True)
 
         # Add embeddings for test papers
         from abstracts_explorer.database import DatabaseManager
-        database_url = f"sqlite:///{test_database.absolute()}"
-        db = DatabaseManager(database_url=database_url)
+        db = DatabaseManager()
         db.connect()
         papers = db.query("SELECT * FROM papers")
 
@@ -206,20 +209,15 @@ def web_server(test_database, tmp_path_factory):
         mock_openai_patcher.stop()
 
         # Restore original environment variables
-        if original_db_path is not None:
-            os.environ["PAPER_DB_PATH"] = original_db_path
-        elif "PAPER_DB_PATH" in os.environ:
-            del os.environ["PAPER_DB_PATH"]
+        if original_db is not None:
+            os.environ["PAPER_DB"] = original_db
+        elif "PAPER_DB" in os.environ:
+            del os.environ["PAPER_DB"]
 
-        if original_embeddings_path is not None:
-            os.environ["EMBEDDING_DB_PATH"] = original_embeddings_path
-        elif "EMBEDDING_DB_PATH" in os.environ:
-            del os.environ["EMBEDDING_DB_PATH"]
-
-        if original_collection_name is not None:
-            os.environ["COLLECTION_NAME"] = original_collection_name
-        elif "COLLECTION_NAME" in os.environ:
-            del os.environ["COLLECTION_NAME"]
+        if original_embeddings is not None:
+            os.environ["EMBEDDING_DB"] = original_embeddings
+        elif "EMBEDDING_DB" in os.environ:
+            del os.environ["EMBEDDING_DB"]
 
 
 class TestWebUIIntegration:

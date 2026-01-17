@@ -308,14 +308,19 @@ class TestEmbeddingsManager:
 
         embeddings_manager.close()
 
-    def test_embed_from_database_empty_result(self, embeddings_manager, tmp_path, mock_lm_studio):
+    def test_embed_from_database_empty_result(self, embeddings_manager, tmp_path, monkeypatch, mock_lm_studio):
         """Test embedding from database with no matching papers."""
         from abstracts_explorer.database import DatabaseManager
+        from abstracts_explorer.config import get_config
 
         # Create empty database using DatabaseManager
         db_path = tmp_path / "empty.db"
         database_url = f"sqlite:///{db_path.absolute()}"
-        with DatabaseManager(database_url=database_url) as db:
+
+        monkeypatch.setenv("PAPER_DB", database_url)
+        get_config(reload=True)
+
+        with DatabaseManager() as db:
             db.create_tables()
 
         embeddings_manager.connect()
@@ -330,14 +335,21 @@ class TestEmbeddingsManager:
 
         embeddings_manager.close()
 
-    def test_embed_from_database_all_empty_abstracts(self, embeddings_manager, tmp_path, mock_lm_studio):
+    def test_embed_from_database_all_empty_abstracts(self, embeddings_manager, tmp_path, monkeypatch, mock_lm_studio):
         """Test embedding from database where all papers have empty abstracts."""
         from abstracts_explorer.database import DatabaseManager
         from abstracts_explorer.plugin import LightweightPaper
 
         db_path = tmp_path / "test.db"
         database_url = f"sqlite:///{db_path.absolute()}"
-        with DatabaseManager(database_url=database_url) as db:
+
+        from abstracts_explorer.config import get_config
+
+        monkeypatch.setenv("PAPER_DB", database_url)
+
+        get_config(reload=True)
+
+        with DatabaseManager() as db:
             db.create_tables()
             # Add papers with titles but empty abstracts
             for i in range(3):
@@ -363,17 +375,22 @@ class TestEmbeddingsManager:
         assert count == 3
         embeddings_manager.close()
 
-    def test_embed_from_database_sql_error(self, embeddings_manager, tmp_path):
+    def test_embed_from_database_sql_error(self, embeddings_manager, tmp_path, monkeypatch):
         """Test embedding from database with SQL error."""
         from abstracts_explorer.database import DatabaseManager
+        from abstracts_explorer.config import get_config
         
         # Create database with only embeddings_metadata, but missing papers table
         db_path = tmp_path / "bad.db"
         database_url = f"sqlite:///{db_path.absolute()}"
         
+        # Set environment variable and reload config for database creation
+        monkeypatch.setenv("PAPER_DB", database_url)
+        get_config(reload=True)
+        
         # Use DatabaseManager to connect, but manually create only embeddings_metadata table
         # to simulate a corrupted/incomplete database
-        db = DatabaseManager(database_url=database_url)
+        db = DatabaseManager()
         db.connect()
         
         cursor = db.connection.cursor()
@@ -497,13 +514,20 @@ def test_check_model_compatibility_no_database(embeddings_manager, tmp_path):
     assert current == embeddings_manager.model_name
 
 
-def test_check_model_compatibility_no_model_stored(embeddings_manager, tmp_path):
+def test_check_model_compatibility_no_model_stored(embeddings_manager, tmp_path, monkeypatch):
     """Test checking model compatibility when no model is stored in database."""
     from abstracts_explorer.database import DatabaseManager
     
     db_path = tmp_path / "test.db"
     database_url = f"sqlite:///{db_path.absolute()}"
-    with DatabaseManager(database_url=database_url) as db:
+
+    from abstracts_explorer.config import get_config
+
+    monkeypatch.setenv("PAPER_DB", database_url)
+
+    get_config(reload=True)
+
+    with DatabaseManager() as db:
         db.create_tables()
     
     compatible, stored, current = embeddings_manager.check_model_compatibility(database_url)
@@ -513,13 +537,20 @@ def test_check_model_compatibility_no_model_stored(embeddings_manager, tmp_path)
     assert current == embeddings_manager.model_name
 
 
-def test_check_model_compatibility_matching_models(embeddings_manager, tmp_path):
+def test_check_model_compatibility_matching_models(embeddings_manager, tmp_path, monkeypatch):
     """Test checking model compatibility when models match."""
     from abstracts_explorer.database import DatabaseManager
     
     db_path = tmp_path / "test.db"
     database_url = f"sqlite:///{db_path.absolute()}"
-    with DatabaseManager(database_url=database_url) as db:
+
+    from abstracts_explorer.config import get_config
+
+    monkeypatch.setenv("PAPER_DB", database_url)
+
+    get_config(reload=True)
+
+    with DatabaseManager() as db:
         db.create_tables()
         db.set_embedding_model(embeddings_manager.model_name)
     
@@ -530,15 +561,19 @@ def test_check_model_compatibility_matching_models(embeddings_manager, tmp_path)
     assert current == embeddings_manager.model_name
 
 
-def test_check_model_compatibility_mismatched_models(embeddings_manager, tmp_path):
+def test_check_model_compatibility_mismatched_models(embeddings_manager, tmp_path, monkeypatch):
     """Test checking model compatibility when models differ."""
     from abstracts_explorer.database import DatabaseManager
+    from abstracts_explorer.config import get_config
     
     db_path = tmp_path / "test.db"
     database_url = f"sqlite:///{db_path.absolute()}"
     different_model = "different-embedding-model"
     
-    with DatabaseManager(database_url=database_url) as db:
+    monkeypatch.setenv("PAPER_DB", database_url)
+    get_config(reload=True)
+    
+    with DatabaseManager() as db:
         db.create_tables()
         db.set_embedding_model(different_model)
     
@@ -549,9 +584,10 @@ def test_check_model_compatibility_mismatched_models(embeddings_manager, tmp_pat
     assert current == embeddings_manager.model_name
 
 
-def test_embed_from_database_stores_model(embeddings_manager, test_database):
+def test_embed_from_database_stores_model(embeddings_manager, test_database, monkeypatch):
     """Test that embed_from_database stores the embedding model in the database."""
     from abstracts_explorer.database import DatabaseManager
+    from abstracts_explorer.config import get_config
     
     embeddings_manager.connect()
     embeddings_manager.create_collection()
@@ -562,7 +598,10 @@ def test_embed_from_database_stores_model(embeddings_manager, test_database):
     
     # Check that the model was stored
     database_url = f"sqlite:///{test_database.absolute()}"
-    with DatabaseManager(database_url=database_url) as db:
+    monkeypatch.setenv("PAPER_DB", database_url)
+    get_config(reload=True)
+    
+    with DatabaseManager() as db:
         stored_model = db.get_embedding_model()
         assert stored_model == embeddings_manager.model_name
     

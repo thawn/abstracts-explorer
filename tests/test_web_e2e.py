@@ -69,7 +69,13 @@ def test_database(tmp_path_factory):
     # Create database and add test data
     from abstracts_explorer.plugin import LightweightPaper
     database_url = f"sqlite:///{db_path.absolute()}"
-    db = DatabaseManager(database_url=database_url)
+
+    from abstracts_explorer.config import get_config
+
+    monkeypatch.setenv("PAPER_DB", database_url)
+
+    get_config(reload=True)
+    db = DatabaseManager()
 
     with db:
         db.create_tables()
@@ -158,10 +164,12 @@ def test_embeddings(test_database, tmp_path_factory):
         Tuple of (embeddings_manager, embeddings_path, collection_name, mock_client)
     """
     from abstracts_explorer.embeddings import EmbeddingsManager
+    from abstracts_explorer.config import get_config
     from unittest.mock import Mock
     import chromadb.api.shared_system_client
     import uuid
     import time
+    import os
 
     # Clear ChromaDB's global client registry to avoid conflicts
     chromadb.api.shared_system_client.SharedSystemClient._identifier_to_system.clear()
@@ -171,6 +179,10 @@ def test_embeddings(test_database, tmp_path_factory):
     tmp_dir = tmp_path_factory.mktemp("e2e_embeddings")
     embeddings_path = tmp_dir / f"chroma_{unique_id}"
     collection_name = f"test_collection_{unique_id}"
+
+    # Set environment variable and reload config
+    os.environ["EMBEDDING_DB"] = str(embeddings_path)
+    get_config(reload=True)
 
     # Create mock OpenAI client
     # This will be injected directly into the EmbeddingsManager instance
@@ -189,7 +201,7 @@ def test_embeddings(test_database, tmp_path_factory):
     mock_client.embeddings.create.return_value = mock_embedding_response
 
     # Initialize embeddings manager
-    em = EmbeddingsManager(chroma_path=embeddings_path, collection_name=collection_name)
+    em = EmbeddingsManager(collection_name=collection_name)
 
     # Inject the mock client directly to bypass lazy loading
     # This ensures we ALWAYS use the mock, never a real OpenAI connection
@@ -208,7 +220,11 @@ def test_embeddings(test_database, tmp_path_factory):
 
     # Add embeddings for all test papers from the database
     database_url = f"sqlite:///{test_database.absolute()}"
-    db = DatabaseManager(database_url=database_url)
+    # Set database config and reload
+    os.environ["PAPER_DB"] = database_url
+    get_config(reload=True)
+    
+    db = DatabaseManager()
     db.connect()
     papers = db.query("SELECT * FROM papers")
 

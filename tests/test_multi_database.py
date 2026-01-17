@@ -28,7 +28,7 @@ skip_without_postgres = pytest.mark.skipif(
 class TestMultiDatabaseBackend:
     """Test multi-database backend support."""
 
-    def test_sqlite_via_database_url(self, tmp_path):
+    def test_sqlite_via_database_url(self, tmp_path, monkeypatch):
         """Test using SQLite via DATABASE_URL parameter."""
         db_path = tmp_path / "test.db"
         database_url = f"sqlite:///{db_path}"
@@ -54,7 +54,7 @@ class TestMultiDatabaseBackend:
             count = db.get_paper_count()
             assert count == 1
 
-    def test_sqlite_legacy_path(self, tmp_path):
+    def test_sqlite_legacy_path(self, tmp_path, monkeypatch):
         """Test using SQLite via legacy db_path parameter."""
         db_path = tmp_path / "test.db"
         
@@ -84,7 +84,7 @@ class TestMultiDatabaseBackend:
         with pytest.raises(DatabaseError, match="Either db_path or database_url must be provided"):
             DatabaseManager()
 
-    def test_database_url_takes_precedence(self, tmp_path):
+    def test_database_url_takes_precedence(self, tmp_path, monkeypatch):
         """Test that database_url takes precedence over db_path."""
         db_path1 = tmp_path / "test1.db"
         db_path2 = tmp_path / "test2.db"
