@@ -70,11 +70,15 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     from .config import get_config
     config = get_config()
     
-    # Use database_url from config (supports both SQLite and PostgreSQL)
-    database_url = config.database_url
-    
-    # Legacy: if db_path is explicitly provided via CLI and differs from config, use it
-    if args.db_path and args.db_path != config.paper_db_path:
+    # Determine which database to use
+    # If DATABASE_URL env var is set, it takes precedence
+    # Otherwise, check if --db-path CLI arg was explicitly provided
+    import os
+    if os.environ.get("DATABASE_URL"):
+        # DATABASE_URL environment variable is set - use it (takes precedence)
+        database_url = config.database_url
+    elif args.db_path and args.db_path != config.paper_db_path:
+        # Legacy: --db-path was explicitly provided via CLI (and differs from config default)
         db_path = Path(args.db_path)
         # Validate file exists for SQLite paths
         if not db_path.exists():
@@ -83,6 +87,9 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
             print(f"  abstracts-explorer download --output {db_path}", file=sys.stderr)
             return 1
         database_url = f"sqlite:///{db_path.absolute()}"
+    else:
+        # Use database_url from config (could be from DATABASE_URL or PAPER_DB_PATH)
+        database_url = config.database_url
     
     output_path = Path(args.output)
 
