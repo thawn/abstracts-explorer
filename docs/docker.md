@@ -51,7 +51,7 @@ docker compose up -d
 ```bash
 # Podman
 podman-compose exec abstracts-explorer \
-  abstracts-explorer download --year 2025 --output /app/data/abstracts.db
+  abstracts-explorer download --year 2025 --plugin neurips
 
 # Docker: Replace 'podman-compose' with 'docker compose'
 ```
@@ -60,7 +60,7 @@ podman-compose exec abstracts-explorer \
 
 ```bash
 podman-compose exec abstracts-explorer \
-  abstracts-explorer create-embeddings --db-path /app/data/abstracts.db
+  abstracts-explorer create-embeddings
 ```
 
 ### 6. Access the Web UI
