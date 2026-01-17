@@ -25,8 +25,9 @@ class TestIntegration:
     def test_empty_database_queries(self, tmp_path):
         """Test querying an empty database."""
         db_file = tmp_path / "empty.db"
+        database_url = f"sqlite:///{db_file.absolute()}"
 
-        with DatabaseManager(db_file) as db:
+        with DatabaseManager(database_url=database_url) as db:
             db.create_tables()
 
             assert db.get_paper_count() == 0
@@ -423,7 +424,8 @@ class TestIntegration:
         lightweight_dicts = convert_to_lightweight_schema(raw_papers)
         papers = [LightweightPaper(**paper_dict) for paper_dict in lightweight_dicts]
 
-        with DatabaseManager(db_file) as db:
+        database_url = f"sqlite:///{db_file.absolute()}"
+        with DatabaseManager(database_url=database_url) as db:
             # Create tables
             db.create_tables()
 
@@ -533,8 +535,9 @@ class TestIntegration:
         lightweight_dicts = convert_to_lightweight_schema(raw_papers)
         papers = [LightweightPaper(**paper_dict) for paper_dict in lightweight_dicts]
 
+        database_url = f"sqlite:///{db_file.absolute()}"
         # Step 1: Load papers into database
-        with DatabaseManager(db_file) as db:
+        with DatabaseManager(database_url=database_url) as db:
             db.create_tables()
             count = db.add_papers(papers)
             assert count == 7
@@ -586,7 +589,8 @@ class TestIntegration:
 
             # Step 5: Test metadata filtering - filter by session
             # Get the first session name from our test data to use for filtering
-            with DatabaseManager(db_file) as db:
+            database_url = f"sqlite:///{db_file.absolute()}"
+            with DatabaseManager(database_url=database_url) as db:
                 results = db.query("SELECT DISTINCT session FROM papers LIMIT 1")
                 first_session = results[0]["session"]
 

@@ -56,28 +56,31 @@ class TestDatabaseManager:
     def test_init(self, tmp_path):
         """Test DatabaseManager initialization."""
         db_path = tmp_path / "test.db"
-        db = DatabaseManager(db_path)
+        database_url = f"sqlite:///{db_path.absolute()}"
+        db = DatabaseManager(database_url=database_url)
 
-        assert db.db_path == db_path
-        assert db.connection is None
+        # Verify engine and session are not yet created
+        assert db.engine is None
+        assert db._session is None
 
     def test_connect(self, db_manager):
         """Test database connection."""
         db_manager.connect()
 
-        assert db_manager.connection is not None
-        assert isinstance(db_manager.connection, sqlite3.Connection)
+        assert db_manager.engine is not None
+        assert db_manager._session is not None
 
         db_manager.close()
 
     def test_connect_creates_directories(self, tmp_path):
         """Test that connect creates parent directories."""
         db_path = tmp_path / "subdir" / "another" / "test.db"
-        db = DatabaseManager(db_path)
+        database_url = f"sqlite:///{db_path.absolute()}"
+        db = DatabaseManager(database_url=database_url)
         db.connect()
 
         assert db_path.parent.exists()
-        assert db.connection is not None
+        assert db.engine is not None
 
         db.close()
 
@@ -86,22 +89,23 @@ class TestDatabaseManager:
         db_manager.connect()
         db_manager.close()
 
-        assert db_manager.connection is None
+        assert db_manager._session is None
 
     def test_close_without_connection(self, db_manager):
         """Test closing without connection doesn't raise error."""
         db_manager.close()  # Should not raise
-        assert db_manager.connection is None
+        assert db_manager._session is None
 
     def test_context_manager(self, tmp_path):
         """Test DatabaseManager as context manager."""
         db_path = tmp_path / "test.db"
+        database_url = f"sqlite:///{db_path.absolute()}"
 
-        with DatabaseManager(db_path) as db:
-            assert db.connection is not None
+        with DatabaseManager(database_url=database_url) as db:
+            assert db._session is not None
 
         # Connection should be closed after exiting context
-        assert db.connection is None
+        assert db._session is None
 
     def test_create_tables(self, db_manager):
         """Test table creation."""
@@ -433,15 +437,16 @@ class TestEmbeddingModelMetadata:
     def test_embedding_model_persists_across_connections(self, tmp_path):
         """Test that embedding model persists across database connections."""
         db_path = tmp_path / "test.db"
+        database_url = f"sqlite:///{db_path.absolute()}"
         model_name = "persistent-model"
         
         # First connection: set the model
-        with DatabaseManager(db_path) as db1:
+        with DatabaseManager(database_url=database_url) as db1:
             db1.create_tables()
             db1.set_embedding_model(model_name)
         
         # Second connection: retrieve the model
-        with DatabaseManager(db_path) as db2:
+        with DatabaseManager(database_url=database_url) as db2:
             retrieved_model = db2.get_embedding_model()
             assert retrieved_model == model_name
 

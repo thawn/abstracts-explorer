@@ -182,7 +182,8 @@ class TestCLI:
         from abstracts_explorer import DatabaseManager
 
         db_path = tmp_path / "test.db"
-        with DatabaseManager(db_path) as db:
+        database_url = f"sqlite:///{db_path.absolute()}"
+        with DatabaseManager(database_url=database_url) as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -228,7 +229,8 @@ class TestCLI:
 
         # Create a test database
         db_path = tmp_path / "test.db"
-        with DatabaseManager(db_path) as db:
+        database_url = f"sqlite:///{db_path.absolute()}"
+        with DatabaseManager(database_url=database_url) as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -288,7 +290,8 @@ class TestCLI:
 
         # Create a test database
         db_path = tmp_path / "test.db"
-        with DatabaseManager(db_path) as db:
+        database_url = f"sqlite:///{db_path.absolute()}"
+        with DatabaseManager(database_url=database_url) as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -352,7 +355,8 @@ class TestCLI:
 
         # Create a test database
         db_path = tmp_path / "test.db"
-        with DatabaseManager(db_path) as db:
+        database_url = f"sqlite:///{db_path.absolute()}"
+        with DatabaseManager(database_url=database_url) as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -409,7 +413,8 @@ class TestCLI:
 
         # Create a test database
         db_path = tmp_path / "test.db"
-        with DatabaseManager(db_path) as db:
+        database_url = f"sqlite:///{db_path.absolute()}"
+        with DatabaseManager(database_url=database_url) as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -469,7 +474,8 @@ class TestCLI:
 
         # Create a test database
         db_path = tmp_path / "test.db"
-        with DatabaseManager(db_path) as db:
+        database_url = f"sqlite:///{db_path.absolute()}"
+        with DatabaseManager(database_url=database_url) as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -734,7 +740,8 @@ class TestCLI:
 
         # Create a test database with lightweight schema
         db_path = tmp_path / "test.db"
-        with DatabaseManager(db_path) as db:
+        database_url = f"sqlite:///{db_path.absolute()}"
+        with DatabaseManager(database_url=database_url) as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -851,7 +858,8 @@ class TestCLI:
 
         # Create an empty database using DatabaseManager
         db_path = tmp_path / "test.db"
-        db = DatabaseManager(str(db_path))
+        database_url = f"sqlite:///{db_path.absolute()}"
+        db = DatabaseManager(database_url=database_url)
         db.connect()
         db.close()
 
@@ -1202,12 +1210,13 @@ class TestCLIEmbeddingsProgressAndStats:
         from abstracts_explorer.cli import main
 
         db_path = tmp_path / "test.db"
+        database_url = f"sqlite:///{db_path.absolute()}"
 
         # Create test database
         from abstracts_explorer.database import DatabaseManager
         from abstracts_explorer.plugin import LightweightPaper
 
-        db = DatabaseManager(str(db_path))
+        db = DatabaseManager(database_url=database_url)
         with db:
             db.create_tables()
             for i in range(3):

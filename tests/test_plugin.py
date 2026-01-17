@@ -862,7 +862,8 @@ class TestDatabaseYearConferenceIntegration:
         # Create temporary database and load data (data is now List[LightweightPaper])
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "test.db"
-            with DatabaseManager(db_path) as db:
+            database_url = f"sqlite:///{db_path.absolute()}"
+            with DatabaseManager(database_url=database_url) as db:
                 db.create_tables()
                 db.add_papers(data)
 
@@ -923,7 +924,8 @@ class TestDatabaseYearConferenceIntegration:
         # Create temporary database and load data
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "test.db"
-            with DatabaseManager(db_path) as db:
+            database_url = f"sqlite:///{db_path.absolute()}"
+            with DatabaseManager(database_url=database_url) as db:
                 db.create_tables()
                 db.add_papers(papers_to_insert)
 

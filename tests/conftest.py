@@ -82,7 +82,8 @@ def db_manager(tmp_path):
         Database manager instance with temporary database
     """
     db_path = tmp_path / "test.db"
-    return DatabaseManager(db_path)
+    database_url = f"sqlite:///{db_path.absolute()}"
+    return DatabaseManager(database_url=database_url)
 
 
 @pytest.fixture
@@ -188,9 +189,10 @@ def test_database(tmp_path):
     from abstracts_explorer.plugin import LightweightPaper
     
     db_path = tmp_path / "test.db"
+    database_url = f"sqlite:///{db_path.absolute()}"
     
     # Use DatabaseManager to create the database with proper schema
-    with DatabaseManager(db_path) as db:
+    with DatabaseManager(database_url=database_url) as db:
         db.create_tables()
         
         # Create sample papers using LightweightPaper model

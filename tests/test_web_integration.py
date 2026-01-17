@@ -56,7 +56,8 @@ def test_database(tmp_path_factory, web_test_papers):
     db_path = tmp_dir / "test_web_integration.db"
 
     # Create database and add test data using LightweightPaper
-    db = DatabaseManager(str(db_path))
+    database_url = f"sqlite:///{db_path.absolute()}"
+    db = DatabaseManager(database_url=database_url)
 
     with db:
         db.create_tables()
@@ -154,7 +155,8 @@ def web_server(test_database, tmp_path_factory):
 
         # Add embeddings for test papers
         from abstracts_explorer.database import DatabaseManager
-        db = DatabaseManager(str(test_database))
+        database_url = f"sqlite:///{test_database.absolute()}"
+        db = DatabaseManager(database_url=database_url)
         db.connect()
         papers = db.query("SELECT * FROM papers")
 

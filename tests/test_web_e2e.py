@@ -68,7 +68,8 @@ def test_database(tmp_path_factory):
 
     # Create database and add test data
     from abstracts_explorer.plugin import LightweightPaper
-    db = DatabaseManager(str(db_path))
+    database_url = f"sqlite:///{db_path.absolute()}"
+    db = DatabaseManager(database_url=database_url)
 
     with db:
         db.create_tables()
@@ -206,7 +207,8 @@ def test_embeddings(test_database, tmp_path_factory):
     em.create_collection(reset=False)
 
     # Add embeddings for all test papers from the database
-    db = DatabaseManager(str(test_database))
+    database_url = f"sqlite:///{test_database.absolute()}"
+    db = DatabaseManager(database_url=database_url)
     db.connect()
     papers = db.query("SELECT * FROM papers")
 
@@ -292,9 +294,10 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
         from flask import g
 
         if "db" not in g:
-            db_path = str(test_database)
+            db_path = test_database
+            database_url = f"sqlite:///{db_path.absolute()}"
             # Don't check file existence in tests - the database was created in a temp dir
-            g.db = DatabaseManager(db_path)
+            g.db = DatabaseManager(database_url=database_url)
             g.db.connect()
             g.db.create_tables()  # Ensure all tables exist (including clustering_cache)
         return g.db

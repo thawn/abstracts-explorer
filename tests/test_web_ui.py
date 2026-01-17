@@ -85,7 +85,8 @@ def test_db(tmp_path, web_test_papers):
     consistency across web-related tests.
     """
     db_path = tmp_path / "test.db"
-    db = DatabaseManager(str(db_path))
+    database_url = f"sqlite:///{db_path.absolute()}"
+    db = DatabaseManager(database_url=database_url)
 
     with db:
         db.create_tables()
@@ -755,7 +756,8 @@ class TestWebUIDatabaseModes:
 
         # Create a real SQLite database
         db_path = tmp_path / "test.db"
-        db = DatabaseManager(str(db_path))
+        database_url = f"sqlite:///{db_path.absolute()}"
+        db = DatabaseManager(database_url=database_url)
         with db:
             db.create_tables()
 
@@ -786,7 +788,8 @@ class TestWebUIDatabaseModes:
 
         # Create a real SQLite database
         db_path = tmp_path / "test.db"
-        db = DatabaseManager(str(db_path))
+        database_url = f"sqlite:///{db_path.absolute()}"
+        db = DatabaseManager(database_url=database_url)
         with db:
             db.create_tables()
 
@@ -818,7 +821,8 @@ class TestWebUIDatabaseModes:
 
         # Create a real SQLite database with test data
         db_path = tmp_path / "test.db"
-        db = DatabaseManager(str(db_path))
+        database_url = f"sqlite:///{db_path.absolute()}"
+        db = DatabaseManager(database_url=database_url)
         with db:
             db.create_tables()
             # Add test papers
@@ -1078,7 +1082,8 @@ class TestServerInitialization:
         
         # Create a test database
         db_path = tmp_path / "test.db"
-        db = DatabaseManager(str(db_path))
+        database_url = f"sqlite:///{db_path.absolute()}"
+        db = DatabaseManager(database_url=database_url)
         with db:
             db.create_tables()
         
@@ -1109,7 +1114,8 @@ class TestServerInitialization:
         
         # Create a test database
         db_path = tmp_path / "test.db"
-        db = DatabaseManager(str(db_path))
+        database_url = f"sqlite:///{db_path.absolute()}"
+        db = DatabaseManager(database_url=database_url)
         with db:
             db.create_tables()
         
@@ -1137,7 +1143,8 @@ class TestServerInitialization:
         
         # Create a test database
         db_path = tmp_path / "test.db"
-        db = DatabaseManager(str(db_path))
+        database_url = f"sqlite:///{db_path.absolute()}"
+        db = DatabaseManager(database_url=database_url)
         with db:
             db.create_tables()
         
@@ -1170,7 +1177,8 @@ class TestServerInitialization:
         
         # Create a test database
         db_path = tmp_path / "test.db"
-        db = DatabaseManager(str(db_path))
+        database_url = f"sqlite:///{db_path.absolute()}"
+        db = DatabaseManager(database_url=database_url)
         with db:
             db.create_tables()
         
@@ -1258,7 +1266,8 @@ class TestClusteringEndpoints:
         
         # Create a database with only old tables (simulate migration scenario)
         db_path = tmp_path / "test.db"
-        db = DatabaseManager(str(db_path))
+        database_url = f"sqlite:///{db_path.absolute()}"
+        db = DatabaseManager(database_url=database_url)
         with db:
             db.create_tables()
             # Add a test paper

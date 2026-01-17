@@ -243,7 +243,8 @@ class TestEmbeddingsManager:
         embeddings_manager.connect()
         embeddings_manager.create_collection()
 
-        count = embeddings_manager.embed_from_database(test_database)
+        database_url = f"sqlite:///{test_database.absolute()}"
+        count = embeddings_manager.embed_from_database(database_url)
 
         # Should embed all 3 papers (title is included even if abstract is empty)
         assert count == 3
@@ -257,7 +258,8 @@ class TestEmbeddingsManager:
         embeddings_manager.connect()
         embeddings_manager.create_collection()
 
-        count = embeddings_manager.embed_from_database(test_database, where_clause="session LIKE '%ML%'")
+        database_url = f"sqlite:///{test_database.absolute()}"
+        count = embeddings_manager.embed_from_database(database_url, where_clause="session LIKE '%ML%'")
 
         # Should only embed papers in ML sessions with non-empty abstracts (paper1)
         assert count == 1
@@ -271,15 +273,18 @@ class TestEmbeddingsManager:
         embeddings_manager.connect()
         embeddings_manager.create_collection()
 
+        nonexistent_db = tmp_path / "nonexistent.db"
+        database_url = f"sqlite:///{nonexistent_db.absolute()}"
         with pytest.raises(EmbeddingsError, match="Database not found"):
-            embeddings_manager.embed_from_database(tmp_path / "nonexistent.db")
+            embeddings_manager.embed_from_database(database_url)
 
         embeddings_manager.close()
 
     def test_embed_from_database_collection_not_initialized(self, embeddings_manager, test_database):
         """Test embedding from database without collection."""
+        database_url = f"sqlite:///{test_database.absolute()}"
         with pytest.raises(EmbeddingsError, match="Collection not initialized"):
-            embeddings_manager.embed_from_database(test_database)
+            embeddings_manager.embed_from_database(database_url)
 
     def test_embed_from_database_with_progress_callback(self, embeddings_manager, test_database, mock_lm_studio):
         """Test embedding papers from database with progress callback."""
@@ -291,7 +296,8 @@ class TestEmbeddingsManager:
         def progress_callback(current: int, total: int) -> None:
             progress_calls.append((current, total))
 
-        count = embeddings_manager.embed_from_database(test_database, progress_callback=progress_callback)
+        database_url = f"sqlite:///{test_database.absolute()}"
+        count = embeddings_manager.embed_from_database(database_url, progress_callback=progress_callback)
 
         # Should embed all 3 papers (title is included even if abstract is empty)
         assert count == 3
@@ -308,13 +314,15 @@ class TestEmbeddingsManager:
 
         # Create empty database using DatabaseManager
         db_path = tmp_path / "empty.db"
-        with DatabaseManager(db_path) as db:
+        database_url = f"sqlite:///{db_path.absolute()}"
+        with DatabaseManager(database_url=database_url) as db:
             db.create_tables()
 
         embeddings_manager.connect()
         embeddings_manager.create_collection()
 
-        count = embeddings_manager.embed_from_database(db_path)
+        # Use database_url instead of db_path
+        count = embeddings_manager.embed_from_database(database_url)
 
         assert count == 0
         stats = embeddings_manager.get_collection_stats()
@@ -328,7 +336,8 @@ class TestEmbeddingsManager:
         from abstracts_explorer.plugin import LightweightPaper
 
         db_path = tmp_path / "test.db"
-        with DatabaseManager(db_path) as db:
+        database_url = f"sqlite:///{db_path.absolute()}"
+        with DatabaseManager(database_url=database_url) as db:
             db.create_tables()
             # Add papers with titles but empty abstracts
             for i in range(3):
@@ -347,7 +356,8 @@ class TestEmbeddingsManager:
         embeddings_manager.connect()
         embeddings_manager.create_collection()
 
-        count = embeddings_manager.embed_from_database(db_path)
+        # Use database_url instead of db_path
+        count = embeddings_manager.embed_from_database(database_url)
 
         # Should embed all papers (title is used even if abstract is empty)
         assert count == 3
@@ -359,10 +369,11 @@ class TestEmbeddingsManager:
         
         # Create database with only embeddings_metadata, but missing papers table
         db_path = tmp_path / "bad.db"
+        database_url = f"sqlite:///{db_path.absolute()}"
         
         # Use DatabaseManager to connect, but manually create only embeddings_metadata table
         # to simulate a corrupted/incomplete database
-        db = DatabaseManager(str(db_path))
+        db = DatabaseManager(database_url=database_url)
         db.connect()
         
         cursor = db.connection.cursor()
@@ -385,8 +396,9 @@ class TestEmbeddingsManager:
         embeddings_manager.create_collection()
 
         # Should raise EmbeddingsError due to missing papers table
+        database_url = f"sqlite:///{db_path.absolute()}"
         with pytest.raises(EmbeddingsError, match="Failed to embed from database"):
-            embeddings_manager.embed_from_database(db_path)
+            embeddings_manager.embed_from_database(database_url)
 
         embeddings_manager.close()
 
@@ -395,7 +407,8 @@ class TestEmbeddingsManager:
         embeddings_manager.connect()
         embeddings_manager.create_collection()
 
-        count = embeddings_manager.embed_from_database(test_database)
+        database_url = f"sqlite:///{test_database.absolute()}"
+        count = embeddings_manager.embed_from_database(database_url)
         assert count == 3
 
         # Search to verify metadata includes lightweight schema fields
@@ -453,15 +466,16 @@ class TestEmbeddingsManager:
         embeddings_manager.connect()
         embeddings_manager.create_collection()
 
+        database_url = f"sqlite:///{test_database.absolute()}"
         # First run - should embed all 3 papers
-        count = embeddings_manager.embed_from_database(test_database)
+        count = embeddings_manager.embed_from_database(database_url)
         assert count == 3
 
         stats = embeddings_manager.get_collection_stats()
         assert stats["count"] == 3
 
         # Second run - should skip all existing papers and embed 0 new ones
-        count = embeddings_manager.embed_from_database(test_database)
+        count = embeddings_manager.embed_from_database(database_url)
         assert count == 0
 
         # Collection count should still be 3
@@ -474,8 +488,9 @@ class TestEmbeddingsManager:
 def test_check_model_compatibility_no_database(embeddings_manager, tmp_path):
     """Test checking model compatibility when database does not exist."""
     non_existent_db = tmp_path / "nonexistent.db"
+    database_url = f"sqlite:///{non_existent_db.absolute()}"
     
-    compatible, stored, current = embeddings_manager.check_model_compatibility(non_existent_db)
+    compatible, stored, current = embeddings_manager.check_model_compatibility(database_url)
     
     assert compatible is True
     assert stored is None
@@ -487,10 +502,11 @@ def test_check_model_compatibility_no_model_stored(embeddings_manager, tmp_path)
     from abstracts_explorer.database import DatabaseManager
     
     db_path = tmp_path / "test.db"
-    with DatabaseManager(db_path) as db:
+    database_url = f"sqlite:///{db_path.absolute()}"
+    with DatabaseManager(database_url=database_url) as db:
         db.create_tables()
     
-    compatible, stored, current = embeddings_manager.check_model_compatibility(db_path)
+    compatible, stored, current = embeddings_manager.check_model_compatibility(database_url)
     
     assert compatible is True
     assert stored is None
@@ -502,11 +518,12 @@ def test_check_model_compatibility_matching_models(embeddings_manager, tmp_path)
     from abstracts_explorer.database import DatabaseManager
     
     db_path = tmp_path / "test.db"
-    with DatabaseManager(db_path) as db:
+    database_url = f"sqlite:///{db_path.absolute()}"
+    with DatabaseManager(database_url=database_url) as db:
         db.create_tables()
         db.set_embedding_model(embeddings_manager.model_name)
     
-    compatible, stored, current = embeddings_manager.check_model_compatibility(db_path)
+    compatible, stored, current = embeddings_manager.check_model_compatibility(database_url)
     
     assert compatible is True
     assert stored == embeddings_manager.model_name
@@ -518,13 +535,14 @@ def test_check_model_compatibility_mismatched_models(embeddings_manager, tmp_pat
     from abstracts_explorer.database import DatabaseManager
     
     db_path = tmp_path / "test.db"
+    database_url = f"sqlite:///{db_path.absolute()}"
     different_model = "different-embedding-model"
     
-    with DatabaseManager(db_path) as db:
+    with DatabaseManager(database_url=database_url) as db:
         db.create_tables()
         db.set_embedding_model(different_model)
     
-    compatible, stored, current = embeddings_manager.check_model_compatibility(db_path)
+    compatible, stored, current = embeddings_manager.check_model_compatibility(database_url)
     
     assert compatible is False
     assert stored == different_model
@@ -538,11 +556,13 @@ def test_embed_from_database_stores_model(embeddings_manager, test_database):
     embeddings_manager.connect()
     embeddings_manager.create_collection()
     
+    database_url = f"sqlite:///{test_database.absolute()}"
     # Embed papers
-    embeddings_manager.embed_from_database(test_database)
+    embeddings_manager.embed_from_database(database_url)
     
     # Check that the model was stored
-    with DatabaseManager(test_database) as db:
+    database_url = f"sqlite:///{test_database.absolute()}"
+    with DatabaseManager(database_url=database_url) as db:
         stored_model = db.get_embedding_model()
         assert stored_model == embeddings_manager.model_name
     

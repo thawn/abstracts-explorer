@@ -308,7 +308,8 @@ class TestICLRPluginDatabaseIntegration:
             data = plugin.download(year=2025)
 
             # Create database and load data
-            with DatabaseManager(str(db_path)) as db:
+            database_url = f"sqlite:///{db_path.absolute()}"
+            with DatabaseManager(database_url=database_url) as db:
                 db.create_tables()
                 db.add_papers(data)
 

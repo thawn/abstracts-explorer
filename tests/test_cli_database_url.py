@@ -20,7 +20,8 @@ class TestCLIDatabaseURLConfiguration:
 
         # Create test database
         db_path = tmp_path / "test.db"
-        db = DatabaseManager(str(db_path))
+        database_url = f"sqlite:///{db_path.absolute()}"
+        db = DatabaseManager(database_url=database_url)
         with db:
             db.create_tables()
             paper = LightweightPaper(
@@ -80,7 +81,8 @@ class TestCLIDatabaseURLConfiguration:
         db_path2 = tmp_path / "test2.db"
         
         for db_path in [db_path1, db_path2]:
-            db = DatabaseManager(str(db_path))
+            database_url = f"sqlite:///{db_path.absolute()}"
+            db = DatabaseManager(database_url=database_url)
             with db:
                 db.create_tables()
                 paper = LightweightPaper(

@@ -59,7 +59,8 @@ def create_test_db_with_paper(db_path, paper_data):
     """
     from abstracts_explorer.plugin import LightweightPaper
     
-    db = DatabaseManager(str(db_path))
+    database_url = f"sqlite:///{db_path.absolute()}"
+    db = DatabaseManager(database_url=database_url)
     db.connect()
     db.create_tables()
     
