@@ -430,7 +430,7 @@ def chat_command(args: argparse.Namespace) -> int:
         from abstracts_explorer.config import get_config
 
         config_obj = get_config()
-        db = DatabaseManager(config_obj.paper_db_path)
+        db = DatabaseManager(database_url=config_obj.database_url)
         db.connect()
 
         # Initialize RAG chat
