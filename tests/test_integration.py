@@ -28,7 +28,7 @@ class TestIntegration:
         """Test querying an empty database."""
         db_file = tmp_path / "empty.db"
 
-        set_test_db(monkeypatch, db_file)
+        set_test_db(db_file)
         with DatabaseManager() as db:
             db.create_tables()
 
@@ -426,7 +426,7 @@ class TestIntegration:
         lightweight_dicts = convert_to_lightweight_schema(raw_papers)
         papers = [LightweightPaper(**paper_dict) for paper_dict in lightweight_dicts]
 
-        set_test_db(monkeypatch, db_file)
+        set_test_db(db_file)
         with DatabaseManager() as db:
             # Create tables
             db.create_tables()
@@ -538,7 +538,7 @@ class TestIntegration:
         papers = [LightweightPaper(**paper_dict) for paper_dict in lightweight_dicts]
 
         # Step 1: Load papers into database
-        set_test_db(monkeypatch, db_file)
+        set_test_db(db_file)
         with DatabaseManager() as db:
             db.create_tables()
             count = db.add_papers(papers)

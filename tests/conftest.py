@@ -16,26 +16,31 @@ from abstracts_explorer.plugin import LightweightPaper
 from abstracts_explorer.config import load_env_file, get_config
 
 
-def set_test_db(monkeypatch, db_path):
+def set_test_db(db_path):
     """
     Helper function to set PAPER_DB environment variable and reload config.
     
     This reduces code duplication across test files where the pattern
-    monkeypatch.setenv("PAPER_DB", str(db_path)) followed by get_config(reload=True)
+    os.environ["PAPER_DB"] = str(db_path) followed by get_config(reload=True)
     is repeated many times.
     
     Parameters
     ----------
-    monkeypatch : pytest.MonkeyPatch
-        Pytest's monkeypatch fixture
     db_path : str or Path
         Path to the database file
     
     Examples
     --------
-    >>> set_test_db(monkeypatch, tmp_path / "test.db")
+    >>> set_test_db(tmp_path / "test.db")
+    
+    Notes
+    -----
+    This function uses os.environ directly instead of monkeypatch.setenv
+    so it can be used in contexts where monkeypatch is not available
+    (e.g., in helper functions).
     """
-    monkeypatch.setenv("PAPER_DB", str(db_path))
+    import os
+    os.environ["PAPER_DB"] = str(db_path)
     get_config(reload=True)
 
 
@@ -112,7 +117,7 @@ def db_manager(tmp_path, monkeypatch):
     and reloads config to pick up the change.
     """
     db_path = tmp_path / "test.db"
-    set_test_db(monkeypatch, db_path)
+    set_test_db(db_path)
     
     return DatabaseManager()
 
@@ -225,7 +230,7 @@ def test_database(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     
     # Set PAPER_DB to point to our test database
-    set_test_db(monkeypatch, db_path)
+    set_test_db(db_path)
     
     # Use DatabaseManager to create the database with proper schema
     with DatabaseManager() as db:

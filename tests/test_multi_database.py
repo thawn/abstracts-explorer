@@ -33,7 +33,7 @@ class TestMultiDatabaseBackend:
     def test_sqlite_via_paper_db_path(self, tmp_path, monkeypatch):
         """Test using SQLite via PAPER_DB environment variable (path)."""
         db_path = tmp_path / "test.db"
-        set_test_db(monkeypatch, db_path)
+        set_test_db(db_path)
         
         db = DatabaseManager()
         with db:
@@ -60,8 +60,7 @@ class TestMultiDatabaseBackend:
         """Test using SQLite via PAPER_DB environment variable (URL)."""
         db_path = tmp_path / "test.db"
         database_url = f"sqlite:///{db_path}"
-        monkeypatch.setenv("PAPER_DB", database_url)
-        get_config(reload=True)
+        set_test_db(database_url)
         
         db = DatabaseManager()
         with db:
@@ -88,8 +87,7 @@ class TestMultiDatabaseBackend:
     def test_postgresql_basic_operations(self, monkeypatch):
         """Test basic operations with PostgreSQL backend."""
         # This test requires PostgreSQL to be available
-        monkeypatch.setenv("PAPER_DB", POSTGRES_TEST_URL)
-        get_config(reload=True)
+        set_test_db(POSTGRES_TEST_URL)
         db = DatabaseManager()
         
         with db:
@@ -129,8 +127,7 @@ class TestMultiDatabaseBackend:
     @skip_without_postgres
     def test_postgresql_multiple_papers(self, monkeypatch):
         """Test adding multiple papers with PostgreSQL."""
-        monkeypatch.setenv("PAPER_DB", POSTGRES_TEST_URL)
-        get_config(reload=True)
+        set_test_db(POSTGRES_TEST_URL)
         db = DatabaseManager()
         
         with db:
@@ -158,8 +155,7 @@ class TestMultiDatabaseBackend:
     @skip_without_postgres
     def test_postgresql_embedding_model_metadata(self, monkeypatch):
         """Test embedding model metadata with PostgreSQL."""
-        monkeypatch.setenv("PAPER_DB", POSTGRES_TEST_URL)
-        get_config(reload=True)
+        set_test_db(POSTGRES_TEST_URL)
         db = DatabaseManager()
         
         with db:
@@ -183,8 +179,7 @@ class TestMultiDatabaseBackend:
     @skip_without_postgres
     def test_postgresql_idempotent_create_tables(self, monkeypatch):
         """Test that create_tables can be called multiple times without error."""
-        monkeypatch.setenv("PAPER_DB", POSTGRES_TEST_URL)
-        get_config(reload=True)
+        set_test_db(POSTGRES_TEST_URL)
         db = DatabaseManager()
         
         with db:
@@ -214,8 +209,7 @@ def test_database_url_in_config(tmp_path, monkeypatch):
     database_url = f"sqlite:///{db_path}"
     
     # Set environment variable using PAPER_DB (new system)
-    monkeypatch.setenv("PAPER_DB", database_url)
-    
+    set_test_db(database_url)
     # Reload config to pick up environment variable
     config = get_config(reload=True)
     assert config.database_url == database_url

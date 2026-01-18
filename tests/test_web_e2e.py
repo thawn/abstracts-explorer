@@ -68,8 +68,7 @@ def test_database(tmp_path_factory):
 
     # Create database and add test data
     from abstracts_explorer.plugin import LightweightPaper
-    os.environ["PAPER_DB"] = str(db_path)
-    get_config(reload=True)
+    set_test_db(db_path)
     db = DatabaseManager()
 
     with db:
@@ -208,8 +207,7 @@ def test_embeddings(test_database, tmp_path_factory):
     em.create_collection(reset=False)
 
     # Add embeddings for all test papers from the database
-    os.environ["PAPER_DB"] = str(test_database)
-    get_config(reload=True)
+    set_test_db(str(test_database))
     db = DatabaseManager()
     db.connect()
     papers = db.query("SELECT * FROM papers")
@@ -298,8 +296,7 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
         if "db" not in g:
             db_path = str(test_database)
             # Don't check file existence in tests - the database was created in a temp dir
-            os.environ["PAPER_DB"] = db_path
-            get_config(reload=True)
+            set_test_db(db_path)
             g.db = DatabaseManager()
             g.db.connect()
             g.db.create_tables()  # Ensure all tables exist (including clustering_cache)

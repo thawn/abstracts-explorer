@@ -58,7 +58,7 @@ class TestDatabaseManager:
     def test_init(self, tmp_path, monkeypatch):
         """Test DatabaseManager initialization."""
         db_path = tmp_path / "test.db"
-        set_test_db(monkeypatch, db_path)
+        set_test_db(db_path)
         
         db = DatabaseManager()
 
@@ -77,7 +77,7 @@ class TestDatabaseManager:
     def test_connect_creates_directories(self, tmp_path, monkeypatch):
         """Test that connect creates parent directories."""
         db_path = tmp_path / "subdir" / "another" / "test.db"
-        set_test_db(monkeypatch, db_path)
+        set_test_db(db_path)
         
         db = DatabaseManager()
         db.connect()
@@ -102,7 +102,7 @@ class TestDatabaseManager:
     def test_context_manager(self, tmp_path, monkeypatch):
         """Test DatabaseManager as context manager."""
         db_path = tmp_path / "test.db"
-        set_test_db(monkeypatch, db_path)
+        set_test_db(db_path)
 
         with DatabaseManager() as db:
             assert db.connection is not None
@@ -443,7 +443,7 @@ class TestEmbeddingModelMetadata:
         model_name = "persistent-model"
         
         # Set PAPER_DB and reload config
-        set_test_db(monkeypatch, db_path)
+        set_test_db(db_path)
         
         # First connection: set the model
         with DatabaseManager() as db1:

@@ -88,8 +88,7 @@ def test_db(tmp_path, web_test_papers):
     consistency across web-related tests.
     """
     db_path = tmp_path / "test.db"
-    os.environ["PAPER_DB"] = str(db_path)
-    get_config(reload=True)
+    set_test_db(str(db_path))
     db = DatabaseManager()
 
     with db:
@@ -701,7 +700,7 @@ class TestWebUIDatabaseNotFound:
 
         # Create a valid SQLite database
         db_path = tmp_path / "test.db"
-        set_test_db(monkeypatch, db_path)
+        set_test_db(db_path)
 
         with app.test_client() as client:
             # Database will be created automatically, so /api/stats should work
@@ -741,7 +740,7 @@ class TestWebUIDatabaseModes:
 
         # Create a real SQLite database
         db_path = tmp_path / "test.db"
-        set_test_db(monkeypatch, db_path)
+        set_test_db(db_path)
         db = DatabaseManager()
         with db:
             db.create_tables()
@@ -773,7 +772,7 @@ class TestWebUIDatabaseModes:
 
         # Create a real SQLite database
         db_path = tmp_path / "test.db"
-        set_test_db(monkeypatch, db_path)
+        set_test_db(db_path)
         db = DatabaseManager()
         with db:
             db.create_tables()
@@ -806,7 +805,7 @@ class TestWebUIDatabaseModes:
 
         # Create a real SQLite database with test data
         db_path = tmp_path / "test.db"
-        set_test_db(monkeypatch, db_path)
+        set_test_db(db_path)
         db = DatabaseManager()
         with db:
             db.create_tables()
@@ -993,7 +992,7 @@ class TestWebUIRunServer:
         
         # Set non-existent database path
         nonexistent_path = "/nonexistent/test.db"
-        set_test_db(monkeypatch, nonexistent_path)
+        set_test_db(nonexistent_path)
 
         with patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=False):
             with pytest.raises(FileNotFoundError) as exc_info:
@@ -1067,7 +1066,7 @@ class TestServerInitialization:
         
         # Create a test database
         db_path = tmp_path / "test.db"
-        set_test_db(monkeypatch, db_path)
+        set_test_db(db_path)
         db = DatabaseManager()
         with db:
             db.create_tables()
@@ -1092,7 +1091,7 @@ class TestServerInitialization:
         
         # Create a test database
         db_path = tmp_path / "test.db"
-        set_test_db(monkeypatch, db_path)
+        set_test_db(db_path)
         db = DatabaseManager()
         with db:
             db.create_tables()
@@ -1121,7 +1120,7 @@ class TestServerInitialization:
         
         # Create a test database
         db_path = tmp_path / "test.db"
-        set_test_db(monkeypatch, db_path)
+        set_test_db(db_path)
         db = DatabaseManager()
         with db:
             db.create_tables()
@@ -1155,7 +1154,7 @@ class TestServerInitialization:
         
         # Create a test database
         db_path = tmp_path / "test.db"
-        set_test_db(monkeypatch, db_path)
+        set_test_db(db_path)
         db = DatabaseManager()
         with db:
             db.create_tables()
@@ -1193,7 +1192,7 @@ class TestServerInitialization:
         
         # Use a non-existent database path
         db_path = tmp_path / "nonexistent.db"
-        set_test_db(monkeypatch, db_path)
+        set_test_db(db_path)
         
         # Should raise FileNotFoundError
         with pytest.raises(FileNotFoundError, match="Database not found"):
@@ -1238,7 +1237,7 @@ class TestClusteringEndpoints:
         
         # Create a database with only old tables (simulate migration scenario)
         db_path = tmp_path / "test.db"
-        set_test_db(monkeypatch, db_path)
+        set_test_db(db_path)
         db = DatabaseManager()
         with db:
             db.create_tables()

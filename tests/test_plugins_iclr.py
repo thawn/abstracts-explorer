@@ -308,10 +308,7 @@ class TestICLRPluginDatabaseIntegration:
             data = plugin.download(year=2025)
 
             # Create database and load data
-            monkeypatch.setenv("PAPER_DB", str(db_path))
-            from abstracts_explorer.config import get_config
-from tests.conftest import set_test_db
-            get_config(reload=True)
+            set_test_db(db_path)
             with DatabaseManager() as db:
                 db.create_tables()
                 db.add_papers(data)

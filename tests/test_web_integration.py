@@ -59,8 +59,7 @@ def test_database(tmp_path_factory, web_test_papers):
     db_path = tmp_dir / "test_web_integration.db"
 
     # Create database and add test data using LightweightPaper
-    os.environ["PAPER_DB"] = str(db_path)
-    get_config(reload=True)
+    set_test_db(str(db_path))
     db = DatabaseManager()
 
     with db:
@@ -159,8 +158,7 @@ def web_server(test_database, tmp_path_factory):
 
         # Add embeddings for test papers
         from abstracts_explorer.database import DatabaseManager
-        os.environ["PAPER_DB"] = str(test_database)
-        get_config(reload=True)
+        set_test_db(str(test_database))
         db = DatabaseManager()
         db.connect()
         papers = db.query("SELECT * FROM papers")

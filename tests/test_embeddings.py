@@ -274,7 +274,7 @@ class TestEmbeddingsManager:
         
         # Set PAPER_DB to a nonexistent database
         nonexistent_db = tmp_path / "nonexistent.db"
-        set_test_db(monkeypatch, nonexistent_db)
+        set_test_db(nonexistent_db)
         
         embeddings_manager.connect()
         embeddings_manager.create_collection()
@@ -318,7 +318,7 @@ class TestEmbeddingsManager:
 
         # Create empty database using DatabaseManager
         db_path = tmp_path / "empty.db"
-        set_test_db(monkeypatch, db_path)
+        set_test_db(db_path)
         with DatabaseManager() as db:
             db.create_tables()
 
@@ -339,7 +339,7 @@ class TestEmbeddingsManager:
         from abstracts_explorer.plugin import LightweightPaper
 
         db_path = tmp_path / "test.db"
-        set_test_db(monkeypatch, db_path)
+        set_test_db(db_path)
         with DatabaseManager() as db:
             db.create_tables()
             # Add papers with titles but empty abstracts
@@ -374,7 +374,7 @@ class TestEmbeddingsManager:
         
         # Use DatabaseManager to connect, but manually create only embeddings_metadata table
         # to simulate a corrupted/incomplete database
-        set_test_db(monkeypatch, db_path)
+        set_test_db(db_path)
         db = DatabaseManager()
         db.connect()
         
@@ -489,7 +489,7 @@ def test_check_model_compatibility_no_database(embeddings_manager, tmp_path, mon
     from abstracts_explorer.config import get_config
     
     non_existent_db = tmp_path / "nonexistent.db"
-    set_test_db(monkeypatch, non_existent_db)
+    set_test_db(non_existent_db)
     
     # Since the database doesn't exist, this will raise an error when trying to connect
     # The behavior has changed - we no longer check if db exists before connecting
@@ -503,7 +503,7 @@ def test_check_model_compatibility_no_model_stored(embeddings_manager, tmp_path,
     from abstracts_explorer.database import DatabaseManager
     
     db_path = tmp_path / "test.db"
-    set_test_db(monkeypatch, db_path)
+    set_test_db(db_path)
     with DatabaseManager() as db:
         db.create_tables()
     
@@ -519,7 +519,7 @@ def test_check_model_compatibility_matching_models(embeddings_manager, tmp_path,
     from abstracts_explorer.database import DatabaseManager
     
     db_path = tmp_path / "test.db"
-    set_test_db(monkeypatch, db_path)
+    set_test_db(db_path)
     with DatabaseManager() as db:
         db.create_tables()
         db.set_embedding_model(embeddings_manager.model_name)
@@ -538,7 +538,7 @@ def test_check_model_compatibility_mismatched_models(embeddings_manager, tmp_pat
     db_path = tmp_path / "test.db"
     different_model = "different-embedding-model"
     
-    set_test_db(monkeypatch, db_path)
+    set_test_db(db_path)
     with DatabaseManager() as db:
         db.create_tables()
         db.set_embedding_model(different_model)
@@ -555,7 +555,7 @@ def test_embed_from_database_stores_model(embeddings_manager, test_database, mon
     from abstracts_explorer.database import DatabaseManager
     
     # Set env var for test_database fixture
-    set_test_db(monkeypatch, test_database)
+    set_test_db(test_database)
     
     embeddings_manager.connect()
     embeddings_manager.create_collection()

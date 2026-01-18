@@ -864,7 +864,7 @@ class TestDatabaseYearConferenceIntegration:
         # Create temporary database and load data (data is now List[LightweightPaper])
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "test.db"
-            set_test_db(monkeypatch, db_path)
+            set_test_db(db_path)
             with DatabaseManager() as db:
                 db.create_tables()
                 db.add_papers(data)
@@ -926,7 +926,7 @@ class TestDatabaseYearConferenceIntegration:
         # Create temporary database and load data
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "test.db"
-            set_test_db(monkeypatch, db_path)
+            set_test_db(db_path)
             with DatabaseManager() as db:
                 db.create_tables()
                 db.add_papers(papers_to_insert)
