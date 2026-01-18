@@ -20,7 +20,7 @@ MOCK_EMBEDDING_DIMENSION = 4096
 
 
 @pytest.fixture(scope="module")
-def test_chroma_collection(tmp_path_factory):
+def test_chroma_collection(tmp_path_factory, monkeypatch_session):
     """
     Create a test ChromaDB collection with sample paper data.
 
@@ -36,6 +36,7 @@ def test_chroma_collection(tmp_path_factory):
     import uuid
     import time
     import chromadb.api.shared_system_client
+    import os
 
     # Clear ChromaDB's global client registry to avoid conflicts
     chromadb.api.shared_system_client.SharedSystemClient._identifier_to_system.clear()
@@ -45,6 +46,13 @@ def test_chroma_collection(tmp_path_factory):
     tmp_dir = tmp_path_factory.mktemp("chroma_test")
     chroma_path = tmp_dir / f"chroma_{unique_id}"
     collection_name = f"test_papers_{unique_id}"
+
+    # Set environment variable for EMBEDDING_DB
+    os.environ["EMBEDDING_DB"] = str(chroma_path)
+    
+    # Force config reload to pick up the environment variable
+    from abstracts_explorer.config import get_config
+    config = get_config(reload=True)
 
     # Create mock OpenAI client
     mock_client = Mock()
@@ -59,7 +67,7 @@ def test_chroma_collection(tmp_path_factory):
     mock_client.embeddings.create.return_value = mock_embedding_response
 
     # Initialize embeddings manager
-    em = EmbeddingsManager(chroma_path=chroma_path, collection_name=collection_name)
+    em = EmbeddingsManager(collection_name=collection_name)
     em._openai_client = mock_client  # Inject mock
     em.connect()
     em.create_collection(reset=True)

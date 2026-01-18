@@ -16,6 +16,19 @@ from abstracts_explorer.plugin import LightweightPaper
 from abstracts_explorer.config import load_env_file, get_config
 
 
+@pytest.fixture(scope="session")
+def monkeypatch_session():
+    """
+    Session-scoped monkeypatch fixture for module-level fixtures.
+    
+    This allows module-scoped fixtures to use monkeypatch functionality.
+    """
+    from _pytest.monkeypatch import MonkeyPatch
+    m = MonkeyPatch()
+    yield m
+    m.undo()
+
+
 def set_test_db(db_path):
     """
     Helper function to set PAPER_DB environment variable and reload config.
