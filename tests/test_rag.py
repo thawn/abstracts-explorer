@@ -92,6 +92,7 @@ def mock_lm_studio_response():
         mock_choice = Mock()
         mock_message = Mock()
         mock_message.content = "Based on Paper 1 and Paper 2, attention mechanisms allow models to focus on relevant parts of the input."
+        mock_message.tool_calls = None  # No tool calls for standard RAG
         mock_choice.message = mock_message
         mock_chat_response.choices = [mock_choice]
         mock_client.chat.completions.create.return_value = mock_chat_response
@@ -766,6 +767,7 @@ class TestRAGChatQueryRewriting:
                 else:
                     mock_message.content = "Response about attention"
                 
+                mock_message.tool_calls = None  # No tool calls
                 mock_choice.message = mock_message
                 mock_response.choices = [mock_choice]
                 return mock_response
@@ -811,6 +813,7 @@ class TestRAGChatQueryRewriting:
                 else:
                     mock_message.content = "Response"
                 
+                mock_message.tool_calls = None  # No tool calls
                 mock_choice.message = mock_message
                 mock_response.choices = [mock_choice]
                 return mock_response
@@ -1086,3 +1089,204 @@ class TestRAGChatMCPTools:
                 
                 # Should still return a response even with tool error
                 assert "error" in response.lower() or "Sorry" in response
+
+
+class TestRAGChatMCPToolsE2E:
+    """E2E tests for RAG chat with MCP tools - both mocked and real LLM."""
+
+    def test_mocked_query_triggers_cluster_topics(self, mock_embeddings_manager, mock_database):
+        """Test that a query about main topics triggers get_cluster_topics (mocked)."""
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
+            with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
+                mock_client = Mock()
+                mock_openai_class.return_value = mock_client
+                
+                # Mock tool call in initial response
+                mock_tool_call = Mock()
+                mock_tool_call.id = "call_123"
+                mock_tool_call.function.name = "get_cluster_topics"
+                mock_tool_call.function.arguments = json.dumps({"n_clusters": 8})
+                
+                mock_initial_response = Mock()
+                mock_choice = Mock()
+                mock_message = Mock()
+                mock_message.content = None
+                mock_message.tool_calls = [mock_tool_call]
+                mock_choice.message = mock_message
+                mock_initial_response.choices = [mock_choice]
+                
+                # Mock tool execution result
+                mock_execute.return_value = json.dumps({
+                    "statistics": {"n_clusters": 8, "total_papers": 100},
+                    "clusters": [
+                        {
+                            "cluster_id": 0,
+                            "paper_count": 20,
+                            "keywords": [{"keyword": "transformers", "count": 15}]
+                        }
+                    ]
+                })
+                
+                # Mock final response after tool execution
+                mock_final_response = Mock()
+                mock_final_choice = Mock()
+                mock_final_message = Mock()
+                mock_final_message.content = "The main topics include transformers and attention mechanisms."
+                mock_final_message.tool_calls = None
+                mock_final_choice.message = mock_final_message
+                mock_final_response.choices = [mock_final_choice]
+                
+                # Set up create to return initial response first, then final
+                mock_client.chat.completions.create.side_effect = [
+                    mock_initial_response,
+                    mock_final_response
+                ]
+                
+                chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
+                chat.enable_query_rewriting = False  # Disable query rewriting for this test
+                result = chat.query("What are the main research topics at this conference?")
+                
+                # Verify tool was executed
+                mock_execute.assert_called_once_with("get_cluster_topics", {"n_clusters": 8})
+                
+                # Verify final response was returned
+                assert "main topics" in result["response"].lower() or "transformers" in result["response"].lower()
+
+    def test_mocked_query_triggers_topic_evolution(self, mock_embeddings_manager, mock_database):
+        """Test that a query about trends triggers get_topic_evolution (mocked)."""
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
+            with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
+                mock_client = Mock()
+                mock_openai_class.return_value = mock_client
+                
+                # Mock tool call in initial response
+                mock_tool_call = Mock()
+                mock_tool_call.id = "call_456"
+                mock_tool_call.function.name = "get_topic_evolution"
+                mock_tool_call.function.arguments = json.dumps({
+                    "topic_keywords": "transformers",
+                    "conference": "neurips"
+                })
+                
+                mock_initial_response = Mock()
+                mock_choice = Mock()
+                mock_message = Mock()
+                mock_message.content = None
+                mock_message.tool_calls = [mock_tool_call]
+                mock_choice.message = mock_message
+                mock_initial_response.choices = [mock_choice]
+                
+                # Mock tool execution result
+                mock_execute.return_value = json.dumps({
+                    "topic": "transformers",
+                    "year_counts": {"2020": 10, "2021": 15, "2022": 20},
+                    "total_papers": 45
+                })
+                
+                # Mock final response after tool execution
+                mock_final_response = Mock()
+                mock_final_choice = Mock()
+                mock_final_message = Mock()
+                mock_final_message.content = "Transformers have grown from 10 papers in 2020 to 20 papers in 2022."
+                mock_final_message.tool_calls = None
+                mock_final_choice.message = mock_final_message
+                mock_final_response.choices = [mock_final_choice]
+                
+                # Set up create to return initial response first, then final
+                mock_client.chat.completions.create.side_effect = [
+                    mock_initial_response,
+                    mock_final_response
+                ]
+                
+                chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
+                chat.enable_query_rewriting = False  # Disable query rewriting for this test
+                result = chat.query("How have transformers evolved at NeurIPS over the years?")
+                
+                # Verify tool was executed with correct parameters
+                mock_execute.assert_called_once_with(
+                    "get_topic_evolution",
+                    {"topic_keywords": "transformers", "conference": "neurips"}
+                )
+                
+                # Verify final response was returned
+                assert "2020" in result["response"] or "evolved" in result["response"].lower()
+
+    def test_mocked_query_triggers_recent_developments(self, mock_embeddings_manager, mock_database):
+        """Test that a query about recent papers triggers get_recent_developments (mocked)."""
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
+            with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
+                mock_client = Mock()
+                mock_openai_class.return_value = mock_client
+                
+                # Mock tool call in initial response
+                mock_tool_call = Mock()
+                mock_tool_call.id = "call_789"
+                mock_tool_call.function.name = "get_recent_developments"
+                mock_tool_call.function.arguments = json.dumps({
+                    "topic_keywords": "large language models",
+                    "n_years": 2
+                })
+                
+                mock_initial_response = Mock()
+                mock_choice = Mock()
+                mock_message = Mock()
+                mock_message.content = None
+                mock_message.tool_calls = [mock_tool_call]
+                mock_choice.message = mock_message
+                mock_initial_response.choices = [mock_choice]
+                
+                # Mock tool execution result
+                mock_execute.return_value = json.dumps({
+                    "topic": "large language models",
+                    "papers_found": 5,
+                    "papers": [
+                        {"title": "GPT-4 Architecture", "year": 2024},
+                        {"title": "Scaling Laws", "year": 2024}
+                    ]
+                })
+                
+                # Mock final response after tool execution
+                mock_final_response = Mock()
+                mock_final_choice = Mock()
+                mock_final_message = Mock()
+                mock_final_message.content = "Recent papers include GPT-4 Architecture and Scaling Laws."
+                mock_final_message.tool_calls = None
+                mock_final_choice.message = mock_final_message
+                mock_final_response.choices = [mock_final_choice]
+                
+                # Set up create to return initial response first, then final
+                mock_client.chat.completions.create.side_effect = [
+                    mock_initial_response,
+                    mock_final_response
+                ]
+                
+                chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
+                chat.enable_query_rewriting = False  # Disable query rewriting for this test
+                result = chat.query("What are the latest papers on large language models?")
+                
+                # Verify tool was executed
+                mock_execute.assert_called_once_with(
+                    "get_recent_developments",
+                    {"topic_keywords": "large language models", "n_years": 2}
+                )
+                
+                # Verify final response was returned
+                assert "GPT-4" in result["response"] or "recent" in result["response"].lower()
+
+    @requires_lm_studio
+    def test_real_llm_query_triggers_tools(self, mock_embeddings_manager, mock_database):
+        """Test with real LLM that it can decide to use MCP tools (requires LM Studio)."""
+        # This test requires a real LLM backend running
+        # It will be skipped if LM Studio is not available
+        
+        chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
+        
+        # Query that should trigger clustering tools
+        result = chat.query("What are the main research topics covered in the conference?")
+        
+        # Verify we got a response
+        assert "response" in result
+        assert len(result["response"]) > 0
+        
+        # Note: We can't assert specific tool calls without introspecting the LLM's behavior,
+        # but this test ensures the integration works end-to-end with a real LLM
