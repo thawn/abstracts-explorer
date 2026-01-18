@@ -96,7 +96,7 @@ class TestConfig:
             "EMBEDDING_MODEL",
             "LLM_BACKEND_URL",
             "LLM_BACKEND_AUTH_TOKEN",
-            "EMBEDDING_DB_PATH",
+            "EMBEDDING_DB",
             "PAPER_DB",
             "COLLECTION_NAME",
             "MAX_CONTEXT_PAPERS",
@@ -118,7 +118,7 @@ class TestConfig:
             "EMBEDDING_MODEL",
             "LLM_BACKEND_URL",
             "LLM_BACKEND_AUTH_TOKEN",
-            "EMBEDDING_DB_PATH",
+            "EMBEDDING_DB",
             "PAPER_DB",
             "COLLECTION_NAME",
             "MAX_CONTEXT_PAPERS",
@@ -139,8 +139,8 @@ class TestConfig:
             "EMBEDDING_MODEL",
             "LLM_BACKEND_URL",
             "LLM_BACKEND_AUTH_TOKEN",
-            "EMBEDDING_DB_PATH",
-            "PAPER_DB_PATH",
+            "EMBEDDING_DB",
+            "PAPER_DB",
             "COLLECTION_NAME",
             "MAX_CONTEXT_PAPERS",
             "CHAT_TEMPERATURE",
@@ -159,7 +159,7 @@ class TestConfig:
         assert config.embedding_model == "text-embedding-qwen3-embedding-4b"
         assert config.llm_backend_url == "http://localhost:1234"
         assert config.llm_backend_auth_token == ""
-        assert config.embedding_db_path == str((Path("data") / "chroma_db").absolute())
+        assert config.embedding_db == str((Path("data") / "chroma_db").absolute())
         # Test database_url is constructed from PAPER_DB
         assert config.database_url == f"sqlite:///{(Path('data') / 'abstracts.db').absolute()}"
         assert config.collection_name == "papers"
@@ -176,7 +176,7 @@ CHAT_MODEL=custom-chat-model
 EMBEDDING_MODEL=custom-embedding
 LLM_BACKEND_URL=http://custom:9999
 LLM_BACKEND_AUTH_TOKEN=secret-token
-EMBEDDING_DB_PATH=custom_chroma
+EMBEDDING_DB=custom_chroma
 PAPER_DB=custom.db
 COLLECTION_NAME=custom_collection
 MAX_CONTEXT_PAPERS=15
@@ -192,7 +192,7 @@ CHAT_MAX_TOKENS=2000
         assert config.llm_backend_url == "http://custom:9999"
         assert config.llm_backend_auth_token == "secret-token"
         # Paths are resolved relative to data_dir
-        assert config.embedding_db_path == str((Path("data") / "custom_chroma").absolute())
+        assert config.embedding_db == str((Path("data") / "custom_chroma").absolute())
         # Test database_url is constructed from PAPER_DB
         assert config.database_url == f"sqlite:///{(Path('data') / 'custom.db').absolute()}"
         assert config.collection_name == "custom_collection"
@@ -258,7 +258,7 @@ CHAT_MAX_TOKENS=500
         assert "chat_model" in config_dict
         assert "embedding_model" in config_dict
         assert "llm_backend_url" in config_dict
-        assert "embedding_db_path" in config_dict
+        assert "embedding_db" in config_dict
         assert "database_url" in config_dict
         assert "collection_name" in config_dict
         assert "max_context_papers" in config_dict
@@ -294,7 +294,7 @@ CHAT_MAX_TOKENS=500
 
         assert config.data_dir == "/custom/data"
         # Paths should be resolved relative to custom data_dir
-        assert config.embedding_db_path == str((Path("/custom/data") / "chroma_db").absolute())
+        assert config.embedding_db == str((Path("/custom/data") / "chroma_db").absolute())
         # database_url should be constructed from PAPER_DB (defaults to abstracts.db in custom data_dir)
         assert config.database_url == f"sqlite:///{(Path('/custom/data') / 'abstracts.db').absolute()}"
 
@@ -303,7 +303,7 @@ CHAT_MAX_TOKENS=500
         env_file = tmp_path / ".env"
         env_file.write_text(
             """
-EMBEDDING_DB_PATH=/absolute/path/to/chroma_db
+EMBEDDING_DB=/absolute/path/to/chroma_db
 PAPER_DB=/absolute/path/to/papers.db
 """
         )
@@ -311,8 +311,18 @@ PAPER_DB=/absolute/path/to/papers.db
         config = Config(env_path=env_file)
 
         # Absolute paths should remain unchanged
-        assert config.embedding_db_path == str((Path("/absolute/path/to/chroma_db")).absolute())
+        assert config.embedding_db == str((Path("/absolute/path/to/chroma_db")).absolute())
         assert config.database_url == f"sqlite:///{Path('/absolute/path/to/papers.db').absolute()}"
+
+    def test_config_embedding_db_url(self, tmp_path):
+        """Test that EMBEDDING_DB can be a URL."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("EMBEDDING_DB=http://chromadb:8000")
+
+        config = Config(env_path=env_file)
+
+        # URLs should remain unchanged
+        assert config.embedding_db == "http://chromadb:8000"
 
 
 class TestGetConfig:
