@@ -2,6 +2,8 @@
 
 The Abstracts Explorer includes a Model Context Protocol (MCP) server that provides tools for analyzing clustered paper embeddings. This enables LLM-based assistants to answer sophisticated questions about research topics, trends, and developments.
 
+**NEW**: MCP tools are automatically integrated into the RAG chat system, allowing the LLM to decide when to use clustering analysis versus paper retrieval.
+
 ## What is MCP?
 
 Model Context Protocol (MCP) is a protocol that allows tools and servers to provide context and capabilities to LLM-based applications. The MCP server exposes tools that can be called by LLM assistants to perform specific tasks.
@@ -137,9 +139,37 @@ EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b
 
 ## Integration with LLM Assistants
 
-The MCP server can be integrated with any MCP-compatible LLM assistant or client. Here's how tools would be called:
+The MCP server can be integrated with any MCP-compatible LLM assistant or client. **It's now automatically integrated into the RAG chat system.**
 
-### Example: Claude Desktop Integration
+### RAG Chat Integration (Recommended)
+
+The easiest way to use MCP tools is through the RAG chat system, which automatically calls the appropriate tools:
+
+```python
+from abstracts_explorer.rag import RAGChat
+from abstracts_explorer.embeddings import EmbeddingsManager
+from abstracts_explorer.database import DatabaseManager
+
+# Initialize components
+em = EmbeddingsManager()
+em.connect()
+db = DatabaseManager()
+db.connect()
+
+# Create RAG chat (MCP tools enabled by default)
+chat = RAGChat(em, db, enable_mcp_tools=True)
+
+# The LLM automatically uses clustering tools when appropriate
+response = chat.query("What are the main topics at NeurIPS?")
+# Internally calls get_cluster_topics() and uses results
+
+response = chat.query("How have transformers evolved over time?")
+# Internally calls get_topic_evolution(topic_keywords="transformers")
+```
+
+See the [RAG API documentation](api/rag.md#mcp-clustering-tools-integration) for more details.
+
+### Claude Desktop Integration
 
 Add to Claude Desktop MCP configuration:
 
