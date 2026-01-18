@@ -25,7 +25,6 @@ from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.firefox import GeckoDriverManager
 from webdriver_manager.core.os_manager import ChromeType
 from abstracts_explorer.database import DatabaseManager
-from abstracts_explorer.config import Config
 from tests.helpers import find_free_port
 from tests.conftest import set_test_db
 
