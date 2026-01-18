@@ -82,7 +82,7 @@ response = chat.query(
 
 ## MCP Clustering Tools Integration
 
-**NEW in v0.1.0**: RAGChat now integrates with MCP clustering tools, allowing the LLM to automatically analyze conference topics, trends, and developments.
+**Coming in v0.3.0**: RAGChat now integrates with MCP clustering tools, allowing the LLM to automatically analyze conference topics, trends, and developments.
 
 ### What Are MCP Tools?
 
