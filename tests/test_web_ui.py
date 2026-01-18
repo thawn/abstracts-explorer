@@ -1559,7 +1559,7 @@ class TestClusteringEndpoints:
                 data = response.get_json()
                 
                 assert data["n_papers"] == 5000
-                # For 5000 papers: max(5, min(100, 5000 // 100)) = max(5, min(100, 50)) = 50
+                # For 5000 papers: max(2, min(50, 5000 // 100)) = max(2, min(50, 50)) = 50
                 assert data["n_clusters"] == 50
     
     def test_get_default_cluster_count_error(self):
