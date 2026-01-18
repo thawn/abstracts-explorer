@@ -16,13 +16,35 @@ let currentClusterConfig = {
     reduction_method: 'tsne',
     n_components: 2,
     clustering_method: 'kmeans',
-    n_clusters: 30,
+    n_clusters: null,  // Will be auto-calculated
     eps: 0.5,
     min_samples: 5,
     limit: null
 };
 // Track selected clusters for multi-select
 let selectedClusters = new Set();
+
+/**
+ * Initialize default cluster count from backend
+ * @async
+ */
+async function initDefaultClusterCount() {
+    try {
+        const response = await fetch(`${API_BASE}/api/clusters/default-count`);
+        if (response.ok) {
+            const data = await response.json();
+            if (currentClusterConfig.n_clusters === null) {
+                currentClusterConfig.n_clusters = data.n_clusters;
+                console.log(`Auto-calculated n_clusters=${data.n_clusters} based on ${data.n_papers} papers`);
+            }
+        }
+    } catch (error) {
+        console.warn('Failed to fetch default cluster count, using fallback', error);
+        if (currentClusterConfig.n_clusters === null) {
+            currentClusterConfig.n_clusters = 5;  // Fallback
+        }
+    }
+}
 
 /**
  * Check if clusters are loaded
@@ -39,6 +61,9 @@ export function areClustersLoaded() {
 export async function loadClusters() {
     try {
         showLoading('cluster-plot', 'Loading clusters...');
+        
+        // Initialize default cluster count if not set
+        await initDefaultClusterCount();
         
         // Try to load cached clusters first
         let response = await fetch(`${API_BASE}/api/clusters/cached`);
@@ -636,8 +661,10 @@ export function openClusterSettings() {
                     </div>
                     <div id="kmeans-params" class="${currentClusterConfig.clustering_method === 'kmeans' || currentClusterConfig.clustering_method === 'agglomerative' ? '' : 'hidden'}">
                         <label class="block text-sm font-medium text-gray-700 mb-2">Number of Clusters</label>
-                        <input type="number" id="cluster-n-clusters" value="${currentClusterConfig.n_clusters}" min="2" max="20" 
+                        <input type="number" id="cluster-n-clusters" value="${currentClusterConfig.n_clusters || ''}" min="2" max="100" 
+                               placeholder="Auto (n_papers / 100)"
                                class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                        <p class="text-xs text-gray-500 mt-1">Leave empty for automatic calculation based on paper count</p>
                     </div>
                     <div id="dbscan-params" class="${currentClusterConfig.clustering_method === 'dbscan' ? '' : 'hidden'}">
                         <label class="block text-sm font-medium text-gray-700 mb-2">Epsilon (eps)</label>
@@ -685,10 +712,12 @@ export function closeClusterSettings() {
  */
 export async function applyClusterSettings() {
     // Get settings from modal
+    // Get settings from modal
+    const nClustersValue = document.getElementById('cluster-n-clusters').value;
     currentClusterConfig = {
         reduction_method: document.getElementById('cluster-reduction-method').value,
         clustering_method: document.getElementById('cluster-method').value,
-        n_clusters: parseInt(document.getElementById('cluster-n-clusters').value) || 5,
+        n_clusters: nClustersValue ? parseInt(nClustersValue) : null,  // null means auto-calculate
         eps: parseFloat(document.getElementById('cluster-eps').value) || 0.5,
         min_samples: parseInt(document.getElementById('cluster-min-samples').value) || 5,
         limit: parseInt(document.getElementById('cluster-limit').value) || null

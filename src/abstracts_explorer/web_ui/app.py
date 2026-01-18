@@ -600,7 +600,7 @@ def compute_clusters():
         "reduction_method": str (optional, default: "pca"),
         "n_components": int (optional, default: 2),
         "clustering_method": str (optional, default: "kmeans"),
-        "n_clusters": int (optional, default: 5),
+        "n_clusters": int (optional, default: None - auto-calculated),
         "eps": float (optional, default: 0.5, for DBSCAN),
         "min_samples": int (optional, default: 5, for DBSCAN),
         "limit": int (optional, max embeddings to process),
@@ -613,7 +613,7 @@ def compute_clusters():
         Clustering results with points, statistics, and metadata
     """
     try:
-        from abstracts_explorer.clustering import ClusteringManager, ClusteringError
+        from abstracts_explorer.clustering import ClusteringManager, ClusteringError, calculate_default_clusters
 
         data = request.get_json() or {}
 
@@ -621,7 +621,7 @@ def compute_clusters():
         reduction_method = data.get("reduction_method", "pca")
         n_components = data.get("n_components", 2)
         clustering_method = data.get("clustering_method", "kmeans")
-        n_clusters = data.get("n_clusters", 5)
+        n_clusters = data.get("n_clusters")  # None means auto-calculate
         limit = data.get("limit")
         force = data.get("force", False)
 
@@ -632,6 +632,15 @@ def compute_clusters():
 
         # Get current embedding model
         current_model = config.embedding_model
+        
+        # Get embeddings count to calculate default n_clusters if needed
+        collection_stats = em.get_collection_stats()
+        n_papers = collection_stats["count"]
+        
+        # Calculate default n_clusters if not provided
+        if n_clusters is None:
+            n_clusters = calculate_default_clusters(n_papers)
+            logger.info(f"Auto-calculated n_clusters={n_clusters} based on {n_papers} papers")
 
         # Check if cache exists and is valid
         if not force and not limit:  # Only use cache if not limiting results
@@ -751,6 +760,39 @@ def get_cached_clusters():
         return jsonify({"error": f"Invalid JSON in cache file: {str(e)}"}), 500
     except Exception as e:
         logger.error(f"Error loading cached clusters: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/clusters/default-count")
+def get_default_cluster_count():
+    """
+    Get the recommended default number of clusters based on embeddings count.
+
+    Returns
+    -------
+    dict
+        Dictionary with:
+        - n_clusters: Recommended number of clusters
+        - n_papers: Number of papers in embeddings collection
+    """
+    try:
+        from abstracts_explorer.clustering import calculate_default_clusters
+
+        em = get_embeddings_manager()
+        
+        # Get embeddings count
+        collection_stats = em.get_collection_stats()
+        n_papers = collection_stats["count"]
+        
+        # Calculate default
+        n_clusters = calculate_default_clusters(n_papers)
+        
+        return jsonify({
+            "n_clusters": n_clusters,
+            "n_papers": n_papers
+        })
+    except Exception as e:
+        logger.error(f"Error calculating default cluster count: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
