@@ -566,6 +566,123 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Search failed: {str(e)}") from e
 
+    def search_papers_keyword(
+        self,
+        query: str,
+        limit: int = 10,
+        sessions: Optional[List[str]] = None,
+        years: Optional[List[int]] = None,
+        conferences: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Perform keyword-based search with filtering and author parsing.
+        
+        This is a convenience method that wraps search_papers and formats
+        the results for web API consumption, including author parsing.
+        
+        Parameters
+        ----------
+        query : str
+            Keyword to search in title, abstract, or keywords fields
+        limit : int, optional
+            Maximum number of results, by default 10
+        sessions : list of str, optional
+            Filter by paper sessions
+        years : list of int, optional
+            Filter by publication years
+        conferences : list of str, optional
+            Filter by conference names
+            
+        Returns
+        -------
+        list of dict
+            List of paper dictionaries with parsed authors
+            
+        Examples
+        --------
+        >>> papers = db.search_papers_keyword(
+        ...     "neural networks",
+        ...     limit=5,
+        ...     years=[2024, 2025]
+        ... )
+        """
+        # Keyword search in database with multiple filter support
+        papers = self.search_papers(
+            keyword=query,
+            sessions=sessions,
+            years=years,
+            conferences=conferences,
+            limit=limit,
+        )
+        
+        # Convert to list of dicts for JSON serialization
+        papers = [dict(p) for p in papers]
+        
+        # Parse authors from comma-separated string for each paper
+        for paper in papers:
+            if "authors" in paper and paper["authors"]:
+                paper["authors"] = [a.strip() for a in paper["authors"].split(";")]
+            else:
+                paper["authors"] = []
+        
+        return papers
+
+    def get_stats(
+        self,
+        year: Optional[int] = None,
+        conference: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get database statistics, optionally filtered by year and conference.
+        
+        Parameters
+        ----------
+        year : int, optional
+            Filter by specific year
+        conference : str, optional
+            Filter by specific conference
+            
+        Returns
+        -------
+        dict
+            Statistics dictionary with:
+            - total_papers: int - Number of papers matching filters
+            - year: int or None - Filter year if provided
+            - conference: str or None - Filter conference if provided
+            
+        Examples
+        --------
+        >>> stats = db.get_stats()
+        >>> print(f"Total papers: {stats['total_papers']}")
+        
+        >>> stats_2024 = db.get_stats(year=2024)
+        >>> print(f"Papers in 2024: {stats_2024['total_papers']}")
+        """
+        # Build WHERE clause for filtered count
+        conditions: List[str] = []
+        parameters: List[Any] = []
+        
+        if year is not None:
+            conditions.append("year = ?")
+            parameters.append(year)
+        
+        if conference is not None:
+            conditions.append("conference = ?")
+            parameters.append(conference)
+        
+        if conditions:
+            where_clause = " AND ".join(conditions)
+            result = self.query(f"SELECT COUNT(*) as count FROM papers WHERE {where_clause}", tuple(parameters))
+            total_papers = result[0]["count"] if result else 0
+        else:
+            total_papers = self.get_paper_count()
+        
+        return {
+            "total_papers": total_papers,
+            "year": year,
+            "conference": conference,
+        }
+
     def _paper_to_dict(self, paper: Paper) -> Dict[str, Any]:
         """Convert Paper ORM object to dictionary."""
         return {

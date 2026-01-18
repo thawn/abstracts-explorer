@@ -690,3 +690,90 @@ class EmbeddingsManager:
 
         except Exception as e:
             raise EmbeddingsError(f"Failed to embed from database: {str(e)}") from e
+
+    def search_papers_semantic(
+        self,
+        query: str,
+        database,
+        limit: int = 10,
+        sessions: Optional[List[str]] = None,
+        years: Optional[List[int]] = None,
+        conferences: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Perform semantic search for papers using embeddings.
+        
+        This function combines embedding-based similarity search with metadata filtering
+        and retrieves complete paper information from the database.
+        
+        Parameters
+        ----------
+        query : str
+            Search query text
+        database : DatabaseManager
+            Database manager for retrieving full paper details
+        limit : int, optional
+            Maximum number of results to return, by default 10
+        sessions : list of str, optional
+            Filter by paper sessions
+        years : list of int, optional
+            Filter by publication years
+        conferences : list of str, optional
+            Filter by conference names
+            
+        Returns
+        -------
+        list of dict
+            List of paper dictionaries with complete information
+            
+        Raises
+        ------
+        EmbeddingsError
+            If search fails
+            
+        Examples
+        --------
+        >>> papers = em.search_papers_semantic(
+        ...     "transformers in vision",
+        ...     database=db,
+        ...     limit=5,
+        ...     years=[2024, 2025]
+        ... )
+        """
+        from .paper_utils import format_search_results, PaperFormattingError
+        
+        # Build metadata filter for embeddings search
+        filter_conditions: List[Dict[str, Any]] = []
+        if sessions:
+            filter_conditions.append({"session": {"$in": sessions}})
+        if years:
+            # Convert years to integers for ChromaDB
+            year_ints: List[int] = [int(y) for y in years]
+            filter_conditions.append({"year": {"$in": year_ints}})
+        if conferences:
+            filter_conditions.append({"conference": {"$in": conferences}})
+        
+        # Use $and operator if multiple conditions, otherwise use single condition
+        where_filter: Optional[Dict[str, Any]] = None
+        if len(filter_conditions) > 1:
+            where_filter = {"$and": filter_conditions}
+        elif len(filter_conditions) == 1:
+            where_filter = filter_conditions[0]
+        
+        logger.info(f"Semantic search - query: {query}, filter: sessions={sessions}, years={years}, conferences={conferences}")
+        logger.info(f"Where filter: {where_filter}")
+        
+        # Get more results initially to account for filtering
+        results = self.search_similar(query, n_results=limit * 2, where=where_filter)
+        
+        logger.info(f"Search results count: {len(results.get('ids', [[]])[0]) if results else 0}")
+        
+        # Transform ChromaDB results to paper format using shared utility
+        try:
+            papers = format_search_results(results, database, include_documents=False)
+        except PaperFormattingError:
+            # No valid papers found
+            return []
+        
+        # Limit results (filtering already done at database level)
+        return papers[:limit]

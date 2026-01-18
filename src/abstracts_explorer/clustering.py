@@ -1069,3 +1069,141 @@ def perform_clustering(
 
     except Exception as e:
         raise ClusteringError(f"Clustering pipeline failed: {str(e)}") from e
+
+
+def compute_clusters_with_cache(
+    embeddings_manager: EmbeddingsManager,
+    database: DatabaseManager,
+    embedding_model: str,
+    reduction_method: str = "pca",
+    n_components: int = 2,
+    clustering_method: str = "kmeans",
+    n_clusters: Optional[int] = None,
+    limit: Optional[int] = None,
+    force: bool = False,
+    **clustering_kwargs
+) -> Dict[str, Any]:
+    """
+    Compute clusters with caching support.
+    
+    This function checks the cache first and returns cached results if available.
+    If cache miss or forced recompute, it performs clustering and saves to cache.
+    
+    Parameters
+    ----------
+    embeddings_manager : EmbeddingsManager
+        Embeddings manager instance
+    database : DatabaseManager
+        Database manager for cache operations
+    embedding_model : str
+        Current embedding model name
+    reduction_method : str, optional
+        Dimensionality reduction method, by default "pca"
+    n_components : int, optional
+        Number of components for reduction, by default 2
+    clustering_method : str, optional
+        Clustering method to use, by default "kmeans"
+    n_clusters : int, optional
+        Number of clusters. If None, auto-calculated based on data size
+    limit : int, optional
+        Maximum number of embeddings to process
+    force : bool, optional
+        Force recompute even if cache exists, by default False
+    **clustering_kwargs
+        Additional clustering parameters (e.g., eps, min_samples for DBSCAN)
+        
+    Returns
+    -------
+    dict
+        Clustering results with points, statistics, and metadata
+        
+    Raises
+    ------
+    ClusteringError
+        If clustering fails
+        
+    Examples
+    --------
+    >>> results = compute_clusters_with_cache(
+    ...     em, db, "text-embedding-model",
+    ...     clustering_method="kmeans",
+    ...     n_clusters=5
+    ... )
+    """
+    # Get embeddings count to calculate default n_clusters if needed
+    collection_stats = embeddings_manager.get_collection_stats()
+    n_papers = collection_stats["count"]
+    
+    # Calculate default n_clusters if not provided
+    if n_clusters is None:
+        n_clusters = calculate_default_clusters(n_papers)
+        logger.info(f"Auto-calculated n_clusters={n_clusters} based on {n_papers} papers")
+    
+    # Check if cache exists and is valid
+    if not force and not limit:  # Only use cache if not limiting results
+        cached_results = database.get_clustering_cache(
+            embedding_model=embedding_model,
+            reduction_method=reduction_method,
+            n_components=n_components,
+            clustering_method=clustering_method,
+            n_clusters=n_clusters if clustering_method.lower() != "dbscan" else None,
+        )
+        
+        if cached_results:
+            logger.info("Using cached clustering results")
+            return cached_results
+    
+    # Cache miss or forced recompute - compute clusters
+    logger.info("Computing new clustering results...")
+    
+    # Create clustering manager
+    cm = ClusteringManager(embeddings_manager)
+    
+    # Load embeddings
+    logger.info(f"Loading embeddings (limit={limit})...")
+    cm.load_embeddings(limit=limit)
+    
+    # Perform clustering on full embeddings first
+    logger.info(f"Clustering using {clustering_method} on full embeddings...")
+    cm.cluster(
+        method=clustering_method,
+        n_clusters=n_clusters,
+        use_reduced=False,  # Cluster on full embeddings
+        **clustering_kwargs
+    )
+    
+    # Reduce dimensions for visualization
+    logger.info(f"Reducing dimensions using {reduction_method} for visualization...")
+    cm.reduce_dimensions(
+        method=reduction_method,
+        n_components=n_components,
+    )
+    
+    # Generate cluster labels
+    logger.info("Generating cluster labels...")
+    try:
+        cm.extract_cluster_keywords(n_keywords=10)
+        cm.generate_cluster_labels(use_llm=True, max_keywords=5)
+    except Exception as e:
+        logger.warning(f"Failed to generate cluster labels: {e}")
+        # Continue without labels
+    
+    # Get results
+    results = cm.get_clustering_results()
+    
+    # Save to cache if no limit was applied
+    if not limit:
+        try:
+            database.save_clustering_cache(
+                embedding_model=embedding_model,
+                reduction_method=reduction_method,
+                n_components=n_components,
+                clustering_method=clustering_method,
+                results=results,
+                n_clusters=n_clusters if clustering_method.lower() != "dbscan" else None,
+                clustering_params=clustering_kwargs if clustering_kwargs else None,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to save clustering cache: {e}")
+    
+    return results
