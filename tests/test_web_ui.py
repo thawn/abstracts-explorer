@@ -1354,6 +1354,7 @@ class TestClusteringEndpoints:
                             mock_cm_class.return_value = mock_cm
                             
                             mock_em = Mock()
+                            mock_em.get_collection_stats.return_value = {"count": 500}
                             mock_get_em.return_value = mock_em
                             
                             response = client.post(
@@ -1399,6 +1400,7 @@ class TestClusteringEndpoints:
                             mock_cm_class.return_value = mock_cm
                             
                             mock_em = Mock()
+                            mock_em.get_collection_stats.return_value = {"count": 500}
                             mock_get_em.return_value = mock_em
                             
                             response = client.post(
@@ -1449,6 +1451,7 @@ class TestClusteringEndpoints:
                             mock_cm_class.return_value = mock_cm
                             
                             mock_em = Mock()
+                            mock_em.get_collection_stats.return_value = {"count": 500}
                             mock_get_em.return_value = mock_em
                             
                             response = client.post(
@@ -1501,6 +1504,7 @@ class TestClusteringEndpoints:
                             mock_cm_class.return_value = mock_cm
                             
                             mock_em = Mock()
+                            mock_em.get_collection_stats.return_value = {"count": 500}
                             mock_get_em.return_value = mock_em
                             
                             response = client.post(
