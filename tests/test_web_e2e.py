@@ -830,9 +830,18 @@ class TestWebUIE2E:
         base_url, _ = web_server
         browser.get(base_url)
 
-        # Wait for stats to load
+        # Wait for stats to load - wait for the actual stats, not just the loading message
         wait = WebDriverWait(browser, 10)
+        # Wait for stats element to be present
         wait.until(EC.presence_of_element_located((By.ID, "stats")))
+        
+        # Wait for stats to actually load (text should change from "Loading stats...")
+        def stats_loaded(driver):
+            stats = driver.find_element(By.ID, "stats")
+            stats_text = stats.text.lower()
+            return "abstracts" in stats_text or "papers" in stats_text or "error loading stats" in stats_text
+        
+        wait.until(stats_loaded)
 
         stats = browser.find_element(By.ID, "stats")
         stats_text = stats.text
