@@ -796,11 +796,11 @@ def main() -> int:
         epilog="""
 Examples:
   # Download NeurIPS 2025 data and create database
-  neurips-abstracts download --year 2025 --output data/abstracts.db
+  neurips-abstracts download --year 2025
   
   # Generate embeddings for all papers
-  neurips-abstracts create-embeddings --db-path data/abstracts.db
-  
+  neurips-abstracts create-embeddings
+
   # Search for similar papers
   neurips-abstracts search "graph neural networks for molecular generation"
   
@@ -841,11 +841,11 @@ Available plugins:
 
 Examples:
   # Download NeurIPS 2025 papers
-  neurips-abstracts download --plugin neurips --year 2025 --output data/abstracts.db
-  
+  neurips-abstracts download --plugin neurips --year 2025
+
   # Download ML4PS 2025 workshop papers with abstracts
-  neurips-abstracts download --plugin ml4ps --year 2025 --output data/ml4ps_2025.db
-  
+  neurips-abstracts download --plugin ml4ps --year 2025
+
   # List available plugins
   neurips-abstracts download --list-plugins
         """,

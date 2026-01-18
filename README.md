@@ -115,14 +115,14 @@ PAPER_DB=postgresql://user:password@localhost/abstracts
 
 ```bash
 # Download NeurIPS 2025 papers
-abstracts-explorer download --year 2025 --output data/abstracts.db
+abstracts-explorer download --year 2025
 ```
 
 ### Generate Embeddings for Semantic Search
 
 ```bash
 # Requires LM Studio running with embedding model loaded
-abstracts-explorer create-embeddings --db-path data/abstracts.db
+abstracts-explorer create-embeddings
 ```
 
 ### Cluster and Visualize Embeddings
@@ -230,7 +230,6 @@ from abstracts_explorer.clustering import perform_clustering
 
 # Perform complete clustering pipeline
 results = perform_clustering(
-    embeddings_path="chroma_db",
     reduction_method="tsne",      # or "pca"
     n_components=2,
     clustering_method="kmeans",    # or "dbscan", "agglomerative"

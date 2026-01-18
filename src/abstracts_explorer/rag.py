@@ -46,7 +46,7 @@ class RAGChat:
     Examples
     --------
     >>> from abstracts_explorer.embeddings import EmbeddingsManager
-    >>> em = EmbeddingsManager("chroma_db")
+    >>> em = EmbeddingsManager()
     >>> em.connect()
     >>> chat = RAGChat(em)
     >>> response = chat.query("What are the latest advances in deep learning?")
@@ -103,7 +103,7 @@ class RAGChat:
         self.query_similarity_threshold = config.query_similarity_threshold
         self.conversation_history: List[Dict[str, str]] = []
         self.last_search_query: Optional[str] = None
-        
+
         # OpenAI client - lazy loaded on first use to avoid API calls during test collection
         self._openai_client: Optional[OpenAI] = None
         self._llm_backend_auth_token = config.llm_backend_auth_token

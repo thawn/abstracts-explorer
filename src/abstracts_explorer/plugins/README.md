@@ -208,7 +208,7 @@ Then use it:
 python -c "from abstracts_explorer.plugins import my_workshop_plugin"
 
 # Or via CLI
-neurips-abstracts download --plugin myworkshop --year 2025 --output workshop.db
+neurips-abstracts download --plugin myworkshop --year 2025
 ```
 
 ## Plugin Interface Requirements

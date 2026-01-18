@@ -30,10 +30,7 @@ from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.rag import RAGChat
 
 # Initialize embeddings manager
-em = EmbeddingsManager(
-    db_path="abstracts.db",
-    embedding_db_path="chroma_db"
-)
+em = EmbeddingsManager()
 
 # Initialize RAG chat
 chat = RAGChat(

@@ -29,7 +29,7 @@ The `DatabaseManager` class handles all database operations including:
 from abstracts_explorer.database import DatabaseManager
 
 # Initialize database
-db = DatabaseManager("data/abstracts.db")
+db = DatabaseManager()
 
 # Add a paper
 paper_id = db.add_paper({
