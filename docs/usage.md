@@ -9,7 +9,7 @@ This guide covers common usage patterns for Abstracts Explorer.
 Download papers for a specific year:
 
 ```bash
-uv run abstracts-explorer download --year 2025 --db-path data/abstracts.db
+uv run abstracts-explorer download --year 2025
 ```
 
 Options:
@@ -22,7 +22,7 @@ Options:
 Generate vector embeddings for semantic search:
 
 ```bash
-uv run abstracts-explorer create-embeddings --db-path data/abstracts.db
+uv run abstracts-explorer create-embeddings
 ```
 
 Options:
@@ -37,13 +37,13 @@ Search papers by keyword or semantic similarity:
 
 ```bash
 # Simple search
-uv run abstracts-explorer search "transformer architecture" --db-path data/abstracts.db
+uv run abstracts-explorer search "transformer architecture"
 
 # Limit results
-uv run abstracts-explorer search "reinforcement learning" --db-path data/abstracts.db --limit 10
+uv run abstracts-explorer search "reinforcement learning" --limit 10
 
 # Filter by year
-uv run abstracts-explorer search "neural networks" --db-path data/abstracts.db --year 2025
+uv run abstracts-explorer search "neural networks" --year 2025
 ```
 
 ### 4. Chat with Papers (RAG)
@@ -51,7 +51,7 @@ uv run abstracts-explorer search "neural networks" --db-path data/abstracts.db -
 Interactive chat interface powered by RAG:
 
 ```bash
-uv run abstracts-explorer chat --db-path data/abstracts.db
+uv run abstracts-explorer chat
 ```
 
 In the chat interface:
@@ -67,7 +67,7 @@ In the chat interface:
 from abstracts_explorer.database import DatabaseManager
 
 # Open database
-db = DatabaseManager("data/abstracts.db")
+db = DatabaseManager()
 
 # Get all papers
 papers = db.get_all_papers()
@@ -101,7 +101,7 @@ papers_data = neurips_plugin.download(year=2025, output_path='neurips_2025.json'
 papers = [LightweightPaper(**paper) for paper in papers_data]
 
 # Save to database
-db = DatabaseManager("data/abstracts.db")
+db = DatabaseManager()
 db.create_tables()
 db.add_papers(papers)
 ```
@@ -113,8 +113,6 @@ from abstracts_explorer.embeddings import EmbeddingsManager
 
 # Initialize embeddings manager
 em = EmbeddingsManager(
-    db_path="abstracts.db",
-    embedding_db_path="chroma_db",
     collection_name="papers"
 )
 
@@ -139,10 +137,7 @@ from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.rag import RAGChat
 
 # Initialize
-em = EmbeddingsManager(
-    db_path="abstracts.db",
-    embedding_db_path="chroma_db"
-)
+em = EmbeddingsManager()
 
 chat = RAGChat(
     em,
@@ -174,8 +169,8 @@ Process multiple years:
 ```bash
 #!/bin/bash
 for year in 2023 2024 2025; do
-    uv run abstracts-explorer download --year $year --db-path data/neurips_${year}.db
-    uv run abstracts-explorer create-embeddings --db-path data/neurips_${year}.db
+    uv run abstracts-explorer download --year $year
+    uv run abstracts-explorer create-embeddings
 done
 ```
 
@@ -197,7 +192,7 @@ config = get_config()
 ```python
 from abstracts_explorer.database import DatabaseManager
 
-db = DatabaseManager("data/abstracts.db")
+db = DatabaseManager()
 
 # Complex search with multiple filters
 papers = db.search_papers(

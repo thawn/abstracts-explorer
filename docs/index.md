@@ -30,31 +30,31 @@ uv sync --all-extras
 Download abstracts for NeurIPS 2025:
 
 ```bash
-uv run abstracts-explorer download --year 2025 --db-path data/abstracts.db
+uv run abstracts-explorer download --year 2025
 ```
 
 Or download from a workshop using plugins:
 
 ```bash
-uv run abstracts-explorer download --plugin ml4ps --year 2025 --db-path data/abstracts.db
+uv run abstracts-explorer download --plugin ml4ps --year 2025
 ```
 
 Create embeddings for semantic search:
 
 ```bash
-uv run abstracts-explorer create-embeddings --db-path data/abstracts.db
+uv run abstracts-explorer create-embeddings
 ```
 
 Search papers:
 
 ```bash
-uv run abstracts-explorer search "machine learning" --db-path data/abstracts.db
+uv run abstracts-explorer search "machine learning"
 ```
 
 Chat with papers using RAG:
 
 ```bash
-uv run abstracts-explorer chat --db-path data/abstracts.db
+uv run abstracts-explorer chat
 ```
 
 ## Documentation Contents

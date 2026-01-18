@@ -230,7 +230,7 @@ Before using the MCP server, ensure:
 Make sure to create embeddings first:
 
 ```bash
-abstracts-explorer create-embeddings --db-path data/abstracts.db
+abstracts-explorer create-embeddings
 ```
 
 ### "Failed to connect to database"

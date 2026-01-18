@@ -34,13 +34,13 @@ abstracts-explorer download [OPTIONS]
 
 ```bash
 # Download 2025 papers
-uv run abstracts-explorer download --year 2025 --db-path data/abstracts.db
+uv run abstracts-explorer download --year 2025
 
 # Force re-download
-uv run abstracts-explorer download --year 2025 --db-path data/abstracts.db --force
+uv run abstracts-explorer download --year 2025 --force
 
 # Disable caching
-uv run abstracts-explorer download --year 2025 --db-path data/abstracts.db --no-cache
+uv run abstracts-explorer download --year 2025 --no-cache
 ```
 
 ### create-embeddings
@@ -64,15 +64,15 @@ abstracts-explorer create-embeddings [OPTIONS]
 
 ```bash
 # Create embeddings with defaults (uses EMBEDDING_DB from config)
-uv run abstracts-explorer create-embeddings --db-path data/abstracts.db
+uv run abstracts-explorer create-embeddings
 
 # Use custom collection name
 uv run abstracts-explorer create-embeddings \
-    --db-path data/abstracts.db \
+    \
     --collection-name my_papers
 
 # Force recreation
-uv run abstracts-explorer create-embeddings --db-path data/abstracts.db --force
+uv run abstracts-explorer create-embeddings --force
 ```
 
 ### search
@@ -102,19 +102,19 @@ abstracts-explorer search QUERY [OPTIONS]
 
 ```bash
 # Basic search
-uv run abstracts-explorer search "transformer" --db-path data/abstracts.db
+uv run abstracts-explorer search "transformer"
 
 # Limit results
-uv run abstracts-explorer search "deep learning" --db-path data/abstracts.db --limit 20
+uv run abstracts-explorer search "deep learning" --limit 20
 
 # Filter by year
-uv run abstracts-explorer search "neural network" --db-path data/abstracts.db --year 2025
+uv run abstracts-explorer search "neural network" --year 2025
 
 # Semantic search using embeddings
-uv run abstracts-explorer search "attention mechanism" --db-path data/abstracts.db --use-embeddings
+uv run abstracts-explorer search "attention mechanism" --use-embeddings
 
 # Search only titles
-uv run abstracts-explorer search "BERT" --db-path data/abstracts.db --title-only
+uv run abstracts-explorer search "BERT" --title-only
 ```
 
 ### chat
@@ -148,14 +148,13 @@ While in the chat session:
 
 ```bash
 # Start chat with defaults (uses EMBEDDING_DB from config)
-uv run abstracts-explorer chat --db-path data/abstracts.db
+uv run abstracts-explorer chat
 
 # Use custom model
-uv run abstracts-explorer chat --db-path data/abstracts.db --model llama-3.2-3b-instruct
+uv run abstracts-explorer chat --model llama-3.2-3b-instruct
 
 # Adjust response parameters
 uv run abstracts-explorer chat \
-    --db-path data/abstracts.db \
     --temperature 0.9 \
     --max-tokens 2000 \
     --n-papers 10
@@ -180,10 +179,10 @@ abstracts-explorer info [OPTIONS]
 
 ```bash
 # Basic info
-uv run abstracts-explorer info --db-path data/abstracts.db
+uv run abstracts-explorer info
 
 # Include embedding info
-uv run abstracts-explorer info --db-path data/abstracts.db --show-embeddings
+uv run abstracts-explorer info --show-embeddings
 ```
 
 ## Environment Variables
