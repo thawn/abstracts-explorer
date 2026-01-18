@@ -69,7 +69,7 @@ class ClusteringError(Exception):
     pass
 
 
-def calculate_default_clusters(n_papers: int, min_clusters: int = 2, max_clusters: int = 50) -> int:
+def calculate_default_clusters(n_papers: int, min_clusters: int = 2, max_clusters: int = 500) -> int:
     """
     Calculate default number of clusters based on the number of papers.
     
@@ -82,7 +82,7 @@ def calculate_default_clusters(n_papers: int, min_clusters: int = 2, max_cluster
     min_clusters : int, optional
         Minimum number of clusters, by default 2
     max_clusters : int, optional
-        Maximum number of clusters, by default 50
+        Maximum number of clusters, by default 500
         
     Returns
     -------
@@ -95,8 +95,8 @@ def calculate_default_clusters(n_papers: int, min_clusters: int = 2, max_cluster
     2
     >>> calculate_default_clusters(500)
     5
-    >>> calculate_default_clusters(10000)
-    50
+    >>> calculate_default_clusters(100000)
+    500
     """
     if n_papers <= 0:
         return min_clusters
@@ -318,7 +318,7 @@ class ClusteringManager:
             Clustering method: 'kmeans', 'dbscan', or 'agglomerative', by default 'kmeans'
         n_clusters : int, optional
             Number of clusters (for kmeans and agglomerative).
-            If None, automatically calculated as n_papers / 100, clamped to [2, 50].
+            If None, automatically calculated as n_papers / 100, clamped to [2, 500].
             By default None.
         random_state : int, optional
             Random state for reproducibility, by default 42
@@ -983,7 +983,7 @@ def perform_clustering(
         Clustering method ('kmeans', 'dbscan', or 'agglomerative'), by default 'kmeans'
     n_clusters : int, optional
         Number of clusters (for kmeans and agglomerative).
-        If None, automatically calculated as n_papers / 100, clamped to [2, 50].
+        If None, automatically calculated as n_papers / 100, clamped to [2, 500].
         By default None.
     output_path : str or Path, optional
         Path to export JSON results. If None, don't export.

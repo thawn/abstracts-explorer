@@ -1540,7 +1540,7 @@ class TestClusteringEndpoints:
                 assert "n_clusters" in data
                 assert "n_papers" in data
                 assert data["n_papers"] == 250
-                # For 250 papers: max(2, min(50, 250 // 100)) = max(2, min(50, 2)) = max(2, 2) = 2
+                # For 250 papers: max(2, min(50, 250 // 100)) = max(2, min(500, 2)) = max(2, 2) = 2
                 assert data["n_clusters"] == 2
     
     def test_get_default_cluster_count_large_dataset(self):
@@ -1558,9 +1558,9 @@ class TestClusteringEndpoints:
                 assert response.status_code == 200
                 data = response.get_json()
                 
-                assert data["n_papers"] == 5000
-                # For 5000 papers: max(2, min(50, 5000 // 100)) = max(2, min(50, 50)) = 50
-                assert data["n_clusters"] == 50
+                assert data["n_papers"] == 50000
+                # For 100000 papers: max(2, min(50, 100000 // 100)) = max(2, min(1000, 500)) = 500
+                assert data["n_clusters"] == 500
     
     def test_get_default_cluster_count_error(self):
         """Test error handling when getting default cluster count."""

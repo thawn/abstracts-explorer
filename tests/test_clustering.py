@@ -32,9 +32,9 @@ class TestCalculateDefaultClusters:
     def test_calculate_default_clusters_large(self):
         """Test calculation with large number of papers."""
         # Should be capped at max_clusters (default 50)
-        assert calculate_default_clusters(5000) == 50
-        assert calculate_default_clusters(10000) == 50
-        assert calculate_default_clusters(100000) == 50
+        assert calculate_default_clusters(5000) == 500
+        assert calculate_default_clusters(10000) == 500
+        assert calculate_default_clusters(100000) == 500
     
     def test_calculate_default_clusters_custom_limits(self):
         """Test calculation with custom min/max limits."""
