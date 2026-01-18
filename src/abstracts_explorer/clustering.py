@@ -69,6 +69,44 @@ class ClusteringError(Exception):
     pass
 
 
+def calculate_default_clusters(n_papers: int, min_clusters: int = 2, max_clusters: int = 500) -> int:
+    """
+    Calculate default number of clusters based on the number of papers.
+    
+    Uses the rule: n_clusters = n_papers / 100, clamped to [min_clusters, max_clusters].
+    
+    Parameters
+    ----------
+    n_papers : int
+        Number of papers to cluster
+    min_clusters : int, optional
+        Minimum number of clusters, by default 2
+    max_clusters : int, optional
+        Maximum number of clusters, by default 500
+        
+    Returns
+    -------
+    int
+        Recommended number of clusters
+        
+    Examples
+    --------
+    >>> calculate_default_clusters(50)
+    2
+    >>> calculate_default_clusters(500)
+    5
+    >>> calculate_default_clusters(100000)
+    500
+    """
+    if n_papers <= 0:
+        return min_clusters
+    
+    # Calculate based on n_papers / 100
+    n_clusters = max(min_clusters, min(max_clusters, n_papers // 100))
+    
+    return n_clusters
+
+
 class ClusteringManager:
     """
     Manager for clustering and dimensionality reduction of embeddings.
@@ -266,7 +304,7 @@ class ClusteringManager:
     def cluster(
         self,
         method: str = "kmeans",
-        n_clusters: int = 5,
+        n_clusters: Optional[int] = None,
         random_state: int = 42,
         use_reduced: bool = False,
         **kwargs
@@ -279,7 +317,9 @@ class ClusteringManager:
         method : str, optional
             Clustering method: 'kmeans', 'dbscan', or 'agglomerative', by default 'kmeans'
         n_clusters : int, optional
-            Number of clusters (for kmeans and agglomerative), by default 5
+            Number of clusters (for kmeans and agglomerative).
+            If None, automatically calculated as n_papers / 100, clamped to [2, 500].
+            By default None.
         random_state : int, optional
             Random state for reproducibility, by default 42
         use_reduced : bool, optional
@@ -299,6 +339,11 @@ class ClusteringManager:
         """
         if self.embeddings is None:
             raise ClusteringError("No embeddings loaded. Call load_embeddings() first.")
+        
+        # Calculate default n_clusters if not provided
+        if n_clusters is None:
+            n_clusters = calculate_default_clusters(len(self.embeddings))
+            logger.info(f"Auto-calculated n_clusters={n_clusters} based on {len(self.embeddings)} papers")
 
         # Choose embeddings to cluster
         if use_reduced and self.reduced_embeddings is not None:
@@ -911,7 +956,7 @@ def perform_clustering(
     reduction_method: str = "pca",
     n_components: int = 2,
     clustering_method: str = "kmeans",
-    n_clusters: int = 5,
+    n_clusters: Optional[int] = None,
     output_path: Optional[Union[str, Path]] = None,
     random_state: int = 42,
     limit: Optional[int] = None,
@@ -937,7 +982,9 @@ def perform_clustering(
     clustering_method : str, optional
         Clustering method ('kmeans', 'dbscan', or 'agglomerative'), by default 'kmeans'
     n_clusters : int, optional
-        Number of clusters (for kmeans and agglomerative), by default 5
+        Number of clusters (for kmeans and agglomerative).
+        If None, automatically calculated as n_papers / 100, clamped to [2, 500].
+        By default None.
     output_path : str or Path, optional
         Path to export JSON results. If None, don't export.
     random_state : int, optional

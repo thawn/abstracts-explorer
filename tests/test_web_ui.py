@@ -1354,6 +1354,7 @@ class TestClusteringEndpoints:
                             mock_cm_class.return_value = mock_cm
                             
                             mock_em = Mock()
+                            mock_em.get_collection_stats.return_value = {"count": 500}
                             mock_get_em.return_value = mock_em
                             
                             response = client.post(
@@ -1399,6 +1400,7 @@ class TestClusteringEndpoints:
                             mock_cm_class.return_value = mock_cm
                             
                             mock_em = Mock()
+                            mock_em.get_collection_stats.return_value = {"count": 500}
                             mock_get_em.return_value = mock_em
                             
                             response = client.post(
@@ -1449,6 +1451,7 @@ class TestClusteringEndpoints:
                             mock_cm_class.return_value = mock_cm
                             
                             mock_em = Mock()
+                            mock_em.get_collection_stats.return_value = {"count": 500}
                             mock_get_em.return_value = mock_em
                             
                             response = client.post(
@@ -1501,6 +1504,7 @@ class TestClusteringEndpoints:
                             mock_cm_class.return_value = mock_cm
                             
                             mock_em = Mock()
+                            mock_em.get_collection_stats.return_value = {"count": 500}
                             mock_get_em.return_value = mock_em
                             
                             response = client.post(
@@ -1517,5 +1521,188 @@ class TestClusteringEndpoints:
                             assert response.status_code == 200
                             data = response.get_json()
                             assert data == computed_results
+
+    def test_get_default_cluster_count(self):
+        """Test getting default cluster count based on embeddings."""
+        from abstracts_explorer.web_ui.app import app
+        
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
+                mock_em = Mock()
+                mock_em.get_collection_stats.return_value = {"count": 250}
+                mock_get_em.return_value = mock_em
+                
+                response = client.get("/api/clusters/default-count")
+                
+                assert response.status_code == 200
+                data = response.get_json()
+                
+                assert "n_clusters" in data
+                assert "n_papers" in data
+                assert data["n_papers"] == 250
+                # For 250 papers: max(2, min(50, 250 // 100)) = max(2, min(500, 2)) = max(2, 2) = 2
+                assert data["n_clusters"] == 2
+    
+    def test_get_default_cluster_count_large_dataset(self):
+        """Test default cluster count with large dataset."""
+        from abstracts_explorer.web_ui.app import app
+        
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
+                mock_em = Mock()
+                mock_em.get_collection_stats.return_value = {"count": 100000}
+                mock_get_em.return_value = mock_em
+                
+                response = client.get("/api/clusters/default-count")
+                
+                assert response.status_code == 200
+                data = response.get_json()
+                
+                assert data["n_papers"] == 100000
+                # For 100000 papers: max(2, min(50, 100000 // 100)) = max(2, min(1000, 500)) = 500
+                assert data["n_clusters"] == 500
+    
+    def test_get_default_cluster_count_error(self):
+        """Test error handling when getting default cluster count."""
+        from abstracts_explorer.web_ui.app import app
+        
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_embeddings_manager", side_effect=Exception("Test error")):
+                response = client.get("/api/clusters/default-count")
+                
+                assert response.status_code == 500
+                data = response.get_json()
+                assert "error" in data
+    
+    def test_precalculate_clusters_starts_background_task(self):
+        """Test that precalculate endpoint starts background clustering."""
+        from abstracts_explorer.web_ui.app import app
+        
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em, \
+                 patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db, \
+                 patch("abstracts_explorer.web_ui.app.get_config") as mock_config, \
+                 patch("abstracts_explorer.clustering.ClusteringManager") as MockCM:
+                
+                # Setup mocks
+                mock_em = Mock()
+                mock_em.get_collection_stats.return_value = {"count": 250}
+                mock_get_em.return_value = mock_em
+                
+                mock_db = Mock()
+                mock_db.get_clustering_cache.return_value = None  # No cache exists
+                mock_get_db.return_value = mock_db
+                
+                mock_cfg = Mock()
+                mock_cfg.embedding_model = "test-model"
+                mock_config.return_value = mock_cfg
+                
+                mock_cm = Mock()
+                mock_cm.get_clustering_results.return_value = {
+                    "points": [],
+                    "statistics": {"n_clusters": 5, "total_papers": 250}
+                }
+                MockCM.return_value = mock_cm
+                
+                response = client.post(
+                    "/api/clusters/precalculate",
+                    json={"clustering_method": "kmeans"}
+                )
+                
+                assert response.status_code == 200
+                data = response.get_json()
+                
+                assert data["status"] == "started"
+                assert "message" in data
+                assert "n_clusters" in data
+    
+    def test_precalculate_clusters_cache_exists(self):
+        """Test precalculate when cache already exists."""
+        from abstracts_explorer.web_ui.app import app
+        
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em, \
+                 patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db, \
+                 patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
+                
+                mock_em = Mock()
+                mock_em.get_collection_stats.return_value = {"count": 250}
+                mock_get_em.return_value = mock_em
+                
+                mock_db = Mock()
+                mock_db.get_clustering_cache.return_value = {
+                    "points": [],
+                    "statistics": {"n_clusters": 5}
+                }  # Cache exists
+                mock_get_db.return_value = mock_db
+                
+                mock_cfg = Mock()
+                mock_cfg.embedding_model = "test-model"
+                mock_config.return_value = mock_cfg
+                
+                response = client.post(
+                    "/api/clusters/precalculate",
+                    json={}
+                )
+                
+                assert response.status_code == 200
+                data = response.get_json()
+                
+                assert data["status"] == "cache_exists"
+                assert "message" in data
+    
+    def test_precalculate_clusters_with_custom_n_clusters(self):
+        """Test precalculate with custom n_clusters value."""
+        from abstracts_explorer.web_ui.app import app
+        
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em, \
+                 patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db, \
+                 patch("abstracts_explorer.web_ui.app.get_config") as mock_config, \
+                 patch("abstracts_explorer.clustering.ClusteringManager") as MockCM:
+                
+                mock_em = Mock()
+                mock_get_em.return_value = mock_em
+                
+                mock_db = Mock()
+                mock_db.get_clustering_cache.return_value = None
+                mock_get_db.return_value = mock_db
+                
+                mock_cfg = Mock()
+                mock_cfg.embedding_model = "test-model"
+                mock_config.return_value = mock_cfg
+                
+                mock_cm = Mock()
+                mock_cm.get_clustering_results.return_value = {
+                    "points": [],
+                    "statistics": {"n_clusters": 15}
+                }
+                MockCM.return_value = mock_cm
+                
+                response = client.post(
+                    "/api/clusters/precalculate",
+                    json={"n_clusters": 15}
+                )
+                
+                assert response.status_code == 200
+                data = response.get_json()
+                
+                assert data["status"] == "started"
+                assert data["n_clusters"] == 15
+    
+    def test_precalculate_clusters_error_handling(self):
+        """Test error handling in precalculate endpoint."""
+        from abstracts_explorer.web_ui.app import app
+        
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_embeddings_manager", side_effect=Exception("Test error")):
+                response = client.post(
+                    "/api/clusters/precalculate",
+                    json={}
+                )
+                
+                assert response.status_code == 500
+                data = response.get_json()
+                assert "error" in data
 
 

@@ -231,6 +231,11 @@ export function handleYearChange() {
             </div>
         `;
     }
+    
+    // Pre-calculate clusters in background for the new filter
+    if (window.precalculateClusters) {
+        window.precalculateClusters();
+    }
 }
 
 /**
@@ -263,6 +268,11 @@ export function handleConferenceChange() {
                 <p class="text-sm">Try "transformer architecture" or "reinforcement learning"</p>
             </div>
         `;
+    }
+    
+    // Pre-calculate clusters in background for the new filter
+    if (window.precalculateClusters) {
+        window.precalculateClusters();
     }
 }
 

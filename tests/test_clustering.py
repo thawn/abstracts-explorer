@@ -9,7 +9,42 @@ import numpy as np
 from abstracts_explorer.clustering import (
     ClusteringManager,
     ClusteringError,
+    calculate_default_clusters,
 )
+
+
+class TestCalculateDefaultClusters:
+    """Test suite for calculate_default_clusters function."""
+    
+    def test_calculate_default_clusters_small(self):
+        """Test calculation with small number of papers."""
+        # Less than 100 papers should give minimum clusters
+        assert calculate_default_clusters(50) == 2
+        assert calculate_default_clusters(100) == 2
+        assert calculate_default_clusters(199) == 2
+    
+    def test_calculate_default_clusters_medium(self):
+        """Test calculation with medium number of papers."""
+        assert calculate_default_clusters(500) == 5
+        assert calculate_default_clusters(1000) == 10
+        assert calculate_default_clusters(2500) == 25
+    
+    def test_calculate_default_clusters_large(self):
+        """Test calculation with large number of papers."""
+        # Should be capped at max_clusters (default 50)
+        assert calculate_default_clusters(50000) == 500
+        assert calculate_default_clusters(100000) == 500
+        assert calculate_default_clusters(1000000) == 500
+    
+    def test_calculate_default_clusters_custom_limits(self):
+        """Test calculation with custom min/max limits."""
+        assert calculate_default_clusters(500, min_clusters=5, max_clusters=20) == 5
+        assert calculate_default_clusters(3000, min_clusters=5, max_clusters=20) == 20
+    
+    def test_calculate_default_clusters_edge_cases(self):
+        """Test edge cases."""
+        assert calculate_default_clusters(0) == 2
+        assert calculate_default_clusters(-10) == 2
 
 
 class TestClusteringManager:
@@ -98,6 +133,21 @@ class TestClusteringManager:
         
         with pytest.raises(ClusteringError, match="No embeddings loaded"):
             cm.cluster()
+
+    def test_cluster_auto_calculate_n_clusters(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test automatic calculation of n_clusters when None is provided."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        
+        # Cluster with n_clusters=None should auto-calculate
+        labels = cm.cluster(method='kmeans', n_clusters=None, use_reduced=False)
+        
+        assert labels.shape == (10,)
+        assert cm.cluster_labels is not None
+        # With 10 papers, should calculate 2 clusters (10 / 100 = 0, min is 2)
+        unique_labels = np.unique(labels)
+        assert len(unique_labels) <= 2
 
     def test_cluster_kmeans(self, mock_embeddings_manager, mock_collection_with_data):
         """Test K-Means clustering on full embeddings."""
