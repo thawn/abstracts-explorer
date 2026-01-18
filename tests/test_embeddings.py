@@ -6,7 +6,6 @@ import pytest
 from unittest.mock import Mock
 
 from abstracts_explorer.embeddings import EmbeddingsError, EmbeddingsManager
-from abstracts_explorer.config import get_config
 from tests.conftest import set_test_db
 
 # Fixtures imported from conftest.py:
@@ -268,9 +267,8 @@ class TestEmbeddingsManager:
         assert stats["count"] == 1
         embeddings_manager.close()
 
-    def test_embed_from_database_not_found(self, embeddings_manager, tmp_path, monkeypatch):
+    def test_embed_from_database_not_found(self, embeddings_manager, tmp_path):
         """Test embedding from non-existent database."""
-        from abstracts_explorer.config import get_config
         
         # Set PAPER_DB to a nonexistent database
         nonexistent_db = tmp_path / "nonexistent.db"
@@ -312,7 +310,7 @@ class TestEmbeddingsManager:
 
         embeddings_manager.close()
 
-    def test_embed_from_database_empty_result(self, embeddings_manager, tmp_path, mock_lm_studio, monkeypatch):
+    def test_embed_from_database_empty_result(self, embeddings_manager, tmp_path, mock_lm_studio):
         """Test embedding from database with no matching papers."""
         from abstracts_explorer.database import DatabaseManager
 
@@ -333,7 +331,7 @@ class TestEmbeddingsManager:
 
         embeddings_manager.close()
 
-    def test_embed_from_database_all_empty_abstracts(self, embeddings_manager, tmp_path, mock_lm_studio, monkeypatch):
+    def test_embed_from_database_all_empty_abstracts(self, embeddings_manager, tmp_path, mock_lm_studio):
         """Test embedding from database where all papers have empty abstracts."""
         from abstracts_explorer.database import DatabaseManager
         from abstracts_explorer.plugin import LightweightPaper
@@ -365,7 +363,7 @@ class TestEmbeddingsManager:
         assert count == 3
         embeddings_manager.close()
 
-    def test_embed_from_database_sql_error(self, embeddings_manager, tmp_path, monkeypatch):
+    def test_embed_from_database_sql_error(self, embeddings_manager, tmp_path):
         """Test embedding from database with SQL error."""
         from abstracts_explorer.database import DatabaseManager
         
@@ -484,9 +482,8 @@ class TestEmbeddingsManager:
         embeddings_manager.close()
 
 
-def test_check_model_compatibility_no_database(embeddings_manager, tmp_path, monkeypatch):
+def test_check_model_compatibility_no_database(embeddings_manager, tmp_path):
     """Test checking model compatibility when database does not exist."""
-    from abstracts_explorer.config import get_config
     
     non_existent_db = tmp_path / "nonexistent.db"
     set_test_db(non_existent_db)
@@ -498,7 +495,7 @@ def test_check_model_compatibility_no_database(embeddings_manager, tmp_path, mon
         embeddings_manager.check_model_compatibility()
 
 
-def test_check_model_compatibility_no_model_stored(embeddings_manager, tmp_path, monkeypatch):
+def test_check_model_compatibility_no_model_stored(embeddings_manager, tmp_path):
     """Test checking model compatibility when no model is stored in database."""
     from abstracts_explorer.database import DatabaseManager
     
@@ -514,7 +511,7 @@ def test_check_model_compatibility_no_model_stored(embeddings_manager, tmp_path,
     assert current == embeddings_manager.model_name
 
 
-def test_check_model_compatibility_matching_models(embeddings_manager, tmp_path, monkeypatch):
+def test_check_model_compatibility_matching_models(embeddings_manager, tmp_path):
     """Test checking model compatibility when models match."""
     from abstracts_explorer.database import DatabaseManager
     
@@ -531,7 +528,7 @@ def test_check_model_compatibility_matching_models(embeddings_manager, tmp_path,
     assert current == embeddings_manager.model_name
 
 
-def test_check_model_compatibility_mismatched_models(embeddings_manager, tmp_path, monkeypatch):
+def test_check_model_compatibility_mismatched_models(embeddings_manager, tmp_path):
     """Test checking model compatibility when models differ."""
     from abstracts_explorer.database import DatabaseManager
     
@@ -550,7 +547,7 @@ def test_check_model_compatibility_mismatched_models(embeddings_manager, tmp_pat
     assert current == embeddings_manager.model_name
 
 
-def test_embed_from_database_stores_model(embeddings_manager, test_database, monkeypatch):
+def test_embed_from_database_stores_model(embeddings_manager, test_database):
     """Test that embed_from_database stores the embedding model in the database."""
     from abstracts_explorer.database import DatabaseManager
     

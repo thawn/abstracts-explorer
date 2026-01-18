@@ -12,7 +12,6 @@ import sqlite3
 
 from abstracts_explorer.database import DatabaseManager, DatabaseError
 from abstracts_explorer.plugin import LightweightPaper
-from abstracts_explorer.config import get_config
 from tests.conftest import set_test_db
 
 # Fixtures are now imported from conftest.py:
@@ -55,7 +54,7 @@ def sample_paper_minimal():
 class TestDatabaseManager:
     """Tests for DatabaseManager class."""
 
-    def test_init(self, tmp_path, monkeypatch):
+    def test_init(self, tmp_path):
         """Test DatabaseManager initialization."""
         db_path = tmp_path / "test.db"
         set_test_db(db_path)
@@ -74,7 +73,7 @@ class TestDatabaseManager:
 
         db_manager.close()
 
-    def test_connect_creates_directories(self, tmp_path, monkeypatch):
+    def test_connect_creates_directories(self, tmp_path):
         """Test that connect creates parent directories."""
         db_path = tmp_path / "subdir" / "another" / "test.db"
         set_test_db(db_path)
@@ -99,7 +98,7 @@ class TestDatabaseManager:
         db_manager.close()  # Should not raise
         assert db_manager.connection is None
 
-    def test_context_manager(self, tmp_path, monkeypatch):
+    def test_context_manager(self, tmp_path):
         """Test DatabaseManager as context manager."""
         db_path = tmp_path / "test.db"
         set_test_db(db_path)
@@ -437,7 +436,7 @@ class TestEmbeddingModelMetadata:
         connected_db.set_embedding_model(model2)
         assert connected_db.get_embedding_model() == model2
 
-    def test_embedding_model_persists_across_connections(self, tmp_path, monkeypatch):
+    def test_embedding_model_persists_across_connections(self, tmp_path):
         """Test that embedding model persists across database connections."""
         db_path = tmp_path / "test.db"
         model_name = "persistent-model"

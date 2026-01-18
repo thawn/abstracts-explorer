@@ -22,7 +22,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from abstracts_explorer.web_ui import app as flask_app
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.config import get_config
-import os
 
 
 # ============================================================
@@ -143,7 +142,7 @@ class TestSearchEndpoint:
         data = json.loads(response.data)
         assert "error" in data
 
-    def test_search_keyword_parameters(self, client, monkeypatch):
+    def test_search_keyword_parameters(self, client):
         """
         Test that keyword search uses correct parameters.
 
@@ -696,7 +695,6 @@ class TestWebUIDatabaseNotFound:
     def test_get_database_sqlite_url_not_found(self, tmp_path, monkeypatch):
         """Test that get_database works with SQLite database URL."""
         from abstracts_explorer.web_ui.app import app
-        import sys
 
         # Create a valid SQLite database
         db_path = tmp_path / "test.db"
@@ -733,7 +731,7 @@ class TestWebUIDatabaseNotFound:
 class TestWebUIDatabaseModes:
     """Test database initialization with both local SQLite and database URL modes."""
 
-    def test_get_database_with_sqlite_path(self, tmp_path, monkeypatch):
+    def test_get_database_with_sqlite_path(self, tmp_path):
         """Test that get_database works with local SQLite database path."""
         from abstracts_explorer.web_ui.app import app, get_database
         from abstracts_explorer.database import DatabaseManager
@@ -765,7 +763,7 @@ class TestWebUIDatabaseModes:
                     count = database.get_paper_count()
                     assert count == 0  # Empty database
 
-    def test_get_database_with_sqlite_url(self, tmp_path, monkeypatch):
+    def test_get_database_with_sqlite_url(self, tmp_path):
         """Test that get_database works with SQLite database URL (converted from path)."""
         from abstracts_explorer.web_ui.app import app, get_database
         from abstracts_explorer.database import DatabaseManager
@@ -797,7 +795,7 @@ class TestWebUIDatabaseModes:
                     count = database.get_paper_count()
                     assert count == 0  # Empty database
 
-    def test_stats_endpoint_with_sqlite_database(self, tmp_path, monkeypatch):
+    def test_stats_endpoint_with_sqlite_database(self, tmp_path):
         """Test that stats endpoint works with local SQLite database."""
         from abstracts_explorer.web_ui.app import app
         from abstracts_explorer.database import DatabaseManager
@@ -986,7 +984,7 @@ class TestWebUIRunServer:
                     # Verify Flask debug flag was set
                     assert app.debug
 
-    def test_run_server_database_not_found(self, capsys, monkeypatch):
+    def test_run_server_database_not_found(self, capsys):
         """Test that run_server raises FileNotFoundError when database doesn't exist."""
         from abstracts_explorer.web_ui import run_server
         
@@ -1059,7 +1057,7 @@ class TestConferencePluginMapping:
 class TestServerInitialization:
     """Test server initialization with production and development modes."""
 
-    def test_run_server_with_waitress_available(self, tmp_path, monkeypatch):
+    def test_run_server_with_waitress_available(self, tmp_path):
         """Test that run_server uses Waitress by default when available."""
         from abstracts_explorer.web_ui.app import run_server
         from abstracts_explorer.database import DatabaseManager
@@ -1084,7 +1082,7 @@ class TestServerInitialization:
             assert call_args[1]["host"] == "127.0.0.1"
             assert call_args[1]["port"] == 5000
 
-    def test_run_server_with_dev_flag(self, tmp_path, monkeypatch):
+    def test_run_server_with_dev_flag(self, tmp_path):
         """Test that run_server uses Flask dev server when dev=True."""
         from abstracts_explorer.web_ui.app import run_server, app
         from abstracts_explorer.database import DatabaseManager
@@ -1113,7 +1111,7 @@ class TestServerInitialization:
                 # Verify Flask dev server was called
                 mock_run.assert_called_once_with(host="127.0.0.1", port=5000, debug=False)
 
-    def test_run_server_with_debug_flag(self, tmp_path, monkeypatch):
+    def test_run_server_with_debug_flag(self, tmp_path):
         """Test that run_server uses Waitress with debug enabled when debug=True."""
         from abstracts_explorer.web_ui.app import run_server, app
         from abstracts_explorer.database import DatabaseManager
@@ -1147,7 +1145,7 @@ class TestServerInitialization:
                 # Verify Flask debug flag was set
                 assert app.debug
 
-    def test_run_server_waitress_not_available(self, tmp_path, monkeypatch):
+    def test_run_server_waitress_not_available(self, tmp_path):
         """Test that run_server falls back to Flask when Waitress is not available."""
         from abstracts_explorer.web_ui.app import run_server, app
         from abstracts_explorer.database import DatabaseManager
@@ -1186,7 +1184,7 @@ class TestServerInitialization:
                 # Verify Flask was called as fallback
                 mock_run.assert_called_once_with(host="127.0.0.1", port=5000, debug=False)
 
-    def test_run_server_missing_database(self, tmp_path, monkeypatch):
+    def test_run_server_missing_database(self, tmp_path):
         """Test that run_server raises FileNotFoundError when database is missing."""
         from abstracts_explorer.web_ui.app import run_server
         
@@ -1229,7 +1227,7 @@ class TestClusteringEndpoints:
         for color in dark24_sample_colors + light24_sample_colors:
             assert color in constants_content, f"Plotly color {color} should be in the constants.js"
 
-    def test_compute_clusters_creates_tables_on_first_connection(self, tmp_path, monkeypatch):
+    def test_compute_clusters_creates_tables_on_first_connection(self, tmp_path):
         """Test that create_tables is called when connecting to database."""
         from abstracts_explorer.web_ui.app import app, get_database
         from abstracts_explorer.database import DatabaseManager

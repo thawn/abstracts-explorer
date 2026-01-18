@@ -14,6 +14,7 @@ import requests
 
 from abstracts_explorer.plugins.iclr_downloader import ICLRDownloaderPlugin
 from abstracts_explorer.database import DatabaseManager
+from tests.conftest import set_test_db
 
 
 class TestICLRPlugin:
@@ -275,7 +276,7 @@ class TestICLRPluginDatabaseIntegration:
     """Test ICLR plugin integration with database."""
 
     @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
-    def test_iclr_data_in_database(self, mock_get, monkeypatch):
+    def test_iclr_data_in_database(self, mock_get):
         """Test that ICLR data can be stored in the database."""
         # Mock the ICLR API response
         mock_response = Mock()

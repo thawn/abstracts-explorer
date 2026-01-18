@@ -6,7 +6,6 @@ to reduce code duplication and ensure consistency.
 """
 
 import socket
-import os
 import requests
 import pytest
 from abstracts_explorer.config import get_config
