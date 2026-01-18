@@ -14,6 +14,7 @@ from openai import OpenAI
 
 from .config import get_config
 from .paper_utils import format_search_results, build_context_from_papers, PaperFormattingError
+from .mcp_tools import get_mcp_tools_schema, execute_mcp_tool, format_tool_result_for_llm
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +30,15 @@ class RAGChat:
     RAG chat interface for querying NeurIPS papers.
 
     Uses embeddings for semantic search and OpenAI-compatible API for response generation.
+    Optionally integrates with MCP clustering tools to answer questions about conference
+    topics, trends, and developments.
 
     Parameters
     ----------
     embeddings_manager : EmbeddingsManager
         Manager for embeddings and vector search.
+    database : DatabaseManager
+        Database instance for querying paper details. REQUIRED.
     lm_studio_url : str, optional
         URL for OpenAI-compatible API, by default "http://localhost:1234"
     model : str, optional
@@ -42,14 +47,25 @@ class RAGChat:
         Maximum number of papers to include in context, by default 5
     temperature : float, optional
         Sampling temperature for generation, by default 0.7
+    enable_mcp_tools : bool, optional
+        Enable MCP clustering tools for topic analysis, by default True
 
     Examples
     --------
     >>> from abstracts_explorer.embeddings import EmbeddingsManager
+    >>> from abstracts_explorer.database import DatabaseManager
     >>> em = EmbeddingsManager()
     >>> em.connect()
-    >>> chat = RAGChat(em)
+    >>> db = DatabaseManager()
+    >>> db.connect()
+    >>> chat = RAGChat(em, db)
+    >>> 
+    >>> # Ask about specific papers
     >>> response = chat.query("What are the latest advances in deep learning?")
+    >>> print(response)
+    >>> 
+    >>> # Ask about conference topics (uses MCP tools automatically)
+    >>> response = chat.query("What are the main research topics at NeurIPS?")
     >>> print(response)
     """
 
@@ -61,6 +77,7 @@ class RAGChat:
         model: Optional[str] = None,
         max_context_papers: Optional[int] = None,
         temperature: Optional[float] = None,
+        enable_mcp_tools: bool = True,
     ):
         """
         Initialize RAG chat.
@@ -81,6 +98,8 @@ class RAGChat:
             Maximum number of papers to include in context. If None, uses config value.
         temperature : float, optional
             Sampling temperature for generation. If None, uses config value.
+        enable_mcp_tools : bool, optional
+            Whether to enable MCP clustering tools for the LLM. Default is True.
 
         Raises
         ------
@@ -101,6 +120,7 @@ class RAGChat:
         self.temperature = temperature or config.chat_temperature
         self.enable_query_rewriting = config.enable_query_rewriting
         self.query_similarity_threshold = config.query_similarity_threshold
+        self.enable_mcp_tools = enable_mcp_tools
         self.conversation_history: List[Dict[str, str]] = []
         self.last_search_query: Optional[str] = None
 
@@ -442,7 +462,7 @@ class RAGChat:
 
     def _generate_response(self, question: str, context: str, system_prompt: Optional[str] = None) -> str:
         """
-        Generate response using OpenAI-compatible API.
+        Generate response using OpenAI-compatible API with optional MCP tool support.
 
         Parameters
         ----------
@@ -471,6 +491,14 @@ class RAGChat:
                 "If the papers don't contain enough information to answer the question, suggest a query that might return more relevant results. "
                 "Always cite which papers you're referencing (e.g., 'Paper 1', 'Paper 2'), using local links: <a href='#paper-1'>Paper-1</a>, <a href='#paper-2'>Paper-2</a> etc."
             )
+            
+            # Enhance system prompt when MCP tools are enabled
+            if self.enable_mcp_tools:
+                system_prompt += (
+                    "\n\nYou have access to clustering analysis tools that can help answer questions about "
+                    "overall conference topics, trends over time, and recent developments. Use these tools when appropriate "
+                    "for questions about general themes, topic evolution, or recent research in specific areas."
+                )
 
         # Build messages
         messages = [{"role": "system", "content": system_prompt}]
@@ -487,19 +515,108 @@ class RAGChat:
 
         messages.append({"role": "user", "content": user_message})
 
+        # Prepare API call parameters
+        api_params = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+            "max_tokens": 1000,
+            "timeout": 180,
+        }
+        
+        # Add MCP tools if enabled
+        if self.enable_mcp_tools:
+            api_params["tools"] = get_mcp_tools_schema()
+            api_params["tool_choice"] = "auto"  # Let the model decide when to use tools
+
         # Call OpenAI-compatible API using OpenAI client
         try:
-            response = self.openai_client.chat.completions.create(
+            response = self.openai_client.chat.completions.create(**api_params)
+            
+            # Check if the model wants to use tools
+            if self.enable_mcp_tools and response.choices[0].message.tool_calls:
+                return self._handle_tool_calls(response, messages)
+            
+            # No tool calls, return direct response
+            return response.choices[0].message.content
+
+        except Exception as e:
+            raise RAGError(f"Failed to generate response: {str(e)}")
+    
+    def _handle_tool_calls(self, initial_response, messages: List[Dict[str, Any]]) -> str:
+        """
+        Handle tool calls from the LLM response.
+        
+        This method executes requested MCP tools and sends the results back to the LLM
+        to generate a final response.
+        
+        Parameters
+        ----------
+        initial_response
+            The initial API response containing tool calls
+        messages : list
+            The message history to continue the conversation
+            
+        Returns
+        -------
+        str
+            Final response from the LLM after tool execution
+        """
+        assistant_message = initial_response.choices[0].message
+        tool_calls = assistant_message.tool_calls
+        
+        # Add the assistant's tool call message to history
+        tool_calls_data: List[Dict[str, Any]] = [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments
+                }
+            }
+            for tc in tool_calls
+        ]
+        
+        messages.append({
+            "role": "assistant",
+            "content": assistant_message.content,
+            "tool_calls": tool_calls_data
+        })
+        
+        # Execute each tool call
+        for tool_call in tool_calls:
+            function_name = tool_call.function.name
+            function_args = json.loads(tool_call.function.arguments)
+            
+            logger.info(f"LLM requested tool: {function_name} with args: {function_args}")
+            
+            # Execute the tool
+            tool_result = execute_mcp_tool(function_name, function_args)
+            
+            # Format the result for better LLM consumption
+            formatted_result = format_tool_result_for_llm(function_name, tool_result)
+            
+            # Add tool result to messages
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "name": function_name,
+                "content": formatted_result
+            })
+        
+        # Get final response from LLM with tool results
+        try:
+            final_response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 temperature=self.temperature,
                 max_tokens=1000,
                 timeout=180,
             )
-            return response.choices[0].message.content
-
+            return final_response.choices[0].message.content
         except Exception as e:
-            raise RAGError(f"Failed to generate response: {str(e)}")
+            raise RAGError(f"Failed to generate response after tool calls: {str(e)}")
 
     def export_conversation(self, output_path: Path) -> None:
         """
