@@ -16,6 +16,7 @@ from unittest.mock import patch, Mock
 
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.config import get_config
+from tests.conftest import set_test_db
 from abstracts_explorer.plugin import (
     sanitize_author_names,
     convert_to_lightweight_schema,
@@ -863,8 +864,7 @@ class TestDatabaseYearConferenceIntegration:
         # Create temporary database and load data (data is now List[LightweightPaper])
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "test.db"
-            monkeypatch.setenv("PAPER_DB", str(db_path))
-            get_config(reload=True)
+            set_test_db(monkeypatch, db_path)
             with DatabaseManager() as db:
                 db.create_tables()
                 db.add_papers(data)
@@ -926,8 +926,7 @@ class TestDatabaseYearConferenceIntegration:
         # Create temporary database and load data
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "test.db"
-            monkeypatch.setenv("PAPER_DB", str(db_path))
-            get_config(reload=True)
+            set_test_db(monkeypatch, db_path)
             with DatabaseManager() as db:
                 db.create_tables()
                 db.add_papers(papers_to_insert)

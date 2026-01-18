@@ -11,6 +11,7 @@ import os
 from abstracts_explorer.database import DatabaseManager, DatabaseError
 from abstracts_explorer.plugin import LightweightPaper
 from abstracts_explorer.config import get_config
+from tests.conftest import set_test_db
 
 
 # Check if PostgreSQL is available via environment variable
@@ -32,8 +33,7 @@ class TestMultiDatabaseBackend:
     def test_sqlite_via_paper_db_path(self, tmp_path, monkeypatch):
         """Test using SQLite via PAPER_DB environment variable (path)."""
         db_path = tmp_path / "test.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         
         db = DatabaseManager()
         with db:

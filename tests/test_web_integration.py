@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.config import get_config
+from tests.conftest import set_test_db
 from tests.helpers import requires_lm_studio, find_free_port
 
 # Helper functions imported from test_helpers:

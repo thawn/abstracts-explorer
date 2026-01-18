@@ -7,6 +7,7 @@ from unittest.mock import Mock
 
 from abstracts_explorer.embeddings import EmbeddingsError, EmbeddingsManager
 from abstracts_explorer.config import get_config
+from tests.conftest import set_test_db
 
 # Fixtures imported from conftest.py:
 # - mock_lm_studio: Mock LM Studio API responses
@@ -273,8 +274,7 @@ class TestEmbeddingsManager:
         
         # Set PAPER_DB to a nonexistent database
         nonexistent_db = tmp_path / "nonexistent.db"
-        monkeypatch.setenv("PAPER_DB", str(nonexistent_db))
-        get_config(reload=True)
+        set_test_db(monkeypatch, nonexistent_db)
         
         embeddings_manager.connect()
         embeddings_manager.create_collection()
@@ -318,8 +318,7 @@ class TestEmbeddingsManager:
 
         # Create empty database using DatabaseManager
         db_path = tmp_path / "empty.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         with DatabaseManager() as db:
             db.create_tables()
 
@@ -340,8 +339,7 @@ class TestEmbeddingsManager:
         from abstracts_explorer.plugin import LightweightPaper
 
         db_path = tmp_path / "test.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         with DatabaseManager() as db:
             db.create_tables()
             # Add papers with titles but empty abstracts
@@ -376,8 +374,7 @@ class TestEmbeddingsManager:
         
         # Use DatabaseManager to connect, but manually create only embeddings_metadata table
         # to simulate a corrupted/incomplete database
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         db = DatabaseManager()
         db.connect()
         
@@ -492,8 +489,7 @@ def test_check_model_compatibility_no_database(embeddings_manager, tmp_path, mon
     from abstracts_explorer.config import get_config
     
     non_existent_db = tmp_path / "nonexistent.db"
-    monkeypatch.setenv("PAPER_DB", str(non_existent_db))
-    get_config(reload=True)
+    set_test_db(monkeypatch, non_existent_db)
     
     # Since the database doesn't exist, this will raise an error when trying to connect
     # The behavior has changed - we no longer check if db exists before connecting
@@ -507,8 +503,7 @@ def test_check_model_compatibility_no_model_stored(embeddings_manager, tmp_path,
     from abstracts_explorer.database import DatabaseManager
     
     db_path = tmp_path / "test.db"
-    monkeypatch.setenv("PAPER_DB", str(db_path))
-    get_config(reload=True)
+    set_test_db(monkeypatch, db_path)
     with DatabaseManager() as db:
         db.create_tables()
     
@@ -524,8 +519,7 @@ def test_check_model_compatibility_matching_models(embeddings_manager, tmp_path,
     from abstracts_explorer.database import DatabaseManager
     
     db_path = tmp_path / "test.db"
-    monkeypatch.setenv("PAPER_DB", str(db_path))
-    get_config(reload=True)
+    set_test_db(monkeypatch, db_path)
     with DatabaseManager() as db:
         db.create_tables()
         db.set_embedding_model(embeddings_manager.model_name)
@@ -544,8 +538,7 @@ def test_check_model_compatibility_mismatched_models(embeddings_manager, tmp_pat
     db_path = tmp_path / "test.db"
     different_model = "different-embedding-model"
     
-    monkeypatch.setenv("PAPER_DB", str(db_path))
-    get_config(reload=True)
+    set_test_db(monkeypatch, db_path)
     with DatabaseManager() as db:
         db.create_tables()
         db.set_embedding_model(different_model)
@@ -562,8 +555,7 @@ def test_embed_from_database_stores_model(embeddings_manager, test_database, mon
     from abstracts_explorer.database import DatabaseManager
     
     # Set env var for test_database fixture
-    monkeypatch.setenv("PAPER_DB", str(test_database))
-    get_config(reload=True)
+    set_test_db(monkeypatch, test_database)
     
     embeddings_manager.connect()
     embeddings_manager.create_collection()

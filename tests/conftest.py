@@ -13,7 +13,30 @@ from unittest.mock import Mock
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.plugin import LightweightPaper
-from abstracts_explorer.config import load_env_file
+from abstracts_explorer.config import load_env_file, get_config
+
+
+def set_test_db(monkeypatch, db_path):
+    """
+    Helper function to set PAPER_DB environment variable and reload config.
+    
+    This reduces code duplication across test files where the pattern
+    monkeypatch.setenv("PAPER_DB", str(db_path)) followed by get_config(reload=True)
+    is repeated many times.
+    
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Pytest's monkeypatch fixture
+    db_path : str or Path
+        Path to the database file
+    
+    Examples
+    --------
+    >>> set_test_db(monkeypatch, tmp_path / "test.db")
+    """
+    monkeypatch.setenv("PAPER_DB", str(db_path))
+    get_config(reload=True)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -88,11 +111,8 @@ def db_manager(tmp_path, monkeypatch):
     Sets PAPER_DB environment variable to point to a temporary database
     and reloads config to pick up the change.
     """
-    from abstracts_explorer.config import get_config
-    
     db_path = tmp_path / "test.db"
-    monkeypatch.setenv("PAPER_DB", str(db_path))
-    get_config(reload=True)  # Reload config to pick up the new PAPER_DB
+    set_test_db(monkeypatch, db_path)
     
     return DatabaseManager()
 
@@ -201,13 +221,11 @@ def test_database(tmp_path, monkeypatch):
     """
     from abstracts_explorer.database import DatabaseManager
     from abstracts_explorer.plugin import LightweightPaper
-    from abstracts_explorer.config import get_config
     
     db_path = tmp_path / "test.db"
     
     # Set PAPER_DB to point to our test database
-    monkeypatch.setenv("PAPER_DB", str(db_path))
-    get_config(reload=True)  # Reload config to pick up the new PAPER_DB
+    set_test_db(monkeypatch, db_path)
     
     # Use DatabaseManager to create the database with proper schema
     with DatabaseManager() as db:

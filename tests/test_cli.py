@@ -14,6 +14,7 @@ from abstracts_explorer.cli import (
 )
 from abstracts_explorer.plugin import LightweightPaper
 from abstracts_explorer.config import get_config
+from tests.conftest import set_test_db
 
 
 class TestCLI:
@@ -45,8 +46,7 @@ class TestCLI:
         output_db = tmp_path / "test.db"
         
         # Set PAPER_DB to output location
-        monkeypatch.setenv("PAPER_DB", str(output_db))
-        get_config(reload=True)
+        set_test_db(monkeypatch, output_db)
 
         # Mock the plugin and its download method to return LightweightPaper objects
         mock_plugin = Mock()
@@ -95,8 +95,7 @@ class TestCLI:
         output_db = tmp_path / "test.db"
         
         # Set PAPER_DB to output location
-        monkeypatch.setenv("PAPER_DB", str(output_db))
-        get_config(reload=True)
+        set_test_db(monkeypatch, output_db)
 
         # Mock the plugin to raise an exception
         mock_plugin = Mock()
@@ -124,8 +123,7 @@ class TestCLI:
         db_path = tmp_path / "test.db"
         
         # Set PAPER_DB environment variable
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         
         # Mock the plugin and its download method
         mock_plugin = Mock()
@@ -166,8 +164,7 @@ class TestCLI:
     def test_create_embeddings_db_not_found(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with non-existent database."""
         nonexistent_db = tmp_path / "nonexistent.db"
-        monkeypatch.setenv("PAPER_DB", str(nonexistent_db))
-        get_config(reload=True)
+        set_test_db(monkeypatch, nonexistent_db)
 
         # The exception will be raised and not caught, so we expect it to propagate
         with patch.object(
@@ -188,8 +185,7 @@ class TestCLI:
         from abstracts_explorer import DatabaseManager
 
         db_path = tmp_path / "test.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         with DatabaseManager() as db:
             db.create_tables()
             papers = [
@@ -234,8 +230,7 @@ class TestCLI:
 
         # Create a test database
         db_path = tmp_path / "test.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         with DatabaseManager() as db:
             db.create_tables()
             papers = [
@@ -294,8 +289,7 @@ class TestCLI:
 
         # Create a test database
         db_path = tmp_path / "test.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         with DatabaseManager() as db:
             db.create_tables()
             papers = [
@@ -358,8 +352,7 @@ class TestCLI:
 
         # Create a test database
         db_path = tmp_path / "test.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         with DatabaseManager() as db:
             db.create_tables()
             papers = [
@@ -415,8 +408,7 @@ class TestCLI:
 
         # Create a test database
         db_path = tmp_path / "test.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         with DatabaseManager() as db:
             db.create_tables()
             papers = [
@@ -475,8 +467,7 @@ class TestCLI:
 
         # Create a test database
         db_path = tmp_path / "test.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         with DatabaseManager() as db:
             db.create_tables()
             papers = [
@@ -742,8 +733,7 @@ class TestCLI:
 
         # Create a test database with lightweight schema
         db_path = tmp_path / "test.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         with DatabaseManager() as db:
             db.create_tables()
             papers = [
@@ -815,8 +805,7 @@ class TestCLI:
         embeddings_path = tmp_path / "embeddings"
         embeddings_path.mkdir()
         nonexistent_db = tmp_path / "nonexistent.db"
-        monkeypatch.setenv("PAPER_DB", str(nonexistent_db))
-        get_config(reload=True)
+        set_test_db(monkeypatch, nonexistent_db)
 
         # Mock embeddings manager
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
@@ -859,8 +848,7 @@ class TestCLI:
 
         # Create an empty database using DatabaseManager
         db_path = tmp_path / "test.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         db = DatabaseManager()
         db.connect()
         db.close()
@@ -1208,8 +1196,7 @@ class TestCLIEmbeddingsProgressAndStats:
         from abstracts_explorer.database import DatabaseManager
         from abstracts_explorer.plugin import LightweightPaper
 
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         db = DatabaseManager()
         with db:
             db.create_tables()

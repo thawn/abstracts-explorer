@@ -11,6 +11,7 @@ import pytest
 from abstracts_explorer import DatabaseManager
 from abstracts_explorer.plugin import LightweightPaper, convert_to_lightweight_schema
 from abstracts_explorer.config import get_config
+from tests.conftest import set_test_db
 from tests.helpers import requires_lm_studio
 
 # Fixtures imported from conftest.py:
@@ -27,8 +28,7 @@ class TestIntegration:
         """Test querying an empty database."""
         db_file = tmp_path / "empty.db"
 
-        monkeypatch.setenv("PAPER_DB", str(db_file))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_file)
         with DatabaseManager() as db:
             db.create_tables()
 
@@ -426,8 +426,7 @@ class TestIntegration:
         lightweight_dicts = convert_to_lightweight_schema(raw_papers)
         papers = [LightweightPaper(**paper_dict) for paper_dict in lightweight_dicts]
 
-        monkeypatch.setenv("PAPER_DB", str(db_file))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_file)
         with DatabaseManager() as db:
             # Create tables
             db.create_tables()
@@ -539,8 +538,7 @@ class TestIntegration:
         papers = [LightweightPaper(**paper_dict) for paper_dict in lightweight_dicts]
 
         # Step 1: Load papers into database
-        monkeypatch.setenv("PAPER_DB", str(db_file))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_file)
         with DatabaseManager() as db:
             db.create_tables()
             count = db.add_papers(papers)

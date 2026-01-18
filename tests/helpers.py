@@ -62,6 +62,7 @@ def create_test_db_with_paper(db_path, paper_data):
     >>> db.close()
     """
     from abstracts_explorer.plugin import LightweightPaper
+    from abstracts_explorer.config import get_config
     
     # Set environment variable and reload config
     os.environ["PAPER_DB"] = str(db_path)

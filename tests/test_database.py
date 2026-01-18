@@ -13,6 +13,7 @@ import sqlite3
 from abstracts_explorer.database import DatabaseManager, DatabaseError
 from abstracts_explorer.plugin import LightweightPaper
 from abstracts_explorer.config import get_config
+from tests.conftest import set_test_db
 
 # Fixtures are now imported from conftest.py:
 # - db_manager: DatabaseManager instance with temporary database
@@ -57,8 +58,7 @@ class TestDatabaseManager:
     def test_init(self, tmp_path, monkeypatch):
         """Test DatabaseManager initialization."""
         db_path = tmp_path / "test.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         
         db = DatabaseManager()
 
@@ -77,8 +77,7 @@ class TestDatabaseManager:
     def test_connect_creates_directories(self, tmp_path, monkeypatch):
         """Test that connect creates parent directories."""
         db_path = tmp_path / "subdir" / "another" / "test.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         
         db = DatabaseManager()
         db.connect()
@@ -103,8 +102,7 @@ class TestDatabaseManager:
     def test_context_manager(self, tmp_path, monkeypatch):
         """Test DatabaseManager as context manager."""
         db_path = tmp_path / "test.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
 
         with DatabaseManager() as db:
             assert db.connection is not None
@@ -445,8 +443,7 @@ class TestEmbeddingModelMetadata:
         model_name = "persistent-model"
         
         # Set PAPER_DB and reload config
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         
         # First connection: set the model
         with DatabaseManager() as db1:

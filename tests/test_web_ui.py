@@ -11,6 +11,7 @@ This module contains unit tests for the web UI application including:
 
 import json
 import pytest
+from tests.conftest import set_test_db
 import sys
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -700,8 +701,7 @@ class TestWebUIDatabaseNotFound:
 
         # Create a valid SQLite database
         db_path = tmp_path / "test.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
 
         with app.test_client() as client:
             # Database will be created automatically, so /api/stats should work
@@ -741,8 +741,7 @@ class TestWebUIDatabaseModes:
 
         # Create a real SQLite database
         db_path = tmp_path / "test.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         db = DatabaseManager()
         with db:
             db.create_tables()
@@ -774,8 +773,7 @@ class TestWebUIDatabaseModes:
 
         # Create a real SQLite database
         db_path = tmp_path / "test.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         db = DatabaseManager()
         with db:
             db.create_tables()
@@ -808,8 +806,7 @@ class TestWebUIDatabaseModes:
 
         # Create a real SQLite database with test data
         db_path = tmp_path / "test.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         db = DatabaseManager()
         with db:
             db.create_tables()
@@ -996,15 +993,15 @@ class TestWebUIRunServer:
         
         # Set non-existent database path
         nonexistent_path = "/nonexistent/test.db"
-        monkeypatch.setenv("PAPER_DB", nonexistent_path)
-        get_config(reload=True)
+        set_test_db(monkeypatch, nonexistent_path)
 
         with patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=False):
             with pytest.raises(FileNotFoundError) as exc_info:
                 run_server(host="127.0.0.1", port=5000, debug=False)
             
-            # Verify error message includes database path
-            assert nonexistent_path in str(exc_info.value)
+            # Verify error message includes database filename (platform-independent check)
+            # On Unix: "/nonexistent/test.db", on Windows: "D:\nonexistent\test.db"
+            assert "test.db" in str(exc_info.value)
         
         # Verify helpful error message was printed
         captured = capsys.readouterr()
@@ -1070,8 +1067,7 @@ class TestServerInitialization:
         
         # Create a test database
         db_path = tmp_path / "test.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         db = DatabaseManager()
         with db:
             db.create_tables()
@@ -1096,8 +1092,7 @@ class TestServerInitialization:
         
         # Create a test database
         db_path = tmp_path / "test.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         db = DatabaseManager()
         with db:
             db.create_tables()
@@ -1126,8 +1121,7 @@ class TestServerInitialization:
         
         # Create a test database
         db_path = tmp_path / "test.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         db = DatabaseManager()
         with db:
             db.create_tables()
@@ -1161,8 +1155,7 @@ class TestServerInitialization:
         
         # Create a test database
         db_path = tmp_path / "test.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         db = DatabaseManager()
         with db:
             db.create_tables()
@@ -1200,8 +1193,7 @@ class TestServerInitialization:
         
         # Use a non-existent database path
         db_path = tmp_path / "nonexistent.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         
         # Should raise FileNotFoundError
         with pytest.raises(FileNotFoundError, match="Database not found"):
@@ -1246,8 +1238,7 @@ class TestClusteringEndpoints:
         
         # Create a database with only old tables (simulate migration scenario)
         db_path = tmp_path / "test.db"
-        monkeypatch.setenv("PAPER_DB", str(db_path))
-        get_config(reload=True)
+        set_test_db(monkeypatch, db_path)
         db = DatabaseManager()
         with db:
             db.create_tables()
