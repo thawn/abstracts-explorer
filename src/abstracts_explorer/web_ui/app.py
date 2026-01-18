@@ -17,8 +17,10 @@ from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.rag import RAGChat
 from abstracts_explorer.config import get_config
-from abstracts_explorer.paper_utils import get_paper_with_authors, format_search_results, PaperFormattingError
-from abstracts_explorer.export_utils import natural_sort_key, generate_folder_structure_export
+from abstracts_explorer.paper_utils import get_paper_with_authors, PaperFormattingError
+from abstracts_explorer.export_utils import export_papers_to_zip
+from abstracts_explorer.clustering import compute_clusters_with_cache, ClusteringError, calculate_default_clusters
+from abstracts_explorer.plugin import get_available_filters
 
 logger = logging.getLogger(__name__)
 
@@ -168,33 +170,9 @@ def stats():
         conference = conference_param if conference_param else None
 
         database = get_database()
-
-        # Build WHERE clause for filtered count
-        conditions = []
-        parameters = []
-
-        if year is not None:
-            conditions.append("year = ?")
-            parameters.append(year)
-
-        if conference is not None:
-            conditions.append("conference = ?")
-            parameters.append(conference)
-
-        if conditions:
-            where_clause = " AND ".join(conditions)
-            result = database.query(f"SELECT COUNT(*) as count FROM papers WHERE {where_clause}", tuple(parameters))
-            total_papers = result[0]["count"] if result else 0
-        else:
-            total_papers = database.get_paper_count()
-
-        return jsonify(
-            {
-                "total_papers": total_papers,
-                "year": year,
-                "conference": conference,
-            }
-        )
+        stats_data = database.get_stats(year=year, conference=conference)
+        
+        return jsonify(stats_data)
     except ValueError as e:
         return jsonify({"error": f"Invalid year parameter: {str(e)}"}), 400
     except Exception as e:
@@ -286,7 +264,7 @@ def get_filters():
 
 
 @app.route("/api/available-filters")
-def get_available_filters():
+def get_available_filters_endpoint():
     """
     Get available conferences and years from registered plugins.
 
@@ -302,34 +280,8 @@ def get_available_filters():
         - conference_years: dict mapping conference names to their supported years
     """
     try:
-        from abstracts_explorer.plugins import list_plugins
-
-        # Get all registered plugins
-        plugins = list_plugins()
-
-        # Build mapping of conferences to years
-        conference_years = {}
-        all_years = set()
-
-        for plugin_info in plugins:
-            conference_name = plugin_info.get("conference_name")
-            supported_years = plugin_info.get("supported_years", [])
-
-            if conference_name and supported_years:
-                if conference_name not in conference_years:
-                    conference_years[conference_name] = []
-                conference_years[conference_name].extend(supported_years)
-                all_years.update(supported_years)
-
-        # Sort years and deduplicate
-        all_years_sorted = sorted(list(all_years), reverse=True)
-        conferences = sorted(conference_years.keys())
-
-        # Sort years for each conference
-        for conf in conference_years:
-            conference_years[conf] = sorted(conference_years[conf], reverse=True)
-
-        return jsonify({"conferences": conferences, "years": all_years_sorted, "conference_years": conference_years})
+        filters = get_available_filters()
+        return jsonify(filters)
     except Exception as e:
         logger.error(f"Error in available-filters endpoint: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
@@ -369,61 +321,25 @@ def search():
             # Semantic search using embeddings
             em = get_embeddings_manager()
             database = get_database()
-
-            # Build metadata filter for embeddings search
-            filter_conditions = []
-            if sessions:
-                filter_conditions.append({"session": {"$in": sessions}})
-            if years:
-                # Convert years to integers for ChromaDB
-                year_ints = [int(y) for y in years]
-                filter_conditions.append({"year": {"$in": year_ints}})
-            if conferences:
-                filter_conditions.append({"conference": {"$in": conferences}})
-
-            # Use $or operator if multiple conditions, otherwise use single condition
-            where_filter = None
-            if len(filter_conditions) > 1:
-                where_filter = {"$and": filter_conditions}
-            elif len(filter_conditions) == 1:
-                where_filter = filter_conditions[0]
-
-            logger.info(f"Search filter: sessions={sessions}, years={years}, conferences={conferences}")
-            logger.info(f"Where filter: {where_filter}")
-
-            results = em.search_similar(query, n_results=limit * 2, where=where_filter)  # Get more results to filter
-
-            logger.info(f"Search results count: {len(results.get('ids', [[]])[0]) if results else 0}")
-
-            # Transform ChromaDB results to paper format using shared utility
-            try:
-                papers = format_search_results(results, database, include_documents=False)
-            except PaperFormattingError:
-                # No valid papers found
-                return jsonify({"papers": [], "count": 0, "query": query, "use_embeddings": use_embeddings})
-
-            # Limit results (filtering already done at database level)
-            papers = papers[:limit]
-        else:
-            # Keyword search in database with multiple filter support
-            database = get_database()
-            papers = database.search_papers(
-                keyword=query,
+            
+            papers = em.search_papers_semantic(
+                query=query,
+                database=database,
+                limit=limit,
                 sessions=sessions,
                 years=years,
                 conferences=conferences,
-                limit=limit,
             )
-
-            # Convert to list of dicts for JSON serialization
-            papers = [dict(p) for p in papers]
-
-            # Parse authors from comma-separated string for each paper
-            for paper in papers:
-                if "authors" in paper and paper["authors"]:
-                    paper["authors"] = [a.strip() for a in paper["authors"].split(";")]
-                else:
-                    paper["authors"] = []
+        else:
+            # Keyword search in database
+            database = get_database()
+            papers = database.search_papers_keyword(
+                query=query,
+                limit=limit,
+                sessions=sessions,
+                years=years,
+                conferences=conferences,
+            )
 
         return jsonify({"papers": papers, "count": len(papers), "query": query, "use_embeddings": use_embeddings})
     except Exception as e:
@@ -611,8 +527,6 @@ def compute_clusters():
         Clustering results with points, statistics, and metadata
     """
     try:
-        from abstracts_explorer.clustering import ClusteringManager, ClusteringError, calculate_default_clusters
-
         data = request.get_json() or {}
 
         # Get parameters
@@ -631,86 +545,25 @@ def compute_clusters():
         # Get current embedding model
         current_model = config.embedding_model
         
-        # Get embeddings count to calculate default n_clusters if needed
-        collection_stats = em.get_collection_stats()
-        n_papers = collection_stats["count"]
-        
-        # Calculate default n_clusters if not provided
-        if n_clusters is None:
-            n_clusters = calculate_default_clusters(n_papers)
-            logger.info(f"Auto-calculated n_clusters={n_clusters} based on {n_papers} papers")
-
-        # Check if cache exists and is valid
-        if not force and not limit:  # Only use cache if not limiting results
-            cached_results = database.get_clustering_cache(
-                embedding_model=current_model,
-                reduction_method=reduction_method,
-                n_components=n_components,
-                clustering_method=clustering_method,
-                n_clusters=n_clusters if clustering_method.lower() != "dbscan" else None,
-            )
-
-            if cached_results:
-                logger.info("Using cached clustering results")
-                return jsonify(cached_results)
-
-        # Cache miss or forced recompute - compute clusters
-        logger.info("Computing new clustering results...")
-
-        # Create clustering manager
-        cm = ClusteringManager(em)
-
-        # Load embeddings
-        logger.info(f"Loading embeddings (limit={limit})...")
-        cm.load_embeddings(limit=limit)
-
-        # Perform clustering on full embeddings first
-        logger.info(f"Clustering using {clustering_method} on full embeddings...")
-        kwargs = {}
+        # Build clustering kwargs for methods like DBSCAN
+        clustering_kwargs = {}
         if clustering_method.lower() == "dbscan":
-            kwargs["eps"] = data.get("eps", 0.5)
-            kwargs["min_samples"] = data.get("min_samples", 5)
+            clustering_kwargs["eps"] = data.get("eps", 0.5)
+            clustering_kwargs["min_samples"] = data.get("min_samples", 5)
 
-        cm.cluster(
-            method=clustering_method,
-            n_clusters=n_clusters,
-            use_reduced=False,  # Cluster on full embeddings
-            **kwargs
-        )
-
-        # Reduce dimensions for visualization
-        logger.info(f"Reducing dimensions using {reduction_method} for visualization...")
-        cm.reduce_dimensions(
-            method=reduction_method,
+        # Use shared clustering function
+        results = compute_clusters_with_cache(
+            embeddings_manager=em,
+            database=database,
+            embedding_model=current_model,
+            reduction_method=reduction_method,
             n_components=n_components,
+            clustering_method=clustering_method,
+            n_clusters=n_clusters,
+            limit=limit,
+            force=force,
+            **clustering_kwargs
         )
-
-        # Generate cluster labels
-        logger.info("Generating cluster labels...")
-        try:
-            cm.extract_cluster_keywords(n_keywords=10)
-            cm.generate_cluster_labels(use_llm=True, max_keywords=5)
-        except Exception as e:
-            logger.warning(f"Failed to generate cluster labels: {e}")
-            # Continue without labels
-
-        # Get results
-        results = cm.get_clustering_results()
-
-        # Save to cache if no limit was applied
-        if not limit:
-            try:
-                database.save_clustering_cache(
-                    embedding_model=current_model,
-                    reduction_method=reduction_method,
-                    n_components=n_components,
-                    clustering_method=clustering_method,
-                    results=results,
-                    n_clusters=n_clusters if clustering_method.lower() != "dbscan" else None,
-                    clustering_params=kwargs if kwargs else None,
-                )
-            except Exception as e:
-                logger.warning(f"Failed to save clustering cache: {e}")
 
         return jsonify(results)
 
@@ -818,7 +671,6 @@ def precalculate_clusters():
     """
     try:
         import threading
-        from abstracts_explorer.clustering import ClusteringManager, calculate_default_clusters
         
         data = request.get_json() or {}
         
@@ -861,41 +713,17 @@ def precalculate_clusters():
             try:
                 logger.info(f"Starting background clustering pre-calculation (n_clusters={n_clusters})")
                 
-                # Create clustering manager
-                cm = ClusteringManager(em)
-                
-                # Load embeddings
-                cm.load_embeddings(limit=None)
-                
-                # Perform clustering
-                cm.cluster(
-                    method=clustering_method,
-                    n_clusters=n_clusters,
-                    use_reduced=False,
-                )
-                
-                # Reduce dimensions
-                cm.reduce_dimensions(
-                    method=reduction_method,
-                    n_components=n_components,
-                )
-                
-                # Generate labels
-                try:
-                    cm.extract_cluster_keywords(n_keywords=10)
-                    cm.generate_cluster_labels(use_llm=True, max_keywords=5)
-                except Exception as e:
-                    logger.warning(f"Failed to generate cluster labels in background: {e}")
-                
-                # Get results and save to cache
-                results = cm.get_clustering_results()
-                database.save_clustering_cache(
+                # Use shared clustering function
+                compute_clusters_with_cache(
+                    embeddings_manager=em,
+                    database=database,
                     embedding_model=current_model,
                     reduction_method=reduction_method,
                     n_components=n_components,
                     clustering_method=clustering_method,
-                    results=results,
-                    n_clusters=n_clusters if clustering_method.lower() != "dbscan" else None,
+                    n_clusters=n_clusters,
+                    limit=None,
+                    force=False,
                 )
                 
                 logger.info("Background clustering pre-calculation completed successfully")
@@ -993,46 +821,8 @@ def export_interesting_papers():
         if not papers:
             return jsonify({"error": "No papers found"}), 404
 
-        # Sort papers based on the selected sort order
-        if sort_order == "search-rating-poster":
-            # Search term, then priority, then poster position
-            papers.sort(
-                key=lambda p: (
-                    p.get("searchTerm") or "",
-                    -p.get("priority", 0),  # Descending priority
-                    natural_sort_key(p.get("poster_position") or ""),
-                )
-            )
-        elif sort_order == "rating-poster-search":
-            # Priority, then poster position, then search term
-            papers.sort(
-                key=lambda p: (
-                    -p.get("priority", 0),  # Descending priority
-                    natural_sort_key(p.get("poster_position") or ""),
-                    p.get("searchTerm") or "",
-                )
-            )
-        elif sort_order == "poster-search-rating":
-            # Poster position, then search term, then priority
-            papers.sort(
-                key=lambda p: (
-                    natural_sort_key(p.get("poster_position") or ""),
-                    p.get("searchTerm") or "",
-                    -p.get("priority", 0),  # Descending priority
-                )
-            )
-        else:
-            # Default: search term, priority, poster position
-            papers.sort(
-                key=lambda p: (
-                    p.get("searchTerm") or "",
-                    -p.get("priority", 0),  # Descending priority
-                    natural_sort_key(p.get("poster_position") or ""),
-                )
-            )
-
-        # Generate zip file with folder structure
-        zip_buffer = generate_folder_structure_export(papers, search_query, sort_order)
+        # Use export utility function to sort and generate ZIP
+        zip_buffer = export_papers_to_zip(papers, search_query, sort_order)
 
         return send_file(
             zip_buffer,

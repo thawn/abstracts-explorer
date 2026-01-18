@@ -599,3 +599,77 @@ def generate_folder_structure_export(
 
     zip_buffer.seek(0)
     return zip_buffer
+
+
+def export_papers_to_zip(
+    papers: List[Dict[str, Any]],
+    search_query: str,
+    sort_order: str = "search-rating-poster"
+) -> BytesIO:
+    """
+    Export papers with priorities to a ZIP file, handling sorting and formatting.
+    
+    This is a convenience function that handles the complete export workflow:
+    - Sorts papers based on the specified sort order
+    - Generates the ZIP file structure
+    - Returns the buffer ready for sending
+    
+    Parameters
+    ----------
+    papers : list
+        List of paper dictionaries with priority and searchTerm fields
+    search_query : str
+        Search query context for the export
+    sort_order : str, optional
+        Sort order: 'search-rating-poster', 'rating-poster-search', or 'poster-search-rating'
+        
+    Returns
+    -------
+    BytesIO
+        Buffer containing the generated ZIP file
+        
+    Examples
+    --------
+    >>> papers = [{"title": "Paper 1", "priority": 5, "searchTerm": "AI"}]
+    >>> zip_buffer = export_papers_to_zip(papers, "AI research", "search-rating-poster")
+    """
+    # Sort papers based on the selected sort order
+    if sort_order == "search-rating-poster":
+        # Search term, then priority, then poster position
+        papers.sort(
+            key=lambda p: (
+                p.get("searchTerm") or "",
+                -p.get("priority", 0),  # Descending priority
+                natural_sort_key(p.get("poster_position") or ""),
+            )
+        )
+    elif sort_order == "rating-poster-search":
+        # Priority, then poster position, then search term
+        papers.sort(
+            key=lambda p: (
+                -p.get("priority", 0),  # Descending priority
+                natural_sort_key(p.get("poster_position") or ""),
+                p.get("searchTerm") or "",
+            )
+        )
+    elif sort_order == "poster-search-rating":
+        # Poster position, then search term, then priority
+        papers.sort(
+            key=lambda p: (
+                natural_sort_key(p.get("poster_position") or ""),
+                p.get("searchTerm") or "",
+                -p.get("priority", 0),  # Descending priority
+            )
+        )
+    else:
+        # Default: search term, priority, poster position
+        papers.sort(
+            key=lambda p: (
+                p.get("searchTerm") or "",
+                -p.get("priority", 0),  # Descending priority
+                natural_sort_key(p.get("poster_position") or ""),
+            )
+        )
+    
+    # Generate zip file with folder structure
+    return generate_folder_structure_export(papers, search_query, sort_order)

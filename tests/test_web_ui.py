@@ -148,7 +148,7 @@ class TestSearchEndpoint:
 
         This test ensures the bug where 'title' and 'abstract' were
         passed to search_papers() doesn't happen again. It verifies
-        that search_papers is called with 'keyword' parameter only.
+        that search_papers_keyword is called with 'query' parameter only.
         """
         from unittest.mock import MagicMock, patch
         import sys
@@ -158,10 +158,10 @@ class TestSearchEndpoint:
 
         # Create a mock database
         mock_db = MagicMock()
-        mock_papers = [{"id": 1, "name": "Test Paper", "abstract": "Test abstract", "uid": "test1"}]
+        mock_papers = [{"id": 1, "name": "Test Paper", "abstract": "Test abstract", "uid": "test1", "authors": []}]
 
         # Setup the mock to return our test data
-        mock_db.search_papers.return_value = mock_papers
+        mock_db.search_papers_keyword.return_value = mock_papers
 
         # Patch the get_database function to return our mock
         with patch.object(app_module, "get_database", return_value=mock_db):
@@ -172,19 +172,19 @@ class TestSearchEndpoint:
                 content_type="application/json",
             )
 
-        # Verify search_papers was called with correct parameters
-        # This is the key test - it should use 'keyword', not 'title' or 'abstract'
-        mock_db.search_papers.assert_called_once()
-        call_args = mock_db.search_papers.call_args
+        # Verify search_papers_keyword was called with correct parameters
+        # This is the key test - it should use 'query' parameter
+        mock_db.search_papers_keyword.assert_called_once()
+        call_args = mock_db.search_papers_keyword.call_args
 
-        # Check that it was called with 'keyword' parameter
-        assert "keyword" in call_args.kwargs, "search_papers should be called with 'keyword' parameter"
-        assert call_args.kwargs["keyword"] == "test"
+        # Check that it was called with 'query' parameter
+        assert "query" in call_args.kwargs, "search_papers_keyword should be called with 'query' parameter"
+        assert call_args.kwargs["query"] == "test"
         assert call_args.kwargs["limit"] == 10
 
         # Verify it was NOT called with invalid parameters
-        assert "title" not in call_args.kwargs, "search_papers should NOT be called with 'title' parameter"
-        assert "abstract" not in call_args.kwargs, "search_papers should NOT be called with 'abstract' parameter"
+        assert "title" not in call_args.kwargs, "search_papers_keyword should NOT be called with 'title' parameter"
+        assert "abstract" not in call_args.kwargs, "search_papers_keyword should NOT be called with 'abstract' parameter"
 
         # Check response
         assert response.status_code == 200
@@ -204,9 +204,11 @@ class TestSearchEndpoint:
 
         # Create a mock database
         mock_db = MagicMock()
-        mock_papers = [{"id": i, "name": f"Paper {i}", "abstract": "About transformers"} for i in range(5)]
+        mock_papers = [
+            {"id": i, "name": f"Paper {i}", "abstract": "About transformers", "authors": []} for i in range(5)
+        ]
 
-        mock_db.search_papers.return_value = mock_papers[:2]  # Return limited results
+        mock_db.search_papers_keyword.return_value = mock_papers[:2]  # Return limited results
 
         # Patch the get_database function
         with patch.object(app_module, "get_database", return_value=mock_db):
@@ -218,7 +220,7 @@ class TestSearchEndpoint:
             )
 
         # Verify limit was passed
-        call_args = mock_db.search_papers.call_args
+        call_args = mock_db.search_papers_keyword.call_args
         assert call_args.kwargs["limit"] == 2
 
         assert response.status_code == 200
@@ -364,43 +366,34 @@ class TestWebUISemanticSearchDetails:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            # Mock the get_embeddings_manager and get_database functions
+            # Mock the get_embeddings_manager function
             with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
                 with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
-                    # Setup mock embeddings manager with STRING UIDs
+                    # Setup mock embeddings manager
                     mock_em = Mock()
-                    mock_em.search_similar.return_value = {
-                        "ids": [["uid_123", "uid_456"]],  # Use string UIDs
-                        "distances": [[0.1, 0.2]],
-                        "documents": [["doc1", "doc2"]],
-                    }
-                    mock_get_em.return_value = mock_em
-
-                    # Setup mock database with lightweight schema
                     mock_db = Mock()
-                    mock_paper1 = {
-                        "uid": "uid_123",
-                        "title": "Test Paper 1",
-                        "abstract": "Abstract 1",
-                        "authors": "Author A, Author B",  # Comma-separated string
-                    }
-                    mock_paper2 = {
-                        "uid": "uid_456",
-                        "title": "Test Paper 2",
-                        "abstract": "Abstract 2",
-                        "authors": "Author C, Author D",  # Comma-separated string
-                    }
-
-                    # Mock query to return paper rows
-                    def mock_query(sql, params):
-                        paper_uid = params[0]
-                        if paper_uid == "uid_123":
-                            return [mock_paper1]
-                        elif paper_uid == "uid_456":
-                            return [mock_paper2]
-                        return []
-
-                    mock_db.query.side_effect = mock_query
+                    
+                    # Mock the search_papers_semantic method to return proper papers
+                    mock_papers = [
+                        {
+                            "uid": "uid_123",
+                            "title": "Test Paper 1",
+                            "abstract": "Abstract 1",
+                            "authors": ["Author A", "Author B"],
+                            "similarity": 0.9,
+                            "distance": 0.1,
+                        },
+                        {
+                            "uid": "uid_456",
+                            "title": "Test Paper 2",
+                            "abstract": "Abstract 2",
+                            "authors": ["Author C", "Author D"],
+                            "similarity": 0.8,
+                            "distance": 0.2,
+                        },
+                    ]
+                    mock_em.search_papers_semantic.return_value = mock_papers
+                    mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
 
                     # Make request
@@ -434,23 +427,22 @@ class TestWebUISemanticSearchDetails:
 
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
-                mock_em = Mock()
-                mock_em.search_similar.return_value = {
-                    "ids": [[]],
-                    "distances": [[]],
-                    "documents": [[]],
-                }
-                mock_get_em.return_value = mock_em
+                with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
+                    mock_em = Mock()
+                    mock_db = Mock()
+                    mock_em.search_papers_semantic.return_value = []
+                    mock_get_em.return_value = mock_em
+                    mock_get_db.return_value = mock_db
 
-                response = client.post(
-                    "/api/search",
-                    json={"query": "nonexistent", "use_embeddings": True, "limit": 5},
-                )
+                    response = client.post(
+                        "/api/search",
+                        json={"query": "nonexistent", "use_embeddings": True, "limit": 5},
+                    )
 
-                assert response.status_code == 200
-                data = response.get_json()
-                assert data["papers"] == []
-                assert data["count"] == 0
+                    assert response.status_code == 200
+                    data = response.get_json()
+                    assert data["papers"] == []
+                    assert data["count"] == 0
 
 
 class TestWebUIChatEndpointSuccess:
@@ -577,7 +569,7 @@ class TestWebUIErrorHandlingDetails:
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 mock_db = Mock()
-                mock_db.get_paper_count.side_effect = Exception("Database error")
+                mock_db.get_stats.side_effect = Exception("Database error")
                 mock_get_db.return_value = mock_db
 
                 response = client.get("/api/stats")
@@ -634,7 +626,11 @@ class TestWebUIStatsEndpoint:
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 mock_db = Mock()
-                mock_db.get_paper_count.return_value = 42
+                mock_db.get_stats.return_value = {
+                    "total_papers": 42,
+                    "year": None,
+                    "conference": None,
+                }
                 mock_get_db.return_value = mock_db
 
                 response = client.get("/api/stats")
@@ -912,13 +908,17 @@ class TestWebUIStatsExceptionHandling:
     """Test stats endpoint exception handling more thoroughly."""
 
     def test_stats_paper_count_calculation(self):
-        """Test that stats correctly calls get_paper_count (line 319)."""
+        """Test that stats correctly calls get_stats (line 319)."""
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 mock_db = Mock()
-                mock_db.get_paper_count.return_value = 100
+                mock_db.get_stats.return_value = {
+                    "total_papers": 100,
+                    "year": None,
+                    "conference": None,
+                }
                 mock_get_db.return_value = mock_db
 
                 response = client.get("/api/stats")
@@ -927,8 +927,8 @@ class TestWebUIStatsExceptionHandling:
                 data = response.get_json()
                 assert data["total_papers"] == 100
 
-                # Verify get_paper_count was actually called
-                mock_db.get_paper_count.assert_called_once()
+                # Verify get_stats was actually called
+                mock_db.get_stats.assert_called_once()
 
 
 class TestWebUIRunServer:
