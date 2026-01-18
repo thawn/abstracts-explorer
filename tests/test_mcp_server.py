@@ -139,7 +139,7 @@ class TestLoadClusteringData:
         mock_em.connect.assert_called_once()
         mock_em.create_collection.assert_called_once()
 
-        mock_db_class.assert_called_once_with("abstracts.db")
+        mock_db_class.assert_called_once_with()
         mock_db.connect.assert_called_once()
 
         mock_cm_class.assert_called_once_with(mock_em, mock_db)
@@ -168,7 +168,6 @@ class TestLoadClusteringData:
             cm, db = load_clustering_data(
                 embeddings_path="custom_chroma",
                 collection_name="custom_papers",
-                db_path="custom.db",
             )
 
             # Verify custom paths were used
@@ -176,7 +175,7 @@ class TestLoadClusteringData:
                 chroma_path="custom_chroma",
                 collection_name="custom_papers",
             )
-            mock_db_class.assert_called_once_with("custom.db")
+            mock_db_class.assert_called_once_with()
 
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
     @patch("abstracts_explorer.mcp_server.get_config")

@@ -112,8 +112,7 @@ class Config:
         Similarity threshold for determining when to retrieve new papers (0.0-1.0).
     database_url : str
         SQLAlchemy database URL (supports SQLite, PostgreSQL, etc.).
-    paper_db_path : str
-        Legacy: Path to SQLite paper database (used when DATABASE_URL not set).
+        Automatically constructed from PAPER_DB config variable.
 
     Examples
     --------
@@ -163,17 +162,20 @@ class Config:
         self.llm_backend_auth_token = self._get_env("LLM_BACKEND_AUTH_TOKEN", default="")
 
         # Database Configuration
-        # DATABASE_URL takes precedence for multi-database support
-        # Falls back to PAPER_DB_PATH for backward compatibility (SQLite only)
-        database_url = self._get_env("DATABASE_URL", default="")
-        if database_url:
-            self.database_url = database_url
-            self.paper_db_path = ""  # Not used when DATABASE_URL is set
+        # PAPER_DB can be either:
+        # 1. A PostgreSQL URL (e.g., "postgresql://user:pass@host/db")
+        # 2. A file path for SQLite (e.g., "abstracts.db" or "/path/to/abstracts.db")
+        paper_db = self._get_env("PAPER_DB", default="abstracts.db")
+        
+        if paper_db.startswith("postgresql://") or paper_db.startswith("sqlite://"):
+            # Full database URL provided
+            self.database_url = paper_db
+        elif "://" in paper_db:
+            # Other database URL (mysql, etc.)
+            self.database_url = paper_db
         else:
-            # Legacy SQLite path configuration
-            paper_db_path = self._resolve_path(self._get_env("PAPER_DB_PATH", default="abstracts.db"))
-            self.paper_db_path = paper_db_path
-            # Convert to SQLAlchemy URL format
+            # File path - treat as SQLite
+            paper_db_path = self._resolve_path(paper_db)
             self.database_url = f"sqlite:///{paper_db_path}"
 
         # Embedding database configuration
@@ -339,7 +341,6 @@ class Config:
             "embedding_db_path": self.embedding_db_path,
             "embedding_db_url": self.embedding_db_url,
             "database_url": self._mask_database_url(self.database_url),
-            "paper_db_path": self.paper_db_path,
             "collection_name": self.collection_name,
             "max_context_papers": self.max_context_papers,
         }

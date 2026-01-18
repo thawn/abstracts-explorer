@@ -41,7 +41,6 @@ class ClusterAnalysisError(Exception):
 def load_clustering_data(
     embeddings_path: Optional[str] = None,
     collection_name: Optional[str] = None,
-    db_path: Optional[str] = None,
 ) -> tuple[ClusteringManager, DatabaseManager]:
     """
     Load clustering data and database.
@@ -52,8 +51,6 @@ def load_clustering_data(
         Path to ChromaDB embeddings database
     collection_name : str, optional
         Name of the ChromaDB collection
-    db_path : str, optional
-        Path to SQLite database
 
     Returns
     -------
@@ -70,7 +67,6 @@ def load_clustering_data(
     # Use config defaults if not provided
     embeddings_path = embeddings_path or config.embedding_db_path
     collection_name = collection_name or config.collection_name
-    db_path = db_path or config.paper_db_path
     
     try:
         # Initialize embeddings manager
@@ -82,7 +78,7 @@ def load_clustering_data(
         em.create_collection()
         
         # Initialize database manager
-        db = DatabaseManager(db_path)
+        db = DatabaseManager()
         db.connect()
         
         # Initialize clustering manager
@@ -188,7 +184,6 @@ def get_cluster_topics(
     clustering_method: str = "kmeans",
     embeddings_path: Optional[str] = None,
     collection_name: Optional[str] = None,
-    db_path: Optional[str] = None,
 ) -> str:
     """
     Get the most frequently mentioned topics from clustered embeddings.
@@ -208,8 +203,6 @@ def get_cluster_topics(
         Path to ChromaDB embeddings database (uses config default if not provided)
     collection_name : str, optional
         Name of ChromaDB collection (uses config default if not provided)
-    db_path : str, optional
-        Path to SQLite database (uses config default if not provided)
 
     Returns
     -------
@@ -220,10 +213,9 @@ def get_cluster_topics(
         config = get_config()
         embeddings_path = embeddings_path or config.embedding_db_path
         collection_name = collection_name or config.collection_name
-        db_path = db_path or config.paper_db_path
         
         # Load clustering data
-        cm, db = load_clustering_data(embeddings_path, collection_name, db_path)
+        cm, db = load_clustering_data(embeddings_path, collection_name)
         
         # Load embeddings
         logger.info("Loading embeddings...")
@@ -352,7 +344,6 @@ def get_topic_evolution(
     where: Optional[Dict[str, Any]] = None,
     embeddings_path: Optional[str] = None,
     collection_name: Optional[str] = None,
-    db_path: Optional[str] = None,
 ) -> str:
     """
     Analyze how topics have evolved over the years for a conference.
@@ -383,8 +374,6 @@ def get_topic_evolution(
         Path to ChromaDB embeddings database
     collection_name : str, optional
         Name of ChromaDB collection
-    db_path : str, optional
-        Path to SQLite database
 
     Returns
     -------
@@ -395,7 +384,6 @@ def get_topic_evolution(
         config = get_config()
         embeddings_path = embeddings_path or config.embedding_db_path
         collection_name = collection_name or config.collection_name
-        db_path = db_path or config.paper_db_path
         
         # Initialize embeddings manager
         em = EmbeddingsManager(
@@ -406,7 +394,7 @@ def get_topic_evolution(
         em.create_collection()
         
         # Initialize database
-        db = DatabaseManager(db_path)
+        db = DatabaseManager()
         db.connect()
         
         # Build metadata filter using helper function
@@ -491,7 +479,6 @@ def get_recent_developments(
     where: Optional[Dict[str, Any]] = None,
     embeddings_path: Optional[str] = None,
     collection_name: Optional[str] = None,
-    db_path: Optional[str] = None,
 ) -> str:
     """
     Find the most important recent developments in a specific topic.
@@ -522,8 +509,6 @@ def get_recent_developments(
         Path to ChromaDB embeddings database
     collection_name : str, optional
         Name of ChromaDB collection
-    db_path : str, optional
-        Path to SQLite database
 
     Returns
     -------
@@ -534,7 +519,6 @@ def get_recent_developments(
         config = get_config()
         embeddings_path = embeddings_path or config.embedding_db_path
         collection_name = collection_name or config.collection_name
-        db_path = db_path or config.paper_db_path
         
         # Initialize embeddings manager
         em = EmbeddingsManager(
@@ -545,7 +529,7 @@ def get_recent_developments(
         em.create_collection()
         
         # Initialize database
-        db = DatabaseManager(db_path)
+        db = DatabaseManager()
         db.connect()
         
         # Calculate year cutoff
@@ -620,7 +604,6 @@ def get_cluster_visualization(
     output_path: Optional[str] = None,
     embeddings_path: Optional[str] = None,
     collection_name: Optional[str] = None,
-    db_path: Optional[str] = None,
 ) -> str:
     """
     Generate visualization data for clustered embeddings.
@@ -644,8 +627,6 @@ def get_cluster_visualization(
         Path to ChromaDB embeddings database
     collection_name : str, optional
         Name of ChromaDB collection
-    db_path : str, optional
-        Path to SQLite database
 
     Returns
     -------
@@ -656,7 +637,6 @@ def get_cluster_visualization(
         config = get_config()
         embeddings_path = embeddings_path or config.embedding_db_path
         collection_name = collection_name or config.collection_name
-        db_path = db_path or config.paper_db_path
         
         # Perform clustering
         logger.info("Performing clustering for visualization...")

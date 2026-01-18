@@ -13,6 +13,8 @@ from abstracts_explorer.cli import (
     search_command,
 )
 from abstracts_explorer.plugin import LightweightPaper
+from abstracts_explorer.config import get_config
+from tests.conftest import set_test_db
 
 
 class TestCLI:
@@ -39,9 +41,12 @@ class TestCLI:
             assert "usage:" in captured.out
             assert "create-embeddings" in captured.out
 
-    def test_download_command_success(self, tmp_path, capsys):
+    def test_download_command_success(self, tmp_path, capsys, monkeypatch):
         """Test download command completes successfully."""
         output_db = tmp_path / "test.db"
+        
+        # Set PAPER_DB to output location
+        set_test_db(output_db)
 
         # Mock the plugin and its download method to return LightweightPaper objects
         mock_plugin = Mock()
@@ -82,12 +87,15 @@ class TestCLI:
         assert exit_code == 0
         captured = capsys.readouterr()
         assert "Downloaded 2 papers" in captured.out
-        assert "Database saved to" in captured.out
+        assert "Database updated:" in captured.out
         assert output_db.exists()
 
-    def test_download_command_failure(self, tmp_path, capsys):
+    def test_download_command_failure(self, tmp_path, capsys, monkeypatch):
         """Test download command handles errors gracefully."""
         output_db = tmp_path / "test.db"
+        
+        # Set PAPER_DB to output location
+        set_test_db(output_db)
 
         # Mock the plugin to raise an exception
         mock_plugin = Mock()
@@ -110,13 +118,12 @@ class TestCLI:
         assert "Error:" in captured.err
 
     def test_download_command_with_database_url(self, tmp_path, capsys, monkeypatch):
-        """Test download command uses DATABASE_URL when set."""
+        """Test download command uses PAPER_DB when set."""
         # Create a temporary SQLite database for testing
-        # (simulating PostgreSQL behavior but using SQLite for the test)
         db_path = tmp_path / "test.db"
         
-        # Set DATABASE_URL environment variable
-        monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+        # Set PAPER_DB environment variable
+        set_test_db(db_path)
         
         # Mock the plugin and its download method
         mock_plugin = Mock()
@@ -135,54 +142,51 @@ class TestCLI:
         ]
         mock_plugin.download.return_value = mock_papers
         
-        # Mock get_config to return a fresh config with the new DATABASE_URL
+        # Mock get_plugin to return the plugin
         with patch("abstracts_explorer.cli.get_plugin") as mock_get_plugin:
             mock_get_plugin.return_value = mock_plugin
-            
-            # Use a context manager to ensure config is reloaded for this test
-            with patch("abstracts_explorer.cli.get_config") as mock_get_config:
-                from abstracts_explorer.config import Config
-                # Create a fresh config instance that will read the monkeypatched env var
-                test_config = Config()
-                mock_get_config.return_value = test_config
                 
-                with patch.object(
-                    sys,
-                    "argv",
-                    ["neurips-abstracts", "download", "--year", "2025", "--output", "ignored_path.db"],
-                ):
-                    exit_code = main()
+            with patch.object(
+                sys,
+                "argv",
+                ["neurips-abstracts", "download", "--year", "2025", "--output", "ignored_path.db"],
+            ):
+                exit_code = main()
         
         assert exit_code == 0
         captured = capsys.readouterr()
         assert "Downloaded 1 papers" in captured.out or "Downloaded 1 paper" in captured.out
-        # Should use DATABASE_URL, not the --output path
-        assert "sqlite:///" in captured.out or "Database saved to" in captured.out
+        # Should use PAPER_DB, not the --output path
+        assert "Database updated:" in captured.out
         # Verify database was created
         assert db_path.exists()
 
-    def test_create_embeddings_db_not_found(self, tmp_path, capsys):
+    def test_create_embeddings_db_not_found(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with non-existent database."""
         nonexistent_db = tmp_path / "nonexistent.db"
+        set_test_db(nonexistent_db)
 
+        # The exception will be raised and not caught, so we expect it to propagate
         with patch.object(
             sys,
             "argv",
-            ["neurips-abstracts", "create-embeddings", "--db-path", str(nonexistent_db)],
+            ["neurips-abstracts", "create-embeddings"],
         ):
-            exit_code = main()
+            # Should raise DatabaseError because database/tables don't exist
+            with pytest.raises(Exception) as exc_info:
+                exit_code = main()
+        
+        # Verify it's a database-related error
+        assert "table" in str(exc_info.value).lower() or "database" in str(exc_info.value).lower()
 
-        assert exit_code == 1
-        captured = capsys.readouterr()
-        assert "Database file not found" in captured.err
-
-    def test_create_embeddings_lm_studio_not_available(self, tmp_path, capsys):
+    def test_create_embeddings_lm_studio_not_available(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings when OpenAI API is not available."""
         # Create a test database
         from abstracts_explorer import DatabaseManager
 
         db_path = tmp_path / "test.db"
-        with DatabaseManager(db_path) as db:
+        set_test_db(db_path)
+        with DatabaseManager() as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -210,8 +214,6 @@ class TestCLI:
                 [
                     "neurips-abstracts",
                     "create-embeddings",
-                    "--db-path",
-                    str(db_path),
                     "--output",
                     str(tmp_path / "embeddings"),
                 ],
@@ -222,13 +224,14 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Failed to connect to OpenAI API" in captured.err
 
-    def test_create_embeddings_success(self, tmp_path, capsys):
+    def test_create_embeddings_success(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings command completes successfully."""
         from abstracts_explorer import DatabaseManager
 
         # Create a test database
         db_path = tmp_path / "test.db"
-        with DatabaseManager(db_path) as db:
+        set_test_db(db_path)
+        with DatabaseManager() as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -269,8 +272,6 @@ class TestCLI:
                 [
                     "neurips-abstracts",
                     "create-embeddings",
-                    "--db-path",
-                    str(db_path),
                     "--output",
                     str(tmp_path / "embeddings"),
                 ],
@@ -282,13 +283,14 @@ class TestCLI:
         assert "Successfully generated embeddings for 2 papers" in captured.out
         assert "Vector database saved to" in captured.out
 
-    def test_create_embeddings_with_where_clause(self, tmp_path, capsys):
+    def test_create_embeddings_with_where_clause(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with WHERE clause filter."""
         from abstracts_explorer import DatabaseManager
 
         # Create a test database
         db_path = tmp_path / "test.db"
-        with DatabaseManager(db_path) as db:
+        set_test_db(db_path)
+        with DatabaseManager() as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -331,8 +333,6 @@ class TestCLI:
                 [
                     "neurips-abstracts",
                     "create-embeddings",
-                    "--db-path",
-                    str(db_path),
                     "--output",
                     str(tmp_path / "embeddings"),
                     "--where",
@@ -346,13 +346,14 @@ class TestCLI:
         assert "Filter will process 1 papers" in captured.out
         assert "Successfully generated embeddings for 1 papers" in captured.out
 
-    def test_create_embeddings_force_flag(self, tmp_path, capsys):
+    def test_create_embeddings_force_flag(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with --force flag."""
         from abstracts_explorer import DatabaseManager
 
         # Create a test database
         db_path = tmp_path / "test.db"
-        with DatabaseManager(db_path) as db:
+        set_test_db(db_path)
+        with DatabaseManager() as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -387,8 +388,6 @@ class TestCLI:
                 [
                     "neurips-abstracts",
                     "create-embeddings",
-                    "--db-path",
-                    str(db_path),
                     "--output",
                     str(embeddings_path),
                     "--force",
@@ -403,13 +402,14 @@ class TestCLI:
         # Verify create_collection was called with reset=True
         mock_em.create_collection.assert_called_once_with(reset=True)
 
-    def test_create_embeddings_custom_model(self, tmp_path, capsys):
+    def test_create_embeddings_custom_model(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with custom model settings."""
         from abstracts_explorer import DatabaseManager
 
         # Create a test database
         db_path = tmp_path / "test.db"
-        with DatabaseManager(db_path) as db:
+        set_test_db(db_path)
+        with DatabaseManager() as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -444,8 +444,6 @@ class TestCLI:
                 [
                     "neurips-abstracts",
                     "create-embeddings",
-                    "--db-path",
-                    str(db_path),
                     "--lm-studio-url",
                     custom_url,
                     "--model",
@@ -462,14 +460,15 @@ class TestCLI:
         assert call_kwargs["lm_studio_url"] == custom_url
         assert call_kwargs["model_name"] == custom_model
 
-    def test_create_embeddings_embeddings_error(self, tmp_path, capsys):
+    def test_create_embeddings_embeddings_error(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings handles EmbeddingsError gracefully."""
         from abstracts_explorer import DatabaseManager
         from abstracts_explorer.embeddings import EmbeddingsError
 
         # Create a test database
         db_path = tmp_path / "test.db"
-        with DatabaseManager(db_path) as db:
+        set_test_db(db_path)
+        with DatabaseManager() as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -495,7 +494,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["neurips-abstracts", "create-embeddings", "--db-path", str(db_path)],
+                ["neurips-abstracts", "create-embeddings"],
             ):
                 exit_code = main()
 
@@ -728,13 +727,14 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "No results found" in captured.out
 
-    def test_search_with_db_path_author_names(self, tmp_path, capsys):
-        """Test search command with database path to resolve author names."""
+    def test_search_with_db_path_author_names(self, tmp_path, capsys, monkeypatch):
+        """Test search command with database to resolve author names."""
         from abstracts_explorer import DatabaseManager
 
         # Create a test database with lightweight schema
         db_path = tmp_path / "test.db"
-        with DatabaseManager(db_path) as db:
+        set_test_db(db_path)
+        with DatabaseManager() as db:
             db.create_tables()
             papers = [
                 LightweightPaper(
@@ -789,8 +789,6 @@ class TestCLI:
                     "test",
                     "--embeddings-path",
                     str(embeddings_path),
-                    "--db-path",
-                    str(db_path),
                 ],
             ):
                 exit_code = main()
@@ -802,11 +800,12 @@ class TestCLI:
         assert "https://example.com/paper/1" in captured.out
         assert "A12" in captured.out
 
-    def test_search_with_db_path_missing_database(self, tmp_path, capsys):
-        """Test search command with non-existent database path."""
+    def test_search_with_db_path_missing_database(self, tmp_path, capsys, monkeypatch):
+        """Test search command with non-existent database."""
         embeddings_path = tmp_path / "embeddings"
         embeddings_path.mkdir()
         nonexistent_db = tmp_path / "nonexistent.db"
+        set_test_db(nonexistent_db)
 
         # Mock embeddings manager
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
@@ -831,8 +830,6 @@ class TestCLI:
                     "test",
                     "--embeddings-path",
                     str(embeddings_path),
-                    "--db-path",
-                    str(nonexistent_db),
                 ],
             ):
                 exit_code = main()
@@ -842,8 +839,8 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "101,102" in captured.out  # Shows IDs as fallback
 
-    def test_search_with_db_path_lookup_error(self, tmp_path, capsys):
-        """Test search command when database connection fails."""
+    def test_search_with_db_path_lookup_error(self, tmp_path, capsys, monkeypatch):
+        """Test search command when database connection fails (no longer relevant)."""
         from abstracts_explorer.database import DatabaseManager
         
         embeddings_path = tmp_path / "embeddings"
@@ -851,7 +848,8 @@ class TestCLI:
 
         # Create an empty database using DatabaseManager
         db_path = tmp_path / "test.db"
-        db = DatabaseManager(str(db_path))
+        set_test_db(db_path)
+        db = DatabaseManager()
         db.connect()
         db.close()
 
@@ -869,32 +867,23 @@ class TestCLI:
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
 
-            # Mock DatabaseManager to raise exception on connect
-            with patch("abstracts_explorer.cli.DatabaseManager") as MockDB:
-                mock_db = Mock()
-                mock_db.connect.side_effect = Exception("Connection failed")
-                MockDB.return_value = mock_db
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "neurips-abstracts",
+                    "search",
+                    "test",
+                    "--embeddings-path",
+                    str(embeddings_path),
+                ],
+            ):
+                exit_code = main()
 
-                with patch.object(
-                    sys,
-                    "argv",
-                    [
-                        "neurips-abstracts",
-                        "search",
-                        "test",
-                        "--embeddings-path",
-                        str(embeddings_path),
-                        "--db-path",
-                        str(db_path),
-                    ],
-                ):
-                    exit_code = main()
-
-        # Should succeed with warning
+        # Should succeed (database connection is no longer attempted from search command)
         assert exit_code == 0
         captured = capsys.readouterr()
-        assert "Could not open database for author names" in captured.err
-        assert "101" in captured.out  # Falls back to IDs
+        assert "101" in captured.out  # Shows author ID as-is since author name resolution is not in search
 
     def test_search_unexpected_exception(self, tmp_path, capsys):
         """Test search command with unexpected exception."""
@@ -1197,7 +1186,7 @@ class TestCLISearchErrorHandling:
 class TestCLIEmbeddingsProgressAndStats:
     """Test embeddings command progress and stats display."""
 
-    def test_create_embeddings_success_displays_stats(self, tmp_path, capsys):
+    def test_create_embeddings_success_displays_stats(self, tmp_path, capsys, monkeypatch):
         """Test that successful embedding displays stats (lines 131-136, 147-152)."""
         from abstracts_explorer.cli import main
 
@@ -1207,7 +1196,8 @@ class TestCLIEmbeddingsProgressAndStats:
         from abstracts_explorer.database import DatabaseManager
         from abstracts_explorer.plugin import LightweightPaper
 
-        db = DatabaseManager(str(db_path))
+        set_test_db(db_path)
+        db = DatabaseManager()
         with db:
             db.create_tables()
             for i in range(3):
@@ -1230,7 +1220,7 @@ class TestCLIEmbeddingsProgressAndStats:
 
             # Mock embed_from_database to simulate progress callbacks
 
-            def mock_embed(db_path, batch_size=10, where_clause=None, progress_callback=None, force_recreate=False):
+            def mock_embed(batch_size=10, where_clause=None, progress_callback=None, force_recreate=False):
                 # Simulate calling progress callback with (current, total) arguments
                 if progress_callback:
                     progress_callback(1, 3)
@@ -1250,8 +1240,6 @@ class TestCLIEmbeddingsProgressAndStats:
                 [
                     "neurips-abstracts",
                     "create-embeddings",
-                    "--db-path",
-                    str(db_path),
                     "--output",
                     str(tmp_path / "chroma_db"),
                 ],

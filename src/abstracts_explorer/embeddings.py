@@ -566,14 +566,9 @@ class EmbeddingsManager:
         except Exception as e:
             raise EmbeddingsError(f"Failed to get collection stats: {str(e)}") from e
 
-    def check_model_compatibility(self, db_path: Union[str, Path]) -> Tuple[bool, Optional[str], Optional[str]]:
+    def check_model_compatibility(self) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         Check if the current embedding model matches the one stored in the database.
-
-        Parameters
-        ----------
-        db_path : str or Path
-            Path to the SQLite database file.
 
         Returns
         -------
@@ -590,18 +585,13 @@ class EmbeddingsManager:
         Examples
         --------
         >>> em = EmbeddingsManager()
-        >>> compatible, stored, current = em.check_model_compatibility("neurips.db")
+        >>> compatible, stored, current = em.check_model_compatibility()
         >>> if not compatible:
         ...     print(f"Model mismatch: stored={stored}, current={current}")
         """
         try:
-            db_path = Path(db_path)
-            if not db_path.exists():
-                # If database doesn't exist, consider it compatible (no previous embeddings)
-                return True, None, self.model_name
-
             # Use DatabaseManager to check the stored model
-            db_manager = DatabaseManager(db_path)
+            db_manager = DatabaseManager()
             db_manager.connect()
 
             stored_model = db_manager.get_embedding_model()
@@ -620,20 +610,17 @@ class EmbeddingsManager:
 
     def embed_from_database(
         self,
-        db_path: Union[str, Path],
         where_clause: Optional[str] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None,
         force_recreate: bool = False,
     ) -> int:
         """
-        Embed papers from a SQLite database.
+        Embed papers from the database.
 
         Reads papers from the database and generates embeddings for their abstracts.
 
         Parameters
         ----------
-        db_path : str or Path
-            Path to the SQLite database file.
         where_clause : str, optional
             SQL WHERE clause to filter papers (e.g., "decision = 'Accept'")
         progress_callback : callable, optional
@@ -656,21 +643,17 @@ class EmbeddingsManager:
         >>> em = EmbeddingsManager()
         >>> em.connect()
         >>> em.create_collection()
-        >>> count = em.embed_from_database("neurips.db")
+        >>> count = em.embed_from_database()
         >>> print(f"Embedded {count} papers")
         >>> # Only embed accepted papers
-        >>> count = em.embed_from_database("neurips.db", where_clause="decision = 'Accept'")
+        >>> count = em.embed_from_database(where_clause="decision = 'Accept'")
         """
         if not self.collection:
             raise EmbeddingsError("Collection not initialized. Call create_collection() first.")
 
         try:
-            db_path = Path(db_path)
-            if not db_path.exists():
-                raise EmbeddingsError(f"Database not found: {db_path}")
-
             # Use DatabaseManager for database operations
-            db_manager = DatabaseManager(db_path)
+            db_manager = DatabaseManager()
             db_manager.connect()
 
             # Store the embedding model in the database

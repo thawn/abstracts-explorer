@@ -13,7 +13,35 @@ from unittest.mock import Mock
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.plugin import LightweightPaper
-from abstracts_explorer.config import load_env_file
+from abstracts_explorer.config import load_env_file, get_config
+
+
+def set_test_db(db_path):
+    """
+    Helper function to set PAPER_DB environment variable and reload config.
+    
+    This reduces code duplication across test files where the pattern
+    os.environ["PAPER_DB"] = str(db_path) followed by get_config(reload=True)
+    is repeated many times.
+    
+    Parameters
+    ----------
+    db_path : str or Path
+        Path to the database file
+    
+    Examples
+    --------
+    >>> set_test_db(tmp_path / "test.db")
+    
+    Notes
+    -----
+    This function uses os.environ directly instead of monkeypatch.setenv
+    so it can be used in contexts where monkeypatch is not available
+    (e.g., in helper functions).
+    """
+    import os
+    os.environ["PAPER_DB"] = str(db_path)
+    get_config(reload=True)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -67,7 +95,7 @@ def test_config():
 
 
 @pytest.fixture
-def db_manager(tmp_path):
+def db_manager(tmp_path, monkeypatch):
     """
     Create a DatabaseManager instance with a temporary database.
 
@@ -75,14 +103,23 @@ def db_manager(tmp_path):
     ----------
     tmp_path : Path
         Pytest's temporary path fixture
+    monkeypatch : MonkeyPatch
+        Pytest's monkeypatch fixture for setting environment variables
 
     Returns
     -------
     DatabaseManager
         Database manager instance with temporary database
+
+    Notes
+    -----
+    Sets PAPER_DB environment variable to point to a temporary database
+    and reloads config to pick up the change.
     """
     db_path = tmp_path / "test.db"
-    return DatabaseManager(db_path)
+    set_test_db(db_path)
+    
+    return DatabaseManager()
 
 
 @pytest.fixture
@@ -165,7 +202,7 @@ def sample_neurips_data():
 
 
 @pytest.fixture
-def test_database(tmp_path):
+def test_database(tmp_path, monkeypatch):
     """
     Create a test database with sample papers for testing.
 
@@ -173,6 +210,8 @@ def test_database(tmp_path):
     ----------
     tmp_path : Path
         Pytest's temporary path fixture
+    monkeypatch : MonkeyPatch
+        Pytest's monkeypatch fixture for setting environment variables
 
     Returns
     -------
@@ -183,14 +222,18 @@ def test_database(tmp_path):
     -----
     Creates a database with 3 papers using the lightweight schema
     via DatabaseManager for testing search and retrieval functionality.
+    Sets PAPER_DB environment variable to point to the test database.
     """
     from abstracts_explorer.database import DatabaseManager
     from abstracts_explorer.plugin import LightweightPaper
     
     db_path = tmp_path / "test.db"
     
+    # Set PAPER_DB to point to our test database
+    set_test_db(db_path)
+    
     # Use DatabaseManager to create the database with proper schema
-    with DatabaseManager(db_path) as db:
+    with DatabaseManager() as db:
         db.create_tables()
         
         # Create sample papers using LightweightPaper model

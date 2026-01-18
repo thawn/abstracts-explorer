@@ -10,6 +10,8 @@ import os
 
 from abstracts_explorer.database import DatabaseManager, DatabaseError
 from abstracts_explorer.plugin import LightweightPaper
+from abstracts_explorer.config import get_config
+from tests.conftest import set_test_db
 
 
 # Check if PostgreSQL is available via environment variable
@@ -28,12 +30,39 @@ skip_without_postgres = pytest.mark.skipif(
 class TestMultiDatabaseBackend:
     """Test multi-database backend support."""
 
-    def test_sqlite_via_database_url(self, tmp_path):
-        """Test using SQLite via DATABASE_URL parameter."""
+    def test_sqlite_via_paper_db_path(self, tmp_path, monkeypatch):
+        """Test using SQLite via PAPER_DB environment variable (path)."""
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
+        
+        db = DatabaseManager()
+        with db:
+            db.create_tables()
+            
+            # Test basic operations
+            paper = LightweightPaper(
+                title="Test Paper",
+                authors=["Author"],
+                abstract="Test abstract",
+                session="Session A",
+                poster_position="P1",
+                year=2025,
+                conference="TestConf",
+            )
+            
+            paper_uid = db.add_paper(paper)
+            assert paper_uid is not None
+            
+            count = db.get_paper_count()
+            assert count == 1
+
+    def test_sqlite_via_paper_db_url(self, tmp_path, monkeypatch):
+        """Test using SQLite via PAPER_DB environment variable (URL)."""
         db_path = tmp_path / "test.db"
         database_url = f"sqlite:///{db_path}"
+        set_test_db(database_url)
         
-        db = DatabaseManager(database_url=database_url)
+        db = DatabaseManager()
         with db:
             db.create_tables()
             
@@ -53,54 +82,13 @@ class TestMultiDatabaseBackend:
             
             count = db.get_paper_count()
             assert count == 1
-
-    def test_sqlite_legacy_path(self, tmp_path):
-        """Test using SQLite via legacy db_path parameter."""
-        db_path = tmp_path / "test.db"
-        
-        db = DatabaseManager(db_path=db_path)
-        with db:
-            db.create_tables()
-            
-            # Test basic operations
-            paper = LightweightPaper(
-                title="Test Paper",
-                authors=["Author"],
-                abstract="Test abstract",
-                session="Session A",
-                poster_position="P1",
-                year=2025,
-                conference="TestConf",
-            )
-            
-            paper_uid = db.add_paper(paper)
-            assert paper_uid is not None
-            
-            count = db.get_paper_count()
-            assert count == 1
-
-    def test_must_provide_db_path_or_url(self):
-        """Test that either db_path or database_url must be provided."""
-        with pytest.raises(DatabaseError, match="Either db_path or database_url must be provided"):
-            DatabaseManager()
-
-    def test_database_url_takes_precedence(self, tmp_path):
-        """Test that database_url takes precedence over db_path."""
-        db_path1 = tmp_path / "test1.db"
-        db_path2 = tmp_path / "test2.db"
-        database_url = f"sqlite:///{db_path2}"
-        
-        db = DatabaseManager(db_path=db_path1, database_url=database_url)
-        
-        # database_url should take precedence
-        assert db.database_url == database_url
-        assert db_path2.stem in db.database_url
 
     @skip_without_postgres
-    def test_postgresql_basic_operations(self):
+    def test_postgresql_basic_operations(self, monkeypatch):
         """Test basic operations with PostgreSQL backend."""
         # This test requires PostgreSQL to be available
-        db = DatabaseManager(database_url=POSTGRES_TEST_URL)
+        set_test_db(POSTGRES_TEST_URL)
+        db = DatabaseManager()
         
         with db:
             # Create tables
@@ -137,9 +125,10 @@ class TestMultiDatabaseBackend:
             assert "conferences" in filters
 
     @skip_without_postgres
-    def test_postgresql_multiple_papers(self):
+    def test_postgresql_multiple_papers(self, monkeypatch):
         """Test adding multiple papers with PostgreSQL."""
-        db = DatabaseManager(database_url=POSTGRES_TEST_URL)
+        set_test_db(POSTGRES_TEST_URL)
+        db = DatabaseManager()
         
         with db:
             db.create_tables()
@@ -164,9 +153,10 @@ class TestMultiDatabaseBackend:
             assert total >= 5
 
     @skip_without_postgres
-    def test_postgresql_embedding_model_metadata(self):
+    def test_postgresql_embedding_model_metadata(self, monkeypatch):
         """Test embedding model metadata with PostgreSQL."""
-        db = DatabaseManager(database_url=POSTGRES_TEST_URL)
+        set_test_db(POSTGRES_TEST_URL)
+        db = DatabaseManager()
         
         with db:
             db.create_tables()
@@ -187,9 +177,10 @@ class TestMultiDatabaseBackend:
             assert retrieved_model == new_model
 
     @skip_without_postgres
-    def test_postgresql_idempotent_create_tables(self):
+    def test_postgresql_idempotent_create_tables(self, monkeypatch):
         """Test that create_tables can be called multiple times without error."""
-        db = DatabaseManager(database_url=POSTGRES_TEST_URL)
+        set_test_db(POSTGRES_TEST_URL)
+        db = DatabaseManager()
         
         with db:
             # Call create_tables multiple times - should not raise errors
@@ -213,29 +204,26 @@ class TestMultiDatabaseBackend:
 
 
 def test_database_url_in_config(tmp_path, monkeypatch):
-    """Test that DATABASE_URL is properly loaded from config."""
-    from abstracts_explorer.config import Config
-    
+    """Test that PAPER_DB with database URL is properly loaded from config."""
     db_path = tmp_path / "test.db"
     database_url = f"sqlite:///{db_path}"
     
-    # Set environment variable
-    monkeypatch.setenv("DATABASE_URL", database_url)
-    
-    config = Config()
+    # Set environment variable using PAPER_DB (new system)
+    set_test_db(database_url)
+    # Reload config to pick up environment variable
+    config = get_config(reload=True)
     assert config.database_url == database_url
 
 
 def test_legacy_paper_db_path_in_config(tmp_path, monkeypatch):
-    """Test that PAPER_DB_PATH still works for backward compatibility."""
-    from abstracts_explorer.config import Config
-    
+    """Test that PAPER_DB with file path works (converts to SQLite URL)."""
     db_path = tmp_path / "test.db"
     
-    # Set environment variable
-    monkeypatch.setenv("PAPER_DB_PATH", str(db_path))
+    # Set environment variable using PAPER_DB with file path
+    monkeypatch.setenv("PAPER_DB", str(db_path))
     
-    config = Config()
+    # Reload config to pick up environment variable
+    config = get_config(reload=True)
     # Should be converted to SQLite URL
     assert "sqlite:///" in config.database_url
     assert str(db_path) in config.database_url

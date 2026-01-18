@@ -12,6 +12,8 @@ import sqlite3
 
 from abstracts_explorer.database import DatabaseManager, DatabaseError
 from abstracts_explorer.plugin import LightweightPaper
+from abstracts_explorer.config import get_config
+from tests.conftest import set_test_db
 
 # Fixtures are now imported from conftest.py:
 # - db_manager: DatabaseManager instance with temporary database
@@ -53,12 +55,14 @@ def sample_paper_minimal():
 class TestDatabaseManager:
     """Tests for DatabaseManager class."""
 
-    def test_init(self, tmp_path):
+    def test_init(self, tmp_path, monkeypatch):
         """Test DatabaseManager initialization."""
         db_path = tmp_path / "test.db"
-        db = DatabaseManager(db_path)
+        set_test_db(db_path)
+        
+        db = DatabaseManager()
 
-        assert db.db_path == db_path
+        assert db.database_url == f"sqlite:///{db_path}"
         assert db.connection is None
 
     def test_connect(self, db_manager):
@@ -70,10 +74,12 @@ class TestDatabaseManager:
 
         db_manager.close()
 
-    def test_connect_creates_directories(self, tmp_path):
+    def test_connect_creates_directories(self, tmp_path, monkeypatch):
         """Test that connect creates parent directories."""
         db_path = tmp_path / "subdir" / "another" / "test.db"
-        db = DatabaseManager(db_path)
+        set_test_db(db_path)
+        
+        db = DatabaseManager()
         db.connect()
 
         assert db_path.parent.exists()
@@ -93,11 +99,12 @@ class TestDatabaseManager:
         db_manager.close()  # Should not raise
         assert db_manager.connection is None
 
-    def test_context_manager(self, tmp_path):
+    def test_context_manager(self, tmp_path, monkeypatch):
         """Test DatabaseManager as context manager."""
         db_path = tmp_path / "test.db"
+        set_test_db(db_path)
 
-        with DatabaseManager(db_path) as db:
+        with DatabaseManager() as db:
             assert db.connection is not None
 
         # Connection should be closed after exiting context
@@ -430,18 +437,21 @@ class TestEmbeddingModelMetadata:
         connected_db.set_embedding_model(model2)
         assert connected_db.get_embedding_model() == model2
 
-    def test_embedding_model_persists_across_connections(self, tmp_path):
+    def test_embedding_model_persists_across_connections(self, tmp_path, monkeypatch):
         """Test that embedding model persists across database connections."""
         db_path = tmp_path / "test.db"
         model_name = "persistent-model"
         
+        # Set PAPER_DB and reload config
+        set_test_db(db_path)
+        
         # First connection: set the model
-        with DatabaseManager(db_path) as db1:
+        with DatabaseManager() as db1:
             db1.create_tables()
             db1.set_embedding_model(model_name)
         
         # Second connection: retrieve the model
-        with DatabaseManager(db_path) as db2:
+        with DatabaseManager() as db2:
             retrieved_model = db2.get_embedding_model()
             assert retrieved_model == model_name
 

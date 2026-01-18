@@ -97,7 +97,7 @@ class TestConfig:
             "LLM_BACKEND_URL",
             "LLM_BACKEND_AUTH_TOKEN",
             "EMBEDDING_DB_PATH",
-            "PAPER_DB_PATH",
+            "PAPER_DB",
             "COLLECTION_NAME",
             "MAX_CONTEXT_PAPERS",
             "CHAT_TEMPERATURE",
@@ -119,7 +119,7 @@ class TestConfig:
             "LLM_BACKEND_URL",
             "LLM_BACKEND_AUTH_TOKEN",
             "EMBEDDING_DB_PATH",
-            "PAPER_DB_PATH",
+            "PAPER_DB",
             "COLLECTION_NAME",
             "MAX_CONTEXT_PAPERS",
             "CHAT_TEMPERATURE",
@@ -160,7 +160,8 @@ class TestConfig:
         assert config.llm_backend_url == "http://localhost:1234"
         assert config.llm_backend_auth_token == ""
         assert config.embedding_db_path == str((Path("data") / "chroma_db").absolute())
-        assert config.paper_db_path == str((Path("data") / "abstracts.db").absolute())
+        # Test database_url is constructed from PAPER_DB
+        assert config.database_url == f"sqlite:///{(Path('data') / 'abstracts.db').absolute()}"
         assert config.collection_name == "papers"
         assert config.max_context_papers == 5
         assert config.chat_temperature == 0.7
@@ -176,7 +177,7 @@ EMBEDDING_MODEL=custom-embedding
 LLM_BACKEND_URL=http://custom:9999
 LLM_BACKEND_AUTH_TOKEN=secret-token
 EMBEDDING_DB_PATH=custom_chroma
-PAPER_DB_PATH=custom.db
+PAPER_DB=custom.db
 COLLECTION_NAME=custom_collection
 MAX_CONTEXT_PAPERS=15
 CHAT_TEMPERATURE=0.9
@@ -192,7 +193,8 @@ CHAT_MAX_TOKENS=2000
         assert config.llm_backend_auth_token == "secret-token"
         # Paths are resolved relative to data_dir
         assert config.embedding_db_path == str((Path("data") / "custom_chroma").absolute())
-        assert config.paper_db_path == str((Path("data") / "custom.db").absolute())
+        # Test database_url is constructed from PAPER_DB
+        assert config.database_url == f"sqlite:///{(Path('data') / 'custom.db').absolute()}"
         assert config.collection_name == "custom_collection"
         assert config.max_context_papers == 15
         assert config.chat_temperature == 0.9
@@ -257,7 +259,7 @@ CHAT_MAX_TOKENS=500
         assert "embedding_model" in config_dict
         assert "llm_backend_url" in config_dict
         assert "embedding_db_path" in config_dict
-        assert "paper_db_path" in config_dict
+        assert "database_url" in config_dict
         assert "collection_name" in config_dict
         assert "max_context_papers" in config_dict
 
@@ -293,7 +295,8 @@ CHAT_MAX_TOKENS=500
         assert config.data_dir == "/custom/data"
         # Paths should be resolved relative to custom data_dir
         assert config.embedding_db_path == str((Path("/custom/data") / "chroma_db").absolute())
-        assert config.paper_db_path == str((Path("/custom/data") / "abstracts.db").absolute())
+        # database_url should be constructed from PAPER_DB (defaults to abstracts.db in custom data_dir)
+        assert config.database_url == f"sqlite:///{(Path('/custom/data') / 'abstracts.db').absolute()}"
 
     def test_config_absolute_paths_unchanged(self, tmp_path):
         """Test that absolute paths are not modified."""
@@ -301,7 +304,7 @@ CHAT_MAX_TOKENS=500
         env_file.write_text(
             """
 EMBEDDING_DB_PATH=/absolute/path/to/chroma_db
-PAPER_DB_PATH=/absolute/path/to/papers.db
+PAPER_DB=/absolute/path/to/papers.db
 """
         )
 
@@ -309,7 +312,7 @@ PAPER_DB_PATH=/absolute/path/to/papers.db
 
         # Absolute paths should remain unchanged
         assert config.embedding_db_path == str((Path("/absolute/path/to/chroma_db")).absolute())
-        assert config.paper_db_path == str((Path("/absolute/path/to/papers.db")).absolute())
+        assert config.database_url == f"sqlite:///{Path('/absolute/path/to/papers.db').absolute()}"
 
 
 class TestGetConfig:

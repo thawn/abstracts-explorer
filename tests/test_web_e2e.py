@@ -25,7 +25,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.firefox import GeckoDriverManager
 from webdriver_manager.core.os_manager import ChromeType
 from abstracts_explorer.database import DatabaseManager
-from abstracts_explorer.config import Config
+from abstracts_explorer.config import Config, get_config
 from tests.helpers import find_free_port
 
 # Add src to path for imports
@@ -68,7 +68,8 @@ def test_database(tmp_path_factory):
 
     # Create database and add test data
     from abstracts_explorer.plugin import LightweightPaper
-    db = DatabaseManager(str(db_path))
+    set_test_db(db_path)
+    db = DatabaseManager()
 
     with db:
         db.create_tables()
@@ -206,7 +207,8 @@ def test_embeddings(test_database, tmp_path_factory):
     em.create_collection(reset=False)
 
     # Add embeddings for all test papers from the database
-    db = DatabaseManager(str(test_database))
+    set_test_db(str(test_database))
+    db = DatabaseManager()
     db.connect()
     papers = db.query("SELECT * FROM papers")
 
@@ -294,7 +296,8 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
         if "db" not in g:
             db_path = str(test_database)
             # Don't check file existence in tests - the database was created in a temp dir
-            g.db = DatabaseManager(db_path)
+            set_test_db(db_path)
+            g.db = DatabaseManager()
             g.db.connect()
             g.db.create_tables()  # Ensure all tables exist (including clustering_cache)
         return g.db
