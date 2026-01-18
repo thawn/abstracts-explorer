@@ -1550,7 +1550,7 @@ class TestClusteringEndpoints:
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
                 mock_em = Mock()
-                mock_em.get_collection_stats.return_value = {"count": 5000}
+                mock_em.get_collection_stats.return_value = {"count": 100000}
                 mock_get_em.return_value = mock_em
                 
                 response = client.get("/api/clusters/default-count")
@@ -1558,7 +1558,7 @@ class TestClusteringEndpoints:
                 assert response.status_code == 200
                 data = response.get_json()
                 
-                assert data["n_papers"] == 50000
+                assert data["n_papers"] == 100000
                 # For 100000 papers: max(2, min(50, 100000 // 100)) = max(2, min(1000, 500)) = 500
                 assert data["n_clusters"] == 500
     
