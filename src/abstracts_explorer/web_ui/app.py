@@ -796,6 +796,132 @@ def get_default_cluster_count():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/clusters/precalculate", methods=["POST"])
+def precalculate_clusters():
+    """
+    Pre-calculate clusters in the background for caching.
+    
+    This endpoint starts a background clustering computation with default settings
+    to populate the cache. It returns immediately without waiting for completion.
+    
+    Request Body
+    ------------
+    {
+        "reduction_method": str (optional, default: "pca"),
+        "n_components": int (optional, default: 2),
+        "clustering_method": str (optional, default: "kmeans"),
+        "n_clusters": int (optional, default: None - auto-calculated)
+    }
+    
+    Returns
+    -------
+    dict
+        Status message indicating the pre-calculation was started
+    """
+    try:
+        import threading
+        from abstracts_explorer.clustering import ClusteringManager, calculate_default_clusters
+        
+        data = request.get_json() or {}
+        
+        # Get parameters with defaults
+        reduction_method = data.get("reduction_method", "pca")
+        n_components = data.get("n_components", 2)
+        clustering_method = data.get("clustering_method", "kmeans")
+        n_clusters = data.get("n_clusters")
+        
+        # Get config and managers
+        config = get_config()
+        em = get_embeddings_manager()
+        database = get_database()
+        
+        # Calculate default n_clusters if not provided
+        if n_clusters is None:
+            collection_stats = em.get_collection_stats()
+            n_papers = collection_stats["count"]
+            n_clusters = calculate_default_clusters(n_papers)
+        
+        # Check if cache already exists
+        current_model = config.embedding_model
+        cached_results = database.get_clustering_cache(
+            embedding_model=current_model,
+            reduction_method=reduction_method,
+            n_components=n_components,
+            clustering_method=clustering_method,
+            n_clusters=n_clusters if clustering_method.lower() != "dbscan" else None,
+        )
+        
+        if cached_results:
+            logger.info("Clustering cache already exists, skipping pre-calculation")
+            return jsonify({
+                "status": "cache_exists",
+                "message": "Clustering cache already exists"
+            })
+        
+        # Define background task
+        def background_clustering():
+            try:
+                logger.info(f"Starting background clustering pre-calculation (n_clusters={n_clusters})")
+                
+                # Create clustering manager
+                cm = ClusteringManager(em)
+                
+                # Load embeddings
+                cm.load_embeddings(limit=None)
+                
+                # Perform clustering
+                cm.cluster(
+                    method=clustering_method,
+                    n_clusters=n_clusters,
+                    use_reduced=False,
+                )
+                
+                # Reduce dimensions
+                cm.reduce_dimensions(
+                    method=reduction_method,
+                    n_components=n_components,
+                )
+                
+                # Generate labels
+                try:
+                    cm.extract_cluster_keywords(n_keywords=10)
+                    cm.generate_cluster_labels(use_llm=True, max_keywords=5)
+                except Exception as e:
+                    logger.warning(f"Failed to generate cluster labels in background: {e}")
+                
+                # Get results and save to cache
+                results = cm.get_clustering_results()
+                database.save_clustering_cache(
+                    embedding_model=current_model,
+                    reduction_method=reduction_method,
+                    n_components=n_components,
+                    clustering_method=clustering_method,
+                    results=results,
+                    n_clusters=n_clusters if clustering_method.lower() != "dbscan" else None,
+                )
+                
+                logger.info("Background clustering pre-calculation completed successfully")
+                
+            except Exception as e:
+                logger.error(f"Error in background clustering: {e}", exc_info=True)
+        
+        # Start background thread
+        thread = threading.Thread(target=background_clustering, daemon=True)
+        thread.start()
+        
+        logger.info(f"Started background clustering pre-calculation with n_clusters={n_clusters}")
+        
+        return jsonify({
+            "status": "started",
+            "message": "Clustering pre-calculation started in background",
+            "n_clusters": n_clusters
+        })
+        
+    except Exception as e:
+        logger.error(f"Error starting clustering pre-calculation: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/years")
 def get_years():
     """
