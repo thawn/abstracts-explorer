@@ -395,7 +395,7 @@ def embeddings_manager(tmp_path, monkeypatch):
     
     # Force config reload to pick up the environment variable
     from abstracts_explorer.config import get_config
-    config = get_config(reload=True)
+    _ = get_config(reload=True)  # Force reload but don't need the result
     
     # Create the manager
     em = EmbeddingsManager(

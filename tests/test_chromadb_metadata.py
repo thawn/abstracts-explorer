@@ -52,7 +52,7 @@ def test_chroma_collection(tmp_path_factory, monkeypatch_session):
     
     # Force config reload to pick up the environment variable
     from abstracts_explorer.config import get_config
-    config = get_config(reload=True)
+    _ = get_config(reload=True)  # Force reload but don't need the result
 
     # Create mock OpenAI client
     mock_client = Mock()

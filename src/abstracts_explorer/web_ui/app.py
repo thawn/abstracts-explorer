@@ -68,8 +68,6 @@ def get_embeddings_manager():
         embeddings_manager = EmbeddingsManager(
             lm_studio_url=config.llm_backend_url,
             model_name=config.embedding_model,
-            chroma_path=config.embedding_db_path if config.embedding_db_path else None,
-            chroma_url=config.embedding_db_url if config.embedding_db_url else None,
             collection_name=config.collection_name,
         )
         embeddings_manager.connect()  # Connect to ChromaDB
@@ -1483,10 +1481,7 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False):
     print(f"Database: {config.database_url}")
     
     # Print embeddings configuration
-    if config.embedding_db_url:
-        print(f"Embeddings: {config.embedding_db_url}")
-    else:
-        print(f"Embeddings: {config.embedding_db_path}")
+    print(f"Embeddings: {config.embedding_db}")
     
     print(f"Server: http://{host}:{port}")
     
