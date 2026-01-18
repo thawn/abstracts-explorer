@@ -59,10 +59,14 @@ The configuration automatically detects the database type based on the format:
 
 #### Embedding Database
 
-- **EMBEDDING_DB_PATH**: Path to local ChromaDB database (default: `chroma_db`). If relative, resolved relative to DATA_DIR.
-- **EMBEDDING_DB_URL**: URL for remote ChromaDB HTTP service (e.g., `http://chromadb:8000`). Use this for Docker deployments.
+- **EMBEDDING_DB**: ChromaDB location. Can be either:
+  - **HTTP URL**: `http://chromadb:8000` for remote ChromaDB service (Docker deployments)
+  - **File path**: `chroma_db` (relative to DATA_DIR) or `/absolute/path/to/chroma_db` for local ChromaDB
+  - Default: `chroma_db`
 
-**Note**: `EMBEDDING_DB_URL` and `EMBEDDING_DB_PATH` are mutually exclusive. Only set one of them.
+The configuration automatically detects the type based on the format:
+- URLs starting with `http://` or `https://` are treated as remote ChromaDB services
+- Other values are treated as local file paths (relative to DATA_DIR unless absolute)
 
 ### RAG Settings
 
@@ -92,7 +96,7 @@ LLM_BACKEND_AUTH_TOKEN=
 PAPER_DB=abstracts.db
 
 # Local ChromaDB (relative to DATA_DIR - will resolve to data/chroma_db)
-EMBEDDING_DB_PATH=chroma_db
+EMBEDDING_DB=chroma_db
 
 COLLECTION_NAME=papers
 MAX_CONTEXT_PAPERS=5
@@ -118,7 +122,7 @@ LLM_BACKEND_AUTH_TOKEN=
 PAPER_DB=postgresql://abstracts:password@postgres:5432/abstracts
 
 # Remote ChromaDB HTTP service
-EMBEDDING_DB_URL=http://chromadb:8000
+EMBEDDING_DB=http://chromadb:8000
 
 COLLECTION_NAME=papers
 MAX_CONTEXT_PAPERS=5
@@ -129,7 +133,7 @@ MAX_CONTEXT_PAPERS=5
 ```bash
 # Using absolute paths for both databases
 PAPER_DB=/var/data/abstracts.db
-EMBEDDING_DB_PATH=/var/data/chroma_db
+EMBEDDING_DB=/var/data/chroma_db
 ```
 
 ## Using Configuration in Code
@@ -145,11 +149,8 @@ print(f"Chat model: {config.chat_model}")
 print(f"Backend URL: {config.llm_backend_url}")
 print(f"Database URL: {config.database_url}")  # SQLAlchemy-compatible URL
 
-# Check which embedding database mode is active
-if config.embedding_db_url:
-    print(f"Using remote ChromaDB: {config.embedding_db_url}")
-else:
-    print(f"Using local ChromaDB: {config.embedding_db_path}")
+# ChromaDB location (automatically detected as URL or path)
+print(f"ChromaDB: {config.embedding_db}")
 ```
 
 ## Environment Variables

@@ -56,7 +56,6 @@ abstracts-explorer create-embeddings [OPTIONS]
 **Options:**
 
 - `--db-path TEXT`: Path to SQLite database with papers (required)
-- `--embedding-db-path TEXT`: Path to ChromaDB database (default: from config)
 - `--collection-name TEXT`: Collection name in ChromaDB (default: from config)
 - `--model TEXT`: Embedding model to use (default: from config)
 - `--force`: Recreate embeddings even if they exist
@@ -64,13 +63,12 @@ abstracts-explorer create-embeddings [OPTIONS]
 **Examples:**
 
 ```bash
-# Create embeddings with defaults
+# Create embeddings with defaults (uses EMBEDDING_DB from config)
 uv run abstracts-explorer create-embeddings --db-path data/abstracts.db
 
-# Use custom paths
+# Use custom collection name
 uv run abstracts-explorer create-embeddings \
     --db-path data/abstracts.db \
-    --embedding-db-path custom_embeddings \
     --collection-name my_papers
 
 # Force recreation
@@ -132,7 +130,6 @@ abstracts-explorer chat [OPTIONS]
 **Options:**
 
 - `--db-path TEXT`: Path to SQLite database (required)
-- `--embedding-db-path TEXT`: Path to ChromaDB database (default: from config)
 - `--model TEXT`: LLM model to use (default: from config)
 - `--temperature FLOAT`: Temperature for responses (default: from config)
 - `--max-tokens INTEGER`: Maximum tokens in response (default: from config)
@@ -150,7 +147,7 @@ While in the chat session:
 **Examples:**
 
 ```bash
-# Start chat with defaults
+# Start chat with defaults (uses EMBEDDING_DB from config)
 uv run abstracts-explorer chat --db-path data/abstracts.db
 
 # Use custom model

@@ -166,13 +166,13 @@ volumes:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DATABASE_URL` | PostgreSQL connection URL | `postgresql://abstracts:abstracts_password@postgres:5432/abstracts` |
-| `EMBEDDING_DB_URL` | ChromaDB HTTP endpoint | `http://chromadb:8000` |
+| `EMBEDDING_DB` | ChromaDB location (URL or path) | `http://chromadb:8000` |
 | `LLM_BACKEND_URL` | LLM backend URL | `http://host.docker.internal:1234` |
 | `CHAT_MODEL` | Chat model name | `gemma-3-4b-it-qat` |
 | `EMBEDDING_MODEL` | Embedding model name | `text-embedding-qwen3-embedding-4b` |
 | `COLLECTION_NAME` | ChromaDB collection | `papers` |
 
-**Note:** The setup now uses PostgreSQL and ChromaDB by default. SQLite mode is still supported for local development by setting `PAPER_DB=abstracts.db` instead of `PAPER_DB=postgresql://...`.
+**Note:** The setup uses PostgreSQL and ChromaDB by default. For local development with SQLite, set `PAPER_DB=abstracts.db` instead of the PostgreSQL URL. For local ChromaDB, set `EMBEDDING_DB=chroma_db` instead of the HTTP URL.
 
 ### Connecting to Host LM Studio
 
