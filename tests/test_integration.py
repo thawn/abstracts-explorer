@@ -10,7 +10,6 @@ import pytest
 
 from abstracts_explorer import DatabaseManager
 from abstracts_explorer.plugin import LightweightPaper, convert_to_lightweight_schema
-from abstracts_explorer.config import get_config
 from tests.conftest import set_test_db
 from tests.helpers import requires_lm_studio
 
@@ -24,7 +23,7 @@ pytestmark = pytest.mark.integration
 class TestIntegration:
     """Integration tests for the complete workflow."""
 
-    def test_empty_database_queries(self, tmp_path, monkeypatch):
+    def test_empty_database_queries(self, tmp_path):
         """Test querying an empty database."""
         db_file = tmp_path / "empty.db"
 
@@ -397,7 +396,7 @@ class TestIntegration:
             ],
         }
 
-    def test_real_neurips_data_subset(self, tmp_path, monkeypatch):
+    def test_real_neurips_data_subset(self, tmp_path):
         """
         Test with a diverse subset of actual NeurIPS 2025 data.
 

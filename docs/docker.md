@@ -172,7 +172,7 @@ volumes:
 | `EMBEDDING_MODEL` | Embedding model name | `text-embedding-qwen3-embedding-4b` |
 | `COLLECTION_NAME` | ChromaDB collection | `papers` |
 
-**Note:** The setup now uses PostgreSQL and ChromaDB by default. SQLite mode is still supported for local development by setting `PAPER_DB_PATH` instead of `DATABASE_URL`.
+**Note:** The setup now uses PostgreSQL and ChromaDB by default. SQLite mode is still supported for local development by setting `PAPER_DB=abstracts.db` instead of `PAPER_DB=postgresql://...`.
 
 ### Connecting to Host LM Studio
 

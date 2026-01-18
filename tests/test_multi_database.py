@@ -8,7 +8,7 @@ including PostgreSQL. PostgreSQL tests are skipped if PostgreSQL is not availabl
 import pytest
 import os
 
-from abstracts_explorer.database import DatabaseManager, DatabaseError
+from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.plugin import LightweightPaper
 from abstracts_explorer.config import get_config
 from tests.conftest import set_test_db
@@ -30,7 +30,7 @@ skip_without_postgres = pytest.mark.skipif(
 class TestMultiDatabaseBackend:
     """Test multi-database backend support."""
 
-    def test_sqlite_via_paper_db_path(self, tmp_path, monkeypatch):
+    def test_sqlite_via_paper_db_path(self, tmp_path):
         """Test using SQLite via PAPER_DB environment variable (path)."""
         db_path = tmp_path / "test.db"
         set_test_db(db_path)
@@ -56,7 +56,7 @@ class TestMultiDatabaseBackend:
             count = db.get_paper_count()
             assert count == 1
 
-    def test_sqlite_via_paper_db_url(self, tmp_path, monkeypatch):
+    def test_sqlite_via_paper_db_url(self, tmp_path):
         """Test using SQLite via PAPER_DB environment variable (URL)."""
         db_path = tmp_path / "test.db"
         database_url = f"sqlite:///{db_path}"
@@ -84,7 +84,7 @@ class TestMultiDatabaseBackend:
             assert count == 1
 
     @skip_without_postgres
-    def test_postgresql_basic_operations(self, monkeypatch):
+    def test_postgresql_basic_operations(self):
         """Test basic operations with PostgreSQL backend."""
         # This test requires PostgreSQL to be available
         set_test_db(POSTGRES_TEST_URL)
@@ -125,7 +125,7 @@ class TestMultiDatabaseBackend:
             assert "conferences" in filters
 
     @skip_without_postgres
-    def test_postgresql_multiple_papers(self, monkeypatch):
+    def test_postgresql_multiple_papers(self):
         """Test adding multiple papers with PostgreSQL."""
         set_test_db(POSTGRES_TEST_URL)
         db = DatabaseManager()
@@ -153,7 +153,7 @@ class TestMultiDatabaseBackend:
             assert total >= 5
 
     @skip_without_postgres
-    def test_postgresql_embedding_model_metadata(self, monkeypatch):
+    def test_postgresql_embedding_model_metadata(self):
         """Test embedding model metadata with PostgreSQL."""
         set_test_db(POSTGRES_TEST_URL)
         db = DatabaseManager()
@@ -177,7 +177,7 @@ class TestMultiDatabaseBackend:
             assert retrieved_model == new_model
 
     @skip_without_postgres
-    def test_postgresql_idempotent_create_tables(self, monkeypatch):
+    def test_postgresql_idempotent_create_tables(self):
         """Test that create_tables can be called multiple times without error."""
         set_test_db(POSTGRES_TEST_URL)
         db = DatabaseManager()

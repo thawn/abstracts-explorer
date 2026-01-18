@@ -15,7 +15,6 @@ from pydantic import ValidationError
 from unittest.mock import patch, Mock
 
 from abstracts_explorer.database import DatabaseManager
-from abstracts_explorer.config import get_config
 from tests.conftest import set_test_db
 from abstracts_explorer.plugin import (
     sanitize_author_names,
@@ -827,7 +826,7 @@ class TestDatabaseYearConferenceIntegration:
     """Test that year and conference fields are properly stored in the database."""
 
     @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
-    def test_neurips_year_conference_in_database(self, mock_get, monkeypatch):
+    def test_neurips_year_conference_in_database(self, mock_get):
         """Test that year and conference are stored in database from NeurIPS plugin."""
         # Mock the requests.get to return test data
         mock_response = Mock()
@@ -891,7 +890,7 @@ class TestDatabaseYearConferenceIntegration:
                 papers = db.query("SELECT * FROM papers WHERE conference = 'NeurIPS'")
                 assert len(papers) == 2
 
-    def test_ml4ps_year_conference_in_database(self, monkeypatch):
+    def test_ml4ps_year_conference_in_database(self):
         """Test that year and conference are stored in database from ML4PS plugin."""
         plugin = ML4PSDownloaderPlugin()
 

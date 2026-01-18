@@ -13,7 +13,6 @@ from abstracts_explorer.cli import (
     search_command,
 )
 from abstracts_explorer.plugin import LightweightPaper
-from abstracts_explorer.config import get_config
 from tests.conftest import set_test_db
 
 
@@ -41,7 +40,7 @@ class TestCLI:
             assert "usage:" in captured.out
             assert "create-embeddings" in captured.out
 
-    def test_download_command_success(self, tmp_path, capsys, monkeypatch):
+    def test_download_command_success(self, tmp_path, capsys):
         """Test download command completes successfully."""
         output_db = tmp_path / "test.db"
         
@@ -90,7 +89,7 @@ class TestCLI:
         assert "Database updated:" in captured.out
         assert output_db.exists()
 
-    def test_download_command_failure(self, tmp_path, capsys, monkeypatch):
+    def test_download_command_failure(self, tmp_path, capsys):
         """Test download command handles errors gracefully."""
         output_db = tmp_path / "test.db"
         
@@ -117,7 +116,7 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Error:" in captured.err
 
-    def test_download_command_with_database_url(self, tmp_path, capsys, monkeypatch):
+    def test_download_command_with_database_url(self, tmp_path, capsys):
         """Test download command uses PAPER_DB when set."""
         # Create a temporary SQLite database for testing
         db_path = tmp_path / "test.db"
@@ -161,7 +160,7 @@ class TestCLI:
         # Verify database was created
         assert db_path.exists()
 
-    def test_create_embeddings_db_not_found(self, tmp_path, capsys, monkeypatch):
+    def test_create_embeddings_db_not_found(self, tmp_path, capsys):
         """Test create-embeddings with non-existent database."""
         nonexistent_db = tmp_path / "nonexistent.db"
         set_test_db(nonexistent_db)
@@ -174,12 +173,12 @@ class TestCLI:
         ):
             # Should raise DatabaseError because database/tables don't exist
             with pytest.raises(Exception) as exc_info:
-                exit_code = main()
+                main()
         
         # Verify it's a database-related error
         assert "table" in str(exc_info.value).lower() or "database" in str(exc_info.value).lower()
 
-    def test_create_embeddings_lm_studio_not_available(self, tmp_path, capsys, monkeypatch):
+    def test_create_embeddings_lm_studio_not_available(self, tmp_path, capsys):
         """Test create-embeddings when OpenAI API is not available."""
         # Create a test database
         from abstracts_explorer import DatabaseManager
@@ -224,7 +223,7 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Failed to connect to OpenAI API" in captured.err
 
-    def test_create_embeddings_success(self, tmp_path, capsys, monkeypatch):
+    def test_create_embeddings_success(self, tmp_path, capsys):
         """Test create-embeddings command completes successfully."""
         from abstracts_explorer import DatabaseManager
 
@@ -283,7 +282,7 @@ class TestCLI:
         assert "Successfully generated embeddings for 2 papers" in captured.out
         assert "Vector database saved to" in captured.out
 
-    def test_create_embeddings_with_where_clause(self, tmp_path, capsys, monkeypatch):
+    def test_create_embeddings_with_where_clause(self, tmp_path, capsys):
         """Test create-embeddings with WHERE clause filter."""
         from abstracts_explorer import DatabaseManager
 
@@ -346,7 +345,7 @@ class TestCLI:
         assert "Filter will process 1 papers" in captured.out
         assert "Successfully generated embeddings for 1 papers" in captured.out
 
-    def test_create_embeddings_force_flag(self, tmp_path, capsys, monkeypatch):
+    def test_create_embeddings_force_flag(self, tmp_path, capsys):
         """Test create-embeddings with --force flag."""
         from abstracts_explorer import DatabaseManager
 
@@ -402,7 +401,7 @@ class TestCLI:
         # Verify create_collection was called with reset=True
         mock_em.create_collection.assert_called_once_with(reset=True)
 
-    def test_create_embeddings_custom_model(self, tmp_path, capsys, monkeypatch):
+    def test_create_embeddings_custom_model(self, tmp_path, capsys):
         """Test create-embeddings with custom model settings."""
         from abstracts_explorer import DatabaseManager
 
@@ -460,7 +459,7 @@ class TestCLI:
         assert call_kwargs["lm_studio_url"] == custom_url
         assert call_kwargs["model_name"] == custom_model
 
-    def test_create_embeddings_embeddings_error(self, tmp_path, capsys, monkeypatch):
+    def test_create_embeddings_embeddings_error(self, tmp_path, capsys):
         """Test create-embeddings handles EmbeddingsError gracefully."""
         from abstracts_explorer import DatabaseManager
         from abstracts_explorer.embeddings import EmbeddingsError
@@ -727,7 +726,7 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "No results found" in captured.out
 
-    def test_search_with_db_path_author_names(self, tmp_path, capsys, monkeypatch):
+    def test_search_with_db_path_author_names(self, tmp_path, capsys):
         """Test search command with database to resolve author names."""
         from abstracts_explorer import DatabaseManager
 
@@ -800,7 +799,7 @@ class TestCLI:
         assert "https://example.com/paper/1" in captured.out
         assert "A12" in captured.out
 
-    def test_search_with_db_path_missing_database(self, tmp_path, capsys, monkeypatch):
+    def test_search_with_db_path_missing_database(self, tmp_path, capsys):
         """Test search command with non-existent database."""
         embeddings_path = tmp_path / "embeddings"
         embeddings_path.mkdir()
@@ -839,7 +838,7 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "101,102" in captured.out  # Shows IDs as fallback
 
-    def test_search_with_db_path_lookup_error(self, tmp_path, capsys, monkeypatch):
+    def test_search_with_db_path_lookup_error(self, tmp_path, capsys):
         """Test search command when database connection fails (no longer relevant)."""
         from abstracts_explorer.database import DatabaseManager
         
@@ -1186,7 +1185,7 @@ class TestCLISearchErrorHandling:
 class TestCLIEmbeddingsProgressAndStats:
     """Test embeddings command progress and stats display."""
 
-    def test_create_embeddings_success_displays_stats(self, tmp_path, capsys, monkeypatch):
+    def test_create_embeddings_success_displays_stats(self, tmp_path, capsys):
         """Test that successful embedding displays stats (lines 131-136, 147-152)."""
         from abstracts_explorer.cli import main
 

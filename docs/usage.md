@@ -185,7 +185,7 @@ Use a custom configuration file:
 
 ```python
 import os
-os.environ['PAPER_DB_PATH'] = 'custom_papers.db'
+os.environ['PAPER_DB'] = 'custom_papers.db'
 os.environ['EMBEDDING_DB_PATH'] = 'custom_embeddings'
 
 from abstracts_explorer.config import get_config
