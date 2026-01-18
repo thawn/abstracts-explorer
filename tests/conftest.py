@@ -16,6 +16,19 @@ from abstracts_explorer.plugin import LightweightPaper
 from abstracts_explorer.config import load_env_file, get_config
 
 
+@pytest.fixture(scope="session")
+def monkeypatch_session():
+    """
+    Session-scoped monkeypatch fixture for module-level fixtures.
+    
+    This allows module-scoped fixtures to use monkeypatch functionality.
+    """
+    from _pytest.monkeypatch import MonkeyPatch
+    m = MonkeyPatch()
+    yield m
+    m.undo()
+
+
 def set_test_db(db_path):
     """
     Helper function to set PAPER_DB environment variable and reload config.
@@ -352,7 +365,7 @@ def mock_rag_openai():
 
 
 @pytest.fixture
-def embeddings_manager(tmp_path):
+def embeddings_manager(tmp_path, monkeypatch):
     """
     Create an EmbeddingsManager instance for testing.
 
@@ -360,6 +373,8 @@ def embeddings_manager(tmp_path):
     ----------
     tmp_path : Path
         Pytest's temporary path fixture
+    monkeypatch : MonkeyPatch
+        Pytest's monkeypatch fixture
 
     Returns
     -------
@@ -375,10 +390,16 @@ def embeddings_manager(tmp_path):
     
     chroma_path = tmp_path / "test_chroma"
     
+    # Set the embedding_db path via environment variable
+    monkeypatch.setenv("EMBEDDING_DB", str(chroma_path))
+    
+    # Force config reload to pick up the environment variable
+    from abstracts_explorer.config import get_config
+    _ = get_config(reload=True)  # Force reload but don't need the result
+    
     # Create the manager
     em = EmbeddingsManager(
         lm_studio_url="http://localhost:1234",
-        chroma_path=chroma_path,
         collection_name="test_collection",
     )
     

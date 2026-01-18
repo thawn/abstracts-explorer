@@ -197,7 +197,7 @@ neurips_plugin = get_plugin('neurips')
 papers_data = neurips_plugin.download(year=2025)
 
 # Load into database and search
-with DatabaseManager("data/abstracts.db") as db:
+with DatabaseManager() as db:
     db.create_tables()
     db.add_papers(papers_data)
     
@@ -214,7 +214,7 @@ from abstracts_explorer import EmbeddingsManager
 
 with EmbeddingsManager() as em:
     em.create_collection()
-    em.embed_from_database("data/abstracts.db")
+    em.embed_from_database()
     
     # Find similar papers
     results = em.search_similar(

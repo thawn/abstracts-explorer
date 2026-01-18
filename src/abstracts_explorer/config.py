@@ -92,10 +92,9 @@ class Config:
         URL for OpenAI-compatible API endpoint.
     llm_backend_auth_token : str
         Authentication token for LLM backend (if required).
-    embedding_db_path : str
-        Path to ChromaDB vector database (for embedded/local ChromaDB).
-    embedding_db_url : str
-        URL for ChromaDB HTTP service (for remote ChromaDB).
+    embedding_db : str
+        ChromaDB configuration - can be either a URL (e.g., "http://chromadb:8000")
+        or a file path (e.g., "chroma_db" or "/path/to/chroma_db").
     paper_db_path : str
         Path to SQLite paper database.
     collection_name : str
@@ -179,21 +178,16 @@ class Config:
             self.database_url = f"sqlite:///{paper_db_path}"
 
         # Embedding database configuration
-        # EMBEDDING_DB_URL takes precedence for HTTP ChromaDB service
-        # Falls back to EMBEDDING_DB_PATH for embedded/local ChromaDB
-        # Note: Only one of these should be set; they are mutually exclusive
-        # Initialize both attributes to ensure they always exist
-        self.embedding_db_url = ""
-        self.embedding_db_path = ""
+        # EMBEDDING_DB can be either a URL (e.g., "http://chromadb:8000")
+        # or a file path (e.g., "chroma_db" or "/path/to/chroma_db")
+        embedding_db = self._get_env("EMBEDDING_DB", default="chroma_db")
         
-        embedding_db_url = self._get_env("EMBEDDING_DB_URL", default="")
-        if embedding_db_url:
-            self.embedding_db_url = embedding_db_url
-            # embedding_db_path remains empty (mutual exclusion)
+        if embedding_db.startswith("http://") or embedding_db.startswith("https://"):
+            # URL provided - use as-is
+            self.embedding_db = embedding_db
         else:
-            # Local ChromaDB path configuration
-            self.embedding_db_path = self._resolve_path(self._get_env("EMBEDDING_DB_PATH", default="chroma_db"))
-            # embedding_db_url remains empty (mutual exclusion)
+            # File path - resolve relative to data_dir
+            self.embedding_db = self._resolve_path(embedding_db)
 
         # Collection Settings
         self.collection_name = self._get_env("COLLECTION_NAME", default="papers")
@@ -338,8 +332,7 @@ class Config:
             "embedding_model": self.embedding_model,
             "llm_backend_url": self.llm_backend_url,
             "llm_backend_auth_token": "***" if self.llm_backend_auth_token else "",
-            "embedding_db_path": self.embedding_db_path,
-            "embedding_db_url": self.embedding_db_url,
+            "embedding_db": self.embedding_db,
             "database_url": self._mask_database_url(self.database_url),
             "collection_name": self.collection_name,
             "max_context_papers": self.max_context_papers,

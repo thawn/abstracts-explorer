@@ -25,7 +25,6 @@ from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.firefox import GeckoDriverManager
 from webdriver_manager.core.os_manager import ChromeType
 from abstracts_explorer.database import DatabaseManager
-from abstracts_explorer.config import Config
 from tests.helpers import find_free_port
 from tests.conftest import set_test_db
 
@@ -189,8 +188,15 @@ def test_embeddings(test_database, tmp_path_factory):
     mock_embedding_response.data = [mock_embedding_data]
     mock_client.embeddings.create.return_value = mock_embedding_response
 
+    # Set environment variable for EMBEDDING_DB before creating EmbeddingsManager
+    os.environ["EMBEDDING_DB"] = str(embeddings_path)
+    
+    # Force config reload to pick up environment variable
+    from abstracts_explorer.config import get_config
+    _ = get_config(reload=True)
+
     # Initialize embeddings manager
-    em = EmbeddingsManager(chroma_path=embeddings_path, collection_name=collection_name)
+    em = EmbeddingsManager(collection_name=collection_name)
 
     # Inject the mock client directly to bypass lazy loading
     # This ensures we ALWAYS use the mock, never a real OpenAI connection
@@ -270,13 +276,20 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     port = find_free_port()
     base_url = f"http://localhost:{port}"
 
-    # Configure the app to use test database and embeddings
+    # Configure the app to use test database and embeddings via environment variables
+    # Set environment variables before creating Config instance
+    original_paper_db = os.environ.get("PAPER_DB")
+    original_embedding_db = os.environ.get("EMBEDDING_DB")
+    original_collection_name = os.environ.get("COLLECTION_NAME")
+    
+    os.environ["PAPER_DB"] = str(test_database)
+    os.environ["EMBEDDING_DB"] = str(embeddings_path)
+    os.environ["COLLECTION_NAME"] = collection_name
+    
     def mock_get_config():
-        config = Config()
-        config.paper_db_path = str(test_database)
-        config.embedding_db_path = str(embeddings_path)
-        config.collection_name = collection_name
-        return config
+        # Force reload to pick up environment variables
+        from abstracts_explorer.config import get_config as real_get_config
+        return real_get_config(reload=True)
 
     app_module.get_config = mock_get_config
 
@@ -342,6 +355,22 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     app_module.embeddings_manager = None
     app_module.rag_chat = None
     app_module.get_database = original_get_database
+    
+    # Restore original environment variables
+    if original_paper_db is not None:
+        os.environ["PAPER_DB"] = original_paper_db
+    elif "PAPER_DB" in os.environ:
+        del os.environ["PAPER_DB"]
+    
+    if original_embedding_db is not None:
+        os.environ["EMBEDDING_DB"] = original_embedding_db
+    elif "EMBEDDING_DB" in os.environ:
+        del os.environ["EMBEDDING_DB"]
+    
+    if original_collection_name is not None:
+        os.environ["COLLECTION_NAME"] = original_collection_name
+    elif "COLLECTION_NAME" in os.environ:
+        del os.environ["COLLECTION_NAME"]
 
 
 def _check_chrome_available():

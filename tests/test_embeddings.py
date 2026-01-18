@@ -27,7 +27,10 @@ class TestEmbeddingsManager:
         """Test connecting to ChromaDB."""
         embeddings_manager.connect()
         assert embeddings_manager.client is not None
-        assert embeddings_manager.chroma_path.exists()
+        # Check that embedding_db path exists (only for local paths)
+        if not embeddings_manager.embedding_db.startswith("http"):
+            from pathlib import Path
+            assert Path(embeddings_manager.embedding_db).exists()
         embeddings_manager.close()
 
     def test_close(self, embeddings_manager):

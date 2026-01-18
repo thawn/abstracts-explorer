@@ -112,12 +112,12 @@ def web_server(test_database, tmp_path_factory):
 
     # Set environment variables BEFORE importing the app modules
     # This ensures the config is loaded with the correct test paths
-    original_db_path = os.environ.get("PAPER_DB_PATH")
-    original_embeddings_path = os.environ.get("EMBEDDING_DB_PATH")
+    original_paper_db = os.environ.get("PAPER_DB")
+    original_embedding_db = os.environ.get("EMBEDDING_DB")
     original_collection_name = os.environ.get("COLLECTION_NAME")
 
-    os.environ["PAPER_DB_PATH"] = str(test_database)
-    os.environ["EMBEDDING_DB_PATH"] = str(embeddings_path)
+    os.environ["PAPER_DB"] = str(test_database)
+    os.environ["EMBEDDING_DB"] = str(embeddings_path)
     os.environ["COLLECTION_NAME"] = collection_name
 
     # Mock the OpenAI API for embedding generation
@@ -150,7 +150,7 @@ def web_server(test_database, tmp_path_factory):
         get_config(reload=True)
 
         # Initialize embeddings with test data
-        em = EmbeddingsManager(chroma_path=embeddings_path, collection_name=collection_name)
+        em = EmbeddingsManager(collection_name=collection_name)
         em.connect()
         em.create_collection(reset=True)
 
@@ -207,15 +207,15 @@ def web_server(test_database, tmp_path_factory):
         mock_openai_patcher.stop()
 
         # Restore original environment variables
-        if original_db_path is not None:
-            os.environ["PAPER_DB_PATH"] = original_db_path
-        elif "PAPER_DB_PATH" in os.environ:
-            del os.environ["PAPER_DB_PATH"]
+        if original_paper_db is not None:
+            os.environ["PAPER_DB"] = original_paper_db
+        elif "PAPER_DB" in os.environ:
+            del os.environ["PAPER_DB"]
 
-        if original_embeddings_path is not None:
-            os.environ["EMBEDDING_DB_PATH"] = original_embeddings_path
-        elif "EMBEDDING_DB_PATH" in os.environ:
-            del os.environ["EMBEDDING_DB_PATH"]
+        if original_embedding_db is not None:
+            os.environ["EMBEDDING_DB"] = original_embedding_db
+        elif "EMBEDDING_DB" in os.environ:
+            del os.environ["EMBEDDING_DB"]
 
         if original_collection_name is not None:
             os.environ["COLLECTION_NAME"] = original_collection_name
@@ -431,11 +431,8 @@ class TestWebUIIntegration:
         """
         Test that semantic search initializes EmbeddingsManager correctly.
 
-        This test specifically checks for the bug where EmbeddingsManager was being
-        initialized with incorrect parameters (db_path instead of chroma_path).
-
-        Bug: EmbeddingsManager.__init__() got an unexpected keyword argument 'db_path'
-        Fix: Use correct parameters: lm_studio_url, model_name, chroma_path, collection_name
+        This test verifies that EmbeddingsManager uses configuration from
+        environment variables rather than direct parameters.
         """
         host, port, base_url = web_server
 
