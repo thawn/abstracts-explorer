@@ -35,7 +35,7 @@ config = get_config()
 # Access configuration values
 print(f"Chat model: {config.chat_model}")
 print(f"Backend URL: {config.llm_backend_url}")
-print(f"Database path: {config.paper_db_path}")
+print(f"Database URL: {config.database_url}")
 ```
 
 ### Configuration Values
@@ -50,11 +50,12 @@ config.llm_backend_auth_token       # str
 
 # Embedding settings
 config.embedding_model              # str
-config.embedding_db_path            # str
+config.embedding_db_path            # str (for local ChromaDB)
+config.embedding_db_url             # str (for remote ChromaDB)
 config.collection_name              # str
 
 # Database settings
-config.paper_db_path                # str
+config.database_url                 # str (SQLAlchemy-compatible URL)
 
 # RAG settings
 config.max_context_papers           # int
@@ -154,17 +155,20 @@ config.chat_temperature    # float: 0.7
 Default values when not configured:
 
 ```python
-CHAT_MODEL = "gemma-3-4b-it-qat"
+DATA_DIR = "data"
+
+CHAT_MODEL = "diffbot-small-xl-2508"
 CHAT_TEMPERATURE = 0.7
 CHAT_MAX_TOKENS = 1000
 
 EMBEDDING_MODEL = "text-embedding-qwen3-embedding-4b"
 EMBEDDING_DB_PATH = "chroma_db"
+EMBEDDING_DB_URL = ""
 
 LLM_BACKEND_URL = "http://localhost:1234"
 LLM_BACKEND_AUTH_TOKEN = ""
 
-PAPER_DB_PATH = "abstracts.db"
+PAPER_DB = "abstracts.db"  # Converted to database_url internally
 COLLECTION_NAME = "papers"
 MAX_CONTEXT_PAPERS = 5
 ```

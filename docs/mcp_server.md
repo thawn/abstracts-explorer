@@ -125,9 +125,9 @@ abstracts-explorer mcp-server --transport stdio
 The MCP server uses the same configuration as the rest of Abstracts Explorer. Configure via `.env` file:
 
 ```bash
-# Database Paths
+# Database Configuration
+PAPER_DB=abstracts.db
 EMBEDDING_DB_PATH=chroma_db
-PAPER_DB_PATH=abstracts.db
 COLLECTION_NAME=papers
 
 # LLM Backend (for embeddings in tools)
@@ -239,7 +239,7 @@ Check that the database paths in `.env` are correct:
 
 ```bash
 # .env
-PAPER_DB_PATH=data/abstracts.db
+PAPER_DB=data/abstracts.db
 EMBEDDING_DB_PATH=chroma_db
 ```
 

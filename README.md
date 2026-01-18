@@ -88,10 +88,10 @@ Abstracts Explorer supports both SQLite and PostgreSQL backends:
 
 ```bash
 # Option 1: SQLite (default, no additional setup required)
-PAPER_DB_PATH=data/abstracts.db
+PAPER_DB=data/abstracts.db
 
 # Option 2: PostgreSQL (requires PostgreSQL server)
-DATABASE_URL=postgresql://user:password@localhost/abstracts
+PAPER_DB=postgresql://user:password@localhost/abstracts
 ```
 
 **PostgreSQL Setup:**
@@ -104,7 +104,7 @@ uv sync --extra postgres
 createdb abstracts
 
 # Configure in .env
-DATABASE_URL=postgresql://user:password@localhost/abstracts
+PAPER_DB=postgresql://user:password@localhost/abstracts
 ```
 
 📖 See [Configuration Guide](docs/configuration.md) for more database options

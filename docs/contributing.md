@@ -356,10 +356,10 @@ Abstracts Explorer supports both SQLite and PostgreSQL backends through SQLAlche
 **Configuration:**
 ```bash
 # SQLite (default)
-PAPER_DB_PATH=data/abstracts.db
+PAPER_DB=data/abstracts.db
 
 # PostgreSQL
-DATABASE_URL=postgresql://user:pass@localhost/abstracts
+PAPER_DB=postgresql://user:pass@localhost/abstracts
 ```
 
 ### Working with Databases

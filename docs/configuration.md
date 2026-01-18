@@ -44,25 +44,42 @@ nano .env
 
 - **DATA_DIR**: Base directory for data files (default: `data`)
 
-### Database Paths
+### Database Configuration
 
-- **EMBEDDING_DB_PATH**: Path to ChromaDB database (default: `chroma_db`). If relative, resolved relative to DATA_DIR.
-- **PAPER_DB_PATH**: Path to SQLite database with papers (default: `data/abstracts.db`). If relative, resolved relative to DATA_DIR.
+#### Paper Database
+
+- **PAPER_DB**: Database connection for papers. Can be either:
+  - **PostgreSQL URL**: `postgresql://user:password@host:port/database`
+  - **SQLite file path**: `abstracts.db` (relative to DATA_DIR) or `/absolute/path/to/abstracts.db`
+  - Default: `abstracts.db`
+
+The configuration automatically detects the database type based on the format:
+- URLs starting with `postgresql://`, `sqlite://`, or other database schemes are treated as database URLs
+- Other values are treated as SQLite file paths (relative to DATA_DIR unless absolute)
+
+#### Embedding Database
+
+- **EMBEDDING_DB_PATH**: Path to local ChromaDB database (default: `chroma_db`). If relative, resolved relative to DATA_DIR.
+- **EMBEDDING_DB_URL**: URL for remote ChromaDB HTTP service (e.g., `http://chromadb:8000`). Use this for Docker deployments.
+
+**Note**: `EMBEDDING_DB_URL` and `EMBEDDING_DB_PATH` are mutually exclusive. Only set one of them.
 
 ### RAG Settings
 
 - **COLLECTION_NAME**: ChromaDB collection name (default: `papers`)
 - **MAX_CONTEXT_PAPERS**: Number of papers to include in RAG context (default: `5`)
 
-## Example Configuration
+## Example Configurations
+
+### Local Development (SQLite)
 
 ```bash
-# .env file example
+# .env file for local development
 
 # Base directory for data files
 DATA_DIR=data
 
-CHAT_MODEL=gemma-3-4b-it-qat
+CHAT_MODEL=diffbot-small-xl-2508
 CHAT_TEMPERATURE=0.7
 CHAT_MAX_TOKENS=1000
 
@@ -71,16 +88,48 @@ EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b
 LLM_BACKEND_URL=http://localhost:1234
 LLM_BACKEND_AUTH_TOKEN=
 
-# Paths relative to DATA_DIR (will resolve to data/chroma_db and data/abstracts.db)
-EMBEDDING_DB_PATH=chroma_db
-PAPER_DB_PATH=abstracts.db
+# SQLite database (relative to DATA_DIR - will resolve to data/abstracts.db)
+PAPER_DB=abstracts.db
 
-# Or use absolute paths:
-# EMBEDDING_DB_PATH=/absolute/path/to/chroma_db
-# PAPER_DB_PATH=/absolute/path/to/abstracts.db
+# Local ChromaDB (relative to DATA_DIR - will resolve to data/chroma_db)
+EMBEDDING_DB_PATH=chroma_db
 
 COLLECTION_NAME=papers
 MAX_CONTEXT_PAPERS=5
+```
+
+### Production/Docker (PostgreSQL)
+
+```bash
+# .env file for production with PostgreSQL
+
+DATA_DIR=data
+
+CHAT_MODEL=diffbot-small-xl-2508
+CHAT_TEMPERATURE=0.7
+CHAT_MAX_TOKENS=1000
+
+EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b
+
+LLM_BACKEND_URL=http://localhost:1234
+LLM_BACKEND_AUTH_TOKEN=
+
+# PostgreSQL database URL
+PAPER_DB=postgresql://abstracts:password@postgres:5432/abstracts
+
+# Remote ChromaDB HTTP service
+EMBEDDING_DB_URL=http://chromadb:8000
+
+COLLECTION_NAME=papers
+MAX_CONTEXT_PAPERS=5
+```
+
+### Alternative: Absolute Paths
+
+```bash
+# Using absolute paths for both databases
+PAPER_DB=/var/data/abstracts.db
+EMBEDDING_DB_PATH=/var/data/chroma_db
 ```
 
 ## Using Configuration in Code
@@ -94,7 +143,13 @@ config = get_config()
 # Access configuration values
 print(f"Chat model: {config.chat_model}")
 print(f"Backend URL: {config.llm_backend_url}")
-print(f"Database path: {config.paper_db_path}")
+print(f"Database URL: {config.database_url}")  # SQLAlchemy-compatible URL
+
+# Check which embedding database mode is active
+if config.embedding_db_url:
+    print(f"Using remote ChromaDB: {config.embedding_db_url}")
+else:
+    print(f"Using local ChromaDB: {config.embedding_db_path}")
 ```
 
 ## Environment Variables
