@@ -236,7 +236,9 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
         elif tool_name == "get_cluster_visualization":
             return get_cluster_visualization(**arguments)
         else:
-            raise MCPToolsError(f"Unknown MCP tool: {tool_name}")
+            # Return error JSON for unknown tools
+            error_result = {"error": f"Unknown MCP tool: {tool_name}"}
+            return json.dumps(error_result, indent=2)
     
     except Exception as e:
         logger.error(f"MCP tool execution failed: {str(e)}")

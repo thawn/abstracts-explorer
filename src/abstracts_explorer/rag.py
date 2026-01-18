@@ -587,7 +587,13 @@ class RAGChat:
         # Execute each tool call
         for tool_call in tool_calls:
             function_name = tool_call.function.name
-            function_args = json.loads(tool_call.function.arguments)
+            
+            try:
+                function_args = json.loads(tool_call.function.arguments)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse tool arguments: {e}")
+                # Use empty args as fallback
+                function_args = {}
             
             logger.info(f"LLM requested tool: {function_name} with args: {function_args}")
             

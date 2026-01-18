@@ -51,8 +51,10 @@ def main():
     
     try:
         response1 = chat.query(question1)
-        print(f"Response: {response1['response'][:500]}...")
-        print(f"Metadata: {response1['metadata']}")
+        response_text = response1.get('response', '')
+        metadata = response1.get('metadata', {})
+        print(f"Response: {response_text[:500]}...")
+        print(f"Metadata: {metadata}")
     except Exception as e:
         print(f"Error: {e}")
     print()
@@ -69,8 +71,10 @@ def main():
     
     try:
         response2 = chat.query(question2)
-        print(f"Response: {response2['response'][:500]}...")
-        print(f"Metadata: {response2['metadata']}")
+        response_text = response2.get('response', '')
+        metadata = response2.get('metadata', {})
+        print(f"Response: {response_text[:500]}...")
+        print(f"Metadata: {metadata}")
     except Exception as e:
         print(f"Error: {e}")
     print()
@@ -87,8 +91,10 @@ def main():
     
     try:
         response3 = chat.query(question3)
-        print(f"Response: {response3['response'][:500]}...")
-        print(f"Metadata: {response3['metadata']}")
+        response_text = response3.get('response', '')
+        metadata = response3.get('metadata', {})
+        print(f"Response: {response_text[:500]}...")
+        print(f"Metadata: {metadata}")
     except Exception as e:
         print(f"Error: {e}")
     print()
@@ -105,9 +111,12 @@ def main():
     
     try:
         response4 = chat.query(question4)
-        print(f"Response: {response4['response'][:500]}...")
-        print(f"Metadata: {response4['metadata']}")
-        print(f"Papers used: {len(response4['papers'])} papers")
+        response_text = response4.get('response', '')
+        metadata = response4.get('metadata', {})
+        papers = response4.get('papers', [])
+        print(f"Response: {response_text[:500]}...")
+        print(f"Metadata: {metadata}")
+        print(f"Papers used: {len(papers)} papers")
     except Exception as e:
         print(f"Error: {e}")
     print()
@@ -124,8 +133,10 @@ def main():
     
     try:
         response5 = chat.query(question5)
-        print(f"Response: {response5['response'][:500]}...")
-        print(f"Metadata: {response5['metadata']}")
+        response_text = response5.get('response', '')
+        metadata = response5.get('metadata', {})
+        print(f"Response: {response_text[:500]}...")
+        print(f"Metadata: {metadata}")
     except Exception as e:
         print(f"Error: {e}")
     print()
