@@ -189,8 +189,15 @@ def test_embeddings(test_database, tmp_path_factory):
     mock_embedding_response.data = [mock_embedding_data]
     mock_client.embeddings.create.return_value = mock_embedding_response
 
+    # Set environment variable for EMBEDDING_DB before creating EmbeddingsManager
+    os.environ["EMBEDDING_DB"] = str(embeddings_path)
+    
+    # Force config reload to pick up environment variable
+    from abstracts_explorer.config import get_config
+    _ = get_config(reload=True)
+
     # Initialize embeddings manager
-    em = EmbeddingsManager(chroma_path=embeddings_path, collection_name=collection_name)
+    em = EmbeddingsManager(collection_name=collection_name)
 
     # Inject the mock client directly to bypass lazy loading
     # This ensures we ALWAYS use the mock, never a real OpenAI connection
@@ -273,8 +280,8 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     # Configure the app to use test database and embeddings
     def mock_get_config():
         config = Config()
-        config.paper_db_path = str(test_database)
-        config.embedding_db_path = str(embeddings_path)
+        config.database_url = f"sqlite:///{test_database}"
+        config.embedding_db = str(embeddings_path)
         config.collection_name = collection_name
         return config
 
