@@ -155,6 +155,8 @@ abstracts-explorer mcp-server
 # - Generate cluster visualizations
 ```
 
+**NEW**: MCP clustering tools are now **automatically integrated** into the RAG chat! The LLM will automatically use clustering tools when appropriate to answer questions about topics, trends, and developments. No need to run a separate MCP server for RAG chat usage.
+
 ### Start Web Interface
 
 ```bash
