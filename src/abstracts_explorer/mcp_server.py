@@ -39,7 +39,6 @@ class ClusterAnalysisError(Exception):
 
 
 def load_clustering_data(
-    embeddings_path: Optional[str] = None,
     collection_name: Optional[str] = None,
 ) -> tuple[ClusteringManager, DatabaseManager]:
     """
@@ -47,8 +46,6 @@ def load_clustering_data(
 
     Parameters
     ----------
-    embeddings_path : str, optional
-        Path to ChromaDB embeddings database
     collection_name : str, optional
         Name of the ChromaDB collection
 
@@ -65,13 +62,11 @@ def load_clustering_data(
     config = get_config()
     
     # Use config defaults if not provided
-    embeddings_path = embeddings_path or config.embedding_db_path
     collection_name = collection_name or config.collection_name
     
     try:
         # Initialize embeddings manager
         em = EmbeddingsManager(
-            chroma_path=embeddings_path,
             collection_name=collection_name,
         )
         em.connect()
@@ -182,7 +177,6 @@ def get_cluster_topics(
     n_clusters: int = 8,
     reduction_method: str = "pca",
     clustering_method: str = "kmeans",
-    embeddings_path: Optional[str] = None,
     collection_name: Optional[str] = None,
 ) -> str:
     """
@@ -199,8 +193,6 @@ def get_cluster_topics(
         Dimensionality reduction method: 'pca' or 'tsne' (default: 'pca')
     clustering_method : str, optional
         Clustering method: 'kmeans', 'dbscan', or 'agglomerative' (default: 'kmeans')
-    embeddings_path : str, optional
-        Path to ChromaDB embeddings database (uses config default if not provided)
     collection_name : str, optional
         Name of ChromaDB collection (uses config default if not provided)
 
@@ -211,11 +203,10 @@ def get_cluster_topics(
     """
     try:
         config = get_config()
-        embeddings_path = embeddings_path or config.embedding_db_path
         collection_name = collection_name or config.collection_name
         
         # Load clustering data
-        cm, db = load_clustering_data(embeddings_path, collection_name)
+        cm, db = load_clustering_data(collection_name)
         
         # Load embeddings
         logger.info("Loading embeddings...")
@@ -342,7 +333,6 @@ def get_topic_evolution(
     start_year: Optional[int] = None,
     end_year: Optional[int] = None,
     where: Optional[Dict[str, Any]] = None,
-    embeddings_path: Optional[str] = None,
     collection_name: Optional[str] = None,
 ) -> str:
     """
@@ -370,8 +360,6 @@ def get_topic_evolution(
           {"session": {"$in": ["Oral Session 1", "Oral Session 2"]}}  # Multiple sessions
           {"$and": [{"year": {"$gte": 2024}}, {"conference": "NeurIPS"}]}  # Multiple conditions
         Note: If 'conference' parameter is provided, it will be merged with this WHERE clause.
-    embeddings_path : str, optional
-        Path to ChromaDB embeddings database
     collection_name : str, optional
         Name of ChromaDB collection
 
@@ -382,12 +370,10 @@ def get_topic_evolution(
     """
     try:
         config = get_config()
-        embeddings_path = embeddings_path or config.embedding_db_path
         collection_name = collection_name or config.collection_name
         
         # Initialize embeddings manager
         em = EmbeddingsManager(
-            chroma_path=embeddings_path,
             collection_name=collection_name,
         )
         em.connect()
@@ -477,7 +463,6 @@ def get_recent_developments(
     n_results: int = 10,
     conference: Optional[str] = None,
     where: Optional[Dict[str, Any]] = None,
-    embeddings_path: Optional[str] = None,
     collection_name: Optional[str] = None,
 ) -> str:
     """
@@ -505,8 +490,6 @@ def get_recent_developments(
           {"session": {"$in": ["Oral Session 1", "Oral Session 2"]}}  # Multiple sessions
           {"$and": [{"year": {"$gte": 2024}}, {"conference": "NeurIPS"}]}  # Multiple conditions
         Note: If 'conference' parameter is provided, it will be merged with this WHERE clause.
-    embeddings_path : str, optional
-        Path to ChromaDB embeddings database
     collection_name : str, optional
         Name of ChromaDB collection
 
@@ -517,12 +500,10 @@ def get_recent_developments(
     """
     try:
         config = get_config()
-        embeddings_path = embeddings_path or config.embedding_db_path
         collection_name = collection_name or config.collection_name
         
         # Initialize embeddings manager
         em = EmbeddingsManager(
-            chroma_path=embeddings_path,
             collection_name=collection_name,
         )
         em.connect()
@@ -602,7 +583,6 @@ def get_cluster_visualization(
     clustering_method: str = "kmeans",
     n_components: int = 2,
     output_path: Optional[str] = None,
-    embeddings_path: Optional[str] = None,
     collection_name: Optional[str] = None,
 ) -> str:
     """
@@ -623,8 +603,6 @@ def get_cluster_visualization(
         Number of dimensions for visualization: 2 or 3 (default: 2)
     output_path : str, optional
         Path to save visualization JSON file (optional)
-    embeddings_path : str, optional
-        Path to ChromaDB embeddings database
     collection_name : str, optional
         Name of ChromaDB collection
 
@@ -635,13 +613,11 @@ def get_cluster_visualization(
     """
     try:
         config = get_config()
-        embeddings_path = embeddings_path or config.embedding_db_path
         collection_name = collection_name or config.collection_name
         
         # Perform clustering
         logger.info("Performing clustering for visualization...")
         results = perform_clustering(
-            embeddings_path=embeddings_path,
             collection_name=collection_name,
             reduction_method=reduction_method,
             n_components=n_components,

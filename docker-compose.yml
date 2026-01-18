@@ -19,7 +19,7 @@ services:
       - PAPER_DB=postgresql://abstracts:abstracts_password@postgres:5432/abstracts
       
       # Embeddings configuration - using ChromaDB service
-      - EMBEDDING_DB_URL=http://chromadb:8000
+      - EMBEDDING_DB=http://chromadb:8000
       - COLLECTION_NAME=papers
       
       # LLM Backend configuration

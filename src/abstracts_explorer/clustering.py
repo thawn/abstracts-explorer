@@ -907,7 +907,6 @@ Only respond with the label, nothing else."""
 
 
 def perform_clustering(
-    embeddings_path: Union[str, Path],
     collection_name: str = "papers",
     reduction_method: str = "pca",
     n_components: int = 2,
@@ -929,8 +928,6 @@ def perform_clustering(
 
     Parameters
     ----------
-    embeddings_path : str or Path
-        Path to ChromaDB embeddings database
     collection_name : str, optional
         Name of the ChromaDB collection, by default "papers"
     reduction_method : str, optional
@@ -963,7 +960,6 @@ def perform_clustering(
     Examples
     --------
     >>> results = perform_clustering(
-    ...     embeddings_path="chroma_db",
     ...     reduction_method="tsne",
     ...     clustering_method="kmeans",
     ...     n_clusters=5,
@@ -972,9 +968,8 @@ def perform_clustering(
     >>> print(f"Found {results['statistics']['n_clusters']} clusters")
     """
     try:
-        # Initialize embeddings manager
+        # Initialize embeddings manager - gets config from environment
         em = EmbeddingsManager(
-            chroma_path=embeddings_path,
             collection_name=collection_name,
         )
         em.connect()
