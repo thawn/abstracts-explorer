@@ -116,9 +116,9 @@ class TestLoadClusteringData:
         """Test loading clustering data with default config values."""
         # Setup mocks
         mock_config_obj = Mock()
-        mock_config_obj.embedding_db_path = "chroma_db"
+        mock_config_obj.embedding_db = "chroma_db"
         mock_config_obj.collection_name = "papers"
-        mock_config_obj.paper_db_path = "abstracts.db"
+        mock_config_obj.database_url = "sqlite:///abstracts.db"
         mock_config.return_value = mock_config_obj
 
         mock_em = Mock()
@@ -131,9 +131,8 @@ class TestLoadClusteringData:
         # Call function
         cm, db = load_clustering_data()
 
-        # Verify calls
+        # Verify calls - EmbeddingsManager now only takes collection_name
         mock_em_class.assert_called_once_with(
-            chroma_path="chroma_db",
             collection_name="papers",
         )
         mock_em.connect.assert_called_once()
@@ -149,9 +148,10 @@ class TestLoadClusteringData:
 
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
     @patch("abstracts_explorer.mcp_server.get_config")
-    def test_load_with_custom_paths(self, mock_config, mock_em_class):
-        """Test loading with custom paths overriding config."""
+    def test_load_with_custom_collection(self, mock_config, mock_em_class):
+        """Test loading with custom collection name."""
         mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
         mock_config.return_value = mock_config_obj
 
         mock_em = Mock()
@@ -164,15 +164,13 @@ class TestLoadClusteringData:
             mock_cm = Mock()
             mock_cm_class.return_value = mock_cm
 
-            # Call with custom paths
+            # Call with custom collection name
             cm, db = load_clustering_data(
-                embeddings_path="custom_chroma",
                 collection_name="custom_papers",
             )
 
-            # Verify custom paths were used
+            # Verify custom collection name was used
             mock_em_class.assert_called_once_with(
-                chroma_path="custom_chroma",
                 collection_name="custom_papers",
             )
             mock_db_class.assert_called_once_with()
