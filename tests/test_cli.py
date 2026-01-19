@@ -6,11 +6,13 @@ including the download and create-embeddings commands.
 """
 
 import sys
+import logging
 from unittest.mock import Mock, patch
 import pytest
 from abstracts_explorer.cli import (
     main,
     search_command,
+    setup_logging,
 )
 from abstracts_explorer.plugin import LightweightPaper
 from tests.conftest import set_test_db
@@ -1673,3 +1675,112 @@ class TestCLIChatInteractiveLoop:
         assert exit_code == 0
         captured = capsys.readouterr()
         assert "Goodbye" in captured.out
+
+
+class TestLogging:
+    """Test cases for logging configuration."""
+
+    def test_setup_logging_default_warning(self, monkeypatch):
+        """Test that default logging level is WARNING when no flags or env var is set."""
+        
+        # Clear any LOG_LEVEL env var
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+        
+        # Force config reload to pick up environment changes
+        get_config(reload=True)
+        
+        # Setup logging with verbosity=0 (default)
+        setup_logging(0)
+        
+        # Check that root logger is at WARNING level
+        assert logging.root.level == logging.WARNING
+
+    def test_setup_logging_verbosity_info(self, monkeypatch):
+        """Test that -v flag sets INFO level."""
+        
+        # Clear any LOG_LEVEL env var
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+        
+        # Force config reload
+        get_config(reload=True)
+        
+        # Setup logging with verbosity=1 (-v)
+        setup_logging(1)
+        
+        # Check that root logger is at INFO level
+        assert logging.root.level == logging.INFO
+
+    def test_setup_logging_verbosity_debug(self, monkeypatch):
+        """Test that -vv flag sets DEBUG level."""
+        
+        # Clear any LOG_LEVEL env var
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+        
+        # Force config reload
+        get_config(reload=True)
+        
+        # Setup logging with verbosity=2 (-vv)
+        setup_logging(2)
+        
+        # Check that root logger is at DEBUG level
+        assert logging.root.level == logging.DEBUG
+
+    def test_setup_logging_env_var_info(self, monkeypatch):
+        """Test that LOG_LEVEL=INFO env var sets INFO level."""
+        
+        # Set LOG_LEVEL env var
+        monkeypatch.setenv("LOG_LEVEL", "INFO")
+        
+        # Force config reload to pick up environment changes
+        get_config(reload=True)
+        
+        # Setup logging with verbosity=0 (no flags)
+        setup_logging(0)
+        
+        # Check that root logger is at INFO level
+        assert logging.root.level == logging.INFO
+
+    def test_setup_logging_env_var_debug(self, monkeypatch):
+        """Test that LOG_LEVEL=DEBUG env var sets DEBUG level."""
+        
+        # Set LOG_LEVEL env var
+        monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+        
+        # Force config reload
+        get_config(reload=True)
+        
+        # Setup logging with verbosity=0 (no flags)
+        setup_logging(0)
+        
+        # Check that root logger is at DEBUG level
+        assert logging.root.level == logging.DEBUG
+
+    def test_setup_logging_flag_overrides_env_var(self, monkeypatch):
+        """Test that -v flag overrides LOG_LEVEL env var."""
+        
+        # Set LOG_LEVEL to WARNING
+        monkeypatch.setenv("LOG_LEVEL", "WARNING")
+        
+        # Force config reload
+        get_config(reload=True)
+        
+        # Setup logging with verbosity=2 (-vv for DEBUG)
+        setup_logging(2)
+        
+        # Check that root logger is at DEBUG level (flag overrides env var)
+        assert logging.root.level == logging.DEBUG
+
+    def test_setup_logging_invalid_env_var(self, monkeypatch):
+        """Test that invalid LOG_LEVEL env var falls back to WARNING."""
+        
+        # Set invalid LOG_LEVEL
+        monkeypatch.setenv("LOG_LEVEL", "INVALID")
+        
+        # Force config reload
+        get_config(reload=True)
+        
+        # Setup logging with verbosity=0
+        setup_logging(0)
+        
+        # Check that root logger falls back to WARNING
+        assert logging.root.level == logging.WARNING
