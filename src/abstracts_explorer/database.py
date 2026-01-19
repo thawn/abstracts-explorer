@@ -120,7 +120,7 @@ class DatabaseManager:
             self._raw_connection = self.engine.raw_connection()
             self.connection = self._raw_connection.driver_connection
 
-            logger.info(f"Connected to database: {self._mask_url(self.database_url)}")
+            logger.debug(f"Connected to database: {self._mask_url(self.database_url)}")
         except Exception as e:
             raise DatabaseError(f"Failed to connect to database: {str(e)}") from e
 
@@ -152,7 +152,7 @@ class DatabaseManager:
             self.engine = None
         self.SessionLocal = None
         self.connection = None
-        logger.info("Database connection closed")
+        logger.debug("Database connection closed")
 
     def __enter__(self):
         """Context manager entry."""
@@ -187,7 +187,7 @@ class DatabaseManager:
             # Create tables only if they don't exist (checkfirst=True is the default)
             # This makes the operation idempotent
             Base.metadata.create_all(bind=self.engine, checkfirst=True)
-            logger.info("Database tables created successfully")
+            logger.debug("Database tables created successfully")
         except (OperationalError, ProgrammingError, IntegrityError) as e:
             # These exceptions can occur when tables already exist, especially with:
             # - Race conditions in concurrent environments
@@ -371,7 +371,7 @@ class DatabaseManager:
             if result is not None:
                 inserted_count += 1
 
-        logger.info(f"Successfully inserted {inserted_count} of {len(papers)} papers")
+        logger.debug(f"Successfully inserted {inserted_count} of {len(papers)} papers")
         return inserted_count
 
     def query(self, sql: str, parameters: tuple = ()) -> List[Dict[str, Any]]:

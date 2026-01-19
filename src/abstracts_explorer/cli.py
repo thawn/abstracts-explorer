@@ -23,15 +23,40 @@ from .mcp_server import run_mcp_server
 
 def setup_logging(verbosity: int) -> None:
     """
-    Configure logging based on verbosity level.
+    Configure logging based on verbosity level and LOG_LEVEL environment variable.
+
+    Precedence (highest to lowest):
+    1. Command-line verbosity flags (-v, -vv)
+    2. LOG_LEVEL environment variable
+    3. Default (WARNING)
 
     Parameters
     ----------
     verbosity : int
-        Verbosity level (0=WARNING, 1=INFO, 2+=DEBUG)
+        Verbosity level from command-line flags:
+        - 0: Use LOG_LEVEL env var or WARNING (default)
+        - 1: INFO
+        - 2+: DEBUG
     """
+    # Start with default level
+    level = logging.WARNING
+    
+    # Check if verbosity flags were used
     if verbosity == 0:
-        level = logging.WARNING
+        # No verbosity flags - check environment variable
+        config = get_config()
+        if config.log_level:
+            level_map = {
+                "DEBUG": logging.DEBUG,
+                "INFO": logging.INFO,
+                "WARNING": logging.WARNING,
+                "ERROR": logging.ERROR,
+                "CRITICAL": logging.CRITICAL,
+            }
+            level = level_map.get(config.log_level, logging.WARNING)
+        else:
+            # No env var either - use default WARNING
+            level = logging.WARNING
     elif verbosity == 1:
         level = logging.INFO
     else:
