@@ -556,16 +556,19 @@ class TestWebUIIntegration:
             assert data["count"] == len(data["papers"])
             assert data["count"] <= 3
 
-            # If we got results, check they have similarity scores
-            if data["papers"]:
-                for paper in data["papers"]:
-                    assert "uid" in paper
-                    assert "title" in paper
-                    assert "abstract" in paper
-                    # Semantic search results should include similarity score
-                    assert "similarity" in paper, "Semantic search results should include similarity score"
-                    assert isinstance(paper["similarity"], (int, float))
-                    assert 0 <= paper["similarity"] <= 1, "Similarity should be between 0 and 1"
+            # Semantic search MUST return results - if it returns 0, it's a bug
+            assert data["count"] > 0, "Semantic search must return at least 1 result. If this fails, check that embeddings are created and the collection is not empty."
+            assert len(data["papers"]) > 0, "Semantic search must return at least 1 paper"
+            
+            # Check that results have similarity scores
+            for paper in data["papers"]:
+                assert "uid" in paper
+                assert "title" in paper
+                assert "abstract" in paper
+                # Semantic search results should include similarity score
+                assert "similarity" in paper, "Semantic search results should include similarity score"
+                assert isinstance(paper["similarity"], (int, float))
+                assert 0 <= paper["similarity"] <= 1, "Similarity should be between 0 and 1"
         else:
             # If failed, should have clear error message
             assert "error" in data
@@ -613,10 +616,12 @@ class TestWebUIIntegration:
             assert "papers" in semantic_results
             assert "use_embeddings" in semantic_results
             assert semantic_results["use_embeddings"] is True
+            
+            # Semantic search MUST return results
+            assert len(semantic_results["papers"]) > 0, "Semantic search must return at least 1 result"
 
             # Semantic results should have similarity scores
-            if semantic_results["papers"]:
-                assert "similarity" in semantic_results["papers"][0]
+            assert "similarity" in semantic_results["papers"][0]
 
             # Keyword results should NOT have similarity scores
             if keyword_results["papers"]:
