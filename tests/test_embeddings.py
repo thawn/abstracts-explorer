@@ -569,3 +569,76 @@ def test_embed_from_database_stores_model(embeddings_manager, test_database):
         assert stored_model == embeddings_manager.model_name
     
     embeddings_manager.close()
+
+
+def test_search_papers_semantic_with_year_filter(embeddings_manager, tmp_path, mock_lm_studio):
+    """Test that search_papers_semantic correctly filters by year.
+    
+    This is a regression test for the bug where year filters were being
+    converted to integers but ChromaDB stores metadata as strings, causing
+    filters to return 0 results.
+    """
+    from abstracts_explorer.database import DatabaseManager
+    from abstracts_explorer.plugin import LightweightPaper
+    
+    # Create a database with papers from different years
+    db_path = tmp_path / "test_year_filter.db"
+    set_test_db(db_path)
+    
+    with DatabaseManager() as db:
+        db.create_tables()
+        
+        # Add papers with different years
+        papers = [
+            LightweightPaper(
+                uid="paper2024",
+                title="Paper from 2024",
+                abstract="This is a paper from 2024.",
+                authors=["Author A"],
+                session="Session 1",
+                poster_position="A1",
+                year=2024,
+                conference="NeurIPS",
+            ),
+            LightweightPaper(
+                uid="paper2025",
+                title="Paper from 2025",
+                abstract="This is a paper from 2025.",
+                authors=["Author B"],
+                session="Session 2",
+                poster_position="A2",
+                year=2025,
+                conference="NeurIPS",
+            ),
+        ]
+        for paper in papers:
+            db.add_paper(paper)
+    
+    # Embed papers
+    embeddings_manager.connect()
+    embeddings_manager.create_collection()
+    embeddings_manager.embed_from_database()
+    
+    # Test search without filter - should return both papers
+    with DatabaseManager() as db:
+        results_all = embeddings_manager.search_papers_semantic("paper", database=db, limit=10)
+        assert len(results_all) == 2, f"Expected 2 papers without filter, got {len(results_all)}"
+    
+    # Test search with year filter [2024] - should return only 2024 paper
+    with DatabaseManager() as db:
+        results_2024 = embeddings_manager.search_papers_semantic("paper", database=db, limit=10, years=[2024])
+        assert len(results_2024) == 1, f"Expected 1 paper with year=2024 filter, got {len(results_2024)}"
+        assert results_2024[0]["year"] == 2024, f"Expected year 2024, got {results_2024[0]['year']}"
+    
+    # Test search with year filter [2025] - should return only 2025 paper
+    with DatabaseManager() as db:
+        results_2025 = embeddings_manager.search_papers_semantic("paper", database=db, limit=10, years=[2025])
+        assert len(results_2025) == 1, f"Expected 1 paper with year=2025 filter, got {len(results_2025)}"
+        assert results_2025[0]["year"] == 2025, f"Expected year 2025, got {results_2025[0]['year']}"
+    
+    # Test search with multiple year filters - should return both papers
+    with DatabaseManager() as db:
+        results_both = embeddings_manager.search_papers_semantic("paper", database=db, limit=10, years=[2024, 2025])
+        assert len(results_both) == 2, f"Expected 2 papers with years=[2024, 2025] filter, got {len(results_both)}"
+    
+    embeddings_manager.close()

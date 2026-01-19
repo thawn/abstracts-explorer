@@ -743,13 +743,15 @@ class EmbeddingsManager:
         from .paper_utils import format_search_results, PaperFormattingError
         
         # Build metadata filter for embeddings search
+        # NOTE: All metadata is stored as strings in ChromaDB (see add_paper method, line 445)
+        # so we must convert filter values to strings for matching
         filter_conditions: List[Dict[str, Any]] = []
         if sessions:
             filter_conditions.append({"session": {"$in": sessions}})
         if years:
-            # Convert years to integers for ChromaDB
-            year_ints: List[int] = [int(y) for y in years]
-            filter_conditions.append({"year": {"$in": year_ints}})
+            # Convert years to strings to match ChromaDB metadata storage format
+            year_strs: List[str] = [str(y) for y in years]
+            filter_conditions.append({"year": {"$in": year_strs}})
         if conferences:
             filter_conditions.append({"conference": {"$in": conferences}})
         

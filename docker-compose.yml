@@ -11,11 +11,11 @@ services:
     volumes:
       # Persist data directory
       - abstracts-data:/app/data
-      # Optional: mount custom .env file
-      # - ./.env:/app/.env:ro
     environment:
-      # Database configuration - using PostgreSQL
+      # Data dir must be the same as assigned to the volume, otherwise downloaded data will not persist
       - DATA_DIR=/app/data
+
+      # Database configuration - using PostgreSQL
       - PAPER_DB=postgresql://abstracts:abstracts_password@postgres:5432/abstracts
       
       # Embeddings configuration - using ChromaDB service
@@ -23,6 +23,8 @@ services:
       - COLLECTION_NAME=papers
       
       # LLM Backend configuration
+      # The auth token for the LLM backend is read from the environment variable LLM_BACKEND_AUTH_TOKEN,
+      # which must be set in the environment or .env file.
       # Option 1: Use external service (e.g., blablador)
       - LLM_BACKEND_URL=https://api.helmholtz-blablador.fz-juelich.de
       - LLM_BACKEND_AUTH_TOKEN=${LLM_BACKEND_AUTH_TOKEN}
@@ -73,7 +75,7 @@ services:
     image: chromadb/chroma:latest
     container_name: abstracts-chromadb
     volumes:
-      - chromadb-data:/chroma/chroma
+      - chromadb-data:/data
     environment:
       - IS_PERSISTENT=TRUE
       - ANONYMIZED_TELEMETRY=FALSE
