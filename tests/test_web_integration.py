@@ -146,8 +146,11 @@ def web_server(test_database, tmp_path_factory):
         from abstracts_explorer.embeddings import EmbeddingsManager
         from abstracts_explorer.config import get_config
 
-        # Force reload config to pick up environment variables
-        get_config(reload=True)
+        # Force reload config to pick up environment variables with .env.example
+        from pathlib import Path
+        repo_root = Path(__file__).parent.parent.parent
+        env_example = repo_root / ".env.example"
+        get_config(reload=True, env_path=env_example)
 
         # Initialize embeddings with test data
         em = EmbeddingsManager(collection_name=collection_name)

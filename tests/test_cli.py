@@ -8,6 +8,7 @@ including the download and create-embeddings commands.
 import sys
 import logging
 from unittest.mock import Mock, patch
+from pathlib import Path
 import pytest
 from abstracts_explorer.cli import (
     main,
@@ -24,15 +25,19 @@ def patch_get_config_for_test(monkeypatch, embeddings_path):
     Patch get_config to use test environment variables.
     
     This ensures that get_config reads the EMBEDDING_DB environment variable
-    set by monkeypatch, by forcing a config reload.
+    set by monkeypatch, by forcing a config reload with .env.example.
     """
     monkeypatch.setenv("EMBEDDING_DB", str(embeddings_path))
     
-    # Create a wrapper that always reloads config
+    # Get path to .env.example
+    repo_root = Path(__file__).parent.parent
+    env_example = repo_root / ".env.example"
+    
+    # Create a wrapper that always reloads config with .env.example
     original_get_config = get_config
     
     def get_config_with_reload(reload=False):
-        return original_get_config(reload=True)
+        return original_get_config(reload=True, env_path=env_example)
     
     # Patch get_config in the cli module
     monkeypatch.setattr("abstracts_explorer.cli.get_config", get_config_with_reload)
@@ -1687,7 +1692,9 @@ class TestLogging:
         monkeypatch.delenv("LOG_LEVEL", raising=False)
         
         # Force config reload to pick up environment changes
-        get_config(reload=True)
+        repo_root = Path(__file__).parent.parent
+        env_example = repo_root / ".env.example"
+        get_config(reload=True, env_path=env_example)
         
         # Setup logging with verbosity=0 (default)
         setup_logging(0)
@@ -1702,7 +1709,9 @@ class TestLogging:
         monkeypatch.delenv("LOG_LEVEL", raising=False)
         
         # Force config reload
-        get_config(reload=True)
+        repo_root = Path(__file__).parent.parent
+        env_example = repo_root / ".env.example"
+        get_config(reload=True, env_path=env_example)
         
         # Setup logging with verbosity=1 (-v)
         setup_logging(1)
@@ -1717,7 +1726,9 @@ class TestLogging:
         monkeypatch.delenv("LOG_LEVEL", raising=False)
         
         # Force config reload
-        get_config(reload=True)
+        repo_root = Path(__file__).parent.parent
+        env_example = repo_root / ".env.example"
+        get_config(reload=True, env_path=env_example)
         
         # Setup logging with verbosity=2 (-vv)
         setup_logging(2)
@@ -1732,7 +1743,9 @@ class TestLogging:
         monkeypatch.setenv("LOG_LEVEL", "INFO")
         
         # Force config reload to pick up environment changes
-        get_config(reload=True)
+        repo_root = Path(__file__).parent.parent
+        env_example = repo_root / ".env.example"
+        get_config(reload=True, env_path=env_example)
         
         # Setup logging with verbosity=0 (no flags)
         setup_logging(0)
@@ -1747,7 +1760,9 @@ class TestLogging:
         monkeypatch.setenv("LOG_LEVEL", "DEBUG")
         
         # Force config reload
-        get_config(reload=True)
+        repo_root = Path(__file__).parent.parent
+        env_example = repo_root / ".env.example"
+        get_config(reload=True, env_path=env_example)
         
         # Setup logging with verbosity=0 (no flags)
         setup_logging(0)
@@ -1762,7 +1777,9 @@ class TestLogging:
         monkeypatch.setenv("LOG_LEVEL", "WARNING")
         
         # Force config reload
-        get_config(reload=True)
+        repo_root = Path(__file__).parent.parent
+        env_example = repo_root / ".env.example"
+        get_config(reload=True, env_path=env_example)
         
         # Setup logging with verbosity=2 (-vv for DEBUG)
         setup_logging(2)
@@ -1777,7 +1794,9 @@ class TestLogging:
         monkeypatch.setenv("LOG_LEVEL", "INVALID")
         
         # Force config reload
-        get_config(reload=True)
+        repo_root = Path(__file__).parent.parent
+        env_example = repo_root / ".env.example"
+        get_config(reload=True, env_path=env_example)
         
         # Setup logging with verbosity=0
         setup_logging(0)

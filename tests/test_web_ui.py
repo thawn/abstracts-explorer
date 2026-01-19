@@ -708,10 +708,13 @@ class TestWebUIDatabaseNotFound:
     def test_get_database_postgresql_url_connection_failed(self, monkeypatch):
         """Test that get_database uses fallback SQLite when PostgreSQL URL cannot connect."""
         from abstracts_explorer.web_ui.app import app
+        from pathlib import Path
 
         # Set invalid PostgreSQL URL (but no PAPER_DB, so it falls back to default SQLite)
         monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@nonexistent-host:5432/db")
-        get_config(reload=True)
+        repo_root = Path(__file__).parent.parent
+        env_example = repo_root / ".env.example"
+        get_config(reload=True, env_path=env_example)
 
         with app.test_client() as client:
             # Try to access endpoint that uses database
