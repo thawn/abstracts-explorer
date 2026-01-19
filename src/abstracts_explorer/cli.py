@@ -54,9 +54,7 @@ def setup_logging(verbosity: int) -> None:
                 "CRITICAL": logging.CRITICAL,
             }
             level = level_map.get(config.log_level, logging.WARNING)
-        else:
-            # No env var either - use default WARNING
-            level = logging.WARNING
+        # else: level remains at default WARNING (set above)
     elif verbosity == 1:
         level = logging.INFO
     else:

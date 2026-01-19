@@ -6,11 +6,13 @@ including the download and create-embeddings commands.
 """
 
 import sys
+import logging
 from unittest.mock import Mock, patch
 import pytest
 from abstracts_explorer.cli import (
     main,
     search_command,
+    setup_logging,
 )
 from abstracts_explorer.plugin import LightweightPaper
 from tests.conftest import set_test_db
@@ -1680,14 +1682,11 @@ class TestLogging:
 
     def test_setup_logging_default_warning(self, monkeypatch):
         """Test that default logging level is WARNING when no flags or env var is set."""
-        import logging
-        from abstracts_explorer.cli import setup_logging
         
         # Clear any LOG_LEVEL env var
         monkeypatch.delenv("LOG_LEVEL", raising=False)
         
         # Force config reload to pick up environment changes
-        from abstracts_explorer.config import get_config
         get_config(reload=True)
         
         # Setup logging with verbosity=0 (default)
@@ -1698,14 +1697,11 @@ class TestLogging:
 
     def test_setup_logging_verbosity_info(self, monkeypatch):
         """Test that -v flag sets INFO level."""
-        import logging
-        from abstracts_explorer.cli import setup_logging
         
         # Clear any LOG_LEVEL env var
         monkeypatch.delenv("LOG_LEVEL", raising=False)
         
         # Force config reload
-        from abstracts_explorer.config import get_config
         get_config(reload=True)
         
         # Setup logging with verbosity=1 (-v)
@@ -1716,14 +1712,11 @@ class TestLogging:
 
     def test_setup_logging_verbosity_debug(self, monkeypatch):
         """Test that -vv flag sets DEBUG level."""
-        import logging
-        from abstracts_explorer.cli import setup_logging
         
         # Clear any LOG_LEVEL env var
         monkeypatch.delenv("LOG_LEVEL", raising=False)
         
         # Force config reload
-        from abstracts_explorer.config import get_config
         get_config(reload=True)
         
         # Setup logging with verbosity=2 (-vv)
@@ -1734,14 +1727,11 @@ class TestLogging:
 
     def test_setup_logging_env_var_info(self, monkeypatch):
         """Test that LOG_LEVEL=INFO env var sets INFO level."""
-        import logging
-        from abstracts_explorer.cli import setup_logging
         
         # Set LOG_LEVEL env var
         monkeypatch.setenv("LOG_LEVEL", "INFO")
         
         # Force config reload to pick up environment changes
-        from abstracts_explorer.config import get_config
         get_config(reload=True)
         
         # Setup logging with verbosity=0 (no flags)
@@ -1752,14 +1742,11 @@ class TestLogging:
 
     def test_setup_logging_env_var_debug(self, monkeypatch):
         """Test that LOG_LEVEL=DEBUG env var sets DEBUG level."""
-        import logging
-        from abstracts_explorer.cli import setup_logging
         
         # Set LOG_LEVEL env var
         monkeypatch.setenv("LOG_LEVEL", "DEBUG")
         
         # Force config reload
-        from abstracts_explorer.config import get_config
         get_config(reload=True)
         
         # Setup logging with verbosity=0 (no flags)
@@ -1770,14 +1757,11 @@ class TestLogging:
 
     def test_setup_logging_flag_overrides_env_var(self, monkeypatch):
         """Test that -v flag overrides LOG_LEVEL env var."""
-        import logging
-        from abstracts_explorer.cli import setup_logging
         
         # Set LOG_LEVEL to WARNING
         monkeypatch.setenv("LOG_LEVEL", "WARNING")
         
         # Force config reload
-        from abstracts_explorer.config import get_config
         get_config(reload=True)
         
         # Setup logging with verbosity=2 (-vv for DEBUG)
@@ -1788,14 +1772,11 @@ class TestLogging:
 
     def test_setup_logging_invalid_env_var(self, monkeypatch):
         """Test that invalid LOG_LEVEL env var falls back to WARNING."""
-        import logging
-        from abstracts_explorer.cli import setup_logging
         
         # Set invalid LOG_LEVEL
         monkeypatch.setenv("LOG_LEVEL", "INVALID")
         
         # Force config reload
-        from abstracts_explorer.config import get_config
         get_config(reload=True)
         
         # Setup logging with verbosity=0
