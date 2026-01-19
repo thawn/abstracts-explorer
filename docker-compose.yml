@@ -75,7 +75,7 @@ services:
     image: chromadb/chroma:latest
     container_name: abstracts-chromadb
     volumes:
-      - chromadb-data:/chroma/chroma
+      - chromadb-data:/data
     environment:
       - IS_PERSISTENT=TRUE
       - ANONYMIZED_TELEMETRY=FALSE
