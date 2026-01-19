@@ -154,7 +154,7 @@ class EmbeddingsManager:
                     port=port,
                     settings=Settings(anonymized_telemetry=False),
                 )
-                logger.info(f"Connected to ChromaDB HTTP service at: {self.embedding_db}")
+                logger.debug(f"Connected to ChromaDB HTTP service at: {self.embedding_db}")
             else:
                 # Use persistent client for local storage
                 chroma_path = Path(self.embedding_db)
@@ -163,7 +163,7 @@ class EmbeddingsManager:
                     path=str(chroma_path),
                     settings=Settings(anonymized_telemetry=False),
                 )
-                logger.info(f"Connected to ChromaDB at: {chroma_path}")
+                logger.debug(f"Connected to ChromaDB at: {chroma_path}")
         except Exception as e:
             raise EmbeddingsError(f"Failed to connect to ChromaDB: {str(e)}") from e
 
@@ -176,7 +176,7 @@ class EmbeddingsManager:
         if self.client:
             self.client = None
             self.collection = None
-            logger.info("ChromaDB connection closed")
+            logger.debug("ChromaDB connection closed")
 
     def __enter__(self):
         """Context manager entry."""
@@ -205,7 +205,7 @@ class EmbeddingsManager:
         try:
             # Try to get models list
             _ = self.openai_client.models.list()
-            logger.info(f"Successfully connected to OpenAI API at {self.lm_studio_url}")
+            logger.debug(f"Successfully connected to OpenAI API at {self.lm_studio_url}")
             return True
         except Exception as e:
             logger.warning(f"Failed to connect to OpenAI API: {str(e)}")
@@ -292,7 +292,7 @@ class EmbeddingsManager:
                 name=self.collection_name,
                 metadata={"description": "NeurIPS paper abstracts and metadata"},
             )
-            logger.info(f"Created/retrieved collection: {self.collection_name}")
+            logger.debug(f"Created/retrieved collection: {self.collection_name}")
 
         except Exception as e:
             raise EmbeddingsError(f"Failed to create collection: {str(e)}") from e
@@ -650,7 +650,7 @@ class EmbeddingsManager:
             rows = db_manager.query(query)
             total = len(rows)
 
-            logger.info(f"Found {total} papers to embed")
+            logger.debug(f"Found {total} papers to embed")
 
             if total == 0:
                 db_manager.close()

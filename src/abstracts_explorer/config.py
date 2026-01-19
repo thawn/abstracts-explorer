@@ -112,6 +112,9 @@ class Config:
     database_url : str
         SQLAlchemy database URL (supports SQLite, PostgreSQL, etc.).
         Automatically constructed from PAPER_DB config variable.
+    log_level : str
+        Logging level from environment (WARNING, INFO, DEBUG). Empty string if not set.
+        Used by setup_logging() to set the default log level when verbosity flags are not used.
 
     Examples
     --------
@@ -198,6 +201,9 @@ class Config:
         # Query Rewriting Settings
         self.enable_query_rewriting = self._get_env_bool("ENABLE_QUERY_REWRITING", default=True)
         self.query_similarity_threshold = self._get_env_float("QUERY_SIMILARITY_THRESHOLD", default=0.7)
+
+        # Logging Configuration
+        self.log_level = self._get_env("LOG_LEVEL", default="").upper()
 
     def _get_env(self, key: str, default: str = "") -> str:
         """

@@ -43,6 +43,10 @@ services:
       - MAX_CONTEXT_PAPERS=5
       - ENABLE_QUERY_REWRITING=true
       - QUERY_SIMILARITY_THRESHOLD=0.7
+      
+      # Logging configuration
+      # Set log level: DEBUG, INFO, WARNING (default), ERROR, CRITICAL
+      - LOG_LEVEL=WARNING
     
     # Use host network mode for easier access to host's LM Studio
     # Uncomment if using LM Studio on host
