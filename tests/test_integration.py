@@ -642,7 +642,6 @@ class TestIntegration:
 
         # Create test database with papers from different years
         db_file = tmp_path / "test_semantic_search.db"
-        chroma_path = tmp_path / "test_semantic_chroma"
 
         papers = [
             LightweightPaper(

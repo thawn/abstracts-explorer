@@ -743,7 +743,7 @@ class EmbeddingsManager:
         from .paper_utils import format_search_results, PaperFormattingError
         
         # Build metadata filter for embeddings search
-        # NOTE: All metadata is stored as strings in ChromaDB (see add_paper line 445)
+        # NOTE: All metadata is stored as strings in ChromaDB (see add_paper method, line 445)
         # so we must convert filter values to strings for matching
         filter_conditions: List[Dict[str, Any]] = []
         if sessions:
