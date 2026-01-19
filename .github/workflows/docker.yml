@@ -138,3 +138,69 @@ jobs:
           min-versions-to-keep: 10
           delete-only-untagged-versions: 'true'
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  cleanup-sha-only:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.event_name != 'pull_request'
+    permissions:
+      packages: write
+      contents: read
+
+    steps:
+      - name: Delete images tagged only with sha-*
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const packageName = context.repo.repo;
+            const owner = context.repo.owner;
+
+            console.log(`Checking package: ${owner}/${packageName}`);
+
+            // Get all package versions
+            const { data: versions } = await github.rest.packages
+              .getAllPackageVersionsForPackageOwnedByOrg({
+                package_type: 'container',
+                package_name: packageName,
+                org: owner,
+                per_page: 100,
+                page: 1
+              });
+
+            console.log(`Found ${versions.length} package versions`);
+
+            // Check each version's tags
+            for (const version of versions) {
+              const tags = version.metadata?.container?.tags || [];
+
+              if (tags.length === 0) {
+                console.log(`Version ${version.id}: No tags (skipping)`);
+                continue;
+              }
+
+              // Check if ALL tags match sha-* pattern
+              const allTagsAreSha = tags.every(tag =>
+                /^sha-[a-f0-9]+$/.test(tag)
+              );
+
+              if (allTagsAreSha) {
+                const tagList = tags.join(', ');
+                console.log(`Version ${version.id}: Deleting (tags: ${tagList})`);
+                try {
+                  await github.rest.packages.deletePackageVersionForOrg({
+                    package_type: 'container',
+                    package_name: packageName,
+                    org: owner,
+                    package_version_id: version.id
+                  });
+                  console.log(`  ✓ Deleted version ${version.id}`);
+                } catch (error) {
+                  const msg = error.message;
+                  console.log(`  ✗ Failed to delete version ${version.id}: ${msg}`);
+                }
+              } else {
+                const tagList = tags.join(', ');
+                console.log(`Version ${version.id}: Keeping (tags: ${tagList})`);
+              }
+            }
