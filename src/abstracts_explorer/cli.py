@@ -66,6 +66,7 @@ def setup_logging(verbosity: int) -> None:
         level=level,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
+        force=True,  # Force reconfiguration even if logging is already configured
     )
 
 
