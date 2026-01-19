@@ -622,3 +622,106 @@ class TestIntegration:
             # Can still perform searches
             results = em.search_similar("neural networks", n_results=3)
             assert len(results["ids"][0]) > 0
+
+    @requires_lm_studio
+    def test_search_papers_semantic_e2e(self, tmp_path):
+        """
+        End-to-end test for search_papers_semantic with real API backend.
+        
+        This test verifies that search_papers_semantic correctly:
+        1. Performs semantic search with real embeddings
+        2. Returns results with similarity scores
+        3. Filters by year metadata correctly (regression test for bug)
+        4. Works with both LM Studio and blablador API backends
+        
+        Note: This test requires an OpenAI-compatible API backend (LM Studio or blablador)
+        to be running and is marked as slow. The test will be skipped by default unless
+        running with -m slow.
+        """
+        from abstracts_explorer import DatabaseManager, EmbeddingsManager
+
+        # Create test database with papers from different years
+        db_file = tmp_path / "test_semantic_search.db"
+        chroma_path = tmp_path / "test_semantic_chroma"
+
+        papers = [
+            LightweightPaper(
+                uid="paper2024",
+                title="Deep Learning with Neural Networks",
+                abstract="This paper explores deep learning techniques for image recognition.",
+                authors=["Author A", "Author B"],
+                session="Oral Session 1",
+                poster_position="A1",
+                year=2024,
+                conference="NeurIPS",
+            ),
+            LightweightPaper(
+                uid="paper2025a",
+                title="Transformers for Computer Vision",
+                abstract="This paper presents transformer architectures for vision tasks.",
+                authors=["Author C"],
+                session="Poster Session 1",
+                poster_position="P1",
+                year=2025,
+                conference="NeurIPS",
+            ),
+            LightweightPaper(
+                uid="paper2025b",
+                title="Reinforcement Learning for Robotics",
+                abstract="This paper applies reinforcement learning to robotic control.",
+                authors=["Author D", "Author E"],
+                session="Oral Session 2",
+                poster_position="A2",
+                year=2025,
+                conference="NeurIPS",
+            ),
+        ]
+
+        # Load papers into database
+        set_test_db(db_file)
+        with DatabaseManager() as db:
+            db.create_tables()
+            for paper in papers:
+                db.add_paper(paper)
+
+        # Generate embeddings with real API
+        with EmbeddingsManager(collection_name="semantic_test") as em:
+            em.connect()
+            em.create_collection(reset=True)
+            em.embed_from_database()
+
+            # Test 1: Search without filters - should return all papers
+            with DatabaseManager() as db:
+                results_all = em.search_papers_semantic("neural networks learning", database=db, limit=10)
+                assert len(results_all) > 0, "Search without filters should return results"
+                # Verify similarity scores are included
+                for paper in results_all:
+                    assert "similarity" in paper, "Results should include similarity score"
+                    assert 0 <= paper["similarity"] <= 1, f"Similarity should be 0-1, got {paper['similarity']}"
+
+            # Test 2: Search with year filter [2024] - should return only 2024 paper
+            with DatabaseManager() as db:
+                results_2024 = em.search_papers_semantic("learning", database=db, limit=10, years=[2024])
+                assert len(results_2024) > 0, "Search with year=2024 filter should return results"
+                for paper in results_2024:
+                    assert paper["year"] == 2024, f"All results should be from 2024, got {paper['year']}"
+                    assert "similarity" in paper, "Results should include similarity score"
+
+            # Test 3: Search with year filter [2025] - should return only 2025 papers
+            with DatabaseManager() as db:
+                results_2025 = em.search_papers_semantic("learning", database=db, limit=10, years=[2025])
+                assert len(results_2025) > 0, "Search with year=2025 filter should return results"
+                for paper in results_2025:
+                    assert paper["year"] == 2025, f"All results should be from 2025, got {paper['year']}"
+                    assert "similarity" in paper, "Results should include similarity score"
+
+            # Test 4: Search with session filter
+            with DatabaseManager() as db:
+                results_oral = em.search_papers_semantic(
+                    "learning", database=db, limit=10, sessions=["Oral Session 1"]
+                )
+                assert len(results_oral) > 0, "Search with session filter should return results"
+                for paper in results_oral:
+                    assert paper["session"] == "Oral Session 1", f"Expected Oral Session 1, got {paper['session']}"
+
+            em.close()
