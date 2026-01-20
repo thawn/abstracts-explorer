@@ -53,10 +53,8 @@ def test_chroma_collection(tmp_path_factory, monkeypatch_session):
     # Force config reload to pick up the environment variable
     # Use .env.example for consistent test configuration
     from abstracts_explorer.config import get_config
-    from pathlib import Path
-    repo_root = Path(__file__).parent.parent
-    env_example = repo_root / ".env.example"
-    _ = get_config(reload=True, env_path=env_example)  # Force reload but don't need the result
+    from tests.conftest import get_env_example_path
+    _ = get_config(reload=True, env_path=get_env_example_path())  # Force reload but don't need the result
 
     # Create mock OpenAI client
     mock_client = Mock()

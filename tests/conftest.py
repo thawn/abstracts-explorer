@@ -15,6 +15,27 @@ from abstracts_explorer.plugin import LightweightPaper
 from abstracts_explorer.config import get_config
 
 
+def get_env_example_path() -> Path:
+    """
+    Get the path to the .env.example file.
+    
+    This helper function centralizes the logic for finding .env.example,
+    reducing code duplication across test files.
+    
+    Returns
+    -------
+    Path
+        Path to the .env.example file in the repository root.
+    
+    Examples
+    --------
+    >>> env_example = get_env_example_path()
+    >>> config = get_config(reload=True, env_path=env_example)
+    """
+    repo_root = Path(__file__).parent.parent
+    return repo_root / ".env.example"
+
+
 @pytest.fixture(scope="session")
 def monkeypatch_session():
     """
@@ -58,9 +79,7 @@ def set_test_db(db_path):
     
     # Reload config with .env.example to ensure consistent test configuration
     # The PAPER_DB environment variable will override the value from .env.example
-    repo_root = Path(__file__).parent.parent
-    env_example = repo_root / ".env.example"
-    get_config(reload=True, env_path=env_example)
+    get_config(reload=True, env_path=get_env_example_path())
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -81,8 +100,7 @@ def test_config():
     from abstracts_explorer.config import get_config
     
     # Find .env.example file
-    repo_root = Path(__file__).parent.parent
-    env_example = repo_root / ".env.example"
+    env_example = get_env_example_path()
     
     if not env_example.exists():
         # If .env.example doesn't exist, skip this fixture
@@ -389,9 +407,7 @@ def embeddings_manager(tmp_path, monkeypatch):
     # Force config reload to pick up the environment variable
     # Use .env.example for consistent test configuration
     from abstracts_explorer.config import get_config
-    repo_root = Path(__file__).parent.parent
-    env_example = repo_root / ".env.example"
-    _ = get_config(reload=True, env_path=env_example)  # Force reload but don't need the result
+    _ = get_config(reload=True, env_path=get_env_example_path())  # Force reload but don't need the result
     
     # Create the manager
     em = EmbeddingsManager(
