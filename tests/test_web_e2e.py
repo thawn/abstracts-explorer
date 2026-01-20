@@ -191,9 +191,10 @@ def test_embeddings(test_database, tmp_path_factory):
     # Set environment variable for EMBEDDING_DB before creating EmbeddingsManager
     os.environ["EMBEDDING_DB"] = str(embeddings_path)
     
-    # Force config reload to pick up environment variable
+    # Force config reload to pick up environment variable with .env.example
     from abstracts_explorer.config import get_config
-    _ = get_config(reload=True)
+    from tests.conftest import get_env_example_path
+    _ = get_config(reload=True, env_path=get_env_example_path())
 
     # Initialize embeddings manager
     em = EmbeddingsManager(collection_name=collection_name)
@@ -287,9 +288,10 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     os.environ["COLLECTION_NAME"] = collection_name
     
     def mock_get_config():
-        # Force reload to pick up environment variables
+        # Force reload to pick up environment variables with .env.example
         from abstracts_explorer.config import get_config as real_get_config
-        return real_get_config(reload=True)
+        from tests.conftest import get_env_example_path
+        return real_get_config(reload=True, env_path=get_env_example_path())
 
     app_module.get_config = mock_get_config
 

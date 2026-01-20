@@ -5,7 +5,6 @@ This module contains common fixtures used across multiple test files to reduce
 code duplication and ensure consistency in test setup.
 """
 
-import os
 import pytest
 from pathlib import Path
 from unittest.mock import Mock
@@ -13,7 +12,28 @@ from unittest.mock import Mock
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.plugin import LightweightPaper
-from abstracts_explorer.config import load_env_file, get_config
+from abstracts_explorer.config import get_config
+
+
+def get_env_example_path() -> Path:
+    """
+    Get the path to the .env.example file.
+    
+    This helper function centralizes the logic for finding .env.example,
+    reducing code duplication across test files.
+    
+    Returns
+    -------
+    Path
+        Path to the .env.example file in the repository root.
+    
+    Examples
+    --------
+    >>> env_example = get_env_example_path()
+    >>> config = get_config(reload=True, env_path=env_example)
+    """
+    repo_root = Path(__file__).parent.parent
+    return repo_root / ".env.example"
 
 
 @pytest.fixture(scope="session")
@@ -37,6 +57,8 @@ def set_test_db(db_path):
     os.environ["PAPER_DB"] = str(db_path) followed by get_config(reload=True)
     is repeated many times.
     
+    Uses .env.example for all other config values to ensure test consistency.
+    
     Parameters
     ----------
     db_path : str or Path
@@ -54,7 +76,10 @@ def set_test_db(db_path):
     """
     import os
     os.environ["PAPER_DB"] = str(db_path)
-    get_config(reload=True)
+    
+    # Reload config with .env.example to ensure consistent test configuration
+    # The PAPER_DB environment variable will override the value from .env.example
+    get_config(reload=True, env_path=get_env_example_path())
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -62,48 +87,34 @@ def test_config():
     """
     Ensure tests use predictable configuration from .env.example.
     
-    This fixture sets environment variables from .env.example to provide
+    This fixture loads configuration directly from .env.example to provide
     consistent defaults for all tests, preventing tests from being affected
-    by the user's custom .env file. However, it only sets variables that
-    are not already in the environment, allowing individual tests to override.
+    by the user's custom .env file.
     
     The fixture runs automatically for all tests (autouse=True) at session scope.
+    Individual tests can override specific environment variables as needed.
+    
+    Note: End-to-end tests that require a working LM Studio connection should
+    not use .env.example and will need to reload config without env_path.
     """
     from abstracts_explorer.config import get_config
     
     # Find .env.example file
-    repo_root = Path(__file__).parent.parent
-    env_example = repo_root / ".env.example"
+    env_example = get_env_example_path()
     
     if not env_example.exists():
         # If .env.example doesn't exist, skip this fixture
         yield
         return
     
-    # Load values from .env.example
-    example_vars = load_env_file(env_example)
-    
-    # Store which environment variables we added (not ones that were already there)
-    added_vars = []
-    
-    # Only set environment variables that are NOT already set
-    # This allows individual tests to override and prevents interference
-    for key, value in example_vars.items():
-        if key not in os.environ:
-            os.environ[key] = value
-            added_vars.append(key)
-    
-    # Force config reload to pick up test environment variables
-    get_config(reload=True)
+    # Force config reload with .env.example
+    # This ensures all tests start with predictable configuration values
+    get_config(reload=True, env_path=env_example)
     
     yield
     
-    # Remove only the environment variables we added
-    for key in added_vars:
-        if key in os.environ:
-            del os.environ[key]
-    
-    # Reload config to restore user's configuration
+    # Reload config without env_path to restore user's configuration
+    # This uses the default behavior (searching for .env file)
     get_config(reload=True)
 
 
@@ -394,8 +405,9 @@ def embeddings_manager(tmp_path, monkeypatch):
     monkeypatch.setenv("EMBEDDING_DB", str(chroma_path))
     
     # Force config reload to pick up the environment variable
+    # Use .env.example for consistent test configuration
     from abstracts_explorer.config import get_config
-    _ = get_config(reload=True)  # Force reload but don't need the result
+    _ = get_config(reload=True, env_path=get_env_example_path())  # Force reload but don't need the result
     
     # Create the manager
     em = EmbeddingsManager(

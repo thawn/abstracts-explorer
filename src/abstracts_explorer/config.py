@@ -390,7 +390,7 @@ class Config:
 _config: Optional[Config] = None
 
 
-def get_config(reload: bool = False) -> Config:
+def get_config(reload: bool = False, env_path: Optional[Path] = None) -> Config:
     """
     Get global configuration instance.
 
@@ -398,6 +398,9 @@ def get_config(reload: bool = False) -> Config:
     ----------
     reload : bool, optional
         Force reload configuration from environment, by default False
+    env_path : Path, optional
+        Path to .env file. If provided, loads configuration from this file.
+        Useful for testing to ensure consistent configuration.
 
     Returns
     -------
@@ -408,8 +411,10 @@ def get_config(reload: bool = False) -> Config:
     --------
     >>> config = get_config()
     >>> print(config.chat_model)
+    >>> # In tests, use .env.example for consistent values
+    >>> config = get_config(reload=True, env_path=Path(".env.example"))
     """
     global _config
     if _config is None or reload:
-        _config = Config()
+        _config = Config(env_path=env_path)
     return _config

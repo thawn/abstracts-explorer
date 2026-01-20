@@ -24,15 +24,20 @@ def patch_get_config_for_test(monkeypatch, embeddings_path):
     Patch get_config to use test environment variables.
     
     This ensures that get_config reads the EMBEDDING_DB environment variable
-    set by monkeypatch, by forcing a config reload.
+    set by monkeypatch, by forcing a config reload with .env.example.
     """
+    from tests.conftest import get_env_example_path
+    
     monkeypatch.setenv("EMBEDDING_DB", str(embeddings_path))
     
-    # Create a wrapper that always reloads config
+    # Get path to .env.example
+    env_example = get_env_example_path()
+    
+    # Create a wrapper that always reloads config with .env.example
     original_get_config = get_config
     
     def get_config_with_reload(reload=False):
-        return original_get_config(reload=True)
+        return original_get_config(reload=True, env_path=env_example)
     
     # Patch get_config in the cli module
     monkeypatch.setattr("abstracts_explorer.cli.get_config", get_config_with_reload)
@@ -1682,12 +1687,13 @@ class TestLogging:
 
     def test_setup_logging_default_warning(self, monkeypatch):
         """Test that default logging level is WARNING when no flags or env var is set."""
+        from tests.conftest import get_env_example_path
         
         # Clear any LOG_LEVEL env var
         monkeypatch.delenv("LOG_LEVEL", raising=False)
         
         # Force config reload to pick up environment changes
-        get_config(reload=True)
+        get_config(reload=True, env_path=get_env_example_path())
         
         # Setup logging with verbosity=0 (default)
         setup_logging(0)
@@ -1697,12 +1703,13 @@ class TestLogging:
 
     def test_setup_logging_verbosity_info(self, monkeypatch):
         """Test that -v flag sets INFO level."""
+        from tests.conftest import get_env_example_path
         
         # Clear any LOG_LEVEL env var
         monkeypatch.delenv("LOG_LEVEL", raising=False)
         
         # Force config reload
-        get_config(reload=True)
+        get_config(reload=True, env_path=get_env_example_path())
         
         # Setup logging with verbosity=1 (-v)
         setup_logging(1)
@@ -1712,12 +1719,13 @@ class TestLogging:
 
     def test_setup_logging_verbosity_debug(self, monkeypatch):
         """Test that -vv flag sets DEBUG level."""
+        from tests.conftest import get_env_example_path
         
         # Clear any LOG_LEVEL env var
         monkeypatch.delenv("LOG_LEVEL", raising=False)
         
         # Force config reload
-        get_config(reload=True)
+        get_config(reload=True, env_path=get_env_example_path())
         
         # Setup logging with verbosity=2 (-vv)
         setup_logging(2)
@@ -1727,12 +1735,13 @@ class TestLogging:
 
     def test_setup_logging_env_var_info(self, monkeypatch):
         """Test that LOG_LEVEL=INFO env var sets INFO level."""
+        from tests.conftest import get_env_example_path
         
         # Set LOG_LEVEL env var
         monkeypatch.setenv("LOG_LEVEL", "INFO")
         
         # Force config reload to pick up environment changes
-        get_config(reload=True)
+        get_config(reload=True, env_path=get_env_example_path())
         
         # Setup logging with verbosity=0 (no flags)
         setup_logging(0)
@@ -1742,12 +1751,13 @@ class TestLogging:
 
     def test_setup_logging_env_var_debug(self, monkeypatch):
         """Test that LOG_LEVEL=DEBUG env var sets DEBUG level."""
+        from tests.conftest import get_env_example_path
         
         # Set LOG_LEVEL env var
         monkeypatch.setenv("LOG_LEVEL", "DEBUG")
         
         # Force config reload
-        get_config(reload=True)
+        get_config(reload=True, env_path=get_env_example_path())
         
         # Setup logging with verbosity=0 (no flags)
         setup_logging(0)
@@ -1757,12 +1767,13 @@ class TestLogging:
 
     def test_setup_logging_flag_overrides_env_var(self, monkeypatch):
         """Test that -v flag overrides LOG_LEVEL env var."""
+        from tests.conftest import get_env_example_path
         
         # Set LOG_LEVEL to WARNING
         monkeypatch.setenv("LOG_LEVEL", "WARNING")
         
         # Force config reload
-        get_config(reload=True)
+        get_config(reload=True, env_path=get_env_example_path())
         
         # Setup logging with verbosity=2 (-vv for DEBUG)
         setup_logging(2)
@@ -1772,12 +1783,13 @@ class TestLogging:
 
     def test_setup_logging_invalid_env_var(self, monkeypatch):
         """Test that invalid LOG_LEVEL env var falls back to WARNING."""
+        from tests.conftest import get_env_example_path
         
         # Set invalid LOG_LEVEL
         monkeypatch.setenv("LOG_LEVEL", "INVALID")
         
         # Force config reload
-        get_config(reload=True)
+        get_config(reload=True, env_path=get_env_example_path())
         
         # Setup logging with verbosity=0
         setup_logging(0)

@@ -217,13 +217,15 @@ def test_database_url_in_config(tmp_path, monkeypatch):
 
 def test_legacy_paper_db_path_in_config(tmp_path, monkeypatch):
     """Test that PAPER_DB with file path works (converts to SQLite URL)."""
+    from tests.conftest import get_env_example_path
+    
     db_path = tmp_path / "test.db"
     
     # Set environment variable using PAPER_DB with file path
     monkeypatch.setenv("PAPER_DB", str(db_path))
     
-    # Reload config to pick up environment variable
-    config = get_config(reload=True)
+    # Reload config to pick up environment variable with .env.example
+    config = get_config(reload=True, env_path=get_env_example_path())
     # Should be converted to SQLite URL
     assert "sqlite:///" in config.database_url
     assert str(db_path) in config.database_url

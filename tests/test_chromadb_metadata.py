@@ -51,8 +51,10 @@ def test_chroma_collection(tmp_path_factory, monkeypatch_session):
     os.environ["EMBEDDING_DB"] = str(chroma_path)
     
     # Force config reload to pick up the environment variable
+    # Use .env.example for consistent test configuration
     from abstracts_explorer.config import get_config
-    _ = get_config(reload=True)  # Force reload but don't need the result
+    from tests.conftest import get_env_example_path
+    _ = get_config(reload=True, env_path=get_env_example_path())  # Force reload but don't need the result
 
     # Create mock OpenAI client
     mock_client = Mock()
