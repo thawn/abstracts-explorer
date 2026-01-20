@@ -8,7 +8,6 @@ including the download and create-embeddings commands.
 import sys
 import logging
 from unittest.mock import Mock, patch
-from pathlib import Path
 import pytest
 from abstracts_explorer.cli import (
     main,
