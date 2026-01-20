@@ -28,6 +28,12 @@ First create a `.env` file with your [blablador token](https://sdlaml.pages.jsc.
 LLM_BACKEND_AUTH_TOKEN=your_blablador_token_here
 ```
 
+Then download [`docker-compose.yml`](https://raw.githubusercontent.com/thawn/abstracts-explorer/refs/heads/main/docker-compose.yml):
+
+```bash
+curl -o docker-compose.yml https://raw.githubusercontent.com/thawn/abstracts-explorer/refs/heads/main/docker-compose.yml
+```
+
 Then start the services with:
 
 ```bash
