@@ -89,9 +89,6 @@ export async function loadClusters() {
             return;
         }
         
-        // Update cluster stats
-        updateClusterStats();
-        
         // Initialize selected clusters (start with all selected)
         selectedClusters.clear();
         
@@ -295,7 +292,21 @@ function createCustomLegend(sortedClusterEntries, labels) {
     
     const title = document.createElement('h4');
     title.className = 'text-sm font-semibold text-gray-700 mb-2';
-    title.textContent = 'Clusters';
+    
+    // Build dynamic title with stats
+    let titleHTML = 'Clusters';
+    if (clusterData && clusterData.statistics) {
+        const stats = clusterData.statistics;
+        titleHTML += `<br><span class="text-xs font-normal">${stats.total_papers} papers in ${stats.n_clusters} clusters`;
+        if (stats.n_noise > 0) {
+            titleHTML += ` (<span class="text-red-600">${stats.n_noise}</span> noise)`;
+        }
+        titleHTML += '</span>';
+        if (Object.keys(labels).length > 0) {
+            titleHTML += '<br><span class="text-xs font-normal text-green-600">✓ Labels generated</span>';
+        }
+    }
+    title.innerHTML = titleHTML;
     header.appendChild(title);
     
     // Create button container
@@ -745,7 +756,6 @@ export async function applyClusterSettings() {
             return;
         }
         
-        updateClusterStats();
         visualizeClusters();
         
     } catch (error) {
@@ -772,32 +782,6 @@ export function exportClusters() {
     linkElement.setAttribute('href', dataUri);
     linkElement.setAttribute('download', exportFileDefaultName);
     linkElement.click();
-}
-
-/**
- * Update cluster statistics display
- */
-export function updateClusterStats() {
-    if (!clusterData || !clusterData.statistics) return;
-    
-    const stats = clusterData.statistics;
-    const labels = clusterData.cluster_labels || {};
-    const statsDiv = document.getElementById('cluster-stats');
-    
-    let statsHTML = `
-        <span class="font-semibold">${stats.total_papers}</span> papers in 
-        <span class="font-semibold">${stats.n_clusters}</span> clusters
-    `;
-    
-    if (stats.n_noise > 0) {
-        statsHTML += ` (<span class="text-red-600">${stats.n_noise}</span> noise)`;
-    }
-    
-    if (Object.keys(labels).length > 0) {
-        statsHTML += `<br><span class="text-xs text-green-600" role="status" aria-label="Cluster labels generated successfully">Success: Cluster labels generated</span>`;
-    }
-    
-    statsDiv.innerHTML = statsHTML;
 }
 
 /**
