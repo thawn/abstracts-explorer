@@ -1412,7 +1412,7 @@ class TestClusteringTab:
 
         # Navigate to clustering tab
         wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
         clustering_tab.click()
         time.sleep(1)
 
