@@ -1398,7 +1398,7 @@ class TestClusteringTab:
 
     def test_clustering_stats_display(self, web_server, browser):
         """
-        Test that clustering statistics are displayed.
+        Test that clustering statistics are displayed in the legend title.
 
         Parameters
         ----------
@@ -1412,13 +1412,18 @@ class TestClusteringTab:
 
         # Navigate to clustering tab
         wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
         clustering_tab.click()
         time.sleep(1)
 
-        # Check for stats display
-        stats_element = browser.find_element(By.ID, "cluster-stats")
-        assert stats_element.is_displayed(), "Cluster stats should be visible"
+        # Check for legend with stats in title
+        legend_element = browser.find_element(By.ID, "cluster-legend")
+        assert legend_element.is_displayed(), "Cluster legend should be visible"
+        
+        # Verify legend contains the stats information
+        legend_text = legend_element.text
+        assert "papers" in legend_text.lower(), "Legend should contain paper count"
+        assert "clusters" in legend_text.lower(), "Legend should contain cluster count"
 
     def test_clustering_filter_dropdown(self, web_server, browser):
         """
