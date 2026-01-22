@@ -270,10 +270,26 @@ export function visualizeClusters() {
 }
 
 /**
- * Create custom legend in separate container
- * @param {Array} sortedClusterEntries - Sorted cluster entries [clusterId, clusterPoints]
- * @param {Object} labels - Cluster labels
+ * Format cluster statistics as HTML string for legend title
+ * @param {Object} statistics - Cluster statistics object with total_papers, n_clusters, n_noise
+ * @param {Object} labels - Cluster labels object
+ * @returns {string} Formatted HTML string with cluster statistics
  */
+function formatClusterStats(statistics, labels) {
+    let statsHTML = 'Clusters';
+    if (statistics) {
+        statsHTML += `<br><span class="text-xs font-normal">${statistics.total_papers} papers in ${statistics.n_clusters} clusters`;
+        if (statistics.n_noise > 0) {
+            statsHTML += ` (<span class="text-red-600">${statistics.n_noise}</span> noise)`;
+        }
+        statsHTML += '</span>';
+        if (labels && Object.keys(labels).length > 0) {
+            statsHTML += '<br><span class="text-xs font-normal text-green-600">✓ Labels generated</span>';
+        }
+    }
+    return statsHTML;
+}
+
 /**
  * Create custom legend with multi-select support
  * @param {Array} sortedClusterEntries - Array of [clusterId, points[]] entries
@@ -294,18 +310,7 @@ function createCustomLegend(sortedClusterEntries, labels) {
     title.className = 'text-sm font-semibold text-gray-700 mb-2';
     
     // Build dynamic title with stats
-    let titleHTML = 'Clusters';
-    if (clusterData && clusterData.statistics) {
-        const stats = clusterData.statistics;
-        titleHTML += `<br><span class="text-xs font-normal">${stats.total_papers} papers in ${stats.n_clusters} clusters`;
-        if (stats.n_noise > 0) {
-            titleHTML += ` (<span class="text-red-600">${stats.n_noise}</span> noise)`;
-        }
-        titleHTML += '</span>';
-        if (Object.keys(labels).length > 0) {
-            titleHTML += '<br><span class="text-xs font-normal text-green-600">✓ Labels generated</span>';
-        }
-    }
+    const titleHTML = formatClusterStats(clusterData?.statistics, labels);
     title.innerHTML = titleHTML;
     header.appendChild(title);
     
