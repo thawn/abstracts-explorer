@@ -213,6 +213,41 @@ describe('Paper Card Module', () => {
             const stars = document.getElementById('stars-p2');
             expect(stars).not.toBeNull();
         });
+
+        it('should update stars in chat papers panel', () => {
+            // Set up chat papers panel with a paper card
+            document.body.innerHTML += `
+                <div id="chat-papers">
+                    <div class="paper-card" onclick="showPaperDetails('p3')">
+                        <div class="star-container">
+                            <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer" onclick="setPaperPriority('p3', 1)"></i>
+                            <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer" onclick="setPaperPriority('p3', 2)"></i>
+                            <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer" onclick="setPaperPriority('p3', 3)"></i>
+                            <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer" onclick="setPaperPriority('p3', 4)"></i>
+                            <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer" onclick="setPaperPriority('p3', 5)"></i>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            State.setCurrentSearchTerm('test');
+            State.setPaperPriority('p3', 3);
+
+            updateStarDisplay('p3');
+
+            const chatPapersDiv = document.getElementById('chat-papers');
+            expect(chatPapersDiv).not.toBeNull();
+            
+            const stars = chatPapersDiv.querySelectorAll('i[onclick*="p3"]');
+            expect(stars.length).toBe(5);
+            
+            // First 3 stars should be filled (fas), remaining 2 should be empty (far)
+            expect(stars[0].className).toContain('fas');
+            expect(stars[1].className).toContain('fas');
+            expect(stars[2].className).toContain('fas');
+            expect(stars[3].className).toContain('far');
+            expect(stars[4].className).toContain('far');
+        });
     });
 
     describe('updateInterestingPapersCount', () => {

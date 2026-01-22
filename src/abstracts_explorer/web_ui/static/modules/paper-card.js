@@ -277,6 +277,20 @@ export function updateStarDisplay(paperId) {
             }
         });
     }
+    
+    // Also update stars in the chat papers panel if it's showing this paper
+    const chatPapersDiv = document.getElementById('chat-papers');
+    if (chatPapersDiv) {
+        const chatStars = chatPapersDiv.querySelectorAll(`i[onclick*="'${paperId}'"]`);
+        chatStars.forEach((star, index) => {
+            const starNumber = index + 1;
+            if (starNumber <= priority) {
+                star.className = 'fas fa-star text-yellow-400 hover:text-yellow-500 cursor-pointer';
+            } else {
+                star.className = 'far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer';
+            }
+        });
+    }
 }
 
 /**
