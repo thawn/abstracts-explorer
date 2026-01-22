@@ -99,7 +99,7 @@ export function formatPaperCard(paper, options = {}) {
         const starClass = isSelected
             ? 'fas fa-star text-yellow-400 hover:text-yellow-500'
             : 'far fa-star text-gray-300 hover:text-yellow-400';
-        starsHtml += `<i class="${starClass} cursor-pointer text-${compact ? 'sm' : 'base'}" onclick="setPaperPriority('${paper.uid}', ${i})"></i>`;
+        starsHtml += `<i class="${starClass} cursor-pointer text-${compact ? 'sm' : 'base'} paper-star" data-paper-id="${paper.uid}" onclick="setPaperPriority('${paper.uid}', ${i})"></i>`;
     }
     starsHtml += '</div>';
 
@@ -248,49 +248,38 @@ export async function showPaperDetails(paperId) {
 export function updateStarDisplay(paperId) {
     const priority = getPaperPriority(paperId);
 
-    // Find all star elements for this paper in search results
-    const paperCard = document.querySelector(`[onclick*="showPaperDetails('${paperId}')"]`);
-    if (paperCard) {
-        const stars = paperCard.querySelectorAll('i[class*="fa-star"]');
-        stars.forEach((star, index) => {
-            const starNumber = index + 1;
-            if (starNumber <= priority) {
-                star.className = star.className.replace('far fa-star text-gray-300', 'fas fa-star text-yellow-400');
-                star.className = star.className.replace('hover:text-yellow-400', 'hover:text-yellow-500');
-            } else {
-                star.className = star.className.replace('fas fa-star text-yellow-400', 'far fa-star text-gray-300');
-                star.className = star.className.replace('hover:text-yellow-500', 'hover:text-yellow-400');
-            }
-        });
-    }
+    // Find all star elements for this paper anywhere on the page using the paper-star class
+    const allStars = document.querySelectorAll(`.paper-star[data-paper-id="${paperId}"]`);
     
-    // Also update stars in the cluster details panel if it's showing this paper
-    const clusterDetailsContent = document.getElementById('selected-paper-content');
-    if (clusterDetailsContent) {
-        const clusterStars = clusterDetailsContent.querySelectorAll(`i[onclick*="'${paperId}'"]`);
-        clusterStars.forEach((star, index) => {
-            const starNumber = index + 1;
-            if (starNumber <= priority) {
-                star.className = 'fas fa-star text-yellow-400 hover:text-yellow-400 cursor-pointer';
-            } else {
-                star.className = 'far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer';
+    allStars.forEach((star) => {
+        // Determine which star number this is by looking at its onclick attribute
+        const onclickMatch = star.getAttribute('onclick').match(/setPaperPriority\('[^']+',\s*(\d+)\)/);
+        if (!onclickMatch) return;
+        
+        const starNumber = parseInt(onclickMatch[1], 10);
+        
+        if (starNumber <= priority) {
+            // Set to filled star
+            star.className = star.className.replace(/far fa-star text-gray-300/, 'fas fa-star text-yellow-400');
+            star.className = star.className.replace(/hover:text-yellow-400/, 'hover:text-yellow-500');
+            // Ensure the class includes the necessary parts if not already present
+            if (!star.className.includes('fas fa-star')) {
+                star.classList.remove('far');
+                star.classList.add('fas', 'text-yellow-400');
+                star.classList.remove('text-gray-300');
             }
-        });
-    }
-    
-    // Also update stars in the chat papers panel if it's showing this paper
-    const chatPapersDiv = document.getElementById('chat-papers');
-    if (chatPapersDiv) {
-        const chatStars = chatPapersDiv.querySelectorAll(`i[onclick*="'${paperId}'"]`);
-        chatStars.forEach((star, index) => {
-            const starNumber = index + 1;
-            if (starNumber <= priority) {
-                star.className = 'fas fa-star text-yellow-400 hover:text-yellow-500 cursor-pointer';
-            } else {
-                star.className = 'far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer';
+        } else {
+            // Set to empty star
+            star.className = star.className.replace(/fas fa-star text-yellow-400/, 'far fa-star text-gray-300');
+            star.className = star.className.replace(/hover:text-yellow-500/, 'hover:text-yellow-400');
+            // Ensure the class includes the necessary parts if not already present
+            if (!star.className.includes('far fa-star')) {
+                star.classList.remove('fas');
+                star.classList.add('far', 'text-gray-300');
+                star.classList.remove('text-yellow-400');
             }
-        });
-    }
+        }
+    });
 }
 
 /**

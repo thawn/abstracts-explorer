@@ -220,11 +220,11 @@ describe('Paper Card Module', () => {
                 <div id="chat-papers">
                     <div class="paper-card" onclick="showPaperDetails('p3')">
                         <div class="star-container">
-                            <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer" onclick="setPaperPriority('p3', 1)"></i>
-                            <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer" onclick="setPaperPriority('p3', 2)"></i>
-                            <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer" onclick="setPaperPriority('p3', 3)"></i>
-                            <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer" onclick="setPaperPriority('p3', 4)"></i>
-                            <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer" onclick="setPaperPriority('p3', 5)"></i>
+                            <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer paper-star" data-paper-id="p3" onclick="setPaperPriority('p3', 1)"></i>
+                            <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer paper-star" data-paper-id="p3" onclick="setPaperPriority('p3', 2)"></i>
+                            <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer paper-star" data-paper-id="p3" onclick="setPaperPriority('p3', 3)"></i>
+                            <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer paper-star" data-paper-id="p3" onclick="setPaperPriority('p3', 4)"></i>
+                            <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer paper-star" data-paper-id="p3" onclick="setPaperPriority('p3', 5)"></i>
                         </div>
                     </div>
                 </div>
@@ -238,7 +238,7 @@ describe('Paper Card Module', () => {
             const chatPapersDiv = document.getElementById('chat-papers');
             expect(chatPapersDiv).not.toBeNull();
             
-            const stars = chatPapersDiv.querySelectorAll('i[onclick*="p3"]');
+            const stars = chatPapersDiv.querySelectorAll('.paper-star[data-paper-id="p3"]');
             expect(stars.length).toBe(5);
             
             // First 3 stars should be filled (fas), remaining 2 should be empty (far)
@@ -247,6 +247,49 @@ describe('Paper Card Module', () => {
             expect(stars[2].className).toContain('fas');
             expect(stars[3].className).toContain('far');
             expect(stars[4].className).toContain('far');
+        });
+
+        it('should update stars across multiple panels simultaneously', () => {
+            // Set up multiple panels with the same paper
+            document.body.innerHTML += `
+                <div id="search-results">
+                    <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer paper-star" data-paper-id="p4" onclick="setPaperPriority('p4', 1)"></i>
+                    <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer paper-star" data-paper-id="p4" onclick="setPaperPriority('p4', 2)"></i>
+                    <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer paper-star" data-paper-id="p4" onclick="setPaperPriority('p4', 3)"></i>
+                    <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer paper-star" data-paper-id="p4" onclick="setPaperPriority('p4', 4)"></i>
+                    <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer paper-star" data-paper-id="p4" onclick="setPaperPriority('p4', 5)"></i>
+                </div>
+                <div id="chat-papers">
+                    <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer paper-star" data-paper-id="p4" onclick="setPaperPriority('p4', 1)"></i>
+                    <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer paper-star" data-paper-id="p4" onclick="setPaperPriority('p4', 2)"></i>
+                    <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer paper-star" data-paper-id="p4" onclick="setPaperPriority('p4', 3)"></i>
+                    <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer paper-star" data-paper-id="p4" onclick="setPaperPriority('p4', 4)"></i>
+                    <i class="far fa-star text-gray-300 hover:text-yellow-400 cursor-pointer paper-star" data-paper-id="p4" onclick="setPaperPriority('p4', 5)"></i>
+                </div>
+            `;
+            
+            State.setCurrentSearchTerm('test');
+            State.setPaperPriority('p4', 2);
+
+            updateStarDisplay('p4');
+
+            // Check all stars across both panels
+            const allStars = document.querySelectorAll('.paper-star[data-paper-id="p4"]');
+            expect(allStars.length).toBe(10); // 5 stars in each of 2 panels
+            
+            // First 2 stars in each panel should be filled, rest empty
+            expect(allStars[0].className).toContain('fas');
+            expect(allStars[1].className).toContain('fas');
+            expect(allStars[2].className).toContain('far');
+            expect(allStars[3].className).toContain('far');
+            expect(allStars[4].className).toContain('far');
+            
+            // Second panel
+            expect(allStars[5].className).toContain('fas');
+            expect(allStars[6].className).toContain('fas');
+            expect(allStars[7].className).toContain('far');
+            expect(allStars[8].className).toContain('far');
+            expect(allStars[9].className).toContain('far');
         });
     });
 
