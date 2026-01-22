@@ -260,24 +260,15 @@ export function updateStarDisplay(paperId) {
         
         if (starNumber <= priority) {
             // Set to filled star
-            star.className = star.className.replace(/far fa-star text-gray-300/, 'fas fa-star text-yellow-400');
-            star.className = star.className.replace(/hover:text-yellow-400/, 'hover:text-yellow-500');
-            // Ensure the class includes the necessary parts if not already present
-            if (!star.className.includes('fas fa-star')) {
-                star.classList.remove('far');
-                star.classList.add('fas', 'text-yellow-400');
-                star.classList.remove('text-gray-300');
-            }
+            star.classList.remove('far', 'text-gray-300');
+            star.classList.add('fas', 'text-yellow-400');
+            // Update hover state
+            star.classList.remove('hover:text-yellow-400');
+            star.classList.add('hover:text-yellow-500');
         } else {
             // Set to empty star
-            star.className = star.className.replace(/fas fa-star text-yellow-400/, 'far fa-star text-gray-300');
-            star.className = star.className.replace(/hover:text-yellow-500/, 'hover:text-yellow-400');
-            // Ensure the class includes the necessary parts if not already present
-            if (!star.className.includes('far fa-star')) {
-                star.classList.remove('fas');
-                star.classList.add('far', 'text-gray-300');
-                star.classList.remove('text-yellow-400');
-            }
+            star.classList.remove('fas', 'text-yellow-400', 'hover:text-yellow-500');
+            star.classList.add('far', 'text-gray-300', 'hover:text-yellow-400');
         }
     });
 }
