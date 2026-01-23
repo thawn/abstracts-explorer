@@ -293,7 +293,17 @@ class ClusteringManager:
                 logger.info(f"Applying t-SNE to reduce to {n_components} dimensions (perplexity={perplexity})")
             elif method.lower() == "umap":
                 # UMAP parameters
+                # UMAP requires a sufficient number of samples for spectral initialization
+                # Practical minimum is around max(n_components + 1, 4) for reliable operation
+                min_samples_required = max(n_components + 1, 4)
+                if len(self.embeddings) < min_samples_required:
+                    raise ClusteringError(
+                        f"UMAP requires at least {min_samples_required} samples for {n_components} components, "
+                        f"but only {len(self.embeddings)} samples available. Try PCA or t-SNE instead."
+                    )
                 n_neighbors = kwargs.pop("n_neighbors", min(15, len(self.embeddings) - 1))
+                # Ensure n_neighbors is at least 2 and less than n_samples
+                n_neighbors = max(2, min(n_neighbors, len(self.embeddings) - 1))
                 min_dist = kwargs.pop("min_dist", 0.1)
                 metric = kwargs.pop("metric", "cosine")
                 reducer = UMAP(
