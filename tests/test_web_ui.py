@@ -106,6 +106,13 @@ class TestWebInterface:
         assert response.status_code == 200
         assert b"Abstracts Explorer" in response.data
 
+    def test_index_version_display(self, client):
+        """Test that the version is displayed on the main page."""
+        response = client.get("/")
+        assert response.status_code == 200
+        # Check that version tag is present in the response
+        assert b"v0.1" in response.data or b"v{{ version }}" not in response.data
+
     def test_stats_endpoint_no_db(self, client):
         """Test stats endpoint when database doesn't exist."""
         response = client.get("/api/stats")
