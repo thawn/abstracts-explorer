@@ -665,6 +665,7 @@ export function openClusterSettings() {
                         <select id="cluster-reduction-method" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
                             <option value="pca" ${currentClusterConfig.reduction_method === 'pca' ? 'selected' : ''}>PCA</option>
                             <option value="tsne" ${currentClusterConfig.reduction_method === 'tsne' ? 'selected' : ''}>t-SNE</option>
+                            <option value="umap" ${currentClusterConfig.reduction_method === 'umap' ? 'selected' : ''}>UMAP</option>
                         </select>
                     </div>
                     <div>

@@ -1032,6 +1032,30 @@ class TestWebUIErrorHandlingPaths:
         data = response.json()
         assert "error" in data
 
+    def test_clusters_compute_with_umap(self, web_server):
+        """Test that clusters compute endpoint works with UMAP reduction method."""
+        host, port, base_url = web_server
+
+        # Request cluster computation with UMAP
+        cluster_data = {
+            "reduction_method": "umap",
+            "n_components": 2,
+            "clustering_method": "kmeans",
+            "n_clusters": 3,
+        }
+
+        response = requests.post(f"{base_url}/api/clusters/compute", json=cluster_data, timeout=30)
+
+        # With only 3 test samples, UMAP will fail with a proper error message
+        # UMAP requires at least n_components + 1 samples
+        # This is expected behavior for small datasets
+        assert response.status_code == 500
+
+        data = response.json()
+        assert isinstance(data, dict)
+        assert "error" in data
+        assert "UMAP requires at least" in data["error"]
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])

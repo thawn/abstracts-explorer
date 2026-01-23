@@ -6,6 +6,7 @@ This module tests the clustering and dimensionality reduction functionality.
 
 import pytest
 import numpy as np
+from unittest.mock import Mock
 from abstracts_explorer.clustering import (
     ClusteringManager,
     ClusteringError,
@@ -117,6 +118,34 @@ class TestClusteringManager:
         
         assert reduced.shape == (10, 2)
         assert cm.reduced_embeddings is not None
+
+    def test_reduce_dimensions_umap(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test UMAP dimensionality reduction."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        
+        reduced = cm.reduce_dimensions(method='umap', n_components=2)
+        
+        assert reduced.shape == (10, 2)
+        assert cm.reduced_embeddings is not None
+
+    def test_reduce_dimensions_umap_insufficient_samples(self, mock_embeddings_manager):
+        """Test UMAP with insufficient samples raises appropriate error."""
+        # Create a mock collection with only 2 samples (need at least 4 for 2 components)
+        mock_collection = Mock()
+        mock_collection.get.return_value = {
+            'ids': ['id1', 'id2'],
+            'embeddings': np.random.randn(2, 128).tolist(),
+            'metadatas': [{'title': 'Paper 1'}, {'title': 'Paper 2'}]
+        }
+        mock_embeddings_manager.collection = mock_collection
+        
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        
+        with pytest.raises(ClusteringError, match="UMAP requires at least 4 samples"):
+            cm.reduce_dimensions(method='umap', n_components=2)
 
     def test_reduce_dimensions_invalid_method(self, mock_embeddings_manager, mock_collection_with_data):
         """Test invalid dimensionality reduction method."""
