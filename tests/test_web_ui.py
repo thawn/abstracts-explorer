@@ -106,6 +106,15 @@ class TestWebInterface:
         assert response.status_code == 200
         assert b"Abstracts Explorer" in response.data
 
+    def test_index_version_display(self, client):
+        """Test that the version is displayed in the footer."""
+        response = client.get("/")
+        assert response.status_code == 200
+        # Check that version is present in footer
+        assert b"Powered by Abstracts Explorer version" in response.data
+        # Ensure the template variable was replaced (not left as {{ version }})
+        assert b"{{ version }}" not in response.data
+
     def test_stats_endpoint_no_db(self, client):
         """Test stats endpoint when database doesn't exist."""
         response = client.get("/api/stats")

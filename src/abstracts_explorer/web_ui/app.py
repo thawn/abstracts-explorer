@@ -22,6 +22,13 @@ from abstracts_explorer.export_utils import export_papers_to_zip
 from abstracts_explorer.clustering import compute_clusters_with_cache, ClusteringError, calculate_default_clusters
 from abstracts_explorer.plugin import get_available_filters
 
+# Import version
+try:
+    from abstracts_explorer._version import __version__
+except ImportError:
+    # Fallback if _version.py doesn't exist (e.g., editable install without build)
+    from abstracts_explorer import __version__
+
 logger = logging.getLogger(__name__)
 
 # Get the directory where this file is located
@@ -121,7 +128,7 @@ def index():
     str
         Rendered HTML template
     """
-    return render_template("index.html")
+    return render_template("index.html", version=__version__)
 
 
 @app.route("/health")
