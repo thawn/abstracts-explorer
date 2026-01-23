@@ -364,7 +364,7 @@ class ClusteringManager:
         """
         if self.embeddings is None:
             raise ClusteringError("No embeddings loaded. Call load_embeddings() first.")
-        
+
         # Calculate default n_clusters if not provided
         if n_clusters is None:
             n_clusters = calculate_default_clusters(len(self.embeddings))
@@ -675,7 +675,7 @@ Sample paper titles:
 {sample_titles_str}
 
 Generate a concise, descriptive label (3-5 words) that captures the main theme of this cluster. 
-Only respond with the label, nothing else."""
+Only respond with the label, nothing else. Do not add formatting."""
 
         try:
             # Check if OpenAI client is available
