@@ -6,7 +6,7 @@ This module provides functionality to cluster and visualize paper embeddings
 using dimensionality reduction and clustering algorithms from scikit-learn.
 
 Features:
-- Dimensionality reduction using PCA and t-SNE
+- Dimensionality reduction using PCA, t-SNE, and UMAP
 - Clustering using K-Means, DBSCAN, and Agglomerative clustering
 - **NEW: Automatic cluster labeling using TF-IDF and LLM-based methods**
 - **NEW: Keyword extraction for each cluster**
@@ -57,6 +57,7 @@ from sklearn.manifold import TSNE
 from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
 from sklearn.preprocessing import StandardScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
+from umap import UMAP
 
 from .embeddings import EmbeddingsManager
 from .database import DatabaseManager
@@ -246,7 +247,7 @@ class ClusteringManager:
         Parameters
         ----------
         method : str, optional
-            Dimensionality reduction method: 'pca' or 'tsne', by default 'pca'
+            Dimensionality reduction method: 'pca', 'tsne', or 'umap', by default 'pca'
         n_components : int, optional
             Number of components to reduce to, by default 2
         random_state : int, optional
@@ -290,8 +291,22 @@ class ClusteringManager:
                     **kwargs
                 )
                 logger.info(f"Applying t-SNE to reduce to {n_components} dimensions (perplexity={perplexity})")
+            elif method.lower() == "umap":
+                # UMAP parameters
+                n_neighbors = kwargs.pop("n_neighbors", min(15, len(self.embeddings) - 1))
+                min_dist = kwargs.pop("min_dist", 0.1)
+                metric = kwargs.pop("metric", "cosine")
+                reducer = UMAP(
+                    n_components=n_components,
+                    random_state=random_state,
+                    n_neighbors=n_neighbors,
+                    min_dist=min_dist,
+                    metric=metric,
+                    **kwargs
+                )
+                logger.info(f"Applying UMAP to reduce to {n_components} dimensions (n_neighbors={n_neighbors}, min_dist={min_dist})")
             else:
-                raise ClusteringError(f"Unknown reduction method: {method}. Use 'pca' or 'tsne'.")
+                raise ClusteringError(f"Unknown reduction method: {method}. Use 'pca', 'tsne', or 'umap'.")
 
             self.reduced_embeddings = reducer.fit_transform(scaled_embeddings)
             logger.info(f"Reduced embeddings shape: {self.reduced_embeddings.shape}")
@@ -976,7 +991,7 @@ def perform_clustering(
     collection_name : str, optional
         Name of the ChromaDB collection, by default "papers"
     reduction_method : str, optional
-        Dimensionality reduction method ('pca' or 'tsne') for visualization, by default 'pca'
+        Dimensionality reduction method ('pca', 'tsne', or 'umap') for visualization, by default 'pca'
     n_components : int, optional
         Number of components for dimensionality reduction, by default 2
     clustering_method : str, optional

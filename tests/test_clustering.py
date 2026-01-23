@@ -118,6 +118,17 @@ class TestClusteringManager:
         assert reduced.shape == (10, 2)
         assert cm.reduced_embeddings is not None
 
+    def test_reduce_dimensions_umap(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test UMAP dimensionality reduction."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        
+        reduced = cm.reduce_dimensions(method='umap', n_components=2)
+        
+        assert reduced.shape == (10, 2)
+        assert cm.reduced_embeddings is not None
+
     def test_reduce_dimensions_invalid_method(self, mock_embeddings_manager, mock_collection_with_data):
         """Test invalid dimensionality reduction method."""
         mock_embeddings_manager.collection = mock_collection_with_data
