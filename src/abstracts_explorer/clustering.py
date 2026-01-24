@@ -492,9 +492,6 @@ class ClusteringManager:
                 logger.info(f"Fuzzy C-Means completed with FPC={fpc:.4f}")
                 
             elif method.lower() == "spectral":
-                if n_clusters is None:
-                    raise ClusteringError("n_clusters must be specified for spectral clustering")
-                    
                 # Spectral clustering parameters
                 affinity = kwargs.pop("affinity", "rbf")
                 n_neighbors = kwargs.pop("n_neighbors", 10)
