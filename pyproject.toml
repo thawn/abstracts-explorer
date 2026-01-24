@@ -36,6 +36,7 @@ dependencies = [
     "numba>=0.57",
     "llvmlite>=0.40",
     "umap-learn>=0.5.11",
+    "scikit-fuzzy>=0.4.2",
 ]
 
 [project.optional-dependencies]

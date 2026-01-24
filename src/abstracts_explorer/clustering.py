@@ -7,10 +7,11 @@ using dimensionality reduction and clustering algorithms from scikit-learn.
 
 Features:
 - Dimensionality reduction using PCA, t-SNE, and UMAP
-- Clustering using K-Means, DBSCAN, and Agglomerative clustering
+- Clustering using K-Means, DBSCAN, Agglomerative, Fuzzy C-Means, and Spectral clustering
 - **NEW: Automatic cluster labeling using TF-IDF and LLM-based methods**
 - **NEW: Keyword extraction for each cluster**
 - **NEW: Representative paper selection based on cluster centroids**
+- **NEW: Hierarchical cluster structure for agglomerative clustering**
 - Export clustering results to JSON for visualization
 
 Cluster Labeling
@@ -19,6 +20,11 @@ The module now includes state-of-the-art cluster labeling functionality that:
 1. Extracts distinctive keywords for each cluster using TF-IDF analysis
 2. Generates human-readable labels using LLM (Large Language Model) integration
 3. Identifies representative papers closest to each cluster's centroid
+
+Hierarchical Clustering
+-----------------------
+When using agglomerative clustering with distance_threshold, the module tracks
+the hierarchical structure of clusters, allowing exploration of sub-clusters.
 
 Example
 -------
@@ -54,10 +60,15 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
-from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
+from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering, SpectralClustering
 from sklearn.preprocessing import StandardScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
 from umap import UMAP
+try:
+    import skfuzzy as fuzz
+    HAS_FUZZY = True
+except ImportError:
+    HAS_FUZZY = False
 
 from .embeddings import EmbeddingsManager
 from .database import DatabaseManager
@@ -114,11 +125,12 @@ class ClusteringManager:
 
     This class handles:
     - Loading embeddings from ChromaDB
-    - Dimensionality reduction (PCA, t-SNE)
-    - Clustering (K-Means, DBSCAN, Agglomerative)
+    - Dimensionality reduction (PCA, t-SNE, UMAP)
+    - Clustering (K-Means, DBSCAN, Agglomerative, Fuzzy C-Means, Spectral)
     - **Automatic cluster labeling using TF-IDF and LLM**
     - **Keyword extraction for clusters**
     - **Representative paper selection**
+    - **Hierarchical cluster structure tracking**
     - Export of results for visualization
 
     Parameters
@@ -150,6 +162,10 @@ class ClusteringManager:
         Keywords extracted for each cluster
     cluster_summaries : dict or None
         Summaries generated for each cluster
+    cluster_hierarchy : dict or None
+        Hierarchical structure of clusters (for agglomerative)
+    fuzzy_memberships : np.ndarray or None
+        Fuzzy membership values (for fuzzy c-means)
 
     Examples
     --------
@@ -191,6 +207,9 @@ class ClusteringManager:
         self.cluster_label_names: Optional[Dict[int, str]] = None
         self.cluster_keywords: Optional[Dict[int, List[str]]] = None
         self.cluster_summaries: Optional[Dict[int, str]] = None
+        self.cluster_hierarchy: Optional[Dict[str, Any]] = None
+        self.fuzzy_memberships: Optional[np.ndarray] = None
+        self.clusterer: Optional[Any] = None  # Store the clusterer for hierarchy access
 
     def load_embeddings(self, limit: Optional[int] = None) -> int:
         """
@@ -340,9 +359,11 @@ class ClusteringManager:
         Parameters
         ----------
         method : str, optional
-            Clustering method: 'kmeans', 'dbscan', or 'agglomerative', by default 'kmeans'
+            Clustering method: 'kmeans', 'dbscan', 'agglomerative', 'fuzzy_cmeans', or 'spectral'.
+            By default 'kmeans'.
         n_clusters : int, optional
-            Number of clusters (for kmeans and agglomerative).
+            Number of clusters (for kmeans, agglomerative, fuzzy_cmeans, and spectral).
+            For agglomerative, can be None if distance_threshold is provided.
             If None, automatically calculated as n_papers / 100, clamped to [2, 500].
             By default None.
         random_state : int, optional
@@ -350,7 +371,11 @@ class ClusteringManager:
         use_reduced : bool, optional
             Whether to cluster reduced embeddings or original embeddings, by default False
         **kwargs
-            Additional arguments passed to the clustering algorithm
+            Additional arguments passed to the clustering algorithm.
+            For agglomerative: distance_threshold (float), linkage (str), affinity (str)
+            For dbscan: eps (float), min_samples (int)
+            For fuzzy_cmeans: m (float, fuzziness parameter), error (float), maxiter (int)
+            For spectral: affinity (str), n_neighbors (int)
 
         Returns
         -------
@@ -361,12 +386,26 @@ class ClusteringManager:
         ------
         ClusteringError
             If embeddings not loaded or clustering fails
+            
+        Examples
+        --------
+        >>> # Agglomerative with distance threshold
+        >>> cm.cluster(method='agglomerative', distance_threshold=0.5, n_clusters=None)
+        
+        >>> # Fuzzy C-Means
+        >>> cm.cluster(method='fuzzy_cmeans', n_clusters=5, m=2.0)
+        
+        >>> # Spectral clustering
+        >>> cm.cluster(method='spectral', n_clusters=5)
         """
         if self.embeddings is None:
             raise ClusteringError("No embeddings loaded. Call load_embeddings() first.")
 
-        # Calculate default n_clusters if not provided
-        if n_clusters is None:
+        # Extract distance_threshold for agglomerative if provided
+        distance_threshold = kwargs.pop("distance_threshold", None)
+        
+        # Calculate default n_clusters if not provided and not using distance_threshold
+        if n_clusters is None and distance_threshold is None:
             n_clusters = calculate_default_clusters(len(self.embeddings))
             logger.info(f"Auto-calculated n_clusters={n_clusters} based on {len(self.embeddings)} papers")
 
@@ -385,22 +424,106 @@ class ClusteringManager:
 
         try:
             if method.lower() == "kmeans":
-                clusterer = KMeans(n_clusters=n_clusters, random_state=random_state, **kwargs)
+                self.clusterer = KMeans(n_clusters=n_clusters, random_state=random_state, **kwargs)
                 logger.info(f"Applying K-Means clustering with {n_clusters} clusters")
+                self.cluster_labels = self.clusterer.fit_predict(data_to_cluster)
+                
             elif method.lower() == "dbscan":
                 eps = kwargs.pop("eps", 0.5)
                 min_samples = kwargs.pop("min_samples", 5)
-                clusterer = DBSCAN(eps=eps, min_samples=min_samples, **kwargs)
+                self.clusterer = DBSCAN(eps=eps, min_samples=min_samples, **kwargs)
                 logger.info(f"Applying DBSCAN clustering with eps={eps}, min_samples={min_samples}")
+                self.cluster_labels = self.clusterer.fit_predict(data_to_cluster)
+                
             elif method.lower() == "agglomerative":
-                clusterer = AgglomerativeClustering(n_clusters=n_clusters, **kwargs)
-                logger.info(f"Applying Agglomerative clustering with {n_clusters} clusters")
+                # Handle agglomerative with distance_threshold or n_clusters
+                if distance_threshold is not None:
+                    self.clusterer = AgglomerativeClustering(
+                        n_clusters=None,
+                        distance_threshold=distance_threshold,
+                        compute_full_tree=True,  # Required for hierarchy
+                        **kwargs
+                    )
+                    logger.info(f"Applying Agglomerative clustering with distance_threshold={distance_threshold}")
+                else:
+                    self.clusterer = AgglomerativeClustering(
+                        n_clusters=n_clusters,
+                        compute_full_tree=True,  # Store for potential hierarchy extraction
+                        **kwargs
+                    )
+                    logger.info(f"Applying Agglomerative clustering with {n_clusters} clusters")
+                    
+                self.cluster_labels = self.clusterer.fit_predict(data_to_cluster)
+                
+                # Extract hierarchical structure
+                self._extract_cluster_hierarchy()
+                
+            elif method.lower() == "fuzzy_cmeans" or method.lower() == "fuzzy-cmeans":
+                if not HAS_FUZZY:
+                    raise ClusteringError(
+                        "Fuzzy C-Means requires scikit-fuzzy. Install with: pip install scikit-fuzzy"
+                    )
+                if n_clusters is None:
+                    raise ClusteringError("n_clusters must be specified for fuzzy c-means")
+                    
+                # Fuzzy C-Means parameters
+                m = kwargs.pop("m", 2.0)  # Fuzziness parameter
+                error = kwargs.pop("error", 0.005)
+                maxiter = kwargs.pop("maxiter", 1000)
+                
+                logger.info(f"Applying Fuzzy C-Means clustering with {n_clusters} clusters (m={m})")
+                
+                # Fuzzy C-Means expects features as rows, samples as columns (transpose)
+                cntr, u, u0, d, jm, p, fpc = fuzz.cluster.cmeans(
+                    data_to_cluster.T,
+                    c=n_clusters,
+                    m=m,
+                    error=error,
+                    maxiter=maxiter,
+                    init=None
+                )
+                
+                # Store fuzzy memberships (shape: n_clusters x n_samples)
+                self.fuzzy_memberships = u
+                
+                # Get hard cluster assignments (highest membership)
+                self.cluster_labels = np.argmax(u, axis=0)
+                
+                logger.info(f"Fuzzy C-Means completed with FPC={fpc:.4f}")
+                
+            elif method.lower() == "spectral":
+                if n_clusters is None:
+                    raise ClusteringError("n_clusters must be specified for spectral clustering")
+                    
+                # Spectral clustering parameters
+                affinity = kwargs.pop("affinity", "rbf")
+                n_neighbors = kwargs.pop("n_neighbors", 10)
+                
+                if affinity == "nearest_neighbors":
+                    self.clusterer = SpectralClustering(
+                        n_clusters=n_clusters,
+                        random_state=random_state,
+                        affinity=affinity,
+                        n_neighbors=n_neighbors,
+                        **kwargs
+                    )
+                    logger.info(f"Applying Spectral clustering with {n_clusters} clusters (affinity={affinity}, n_neighbors={n_neighbors})")
+                else:
+                    self.clusterer = SpectralClustering(
+                        n_clusters=n_clusters,
+                        random_state=random_state,
+                        affinity=affinity,
+                        **kwargs
+                    )
+                    logger.info(f"Applying Spectral clustering with {n_clusters} clusters (affinity={affinity})")
+                    
+                self.cluster_labels = self.clusterer.fit_predict(data_to_cluster)
+                
             else:
                 raise ClusteringError(
-                    f"Unknown clustering method: {method}. Use 'kmeans', 'dbscan', or 'agglomerative'."
+                    f"Unknown clustering method: {method}. "
+                    f"Use 'kmeans', 'dbscan', 'agglomerative', 'fuzzy_cmeans', or 'spectral'."
                 )
-
-            self.cluster_labels = clusterer.fit_predict(data_to_cluster)
 
             # Count unique clusters
             unique_labels = np.unique(self.cluster_labels)
@@ -415,6 +538,65 @@ class ClusteringManager:
 
         except Exception as e:
             raise ClusteringError(f"Failed to cluster embeddings: {str(e)}") from e
+
+    def _extract_cluster_hierarchy(self) -> None:
+        """
+        Extract hierarchical cluster structure from agglomerative clustering.
+        
+        This method extracts the dendrogram information from scikit-learn's
+        AgglomerativeClustering to build a hierarchy that can be used for
+        hierarchical visualization.
+        
+        The hierarchy is stored in self.cluster_hierarchy as a dictionary
+        mapping cluster IDs to their children and parent information.
+        """
+        if not isinstance(self.clusterer, AgglomerativeClustering):
+            return
+            
+        if not hasattr(self.clusterer, 'children_'):
+            logger.warning("Clusterer does not have children_ attribute, hierarchy not available")
+            return
+            
+        if self.cluster_labels is None:
+            logger.warning("Cluster labels not available, cannot extract hierarchy")
+            return
+            
+        try:
+            n_samples = len(self.cluster_labels)
+            children = self.clusterer.children_
+            
+            # Build hierarchy dictionary
+            # Each merge creates a new cluster node
+            merges: List[Dict[str, Any]] = []
+            
+            # Each row in children represents a merge
+            # children[i] = [left, right] where left and right are indices
+            # Indices < n_samples are original samples
+            # Indices >= n_samples are merged clusters (index - n_samples gives merge step)
+            for i, (left, right) in enumerate(children):
+                merge_info: Dict[str, Any] = {
+                    'merge_id': i,
+                    'left': int(left),
+                    'right': int(right),
+                    'cluster_id': n_samples + i  # New cluster ID
+                }
+                
+                # Add distance if available
+                if hasattr(self.clusterer, 'distances_'):
+                    merge_info['distance'] = float(self.clusterer.distances_[i])
+                    
+                merges.append(merge_info)
+            
+            self.cluster_hierarchy = {
+                'n_samples': n_samples,
+                'n_clusters': len(np.unique(self.cluster_labels)),
+                'merges': merges
+            }
+            logger.info(f"Extracted hierarchy with {len(children)} merges")
+            
+        except Exception as e:
+            logger.warning(f"Failed to extract cluster hierarchy: {e}")
+            self.cluster_hierarchy = None
 
     def get_cluster_statistics(self) -> Dict[str, Any]:
         """
@@ -875,6 +1057,15 @@ Only respond with the label, nothing else. Do not add formatting."""
             # Add cluster keywords if available
             if self.cluster_keywords:
                 results["cluster_keywords"] = self.cluster_keywords
+                
+            # Add cluster hierarchy if available (for agglomerative)
+            if self.cluster_hierarchy:
+                results["cluster_hierarchy"] = self.cluster_hierarchy
+                
+            # Add fuzzy memberships if available (for fuzzy c-means)
+            if self.fuzzy_memberships is not None:
+                # Convert to list format for JSON serialization
+                results["fuzzy_memberships"] = self.fuzzy_memberships.tolist()
 
             logger.info(f"Generated clustering results with {len(points)} points")
             return results
@@ -1005,7 +1196,7 @@ def perform_clustering(
     n_components : int, optional
         Number of components for dimensionality reduction, by default 2
     clustering_method : str, optional
-        Clustering method ('kmeans', 'dbscan', or 'agglomerative'), by default 'kmeans'
+        Clustering method ('kmeans', 'dbscan', 'agglomerative', 'fuzzy_cmeans', or 'spectral'), by default 'kmeans'
     n_clusters : int, optional
         Number of clusters (for kmeans and agglomerative).
         If None, automatically calculated as n_papers / 100, clamped to [2, 500].
