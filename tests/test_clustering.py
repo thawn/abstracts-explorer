@@ -472,3 +472,200 @@ class TestClusterLabeling:
         assert 'cluster_keywords' in results
         assert isinstance(results['cluster_labels'], dict)
         assert isinstance(results['cluster_keywords'], dict)
+
+
+class TestNewClusteringMethods:
+    """Test suite for new clustering methods: spectral, fuzzy c-means, and enhanced agglomerative."""
+
+    def test_spectral_clustering_basic(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test basic spectral clustering."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        
+        labels = cm.cluster(method='spectral', n_clusters=3)
+        
+        assert labels is not None
+        assert len(labels) == 10
+        assert len(np.unique(labels)) <= 3
+        
+    def test_spectral_clustering_with_affinity(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test spectral clustering with different affinity parameters."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        
+        # Test with nearest_neighbors affinity
+        labels = cm.cluster(method='spectral', n_clusters=3, affinity='nearest_neighbors', n_neighbors=5)
+        
+        assert labels is not None
+        assert len(labels) == 10
+        
+    def test_spectral_clustering_requires_n_clusters(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test that spectral clustering requires n_clusters to be specified."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        
+        # Should use auto-calculated n_clusters when None is provided
+        labels = cm.cluster(method='spectral', n_clusters=None)
+        
+        assert labels is not None
+        assert len(labels) == 10
+        
+    def test_fuzzy_cmeans_basic(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test basic fuzzy c-means clustering."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        
+        labels = cm.cluster(method='fuzzy_cmeans', n_clusters=3)
+        
+        assert labels is not None
+        assert len(labels) == 10
+        assert len(np.unique(labels)) <= 3
+        # Check that fuzzy memberships are stored
+        assert cm.fuzzy_memberships is not None
+        assert cm.fuzzy_memberships.shape == (3, 10)  # n_clusters x n_samples
+        
+    def test_fuzzy_cmeans_with_parameters(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test fuzzy c-means with custom fuzziness parameter."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        
+        labels = cm.cluster(method='fuzzy_cmeans', n_clusters=3, m=2.5, maxiter=100)
+        
+        assert labels is not None
+        assert len(labels) == 10
+        assert cm.fuzzy_memberships is not None
+        
+    def test_fuzzy_cmeans_in_results(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test that fuzzy memberships are included in clustering results."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        cm.cluster(method='fuzzy_cmeans', n_clusters=3)
+        cm.reduce_dimensions(method='pca', n_components=2)
+        
+        results = cm.get_clustering_results()
+        
+        assert 'fuzzy_memberships' in results
+        assert isinstance(results['fuzzy_memberships'], list)
+        
+    def test_agglomerative_with_distance_threshold(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test agglomerative clustering with distance threshold instead of n_clusters."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        
+        labels = cm.cluster(method='agglomerative', distance_threshold=5.0, n_clusters=None)
+        
+        assert labels is not None
+        assert len(labels) == 10
+        # Number of clusters should be determined by distance threshold
+        n_clusters_found = len(np.unique(labels))
+        assert n_clusters_found >= 1
+        
+    def test_agglomerative_hierarchy_extraction(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test that hierarchical structure is extracted for agglomerative clustering."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        
+        cm.cluster(method='agglomerative', n_clusters=3)
+        
+        # Check that hierarchy was extracted
+        assert cm.cluster_hierarchy is not None
+        assert 'n_samples' in cm.cluster_hierarchy
+        assert 'n_clusters' in cm.cluster_hierarchy
+        assert 'merges' in cm.cluster_hierarchy
+        assert isinstance(cm.cluster_hierarchy['merges'], list)
+        # Should have n_samples - 1 merges to form the tree
+        assert len(cm.cluster_hierarchy['merges']) == 9  # 10 samples - 1
+        
+    def test_agglomerative_hierarchy_in_results(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test that hierarchy is included in clustering results."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        cm.cluster(method='agglomerative', n_clusters=3)
+        cm.reduce_dimensions(method='pca', n_components=2)
+        
+        results = cm.get_clustering_results()
+        
+        assert 'cluster_hierarchy' in results
+        assert isinstance(results['cluster_hierarchy'], dict)
+        assert 'merges' in results['cluster_hierarchy']
+        
+    def test_agglomerative_with_linkage(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test agglomerative clustering with different linkage methods."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        
+        # Test with different linkage methods
+        for linkage in ['ward', 'complete', 'average']:
+            cm_test = ClusteringManager(mock_embeddings_manager)
+            cm_test.load_embeddings()
+            labels = cm_test.cluster(method='agglomerative', n_clusters=3, linkage=linkage)
+            
+            assert labels is not None
+            assert len(labels) == 10
+            
+    def test_clustering_method_names_case_insensitive(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test that clustering method names are case-insensitive."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        
+        # Test different case variations
+        for method in ['SPECTRAL', 'Spectral', 'sPeCtRaL']:
+            cm = ClusteringManager(mock_embeddings_manager)
+            cm.load_embeddings()
+            labels = cm.cluster(method=method, n_clusters=3)
+            assert labels is not None
+            
+    def test_fuzzy_cmeans_alternative_name(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test that fuzzy c-means accepts both 'fuzzy_cmeans' and 'fuzzy-cmeans'."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        
+        # Test with hyphen
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        labels = cm.cluster(method='fuzzy-cmeans', n_clusters=3)
+        
+        assert labels is not None
+        assert cm.fuzzy_memberships is not None
+        
+    def test_unknown_clustering_method_error(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test that unknown clustering methods raise ClusteringError."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        
+        with pytest.raises(ClusteringError, match="Unknown clustering method"):
+            cm.cluster(method='invalid_method', n_clusters=3)
+            
+    def test_spectral_on_reduced_embeddings(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test spectral clustering on reduced embeddings."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        cm.reduce_dimensions(method='pca', n_components=5)
+        
+        labels = cm.cluster(method='spectral', n_clusters=3, use_reduced=True)
+        
+        assert labels is not None
+        assert len(labels) == 10
+        
+    def test_fuzzy_cmeans_on_reduced_embeddings(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test fuzzy c-means clustering on reduced embeddings."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        cm.reduce_dimensions(method='pca', n_components=5)
+        
+        labels = cm.cluster(method='fuzzy_cmeans', n_clusters=3, use_reduced=True)
+        
+        assert labels is not None
+        assert len(labels) == 10
+        assert cm.fuzzy_memberships is not None
