@@ -524,6 +524,11 @@ def compute_clusters():
         "n_clusters": int (optional, default: None - auto-calculated),
         "eps": float (optional, default: 0.5, for DBSCAN),
         "min_samples": int (optional, default: 5, for DBSCAN),
+        "distance_threshold": float (optional, for agglomerative),
+        "linkage": str (optional, for agglomerative, default: "ward"),
+        "affinity": str (optional, for agglomerative/spectral),
+        "m": float (optional, for fuzzy c-means, default: 2.0),
+        "n_neighbors": int (optional, for spectral with nearest_neighbors affinity),
         "limit": int (optional, max embeddings to process),
         "force": bool (optional, default: False, force recompute)
     }
@@ -552,11 +557,32 @@ def compute_clusters():
         # Get current embedding model
         current_model = config.embedding_model
         
-        # Build clustering kwargs for methods like DBSCAN
+        # Build clustering kwargs for different methods
         clustering_kwargs = {}
-        if clustering_method.lower() == "dbscan":
+        method_lower = clustering_method.lower()
+        
+        if method_lower == "dbscan":
             clustering_kwargs["eps"] = data.get("eps", 0.5)
             clustering_kwargs["min_samples"] = data.get("min_samples", 5)
+        elif method_lower == "agglomerative":
+            if "distance_threshold" in data:
+                clustering_kwargs["distance_threshold"] = data.get("distance_threshold")
+            if "linkage" in data:
+                clustering_kwargs["linkage"] = data.get("linkage")
+            if "affinity" in data:
+                clustering_kwargs["affinity"] = data.get("affinity")
+        elif method_lower in ["fuzzy_cmeans", "fuzzy-cmeans"]:
+            if "m" in data:
+                clustering_kwargs["m"] = data.get("m", 2.0)
+            if "maxiter" in data:
+                clustering_kwargs["maxiter"] = data.get("maxiter")
+            if "error" in data:
+                clustering_kwargs["error"] = data.get("error")
+        elif method_lower == "spectral":
+            if "affinity" in data:
+                clustering_kwargs["affinity"] = data.get("affinity")
+            if "n_neighbors" in data:
+                clustering_kwargs["n_neighbors"] = data.get("n_neighbors")
 
         # Use shared clustering function
         results = compute_clusters_with_cache(

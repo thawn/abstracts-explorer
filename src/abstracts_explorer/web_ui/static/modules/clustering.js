@@ -19,6 +19,10 @@ let currentClusterConfig = {
     n_clusters: null,  // Will be auto-calculated
     eps: 0.5,
     min_samples: 5,
+    distance_threshold: null,
+    linkage: 'ward',
+    affinity: 'rbf',
+    m: 2.0,
     limit: null
 };
 // Track selected clusters for multi-select
@@ -674,14 +678,34 @@ export function openClusterSettings() {
                             <option value="kmeans" ${currentClusterConfig.clustering_method === 'kmeans' ? 'selected' : ''}>K-Means</option>
                             <option value="dbscan" ${currentClusterConfig.clustering_method === 'dbscan' ? 'selected' : ''}>DBSCAN</option>
                             <option value="agglomerative" ${currentClusterConfig.clustering_method === 'agglomerative' ? 'selected' : ''}>Agglomerative</option>
+                            <option value="spectral" ${currentClusterConfig.clustering_method === 'spectral' ? 'selected' : ''}>Spectral</option>
+                            <option value="fuzzy_cmeans" ${currentClusterConfig.clustering_method === 'fuzzy_cmeans' ? 'selected' : ''}>Fuzzy C-Means</option>
                         </select>
                     </div>
-                    <div id="kmeans-params" class="${currentClusterConfig.clustering_method === 'kmeans' || currentClusterConfig.clustering_method === 'agglomerative' ? '' : 'hidden'}">
+                    <div id="kmeans-params" class="${currentClusterConfig.clustering_method === 'kmeans' || currentClusterConfig.clustering_method === 'spectral' || currentClusterConfig.clustering_method === 'fuzzy_cmeans' ? '' : 'hidden'}">
                         <label class="block text-sm font-medium text-gray-700 mb-2">Number of Clusters</label>
                         <input type="number" id="cluster-n-clusters" value="${currentClusterConfig.n_clusters || ''}" min="2" max="100" 
                                placeholder="Auto (n_papers / 100)"
                                class="w-full px-4 py-2 border border-gray-300 rounded-lg">
                         <p class="text-xs text-gray-500 mt-1">Leave empty for automatic calculation based on paper count</p>
+                    </div>
+                    <div id="agglomerative-params" class="${currentClusterConfig.clustering_method === 'agglomerative' ? '' : 'hidden'}">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Number of Clusters (or Distance Threshold)</label>
+                        <input type="number" id="cluster-n-clusters-agg" value="${currentClusterConfig.n_clusters || ''}" min="2" max="100" 
+                               placeholder="Leave empty to use distance threshold"
+                               class="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Distance Threshold (optional)</label>
+                        <input type="number" id="cluster-distance-threshold" value="${currentClusterConfig.distance_threshold || ''}" step="0.1" min="0.1" 
+                               placeholder="Leave empty to use n_clusters"
+                               class="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Linkage Method</label>
+                        <select id="cluster-linkage" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                            <option value="ward" ${currentClusterConfig.linkage === 'ward' ? 'selected' : ''}>Ward</option>
+                            <option value="complete" ${currentClusterConfig.linkage === 'complete' ? 'selected' : ''}>Complete</option>
+                            <option value="average" ${currentClusterConfig.linkage === 'average' ? 'selected' : ''}>Average</option>
+                            <option value="single" ${currentClusterConfig.linkage === 'single' ? 'selected' : ''}>Single</option>
+                        </select>
+                        <p class="text-xs text-gray-500 mt-1">Specify either n_clusters OR distance_threshold (not both)</p>
                     </div>
                     <div id="dbscan-params" class="${currentClusterConfig.clustering_method === 'dbscan' ? '' : 'hidden'}">
                         <label class="block text-sm font-medium text-gray-700 mb-2">Epsilon (eps)</label>
@@ -690,6 +714,19 @@ export function openClusterSettings() {
                         <label class="block text-sm font-medium text-gray-700 mb-2">Min Samples</label>
                         <input type="number" id="cluster-min-samples" value="${currentClusterConfig.min_samples}" min="2" 
                                class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                    </div>
+                    <div id="fuzzy-params" class="${currentClusterConfig.clustering_method === 'fuzzy_cmeans' ? '' : 'hidden'}">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Fuzziness Parameter (m)</label>
+                        <input type="number" id="cluster-fuzziness" value="${currentClusterConfig.m || 2.0}" step="0.1" min="1.1" max="5.0"
+                               class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                        <p class="text-xs text-gray-500 mt-1">Higher values create fuzzier clusters (default: 2.0)</p>
+                    </div>
+                    <div id="spectral-params" class="${currentClusterConfig.clustering_method === 'spectral' ? '' : 'hidden'}">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Affinity</label>
+                        <select id="cluster-affinity" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                            <option value="rbf" ${currentClusterConfig.affinity === 'rbf' ? 'selected' : ''}>RBF</option>
+                            <option value="nearest_neighbors" ${currentClusterConfig.affinity === 'nearest_neighbors' ? 'selected' : ''}>Nearest Neighbors</option>
+                        </select>
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Max Papers (optional)</label>
@@ -729,16 +766,47 @@ export function closeClusterSettings() {
  */
 export async function applyClusterSettings() {
     // Get settings from modal
-    // Get settings from modal
-    const nClustersValue = document.getElementById('cluster-n-clusters').value;
+    const method = document.getElementById('cluster-method').value;
+    
+    // Base config
     currentClusterConfig = {
         reduction_method: document.getElementById('cluster-reduction-method').value,
-        clustering_method: document.getElementById('cluster-method').value,
-        n_clusters: nClustersValue ? parseInt(nClustersValue) : null,  // null means auto-calculate
-        eps: parseFloat(document.getElementById('cluster-eps').value) || 0.5,
-        min_samples: parseInt(document.getElementById('cluster-min-samples').value) || 5,
+        clustering_method: method,
         limit: parseInt(document.getElementById('cluster-limit').value) || null
     };
+    
+    // Method-specific parameters
+    if (method === 'kmeans' || method === 'spectral' || method === 'fuzzy_cmeans') {
+        const nClustersValue = document.getElementById('cluster-n-clusters').value;
+        currentClusterConfig.n_clusters = nClustersValue ? parseInt(nClustersValue) : null;
+    }
+    
+    if (method === 'agglomerative') {
+        const nClustersValue = document.getElementById('cluster-n-clusters-agg').value;
+        const distThresholdValue = document.getElementById('cluster-distance-threshold').value;
+        
+        if (distThresholdValue) {
+            currentClusterConfig.distance_threshold = parseFloat(distThresholdValue);
+            currentClusterConfig.n_clusters = null;  // Can't specify both
+        } else {
+            currentClusterConfig.n_clusters = nClustersValue ? parseInt(nClustersValue) : null;
+        }
+        
+        currentClusterConfig.linkage = document.getElementById('cluster-linkage').value;
+    }
+    
+    if (method === 'dbscan') {
+        currentClusterConfig.eps = parseFloat(document.getElementById('cluster-eps').value) || 0.5;
+        currentClusterConfig.min_samples = parseInt(document.getElementById('cluster-min-samples').value) || 5;
+    }
+    
+    if (method === 'fuzzy_cmeans') {
+        currentClusterConfig.m = parseFloat(document.getElementById('cluster-fuzziness').value) || 2.0;
+    }
+    
+    if (method === 'spectral') {
+        currentClusterConfig.affinity = document.getElementById('cluster-affinity').value;
+    }
     
     closeClusterSettings();
     
@@ -797,13 +865,30 @@ export function toggleClusterParams() {
     const method = document.getElementById('cluster-method').value;
     const kmeansParams = document.getElementById('kmeans-params');
     const dbscanParams = document.getElementById('dbscan-params');
+    const agglomerativeParams = document.getElementById('agglomerative-params');
+    const fuzzyParams = document.getElementById('fuzzy-params');
+    const spectralParams = document.getElementById('spectral-params');
     
-    if (method === 'kmeans' || method === 'agglomerative') {
+    // Hide all parameter sections first
+    kmeansParams.classList.add('hidden');
+    dbscanParams.classList.add('hidden');
+    agglomerativeParams.classList.add('hidden');
+    fuzzyParams.classList.add('hidden');
+    spectralParams.classList.add('hidden');
+    
+    // Show relevant parameter section
+    if (method === 'kmeans') {
         kmeansParams.classList.remove('hidden');
-        dbscanParams.classList.add('hidden');
     } else if (method === 'dbscan') {
-        kmeansParams.classList.add('hidden');
         dbscanParams.classList.remove('hidden');
+    } else if (method === 'agglomerative') {
+        agglomerativeParams.classList.remove('hidden');
+    } else if (method === 'fuzzy_cmeans') {
+        kmeansParams.classList.remove('hidden');  // Uses n_clusters
+        fuzzyParams.classList.remove('hidden');
+    } else if (method === 'spectral') {
+        kmeansParams.classList.remove('hidden');  // Uses n_clusters
+        spectralParams.classList.remove('hidden');
     }
 }
 
