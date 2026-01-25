@@ -584,16 +584,278 @@ class ClusteringManager:
                     
                 merges.append(merge_info)
             
+            # Build tree structure with levels
+            tree = self._build_hierarchy_tree(n_samples, children)
+            
             self.cluster_hierarchy = {
                 'n_samples': n_samples,
                 'n_clusters': len(np.unique(self.cluster_labels)),
-                'merges': merges
+                'merges': merges,
+                'tree': tree
             }
             logger.info(f"Extracted hierarchy with {len(children)} merges")
             
         except Exception as e:
             logger.warning(f"Failed to extract cluster hierarchy: {e}")
             self.cluster_hierarchy = None
+    
+    def _build_hierarchy_tree(self, n_samples: int, children: np.ndarray) -> Dict[str, Any]:
+        """
+        Build a tree structure from agglomerative clustering merges.
+        
+        Parameters
+        ----------
+        n_samples : int
+            Number of original samples
+        children : np.ndarray
+            Children array from AgglomerativeClustering
+            
+        Returns
+        -------
+        dict
+            Tree structure with nodes and their relationships
+        """
+        # Build node information
+        nodes = {}
+        
+        # Leaf nodes (original samples)
+        for i in range(n_samples):
+            nodes[i] = {
+                'node_id': i,
+                'is_leaf': True,
+                'children': [],
+                'samples': [i],
+                'level': 0
+            }
+        
+        # Internal nodes (merges)
+        for i, (left, right) in enumerate(children):
+            node_id = n_samples + i
+            left_node = nodes[int(left)]
+            right_node = nodes[int(right)]
+            
+            left_samples: List[int] = left_node['samples']  # type: ignore
+            right_samples: List[int] = right_node['samples']  # type: ignore
+            left_level: int = left_node['level']  # type: ignore
+            right_level: int = right_node['level']  # type: ignore
+            
+            nodes[node_id] = {
+                'node_id': node_id,
+                'is_leaf': False,
+                'children': [int(left), int(right)],
+                'samples': left_samples + right_samples,
+                'level': max(left_level, right_level) + 1
+            }
+        
+        # Root is the last merge
+        root_id = n_samples + len(children) - 1
+        
+        return {
+            'nodes': {k: v for k, v in nodes.items()},
+            'root': root_id,
+            'max_level': nodes[root_id]['level']
+        }
+    
+    def get_hierarchy_level_clusters(self, level: int = 0) -> Dict[str, Any]:
+        """
+        Get clusters at a specific hierarchy level for agglomerative clustering.
+        
+        Parameters
+        ----------
+        level : int, optional
+            Hierarchy level (0 = leaf level, higher = more merged), by default 0
+            
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - clusters: List of cluster information at the level
+            - level: The requested level
+            - max_level: Maximum available level
+            
+        Raises
+        ------
+        ClusteringError
+            If hierarchy not available
+        """
+        if self.cluster_hierarchy is None or 'tree' not in self.cluster_hierarchy:
+            raise ClusteringError("Cluster hierarchy not available. Use agglomerative clustering.")
+        
+        tree = self.cluster_hierarchy['tree']
+        max_level = tree['max_level']
+        
+        # Clamp level to valid range
+        level = max(0, min(level, max_level))
+        
+        # Find all nodes at the requested level
+        clusters_at_level = []
+        for node_id, node_info in tree['nodes'].items():
+            if node_info['level'] == level:
+                clusters_at_level.append({
+                    'cluster_id': node_id,
+                    'node_id': node_id,
+                    'samples': node_info['samples'],
+                    'is_leaf': node_info['is_leaf'],
+                    'children': node_info['children'],
+                    'size': len(node_info['samples'])
+                })
+        
+        return {
+            'clusters': clusters_at_level,
+            'level': level,
+            'max_level': max_level
+        }
+    
+    def generate_hierarchical_labels(
+        self,
+        use_llm: bool = True,
+        max_keywords: int = 5,
+    ) -> Dict[int, str]:
+        """
+        Generate labels for all levels of the hierarchy.
+        
+        For leaf clusters, uses existing cluster labels or keywords.
+        For parent clusters, generates labels by summarizing child labels using LLM.
+        
+        Parameters
+        ----------
+        use_llm : bool, optional
+            Whether to use LLM for label generation, by default True
+        max_keywords : int, optional
+            Maximum number of keywords to use in label generation, by default 5
+            
+        Returns
+        -------
+        Dict[int, str]
+            Dictionary mapping node IDs to labels
+            
+        Raises
+        ------
+        ClusteringError
+            If hierarchy not available
+        """
+        if self.cluster_hierarchy is None or 'tree' not in self.cluster_hierarchy:
+            raise ClusteringError("Cluster hierarchy not available. Use agglomerative clustering.")
+        
+        # First generate labels for leaf clusters if not already done
+        if self.cluster_label_names is None:
+            self.generate_cluster_labels(use_llm=use_llm, max_keywords=max_keywords)
+        
+        tree = self.cluster_hierarchy['tree']
+        hierarchical_labels = {}
+        
+        # Start with leaf labels (map sample indices to cluster labels)
+        n_samples = self.cluster_hierarchy['n_samples']
+        for i in range(n_samples):
+            if self.cluster_labels is not None:
+                cluster_id = int(self.cluster_labels[i])
+                if self.cluster_label_names and cluster_id in self.cluster_label_names:
+                    hierarchical_labels[i] = self.cluster_label_names[cluster_id]
+                else:
+                    hierarchical_labels[i] = f"Sample {i}"
+        
+        # Generate labels for internal nodes bottom-up
+        for level in range(1, tree['max_level'] + 1):
+            for node_id, node_info in tree['nodes'].items():
+                if node_info['level'] == level:
+                    child_labels = [
+                        hierarchical_labels.get(child, f"Node {child}")
+                        for child in node_info['children']
+                    ]
+                    
+                    if use_llm and self.embeddings_manager:
+                        try:
+                            label = self._generate_parent_label_llm(child_labels, node_info['samples'])
+                            hierarchical_labels[node_id] = label
+                        except Exception as e:
+                            logger.warning(f"LLM label generation failed for node {node_id}: {e}")
+                            hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
+                    else:
+                        hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
+        
+        return hierarchical_labels
+    
+    def _generate_parent_label_llm(self, child_labels: List[str], sample_indices: List[int]) -> str:
+        """
+        Generate a parent cluster label by summarizing child labels using LLM.
+        
+        Parameters
+        ----------
+        child_labels : List[str]
+            Labels of child clusters
+        sample_indices : List[int]
+            Indices of samples in this parent cluster
+            
+        Returns
+        -------
+        str
+            Generated parent label
+        """
+        from .config import get_config
+        config = get_config()
+        
+        # Get sample titles from the parent cluster
+        sample_titles = []
+        if self.metadatas and len(sample_indices) > 0:
+            sample_size = min(5, len(sample_indices))
+            sampled_indices = np.random.choice(sample_indices, size=sample_size, replace=False)
+            for idx in sampled_indices:
+                title = self.metadatas[idx].get('title', '')
+                if title:
+                    sample_titles.append(title)
+        
+        sample_titles_str = "\n".join(f"- {title}" for title in sample_titles) if sample_titles else "N/A"
+        child_labels_str = "\n".join(f"- {label}" for label in child_labels)
+        
+        prompt = f"""Given a parent cluster that contains the following sub-clusters:
+
+{child_labels_str}
+
+Sample paper titles from this parent cluster:
+{sample_titles_str}
+
+Generate a concise, descriptive label (3-5 words) that captures the overarching theme of this parent cluster.
+The label should generalize the themes of the child clusters.
+Only respond with the label, nothing else. Do not add formatting."""
+
+        try:
+            if not hasattr(self.embeddings_manager, 'openai_client'):
+                raise AttributeError("OpenAI client not available")
+            
+            response = self.embeddings_manager.openai_client.chat.completions.create(
+                model=config.chat_model,
+                messages=[
+                    {"role": "system", "content": "You are a research paper categorization expert. Generate concise labels that generalize child cluster themes."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=50
+            )
+            
+            label = response.choices[0].message.content.strip()
+            label = label.strip('"\'')
+            return label
+            
+        except Exception as e:
+            logger.warning(f"LLM API call failed: {e}")
+            return self._generate_parent_label_fallback(child_labels)
+    
+    def _generate_parent_label_fallback(self, child_labels: List[str]) -> str:
+        """
+        Generate a parent label by combining child labels (fallback method).
+        
+        Parameters
+        ----------
+        child_labels : List[str]
+            Labels of child clusters
+            
+        Returns
+        -------
+        str
+            Generated parent label
+        """
+        # Simple concatenation with "&" separator
+        return " & ".join(child_labels[:3])
 
     def get_cluster_statistics(self) -> Dict[str, Any]:
         """

@@ -669,3 +669,91 @@ class TestNewClusteringMethods:
         assert labels is not None
         assert len(labels) == 10
         assert cm.fuzzy_memberships is not None
+
+
+class TestHierarchicalClustering:
+    """Test suite for hierarchical clustering visualization features."""
+    
+    def test_build_hierarchy_tree(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test that hierarchy tree is built correctly."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        
+        cm.cluster(method='agglomerative', n_clusters=3)
+        
+        assert cm.cluster_hierarchy is not None
+        assert 'tree' in cm.cluster_hierarchy
+        
+        tree = cm.cluster_hierarchy['tree']
+        assert 'nodes' in tree
+        assert 'root' in tree
+        assert 'max_level' in tree
+        
+        # Check that we have leaf and internal nodes
+        assert len(tree['nodes']) == 19  # 10 leaves + 9 internal nodes
+        
+    def test_get_hierarchy_level_clusters(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test getting clusters at a specific hierarchy level."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        
+        cm.cluster(method='agglomerative', n_clusters=3)
+        
+        # Get leaf level (level 0)
+        level0 = cm.get_hierarchy_level_clusters(level=0)
+        assert level0['level'] == 0
+        assert len(level0['clusters']) == 10  # All original samples
+        
+        # Get a higher level
+        level2 = cm.get_hierarchy_level_clusters(level=2)
+        assert level2['level'] == 2
+        assert len(level2['clusters']) < 10  # Should have fewer clusters
+        
+    def test_get_hierarchy_level_clusters_no_hierarchy(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test that getting hierarchy levels fails without hierarchy."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        
+        # Use non-hierarchical clustering
+        cm.cluster(method='kmeans', n_clusters=3)
+        
+        with pytest.raises(ClusteringError, match="Cluster hierarchy not available"):
+            cm.get_hierarchy_level_clusters(level=0)
+            
+    def test_generate_hierarchical_labels_fallback(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test hierarchical label generation with fallback (no LLM)."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        
+        cm.cluster(method='agglomerative', n_clusters=3)
+        
+        # Generate labels without LLM
+        labels = cm.generate_hierarchical_labels(use_llm=False)
+        
+        assert labels is not None
+        assert len(labels) > 0
+        
+        # Check that we have labels for both leaf and internal nodes
+        tree = cm.cluster_hierarchy['tree']
+        for node_id in tree['nodes'].keys():
+            assert node_id in labels
+            
+    def test_parent_label_fallback(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test fallback parent label generation."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        
+        cm.cluster(method='agglomerative', n_clusters=3)
+        
+        # Test the fallback method directly
+        child_labels = ["Machine Learning", "Deep Learning", "Neural Networks"]
+        parent_label = cm._generate_parent_label_fallback(child_labels)
+        
+        assert parent_label is not None
+        assert isinstance(parent_label, str)
+        assert len(parent_label) > 0

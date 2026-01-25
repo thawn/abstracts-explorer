@@ -28,6 +28,12 @@ let currentClusterConfig = {
 // Track selected clusters for multi-select
 let selectedClusters = new Set();
 
+// Hierarchical clustering state
+let hierarchyMode = false;
+let currentHierarchyLevel = 0;
+let maxHierarchyLevel = 0;
+let currentParentId = null;
+
 /**
  * Initialize default cluster count from backend
  * @async
@@ -102,6 +108,281 @@ export async function loadClusters() {
     } catch (error) {
         console.error('Error loading clusters:', error);
         showErrorInElement('cluster-plot', `Failed to load clusters: ${error.message}`);
+    }
+}
+
+/**
+ * Enable hierarchical clustering mode
+ * @async
+ */
+export async function enableHierarchyMode() {
+    if (!clusterData || !clusterData.cluster_hierarchy) {
+        console.warn('Hierarchy not available for current clustering');
+        return;
+    }
+    
+    hierarchyMode = true;
+    currentHierarchyLevel = 0;
+    maxHierarchyLevel = clusterData.cluster_hierarchy.tree?.max_level || 0;
+    currentParentId = null;
+    
+    // Show hierarchy controls
+    showHierarchyControls();
+    
+    // Re-visualize with hierarchy
+    await loadHierarchyLevel(0);
+}
+
+/**
+ * Disable hierarchical clustering mode
+ */
+export function disableHierarchyMode() {
+    hierarchyMode = false;
+    currentHierarchyLevel = 0;
+    currentParentId = null;
+    
+    // Hide hierarchy controls
+    hideHierarchyControls();
+    
+    // Re-visualize normal view
+    visualizeClusters();
+}
+
+/**
+ * Load and visualize a specific hierarchy level
+ * @async
+ * @param {number} level - Hierarchy level to load
+ * @param {number|null} parentId - Optional parent cluster ID to filter by
+ */
+export async function loadHierarchyLevel(level, parentId = null) {
+    if (!hierarchyMode) {
+        console.warn('Not in hierarchy mode');
+        return;
+    }
+    
+    try {
+        showLoading('cluster-plot', `Loading hierarchy level ${level}...`);
+        
+        // Build query parameters
+        let url = `${API_BASE}/api/clusters/hierarchy/level/${level}`;
+        if (parentId !== null) {
+            url += `?parent_id=${parentId}`;
+        }
+        
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const levelData = await response.json();
+        
+        if (levelData.error) {
+            showErrorInElement('cluster-plot', levelData.error);
+            return;
+        }
+        
+        // Update state
+        currentHierarchyLevel = levelData.level;
+        maxHierarchyLevel = levelData.max_level;
+        currentParentId = parentId;
+        
+        // Update hierarchy controls
+        updateHierarchyControls();
+        
+        // Visualize this level
+        visualizeHierarchyLevel(levelData);
+        
+    } catch (error) {
+        console.error('Error loading hierarchy level:', error);
+        showErrorInElement('cluster-plot', `Failed to load hierarchy level: ${error.message}`);
+    }
+}
+
+/**
+ * Show hierarchy controls in the UI
+ */
+function showHierarchyControls() {
+    const plotContainer = document.getElementById('cluster-plot');
+    if (!plotContainer) return;
+    
+    // Check if controls already exist
+    if (document.getElementById('hierarchy-controls')) return;
+    
+    const controlsHTML = `
+        <div id="hierarchy-controls" class="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-4">
+                    <h3 class="text-lg font-semibold text-blue-900">Hierarchical View</h3>
+                    <div class="flex items-center gap-2">
+                        <button id="hierarchy-level-up" onclick="navigateHierarchyUp()" 
+                                class="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed">
+                            ↑ Level Up
+                        </button>
+                        <span id="hierarchy-level-display" class="px-3 py-1 bg-white border border-blue-300 rounded">
+                            Level 0
+                        </span>
+                        <button id="hierarchy-level-down" onclick="navigateHierarchyDown()" 
+                                class="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed">
+                            ↓ Level Down
+                        </button>
+                    </div>
+                </div>
+                <button onclick="disableHierarchyMode()" class="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700">
+                    Exit Hierarchy Mode
+                </button>
+            </div>
+            <p class="text-sm text-blue-700 mt-2">
+                Click on a cluster to drill down and view its sub-clusters
+            </p>
+        </div>
+    `;
+    
+    plotContainer.insertAdjacentHTML('beforebegin', controlsHTML);
+}
+
+/**
+ * Hide hierarchy controls
+ */
+function hideHierarchyControls() {
+    const controls = document.getElementById('hierarchy-controls');
+    if (controls) {
+        controls.remove();
+    }
+}
+
+/**
+ * Update hierarchy control states
+ */
+function updateHierarchyControls() {
+    const levelDisplay = document.getElementById('hierarchy-level-display');
+    const upButton = document.getElementById('hierarchy-level-up');
+    const downButton = document.getElementById('hierarchy-level-down');
+    
+    if (levelDisplay) {
+        levelDisplay.textContent = `Level ${currentHierarchyLevel} / ${maxHierarchyLevel}`;
+    }
+    
+    if (upButton) {
+        upButton.disabled = currentHierarchyLevel >= maxHierarchyLevel;
+    }
+    
+    if (downButton) {
+        downButton.disabled = currentHierarchyLevel <= 0;
+    }
+}
+
+/**
+ * Navigate up in hierarchy (more merged clusters)
+ * @async
+ */
+export async function navigateHierarchyUp() {
+    if (currentHierarchyLevel < maxHierarchyLevel) {
+        await loadHierarchyLevel(currentHierarchyLevel + 1, null);
+    }
+}
+
+/**
+ * Navigate down in hierarchy (more detailed clusters)
+ * @async
+ */
+export async function navigateHierarchyDown() {
+    if (currentHierarchyLevel > 0) {
+        await loadHierarchyLevel(currentHierarchyLevel - 1, currentParentId);
+    }
+}
+
+/**
+ * Visualize hierarchy level data
+ * @param {Object} levelData - Level data from API
+ */
+function visualizeHierarchyLevel(levelData) {
+    const traces = [];
+    const clusters = levelData.clusters || [];
+    
+    clusters.forEach((cluster, idx) => {
+        const clusterColor = PLOTLY_COLORS[idx % PLOTLY_COLORS.length];
+        const label = cluster.label || `Cluster ${cluster.cluster_id}`;
+        
+        // For hierarchy view, we show cluster centroids as large markers
+        // and sample points within each cluster as smaller markers
+        const samples = cluster.samples || [];
+        
+        // Get points for this cluster from main cluster data
+        const clusterPoints = clusterData.points.filter(p => 
+            samples.includes(parseInt(p.id)) || samples.some(s => s === parseInt(p.id))
+        );
+        
+        if (clusterPoints.length > 0) {
+            const trace = {
+                x: clusterPoints.map(p => p.x),
+                y: clusterPoints.map(p => p.y),
+                mode: 'markers',
+                type: 'scatter',
+                name: `${label} (${cluster.size})`,
+                text: clusterPoints.map(p => p.title || p.id),
+                customdata: clusterPoints.map(p => ({
+                    id: p.id,
+                    title: p.title || '',
+                    cluster_id: cluster.cluster_id,
+                    node_id: cluster.node_id,
+                    has_children: !cluster.is_leaf
+                })),
+                marker: {
+                    color: clusterColor,
+                    size: 8,
+                    opacity: 0.7,
+                    line: {
+                        color: 'white',
+                        width: 0.5
+                    }
+                },
+                hovertemplate: '<b>%{text}</b><br>' +
+                              'Cluster: ' + label + '<br>' +
+                              (cluster.is_leaf ? '' : 'Click to drill down<br>') +
+                              '<extra></extra>',
+                legendgroup: `cluster-${cluster.cluster_id}`
+            };
+            traces.push(trace);
+        }
+    });
+    
+    const layout = {
+        title: `Hierarchy Level ${currentHierarchyLevel}${currentParentId ? ` (Parent: ${currentParentId})` : ''}`,
+        hovermode: 'closest',
+        showlegend: true,
+        legend: {
+            x: 1.02,
+            y: 1,
+            xanchor: 'left',
+            yanchor: 'top'
+        },
+        xaxis: { title: 'Component 1' },
+        yaxis: { title: 'Component 2' }
+    };
+    
+    const config = {
+        responsive: true,
+        displayModeBar: true,
+        modeBarButtonsToAdd: ['select2d', 'lasso2d']
+    };
+    
+    Plotly.newPlot('cluster-plot', traces, layout, config);
+    
+    // Add click handler for drilling down
+    const plotDiv = document.getElementById('cluster-plot');
+    if (plotDiv) {
+        plotDiv.on('plotly_click', async function(data) {
+            if (hierarchyMode && data.points && data.points.length > 0) {
+                const point = data.points[0];
+                const hasChildren = point.customdata?.has_children;
+                const nodeId = point.customdata?.node_id;
+                
+                if (hasChildren && nodeId !== undefined && currentHierarchyLevel > 0) {
+                    // Drill down to children of this cluster
+                    await loadHierarchyLevel(currentHierarchyLevel - 1, nodeId);
+                }
+            }
+        });
     }
 }
 
@@ -265,12 +546,50 @@ export function visualizeClusters() {
     // Create custom legend in separate container
     createCustomLegend(sortedClusterEntries, labels);
     
+    // Add hierarchy mode button if applicable
+    addHierarchyModeButton();
+    
     // Add click handler for point selection
     document.getElementById('cluster-plot').on('plotly_click', function(data) {
         const point = data.points[0];
         const customdata = point.customdata;
         showClusterPaperDetails(customdata.id, customdata);
     });
+}
+
+/**
+ * Add hierarchy mode button if agglomerative clustering with hierarchy is available
+ */
+function addHierarchyModeButton() {
+    // Remove existing button if any
+    const existingButton = document.getElementById('hierarchy-mode-button');
+    if (existingButton) {
+        existingButton.remove();
+    }
+    
+    // Only add button if we have hierarchy data and using agglomerative clustering
+    if (!clusterData || !clusterData.cluster_hierarchy || !clusterData.cluster_hierarchy.tree) {
+        return;
+    }
+    
+    const plotContainer = document.getElementById('cluster-plot');
+    if (!plotContainer) return;
+    
+    const buttonHTML = `
+        <div id="hierarchy-mode-button" class="mt-4 flex justify-center">
+            <button onclick="enableHierarchyMode()" 
+                    class="px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white font-semibold rounded-lg shadow-lg hover:from-purple-700 hover:to-blue-700 transform hover:scale-105 transition-all duration-200">
+                <span class="flex items-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"></path>
+                    </svg>
+                    Enable Hierarchical View
+                </span>
+            </button>
+        </div>
+    `;
+    
+    plotContainer.insertAdjacentHTML('afterend', buttonHTML);
 }
 
 /**
@@ -898,6 +1217,14 @@ export function toggleClusterParams() {
  */
 export function getClusterData() {
     return clusterData;
+}
+
+// Make hierarchy functions globally accessible for onclick handlers
+if (typeof window !== 'undefined') {
+    window.enableHierarchyMode = enableHierarchyMode;
+    window.disableHierarchyMode = disableHierarchyMode;
+    window.navigateHierarchyUp = navigateHierarchyUp;
+    window.navigateHierarchyDown = navigateHierarchyDown;
 }
 
 /**
