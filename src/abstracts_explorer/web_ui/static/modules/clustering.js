@@ -122,12 +122,63 @@ export async function enableHierarchyMode() {
     }
     
     hierarchyMode = true;
-    currentHierarchyLevel = clusterData.cluster_hierarchy.tree?.max_level || 0;  // Start at top level
-    maxHierarchyLevel = clusterData.cluster_hierarchy.tree?.max_level || 0;
+    const tree = clusterData.cluster_hierarchy.tree;
+    currentHierarchyLevel = tree?.max_level || 0;  // Start at top level
+    maxHierarchyLevel = tree?.max_level || 0;
     currentParentId = null;
     
-    // Re-visualize with hierarchy
-    await loadHierarchyLevel(currentHierarchyLevel);
+    // Build level data from local cluster hierarchy
+    const levelData = buildLevelDataFromHierarchy(currentHierarchyLevel, null);
+    
+    // Visualize with hierarchy
+    visualizeHierarchyLevel(levelData);
+    
+    // Create hierarchy legend
+    createHierarchyLegend(levelData.clusters);
+}
+
+/**
+ * Build level data from local hierarchy structure
+ * @param {number} level - Hierarchy level to build
+ * @param {number|null} parentId - Optional parent node ID to filter by
+ * @returns {Object} Level data structure
+ */
+function buildLevelDataFromHierarchy(level, parentId = null) {
+    const tree = clusterData.cluster_hierarchy.tree;
+    if (!tree) {
+        return { clusters: [], level: 0, max_level: 0, labels: {} };
+    }
+    
+    // Get all nodes at this level
+    const nodesAtLevel = tree.levels[level] || [];
+    
+    // Filter by parent if specified
+    let filteredNodes = nodesAtLevel;
+    if (parentId !== null && tree.nodes[parentId]) {
+        const parentChildren = tree.nodes[parentId].children || [];
+        filteredNodes = nodesAtLevel.filter(nodeId => parentChildren.includes(nodeId));
+    }
+    
+    // Build cluster info for each node
+    const clusters = filteredNodes.map(nodeId => {
+        const node = tree.nodes[nodeId];
+        return {
+            cluster_id: nodeId,
+            node_id: nodeId,
+            label: node.label || `Cluster ${nodeId}`,
+            size: node.size || 0,
+            samples: node.samples || [],
+            is_leaf: node.is_leaf || false,
+            has_children: (node.children && node.children.length > 0) || false
+        };
+    });
+    
+    return {
+        clusters: clusters,
+        level: level,
+        max_level: tree.max_level || 0,
+        labels: {} // Labels are already in cluster objects
+    };
 }
 
 /**
@@ -157,23 +208,8 @@ export async function loadHierarchyLevel(level, parentId = null) {
     try {
         showLoading('cluster-plot', `Loading hierarchy level ${level}...`);
         
-        // Build query parameters
-        let url = `${API_BASE}/api/clusters/hierarchy/level/${level}`;
-        if (parentId !== null) {
-            url += `?parent_id=${parentId}`;
-        }
-        
-        const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const levelData = await response.json();
-        
-        if (levelData.error) {
-            showErrorInElement('cluster-plot', levelData.error);
-            return;
-        }
+        // Build level data from local hierarchy structure
+        const levelData = buildLevelDataFromHierarchy(level, parentId);
         
         // Update state
         currentHierarchyLevel = levelData.level;
@@ -182,6 +218,9 @@ export async function loadHierarchyLevel(level, parentId = null) {
         
         // Visualize this level
         visualizeHierarchyLevel(levelData);
+        
+        // Update legend
+        createHierarchyLegend(levelData.clusters);
         
     } catch (error) {
         console.error('Error loading hierarchy level:', error);
@@ -540,9 +579,6 @@ export function visualizeClusters() {
     // Create custom legend in separate container
     createCustomLegend(sortedClusterEntries, labels);
     
-    // Add hierarchy mode button if applicable
-    addHierarchyModeButton();
-    
     // Add click handler for point selection
     document.getElementById('cluster-plot').on('plotly_click', function(data) {
         const point = data.points[0];
@@ -655,38 +691,6 @@ function createHierarchyLegend(clusters) {
 /**
  * Add hierarchy mode button if agglomerative clustering with hierarchy is available
  */
-function addHierarchyModeButton() {
-    // Remove existing button if any
-    const existingButton = document.getElementById('hierarchy-mode-button');
-    if (existingButton) {
-        existingButton.remove();
-    }
-    
-    // Only add button if we have hierarchy data and using agglomerative clustering
-    if (!clusterData || !clusterData.cluster_hierarchy || !clusterData.cluster_hierarchy.tree) {
-        return;
-    }
-    
-    const plotContainer = document.getElementById('cluster-plot');
-    if (!plotContainer) return;
-    
-    const buttonHTML = `
-        <div id="hierarchy-mode-button" class="mt-4 flex justify-center">
-            <button onclick="enableHierarchyMode()" 
-                    class="px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white font-semibold rounded-lg shadow-lg hover:from-purple-700 hover:to-blue-700 transform hover:scale-105 transition-all duration-200">
-                <span class="flex items-center gap-2">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"></path>
-                    </svg>
-                    Enable Hierarchical View
-                </span>
-            </button>
-        </div>
-    `;
-    
-    plotContainer.insertAdjacentHTML('afterend', buttonHTML);
-}
-
 /**
  * Format cluster statistics as HTML string for legend title
  * @param {Object} statistics - Cluster statistics object with total_papers, n_clusters, n_noise
@@ -759,6 +763,17 @@ function createCustomLegend(sortedClusterEntries, labels) {
     
     buttonContainer.appendChild(selectAllBtn);
     buttonContainer.appendChild(clearAllBtn);
+    
+    // Add hierarchy mode button if applicable (only for agglomerative clustering with hierarchy)
+    if (clusterData && clusterData.cluster_hierarchy && clusterData.cluster_hierarchy.tree) {
+        const hierarchyBtn = document.createElement('button');
+        hierarchyBtn.className = 'px-2 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors';
+        hierarchyBtn.textContent = '⊞ Hierarchy';
+        hierarchyBtn.title = 'Enable hierarchical view to explore cluster levels';
+        hierarchyBtn.addEventListener('click', enableHierarchyMode);
+        buttonContainer.appendChild(hierarchyBtn);
+    }
+    
     header.appendChild(buttonContainer);
     
     legendContainer.appendChild(header);
