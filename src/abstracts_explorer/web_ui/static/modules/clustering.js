@@ -122,15 +122,12 @@ export async function enableHierarchyMode() {
     }
     
     hierarchyMode = true;
-    currentHierarchyLevel = 0;
+    currentHierarchyLevel = clusterData.cluster_hierarchy.tree?.max_level || 0;  // Start at top level
     maxHierarchyLevel = clusterData.cluster_hierarchy.tree?.max_level || 0;
     currentParentId = null;
     
-    // Show hierarchy controls
-    showHierarchyControls();
-    
     // Re-visualize with hierarchy
-    await loadHierarchyLevel(0);
+    await loadHierarchyLevel(currentHierarchyLevel);
 }
 
 /**
@@ -140,9 +137,6 @@ export function disableHierarchyMode() {
     hierarchyMode = false;
     currentHierarchyLevel = 0;
     currentParentId = null;
-    
-    // Hide hierarchy controls
-    hideHierarchyControls();
     
     // Re-visualize normal view
     visualizeClusters();
@@ -186,88 +180,12 @@ export async function loadHierarchyLevel(level, parentId = null) {
         maxHierarchyLevel = levelData.max_level;
         currentParentId = parentId;
         
-        // Update hierarchy controls
-        updateHierarchyControls();
-        
         // Visualize this level
         visualizeHierarchyLevel(levelData);
         
     } catch (error) {
         console.error('Error loading hierarchy level:', error);
         showErrorInElement('cluster-plot', `Failed to load hierarchy level: ${error.message}`);
-    }
-}
-
-/**
- * Show hierarchy controls in the UI
- */
-function showHierarchyControls() {
-    const plotContainer = document.getElementById('cluster-plot');
-    if (!plotContainer) return;
-    
-    // Check if controls already exist
-    if (document.getElementById('hierarchy-controls')) return;
-    
-    const controlsHTML = `
-        <div id="hierarchy-controls" class="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <div class="flex items-center justify-between">
-                <div class="flex items-center gap-4">
-                    <h3 class="text-lg font-semibold text-blue-900">Hierarchical View</h3>
-                    <div class="flex items-center gap-2">
-                        <button id="hierarchy-level-up" onclick="navigateHierarchyUp()" 
-                                class="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed">
-                            ↑ Level Up
-                        </button>
-                        <span id="hierarchy-level-display" class="px-3 py-1 bg-white border border-blue-300 rounded">
-                            Level 0
-                        </span>
-                        <button id="hierarchy-level-down" onclick="navigateHierarchyDown()" 
-                                class="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed">
-                            ↓ Level Down
-                        </button>
-                    </div>
-                </div>
-                <button onclick="disableHierarchyMode()" class="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700">
-                    Exit Hierarchy Mode
-                </button>
-            </div>
-            <p class="text-sm text-blue-700 mt-2">
-                Click on a cluster to drill down and view its sub-clusters
-            </p>
-        </div>
-    `;
-    
-    plotContainer.insertAdjacentHTML('beforebegin', controlsHTML);
-}
-
-/**
- * Hide hierarchy controls
- */
-function hideHierarchyControls() {
-    const controls = document.getElementById('hierarchy-controls');
-    if (controls) {
-        controls.remove();
-    }
-}
-
-/**
- * Update hierarchy control states
- */
-function updateHierarchyControls() {
-    const levelDisplay = document.getElementById('hierarchy-level-display');
-    const upButton = document.getElementById('hierarchy-level-up');
-    const downButton = document.getElementById('hierarchy-level-down');
-    
-    if (levelDisplay) {
-        levelDisplay.textContent = `Level ${currentHierarchyLevel} / ${maxHierarchyLevel}`;
-    }
-    
-    if (upButton) {
-        upButton.disabled = currentHierarchyLevel >= maxHierarchyLevel;
-    }
-    
-    if (downButton) {
-        downButton.disabled = currentHierarchyLevel <= 0;
     }
 }
 
@@ -299,74 +217,147 @@ function visualizeHierarchyLevel(levelData) {
     const traces = [];
     const clusters = levelData.clusters || [];
     
+    // For each cluster at this level, create a trace showing:
+    // - A center marker (star) for the cluster
+    // - All member abstracts as smaller points
     clusters.forEach((cluster, idx) => {
         const clusterColor = PLOTLY_COLORS[idx % PLOTLY_COLORS.length];
         const label = cluster.label || `Cluster ${cluster.cluster_id}`;
         
-        // For hierarchy view, we show cluster centroids as large markers
-        // and sample points within each cluster as smaller markers
+        // Get points for all samples in this cluster
         const samples = cluster.samples || [];
-        
-        // Get points for this cluster from main cluster data
         const clusterPoints = clusterData.points.filter(p => 
-            samples.includes(parseInt(p.id)) || samples.some(s => s === parseInt(p.id))
+            samples.includes(parseInt(p.id))
         );
         
         if (clusterPoints.length > 0) {
-            const trace = {
+            // Calculate center point as mean of all points
+            const centerX = clusterPoints.reduce((sum, p) => sum + p.x, 0) / clusterPoints.length;
+            const centerY = clusterPoints.reduce((sum, p) => sum + p.y, 0) / clusterPoints.length;
+            
+            // Trace for cluster center (star marker)
+            const centerTrace = {
+                x: [centerX],
+                y: [centerY],
+                mode: 'markers+text',
+                type: 'scatter',
+                name: `${label} (${cluster.size})`,
+                text: [label],
+                textposition: 'top center',
+                textfont: {
+                    size: 10,
+                    color: clusterColor
+                },
+                customdata: [{
+                    cluster_id: cluster.cluster_id,
+                    node_id: cluster.node_id,
+                    has_children: !cluster.is_leaf,
+                    size: cluster.size
+                }],
+                marker: {
+                    color: clusterColor,
+                    symbol: 'star',
+                    size: 20,
+                    opacity: 1.0,
+                    line: {
+                        color: 'white',
+                        width: 2
+                    }
+                },
+                hovertemplate: '<b>%{text}</b><br>' +
+                              `${cluster.size} papers<br>` +
+                              (cluster.is_leaf ? '' : 'Click to drill down<br>') +
+                              '<extra></extra>',
+                legendgroup: `cluster-${cluster.cluster_id}`,
+                showlegend: false  // We'll use custom legend
+            };
+            traces.push(centerTrace);
+            
+            // Trace for all abstracts in this cluster (smaller markers)
+            const abstractTrace = {
                 x: clusterPoints.map(p => p.x),
                 y: clusterPoints.map(p => p.y),
                 mode: 'markers',
                 type: 'scatter',
-                name: `${label} (${cluster.size})`,
+                name: label,
                 text: clusterPoints.map(p => p.title || p.id),
                 customdata: clusterPoints.map(p => ({
                     id: p.id,
                     title: p.title || '',
                     cluster_id: cluster.cluster_id,
-                    node_id: cluster.node_id,
-                    has_children: !cluster.is_leaf
+                    node_id: cluster.node_id
                 })),
                 marker: {
                     color: clusterColor,
-                    size: 8,
-                    opacity: 0.7,
+                    size: 6,
+                    opacity: 0.5,
                     line: {
                         color: 'white',
                         width: 0.5
                     }
                 },
                 hovertemplate: '<b>%{text}</b><br>' +
-                              'Cluster: ' + label + '<br>' +
-                              (cluster.is_leaf ? '' : 'Click to drill down<br>') +
                               '<extra></extra>',
-                legendgroup: `cluster-${cluster.cluster_id}`
+                legendgroup: `cluster-${cluster.cluster_id}`,
+                showlegend: false
             };
-            traces.push(trace);
+            traces.push(abstractTrace);
         }
     });
     
     const layout = {
-        title: `Hierarchy Level ${currentHierarchyLevel}${currentParentId ? ` (Parent: ${currentParentId})` : ''}`,
+        title: '',
         hovermode: 'closest',
-        showlegend: true,
-        legend: {
-            x: 1.02,
-            y: 1,
-            xanchor: 'left',
-            yanchor: 'top'
+        showlegend: false,  // Use custom legend
+        xaxis: { 
+            title: '',
+            zeroline: false,
+            showgrid: false,
+            showticklabels: false,
+            ticks: ''
         },
-        xaxis: { title: 'Component 1' },
-        yaxis: { title: 'Component 2' }
+        yaxis: { 
+            title: '',
+            zeroline: false,
+            showgrid: false,
+            showticklabels: false,
+            ticks: ''
+        },
+        plot_bgcolor: 'white',
+        paper_bgcolor: 'white',
+        margin: {
+            l: 50,
+            r: 50,
+            t: 50,
+            b: 50
+        },
+        hoverlabel: {
+            namelength: -1,
+            align: 'left'
+        }
     };
     
     const config = {
         responsive: true,
         displayModeBar: true,
-        modeBarButtonsToAdd: ['select2d', 'lasso2d']
+        modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+        displaylogo: false,
+        scrollZoom: true
     };
     
-    Plotly.newPlot('cluster-plot', traces, layout, config);
+    // Clear and create plot
+    const plotElement = document.getElementById('cluster-plot');
+    plotElement.innerHTML = '';
+    
+    Plotly.newPlot('cluster-plot', traces, layout, config).then(function() {
+        Plotly.relayout('cluster-plot', {
+            'xaxis.fixedrange': false,
+            'yaxis.fixedrange': false
+        });
+    });
+    
+    // Create custom legend with hierarchy controls
+    createHierarchyLegend(clusters);
     
     // Add click handler for drilling down
     const plotDiv = document.getElementById('cluster-plot');
@@ -377,13 +368,288 @@ function visualizeHierarchyLevel(levelData) {
                 const hasChildren = point.customdata?.has_children;
                 const nodeId = point.customdata?.node_id;
                 
-                if (hasChildren && nodeId !== undefined && currentHierarchyLevel > 0) {
-                    // Drill down to children of this cluster
-                    await loadHierarchyLevel(currentHierarchyLevel - 1, nodeId);
+                // Only drill down if clicking on a center (star) marker and it has children
+                if (hasChildren && nodeId !== undefined && point.data.marker.symbol === 'star') {
+                    if (currentHierarchyLevel > 0) {
+                        // Drill down to children of this cluster
+                        await loadHierarchyLevel(currentHierarchyLevel - 1, nodeId);
+                    }
                 }
             }
         });
     }
+}
+
+/**
+ * Visualize clusters using Plotly
+ */
+export function visualizeClusters() {
+    if (!clusterData || !clusterData.points) {
+        console.error('No cluster data to visualize');
+        return;
+    }
+    
+    const points = clusterData.points;
+    const centers = clusterData.cluster_centers || {};
+    
+    // Group points by cluster
+    const clusterGroups = {};
+    points.forEach(point => {
+        const cluster = point.cluster;
+        if (!clusterGroups[cluster]) {
+            clusterGroups[cluster] = [];
+        }
+        clusterGroups[cluster].push(point);
+    });
+    
+    // Sort clusters by size (descending), then by ID (ascending) as tiebreaker
+    const sortedClusterEntries = sortClustersBySizeDesc(Object.entries(clusterGroups));
+    
+    // Initialize selected clusters with all clusters
+    selectedClusters.clear();
+    
+    // Create traces for each cluster
+    const labels = clusterData.cluster_labels || {};
+    const traces = [];
+    
+    // For each cluster, create both the points trace and center trace with matching colors
+    sortedClusterEntries.forEach(([clusterId, clusterPoints], idx) => {
+        const paperCount = clusterPoints.length;
+        
+        // Assign explicit color from Plotly's default palette
+        const clusterColor = PLOTLY_COLORS[idx % PLOTLY_COLORS.length];
+        
+        // Get the label with count for this cluster
+        const label = getClusterLabelWithCount(clusterId, labels, paperCount);
+        
+        // Main cluster points trace
+        const pointsTrace = {
+            x: clusterPoints.map(p => p.x),
+            y: clusterPoints.map(p => p.y),
+            mode: 'markers',
+            type: 'scatter',
+            name: label,
+            text: clusterPoints.map(p => p.title || p.id),
+            customdata: clusterPoints.map(p => ({
+                id: p.id,
+                title: p.title || '',
+                year: p.year || '',
+                conference: p.conference || '',
+                session: p.session || ''
+            })),
+            marker: {
+                color: clusterColor,
+                size: 8,
+                opacity: 0.7,
+                line: {
+                    color: 'white',
+                    width: 0.5
+                }
+            },
+            hovertemplate: '<b>%{text}</b><br>' +
+                          'Year: %{customdata.year}<br>' +
+                          'Conference: %{customdata.conference}<br>' +
+                          '<extra></extra>',
+            legendgroup: `cluster-${clusterId}`
+        };
+        traces.push(pointsTrace);
+        
+        // Add cluster center as star marker with same color
+        const center = centers[clusterId];
+        if (center) {
+            const centerTrace = {
+                x: [center.x],
+                y: [center.y],
+                mode: 'markers',
+                type: 'scatter',
+                name: `${label} (center)`,
+                marker: {
+                    color: clusterColor,
+                    symbol: 'star',
+                    size: 16,
+                    opacity: 1.0,
+                    line: {
+                        color: 'white',
+                        width: 2
+                    }
+                },
+                hovertemplate: '<b>Cluster Center</b><br>' +
+                              label + '<br>' +
+                              '<extra></extra>',
+                showlegend: false,
+                legendgroup: `cluster-${clusterId}`
+            };
+            traces.push(centerTrace);
+        }
+    });
+    
+    // Layout configuration
+    const layout = {
+        title: '',  // No title in plot
+        xaxis: {
+            title: '',  // Remove axis label
+            zeroline: false,
+            showgrid: false,  // Remove grid
+            showticklabels: false,  // Remove tick labels
+            ticks: ''  // Remove ticks
+        },
+        yaxis: {
+            title: '',  // Remove axis label
+            zeroline: false,
+            showgrid: false,  // Remove grid
+            showticklabels: false,  // Remove tick labels
+            ticks: ''  // Remove ticks
+        },
+        hovermode: 'closest',
+        showlegend: false,  // Hide built-in legend, we'll create custom one
+        plot_bgcolor: 'white',  // White background
+        paper_bgcolor: 'white',
+        margin: {
+            l: 50,
+            r: 50,
+            t: 50,
+            b: 50  // Standard bottom margin
+        },
+        hoverlabel: {
+            namelength: -1,
+            align: 'left'
+        }
+    };
+    
+    // Config
+    const config = {
+        responsive: true,
+        displayModeBar: true,
+        modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+        displaylogo: false,
+        scrollZoom: true
+    };
+    
+    // Clear the loading spinner before creating the plot
+    const plotElement = document.getElementById('cluster-plot');
+    plotElement.innerHTML = '';
+    
+    // Create plot
+    Plotly.newPlot('cluster-plot', traces, layout, config).then(function() {
+        Plotly.relayout('cluster-plot', {
+            'xaxis.fixedrange': false,
+            'yaxis.fixedrange': false
+        });
+    });
+    
+    // Create custom legend in separate container
+    createCustomLegend(sortedClusterEntries, labels);
+    
+    // Add hierarchy mode button if applicable
+    addHierarchyModeButton();
+    
+    // Add click handler for point selection
+    document.getElementById('cluster-plot').on('plotly_click', function(data) {
+        const point = data.points[0];
+        const customdata = point.customdata;
+        showClusterPaperDetails(customdata.id, customdata);
+    });
+}
+
+/**
+ * Create custom legend with hierarchy controls for hierarchical mode
+ * @param {Array} clusters - Array of cluster objects from API
+ */
+function createHierarchyLegend(clusters) {
+    const legendContainer = document.getElementById('cluster-legend');
+    if (!legendContainer) return;
+    
+    // Clear existing legend
+    legendContainer.innerHTML = '';
+    
+    // Create legend header with hierarchy controls
+    const header = document.createElement('div');
+    header.className = 'mb-3 pb-3 border-b border-gray-200';
+    
+    const title = document.createElement('h4');
+    title.className = 'text-sm font-semibold text-gray-700 mb-3';
+    title.innerHTML = '🔍 Hierarchical View';
+    header.appendChild(title);
+    
+    // Level navigation controls
+    const levelNav = document.createElement('div');
+    levelNav.className = 'flex items-center gap-2 mb-2';
+    
+    const levelUpBtn = document.createElement('button');
+    levelUpBtn.className = 'px-2 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed';
+    levelUpBtn.textContent = '↑ Up';
+    levelUpBtn.disabled = currentHierarchyLevel >= maxHierarchyLevel;
+    levelUpBtn.addEventListener('click', navigateHierarchyUp);
+    
+    const levelDisplay = document.createElement('span');
+    levelDisplay.className = 'px-2 py-1 text-xs bg-gray-100 border border-gray-300 rounded flex-1 text-center';
+    levelDisplay.textContent = `Level ${currentHierarchyLevel} / ${maxHierarchyLevel}`;
+    
+    const levelDownBtn = document.createElement('button');
+    levelDownBtn.className = 'px-2 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed';
+    levelDownBtn.textContent = '↓ Down';
+    levelDownBtn.disabled = currentHierarchyLevel <= 0;
+    levelDownBtn.addEventListener('click', navigateHierarchyDown);
+    
+    levelNav.appendChild(levelUpBtn);
+    levelNav.appendChild(levelDisplay);
+    levelNav.appendChild(levelDownBtn);
+    header.appendChild(levelNav);
+    
+    // Exit button
+    const exitBtn = document.createElement('button');
+    exitBtn.className = 'w-full px-2 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-700 mt-2';
+    exitBtn.textContent = 'Exit Hierarchy Mode';
+    exitBtn.addEventListener('click', disableHierarchyMode);
+    header.appendChild(exitBtn);
+    
+    // Info text
+    const infoText = document.createElement('p');
+    infoText.className = 'text-xs text-gray-600 mt-2';
+    infoText.textContent = 'Click on cluster centers (★) to drill down';
+    header.appendChild(infoText);
+    
+    legendContainer.appendChild(header);
+    
+    // Create legend items container with scrolling
+    const itemsContainer = document.createElement('div');
+    itemsContainer.className = 'space-y-1 overflow-y-auto pr-2 flex-1';
+    itemsContainer.style.minHeight = '0';
+    itemsContainer.style.maxHeight = '100%';
+    
+    clusters.forEach((cluster, idx) => {
+        const clusterColor = PLOTLY_COLORS[idx % PLOTLY_COLORS.length];
+        const label = cluster.label || `Cluster ${cluster.cluster_id}`;
+        
+        // Create legend item
+        const item = document.createElement('div');
+        item.className = 'flex items-center gap-2 p-2 rounded';
+        item.style.backgroundColor = 'rgb(249 250 251)';
+        
+        // Color box
+        const colorBox = document.createElement('div');
+        colorBox.className = 'w-4 h-4 rounded flex-shrink-0';
+        colorBox.style.backgroundColor = clusterColor;
+        
+        // Label text
+        const labelText = document.createElement('span');
+        labelText.className = 'text-sm text-gray-700 flex-1';
+        labelText.textContent = `${label} (${cluster.size})`;
+        
+        item.appendChild(colorBox);
+        item.appendChild(labelText);
+        
+        if (!cluster.is_leaf) {
+            const drillIcon = document.createElement('span');
+            drillIcon.className = 'text-xs text-gray-500';
+            drillIcon.textContent = '▼';
+            item.appendChild(drillIcon);
+        }
+        
+        itemsContainer.appendChild(item);
+    });
+    
+    legendContainer.appendChild(itemsContainer);
 }
 
 /**
