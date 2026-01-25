@@ -619,11 +619,9 @@ class TestWebUIE2E:
         chat_tab_button = browser.find_element(By.ID, "tab-chat")
         chat_tab_button.click()
 
-        # Wait for tab to switch
-        time.sleep(0.5)
-
-        # Chat tab should be visible
-        chat_tab = browser.find_element(By.ID, "chat-tab")
+        # Wait for chat tab to become visible
+        wait = WebDriverWait(browser, 5)
+        chat_tab = wait.until(EC.visibility_of_element_located((By.ID, "chat-tab")))
         assert chat_tab.is_displayed()
 
         # Search tab should be hidden
@@ -633,9 +631,13 @@ class TestWebUIE2E:
         # Switch back to search
         search_tab_button = browser.find_element(By.ID, "tab-search")
         search_tab_button.click()
-        time.sleep(0.5)
-
+        
+        # Wait for search tab to become visible
+        search_tab = wait.until(EC.visibility_of_element_located((By.ID, "search-tab")))
         assert search_tab.is_displayed()
+        
+        # Chat tab should now be hidden
+        chat_tab = browser.find_element(By.ID, "chat-tab")
         assert not chat_tab.is_displayed()
 
     def test_keyword_search_interaction(self, web_server, browser):

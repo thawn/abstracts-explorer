@@ -653,6 +653,177 @@ function createHierarchyLegend(clusters) {
 }
 
 /**
+ * Visualize clusters using Plotly
+ */
+export function visualizeClusters() {
+    if (!clusterData || !clusterData.points) {
+        console.error('No cluster data to visualize');
+        return;
+    }
+    
+    const points = clusterData.points;
+    const centers = clusterData.cluster_centers || {};
+    
+    // Group points by cluster
+    const clusterGroups = {};
+    points.forEach(point => {
+        const cluster = point.cluster;
+        if (!clusterGroups[cluster]) {
+            clusterGroups[cluster] = [];
+        }
+        clusterGroups[cluster].push(point);
+    });
+    
+    // Sort clusters by size (descending), then by ID (ascending) as tiebreaker
+    const sortedClusterEntries = sortClustersBySizeDesc(Object.entries(clusterGroups));
+    
+    // Initialize selected clusters with all clusters
+    selectedClusters.clear();
+    
+    // Create traces for each cluster
+    const labels = clusterData.cluster_labels || {};
+    const traces = [];
+    
+    // For each cluster, create both the points trace and center trace with matching colors
+    sortedClusterEntries.forEach(([clusterId, clusterPoints], idx) => {
+        const paperCount = clusterPoints.length;
+        
+        // Assign explicit color from Plotly's default palette
+        const clusterColor = PLOTLY_COLORS[idx % PLOTLY_COLORS.length];
+        
+        // Get the label with count for this cluster
+        const label = getClusterLabelWithCount(clusterId, labels, paperCount);
+        
+        // Main cluster points trace
+        const pointsTrace = {
+            x: clusterPoints.map(p => p.x),
+            y: clusterPoints.map(p => p.y),
+            mode: 'markers',
+            type: 'scatter',
+            name: label,
+            text: clusterPoints.map(p => p.title || p.id),
+            customdata: clusterPoints.map(p => ({
+                id: p.id,
+                title: p.title || '',
+                year: p.year || '',
+                conference: p.conference || '',
+                session: p.session || ''
+            })),
+            marker: {
+                color: clusterColor,
+                size: 8,
+                opacity: 0.7,
+                line: {
+                    color: 'white',
+                    width: 0.5
+                }
+            },
+            hovertemplate: '<b>%{text}</b><br>' +
+                          'Year: %{customdata.year}<br>' +
+                          'Conference: %{customdata.conference}<br>' +
+                          '<extra></extra>',
+            legendgroup: `cluster-${clusterId}`
+        };
+        traces.push(pointsTrace);
+        
+        // Add cluster center as star marker with same color
+        const center = centers[clusterId];
+        if (center) {
+            const centerTrace = {
+                x: [center.x],
+                y: [center.y],
+                mode: 'markers',
+                type: 'scatter',
+                name: `${label} (center)`,
+                marker: {
+                    color: clusterColor,
+                    symbol: 'star',
+                    size: 16,
+                    opacity: 1.0,
+                    line: {
+                        color: 'white',
+                        width: 2
+                    }
+                },
+                hovertemplate: '<b>Cluster Center</b><br>' +
+                              label + '<br>' +
+                              '<extra></extra>',
+                showlegend: false,
+                legendgroup: `cluster-${clusterId}`
+            };
+            traces.push(centerTrace);
+        }
+    });
+    
+    // Layout configuration
+    const layout = {
+        title: 'All Clusters',
+        xaxis: {
+            title: '',  // Remove axis label
+            zeroline: false,
+            showgrid: false,  // Remove grid
+            showticklabels: false,  // Remove tick labels
+            ticks: ''  // Remove ticks
+        },
+        yaxis: {
+            title: '',  // Remove axis label
+            zeroline: false,
+            showgrid: false,  // Remove grid
+            showticklabels: false,  // Remove tick labels
+            ticks: ''  // Remove ticks
+        },
+        hovermode: 'closest',
+        showlegend: false,  // Hide built-in legend, we'll create custom one
+        plot_bgcolor: 'white',  // White background
+        paper_bgcolor: 'white',
+        margin: {
+            l: 50,
+            r: 50,
+            t: 50,
+            b: 50  // Standard bottom margin
+        },
+        hoverlabel: {
+            namelength: -1,
+            align: 'left'
+        }
+    };
+    
+    // Config
+    const config = {
+        responsive: true,
+        displayModeBar: true,
+        modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+        displaylogo: false,
+        scrollZoom: true
+    };
+    
+    // Clear the loading spinner before creating the plot
+    const plotElement = document.getElementById('cluster-plot');
+    plotElement.innerHTML = '';
+    
+    // Create plot
+    Plotly.newPlot('cluster-plot', traces, layout, config).then(function() {
+        Plotly.relayout('cluster-plot', {
+            'xaxis.fixedrange': false,
+            'yaxis.fixedrange': false
+        });
+    });
+    
+    // Create custom legend in separate container
+    createCustomLegend(sortedClusterEntries, labels);
+    
+    // Add hierarchy mode button if applicable
+    addHierarchyModeButton();
+    
+    // Add click handler for point selection
+    document.getElementById('cluster-plot').on('plotly_click', function(data) {
+        const point = data.points[0];
+        const customdata = point.customdata;
+        showClusterPaperDetails(customdata.id, customdata);
+    });
+}
+
+/**
  * Add hierarchy mode button if agglomerative clustering with hierarchy is available
  */
 function addHierarchyModeButton() {
