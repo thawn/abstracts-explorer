@@ -1616,12 +1616,23 @@ def compute_clusters_with_cache(
     
     # Check if cache exists and is valid
     if not force and not limit:  # Only use cache if not limiting results
+        # For agglomerative with distance_threshold, don't pass n_clusters
+        cache_n_clusters: Optional[int] = n_clusters
+        cache_params = clustering_kwargs.copy() if clustering_kwargs else {}
+        
+        # Special handling for agglomerative with distance_threshold
+        if clustering_method.lower() == "agglomerative" and "distance_threshold" in cache_params:
+            cache_n_clusters = None  # Don't use n_clusters as cache key when using distance_threshold
+        elif clustering_method.lower() == "dbscan":
+            cache_n_clusters = None  # DBSCAN doesn't use n_clusters
+        
         cached_results = database.get_clustering_cache(
             embedding_model=embedding_model,
             reduction_method=reduction_method,
             n_components=n_components,
             clustering_method=clustering_method,
-            n_clusters=n_clusters if clustering_method.lower() != "dbscan" else None,
+            n_clusters=cache_n_clusters,
+            clustering_params=cache_params if cache_params else None,
         )
         
         if cached_results:
@@ -1669,14 +1680,24 @@ def compute_clusters_with_cache(
     # Save to cache if no limit was applied
     if not limit:
         try:
+            # Use same logic as cache lookup for consistency
+            save_n_clusters: Optional[int] = n_clusters
+            save_params = clustering_kwargs.copy() if clustering_kwargs else {}
+            
+            # Special handling for agglomerative with distance_threshold
+            if clustering_method.lower() == "agglomerative" and "distance_threshold" in save_params:
+                save_n_clusters = None  # Don't use n_clusters as cache key when using distance_threshold
+            elif clustering_method.lower() == "dbscan":
+                save_n_clusters = None  # DBSCAN doesn't use n_clusters
+            
             database.save_clustering_cache(
                 embedding_model=embedding_model,
                 reduction_method=reduction_method,
                 n_components=n_components,
                 clustering_method=clustering_method,
                 results=results,
-                n_clusters=n_clusters if clustering_method.lower() != "dbscan" else None,
-                clustering_params=clustering_kwargs if clustering_kwargs else None,
+                n_clusters=save_n_clusters,
+                clustering_params=save_params if save_params else None,
             )
         except Exception as e:
             logger.warning(f"Failed to save clustering cache: {e}")

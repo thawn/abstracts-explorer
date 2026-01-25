@@ -757,3 +757,132 @@ class TestHierarchicalClustering:
         assert parent_label is not None
         assert isinstance(parent_label, str)
         assert len(parent_label) > 0
+
+
+class TestClusteringCache:
+    """Test suite for clustering cache with different parameters."""
+    
+    def test_cache_with_distance_threshold(self, tmp_path):
+        """Test that cache considers distance_threshold parameter."""
+        from abstracts_explorer.database import DatabaseManager
+        from tests.conftest import set_test_db
+        
+        # Create temporary database
+        db_path = tmp_path / "test_cache.db"
+        set_test_db(db_path)
+        
+        db = DatabaseManager()
+        db.connect()
+        db.create_tables()
+        
+        # Create mock results
+        results1 = {
+            'points': [{'x': 0, 'y': 0, 'cluster': 0}],
+            'statistics': {'n_clusters': 2}
+        }
+        results2 = {
+            'points': [{'x': 1, 'y': 1, 'cluster': 1}],
+            'statistics': {'n_clusters': 3}
+        }
+        
+        # Save first result with distance_threshold=1.0
+        db.save_clustering_cache(
+            embedding_model='model1',
+            reduction_method='pca',
+            n_components=2,
+            clustering_method='agglomerative',
+            results=results1,
+            n_clusters=None,
+            clustering_params={'distance_threshold': 1.0, 'linkage': 'ward'}
+        )
+        
+        # Save second result with distance_threshold=2.0
+        db.save_clustering_cache(
+            embedding_model='model1',
+            reduction_method='pca',
+            n_components=2,
+            clustering_method='agglomerative',
+            results=results2,
+            n_clusters=None,
+            clustering_params={'distance_threshold': 2.0, 'linkage': 'ward'}
+        )
+        
+        # Retrieve with distance_threshold=1.0 should get results1
+        cached = db.get_clustering_cache(
+            embedding_model='model1',
+            reduction_method='pca',
+            n_components=2,
+            clustering_method='agglomerative',
+            n_clusters=None,
+            clustering_params={'distance_threshold': 1.0, 'linkage': 'ward'}
+        )
+        assert cached is not None
+        assert cached['statistics']['n_clusters'] == 2
+        
+        # Retrieve with distance_threshold=2.0 should get results2
+        cached = db.get_clustering_cache(
+            embedding_model='model1',
+            reduction_method='pca',
+            n_components=2,
+            clustering_method='agglomerative',
+            n_clusters=None,
+            clustering_params={'distance_threshold': 2.0, 'linkage': 'ward'}
+        )
+        assert cached is not None
+        assert cached['statistics']['n_clusters'] == 3
+        
+        # Retrieve with distance_threshold=3.0 should return None (cache miss)
+        cached = db.get_clustering_cache(
+            embedding_model='model1',
+            reduction_method='pca',
+            n_components=2,
+            clustering_method='agglomerative',
+            n_clusters=None,
+            clustering_params={'distance_threshold': 3.0, 'linkage': 'ward'}
+        )
+        assert cached is None
+        
+        db.close()
+    
+    def test_cache_without_params(self, tmp_path):
+        """Test that cache works when no params are provided."""
+        from abstracts_explorer.database import DatabaseManager
+        from tests.conftest import set_test_db
+        
+        # Create temporary database
+        db_path = tmp_path / "test_cache2.db"
+        set_test_db(db_path)
+        
+        db = DatabaseManager()
+        db.connect()
+        db.create_tables()
+        
+        # Save result without params
+        results = {
+            'points': [{'x': 0, 'y': 0, 'cluster': 0}],
+            'statistics': {'n_clusters': 5}
+        }
+        
+        db.save_clustering_cache(
+            embedding_model='model1',
+            reduction_method='pca',
+            n_components=2,
+            clustering_method='kmeans',
+            results=results,
+            n_clusters=5,
+            clustering_params=None
+        )
+        
+        # Retrieve without params should work
+        cached = db.get_clustering_cache(
+            embedding_model='model1',
+            reduction_method='pca',
+            n_components=2,
+            clustering_method='kmeans',
+            n_clusters=5,
+            clustering_params=None
+        )
+        assert cached is not None
+        assert cached['statistics']['n_clusters'] == 5
+        
+        db.close()
