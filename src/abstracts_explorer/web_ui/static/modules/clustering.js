@@ -1183,6 +1183,13 @@ export function openClusterSettings() {
                                class="w-full px-4 py-2 border border-gray-300 rounded-lg">
                         <p class="text-xs text-gray-500 mt-1">Limit number of papers for faster computation</p>
                     </div>
+                    <div class="border-t border-gray-200 pt-4">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="cluster-force-recreate" class="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500">
+                            <span class="text-sm font-medium text-gray-700">Force Recreate (Ignore Cache)</span>
+                        </label>
+                        <p class="text-xs text-gray-500 mt-1 ml-6">When enabled, clustering will always be recomputed even if cached results exist</p>
+                    </div>
                 </div>
                 <div class="px-6 py-4 bg-gray-50 flex justify-end gap-3 rounded-b-lg">
                     <button onclick="closeClusterSettings()" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-100">
@@ -1216,12 +1223,14 @@ export function closeClusterSettings() {
 export async function applyClusterSettings() {
     // Get settings from modal
     const method = document.getElementById('cluster-method').value;
+    const forceRecreate = document.getElementById('cluster-force-recreate').checked;
     
     // Base config
     currentClusterConfig = {
         reduction_method: document.getElementById('cluster-reduction-method').value,
         clustering_method: method,
-        limit: parseInt(document.getElementById('cluster-limit').value) || null
+        limit: parseInt(document.getElementById('cluster-limit').value) || null,
+        force: forceRecreate
     };
     
     // Method-specific parameters
