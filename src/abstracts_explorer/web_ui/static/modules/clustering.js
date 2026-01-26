@@ -116,19 +116,33 @@ export async function loadClusters() {
  * @async
  */
 export async function enableHierarchyMode() {
-    if (!clusterData || !clusterData.cluster_hierarchy) {
+    if (!clusterData || !clusterData.cluster_hierarchy || !clusterData.cluster_hierarchy.tree) {
         console.warn('Hierarchy not available for current clustering');
+        alert('Hierarchical view is only available for agglomerative clustering. Please run agglomerative clustering first.');
+        return;
+    }
+    
+    const tree = clusterData.cluster_hierarchy.tree;
+    if (!tree.nodes || Object.keys(tree.nodes).length === 0) {
+        console.error('Invalid hierarchy tree: no nodes found');
+        alert('Invalid hierarchy data. Please re-run clustering.');
         return;
     }
     
     hierarchyMode = true;
-    const tree = clusterData.cluster_hierarchy.tree;
     currentHierarchyLevel = tree?.max_level || 0;  // Start at top level
     maxHierarchyLevel = tree?.max_level || 0;
     currentParentId = null;
     
     // Build level data from local cluster hierarchy
     const levelData = buildLevelDataFromHierarchy(currentHierarchyLevel, null);
+    
+    if (levelData.clusters.length === 0) {
+        console.error('No clusters found at level', currentHierarchyLevel);
+        alert('No clusters found at the selected hierarchy level.');
+        hierarchyMode = false;
+        return;
+    }
     
     // Visualize with hierarchy
     visualizeHierarchyLevel(levelData);
@@ -145,12 +159,18 @@ export async function enableHierarchyMode() {
  */
 function buildLevelDataFromHierarchy(level, parentId = null) {
     const tree = clusterData.cluster_hierarchy.tree;
-    if (!tree) {
+    if (!tree || !tree.nodes) {
+        console.error('Invalid hierarchy tree structure:', tree);
         return { clusters: [], level: 0, max_level: 0, labels: {} };
     }
     
-    // Get all nodes at this level
-    const nodesAtLevel = tree.levels[level] || [];
+    // Get all nodes at this level by filtering through all nodes
+    const nodesAtLevel = [];
+    for (const [nodeId, nodeInfo] of Object.entries(tree.nodes)) {
+        if (nodeInfo.level === level) {
+            nodesAtLevel.push(parseInt(nodeId));
+        }
+    }
     
     // Filter by parent if specified
     let filteredNodes = nodesAtLevel;
@@ -166,7 +186,7 @@ function buildLevelDataFromHierarchy(level, parentId = null) {
             cluster_id: nodeId,
             node_id: nodeId,
             label: node.label || `Cluster ${nodeId}`,
-            size: node.size || 0,
+            size: node.samples ? node.samples.length : 0,
             samples: node.samples || [],
             is_leaf: node.is_leaf || false,
             has_children: (node.children && node.children.length > 0) || false
