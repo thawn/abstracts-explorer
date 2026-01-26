@@ -1674,6 +1674,22 @@ def compute_clusters_with_cache(
         logger.warning(f"Failed to generate cluster labels: {e}")
         # Continue without labels
     
+    # Generate hierarchical labels for agglomerative clustering
+    if clustering_method.lower() == "agglomerative" and cm.cluster_hierarchy is not None:
+        logger.info("Generating hierarchical labels for agglomerative clustering...")
+        try:
+            hierarchical_labels = cm.generate_hierarchical_labels(use_llm=True, max_keywords=5)
+            # Update the tree nodes with the generated labels
+            if 'tree' in cm.cluster_hierarchy and 'nodes' in cm.cluster_hierarchy['tree']:
+                for node_id, label in hierarchical_labels.items():
+                    node_id_int = int(node_id)
+                    if node_id_int in cm.cluster_hierarchy['tree']['nodes']:
+                        cm.cluster_hierarchy['tree']['nodes'][node_id_int]['label'] = label
+            logger.info(f"Generated labels for {len(hierarchical_labels)} hierarchy nodes")
+        except Exception as e:
+            logger.warning(f"Failed to generate hierarchical labels: {e}")
+            # Continue without hierarchical labels
+    
     # Get results
     results = cm.get_clustering_results()
     

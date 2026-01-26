@@ -757,6 +757,37 @@ class TestHierarchicalClustering:
         assert parent_label is not None
         assert isinstance(parent_label, str)
         assert len(parent_label) > 0
+        
+    def test_hierarchy_labels_in_tree_nodes(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test that hierarchical labels are added to tree nodes."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        
+        # Use agglomerative clustering
+        cm.cluster(method='agglomerative', n_clusters=3)
+        
+        # Generate hierarchical labels
+        hierarchical_labels = cm.generate_hierarchical_labels(use_llm=False)
+        
+        # Verify labels are generated
+        assert hierarchical_labels is not None
+        assert len(hierarchical_labels) > 0
+        
+        # Manually update tree nodes with labels (simulating what compute_clusters_with_cache does)
+        if 'tree' in cm.cluster_hierarchy and 'nodes' in cm.cluster_hierarchy['tree']:
+            for node_id, label in hierarchical_labels.items():
+                node_id_int = int(node_id)
+                if node_id_int in cm.cluster_hierarchy['tree']['nodes']:
+                    cm.cluster_hierarchy['tree']['nodes'][node_id_int]['label'] = label
+        
+        # Verify that tree nodes now have labels
+        tree = cm.cluster_hierarchy['tree']
+        for node_id, node_info in tree['nodes'].items():
+            if not node_info.get('is_leaf', False):  # Check internal nodes
+                assert 'label' in node_info, f"Node {node_id} missing label"
+                assert node_info['label'] is not None
+                assert len(node_info['label']) > 0
 
 
 class TestClusteringCache:
