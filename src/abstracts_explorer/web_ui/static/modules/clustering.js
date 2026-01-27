@@ -23,7 +23,8 @@ let currentClusterConfig = {
     linkage: 'ward',
     affinity: 'rbf',
     m: 2.0,
-    limit: null
+    limit: null,
+    use_llm_labels: true  // Use LLM for hierarchy labels by default
 };
 // Track selected clusters for multi-select
 let selectedClusters = new Set();
@@ -680,7 +681,7 @@ function createHierarchyLegend(clusters) {
         
         // Create legend item
         const item = document.createElement('div');
-        item.className = 'flex items-center gap-2 p-2 rounded';
+        item.className = 'flex items-center gap-2 p-2 rounded cursor-pointer hover:bg-gray-200 transition-colors';
         item.style.backgroundColor = 'rgb(249 250 251)';
         
         // Color box
@@ -701,12 +702,32 @@ function createHierarchyLegend(clusters) {
             drillIcon.className = 'text-xs text-gray-500';
             drillIcon.textContent = '▼';
             item.appendChild(drillIcon);
+            
+            // Add click handler to drill down
+            item.addEventListener('click', () => {
+                drillDownToCluster(cluster.cluster_id);
+            });
         }
         
         itemsContainer.appendChild(item);
     });
     
     legendContainer.appendChild(itemsContainer);
+}
+
+/**
+ * Drill down to a specific cluster's children
+ * @param {number} clusterId - Node ID to drill down into
+ * @async
+ */
+async function drillDownToCluster(clusterId) {
+    if (currentHierarchyLevel <= 0) {
+        console.warn('Already at lowest level');
+        return;
+    }
+    
+    // Drill down to children of this cluster (same as clicking star marker)
+    await loadHierarchyLevel(currentHierarchyLevel - 1, clusterId);
 }
 
 /**
@@ -1149,12 +1170,17 @@ export function openClusterSettings() {
                                placeholder="Leave empty to use n_clusters"
                                class="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4">
                         <label class="block text-sm font-medium text-gray-700 mb-2">Linkage Method</label>
-                        <select id="cluster-linkage" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                        <select id="cluster-linkage" class="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4">
                             <option value="ward" ${currentClusterConfig.linkage === 'ward' ? 'selected' : ''}>Ward</option>
                             <option value="complete" ${currentClusterConfig.linkage === 'complete' ? 'selected' : ''}>Complete</option>
                             <option value="average" ${currentClusterConfig.linkage === 'average' ? 'selected' : ''}>Average</option>
                             <option value="single" ${currentClusterConfig.linkage === 'single' ? 'selected' : ''}>Single</option>
                         </select>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="cluster-use-llm-labels" ${currentClusterConfig.use_llm_labels !== false ? 'checked' : ''} class="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500">
+                            <span class="text-sm font-medium text-gray-700">Use LLM for Hierarchy Labels</span>
+                        </label>
+                        <p class="text-xs text-gray-500 mt-1 ml-6">When enabled, uses LLM to generate meaningful labels for parent clusters. When disabled, uses simple label concatenation.</p>
                         <p class="text-xs text-gray-500 mt-1">Specify either n_clusters OR distance_threshold (not both)</p>
                     </div>
                     <div id="dbscan-params" class="${currentClusterConfig.clustering_method === 'dbscan' ? '' : 'hidden'}">
@@ -1243,6 +1269,7 @@ export async function applyClusterSettings() {
     if (method === 'agglomerative') {
         const nClustersValue = document.getElementById('cluster-n-clusters-agg').value;
         const distThresholdValue = document.getElementById('cluster-distance-threshold').value;
+        const useLLMLabels = document.getElementById('cluster-use-llm-labels').checked;
         
         if (distThresholdValue) {
             currentClusterConfig.distance_threshold = parseFloat(distThresholdValue);
@@ -1252,6 +1279,7 @@ export async function applyClusterSettings() {
         }
         
         currentClusterConfig.linkage = document.getElementById('cluster-linkage').value;
+        currentClusterConfig.use_llm_labels = useLLMLabels;
     }
     
     if (method === 'dbscan') {

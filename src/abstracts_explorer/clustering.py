@@ -639,6 +639,9 @@ class ClusteringManager:
             # Extract samples and level info, casting to proper types
             left_samples = list(left_node['samples'])  # type: ignore
             right_samples = list(right_node['samples'])  # type: ignore
+            # Remove duplicates while preserving order using dict.fromkeys()
+            all_samples = list(dict.fromkeys(left_samples + right_samples))
+            
             left_level: int = left_node['level']  # type: ignore
             right_level: int = right_node['level']  # type: ignore
             
@@ -646,7 +649,7 @@ class ClusteringManager:
                 'node_id': node_id,
                 'is_leaf': False,
                 'children': [int(left), int(right)],
-                'samples': left_samples + right_samples,  # Concatenate lists of paper IDs
+                'samples': all_samples,  # Deduplicated list of paper IDs
                 'level': max(left_level, right_level) + 1
             }
         
@@ -1681,14 +1684,16 @@ def compute_clusters_with_cache(
     if clustering_method.lower() == "agglomerative" and cm.cluster_hierarchy is not None:
         logger.info("Generating hierarchical labels for agglomerative clustering...")
         try:
-            hierarchical_labels = cm.generate_hierarchical_labels(use_llm=True, max_keywords=5)
+            # Check if use_llm_labels is specified in kwargs, default to True
+            use_llm = clustering_kwargs.get('use_llm_labels', True)
+            hierarchical_labels = cm.generate_hierarchical_labels(use_llm=use_llm, max_keywords=5)
             # Update the tree nodes with the generated labels
             if 'tree' in cm.cluster_hierarchy and 'nodes' in cm.cluster_hierarchy['tree']:
                 for node_id, label in hierarchical_labels.items():
                     node_id_int = int(node_id)
                     if node_id_int in cm.cluster_hierarchy['tree']['nodes']:
                         cm.cluster_hierarchy['tree']['nodes'][node_id_int]['label'] = label
-            logger.info(f"Generated labels for {len(hierarchical_labels)} hierarchy nodes")
+            logger.info(f"Generated labels for {len(hierarchical_labels)} hierarchy nodes (LLM: {use_llm})")
         except Exception as e:
             logger.warning(f"Failed to generate hierarchical labels: {e}")
             # Continue without hierarchical labels
