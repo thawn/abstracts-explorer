@@ -145,6 +145,18 @@ abstracts-explorer cluster-embeddings \
   --min-samples 5 \
   --output clusters.json
 
+# Cluster using Agglomerative with distance threshold
+abstracts-explorer cluster-embeddings \
+  --clustering-method agglomerative \
+  --distance-threshold 5.0 \
+  --output clusters.json
+
+# Cluster using Spectral clustering
+abstracts-explorer cluster-embeddings \
+  --clustering-method spectral \
+  --n-clusters 10 \
+  --output clusters.json
+
 # The web UI includes an interactive cluster visualization tab!
 ```
 
@@ -238,9 +250,9 @@ from abstracts_explorer.clustering import perform_clustering
 
 # Perform complete clustering pipeline
 results = perform_clustering(
-    reduction_method="tsne",      # or "pca"
+    reduction_method="tsne",      # or "pca", "umap"
     n_components=2,
-    clustering_method="kmeans",    # or "dbscan", "agglomerative"
+    clustering_method="kmeans",    # or "dbscan", "agglomerative", "spectral", "fuzzy_cmeans"
     n_clusters=8,
     output_path="clusters.json"
 )

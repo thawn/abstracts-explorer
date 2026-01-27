@@ -20,6 +20,7 @@ dependencies = [
     { name = "psycopg2-binary" },
     { name = "pydantic" },
     { name = "requests" },
+    { name = "scikit-fuzzy" },
     { name = "scikit-learn" },
     { name = "sqlalchemy" },
     { name = "umap-learn" },
@@ -65,6 +66,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.11.0" },
     { name = "requests", specifier = ">=2.31.0" },
+    { name = "scikit-fuzzy", specifier = ">=0.4.2" },
     { name = "scikit-learn", specifier = ">=1.3.0" },
     { name = "selenium", marker = "extra == 'dev'", specifier = ">=4.0.0" },
     { name = "sphinx", marker = "extra == 'docs'", specifier = ">=7.0.0" },
@@ -2636,6 +2638,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/da/8a/22b7beea3ee0d44b1916c0c1cb0ee3af23b700b6da9f04991899d0c555d4/rsa-4.9.1.tar.gz", hash = "sha256:e7bdbfdb5497da4c07dfd35530e1a902659db6ff241e39d9953cad06ebd0ae75", size = 29034, upload-time = "2025-04-16T09:51:18.218Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/64/8d/0133e4eb4beed9e425d9a98ed6e081a55d195481b7632472be1af08d2f6b/rsa-4.9.1-py3-none-any.whl", hash = "sha256:68635866661c6836b8d39430f97a996acbd61bfa49406748ea243539fe239762", size = 34696, upload-time = "2025-04-16T09:51:17.142Z" },
+]
+
+[[package]]
+name = "scikit-fuzzy"
+version = "0.5.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/98/1c/eeffa327ecf44e11fdd312b2b8cf5a7ac7f6cd2956646980893dc4aa56d8/scikit_fuzzy-0.5.0.tar.gz", hash = "sha256:2ee5340523aa7635ca568b9d8029c7738d05f9ea550fc89d4054b4cb50f34e7f", size = 958406, upload-time = "2024-08-22T22:20:45.697Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9d/06/da70811f95c4a3bada55e7b20c957548a4d9bc21150916f0c024286d67c7/scikit_fuzzy-0.5.0-py2.py3-none-any.whl", hash = "sha256:e456c365146bc5c58d9f593f4127ac783112e2daf89f87b12c6ef3c38e4087dd", size = 920817, upload-time = "2024-08-22T22:20:43.447Z" },
 ]
 
 [[package]]

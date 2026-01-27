@@ -19,10 +19,21 @@ let currentClusterConfig = {
     n_clusters: null,  // Will be auto-calculated
     eps: 0.5,
     min_samples: 5,
-    limit: null
+    distance_threshold: null,
+    linkage: 'ward',
+    affinity: 'rbf',
+    m: 2.0,
+    limit: null,
+    use_llm_labels: true  // Use LLM for hierarchy labels by default
 };
 // Track selected clusters for multi-select
 let selectedClusters = new Set();
+
+// Hierarchical clustering state
+let hierarchyMode = false;
+let currentHierarchyLevel = 0;
+let maxHierarchyLevel = 0;
+let currentParentId = null;
 
 /**
  * Initialize default cluster count from backend
@@ -98,6 +109,335 @@ export async function loadClusters() {
     } catch (error) {
         console.error('Error loading clusters:', error);
         showErrorInElement('cluster-plot', `Failed to load clusters: ${error.message}`);
+    }
+}
+
+/**
+ * Enable hierarchical clustering mode
+ * @async
+ */
+export async function enableHierarchyMode() {
+    if (!clusterData || !clusterData.cluster_hierarchy || !clusterData.cluster_hierarchy.tree) {
+        console.warn('Hierarchy not available for current clustering');
+        alert('Hierarchical view is only available for agglomerative clustering. Please run agglomerative clustering first.');
+        return;
+    }
+    
+    const tree = clusterData.cluster_hierarchy.tree;
+    if (!tree.nodes || Object.keys(tree.nodes).length === 0) {
+        console.error('Invalid hierarchy tree: no nodes found');
+        alert('Invalid hierarchy data. Please re-run clustering.');
+        return;
+    }
+    
+    hierarchyMode = true;
+    currentHierarchyLevel = tree?.max_level || 0;  // Start at top level
+    maxHierarchyLevel = tree?.max_level || 0;
+    currentParentId = null;
+    
+    // Build level data from local cluster hierarchy
+    const levelData = buildLevelDataFromHierarchy(currentHierarchyLevel, null);
+    
+    if (levelData.clusters.length === 0) {
+        console.error('No clusters found at level', currentHierarchyLevel);
+        alert('No clusters found at the selected hierarchy level.');
+        hierarchyMode = false;
+        return;
+    }
+    
+    // Visualize with hierarchy
+    visualizeHierarchyLevel(levelData);
+    
+    // Create hierarchy legend
+    createHierarchyLegend(levelData.clusters);
+}
+
+/**
+ * Build level data from local hierarchy structure
+ * @param {number} level - Hierarchy level to build
+ * @param {number|null} parentId - Optional parent node ID to filter by
+ * @returns {Object} Level data structure
+ */
+function buildLevelDataFromHierarchy(level, parentId = null) {
+    const tree = clusterData.cluster_hierarchy.tree;
+    if (!tree || !tree.nodes) {
+        console.error('Invalid hierarchy tree structure:', tree);
+        return { clusters: [], level: 0, max_level: 0, labels: {} };
+    }
+    
+    // Get all nodes at this level by filtering through all nodes
+    const nodesAtLevel = [];
+    for (const [nodeId, nodeInfo] of Object.entries(tree.nodes)) {
+        if (nodeInfo.level === level) {
+            nodesAtLevel.push(parseInt(nodeId));
+        }
+    }
+    
+    // Filter by parent if specified
+    let filteredNodes = nodesAtLevel;
+    if (parentId !== null && tree.nodes[parentId]) {
+        const parentChildren = tree.nodes[parentId].children || [];
+        filteredNodes = nodesAtLevel.filter(nodeId => parentChildren.includes(nodeId));
+    }
+    
+    // Build cluster info for each node
+    const clusters = filteredNodes.map(nodeId => {
+        const node = tree.nodes[nodeId];
+        return {
+            cluster_id: nodeId,
+            node_id: nodeId,
+            label: node.label || `Cluster ${nodeId}`,
+            size: node.samples ? node.samples.length : 0,
+            samples: node.samples || [],
+            is_leaf: node.is_leaf || false,
+            has_children: (node.children && node.children.length > 0) || false
+        };
+    });
+    
+    return {
+        clusters: clusters,
+        level: level,
+        max_level: tree.max_level || 0,
+        labels: {} // Labels are already in cluster objects
+    };
+}
+
+/**
+ * Disable hierarchical clustering mode
+ */
+export function disableHierarchyMode() {
+    hierarchyMode = false;
+    currentHierarchyLevel = 0;
+    currentParentId = null;
+    
+    // Re-visualize normal view
+    visualizeClusters();
+}
+
+/**
+ * Load and visualize a specific hierarchy level
+ * @async
+ * @param {number} level - Hierarchy level to load
+ * @param {number|null} parentId - Optional parent cluster ID to filter by
+ */
+export async function loadHierarchyLevel(level, parentId = null) {
+    if (!hierarchyMode) {
+        console.warn('Not in hierarchy mode');
+        return;
+    }
+    
+    try {
+        showLoading('cluster-plot', `Loading hierarchy level ${level}...`);
+        
+        // Build level data from local hierarchy structure
+        const levelData = buildLevelDataFromHierarchy(level, parentId);
+        
+        // Update state
+        currentHierarchyLevel = levelData.level;
+        maxHierarchyLevel = levelData.max_level;
+        currentParentId = parentId;
+        
+        // Visualize this level
+        visualizeHierarchyLevel(levelData);
+        
+        // Update legend
+        createHierarchyLegend(levelData.clusters);
+        
+    } catch (error) {
+        console.error('Error loading hierarchy level:', error);
+        showErrorInElement('cluster-plot', `Failed to load hierarchy level: ${error.message}`);
+    }
+}
+
+/**
+ * Navigate up in hierarchy (more merged clusters)
+ * @async
+ */
+export async function navigateHierarchyUp() {
+    if (currentHierarchyLevel < maxHierarchyLevel) {
+        await loadHierarchyLevel(currentHierarchyLevel + 1, null);
+    }
+}
+
+/**
+ * Navigate down in hierarchy (more detailed clusters)
+ * @async
+ */
+export async function navigateHierarchyDown() {
+    if (currentHierarchyLevel > 0) {
+        await loadHierarchyLevel(currentHierarchyLevel - 1, currentParentId);
+    }
+}
+
+/**
+ * Visualize hierarchy level data
+ * @param {Object} levelData - Level data from API
+ */
+function visualizeHierarchyLevel(levelData) {
+    const traces = [];
+    const clusters = levelData.clusters || [];
+    
+    // For each cluster at this level, create a trace showing:
+    // - A center marker (star) for the cluster
+    // - All member abstracts as smaller points
+    clusters.forEach((cluster, idx) => {
+        const clusterColor = PLOTLY_COLORS[idx % PLOTLY_COLORS.length];
+        const label = cluster.label || `Cluster ${cluster.cluster_id}`;
+        
+        // Get points for all samples in this cluster
+        // samples now contains paper IDs (not indices), so we can directly compare
+        const samples = cluster.samples || [];
+        const clusterPoints = clusterData.points.filter(p => 
+            samples.includes(p.id)
+        );
+        
+        if (clusterPoints.length > 0) {
+            // Calculate center point as mean of all points
+            const centerX = clusterPoints.reduce((sum, p) => sum + p.x, 0) / clusterPoints.length;
+            const centerY = clusterPoints.reduce((sum, p) => sum + p.y, 0) / clusterPoints.length;
+            
+            // Trace for cluster center (star marker)
+            const centerTrace = {
+                x: [centerX],
+                y: [centerY],
+                mode: 'markers+text',
+                type: 'scatter',
+                name: `${label} (${cluster.size})`,
+                text: [label],
+                textposition: 'top center',
+                textfont: {
+                    size: 10,
+                    color: clusterColor
+                },
+                customdata: [{
+                    cluster_id: cluster.cluster_id,
+                    node_id: cluster.node_id,
+                    has_children: !cluster.is_leaf,
+                    size: cluster.size
+                }],
+                marker: {
+                    color: clusterColor,
+                    symbol: 'star',
+                    size: 20,
+                    opacity: 1.0,
+                    line: {
+                        color: 'white',
+                        width: 2
+                    }
+                },
+                hovertemplate: '<b>%{text}</b><br>' +
+                              `${cluster.size} papers<br>` +
+                              (cluster.is_leaf ? '' : 'Click to drill down<br>') +
+                              '<extra></extra>',
+                legendgroup: `cluster-${cluster.cluster_id}`,
+                showlegend: false  // We'll use custom legend
+            };
+            traces.push(centerTrace);
+            
+            // Trace for all abstracts in this cluster (smaller markers)
+            const abstractTrace = {
+                x: clusterPoints.map(p => p.x),
+                y: clusterPoints.map(p => p.y),
+                mode: 'markers',
+                type: 'scatter',
+                name: label,
+                text: clusterPoints.map(p => p.title || p.id),
+                customdata: clusterPoints.map(p => ({
+                    id: p.id,
+                    title: p.title || '',
+                    cluster_id: cluster.cluster_id,
+                    node_id: cluster.node_id
+                })),
+                marker: {
+                    color: clusterColor,
+                    size: 6,
+                    opacity: 0.5,
+                    line: {
+                        color: 'white',
+                        width: 0.5
+                    }
+                },
+                hovertemplate: '<b>%{text}</b><br>' +
+                              '<extra></extra>',
+                legendgroup: `cluster-${cluster.cluster_id}`,
+                showlegend: false
+            };
+            traces.push(abstractTrace);
+        }
+    });
+    
+    const layout = {
+        title: '',
+        hovermode: 'closest',
+        showlegend: false,  // Use custom legend
+        xaxis: { 
+            title: '',
+            zeroline: false,
+            showgrid: false,
+            showticklabels: false,
+            ticks: ''
+        },
+        yaxis: { 
+            title: '',
+            zeroline: false,
+            showgrid: false,
+            showticklabels: false,
+            ticks: ''
+        },
+        plot_bgcolor: 'white',
+        paper_bgcolor: 'white',
+        margin: {
+            l: 50,
+            r: 50,
+            t: 50,
+            b: 50
+        },
+        hoverlabel: {
+            namelength: -1,
+            align: 'left'
+        }
+    };
+    
+    const config = {
+        responsive: true,
+        displayModeBar: true,
+        modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+        displaylogo: false,
+        scrollZoom: true
+    };
+    
+    // Clear and create plot
+    const plotElement = document.getElementById('cluster-plot');
+    plotElement.innerHTML = '';
+    
+    Plotly.newPlot('cluster-plot', traces, layout, config).then(function() {
+        Plotly.relayout('cluster-plot', {
+            'xaxis.fixedrange': false,
+            'yaxis.fixedrange': false
+        });
+    });
+    
+    // Create custom legend with hierarchy controls
+    createHierarchyLegend(clusters);
+    
+    // Add click handler for drilling down
+    const plotDiv = document.getElementById('cluster-plot');
+    if (plotDiv) {
+        plotDiv.on('plotly_click', async function(data) {
+            if (hierarchyMode && data.points && data.points.length > 0) {
+                const point = data.points[0];
+                const hasChildren = point.customdata?.has_children;
+                const nodeId = point.customdata?.node_id;
+                
+                // Only drill down if clicking on a center (star) marker and it has children
+                if (hasChildren && nodeId !== undefined && point.data.marker.symbol === 'star') {
+                    if (currentHierarchyLevel > 0) {
+                        // Drill down to children of this cluster
+                        await loadHierarchyLevel(currentHierarchyLevel - 1, nodeId);
+                    }
+                }
+            }
+        });
     }
 }
 
@@ -206,7 +546,7 @@ export function visualizeClusters() {
     
     // Layout configuration
     const layout = {
-        title: 'All Clusters',
+        title: '',  // No title in plot
         xaxis: {
             title: '',  // Remove axis label
             zeroline: false,
@@ -269,6 +609,130 @@ export function visualizeClusters() {
     });
 }
 
+/**
+ * Create custom legend with hierarchy controls for hierarchical mode
+ * @param {Array} clusters - Array of cluster objects from API
+ */
+function createHierarchyLegend(clusters) {
+    const legendContainer = document.getElementById('cluster-legend');
+    if (!legendContainer) return;
+    
+    // Clear existing legend
+    legendContainer.innerHTML = '';
+    
+    // Create legend header with hierarchy controls
+    const header = document.createElement('div');
+    header.className = 'mb-3 pb-3 border-b border-gray-200';
+    
+    const title = document.createElement('h4');
+    title.className = 'text-sm font-semibold text-gray-700 mb-3';
+    title.innerHTML = '🔍 Hierarchical View';
+    header.appendChild(title);
+    
+    // Level navigation controls
+    const levelNav = document.createElement('div');
+    levelNav.className = 'flex items-center gap-2 mb-2';
+    
+    const levelUpBtn = document.createElement('button');
+    levelUpBtn.className = 'px-2 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed';
+    levelUpBtn.textContent = '↑ Up';
+    levelUpBtn.disabled = currentHierarchyLevel >= maxHierarchyLevel;
+    levelUpBtn.addEventListener('click', navigateHierarchyUp);
+    
+    const levelDisplay = document.createElement('span');
+    levelDisplay.className = 'px-2 py-1 text-xs bg-gray-100 border border-gray-300 rounded flex-1 text-center';
+    levelDisplay.textContent = `Level ${currentHierarchyLevel} / ${maxHierarchyLevel}`;
+    
+    const levelDownBtn = document.createElement('button');
+    levelDownBtn.className = 'px-2 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed';
+    levelDownBtn.textContent = '↓ Down';
+    levelDownBtn.disabled = currentHierarchyLevel <= 0;
+    levelDownBtn.addEventListener('click', navigateHierarchyDown);
+    
+    levelNav.appendChild(levelUpBtn);
+    levelNav.appendChild(levelDisplay);
+    levelNav.appendChild(levelDownBtn);
+    header.appendChild(levelNav);
+    
+    // Exit button
+    const exitBtn = document.createElement('button');
+    exitBtn.className = 'w-full px-2 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-700 mt-2';
+    exitBtn.textContent = 'Exit Hierarchy Mode';
+    exitBtn.addEventListener('click', disableHierarchyMode);
+    header.appendChild(exitBtn);
+    
+    // Info text
+    const infoText = document.createElement('p');
+    infoText.className = 'text-xs text-gray-600 mt-2';
+    infoText.textContent = 'Click on cluster centers (★) to drill down';
+    header.appendChild(infoText);
+    
+    legendContainer.appendChild(header);
+    
+    // Create legend items container with scrolling
+    const itemsContainer = document.createElement('div');
+    itemsContainer.className = 'space-y-1 overflow-y-auto pr-2 flex-1';
+    itemsContainer.style.minHeight = '0';
+    itemsContainer.style.maxHeight = '100%';
+    
+    clusters.forEach((cluster, idx) => {
+        const clusterColor = PLOTLY_COLORS[idx % PLOTLY_COLORS.length];
+        const label = cluster.label || `Cluster ${cluster.cluster_id}`;
+        
+        // Create legend item
+        const item = document.createElement('div');
+        item.className = 'flex items-center gap-2 p-2 rounded cursor-pointer hover:bg-gray-200 transition-colors';
+        item.style.backgroundColor = 'rgb(249 250 251)';
+        
+        // Color box
+        const colorBox = document.createElement('div');
+        colorBox.className = 'w-4 h-4 rounded flex-shrink-0';
+        colorBox.style.backgroundColor = clusterColor;
+        
+        // Label text
+        const labelText = document.createElement('span');
+        labelText.className = 'text-sm text-gray-700 flex-1';
+        labelText.textContent = `${label} (${cluster.size})`;
+        
+        item.appendChild(colorBox);
+        item.appendChild(labelText);
+        
+        if (!cluster.is_leaf) {
+            const drillIcon = document.createElement('span');
+            drillIcon.className = 'text-xs text-gray-500';
+            drillIcon.textContent = '▼';
+            item.appendChild(drillIcon);
+            
+            // Add click handler to drill down
+            item.addEventListener('click', () => {
+                drillDownToCluster(cluster.cluster_id);
+            });
+        }
+        
+        itemsContainer.appendChild(item);
+    });
+    
+    legendContainer.appendChild(itemsContainer);
+}
+
+/**
+ * Drill down to a specific cluster's children
+ * @param {number} clusterId - Node ID to drill down into
+ * @async
+ */
+async function drillDownToCluster(clusterId) {
+    if (currentHierarchyLevel <= 0) {
+        console.warn('Already at lowest level');
+        return;
+    }
+    
+    // Drill down to children of this cluster (same as clicking star marker)
+    await loadHierarchyLevel(currentHierarchyLevel - 1, clusterId);
+}
+
+/**
+ * Add hierarchy mode button if agglomerative clustering with hierarchy is available
+ */
 /**
  * Format cluster statistics as HTML string for legend title
  * @param {Object} statistics - Cluster statistics object with total_papers, n_clusters, n_noise
@@ -341,6 +805,17 @@ function createCustomLegend(sortedClusterEntries, labels) {
     
     buttonContainer.appendChild(selectAllBtn);
     buttonContainer.appendChild(clearAllBtn);
+    
+    // Add hierarchy mode button if applicable (only for agglomerative clustering with hierarchy)
+    if (clusterData && clusterData.cluster_hierarchy && clusterData.cluster_hierarchy.tree) {
+        const hierarchyBtn = document.createElement('button');
+        hierarchyBtn.className = 'px-2 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors';
+        hierarchyBtn.textContent = '⊞ Hierarchy';
+        hierarchyBtn.title = 'Enable hierarchical view to explore cluster levels';
+        hierarchyBtn.addEventListener('click', enableHierarchyMode);
+        buttonContainer.appendChild(hierarchyBtn);
+    }
+    
     header.appendChild(buttonContainer);
     
     legendContainer.appendChild(header);
@@ -674,14 +1149,39 @@ export function openClusterSettings() {
                             <option value="kmeans" ${currentClusterConfig.clustering_method === 'kmeans' ? 'selected' : ''}>K-Means</option>
                             <option value="dbscan" ${currentClusterConfig.clustering_method === 'dbscan' ? 'selected' : ''}>DBSCAN</option>
                             <option value="agglomerative" ${currentClusterConfig.clustering_method === 'agglomerative' ? 'selected' : ''}>Agglomerative</option>
+                            <option value="spectral" ${currentClusterConfig.clustering_method === 'spectral' ? 'selected' : ''}>Spectral</option>
+                            <option value="fuzzy_cmeans" ${currentClusterConfig.clustering_method === 'fuzzy_cmeans' ? 'selected' : ''}>Fuzzy C-Means</option>
                         </select>
                     </div>
-                    <div id="kmeans-params" class="${currentClusterConfig.clustering_method === 'kmeans' || currentClusterConfig.clustering_method === 'agglomerative' ? '' : 'hidden'}">
+                    <div id="kmeans-params" class="${currentClusterConfig.clustering_method === 'kmeans' || currentClusterConfig.clustering_method === 'spectral' || currentClusterConfig.clustering_method === 'fuzzy_cmeans' ? '' : 'hidden'}">
                         <label class="block text-sm font-medium text-gray-700 mb-2">Number of Clusters</label>
                         <input type="number" id="cluster-n-clusters" value="${currentClusterConfig.n_clusters || ''}" min="2" max="100" 
                                placeholder="Auto (n_papers / 100)"
                                class="w-full px-4 py-2 border border-gray-300 rounded-lg">
                         <p class="text-xs text-gray-500 mt-1">Leave empty for automatic calculation based on paper count</p>
+                    </div>
+                    <div id="agglomerative-params" class="${currentClusterConfig.clustering_method === 'agglomerative' ? '' : 'hidden'}">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Number of Clusters (or Distance Threshold)</label>
+                        <input type="number" id="cluster-n-clusters-agg" value="${currentClusterConfig.n_clusters || ''}" min="2" max="100" 
+                               placeholder="Leave empty to use distance threshold"
+                               class="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Distance Threshold (optional)</label>
+                        <input type="number" id="cluster-distance-threshold" value="${currentClusterConfig.distance_threshold || ''}" step="0.1" min="0.1" 
+                               placeholder="Leave empty to use n_clusters"
+                               class="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Linkage Method</label>
+                        <select id="cluster-linkage" class="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4">
+                            <option value="ward" ${currentClusterConfig.linkage === 'ward' ? 'selected' : ''}>Ward</option>
+                            <option value="complete" ${currentClusterConfig.linkage === 'complete' ? 'selected' : ''}>Complete</option>
+                            <option value="average" ${currentClusterConfig.linkage === 'average' ? 'selected' : ''}>Average</option>
+                            <option value="single" ${currentClusterConfig.linkage === 'single' ? 'selected' : ''}>Single</option>
+                        </select>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="cluster-use-llm-labels" ${currentClusterConfig.use_llm_labels !== false ? 'checked' : ''} class="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500">
+                            <span class="text-sm font-medium text-gray-700">Use LLM for Hierarchy Labels</span>
+                        </label>
+                        <p class="text-xs text-gray-500 mt-1 ml-6">When enabled, uses LLM to generate meaningful labels for parent clusters. When disabled, uses simple label concatenation.</p>
+                        <p class="text-xs text-gray-500 mt-1">Specify either n_clusters OR distance_threshold (not both)</p>
                     </div>
                     <div id="dbscan-params" class="${currentClusterConfig.clustering_method === 'dbscan' ? '' : 'hidden'}">
                         <label class="block text-sm font-medium text-gray-700 mb-2">Epsilon (eps)</label>
@@ -691,11 +1191,31 @@ export function openClusterSettings() {
                         <input type="number" id="cluster-min-samples" value="${currentClusterConfig.min_samples}" min="2" 
                                class="w-full px-4 py-2 border border-gray-300 rounded-lg">
                     </div>
+                    <div id="fuzzy-params" class="${currentClusterConfig.clustering_method === 'fuzzy_cmeans' ? '' : 'hidden'}">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Fuzziness Parameter (m)</label>
+                        <input type="number" id="cluster-fuzziness" value="${currentClusterConfig.m || 2.0}" step="0.1" min="1.1" max="5.0"
+                               class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                        <p class="text-xs text-gray-500 mt-1">Higher values create fuzzier clusters (default: 2.0)</p>
+                    </div>
+                    <div id="spectral-params" class="${currentClusterConfig.clustering_method === 'spectral' ? '' : 'hidden'}">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Affinity</label>
+                        <select id="cluster-affinity" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                            <option value="rbf" ${currentClusterConfig.affinity === 'rbf' ? 'selected' : ''}>RBF</option>
+                            <option value="nearest_neighbors" ${currentClusterConfig.affinity === 'nearest_neighbors' ? 'selected' : ''}>Nearest Neighbors</option>
+                        </select>
+                    </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Max Papers (optional)</label>
                         <input type="number" id="cluster-limit" value="${currentClusterConfig.limit || ''}" placeholder="All papers" 
                                class="w-full px-4 py-2 border border-gray-300 rounded-lg">
                         <p class="text-xs text-gray-500 mt-1">Limit number of papers for faster computation</p>
+                    </div>
+                    <div class="border-t border-gray-200 pt-4">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="cluster-force-recreate" class="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500">
+                            <span class="text-sm font-medium text-gray-700">Force Recreate (Ignore Cache)</span>
+                        </label>
+                        <p class="text-xs text-gray-500 mt-1 ml-6">When enabled, clustering will always be recomputed even if cached results exist</p>
                     </div>
                 </div>
                 <div class="px-6 py-4 bg-gray-50 flex justify-end gap-3 rounded-b-lg">
@@ -729,16 +1249,51 @@ export function closeClusterSettings() {
  */
 export async function applyClusterSettings() {
     // Get settings from modal
-    // Get settings from modal
-    const nClustersValue = document.getElementById('cluster-n-clusters').value;
+    const method = document.getElementById('cluster-method').value;
+    const forceRecreate = document.getElementById('cluster-force-recreate').checked;
+    
+    // Base config
     currentClusterConfig = {
         reduction_method: document.getElementById('cluster-reduction-method').value,
-        clustering_method: document.getElementById('cluster-method').value,
-        n_clusters: nClustersValue ? parseInt(nClustersValue) : null,  // null means auto-calculate
-        eps: parseFloat(document.getElementById('cluster-eps').value) || 0.5,
-        min_samples: parseInt(document.getElementById('cluster-min-samples').value) || 5,
-        limit: parseInt(document.getElementById('cluster-limit').value) || null
+        clustering_method: method,
+        limit: parseInt(document.getElementById('cluster-limit').value) || null,
+        force: forceRecreate
     };
+    
+    // Method-specific parameters
+    if (method === 'kmeans' || method === 'spectral' || method === 'fuzzy_cmeans') {
+        const nClustersValue = document.getElementById('cluster-n-clusters').value;
+        currentClusterConfig.n_clusters = nClustersValue ? parseInt(nClustersValue) : null;
+    }
+    
+    if (method === 'agglomerative') {
+        const nClustersValue = document.getElementById('cluster-n-clusters-agg').value;
+        const distThresholdValue = document.getElementById('cluster-distance-threshold').value;
+        const useLLMLabels = document.getElementById('cluster-use-llm-labels').checked;
+        
+        if (distThresholdValue) {
+            currentClusterConfig.distance_threshold = parseFloat(distThresholdValue);
+            currentClusterConfig.n_clusters = null;  // Can't specify both
+        } else {
+            currentClusterConfig.n_clusters = nClustersValue ? parseInt(nClustersValue) : null;
+        }
+        
+        currentClusterConfig.linkage = document.getElementById('cluster-linkage').value;
+        currentClusterConfig.use_llm_labels = useLLMLabels;
+    }
+    
+    if (method === 'dbscan') {
+        currentClusterConfig.eps = parseFloat(document.getElementById('cluster-eps').value) || 0.5;
+        currentClusterConfig.min_samples = parseInt(document.getElementById('cluster-min-samples').value) || 5;
+    }
+    
+    if (method === 'fuzzy_cmeans') {
+        currentClusterConfig.m = parseFloat(document.getElementById('cluster-fuzziness').value) || 2.0;
+    }
+    
+    if (method === 'spectral') {
+        currentClusterConfig.affinity = document.getElementById('cluster-affinity').value;
+    }
     
     closeClusterSettings();
     
@@ -797,13 +1352,30 @@ export function toggleClusterParams() {
     const method = document.getElementById('cluster-method').value;
     const kmeansParams = document.getElementById('kmeans-params');
     const dbscanParams = document.getElementById('dbscan-params');
+    const agglomerativeParams = document.getElementById('agglomerative-params');
+    const fuzzyParams = document.getElementById('fuzzy-params');
+    const spectralParams = document.getElementById('spectral-params');
     
-    if (method === 'kmeans' || method === 'agglomerative') {
+    // Hide all parameter sections first
+    kmeansParams.classList.add('hidden');
+    dbscanParams.classList.add('hidden');
+    agglomerativeParams.classList.add('hidden');
+    fuzzyParams.classList.add('hidden');
+    spectralParams.classList.add('hidden');
+    
+    // Show relevant parameter section
+    if (method === 'kmeans') {
         kmeansParams.classList.remove('hidden');
-        dbscanParams.classList.add('hidden');
     } else if (method === 'dbscan') {
-        kmeansParams.classList.add('hidden');
         dbscanParams.classList.remove('hidden');
+    } else if (method === 'agglomerative') {
+        agglomerativeParams.classList.remove('hidden');
+    } else if (method === 'fuzzy_cmeans') {
+        kmeansParams.classList.remove('hidden');  // Uses n_clusters
+        fuzzyParams.classList.remove('hidden');
+    } else if (method === 'spectral') {
+        kmeansParams.classList.remove('hidden');  // Uses n_clusters
+        spectralParams.classList.remove('hidden');
     }
 }
 
@@ -813,6 +1385,14 @@ export function toggleClusterParams() {
  */
 export function getClusterData() {
     return clusterData;
+}
+
+// Make hierarchy functions globally accessible for onclick handlers
+if (typeof window !== 'undefined') {
+    window.enableHierarchyMode = enableHierarchyMode;
+    window.disableHierarchyMode = disableHierarchyMode;
+    window.navigateHierarchyUp = navigateHierarchyUp;
+    window.navigateHierarchyDown = navigateHierarchyDown;
 }
 
 /**
