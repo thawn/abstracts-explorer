@@ -890,8 +890,13 @@ Only respond with the label, nothing else. Do not add formatting."""
         str
             Generated parent label
         """
-        # Simple concatenation with "&" separator
-        return " & ".join(child_labels[:3])
+        # Split each label by "&", flatten, deduplicate, and rejoin
+        labels = []
+        for label in child_labels[:3]:
+            labels += label.split(" & ")
+        # Deduplicate while preserving order
+        unique_labels = list(dict.fromkeys(labels))
+        return " & ".join(unique_labels)
     
     def _extract_keywords_for_samples(self, sample_paper_ids: List[str], max_keywords: int = 5) -> List[str]:
         """
