@@ -720,8 +720,10 @@ class ClusteringManager:
         """
         Generate labels for all levels of the hierarchy.
         
-        For leaf clusters, uses existing cluster labels or keywords.
-        For parent clusters, generates labels by summarizing child labels using LLM.
+        Uses a tiered approach when use_llm is True:
+        - Levels 0-3: Simple fallback (concatenation) for fast processing
+        - Level 4: Full keyword extraction + LLM label generation
+        - Levels 5+: LLM-based parent label generation from child labels
         
         Parameters
         ----------
@@ -760,7 +762,7 @@ class ClusteringManager:
                 else:
                     hierarchical_labels[i] = f"Sample {i}"
         
-        # Generate labels for internal nodes bottom-up
+        # Generate labels for internal nodes bottom-up with tiered approach
         for level in range(1, tree['max_level'] + 1):
             for node_id, node_info in tree['nodes'].items():
                 if node_info['level'] == level:
@@ -769,14 +771,42 @@ class ClusteringManager:
                         for child in node_info['children']
                     ]
                     
-                    if use_llm and self.embeddings_manager:
-                        try:
-                            label = self._generate_parent_label_llm(child_labels, node_info['samples'])
-                            hierarchical_labels[node_id] = label
-                        except Exception as e:
-                            logger.warning(f"LLM label generation failed for node {node_id}: {e}")
+                    if use_llm:
+                        # Tiered approach based on level
+                        if level <= 3:
+                            # Levels 0-3: Use simple fallback (fast)
                             hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
+                            logger.debug(f"Level {level} node {node_id}: Using fallback")
+                        elif level == 4:
+                            # Level 4: Use full cluster label generation with keywords
+                            try:
+                                if self.embeddings_manager and self.metadatas:
+                                    keywords = self._extract_keywords_for_samples(node_info['samples'], max_keywords)
+                                    if keywords:
+                                        label = self._generate_llm_label_from_keywords(keywords)
+                                        hierarchical_labels[node_id] = label
+                                        logger.debug(f"Level {level} node {node_id}: Generated LLM label from keywords")
+                                    else:
+                                        hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
+                                else:
+                                    hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
+                            except Exception as e:
+                                logger.warning(f"Keyword-based label generation failed for node {node_id}: {e}")
+                                hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
+                        else:
+                            # Levels 5+: Use LLM-based parent label generation
+                            if self.embeddings_manager:
+                                try:
+                                    label = self._generate_parent_label_llm(child_labels, node_info['samples'])
+                                    hierarchical_labels[node_id] = label
+                                    logger.debug(f"Level {level} node {node_id}: Generated LLM parent label")
+                                except Exception as e:
+                                    logger.warning(f"LLM label generation failed for node {node_id}: {e}")
+                                    hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
+                            else:
+                                hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
                     else:
+                        # LLM disabled: always use fallback
                         hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
         
         return hierarchical_labels
@@ -862,6 +892,121 @@ Only respond with the label, nothing else. Do not add formatting."""
         """
         # Simple concatenation with "&" separator
         return " & ".join(child_labels[:3])
+    
+    def _extract_keywords_for_samples(self, sample_paper_ids: List[str], max_keywords: int = 5) -> List[str]:
+        """
+        Extract keywords from a set of papers identified by their IDs.
+        
+        Parameters
+        ----------
+        sample_paper_ids : List[str]
+            List of paper IDs
+        max_keywords : int, optional
+            Maximum number of keywords to extract
+            
+        Returns
+        -------
+        List[str]
+            List of extracted keywords
+        """
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        
+        if not self.metadatas or not self.paper_ids:
+            return []
+        
+        # Find indices for the given paper IDs
+        sample_indices = []
+        paper_id_to_idx = {pid: idx for idx, pid in enumerate(self.paper_ids)}
+        for paper_id in sample_paper_ids:
+            if paper_id in paper_id_to_idx:
+                sample_indices.append(paper_id_to_idx[paper_id])
+        
+        if not sample_indices:
+            return []
+        
+        # Collect documents for these samples
+        sample_docs = []
+        for idx in sample_indices:
+            doc_text = EmbeddingsManager.embedding_text_from_paper(self.metadatas[idx])
+            sample_docs.append(doc_text)
+        
+        if not sample_docs:
+            return []
+        
+        # Collect all documents for TF-IDF comparison
+        all_docs = []
+        for metadata in self.metadatas:
+            doc_text = EmbeddingsManager.embedding_text_from_paper(metadata)
+            all_docs.append(doc_text)
+        
+        try:
+            # Fit TF-IDF on all documents
+            tfidf = TfidfVectorizer(
+                max_features=1000,
+                min_df=2,
+                stop_words='english',
+                ngram_range=(1, 2)
+            )
+            tfidf_matrix = tfidf.fit_transform(all_docs)
+            feature_names = tfidf.get_feature_names_out()
+            
+            # Calculate mean TF-IDF for sample documents
+            sample_tfidf = tfidf_matrix[sample_indices].mean(axis=0).A1
+            
+            # Get top keywords
+            top_indices = sample_tfidf.argsort()[-max_keywords:][::-1]
+            keywords = [feature_names[i] for i in top_indices if sample_tfidf[i] > 0]
+            
+            return keywords[:max_keywords]
+        except Exception as e:
+            logger.warning(f"Failed to extract keywords: {e}")
+            return []
+    
+    def _generate_llm_label_from_keywords(self, keywords: List[str]) -> str:
+        """
+        Generate a descriptive label from keywords using LLM.
+        
+        Parameters
+        ----------
+        keywords : List[str]
+            List of keywords
+            
+        Returns
+        -------
+        str
+            Generated label
+        """
+        from .config import get_config
+        config = get_config()
+        
+        keywords_str = ", ".join(keywords[:5])
+        prompt = f"""Given these keywords from academic papers: {keywords_str}
+
+Generate a concise, descriptive label (3-5 words) that captures the main theme.
+Only respond with the label, nothing else. Do not add formatting."""
+        
+        try:
+            if not hasattr(self.embeddings_manager, 'openai_client'):
+                raise AttributeError("OpenAI client not available")
+            
+            response = self.embeddings_manager.openai_client.chat.completions.create(
+                model=config.chat_model,
+                messages=[
+                    {"role": "system", "content": "You are a research paper categorization expert."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=50
+            )
+            
+            label = response.choices[0].message.content.strip()
+            label = label.strip('"\'')
+            return label
+            
+        except Exception as e:
+            logger.warning(f"LLM API call failed: {e}")
+            # Fallback to keyword concatenation
+            return ", ".join(keywords[:3])
 
     def get_cluster_statistics(self) -> Dict[str, Any]:
         """
