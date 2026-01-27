@@ -841,7 +841,7 @@ class ClusteringManager:
                     sample_titles.append(title)
         
         sample_titles_str = "\n".join(f"- {title}" for title in sample_titles) if sample_titles else "N/A"
-        child_labels_str = "\n".join(f"- {label}" for label in child_labels)
+        child_labels_str = "\n".join(f"- {label}" for label in set(child_labels))
         
         prompt = f"""Given a parent cluster that contains the following sub-clusters:
 
