@@ -619,12 +619,14 @@ class ClusteringManager:
         nodes = {}
         
         # Leaf nodes (original samples)
+        # Store paper IDs instead of indices for proper frontend mapping
         for i in range(n_samples):
+            paper_id = self.paper_ids[i] if self.paper_ids else str(i)
             nodes[i] = {
                 'node_id': i,
                 'is_leaf': True,
                 'children': [],
-                'samples': [i],
+                'samples': [paper_id],  # Use paper ID instead of index
                 'level': 0
             }
         
@@ -634,8 +636,9 @@ class ClusteringManager:
             left_node = nodes[int(left)]
             right_node = nodes[int(right)]
             
-            left_samples: List[int] = left_node['samples']  # type: ignore
-            right_samples: List[int] = right_node['samples']  # type: ignore
+            # Extract samples and level info, casting to proper types
+            left_samples = list(left_node['samples'])  # type: ignore
+            right_samples = list(right_node['samples'])  # type: ignore
             left_level: int = left_node['level']  # type: ignore
             right_level: int = right_node['level']  # type: ignore
             
@@ -643,7 +646,7 @@ class ClusteringManager:
                 'node_id': node_id,
                 'is_leaf': False,
                 'children': [int(left), int(right)],
-                'samples': left_samples + right_samples,
+                'samples': left_samples + right_samples,  # Concatenate lists of paper IDs
                 'level': max(left_level, right_level) + 1
             }
         

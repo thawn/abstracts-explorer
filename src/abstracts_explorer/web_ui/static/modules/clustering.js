@@ -284,9 +284,10 @@ function visualizeHierarchyLevel(levelData) {
         const label = cluster.label || `Cluster ${cluster.cluster_id}`;
         
         // Get points for all samples in this cluster
+        // samples now contains paper IDs (not indices), so we can directly compare
         const samples = cluster.samples || [];
         const clusterPoints = clusterData.points.filter(p => 
-            samples.includes(parseInt(p.id))
+            samples.includes(p.id)
         );
         
         if (clusterPoints.length > 0) {
