@@ -748,6 +748,11 @@ class ClusteringManager:
                 else:
                     hierarchical_labels[i] = f"Sample {i}"
 
+        # Create mapping from paper IDs to indices for LLM label generation
+        paper_id_to_idx = {}
+        if self.paper_ids:
+            paper_id_to_idx = {pid: idx for idx, pid in enumerate(self.paper_ids)}
+
         # Generate labels for internal nodes bottom-up with tiered approach
         for level in range(1, tree["max_level"] + 1):
             for node_id, node_info in tree["nodes"].items():
@@ -786,7 +791,13 @@ class ClusteringManager:
                             # Levels 5+: Use LLM-based parent label generation
                             if self.embeddings_manager:
                                 try:
-                                    label = self._generate_parent_label_llm(child_labels, node_info["samples"])
+                                    # Convert paper IDs to indices for metadata lookup
+                                    sample_indices = [
+                                        paper_id_to_idx[pid]
+                                        for pid in node_info["samples"]
+                                        if pid in paper_id_to_idx
+                                    ]
+                                    label = self._generate_parent_label_llm(child_labels, sample_indices)
                                     hierarchical_labels[node_id] = label
                                     logger.debug(f"Level {level} node {node_id}: Generated LLM parent label")
                                 except Exception as e:
