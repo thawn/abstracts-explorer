@@ -843,6 +843,7 @@ Sample paper titles from this parent cluster:
 Generate a concise, descriptive label (3-5 words) that captures the overarching theme of this parent cluster.
 The label should generalize the themes of the child clusters.
 Only respond with the label, nothing else. Do not add formatting."""
+        logger.debug(f"Generating LLM parent label with prompt: {prompt}")
 
         try:
             if not hasattr(self.embeddings_manager, "openai_client"):
@@ -863,6 +864,7 @@ Only respond with the label, nothing else. Do not add formatting."""
 
             label = response.choices[0].message.content.strip()
             label = label.strip("\"'")
+            logger.debug(f"Generated LLM parent label: {label}")
             return label
 
         except Exception as e:
@@ -889,7 +891,9 @@ Only respond with the label, nothing else. Do not add formatting."""
             labels += label.split(" & ")
         # Deduplicate while preserving order
         unique_labels = list(dict.fromkeys(labels))
-        return " & ".join(unique_labels)
+        label = " & ".join(unique_labels)
+        logger.debug(f"Generated fallback parent label: {label}")
+        return label
 
     def _extract_keywords_for_samples(self, sample_paper_ids: List[str], max_keywords: int = 5) -> List[str]:
         """
