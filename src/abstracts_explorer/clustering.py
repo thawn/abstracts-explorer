@@ -891,7 +891,7 @@ Only respond with the label, nothing else. Do not add formatting."""
             labels += label.split(" & ")
         # Deduplicate while preserving order
         unique_labels = list(dict.fromkeys(labels))
-        label = " & ".join(unique_labels)
+        label = " & ".join(unique_labels[:3])
         logger.debug(f"Generated fallback parent label: {label}")
         return label
 
