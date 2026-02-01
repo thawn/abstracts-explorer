@@ -993,6 +993,7 @@ class DatabaseManager:
         n_components: int,
         clustering_method: str,
         n_clusters: Optional[int] = None,
+        clustering_params: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Get cached clustering results matching the parameters.
@@ -1009,6 +1010,8 @@ class DatabaseManager:
             Clustering algorithm used.
         n_clusters : int, optional
             Number of clusters (for kmeans/agglomerative).
+        clustering_params : dict, optional
+            Additional clustering parameters (e.g., distance_threshold, eps).
 
         Returns
         -------
@@ -1024,6 +1027,8 @@ class DatabaseManager:
             raise DatabaseError("Not connected to database")
 
         try:
+            import json
+            
             # Build query conditions
             stmt = select(ClusteringCache).where(
                 and_(
@@ -1038,15 +1043,31 @@ class DatabaseManager:
             if n_clusters is not None:
                 stmt = stmt.where(ClusteringCache.n_clusters == n_clusters)
 
-            # Get most recent matching cache
-            stmt = stmt.order_by(ClusteringCache.created_at.desc()).limit(1)
-
-            result = self._session.execute(stmt).scalar_one_or_none()
-
-            if result:
-                import json
-                return json.loads(result.results_json)
-
+            # Get all matching results (we'll filter by params in Python)
+            stmt = stmt.order_by(ClusteringCache.created_at.desc())
+            results = self._session.execute(stmt).scalars().all()
+            
+            if not results:
+                return None
+            
+            # If no clustering_params specified, return first match
+            if clustering_params is None:
+                if results[0].clustering_params is None:
+                    return json.loads(results[0].results_json)
+                # If cache has params but query doesn't, consider it a miss
+                return None
+            
+            # Filter by clustering_params
+            params_json = json.dumps(clustering_params, sort_keys=True)
+            for result in results:
+                if result.clustering_params is None:
+                    continue
+                # Compare params (normalize by sorting keys)
+                cached_params = json.loads(result.clustering_params)
+                cached_params_json = json.dumps(cached_params, sort_keys=True)
+                if cached_params_json == params_json:
+                    return json.loads(result.results_json)
+            
             return None
 
         except Exception as e:

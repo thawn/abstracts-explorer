@@ -19,7 +19,7 @@ Analyzes clustered embeddings to identify the most frequently mentioned topics i
 **Parameters:**
 - `n_clusters` (int): Number of clusters to create (default: 8)
 - `reduction_method` (str): Dimensionality reduction method - 'pca' or 'tsne' (default: 'pca')
-- `clustering_method` (str): Clustering algorithm - 'kmeans', 'dbscan', or 'agglomerative' (default: 'kmeans')
+- `clustering_method` (str): Clustering algorithm - 'kmeans', 'dbscan', 'agglomerative', 'spectral', or 'fuzzy_cmeans' (default: 'kmeans')
 - `embeddings_path` (str, optional): Path to ChromaDB embeddings database
 - `collection_name` (str, optional): Name of ChromaDB collection
 - `db_path` (str, optional): Path to SQLite database
@@ -79,7 +79,7 @@ Generates visualization data for clustered embeddings.
 **Parameters:**
 - `n_clusters` (int): Number of clusters (default: 8)
 - `reduction_method` (str): Reduction method - 'pca' or 'tsne' (default: 'tsne')
-- `clustering_method` (str): Clustering method (default: 'kmeans')
+- `clustering_method` (str): Clustering method - 'kmeans', 'dbscan', 'agglomerative', 'spectral', or 'fuzzy_cmeans' (default: 'kmeans')
 - `n_components` (int): Number of dimensions - 2 or 3 (default: 2)
 - `output_path` (str, optional): Path to save visualization JSON
 - `embeddings_path` (str, optional): Path to ChromaDB embeddings database
@@ -285,14 +285,51 @@ abstracts-explorer mcp-server --port 8001
 
 ### Custom Clustering Parameters
 
-Each tool accepts clustering parameters. For DBSCAN:
+Each tool accepts clustering parameters. Examples:
 
+**For DBSCAN:**
 ```python
-# Tool arguments
 {
   "clustering_method": "dbscan",
   "eps": 0.5,
   "min_samples": 5
+}
+```
+
+**For Agglomerative Clustering:**
+```python
+{
+  "clustering_method": "agglomerative",
+  "n_clusters": 10,
+  "linkage": "ward"
+}
+```
+
+Or with distance threshold:
+```python
+{
+  "clustering_method": "agglomerative",
+  "distance_threshold": 5.0,
+  "linkage": "average"
+}
+```
+
+**For Spectral Clustering:**
+```python
+{
+  "clustering_method": "spectral",
+  "n_clusters": 8,
+  "affinity": "nearest_neighbors",
+  "n_neighbors": 10
+}
+```
+
+**For Fuzzy C-Means:**
+```python
+{
+  "clustering_method": "fuzzy_cmeans",
+  "n_clusters": 8,
+  "m": 2.0  # Fuzziness parameter
 }
 ```
 
