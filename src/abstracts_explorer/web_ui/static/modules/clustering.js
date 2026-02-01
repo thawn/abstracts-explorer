@@ -300,15 +300,10 @@ function visualizeHierarchyLevel(levelData) {
             const centerTrace = {
                 x: [centerX],
                 y: [centerY],
-                mode: 'markers+text',
+                mode: 'markers',  // Changed from 'markers+text' to show label only on hover
                 type: 'scatter',
                 name: `${label} (${cluster.size})`,
                 text: [label],
-                textposition: 'top center',
-                textfont: {
-                    size: 10,
-                    color: clusterColor
-                },
                 customdata: [{
                     cluster_id: cluster.cluster_id,
                     node_id: cluster.node_id,
@@ -613,12 +608,81 @@ export function visualizeClusters() {
  * Create custom legend with hierarchy controls for hierarchical mode
  * @param {Array} clusters - Array of cluster objects from API
  */
+/**
+ * Create a simple dendrogram visualization
+ * @returns {HTMLElement} Dendrogram SVG container
+ */
+function createDendrogram() {
+    const container = document.createElement('div');
+    container.className = 'mb-3 pb-3 border-b border-gray-200';
+    
+    // Get hierarchy tree info
+    if (!clusterData || !clusterData.cluster_hierarchy || !clusterData.cluster_hierarchy.tree) {
+        return container;
+    }
+    
+    const tree = clusterData.cluster_hierarchy.tree;
+    const maxLevel = tree.max_level || 0;
+    
+    // Create SVG dendrogram
+    const svgNS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(svgNS, "svg");
+    svg.setAttribute("width", "100%");
+    svg.setAttribute("height", "80");
+    svg.setAttribute("viewBox", "0 0 200 80");
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.style.display = "block";
+    
+    // Draw horizontal bars representing levels
+    const barHeight = 8;
+    const spacing = 10;
+    
+    for (let level = 0; level <= maxLevel; level++) {
+        const y = 10 + level * (barHeight + spacing);
+        const isCurrentLevel = (level === currentHierarchyLevel);
+        
+        // Draw bar
+        const rect = document.createElementNS(svgNS, "rect");
+        rect.setAttribute("x", "20");
+        rect.setAttribute("y", y);
+        rect.setAttribute("width", "160");
+        rect.setAttribute("height", barHeight);
+        rect.setAttribute("fill", isCurrentLevel ? "#9333ea" : "#d1d5db");
+        rect.setAttribute("rx", "3");
+        svg.appendChild(rect);
+        
+        // Add level label
+        const text = document.createElementNS(svgNS, "text");
+        text.setAttribute("x", "10");
+        text.setAttribute("y", y + barHeight - 1);
+        text.setAttribute("font-size", "10");
+        text.setAttribute("fill", isCurrentLevel ? "#9333ea" : "#6b7280");
+        text.setAttribute("font-weight", isCurrentLevel ? "bold" : "normal");
+        text.textContent = level;
+        svg.appendChild(text);
+    }
+    
+    // Add title
+    const title = document.createElement('p');
+    title.className = 'text-xs text-gray-600 mt-2';
+    title.textContent = 'Hierarchy Levels';
+    
+    container.appendChild(svg);
+    container.appendChild(title);
+    
+    return container;
+}
+
 function createHierarchyLegend(clusters) {
     const legendContainer = document.getElementById('cluster-legend');
     if (!legendContainer) return;
     
     // Clear existing legend
     legendContainer.innerHTML = '';
+    
+    // Add dendrogram at the top
+    const dendrogram = createDendrogram();
+    legendContainer.appendChild(dendrogram);
     
     // Create legend header with hierarchy controls
     const header = document.createElement('div');
