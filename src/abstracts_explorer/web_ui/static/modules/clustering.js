@@ -617,55 +617,91 @@ function createDendrogram() {
     container.className = 'mb-3 pb-3 border-b border-gray-200';
     
     // Get hierarchy tree info
-    if (!clusterData || !clusterData.cluster_hierarchy || !clusterData.cluster_hierarchy.tree) {
+    if (!clusterData || !clusterData.cluster_hierarchy || !clusterData.cluster_hierarchy.dendrogram) {
         return container;
     }
     
-    const tree = clusterData.cluster_hierarchy.tree;
-    const maxLevel = tree.max_level || 0;
+    const dendrogram = clusterData.cluster_hierarchy.dendrogram;
+    const icoord = dendrogram.icoord;
+    const dcoord = dendrogram.dcoord;
+    
+    if (!icoord || !dcoord || icoord.length === 0) {
+        return container;
+    }
+    
+    // Find min/max for scaling
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
+    
+    for (const coords of icoord) {
+        for (const x of coords) {
+            minX = Math.min(minX, x);
+            maxX = Math.max(maxX, x);
+        }
+    }
+    
+    for (const coords of dcoord) {
+        for (const y of coords) {
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
+        }
+    }
+    
+    // Add padding
+    const padding = 10;
+    const width = 200;
+    const height = 100;
     
     // Create SVG dendrogram
     const svgNS = "http://www.w3.org/2000/svg";
     const svg = document.createElementNS(svgNS, "svg");
     svg.setAttribute("width", "100%");
-    svg.setAttribute("height", "80");
-    svg.setAttribute("viewBox", "0 0 200 80");
-    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("height", height);
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
     svg.style.display = "block";
     
-    // Draw horizontal bars representing levels
-    const barHeight = 8;
-    const spacing = 10;
+    // Scaling functions
+    const scaleX = (x) => padding + ((x - minX) / (maxX - minX)) * (width - 2 * padding);
+    const scaleY = (y) => height - padding - ((y - minY) / (maxY - minY)) * (height - 2 * padding);
     
-    for (let level = 0; level <= maxLevel; level++) {
-        const y = 10 + level * (barHeight + spacing);
-        const isCurrentLevel = (level === currentHierarchyLevel);
+    // Get current level's distance threshold if available
+    let currentLevelY = null;
+    if (clusterData.cluster_hierarchy.tree) {
+        const tree = clusterData.cluster_hierarchy.tree;
+        // Find the merge distance at the current level
+        // This would require mapping levels to merge indices, for now we highlight differently
+    }
+    
+    // Draw each merge as a path
+    for (let i = 0; i < icoord.length; i++) {
+        const xCoords = icoord[i];
+        const yCoords = dcoord[i];
         
-        // Draw bar
-        const rect = document.createElementNS(svgNS, "rect");
-        rect.setAttribute("x", "20");
-        rect.setAttribute("y", y);
-        rect.setAttribute("width", "160");
-        rect.setAttribute("height", barHeight);
-        rect.setAttribute("fill", isCurrentLevel ? "#9333ea" : "#d1d5db");
-        rect.setAttribute("rx", "3");
-        svg.appendChild(rect);
+        // Create path for this merge (U-shaped line)
+        const path = document.createElementNS(svgNS, "path");
+        const x1 = scaleX(xCoords[0]);
+        const y1 = scaleY(yCoords[0]);
+        const x2 = scaleX(xCoords[1]);
+        const y2 = scaleY(yCoords[1]);
+        const x3 = scaleX(xCoords[2]);
+        const y3 = scaleY(yCoords[2]);
+        const x4 = scaleX(xCoords[3]);
+        const y4 = scaleY(yCoords[3]);
         
-        // Add level label
-        const text = document.createElementNS(svgNS, "text");
-        text.setAttribute("x", "10");
-        text.setAttribute("y", y + barHeight - 1);
-        text.setAttribute("font-size", "10");
-        text.setAttribute("fill", isCurrentLevel ? "#9333ea" : "#6b7280");
-        text.setAttribute("font-weight", isCurrentLevel ? "bold" : "normal");
-        text.textContent = level;
-        svg.appendChild(text);
+        // Path: vertical from child1, horizontal across, vertical to child2
+        const d = `M ${x1},${y1} L ${x2},${y2} L ${x3},${y3} L ${x4},${y4}`;
+        path.setAttribute("d", d);
+        path.setAttribute("fill", "none");
+        path.setAttribute("stroke", "#6b7280");
+        path.setAttribute("stroke-width", "1.5");
+        svg.appendChild(path);
     }
     
     // Add title
     const title = document.createElement('p');
-    title.className = 'text-xs text-gray-600 mt-2';
-    title.textContent = 'Hierarchy Levels';
+    title.className = 'text-xs text-gray-600 mt-2 text-center';
+    title.textContent = 'Cluster Dendrogram';
     
     container.appendChild(svg);
     container.appendChild(title);
