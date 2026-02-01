@@ -622,25 +622,59 @@ function createDendrogram() {
     }
     
     const dendrogram = clusterData.cluster_hierarchy.dendrogram;
+    const tree = clusterData.cluster_hierarchy.tree;
     const icoord = dendrogram.icoord;
     const dcoord = dendrogram.dcoord;
+    const n_samples = clusterData.cluster_hierarchy.n_samples || 0;
     
-    if (!icoord || !dcoord || icoord.length === 0) {
+    if (!icoord || !dcoord || icoord.length === 0 || !tree || !tree.nodes) {
         return container;
     }
     
-    // Find min/max for scaling
+    // Build mapping from merge index to level
+    // Merge index i corresponds to node (n_samples + i) in the tree
+    const mergeLevels = [];
+    for (let i = 0; i < icoord.length; i++) {
+        const nodeId = n_samples + i;
+        const nodeInfo = tree.nodes[nodeId];
+        const level = nodeInfo ? nodeInfo.level : i + 1;
+        mergeLevels.push(level);
+    }
+    
+    // Filter merges to only show levels >= 5
+    const visibleMerges = [];
+    const visibleIcoord = [];
+    const visibleDcoord = [];
+    
+    for (let i = 0; i < icoord.length; i++) {
+        if (mergeLevels[i] >= 5) {
+            visibleMerges.push(i);
+            visibleIcoord.push(icoord[i]);
+            visibleDcoord.push(dcoord[i]);
+        }
+    }
+    
+    // If no visible merges, show a message
+    if (visibleMerges.length === 0) {
+        const message = document.createElement('p');
+        message.className = 'text-xs text-gray-500 text-center py-2';
+        message.textContent = 'Dendrogram shown for levels ≥ 5';
+        container.appendChild(message);
+        return container;
+    }
+    
+    // Find min/max for scaling (only visible merges)
     let minX = Infinity, maxX = -Infinity;
     let minY = Infinity, maxY = -Infinity;
     
-    for (const coords of icoord) {
+    for (const coords of visibleIcoord) {
         for (const x of coords) {
             minX = Math.min(minX, x);
             maxX = Math.max(maxX, x);
         }
     }
     
-    for (const coords of dcoord) {
+    for (const coords of visibleDcoord) {
         for (const y of coords) {
             minY = Math.min(minY, y);
             maxY = Math.max(maxY, y);
@@ -665,18 +699,12 @@ function createDendrogram() {
     const scaleX = (x) => padding + ((x - minX) / (maxX - minX)) * (width - 2 * padding);
     const scaleY = (y) => height - padding - ((y - minY) / (maxY - minY)) * (height - 2 * padding);
     
-    // Get current level's distance threshold if available
-    let currentLevelY = null;
-    if (clusterData.cluster_hierarchy.tree) {
-        const tree = clusterData.cluster_hierarchy.tree;
-        // Find the merge distance at the current level
-        // This would require mapping levels to merge indices, for now we highlight differently
-    }
-    
-    // Draw each merge as a path
-    for (let i = 0; i < icoord.length; i++) {
-        const xCoords = icoord[i];
-        const yCoords = dcoord[i];
+    // Draw each visible merge as a path
+    for (let idx = 0; idx < visibleMerges.length; idx++) {
+        const mergeIndex = visibleMerges[idx];
+        const level = mergeLevels[mergeIndex];
+        const xCoords = visibleIcoord[idx];
+        const yCoords = visibleDcoord[idx];
         
         // Create path for this merge (U-shaped line)
         const path = document.createElementNS(svgNS, "path");
@@ -693,15 +721,20 @@ function createDendrogram() {
         const d = `M ${x1},${y1} L ${x2},${y2} L ${x3},${y3} L ${x4},${y4}`;
         path.setAttribute("d", d);
         path.setAttribute("fill", "none");
-        path.setAttribute("stroke", "#6b7280");
-        path.setAttribute("stroke-width", "1.5");
+        
+        // Highlight current level in purple, others in gray
+        const isCurrentLevel = (currentHierarchyLevel === level);
+        path.setAttribute("stroke", isCurrentLevel ? "#9333ea" : "#d1d5db");
+        path.setAttribute("stroke-width", isCurrentLevel ? "2.5" : "1.5");
+        path.setAttribute("opacity", isCurrentLevel ? "1.0" : "0.5");
+        
         svg.appendChild(path);
     }
     
     // Add title
     const title = document.createElement('p');
     title.className = 'text-xs text-gray-600 mt-2 text-center';
-    title.textContent = 'Cluster Dendrogram';
+    title.textContent = `Dendrogram (Levels ≥ 5)`;
     
     container.appendChild(svg);
     container.appendChild(title);
