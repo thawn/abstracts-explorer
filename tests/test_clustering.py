@@ -917,3 +917,34 @@ class TestClusteringCache:
         assert cached['statistics']['n_clusters'] == 5
         
         db.close()
+
+
+class TestAgglomerativeParameterFiltering:
+    """Test that agglomerative clustering properly filters parameters."""
+    
+    def test_agglomerative_with_spectral_parameters(self, mock_embeddings_manager, mock_collection_with_data):
+        """Test that agglomerative clustering ignores spectral-specific parameters like affinity."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        
+        # Reduce dimensions
+        cm.reduce_dimensions(method='pca', n_components=2)
+        
+        # Try clustering with parameters that include 'affinity' (for spectral)
+        # This should NOT raise an error even though affinity is not valid for agglomerative
+        cm.cluster(
+            method='agglomerative',
+            distance_threshold=5.0,
+            linkage='ward',
+            affinity='rbf',  # This should be ignored for agglomerative
+            n_neighbors=10   # This should also be ignored
+        )
+        
+        # Verify clustering succeeded
+        assert cm.cluster_labels is not None
+        assert len(cm.cluster_labels) == 10  # mock has 10 items
+        
+        # Verify hierarchy was extracted
+        assert cm.cluster_hierarchy is not None
+        assert 'tree' in cm.cluster_hierarchy

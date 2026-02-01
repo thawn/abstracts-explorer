@@ -435,19 +435,24 @@ class ClusteringManager:
 
             elif method.lower() == "agglomerative":
                 # Handle agglomerative with distance_threshold or n_clusters
+                # Filter out parameters that don't belong to AgglomerativeClustering
+                # (e.g., 'affinity' and 'n_neighbors' are for spectral clustering)
+                agg_kwargs = {k: v for k, v in kwargs.items() 
+                             if k not in ['affinity', 'n_neighbors', 'eps', 'min_samples', 'm']}
+                
                 if distance_threshold is not None:
                     self.clusterer = AgglomerativeClustering(
                         n_clusters=None,
                         distance_threshold=distance_threshold,
                         compute_full_tree=True,  # Required for hierarchy
-                        **kwargs,
+                        **agg_kwargs,
                     )
                     logger.info(f"Applying Agglomerative clustering with distance_threshold={distance_threshold}")
                 else:
                     self.clusterer = AgglomerativeClustering(
                         n_clusters=n_clusters,
                         compute_full_tree=True,  # Store for potential hierarchy extraction
-                        **kwargs,
+                        **agg_kwargs,
                     )
                     logger.info(f"Applying Agglomerative clustering with {n_clusters} clusters")
 
