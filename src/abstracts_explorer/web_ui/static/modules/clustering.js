@@ -15,11 +15,11 @@ let clusterData = null;
 let currentClusterConfig = {
     reduction_method: 'tsne',
     n_components: 2,
-    clustering_method: 'kmeans',
-    n_clusters: null,  // Will be auto-calculated
+    clustering_method: 'agglomerative',  // Default to agglomerative
+    n_clusters: null,  // Empty - rely on distance_threshold
     eps: 0.5,
     min_samples: 5,
-    distance_threshold: null,
+    distance_threshold: 150,  // Default distance threshold
     linkage: 'ward',
     affinity: 'rbf',
     m: 2.0,
@@ -44,14 +44,20 @@ async function initDefaultClusterCount() {
         const response = await fetch(`${API_BASE}/api/clusters/default-count`);
         if (response.ok) {
             const data = await response.json();
-            if (currentClusterConfig.n_clusters === null) {
+            // Only set n_clusters if not using agglomerative with distance_threshold
+            if (currentClusterConfig.n_clusters === null && 
+                !(currentClusterConfig.clustering_method === 'agglomerative' && 
+                  currentClusterConfig.distance_threshold !== null)) {
                 currentClusterConfig.n_clusters = data.n_clusters;
                 console.log(`Auto-calculated n_clusters=${data.n_clusters} based on ${data.n_papers} papers`);
             }
         }
     } catch (error) {
         console.warn('Failed to fetch default cluster count, using fallback', error);
-        if (currentClusterConfig.n_clusters === null) {
+        // Only set fallback n_clusters if not using agglomerative with distance_threshold
+        if (currentClusterConfig.n_clusters === null && 
+            !(currentClusterConfig.clustering_method === 'agglomerative' && 
+              currentClusterConfig.distance_threshold !== null)) {
             currentClusterConfig.n_clusters = 5;  // Fallback
         }
     }
@@ -105,6 +111,16 @@ export async function loadClusters() {
         
         // Create visualization
         visualizeClusters();
+        
+        // Auto-enable hierarchy mode for agglomerative clustering
+        if (currentClusterConfig.clustering_method === 'agglomerative' && 
+            clusterData.cluster_hierarchy && 
+            clusterData.cluster_hierarchy.tree) {
+            // Small delay to ensure visualization is rendered first
+            setTimeout(() => {
+                enableHierarchyMode();
+            }, 100);
+        }
         
     } catch (error) {
         console.error('Error loading clusters:', error);
