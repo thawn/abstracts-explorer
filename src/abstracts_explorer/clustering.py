@@ -792,17 +792,15 @@ class ClusteringManager:
         return {"clusters": clusters_at_level, "level": level, "max_level": max_level}
 
     def generate_hierarchical_labels(
-        self,
-        use_llm: bool = True,
-        max_keywords: int = 5,
+        self, use_llm: bool = True, max_keywords: int = 5, llm_level: int = 8
     ) -> Dict[int, str]:
         """
         Generate labels for all levels of the hierarchy.
 
         Uses a tiered approach when use_llm is True:
-        - Levels 0-3: Simple fallback (concatenation) for fast processing
-        - Level 4: Full keyword extraction + LLM label generation
-        - Levels 5+: LLM-based parent label generation from child labels
+        - Levels 0-llm_level: Simple fallback (concatenation) for fast processing
+        - Level llm_level: Full keyword extraction + LLM label generation
+        - Levels llm_level+: LLM-based parent label generation from child labels
 
         Parameters
         ----------
