@@ -7,10 +7,11 @@ using dimensionality reduction and clustering algorithms from scikit-learn.
 
 Features:
 - Dimensionality reduction using PCA, t-SNE, and UMAP
-- Clustering using K-Means, DBSCAN, and Agglomerative clustering
+- Clustering using K-Means, DBSCAN, Agglomerative, Fuzzy C-Means, and Spectral clustering
 - **NEW: Automatic cluster labeling using TF-IDF and LLM-based methods**
 - **NEW: Keyword extraction for each cluster**
 - **NEW: Representative paper selection based on cluster centroids**
+- **NEW: Hierarchical cluster structure for agglomerative clustering**
 - Export clustering results to JSON for visualization
 
 Cluster Labeling
@@ -20,26 +21,31 @@ The module now includes state-of-the-art cluster labeling functionality that:
 2. Generates human-readable labels using LLM (Large Language Model) integration
 3. Identifies representative papers closest to each cluster's centroid
 
+Hierarchical Clustering
+-----------------------
+When using agglomerative clustering with distance_threshold, the module tracks
+the hierarchical structure of clusters, allowing exploration of sub-clusters.
+
 Example
 -------
 >>> from abstracts_explorer.clustering import ClusteringManager
 >>> from abstracts_explorer.embeddings import EmbeddingsManager
->>> 
+>>>
 >>> # Initialize managers
 >>> em = EmbeddingsManager()
 >>> em.connect()
 >>> em.create_collection()
 >>> cm = ClusteringManager(em)
->>> 
+>>>
 >>> # Load and cluster embeddings
 >>> cm.load_embeddings()
 >>> cm.cluster(method='kmeans', n_clusters=5)
 >>> cm.reduce_dimensions(method='pca', n_components=2)
->>> 
+>>>
 >>> # Generate cluster labels
 >>> cm.extract_cluster_keywords(n_keywords=10)
 >>> cm.generate_cluster_labels(use_llm=True)
->>> 
+>>>
 >>> # Get results with labels
 >>> results = cm.get_clustering_results()
 >>> print(results['cluster_labels'])  # Shows generated labels
@@ -54,10 +60,17 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
-from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
+from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering, SpectralClustering
 from sklearn.preprocessing import StandardScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
 from umap import UMAP
+
+try:
+    import skfuzzy as fuzz
+
+    HAS_FUZZY = True
+except ImportError:
+    HAS_FUZZY = False
 
 from .embeddings import EmbeddingsManager
 from .database import DatabaseManager
@@ -67,15 +80,16 @@ logger = logging.getLogger(__name__)
 
 class ClusteringError(Exception):
     """Exception raised for clustering operations."""
+
     pass
 
 
 def calculate_default_clusters(n_papers: int, min_clusters: int = 2, max_clusters: int = 500) -> int:
     """
     Calculate default number of clusters based on the number of papers.
-    
+
     Uses the rule: n_clusters = n_papers / 100, clamped to [min_clusters, max_clusters].
-    
+
     Parameters
     ----------
     n_papers : int
@@ -84,12 +98,12 @@ def calculate_default_clusters(n_papers: int, min_clusters: int = 2, max_cluster
         Minimum number of clusters, by default 2
     max_clusters : int, optional
         Maximum number of clusters, by default 500
-        
+
     Returns
     -------
     int
         Recommended number of clusters
-        
+
     Examples
     --------
     >>> calculate_default_clusters(50)
@@ -101,10 +115,10 @@ def calculate_default_clusters(n_papers: int, min_clusters: int = 2, max_cluster
     """
     if n_papers <= 0:
         return min_clusters
-    
+
     # Calculate based on n_papers / 100
     n_clusters = max(min_clusters, min(max_clusters, n_papers // 100))
-    
+
     return n_clusters
 
 
@@ -114,11 +128,12 @@ class ClusteringManager:
 
     This class handles:
     - Loading embeddings from ChromaDB
-    - Dimensionality reduction (PCA, t-SNE)
-    - Clustering (K-Means, DBSCAN, Agglomerative)
+    - Dimensionality reduction (PCA, t-SNE, UMAP)
+    - Clustering (K-Means, DBSCAN, Agglomerative, Fuzzy C-Means, Spectral)
     - **Automatic cluster labeling using TF-IDF and LLM**
     - **Keyword extraction for clusters**
     - **Representative paper selection**
+    - **Hierarchical cluster structure tracking**
     - Export of results for visualization
 
     Parameters
@@ -150,6 +165,10 @@ class ClusteringManager:
         Keywords extracted for each cluster
     cluster_summaries : dict or None
         Summaries generated for each cluster
+    cluster_hierarchy : dict or None
+        Hierarchical structure of clusters (for agglomerative)
+    fuzzy_memberships : np.ndarray or None
+        Fuzzy membership values (for fuzzy c-means)
 
     Examples
     --------
@@ -191,6 +210,9 @@ class ClusteringManager:
         self.cluster_label_names: Optional[Dict[int, str]] = None
         self.cluster_keywords: Optional[Dict[int, List[str]]] = None
         self.cluster_summaries: Optional[Dict[int, str]] = None
+        self.cluster_hierarchy: Optional[Dict[str, Any]] = None
+        self.fuzzy_memberships: Optional[np.ndarray] = None
+        self.clusterer: Optional[Any] = None  # Store the clusterer for hierarchy access
 
     def load_embeddings(self, limit: Optional[int] = None) -> int:
         """
@@ -216,10 +238,7 @@ class ClusteringManager:
 
         try:
             # Get all embeddings from the collection
-            results = self.embeddings_manager.collection.get(
-                limit=limit,
-                include=["embeddings", "metadatas"]
-            )
+            results = self.embeddings_manager.collection.get(limit=limit, include=["embeddings", "metadatas"])
 
             if not results["ids"] or len(results["ids"]) == 0:
                 raise ClusteringError("No embeddings found in collection")
@@ -235,11 +254,7 @@ class ClusteringManager:
             raise ClusteringError(f"Failed to load embeddings: {str(e)}") from e
 
     def reduce_dimensions(
-        self,
-        method: str = "pca",
-        n_components: int = 2,
-        random_state: int = 42,
-        **kwargs
+        self, method: str = "pca", n_components: int = 2, random_state: int = 42, **kwargs
     ) -> np.ndarray:
         """
         Reduce dimensionality of embeddings.
@@ -288,7 +303,7 @@ class ClusteringManager:
                     random_state=random_state,
                     perplexity=perplexity,
                     max_iter=max_iter,
-                    **kwargs
+                    **kwargs,
                 )
                 logger.info(f"Applying t-SNE to reduce to {n_components} dimensions (perplexity={perplexity})")
             elif method.lower() == "umap":
@@ -312,9 +327,11 @@ class ClusteringManager:
                     n_neighbors=n_neighbors,
                     min_dist=min_dist,
                     metric=metric,
-                    **kwargs
+                    **kwargs,
                 )
-                logger.info(f"Applying UMAP to reduce to {n_components} dimensions (n_neighbors={n_neighbors}, min_dist={min_dist})")
+                logger.info(
+                    f"Applying UMAP to reduce to {n_components} dimensions (n_neighbors={n_neighbors}, min_dist={min_dist})"
+                )
             else:
                 raise ClusteringError(f"Unknown reduction method: {method}. Use 'pca', 'tsne', or 'umap'.")
 
@@ -332,7 +349,7 @@ class ClusteringManager:
         n_clusters: Optional[int] = None,
         random_state: int = 42,
         use_reduced: bool = False,
-        **kwargs
+        **kwargs,
     ) -> np.ndarray:
         """
         Cluster embeddings using specified algorithm.
@@ -340,9 +357,11 @@ class ClusteringManager:
         Parameters
         ----------
         method : str, optional
-            Clustering method: 'kmeans', 'dbscan', or 'agglomerative', by default 'kmeans'
+            Clustering method: 'kmeans', 'dbscan', 'agglomerative', 'fuzzy_cmeans', or 'spectral'.
+            By default 'kmeans'.
         n_clusters : int, optional
-            Number of clusters (for kmeans and agglomerative).
+            Number of clusters (for kmeans, agglomerative, fuzzy_cmeans, and spectral).
+            For agglomerative, can be None if distance_threshold is provided.
             If None, automatically calculated as n_papers / 100, clamped to [2, 500].
             By default None.
         random_state : int, optional
@@ -350,7 +369,11 @@ class ClusteringManager:
         use_reduced : bool, optional
             Whether to cluster reduced embeddings or original embeddings, by default False
         **kwargs
-            Additional arguments passed to the clustering algorithm
+            Additional arguments passed to the clustering algorithm.
+            For agglomerative: distance_threshold (float), linkage (str), affinity (str)
+            For dbscan: eps (float), min_samples (int)
+            For fuzzy_cmeans: m (float, fuzziness parameter), error (float), maxiter (int)
+            For spectral: affinity (str), n_neighbors (int)
 
         Returns
         -------
@@ -361,12 +384,26 @@ class ClusteringManager:
         ------
         ClusteringError
             If embeddings not loaded or clustering fails
+
+        Examples
+        --------
+        >>> # Agglomerative with distance threshold
+        >>> cm.cluster(method='agglomerative', distance_threshold=0.5, n_clusters=None)
+
+        >>> # Fuzzy C-Means
+        >>> cm.cluster(method='fuzzy_cmeans', n_clusters=5, m=2.0)
+
+        >>> # Spectral clustering
+        >>> cm.cluster(method='spectral', n_clusters=5)
         """
         if self.embeddings is None:
             raise ClusteringError("No embeddings loaded. Call load_embeddings() first.")
 
-        # Calculate default n_clusters if not provided
-        if n_clusters is None:
+        # Extract distance_threshold for agglomerative if provided
+        distance_threshold = kwargs.pop("distance_threshold", None)
+
+        # Calculate default n_clusters if not provided and not using distance_threshold
+        if n_clusters is None and distance_threshold is None:
             n_clusters = calculate_default_clusters(len(self.embeddings))
             logger.info(f"Auto-calculated n_clusters={n_clusters} based on {len(self.embeddings)} papers")
 
@@ -385,22 +422,102 @@ class ClusteringManager:
 
         try:
             if method.lower() == "kmeans":
-                clusterer = KMeans(n_clusters=n_clusters, random_state=random_state, **kwargs)
+                self.clusterer = KMeans(n_clusters=n_clusters, random_state=random_state, **kwargs)
                 logger.info(f"Applying K-Means clustering with {n_clusters} clusters")
+                self.cluster_labels = self.clusterer.fit_predict(data_to_cluster)
+
             elif method.lower() == "dbscan":
                 eps = kwargs.pop("eps", 0.5)
                 min_samples = kwargs.pop("min_samples", 5)
-                clusterer = DBSCAN(eps=eps, min_samples=min_samples, **kwargs)
+                self.clusterer = DBSCAN(eps=eps, min_samples=min_samples, **kwargs)
                 logger.info(f"Applying DBSCAN clustering with eps={eps}, min_samples={min_samples}")
+                self.cluster_labels = self.clusterer.fit_predict(data_to_cluster)
+
             elif method.lower() == "agglomerative":
-                clusterer = AgglomerativeClustering(n_clusters=n_clusters, **kwargs)
-                logger.info(f"Applying Agglomerative clustering with {n_clusters} clusters")
-            else:
-                raise ClusteringError(
-                    f"Unknown clustering method: {method}. Use 'kmeans', 'dbscan', or 'agglomerative'."
+                # Handle agglomerative with distance_threshold or n_clusters
+                # Filter out parameters that don't belong to AgglomerativeClustering
+                # (e.g., 'affinity' and 'n_neighbors' are for spectral clustering)
+                agg_kwargs = {k: v for k, v in kwargs.items() 
+                             if k not in ['affinity', 'n_neighbors', 'eps', 'min_samples', 'm']}
+                
+                if distance_threshold is not None:
+                    self.clusterer = AgglomerativeClustering(
+                        n_clusters=None,
+                        distance_threshold=distance_threshold,
+                        compute_full_tree=True,  # Required for hierarchy
+                        **agg_kwargs,
+                    )
+                    logger.info(f"Applying Agglomerative clustering with distance_threshold={distance_threshold}")
+                else:
+                    self.clusterer = AgglomerativeClustering(
+                        n_clusters=n_clusters,
+                        compute_full_tree=True,  # Store for potential hierarchy extraction
+                        **agg_kwargs,
+                    )
+                    logger.info(f"Applying Agglomerative clustering with {n_clusters} clusters")
+
+                self.cluster_labels = self.clusterer.fit_predict(data_to_cluster)
+
+                # Extract hierarchical structure
+                self._extract_cluster_hierarchy()
+
+            elif method.lower() == "fuzzy_cmeans" or method.lower() == "fuzzy-cmeans":
+                if not HAS_FUZZY:
+                    raise ClusteringError(
+                        "Fuzzy C-Means requires scikit-fuzzy. Install with: pip install scikit-fuzzy"
+                    )
+                if n_clusters is None:
+                    raise ClusteringError("n_clusters must be specified for fuzzy c-means")
+
+                # Fuzzy C-Means parameters
+                m = kwargs.pop("m", 2.0)  # Fuzziness parameter
+                error = kwargs.pop("error", 0.005)
+                maxiter = kwargs.pop("maxiter", 1000)
+
+                logger.info(f"Applying Fuzzy C-Means clustering with {n_clusters} clusters (m={m})")
+
+                # Fuzzy C-Means expects features as rows, samples as columns (transpose)
+                cntr, u, u0, d, jm, p, fpc = fuzz.cluster.cmeans(
+                    data_to_cluster.T, c=n_clusters, m=m, error=error, maxiter=maxiter, init=None
                 )
 
-            self.cluster_labels = clusterer.fit_predict(data_to_cluster)
+                # Store fuzzy memberships (shape: n_clusters x n_samples)
+                self.fuzzy_memberships = u
+
+                # Get hard cluster assignments (highest membership)
+                self.cluster_labels = np.argmax(u, axis=0)
+
+                logger.info(f"Fuzzy C-Means completed with FPC={fpc:.4f}")
+
+            elif method.lower() == "spectral":
+                # Spectral clustering parameters
+                affinity = kwargs.pop("affinity", "rbf")
+                n_neighbors = kwargs.pop("n_neighbors", 10)
+
+                if affinity == "nearest_neighbors":
+                    self.clusterer = SpectralClustering(
+                        n_clusters=n_clusters,
+                        random_state=random_state,
+                        affinity=affinity,
+                        n_neighbors=n_neighbors,
+                        **kwargs,
+                    )
+                    logger.info(
+                        f"Applying Spectral clustering with {n_clusters} clusters (affinity={affinity}, n_neighbors={n_neighbors})"
+                    )
+                else:
+                    self.clusterer = SpectralClustering(
+                        n_clusters=n_clusters, random_state=random_state, affinity=affinity, **kwargs
+                    )
+                    logger.info(f"Applying Spectral clustering with {n_clusters} clusters (affinity={affinity})")
+
+                self.cluster_labels = self.clusterer.fit_predict(data_to_cluster)
+
+            else:
+                raise ClusteringError(
+                    f"Unknown clustering method: {method}. "
+                    f"Use 'kmeans', 'dbscan', 'agglomerative', 'fuzzy_cmeans', or 'spectral'."
+                )
 
             # Count unique clusters
             unique_labels = np.unique(self.cluster_labels)
@@ -415,6 +532,586 @@ class ClusteringManager:
 
         except Exception as e:
             raise ClusteringError(f"Failed to cluster embeddings: {str(e)}") from e
+
+    def _extract_cluster_hierarchy(self) -> None:
+        """
+        Extract hierarchical cluster structure from agglomerative clustering.
+
+        This method extracts the dendrogram information from scikit-learn's
+        AgglomerativeClustering to build a hierarchy that can be used for
+        hierarchical visualization.
+
+        The hierarchy is stored in self.cluster_hierarchy as a dictionary
+        mapping cluster IDs to their children and parent information.
+        """
+        if not isinstance(self.clusterer, AgglomerativeClustering):
+            return
+
+        if not hasattr(self.clusterer, "children_"):
+            logger.warning("Clusterer does not have children_ attribute, hierarchy not available")
+            return
+
+        if self.cluster_labels is None:
+            logger.warning("Cluster labels not available, cannot extract hierarchy")
+            return
+
+        try:
+            n_samples = len(self.cluster_labels)
+            children = self.clusterer.children_
+
+            # Build hierarchy dictionary
+            # Each merge creates a new cluster node
+            merges: List[Dict[str, Any]] = []
+
+            # Each row in children represents a merge
+            # children[i] = [left, right] where left and right are indices
+            # Indices < n_samples are original samples
+            # Indices >= n_samples are merged clusters (index - n_samples gives merge step)
+            for i, (left, right) in enumerate(children):
+                merge_info: Dict[str, Any] = {
+                    "merge_id": i,
+                    "left": int(left),
+                    "right": int(right),
+                    "cluster_id": n_samples + i,  # New cluster ID
+                }
+
+                # Add distance if available
+                if hasattr(self.clusterer, "distances_"):
+                    merge_info["distance"] = float(self.clusterer.distances_[i])
+
+                merges.append(merge_info)
+
+            # Build tree structure with levels
+            tree = self._build_hierarchy_tree(n_samples, children)
+
+            # Compute dendrogram coordinates for visualization
+            dendrogram = self._compute_dendrogram_coords(n_samples, children)
+
+            self.cluster_hierarchy = {
+                "n_samples": n_samples,
+                "n_clusters": len(np.unique(self.cluster_labels)),
+                "merges": merges,
+                "tree": tree,
+                "dendrogram": dendrogram,
+            }
+            logger.info(f"Extracted hierarchy with {len(children)} merges")
+
+        except Exception as e:
+            logger.warning(f"Failed to extract cluster hierarchy: {e}")
+            self.cluster_hierarchy = None
+
+    def _build_hierarchy_tree(self, n_samples: int, children: np.ndarray) -> Dict[str, Any]:
+        """
+        Build a tree structure from agglomerative clustering merges.
+
+        Parameters
+        ----------
+        n_samples : int
+            Number of original samples
+        children : np.ndarray
+            Children array from AgglomerativeClustering
+
+        Returns
+        -------
+        dict
+            Tree structure with nodes and their relationships
+        """
+        # Build node information
+        nodes = {}
+
+        # Leaf nodes (original samples)
+        # Store paper IDs instead of indices for proper frontend mapping
+        for i in range(n_samples):
+            paper_id = self.paper_ids[i] if self.paper_ids else str(i)
+            nodes[i] = {
+                "node_id": i,
+                "is_leaf": True,
+                "children": [],
+                "samples": [paper_id],  # Use paper ID instead of index
+                "level": 0,
+            }
+
+        # Internal nodes (merges)
+        for i, (left, right) in enumerate(children):
+            node_id = n_samples + i
+            left_node = nodes[int(left)]
+            right_node = nodes[int(right)]
+
+            # Extract samples and level info, casting to proper types
+            left_samples = list(left_node["samples"])  # type: ignore
+            right_samples = list(right_node["samples"])  # type: ignore
+            # Remove duplicates while preserving order using dict.fromkeys()
+            all_samples = list(dict.fromkeys(left_samples + right_samples))
+
+            left_level: int = left_node["level"]  # type: ignore
+            right_level: int = right_node["level"]  # type: ignore
+
+            nodes[node_id] = {
+                "node_id": node_id,
+                "is_leaf": False,
+                "children": [int(left), int(right)],
+                "samples": all_samples,  # Deduplicated list of paper IDs
+                "level": max(left_level, right_level) + 1,
+            }
+
+        # Root is the last merge
+        root_id = n_samples + len(children) - 1
+
+        return {"nodes": {k: v for k, v in nodes.items()}, "root": root_id, "max_level": nodes[root_id]["level"]}
+
+    def _compute_dendrogram_coords(self, n_samples: int, children: np.ndarray) -> Dict[str, Any]:
+        """
+        Compute dendrogram coordinates for visualization.
+
+        This follows the approach from sklearn's plot_dendrogram example:
+        https://scikit-learn.org/stable/auto_examples/cluster/plot_agglomerative_dendrogram.html
+
+        Parameters
+        ----------
+        n_samples : int
+            Number of original samples
+        children : np.ndarray
+            Children array from AgglomerativeClustering (shape: [n_merges, 2])
+
+        Returns
+        -------
+        dict
+            Dictionary containing dendrogram plotting data with keys:
+            - icoord: list of x-coordinates for vertical lines
+            - dcoord: list of y-coordinates (distances) for vertical lines
+            - ivl: list of leaf labels at the bottom
+            - leaves: list of original leaf indices
+            - color_list: list of colors for each link (all default for now)
+        """
+        n_merges = len(children)
+
+        # Track counts: how many original samples in each cluster
+        counts = np.zeros(n_merges + n_samples, dtype=int)
+        counts[:n_samples] = 1  # Leaves have count 1
+
+        # Compute counts for internal nodes
+        for i, (left, right) in enumerate(children):
+            counts[n_samples + i] = counts[int(left)] + counts[int(right)]
+
+        # Track positions of clusters on the x-axis
+        positions = {}
+
+        # Initial x-positions for leaves (spread from 5 to 5*n_samples in steps of 10)
+        for i in range(n_samples):
+            positions[i] = 5.0 + 10.0 * i
+
+        # Dendrogram coordinates
+        icoord = []  # x-coordinates for plotting
+        dcoord = []  # y-coordinates (heights/distances)
+
+        # Get distances if available
+        if hasattr(self.clusterer, "distances_") and self.clusterer is not None:
+            distances = self.clusterer.distances_  # type: ignore
+        else:
+            # If no distances, use merge order as proxy (each merge adds 1 to height)
+            distances = np.arange(1, n_merges + 1, dtype=float)
+
+        # Build dendrogram by processing merges
+        for i, (left, right) in enumerate(children):
+            left_idx = int(left)
+            right_idx = int(right)
+            node_idx = n_samples + i
+
+            # Get positions of left and right children
+            left_pos = positions[left_idx]
+            right_pos = positions[right_idx]
+
+            # Position of this merge (midpoint of children)
+            merge_pos = (left_pos + right_pos) / 2.0
+            positions[node_idx] = merge_pos
+
+            # Get heights of children (0 for leaves, previous merge distance for internals)
+            left_height = 0.0 if left_idx < n_samples else distances[left_idx - n_samples]
+            right_height = 0.0 if right_idx < n_samples else distances[right_idx - n_samples]
+            merge_height = distances[i]
+
+            # Add line coordinates for the merge
+            # Format: [left_x, left_x, right_x, right_x] for x-coords
+            #         [left_height, merge_height, merge_height, right_height] for y-coords
+            icoord.append([left_pos, left_pos, right_pos, right_pos])
+            dcoord.append([left_height, merge_height, merge_height, right_height])
+
+        # Create leaf labels (ordered left to right by x-position)
+        leaf_order = sorted(range(n_samples), key=lambda x: positions[x])
+        ivl = [str(i) for i in leaf_order]
+
+        return {
+            "icoord": icoord,
+            "dcoord": dcoord,
+            "ivl": ivl,
+            "leaves": leaf_order,
+            "color_list": ["#808080"] * n_merges,  # Default gray for all links
+        }
+
+    def get_hierarchy_level_clusters(self, level: int = 0) -> Dict[str, Any]:
+        """
+        Get clusters at a specific hierarchy level for agglomerative clustering.
+
+        Parameters
+        ----------
+        level : int, optional
+            Hierarchy level (0 = leaf level, higher = more merged), by default 0
+
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - clusters: List of cluster information at the level
+            - level: The requested level
+            - max_level: Maximum available level
+
+        Raises
+        ------
+        ClusteringError
+            If hierarchy not available
+        """
+        if self.cluster_hierarchy is None or "tree" not in self.cluster_hierarchy:
+            raise ClusteringError("Cluster hierarchy not available. Use agglomerative clustering.")
+
+        tree = self.cluster_hierarchy["tree"]
+        max_level = tree["max_level"]
+
+        # Clamp level to valid range
+        level = max(0, min(level, max_level))
+
+        # Find all nodes at the requested level
+        clusters_at_level = []
+        for node_id, node_info in tree["nodes"].items():
+            if node_info["level"] == level:
+                clusters_at_level.append(
+                    {
+                        "cluster_id": node_id,
+                        "node_id": node_id,
+                        "samples": node_info["samples"],
+                        "is_leaf": node_info["is_leaf"],
+                        "children": node_info["children"],
+                        "size": len(node_info["samples"]),
+                    }
+                )
+
+        return {"clusters": clusters_at_level, "level": level, "max_level": max_level}
+
+    def generate_hierarchical_labels(
+        self, use_llm: bool = True, max_keywords: int = 5, llm_level: int = 8
+    ) -> Dict[int, str]:
+        """
+        Generate labels for all levels of the hierarchy.
+
+        Uses a tiered approach when use_llm is True:
+        - Levels 0-llm_level: Simple fallback (concatenation) for fast processing
+        - Level llm_level: Full keyword extraction + LLM label generation
+        - Levels llm_level+: LLM-based parent label generation from child labels
+
+        Parameters
+        ----------
+        use_llm : bool, optional
+            Whether to use LLM for label generation, by default True
+        max_keywords : int, optional
+            Maximum number of keywords to use in label generation, by default 5
+
+        Returns
+        -------
+        Dict[int, str]
+            Dictionary mapping node IDs to labels
+
+        Raises
+        ------
+        ClusteringError
+            If hierarchy not available
+        """
+        if self.cluster_hierarchy is None or "tree" not in self.cluster_hierarchy:
+            raise ClusteringError("Cluster hierarchy not available. Use agglomerative clustering.")
+
+        # First generate labels for leaf clusters if not already done
+        if self.cluster_label_names is None:
+            self.generate_cluster_labels(use_llm=use_llm, max_keywords=max_keywords)
+
+        tree = self.cluster_hierarchy["tree"]
+        hierarchical_labels = {}
+
+        # Start with leaf labels (map sample indices to cluster labels)
+        n_samples = self.cluster_hierarchy["n_samples"]
+        for i in range(n_samples):
+            if self.cluster_labels is not None:
+                cluster_id = int(self.cluster_labels[i])
+                if self.cluster_label_names and cluster_id in self.cluster_label_names:
+                    hierarchical_labels[i] = self.cluster_label_names[cluster_id]
+                else:
+                    hierarchical_labels[i] = f"Sample {i}"
+
+        # Create mapping from paper IDs to indices for LLM label generation
+        paper_id_to_idx = {}
+        if self.paper_ids:
+            paper_id_to_idx = {pid: idx for idx, pid in enumerate(self.paper_ids)}
+
+        # Generate labels for internal nodes bottom-up with tiered approach
+        for level in range(1, tree["max_level"] + 1):
+            for node_id, node_info in tree["nodes"].items():
+                if node_info["level"] == level:
+                    child_labels = [
+                        hierarchical_labels.get(child, f"Node {child}") for child in node_info["children"]
+                    ]
+
+                    if use_llm:
+                        # Tiered approach based on level
+                        if level <= 3:
+                            # Levels 0-3: Use simple fallback (fast)
+                            hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
+                            logger.debug(f"Level {level} node {node_id}: Using fallback")
+                        elif level == 4:
+                            # Level 4: Use full cluster label generation with keywords
+                            try:
+                                if self.embeddings_manager and self.metadatas:
+                                    keywords = self._extract_keywords_for_samples(node_info["samples"], max_keywords)
+                                    if keywords:
+                                        label = self._generate_llm_label_from_keywords(keywords)
+                                        hierarchical_labels[node_id] = label
+                                        logger.debug(
+                                            f"Level {level} node {node_id}: Generated LLM label from keywords {keywords}"
+                                        )
+                                    else:
+                                        hierarchical_labels[node_id] = self._generate_parent_label_fallback(
+                                            child_labels
+                                        )
+                                else:
+                                    hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
+                            except Exception as e:
+                                logger.warning(f"Keyword-based label generation failed for node {node_id}: {e}")
+                                hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
+                        else:
+                            # Levels 5+: Use LLM-based parent label generation
+                            if self.embeddings_manager:
+                                try:
+                                    # Convert paper IDs to indices for metadata lookup
+                                    sample_indices = [
+                                        paper_id_to_idx[pid]
+                                        for pid in node_info["samples"]
+                                        if pid in paper_id_to_idx
+                                    ]
+                                    label = self._generate_parent_label_llm(child_labels, sample_indices)
+                                    hierarchical_labels[node_id] = label
+                                    logger.debug(f"Level {level} node {node_id}: Generated LLM parent label")
+                                except Exception as e:
+                                    logger.warning(f"LLM label generation failed for node {node_id}: {e}")
+                                    hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
+                            else:
+                                hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
+                    else:
+                        # LLM disabled: always use fallback
+                        hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
+
+        return hierarchical_labels
+
+    def _generate_parent_label_llm(self, child_labels: List[str], sample_indices: List[int]) -> str:
+        """
+        Generate a parent cluster label by summarizing child labels using LLM.
+
+        Parameters
+        ----------
+        child_labels : List[str]
+            Labels of child clusters
+        sample_indices : List[int]
+            Indices of samples in this parent cluster
+
+        Returns
+        -------
+        str
+            Generated parent label
+        """
+        from .config import get_config
+
+        config = get_config()
+
+        # Get sample titles from the parent cluster
+        sample_titles = []
+        if self.metadatas and len(sample_indices) > 0:
+            sample_size = min(5, len(sample_indices))
+            sampled_indices = np.random.choice(sample_indices, size=sample_size, replace=False)
+            for idx in sampled_indices:
+                title = self.metadatas[idx].get("title", "")
+                if title:
+                    sample_titles.append(title)
+
+        sample_titles_str = "\n".join(f"- {title}" for title in sample_titles) if sample_titles else "N/A"
+        child_labels_str = "\n".join(f"- {label}" for label in set(child_labels))
+
+        prompt = f"""Given a parent cluster that contains the following sub-clusters:
+
+{child_labels_str}
+
+Sample paper titles from this parent cluster:
+{sample_titles_str}
+
+Generate a concise, descriptive label (3-5 words) that captures the overarching theme of this parent cluster.
+The label should generalize the themes of the child clusters.
+Only respond with the label, nothing else. Do not add formatting."""
+        logger.debug(f"Generating LLM parent label with prompt: {prompt}")
+
+        try:
+            if not hasattr(self.embeddings_manager, "openai_client"):
+                raise AttributeError("OpenAI client not available")
+
+            response = self.embeddings_manager.openai_client.chat.completions.create(
+                model=config.chat_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a research paper categorization expert. Generate concise labels that generalize child cluster themes.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3,
+                max_tokens=50,
+            )
+
+            label = response.choices[0].message.content.strip()
+            label = label.strip("\"'")
+            logger.debug(f"Generated LLM parent label: {label}")
+            return label
+
+        except Exception as e:
+            logger.warning(f"LLM API call failed: {e}")
+            return self._generate_parent_label_fallback(child_labels)
+
+    def _generate_parent_label_fallback(self, child_labels: List[str]) -> str:
+        """
+        Generate a parent label by combining child labels (fallback method).
+
+        Parameters
+        ----------
+        child_labels : List[str]
+            Labels of child clusters
+
+        Returns
+        -------
+        str
+            Generated parent label
+        """
+        # Split each label by "&", flatten, deduplicate, and rejoin
+        labels = []
+        for label in child_labels[:3]:
+            labels += label.split(" & ")
+        # Deduplicate while preserving order
+        unique_labels = list(dict.fromkeys(labels))
+        label = " & ".join(unique_labels[:3])
+        logger.debug(f"Generated fallback parent label: {label}")
+        return label
+
+    def _extract_keywords_for_samples(self, sample_paper_ids: List[str], max_keywords: int = 5) -> List[str]:
+        """
+        Extract keywords from a set of papers identified by their IDs.
+
+        Parameters
+        ----------
+        sample_paper_ids : List[str]
+            List of paper IDs
+        max_keywords : int, optional
+            Maximum number of keywords to extract
+
+        Returns
+        -------
+        List[str]
+            List of extracted keywords
+        """
+        from sklearn.feature_extraction.text import TfidfVectorizer
+
+        if not self.metadatas or not self.paper_ids:
+            return []
+
+        # Find indices for the given paper IDs
+        sample_indices = []
+        paper_id_to_idx = {pid: idx for idx, pid in enumerate(self.paper_ids)}
+        for paper_id in sample_paper_ids:
+            if paper_id in paper_id_to_idx:
+                sample_indices.append(paper_id_to_idx[paper_id])
+
+        if not sample_indices:
+            return []
+
+        # Collect documents for these samples
+        sample_docs = []
+        for idx in sample_indices:
+            doc_text = EmbeddingsManager.embedding_text_from_paper(self.metadatas[idx])
+            sample_docs.append(doc_text)
+
+        if not sample_docs:
+            return []
+
+        # Collect all documents for TF-IDF comparison
+        all_docs = []
+        for metadata in self.metadatas:
+            doc_text = EmbeddingsManager.embedding_text_from_paper(metadata)
+            all_docs.append(doc_text)
+
+        try:
+            # Fit TF-IDF on all documents
+            tfidf = TfidfVectorizer(max_features=1000, min_df=2, stop_words="english", ngram_range=(1, 2))
+            tfidf_matrix = tfidf.fit_transform(all_docs)
+            feature_names = tfidf.get_feature_names_out()
+
+            # Calculate mean TF-IDF for sample documents
+            sample_tfidf = tfidf_matrix[sample_indices].mean(axis=0).A1
+
+            # Get top keywords
+            top_indices = sample_tfidf.argsort()[-max_keywords:][::-1]
+            keywords = [feature_names[i] for i in top_indices if sample_tfidf[i] > 0]
+
+            return keywords[:max_keywords]
+        except Exception as e:
+            logger.warning(f"Failed to extract keywords: {e}")
+            return []
+
+    def _generate_llm_label_from_keywords(self, keywords: List[str]) -> str:
+        """
+        Generate a descriptive label from keywords using LLM.
+
+        Parameters
+        ----------
+        keywords : List[str]
+            List of keywords
+
+        Returns
+        -------
+        str
+            Generated label
+        """
+        from .config import get_config
+
+        config = get_config()
+
+        keywords_str = ", ".join(keywords[:5])
+        prompt = f"""Given these keywords from academic papers: {keywords_str}
+
+Generate a concise, descriptive label (3-5 words) that captures the main theme.
+Only respond with the label, nothing else. Do not add formatting."""
+
+        try:
+            if not hasattr(self.embeddings_manager, "openai_client"):
+                raise AttributeError("OpenAI client not available")
+
+            response = self.embeddings_manager.openai_client.chat.completions.create(
+                model=config.chat_model,
+                messages=[
+                    {"role": "system", "content": "You are a research paper categorization expert."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3,
+                max_tokens=50,
+            )
+
+            label = response.choices[0].message.content.strip()
+            label = label.strip("\"'")
+            return label
+
+        except Exception as e:
+            logger.warning(f"LLM API call failed: {e}")
+            # Fallback to keyword concatenation
+            return ", ".join(keywords[:3])
 
     def get_cluster_statistics(self) -> Dict[str, Any]:
         """
@@ -532,8 +1229,8 @@ class ClusteringManager:
                 tfidf = TfidfVectorizer(
                     max_features=1000,
                     min_df=min_df,
-                    stop_words='english',
-                    ngram_range=(1, 2)  # Include unigrams and bigrams
+                    stop_words="english",
+                    ngram_range=(1, 2),  # Include unigrams and bigrams
                 )
                 tfidf_matrix = tfidf.fit_transform(all_docs)
                 feature_names = tfidf.get_feature_names_out()
@@ -652,16 +1349,12 @@ class ClusteringManager:
 
         # Use replacement if there are fewer papers than sample size
         replace = len(cluster_indices) < sample_size
-        sample_indices = np.random.choice(
-            cluster_indices, 
-            size=sample_size, 
-            replace=replace
-        )
+        sample_indices = np.random.choice(cluster_indices, size=sample_size, replace=replace)
 
         sample_titles = []
         if self.metadatas:
             for idx in sample_indices:
-                title = self.metadatas[idx].get('title', '')
+                title = self.metadatas[idx].get("title", "")
                 if title:
                     sample_titles.append(title)
 
@@ -679,26 +1372,30 @@ Only respond with the label, nothing else. Do not add formatting."""
 
         try:
             # Check if OpenAI client is available
-            if not hasattr(self.embeddings_manager, 'openai_client'):
+            if not hasattr(self.embeddings_manager, "openai_client"):
                 raise AttributeError("OpenAI client not available in embeddings manager")
 
             # Use the embeddings manager's OpenAI client
             from .config import get_config
+
             config = get_config()
 
             response = self.embeddings_manager.openai_client.chat.completions.create(
                 model=config.chat_model,
                 messages=[
-                    {"role": "system", "content": "You are a research paper categorization expert. Generate concise, descriptive labels for clusters of papers."},
-                    {"role": "user", "content": prompt}
+                    {
+                        "role": "system",
+                        "content": "You are a research paper categorization expert. Generate concise, descriptive labels for clusters of papers.",
+                    },
+                    {"role": "user", "content": prompt},
                 ],
                 temperature=0.3,
-                max_tokens=50
+                max_tokens=50,
             )
 
             label = response.choices[0].message.content.strip()
             # Remove quotes if present
-            label = label.strip('"\'')
+            label = label.strip("\"'")
             return label
 
         except Exception as e:
@@ -776,8 +1473,8 @@ Only respond with the label, nothing else. Do not add formatting."""
                     for idx in closest_indices:
                         paper_idx = cluster_indices[idx]
                         paper_meta = self.metadatas[paper_idx].copy()
-                        paper_meta['paper_id'] = self.paper_ids[paper_idx]
-                        paper_meta['distance_to_centroid'] = float(distances[idx])
+                        paper_meta["paper_id"] = self.paper_ids[paper_idx]
+                        paper_meta["distance_to_centroid"] = float(distances[idx])
                         repr_papers.append(paper_meta)
 
                 representatives[cluster_id] = repr_papers
@@ -875,6 +1572,15 @@ Only respond with the label, nothing else. Do not add formatting."""
             # Add cluster keywords if available
             if self.cluster_keywords:
                 results["cluster_keywords"] = self.cluster_keywords
+
+            # Add cluster hierarchy if available (for agglomerative)
+            if self.cluster_hierarchy:
+                results["cluster_hierarchy"] = self.cluster_hierarchy
+
+            # Add fuzzy memberships if available (for fuzzy c-means)
+            if self.fuzzy_memberships is not None:
+                # Convert to list format for JSON serialization
+                results["fuzzy_memberships"] = self.fuzzy_memberships.tolist()
 
             logger.info(f"Generated clustering results with {len(points)} points")
             return results
@@ -985,7 +1691,7 @@ def perform_clustering(
     output_path: Optional[Union[str, Path]] = None,
     random_state: int = 42,
     limit: Optional[int] = None,
-    **kwargs
+    **kwargs,
 ) -> Dict[str, Any]:
     """
     Perform complete clustering pipeline and optionally export results.
@@ -1005,7 +1711,7 @@ def perform_clustering(
     n_components : int, optional
         Number of components for dimensionality reduction, by default 2
     clustering_method : str, optional
-        Clustering method ('kmeans', 'dbscan', or 'agglomerative'), by default 'kmeans'
+        Clustering method ('kmeans', 'dbscan', 'agglomerative', 'fuzzy_cmeans', or 'spectral'), by default 'kmeans'
     n_clusters : int, optional
         Number of clusters (for kmeans and agglomerative).
         If None, automatically calculated as n_papers / 100, clamped to [2, 500].
@@ -1061,7 +1767,7 @@ def perform_clustering(
             n_clusters=n_clusters,
             random_state=random_state,
             use_reduced=False,  # Cluster on full embeddings
-            **kwargs
+            **kwargs,
         )
 
         # Reduce dimensions for visualization
@@ -1106,14 +1812,14 @@ def compute_clusters_with_cache(
     n_clusters: Optional[int] = None,
     limit: Optional[int] = None,
     force: bool = False,
-    **clustering_kwargs
+    **clustering_kwargs,
 ) -> Dict[str, Any]:
     """
     Compute clusters with caching support.
-    
+
     This function checks the cache first and returns cached results if available.
     If cache miss or forced recompute, it performs clustering and saves to cache.
-    
+
     Parameters
     ----------
     embeddings_manager : EmbeddingsManager
@@ -1136,17 +1842,17 @@ def compute_clusters_with_cache(
         Force recompute even if cache exists, by default False
     **clustering_kwargs
         Additional clustering parameters (e.g., eps, min_samples for DBSCAN)
-        
+
     Returns
     -------
     dict
         Clustering results with points, statistics, and metadata
-        
+
     Raises
     ------
     ClusteringError
         If clustering fails
-        
+
     Examples
     --------
     >>> results = compute_clusters_with_cache(
@@ -1158,52 +1864,63 @@ def compute_clusters_with_cache(
     # Get embeddings count to calculate default n_clusters if needed
     collection_stats = embeddings_manager.get_collection_stats()
     n_papers = collection_stats["count"]
-    
+
     # Calculate default n_clusters if not provided
     if n_clusters is None:
         n_clusters = calculate_default_clusters(n_papers)
         logger.info(f"Auto-calculated n_clusters={n_clusters} based on {n_papers} papers")
-    
+
     # Check if cache exists and is valid
     if not force and not limit:  # Only use cache if not limiting results
+        # For agglomerative with distance_threshold, don't pass n_clusters
+        cache_n_clusters: Optional[int] = n_clusters
+        cache_params = clustering_kwargs.copy() if clustering_kwargs else {}
+
+        # Special handling for agglomerative with distance_threshold
+        if clustering_method.lower() == "agglomerative" and "distance_threshold" in cache_params:
+            cache_n_clusters = None  # Don't use n_clusters as cache key when using distance_threshold
+        elif clustering_method.lower() == "dbscan":
+            cache_n_clusters = None  # DBSCAN doesn't use n_clusters
+
         cached_results = database.get_clustering_cache(
             embedding_model=embedding_model,
             reduction_method=reduction_method,
             n_components=n_components,
             clustering_method=clustering_method,
-            n_clusters=n_clusters if clustering_method.lower() != "dbscan" else None,
+            n_clusters=cache_n_clusters,
+            clustering_params=cache_params if cache_params else None,
         )
-        
+
         if cached_results:
             logger.info("Using cached clustering results")
             return cached_results
-    
+
     # Cache miss or forced recompute - compute clusters
     logger.info("Computing new clustering results...")
-    
+
     # Create clustering manager
     cm = ClusteringManager(embeddings_manager)
-    
+
     # Load embeddings
     logger.info(f"Loading embeddings (limit={limit})...")
     cm.load_embeddings(limit=limit)
-    
+
     # Perform clustering on full embeddings first
     logger.info(f"Clustering using {clustering_method} on full embeddings...")
     cm.cluster(
         method=clustering_method,
         n_clusters=n_clusters,
         use_reduced=False,  # Cluster on full embeddings
-        **clustering_kwargs
+        **clustering_kwargs,
     )
-    
+
     # Reduce dimensions for visualization
     logger.info(f"Reducing dimensions using {reduction_method} for visualization...")
     cm.reduce_dimensions(
         method=reduction_method,
         n_components=n_components,
     )
-    
+
     # Generate cluster labels
     logger.info("Generating cluster labels...")
     try:
@@ -1212,23 +1929,51 @@ def compute_clusters_with_cache(
     except Exception as e:
         logger.warning(f"Failed to generate cluster labels: {e}")
         # Continue without labels
-    
+
+    # Generate hierarchical labels for agglomerative clustering
+    if clustering_method.lower() == "agglomerative" and cm.cluster_hierarchy is not None:
+        logger.info("Generating hierarchical labels for agglomerative clustering...")
+        try:
+            # Check if use_llm_labels is specified in kwargs, default to True
+            use_llm = clustering_kwargs.get("use_llm_labels", True)
+            hierarchical_labels = cm.generate_hierarchical_labels(use_llm=use_llm, max_keywords=5)
+            # Update the tree nodes with the generated labels
+            if "tree" in cm.cluster_hierarchy and "nodes" in cm.cluster_hierarchy["tree"]:
+                for node_id, label in hierarchical_labels.items():
+                    node_id_int = int(node_id)
+                    if node_id_int in cm.cluster_hierarchy["tree"]["nodes"]:
+                        cm.cluster_hierarchy["tree"]["nodes"][node_id_int]["label"] = label
+            logger.info(f"Generated labels for {len(hierarchical_labels)} hierarchy nodes (LLM: {use_llm})")
+        except Exception as e:
+            logger.warning(f"Failed to generate hierarchical labels: {e}")
+            # Continue without hierarchical labels
+
     # Get results
     results = cm.get_clustering_results()
-    
+
     # Save to cache if no limit was applied
     if not limit:
         try:
+            # Use same logic as cache lookup for consistency
+            save_n_clusters: Optional[int] = n_clusters
+            save_params = clustering_kwargs.copy() if clustering_kwargs else {}
+
+            # Special handling for agglomerative with distance_threshold
+            if clustering_method.lower() == "agglomerative" and "distance_threshold" in save_params:
+                save_n_clusters = None  # Don't use n_clusters as cache key when using distance_threshold
+            elif clustering_method.lower() == "dbscan":
+                save_n_clusters = None  # DBSCAN doesn't use n_clusters
+
             database.save_clustering_cache(
                 embedding_model=embedding_model,
                 reduction_method=reduction_method,
                 n_components=n_components,
                 clustering_method=clustering_method,
                 results=results,
-                n_clusters=n_clusters if clustering_method.lower() != "dbscan" else None,
-                clustering_params=clustering_kwargs if clustering_kwargs else None,
+                n_clusters=save_n_clusters,
+                clustering_params=save_params if save_params else None,
             )
         except Exception as e:
             logger.warning(f"Failed to save clustering cache: {e}")
-    
+
     return results
