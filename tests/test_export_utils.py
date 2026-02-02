@@ -5,10 +5,9 @@ Tests the export utilities for generating markdown and zip files from papers,
 including natural sorting, web scraping, and file generation.
 """
 
-import pytest
 import zipfile
 from io import BytesIO
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 from abstracts_explorer.export_utils import (
     natural_sort_key,
