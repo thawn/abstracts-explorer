@@ -1274,8 +1274,8 @@ export async function showClusterPaperDetails(paperId, basicInfo) {
 export function openClusterSettings() {
     const modalHTML = `
         <div id="cluster-settings-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-            <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full">
-                <div class="bg-purple-600 text-white px-6 py-4 flex justify-between items-center rounded-t-lg">
+            <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col">
+                <div class="bg-purple-600 text-white px-6 py-4 flex justify-between items-center rounded-t-lg flex-shrink-0">
                     <h3 class="text-xl font-semibold">
                         <i class="fas fa-cog mr-2"></i>Clustering Settings
                     </h3>
@@ -1283,7 +1283,7 @@ export function openClusterSettings() {
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
-                <div class="p-6 space-y-4">
+                <div class="p-6 space-y-4 overflow-y-auto flex-1">
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Dimensionality Reduction</label>
                         <select id="cluster-reduction-method" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
@@ -1367,7 +1367,7 @@ export function openClusterSettings() {
                         <p class="text-xs text-gray-500 mt-1 ml-6">When enabled, clustering will always be recomputed even if cached results exist</p>
                     </div>
                 </div>
-                <div class="px-6 py-4 bg-gray-50 flex justify-end gap-3 rounded-b-lg">
+                <div class="px-6 py-4 bg-gray-50 flex justify-end gap-3 rounded-b-lg flex-shrink-0">
                     <button onclick="closeClusterSettings()" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-100">
                         Cancel
                     </button>
