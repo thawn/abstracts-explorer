@@ -1200,6 +1200,10 @@ class TestChatCommand:
 
         embeddings_path = tmp_path / "chroma_db"
         embeddings_path.mkdir()
+        
+        # Set up database path
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
 
         # Set EMBEDDING_DB and patch config reload
         patch_get_config_for_test(monkeypatch, embeddings_path)
