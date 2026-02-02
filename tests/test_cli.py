@@ -1806,34 +1806,32 @@ class TestLogging:
         
         # Create database and add some cache entries
         from abstracts_explorer.database import DatabaseManager
-        db = DatabaseManager(str(output_db))
-        
-        # Add some test cache entries
-        db.save_clustering_cache(
-            embedding_model="test-model-1",
-            reduction_method="pca",
-            n_components=2,
-            clustering_method="kmeans",
-            n_clusters=5,
-            results={
-                "labels": [0, 1, 2],
-                "reduced_embeddings": [[1, 2], [3, 4], [5, 6]],
-                "statistics": {"total_papers": 3, "n_clusters": 3},
-            }
-        )
-        db.save_clustering_cache(
-            embedding_model="test-model-2",
-            reduction_method="pca",
-            n_components=2,
-            clustering_method="kmeans",
-            n_clusters=5,
-            results={
-                "labels": [0, 1],
-                "reduced_embeddings": [[1, 2], [3, 4]],
-                "statistics": {"total_papers": 2, "n_clusters": 2},
-            }
-        )
-        db.close()
+        with DatabaseManager() as db:
+            # Add some test cache entries
+            db.save_clustering_cache(
+                embedding_model="test-model-1",
+                reduction_method="pca",
+                n_components=2,
+                clustering_method="kmeans",
+                n_clusters=5,
+                results={
+                    "labels": [0, 1, 2],
+                    "reduced_embeddings": [[1, 2], [3, 4], [5, 6]],
+                    "statistics": {"total_papers": 3, "n_clusters": 3},
+                }
+            )
+            db.save_clustering_cache(
+                embedding_model="test-model-2",
+                reduction_method="pca",
+                n_components=2,
+                clustering_method="kmeans",
+                n_clusters=5,
+                results={
+                    "labels": [0, 1],
+                    "reduced_embeddings": [[1, 2], [3, 4]],
+                    "statistics": {"total_papers": 2, "n_clusters": 2},
+                }
+            )
         
         # Run clear-clustering-cache command
         with patch.object(
@@ -1848,16 +1846,15 @@ class TestLogging:
         assert "Cleared all 2 clustering cache entries" in captured.out
         
         # Verify cache is cleared
-        db = DatabaseManager(str(output_db))
-        cached = db.get_clustering_cache(
-            embedding_model="test-model-1",
-            reduction_method="pca",
-            n_components=2,
-            clustering_method="kmeans",
-            n_clusters=5
-        )
-        assert cached is None
-        db.close()
+        with DatabaseManager() as db:
+            cached = db.get_clustering_cache(
+                embedding_model="test-model-1",
+                reduction_method="pca",
+                n_components=2,
+                clustering_method="kmeans",
+                n_clusters=5
+            )
+            assert cached is None
 
     def test_clear_clustering_cache_by_model(self, tmp_path, capsys):
         """Test clear-clustering-cache command with --embedding-model filter."""
@@ -1868,36 +1865,34 @@ class TestLogging:
         
         # Create database and add cache entries for different models
         from abstracts_explorer.database import DatabaseManager
-        db = DatabaseManager(str(output_db))
-        
-        # Add cache for model1
-        db.save_clustering_cache(
-            embedding_model="model1",
-            reduction_method="pca",
-            n_components=2,
-            clustering_method="kmeans",
-            n_clusters=5,
-            results={
-                "labels": [0, 1, 2],
-                "reduced_embeddings": [[1, 2], [3, 4], [5, 6]],
-                "statistics": {"total_papers": 3, "n_clusters": 3},
-            }
-        )
-        
-        # Add cache for model2
-        db.save_clustering_cache(
-            embedding_model="model2",
-            reduction_method="pca",
-            n_components=2,
-            clustering_method="kmeans",
-            n_clusters=5,
-            results={
-                "labels": [0, 1],
-                "reduced_embeddings": [[1, 2], [3, 4]],
-                "statistics": {"total_papers": 2, "n_clusters": 2},
-            }
-        )
-        db.close()
+        with DatabaseManager() as db:
+            # Add cache for model1
+            db.save_clustering_cache(
+                embedding_model="model1",
+                reduction_method="pca",
+                n_components=2,
+                clustering_method="kmeans",
+                n_clusters=5,
+                results={
+                    "labels": [0, 1, 2],
+                    "reduced_embeddings": [[1, 2], [3, 4], [5, 6]],
+                    "statistics": {"total_papers": 3, "n_clusters": 3},
+                }
+            )
+            
+            # Add cache for model2
+            db.save_clustering_cache(
+                embedding_model="model2",
+                reduction_method="pca",
+                n_components=2,
+                clustering_method="kmeans",
+                n_clusters=5,
+                results={
+                    "labels": [0, 1],
+                    "reduced_embeddings": [[1, 2], [3, 4]],
+                    "statistics": {"total_papers": 2, "n_clusters": 2},
+                }
+            )
         
         # Clear cache only for model1
         with patch.object(
@@ -1912,25 +1907,24 @@ class TestLogging:
         assert "Cleared 1 clustering cache entries for model: model1" in captured.out
         
         # Verify model1 cache is cleared but model2 remains
-        db = DatabaseManager(str(output_db))
-        cached1 = db.get_clustering_cache(
-            embedding_model="model1",
-            reduction_method="pca",
-            n_components=2,
-            clustering_method="kmeans",
-            n_clusters=5
-        )
-        assert cached1 is None
-        
-        cached2 = db.get_clustering_cache(
-            embedding_model="model2",
-            reduction_method="pca",
-            n_components=2,
-            clustering_method="kmeans",
-            n_clusters=5
-        )
-        assert cached2 is not None
-        db.close()
+        with DatabaseManager() as db:
+            cached1 = db.get_clustering_cache(
+                embedding_model="model1",
+                reduction_method="pca",
+                n_components=2,
+                clustering_method="kmeans",
+                n_clusters=5
+            )
+            assert cached1 is None
+            
+            cached2 = db.get_clustering_cache(
+                embedding_model="model2",
+                reduction_method="pca",
+                n_components=2,
+                clustering_method="kmeans",
+                n_clusters=5
+            )
+            assert cached2 is not None
 
     def test_clear_clustering_cache_no_entries(self, tmp_path, capsys):
         """Test clear-clustering-cache command when no cache entries exist."""
@@ -1941,8 +1935,8 @@ class TestLogging:
         
         # Create empty database
         from abstracts_explorer.database import DatabaseManager
-        db = DatabaseManager(str(output_db))
-        db.close()
+        with DatabaseManager() as db:
+            db.create_tables()
         
         # Run clear-clustering-cache command
         with patch.object(
