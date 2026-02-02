@@ -755,6 +755,55 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
         return 1
 
 
+def clear_clustering_cache_command(args: argparse.Namespace) -> int:
+    """
+    Clear clustering cache from the database.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments containing:
+        - embedding_model: Optional embedding model to filter by
+
+    Returns
+    -------
+    int
+        Exit code (0 for success, non-zero for failure)
+    """
+    config = get_config()
+
+    print("Abstracts Explorer - Clear Clustering Cache")
+    print("=" * 70)
+    print(f"Database: {config.database_url}")
+    if args.embedding_model:
+        print(f"Filtering by model: {args.embedding_model}")
+    else:
+        print("Clearing all cache entries")
+    print("=" * 70)
+
+    try:
+        # Connect to database
+        with DatabaseManager() as db:
+            # Clear the cache
+            count = db.clear_clustering_cache(embedding_model=args.embedding_model)
+            
+            if count == 0:
+                print("\n✅ No cache entries found to clear.")
+            else:
+                if args.embedding_model:
+                    print(f"\n✅ Cleared {count} clustering cache entries for model: {args.embedding_model}")
+                else:
+                    print(f"\n✅ Cleared all {count} clustering cache entries")
+
+        return 0
+
+    except Exception as e:
+        print(f"\n❌ Error clearing clustering cache: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
 def mcp_server_command(args: argparse.Namespace) -> int:
     """
     Start the MCP server for cluster analysis.
@@ -1136,6 +1185,32 @@ Examples:
         help="Maximum number of embeddings to process (optional)",
     )
 
+    # Clear clustering cache command
+    clear_cache_parser = subparsers.add_parser(
+        "clear-clustering-cache",
+        help="Clear clustering cache from database",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+Clear clustering cache from the database.
+
+This is useful when embeddings change or cache becomes stale.
+You can optionally filter by embedding model to clear only specific entries.
+
+Examples:
+  # Clear all clustering cache entries
+  abstracts-explorer clear-clustering-cache
+  
+  # Clear cache for a specific embedding model
+  abstracts-explorer clear-clustering-cache --embedding-model text-embedding-3-large
+        """,
+    )
+    clear_cache_parser.add_argument(
+        "--embedding-model",
+        type=str,
+        default=None,
+        help="Only clear cache for this embedding model (optional)",
+    )
+
     # MCP Server command
     mcp_parser = subparsers.add_parser(
         "mcp-server",
@@ -1202,6 +1277,8 @@ Examples:
         return web_ui_command(args)
     elif args.command == "cluster-embeddings":
         return cluster_embeddings_command(args)
+    elif args.command == "clear-clustering-cache":
+        return clear_clustering_cache_command(args)
     elif args.command == "mcp-server":
         return mcp_server_command(args)
     else:
