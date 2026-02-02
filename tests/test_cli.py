@@ -956,6 +956,178 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Unexpected error" in captured.err
 
+    def test_clear_clustering_cache_success(self, tmp_path, capsys):
+        """Test clear-clustering-cache command clears all cache entries."""
+        output_db = tmp_path / "test.db"
+        
+        # Set PAPER_DB to output location
+        set_test_db(output_db)
+        
+        # Create database and add some cache entries
+        from abstracts_explorer.database import DatabaseManager
+        with DatabaseManager() as db:
+            db.create_tables()
+            # Add some test cache entries
+            db.save_clustering_cache(
+                embedding_model="test-model-1",
+                reduction_method="pca",
+                n_components=2,
+                clustering_method="kmeans",
+                n_clusters=5,
+                results={
+                    "labels": [0, 1, 2],
+                    "reduced_embeddings": [[1, 2], [3, 4], [5, 6]],
+                    "statistics": {"total_papers": 3, "n_clusters": 3},
+                }
+            )
+            db.save_clustering_cache(
+                embedding_model="test-model-2",
+                reduction_method="pca",
+                n_components=2,
+                clustering_method="kmeans",
+                n_clusters=5,
+                results={
+                    "labels": [0, 1],
+                    "reduced_embeddings": [[1, 2], [3, 4]],
+                    "statistics": {"total_papers": 2, "n_clusters": 2},
+                }
+            )
+        
+        # Run clear-clustering-cache command
+        with patch.object(
+            sys,
+            "argv",
+            ["abstracts-explorer", "clear-clustering-cache"],
+        ):
+            exit_code = main()
+        
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Cleared all 2 clustering cache entries" in captured.out
+        
+        # Verify cache is cleared
+        with DatabaseManager() as db:
+            cached = db.get_clustering_cache(
+                embedding_model="test-model-1",
+                reduction_method="pca",
+                n_components=2,
+                clustering_method="kmeans",
+                n_clusters=5
+            )
+            assert cached is None
+
+    def test_clear_clustering_cache_by_model(self, tmp_path, capsys):
+        """Test clear-clustering-cache command with --embedding-model filter."""
+        output_db = tmp_path / "test.db"
+        
+        # Set PAPER_DB to output location
+        set_test_db(output_db)
+        
+        # Create database and add cache entries for different models
+        from abstracts_explorer.database import DatabaseManager
+        with DatabaseManager() as db:
+            db.create_tables()
+            # Add cache for model1
+            db.save_clustering_cache(
+                embedding_model="model1",
+                reduction_method="pca",
+                n_components=2,
+                clustering_method="kmeans",
+                n_clusters=5,
+                results={
+                    "labels": [0, 1, 2],
+                    "reduced_embeddings": [[1, 2], [3, 4], [5, 6]],
+                    "statistics": {"total_papers": 3, "n_clusters": 3},
+                }
+            )
+            
+            # Add cache for model2
+            db.save_clustering_cache(
+                embedding_model="model2",
+                reduction_method="pca",
+                n_components=2,
+                clustering_method="kmeans",
+                n_clusters=5,
+                results={
+                    "labels": [0, 1],
+                    "reduced_embeddings": [[1, 2], [3, 4]],
+                    "statistics": {"total_papers": 2, "n_clusters": 2},
+                }
+            )
+        
+        # Clear cache only for model1
+        with patch.object(
+            sys,
+            "argv",
+            ["abstracts-explorer", "clear-clustering-cache", "--embedding-model", "model1"],
+        ):
+            exit_code = main()
+        
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Cleared 1 clustering cache entries for model: model1" in captured.out
+        
+        # Verify model1 cache is cleared but model2 remains
+        with DatabaseManager() as db:
+            cached1 = db.get_clustering_cache(
+                embedding_model="model1",
+                reduction_method="pca",
+                n_components=2,
+                clustering_method="kmeans",
+                n_clusters=5
+            )
+            assert cached1 is None
+            
+            cached2 = db.get_clustering_cache(
+                embedding_model="model2",
+                reduction_method="pca",
+                n_components=2,
+                clustering_method="kmeans",
+                n_clusters=5
+            )
+            assert cached2 is not None
+
+    def test_clear_clustering_cache_no_entries(self, tmp_path, capsys):
+        """Test clear-clustering-cache command when no cache entries exist."""
+        output_db = tmp_path / "test.db"
+        
+        # Set PAPER_DB to output location
+        set_test_db(output_db)
+        
+        # Create empty database
+        from abstracts_explorer.database import DatabaseManager
+        with DatabaseManager() as db:
+            db.create_tables()
+        
+        # Run clear-clustering-cache command
+        with patch.object(
+            sys,
+            "argv",
+            ["abstracts-explorer", "clear-clustering-cache"],
+        ):
+            exit_code = main()
+        
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "No cache entries found to clear" in captured.out
+
+    def test_clear_clustering_cache_error(self, tmp_path, capsys):
+        """Test clear-clustering-cache command handles errors gracefully."""
+        # Set a database path that doesn't exist and can't be created
+        set_test_db("/nonexistent/path/test.db")
+        
+        # Run clear-clustering-cache command
+        with patch.object(
+            sys,
+            "argv",
+            ["abstracts-explorer", "clear-clustering-cache"],
+        ):
+            exit_code = main()
+        
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert "Error clearing clustering cache" in captured.err
+
 
 class TestChatCommand:
     """Test cases for the chat command."""
@@ -1796,173 +1968,3 @@ class TestLogging:
         
         # Check that root logger falls back to WARNING
         assert logging.root.level == logging.WARNING
-
-    def test_clear_clustering_cache_success(self, tmp_path, capsys):
-        """Test clear-clustering-cache command clears all cache entries."""
-        output_db = tmp_path / "test.db"
-        
-        # Set PAPER_DB to output location
-        set_test_db(output_db)
-        
-        # Create database and add some cache entries
-        from abstracts_explorer.database import DatabaseManager
-        with DatabaseManager() as db:
-            # Add some test cache entries
-            db.save_clustering_cache(
-                embedding_model="test-model-1",
-                reduction_method="pca",
-                n_components=2,
-                clustering_method="kmeans",
-                n_clusters=5,
-                results={
-                    "labels": [0, 1, 2],
-                    "reduced_embeddings": [[1, 2], [3, 4], [5, 6]],
-                    "statistics": {"total_papers": 3, "n_clusters": 3},
-                }
-            )
-            db.save_clustering_cache(
-                embedding_model="test-model-2",
-                reduction_method="pca",
-                n_components=2,
-                clustering_method="kmeans",
-                n_clusters=5,
-                results={
-                    "labels": [0, 1],
-                    "reduced_embeddings": [[1, 2], [3, 4]],
-                    "statistics": {"total_papers": 2, "n_clusters": 2},
-                }
-            )
-        
-        # Run clear-clustering-cache command
-        with patch.object(
-            sys,
-            "argv",
-            ["abstracts-explorer", "clear-clustering-cache"],
-        ):
-            exit_code = main()
-        
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        assert "Cleared all 2 clustering cache entries" in captured.out
-        
-        # Verify cache is cleared
-        with DatabaseManager() as db:
-            cached = db.get_clustering_cache(
-                embedding_model="test-model-1",
-                reduction_method="pca",
-                n_components=2,
-                clustering_method="kmeans",
-                n_clusters=5
-            )
-            assert cached is None
-
-    def test_clear_clustering_cache_by_model(self, tmp_path, capsys):
-        """Test clear-clustering-cache command with --embedding-model filter."""
-        output_db = tmp_path / "test.db"
-        
-        # Set PAPER_DB to output location
-        set_test_db(output_db)
-        
-        # Create database and add cache entries for different models
-        from abstracts_explorer.database import DatabaseManager
-        with DatabaseManager() as db:
-            # Add cache for model1
-            db.save_clustering_cache(
-                embedding_model="model1",
-                reduction_method="pca",
-                n_components=2,
-                clustering_method="kmeans",
-                n_clusters=5,
-                results={
-                    "labels": [0, 1, 2],
-                    "reduced_embeddings": [[1, 2], [3, 4], [5, 6]],
-                    "statistics": {"total_papers": 3, "n_clusters": 3},
-                }
-            )
-            
-            # Add cache for model2
-            db.save_clustering_cache(
-                embedding_model="model2",
-                reduction_method="pca",
-                n_components=2,
-                clustering_method="kmeans",
-                n_clusters=5,
-                results={
-                    "labels": [0, 1],
-                    "reduced_embeddings": [[1, 2], [3, 4]],
-                    "statistics": {"total_papers": 2, "n_clusters": 2},
-                }
-            )
-        
-        # Clear cache only for model1
-        with patch.object(
-            sys,
-            "argv",
-            ["abstracts-explorer", "clear-clustering-cache", "--embedding-model", "model1"],
-        ):
-            exit_code = main()
-        
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        assert "Cleared 1 clustering cache entries for model: model1" in captured.out
-        
-        # Verify model1 cache is cleared but model2 remains
-        with DatabaseManager() as db:
-            cached1 = db.get_clustering_cache(
-                embedding_model="model1",
-                reduction_method="pca",
-                n_components=2,
-                clustering_method="kmeans",
-                n_clusters=5
-            )
-            assert cached1 is None
-            
-            cached2 = db.get_clustering_cache(
-                embedding_model="model2",
-                reduction_method="pca",
-                n_components=2,
-                clustering_method="kmeans",
-                n_clusters=5
-            )
-            assert cached2 is not None
-
-    def test_clear_clustering_cache_no_entries(self, tmp_path, capsys):
-        """Test clear-clustering-cache command when no cache entries exist."""
-        output_db = tmp_path / "test.db"
-        
-        # Set PAPER_DB to output location
-        set_test_db(output_db)
-        
-        # Create empty database
-        from abstracts_explorer.database import DatabaseManager
-        with DatabaseManager() as db:
-            db.create_tables()
-        
-        # Run clear-clustering-cache command
-        with patch.object(
-            sys,
-            "argv",
-            ["abstracts-explorer", "clear-clustering-cache"],
-        ):
-            exit_code = main()
-        
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        assert "No cache entries found to clear" in captured.out
-
-    def test_clear_clustering_cache_error(self, tmp_path, capsys):
-        """Test clear-clustering-cache command handles errors gracefully."""
-        # Set a database path that doesn't exist and can't be created
-        set_test_db("/nonexistent/path/test.db")
-        
-        # Run clear-clustering-cache command
-        with patch.object(
-            sys,
-            "argv",
-            ["abstracts-explorer", "clear-clustering-cache"],
-        ):
-            exit_code = main()
-        
-        assert exit_code == 1
-        captured = capsys.readouterr()
-        assert "Error clearing clustering cache" in captured.err
