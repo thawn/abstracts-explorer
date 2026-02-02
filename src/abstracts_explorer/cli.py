@@ -790,10 +790,11 @@ def clear_clustering_cache_command(args: argparse.Namespace) -> int:
             if count == 0:
                 print("\n✅ No cache entries found to clear.")
             else:
+                entry_word = "entry" if count == 1 else "entries"
                 if args.embedding_model:
-                    print(f"\n✅ Cleared {count} clustering cache entries for model: {args.embedding_model}")
+                    print(f"\n✅ Cleared {count} clustering cache {entry_word} for model: {args.embedding_model}")
                 else:
-                    print(f"\n✅ Cleared all {count} clustering cache entries")
+                    print(f"\n✅ Cleared all {count} clustering cache {entry_word}")
 
         return 0
 

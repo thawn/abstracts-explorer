@@ -1065,7 +1065,7 @@ class TestCLI:
         
         assert exit_code == 0
         captured = capsys.readouterr()
-        assert "Cleared 1 clustering cache entries for model: model1" in captured.out
+        assert "Cleared 1 clustering cache entry for model: model1" in captured.out
         
         # Verify model1 cache is cleared but model2 remains
         with DatabaseManager() as db:
