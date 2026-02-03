@@ -38,6 +38,7 @@ let currentParentId = null;
 // Custom query clustering state
 let customQueryClusters = [];  // Array of custom query cluster objects
 let customClusterMode = false;  // Whether custom cluster mode is active
+let customClusterVisibility = {};  // Track visibility of each custom cluster by ID
 
 /**
  * Initialize default cluster count from backend
@@ -1637,6 +1638,9 @@ export async function searchCustomCluster() {
         customQueryClusters.push(customCluster);
         customClusterMode = true;
         
+        // Initialize visibility to true (visible by default)
+        customClusterVisibility[uniqueId] = true;
+        
         // Re-visualize in custom cluster mode
         visualizeClustersWithCustomQueries();
         
@@ -1721,8 +1725,9 @@ function visualizeClustersWithCustomQueries() {
     
     // Add traces for each custom query cluster with unique colors
     customQueryClusters.forEach((cluster, idx) => {
-        // Assign a distinct color from the color palette
-        const clusterColor = PLOTLY_COLORS[idx % PLOTLY_COLORS.length];
+        // Skip blue (first color) - start from index 1 to avoid confusion with background
+        const colorIndex = (idx + 1) % PLOTLY_COLORS.length;
+        const clusterColor = PLOTLY_COLORS[colorIndex];
         
         // Get the points for papers in this cluster
         const clusterPoints = cluster.papers
@@ -1877,12 +1882,18 @@ function updateCustomQueryLegend() {
     html += '<h4 class="text-md font-bold text-gray-700 mb-3">Custom Queries</h4>';
     
     customQueryClusters.forEach((cluster, idx) => {
-        const clusterColor = PLOTLY_COLORS[idx % PLOTLY_COLORS.length];
+        // Skip blue (first color) - start from index 1 to avoid confusion with background
+        const colorIndex = (idx + 1) % PLOTLY_COLORS.length;
+        const clusterColor = PLOTLY_COLORS[colorIndex];
         const escapedQuery = escapeHtml(cluster.query);
+        
+        // Check if this cluster is visible (default: true)
+        const isVisible = customClusterVisibility[cluster.id] !== false;
+        const opacityClass = isVisible ? 'opacity-100' : 'opacity-50';
         
         html += `
             <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100">
-                <div class="flex items-center gap-3 flex-1">
+                <div class="flex items-center gap-3 flex-1 cursor-pointer ${opacityClass}" onclick="toggleCustomClusterVisibility('${cluster.id}')">
                     <div class="w-4 h-4 rounded-full" style="background-color: ${clusterColor}"></div>
                     <div class="flex-1">
                         <div class="font-semibold text-sm text-gray-800">${escapedQuery}</div>
@@ -1931,6 +1942,43 @@ function escapeHtml(text) {
 }
 
 /**
+ * Toggle visibility of a custom cluster
+ * @param {string} clusterId - ID of the custom cluster to toggle
+ */
+export function toggleCustomClusterVisibility(clusterId) {
+    // Toggle visibility state
+    const currentVisibility = customClusterVisibility[clusterId] !== false;
+    customClusterVisibility[clusterId] = !currentVisibility;
+    
+    // Get the plot div
+    const plotDiv = document.getElementById('cluster-plot');
+    if (!plotDiv || !plotDiv.data) {
+        console.warn('Plot not initialized');
+        return;
+    }
+    
+    // Find traces with matching legendgroup and toggle visibility
+    const updates = {
+        visible: []
+    };
+    
+    const traceIndices = [];
+    plotDiv.data.forEach((trace, idx) => {
+        if (trace.legendgroup === clusterId) {
+            traceIndices.push(idx);
+            updates.visible.push(!currentVisibility);
+        }
+    });
+    
+    if (traceIndices.length > 0) {
+        Plotly.restyle(plotDiv, updates, traceIndices);
+    }
+    
+    // Update legend to show opacity change
+    updateCustomQueryLegend();
+}
+
+/**
  * Update legend to include custom clusters with delete buttons
  * @deprecated Replaced by updateCustomQueryLegend
  */
@@ -1952,9 +2000,13 @@ export async function deleteCustomCluster(clusterId) {
     
     customQueryClusters.splice(index, 1);
     
+    // Clean up visibility state
+    delete customClusterVisibility[clusterId];
+    
     // If no more custom clusters, exit custom cluster mode
     if (customQueryClusters.length === 0) {
         customClusterMode = false;
+        customClusterVisibility = {};  // Reset visibility state
         // Reload normal clusters
         visualizeClusters();
         // Update normal legend
@@ -1969,4 +2021,5 @@ export async function deleteCustomCluster(clusterId) {
 if (typeof window !== 'undefined') {
     window.searchCustomCluster = searchCustomCluster;
     window.deleteCustomCluster = deleteCustomCluster;
+    window.toggleCustomClusterVisibility = toggleCustomClusterVisibility;
 }
