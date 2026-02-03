@@ -827,7 +827,10 @@ def search_custom_cluster():
         collection = em.collection
         all_results = collection.get(include=["embeddings", "metadatas"])
         
-        if not all_results or not all_results.get("embeddings"):
+        # Check if we have valid results with embeddings
+        # Use explicit checks to avoid "ambiguous truth value" error with arrays
+        embeddings = all_results.get("embeddings") if all_results else None
+        if embeddings is None or len(embeddings) == 0:
             return jsonify({"error": "No embeddings found in collection"}), 404
         
         # Calculate distances from query embedding to all paper embeddings
@@ -848,12 +851,15 @@ def search_custom_cluster():
             paper_id = all_results["ids"][idx]
             paper_distance = float(distances[idx])
             
-            # Get full paper details from database
-            paper = database.get_paper_by_openreview_id(paper_id)
-            if paper:
-                paper_dict = get_paper_with_authors(paper, database)
+            # Get full paper details from database using uid
+            try:
+                paper_dict = get_paper_with_authors(database, paper_id)
                 paper_dict["distance"] = paper_distance
                 matching_papers.append(paper_dict)
+            except PaperFormattingError:
+                # Paper not found in database, skip it
+                logger.warning(f"Paper {paper_id} not found in database, skipping")
+                continue
         
         # Sort by distance (closest first)
         matching_papers.sort(key=lambda p: p["distance"])

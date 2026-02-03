@@ -1743,20 +1743,17 @@ class TestClusteringEndpoints:
                     mock_em.collection = mock_collection
                     mock_get_em.return_value = mock_em
                     
-                    # Mock database
+                    # Mock database (not used directly, passed to get_paper_with_authors)
                     mock_db = Mock()
-                    mock_db.get_paper_by_openreview_id.side_effect = lambda pid: {
-                        "openreview_id": pid,
-                        "title": f"Paper {pid[-1]}",
-                        "abstract": f"Abstract for {pid}",
-                        "year": 2025
-                    }
                     mock_get_db.return_value = mock_db
                     
-                    # Mock get_paper_with_authors
+                    # Mock get_paper_with_authors - now takes (database, paper_id)
                     with patch("abstracts_explorer.web_ui.app.get_paper_with_authors") as mock_get_paper:
-                        mock_get_paper.side_effect = lambda paper, db: {
-                            **paper,
+                        mock_get_paper.side_effect = lambda db, pid: {
+                            "uid": pid,
+                            "title": f"Paper {pid[-1]}",
+                            "abstract": f"Abstract for {pid}",
+                            "year": 2025,
                             "authors": ["Author 1"]
                         }
                         
