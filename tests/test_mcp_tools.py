@@ -25,7 +25,7 @@ def test_get_mcp_tools_schema():
     
     # Should return a list of tool definitions
     assert isinstance(schema, list)
-    assert len(schema) == 4  # 4 MCP tools
+    assert len(schema) == 5  # 5 MCP tools (including analyze_topic_relevance)
     
     # Check structure of first tool
     tool = schema[0]
@@ -37,6 +37,7 @@ def test_get_mcp_tools_schema():
     
     # Verify all expected tools are present
     tool_names = [t["function"]["name"] for t in schema]
+    assert "analyze_topic_relevance" in tool_names
     assert "get_cluster_topics" in tool_names
     assert "get_topic_evolution" in tool_names
     assert "get_recent_developments" in tool_names
