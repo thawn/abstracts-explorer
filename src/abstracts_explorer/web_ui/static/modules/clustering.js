@@ -35,6 +35,11 @@ let currentHierarchyLevel = 0;
 let maxHierarchyLevel = 0;
 let currentParentId = null;
 
+// Custom query clustering state
+let customQueryClusters = [];  // Array of custom query cluster objects
+let customClusterMode = false;  // Whether custom cluster mode is active
+let customClusterVisibility = {};  // Track visibility of each custom cluster by ID
+
 /**
  * Initialize default cluster count from backend
  * @async
@@ -1576,4 +1581,464 @@ export async function precalculateClusters() {
     } catch (error) {
         console.warn('Error starting background clustering pre-calculation:', error);
     }
+}
+
+/**
+ * Search for papers within distance of a custom query
+ * @async
+ */
+export async function searchCustomCluster() {
+    const queryInput = document.getElementById('custom-query-input');
+    const distanceInput = document.getElementById('custom-query-distance');
+    const searchBtn = document.getElementById('search-custom-btn');
+    
+    const query = queryInput.value.trim();
+    if (!query) {
+        alert('Please enter a search query');
+        return;
+    }
+    
+    const distance = parseFloat(distanceInput.value);
+    if (isNaN(distance) || distance <= 0) {
+        alert('Please enter a valid distance value');
+        return;
+    }
+    
+    // Disable button and show loading
+    searchBtn.disabled = true;
+    searchBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Searching...';
+    
+    try {
+        // Get selected filters from UI
+        const yearSelect = document.getElementById('year-selector');
+        const conferenceSelect = document.getElementById('conference-selector');
+        const selectedYear = yearSelect ? yearSelect.value : '';
+        const selectedConference = conferenceSelect ? conferenceSelect.value : '';
+        
+        // Build request body with optional filters
+        const requestBody = { query, distance };
+        
+        // Add year filter if selected
+        if (selectedYear) {
+            requestBody.years = [parseInt(selectedYear)];
+        }
+        
+        // Add conference filter if selected
+        if (selectedConference) {
+            requestBody.conferences = [selectedConference];
+        }
+        
+        const response = await fetch(`${API_BASE}/api/clusters/search`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Generate unique ID using timestamp and random component
+        const uniqueId = `custom_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        // Add custom cluster to state
+        const customCluster = {
+            id: uniqueId,
+            query: data.query,
+            distance: data.distance,
+            papers: data.papers,
+            count: data.count,
+            queryEmbedding: data.query_embedding
+        };
+        
+        customQueryClusters.push(customCluster);
+        customClusterMode = true;
+        
+        // Initialize visibility to true (visible by default)
+        customClusterVisibility[uniqueId] = true;
+        
+        // Re-visualize in custom cluster mode
+        visualizeClustersWithCustomQueries();
+        
+        console.log(`Found ${data.count} papers within distance ${distance} for query: "${query}"`);
+        
+    } catch (error) {
+        console.error('Error searching custom cluster:', error);
+        alert(`Failed to search: ${error.message}`);
+    } finally {
+        // Re-enable button
+        searchBtn.disabled = false;
+        searchBtn.innerHTML = '<i class="fas fa-search mr-2"></i>Search';
+    }
+}
+
+/**
+ * Visualize clusters with custom queries in custom cluster mode
+ * In this mode:
+ * - All non-matching papers are colored blue
+ * - Each custom query's papers get a unique color
+ * - Query terms are shown as cluster centers (stars)
+ * - Normal legend is replaced with custom query legend
+ */
+function visualizeClustersWithCustomQueries() {
+    if (!clusterData || !clusterData.points) {
+        console.error('No cluster data to visualize');
+        return;
+    }
+    
+    const points = clusterData.points;
+    const traces = [];
+    
+    // Build a set of all paper IDs that match any custom query
+    const matchingPaperIds = new Set();
+    customQueryClusters.forEach(cluster => {
+        cluster.papers.forEach(paper => {
+            // Use uid for matching
+            matchingPaperIds.add(paper.uid);
+        });
+    });
+    
+    // Create a map from paper id to point
+    const paperIdToPoint = {};
+    points.forEach(point => {
+        paperIdToPoint[point.id] = point;
+    });
+    
+    // Collect all non-matching papers (will be colored blue)
+    const nonMatchingPoints = points.filter(p => !matchingPaperIds.has(p.id));
+    
+    // Add trace for non-matching papers (blue)
+    if (nonMatchingPoints.length > 0) {
+        traces.push({
+            x: nonMatchingPoints.map(p => p.x),
+            y: nonMatchingPoints.map(p => p.y),
+            mode: 'markers',
+            type: 'scatter',
+            name: 'Other papers',
+            text: nonMatchingPoints.map(p => p.title || p.id),
+            customdata: nonMatchingPoints.map(p => ({
+                id: p.id,
+                title: p.title || '',
+                year: p.year || '',
+                conference: p.conference || ''
+            })),
+            marker: {
+                color: '#3B82F6',  // Blue color
+                size: 8,
+                opacity: 0.5,
+                line: {
+                    color: 'white',
+                    width: 0.5
+                }
+            },
+            hovertemplate: '<b>%{text}</b><br>' +
+                          'Year: %{customdata.year}<br>' +
+                          'Conference: %{customdata.conference}<br>' +
+                          '<extra></extra>',
+            showlegend: false
+        });
+    }
+    
+    // Add traces for each custom query cluster with unique colors
+    customQueryClusters.forEach((cluster, idx) => {
+        // Skip blue (first color) - start from index 1 to avoid confusion with background
+        const colorIndex = (idx + 1) % PLOTLY_COLORS.length;
+        const clusterColor = PLOTLY_COLORS[colorIndex];
+        
+        // Get the points for papers in this cluster
+        const clusterPoints = cluster.papers
+            .map(paper => paperIdToPoint[paper.uid])
+            .filter(p => p !== undefined);
+        
+        if (clusterPoints.length === 0) {
+            console.warn(`No points found for custom cluster: ${cluster.query}`);
+            return;
+        }
+        
+        // Add trace for cluster papers
+        traces.push({
+            x: clusterPoints.map(p => p.x),
+            y: clusterPoints.map(p => p.y),
+            mode: 'markers',
+            type: 'scatter',
+            name: `${cluster.query} (${cluster.count})`,
+            text: clusterPoints.map(p => p.title || p.id),
+            customdata: clusterPoints.map(p => ({
+                id: p.id,
+                title: p.title || '',
+                year: p.year || '',
+                conference: p.conference || '',
+                distance: cluster.papers.find(cp => cp.uid === p.id)?.distance || 0
+            })),
+            marker: {
+                color: clusterColor,
+                size: 10,
+                opacity: 0.8,
+                line: {
+                    color: 'white',
+                    width: 1
+                }
+            },
+            hovertemplate: '<b>%{text}</b><br>' +
+                          'Year: %{customdata.year}<br>' +
+                          'Conference: %{customdata.conference}<br>' +
+                          'Distance: %{customdata.distance:.3f}<br>' +
+                          '<extra></extra>',
+            legendgroup: cluster.id
+        });
+        
+        // Calculate center position as mean of cluster points
+        const centerX = clusterPoints.reduce((sum, p) => sum + p.x, 0) / clusterPoints.length;
+        const centerY = clusterPoints.reduce((sum, p) => sum + p.y, 0) / clusterPoints.length;
+        
+        // Add cluster center as star marker
+        traces.push({
+            x: [centerX],
+            y: [centerY],
+            mode: 'markers+text',
+            type: 'scatter',
+            name: `${cluster.query} (center)`,
+            text: [cluster.query],
+            textposition: 'top center',
+            marker: {
+                color: clusterColor,
+                symbol: 'star',
+                size: 20,
+                opacity: 1.0,
+                line: {
+                    color: 'white',
+                    width: 2
+                }
+            },
+            hovertemplate: '<b>Query: %{text}</b><br>' +
+                          `Papers: ${cluster.count}<br>` +
+                          '<extra></extra>',
+            showlegend: false,
+            legendgroup: cluster.id
+        });
+    });
+    
+    // Layout configuration
+    const layout = {
+        title: '',
+        xaxis: {
+            title: '',
+            zeroline: false,
+            showgrid: false,
+            showticklabels: false,
+            ticks: ''
+        },
+        yaxis: {
+            title: '',
+            zeroline: false,
+            showgrid: false,
+            showticklabels: false,
+            ticks: ''
+        },
+        hovermode: 'closest',
+        showlegend: false,  // We'll use custom legend
+        plot_bgcolor: 'white',
+        paper_bgcolor: 'white',
+        margin: {
+            l: 50,
+            r: 50,
+            t: 50,
+            b: 50
+        },
+        hoverlabel: {
+            namelength: -1,
+            align: 'left'
+        }
+    };
+    
+    const config = {
+        responsive: true,
+        displayModeBar: true,
+        modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+        displaylogo: false,
+        toImageButtonOptions: {
+            format: 'png',
+            filename: 'custom_cluster_plot',
+            height: 800,
+            width: 800,
+            scale: 2
+        }
+    };
+    
+    const plotDiv = document.getElementById('cluster-plot');
+    Plotly.react(plotDiv, traces, layout, config);
+    
+    // Add click handler
+    plotDiv.on('plotly_click', function(data) {
+        if (data.points.length > 0) {
+            const point = data.points[0];
+            const paperId = point.customdata?.id || point.data.customdata?.[point.pointIndex]?.id;
+            if (paperId) {
+                showClusterPaperDetails(paperId);
+            }
+        }
+    });
+    
+    // Update custom legend
+    updateCustomQueryLegend();
+}
+
+/**
+ * Update custom legend showing only custom queries
+ */
+function updateCustomQueryLegend() {
+    const legendDiv = document.getElementById('cluster-legend');
+    
+    if (customQueryClusters.length === 0) {
+        legendDiv.innerHTML = '<p class="text-gray-500 text-sm">No custom queries</p>';
+        return;
+    }
+    
+    let html = '<div class="space-y-3">';
+    html += '<h4 class="text-md font-bold text-gray-700 mb-3">Custom Queries</h4>';
+    
+    customQueryClusters.forEach((cluster, idx) => {
+        // Skip blue (first color) - start from index 1 to avoid confusion with background
+        const colorIndex = (idx + 1) % PLOTLY_COLORS.length;
+        const clusterColor = PLOTLY_COLORS[colorIndex];
+        const escapedQuery = escapeHtml(cluster.query);
+        
+        // Check if this cluster is visible (default: true)
+        const isVisible = customClusterVisibility[cluster.id] !== false;
+        const opacityClass = isVisible ? 'opacity-100' : 'opacity-50';
+        
+        html += `
+            <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100">
+                <div class="flex items-center gap-3 flex-1 cursor-pointer ${opacityClass}" onclick="toggleCustomClusterVisibility('${cluster.id}')">
+                    <div class="w-4 h-4 rounded-full" style="background-color: ${clusterColor}"></div>
+                    <div class="flex-1">
+                        <div class="font-semibold text-sm text-gray-800">${escapedQuery}</div>
+                        <div class="text-xs text-gray-600">${cluster.count} papers (d=${cluster.distance.toFixed(2)})</div>
+                    </div>
+                </div>
+                <button onclick="deleteCustomCluster('${cluster.id}')" 
+                    class="ml-2 px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-xs">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    legendDiv.innerHTML = html;
+}
+
+/**
+ * Display statistics for a custom query cluster
+ * @param {Object} customCluster - Custom cluster data
+ */
+function displayCustomQueryStats(customCluster) {
+    // Statistics removed per user request
+    // This function is kept for compatibility but does nothing
+}
+
+/**
+ * Update visualization to highlight papers in custom cluster
+ * @param {Object} customCluster - Custom cluster data
+ * @deprecated This function is no longer used in custom cluster mode
+ */
+function updateVisualizationWithCustomCluster(customCluster) {
+    // No longer used - replaced by visualizeClustersWithCustomQueries
+}
+
+/**
+ * Escape HTML to prevent XSS attacks
+ * @param {string} text - Text to escape
+ * @returns {string} Escaped text
+ */
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+/**
+ * Toggle visibility of a custom cluster
+ * @param {string} clusterId - ID of the custom cluster to toggle
+ */
+export function toggleCustomClusterVisibility(clusterId) {
+    // Toggle visibility state
+    const currentVisibility = customClusterVisibility[clusterId] !== false;
+    customClusterVisibility[clusterId] = !currentVisibility;
+    
+    // Get the plot div
+    const plotDiv = document.getElementById('cluster-plot');
+    if (!plotDiv || !plotDiv.data) {
+        console.warn('Plot not initialized');
+        return;
+    }
+    
+    // Find traces with matching legendgroup and toggle visibility
+    const updates = {
+        visible: []
+    };
+    
+    const traceIndices = [];
+    plotDiv.data.forEach((trace, idx) => {
+        if (trace.legendgroup === clusterId) {
+            traceIndices.push(idx);
+            updates.visible.push(!currentVisibility);
+        }
+    });
+    
+    if (traceIndices.length > 0) {
+        Plotly.restyle(plotDiv, updates, traceIndices);
+    }
+    
+    // Update legend to show opacity change
+    updateCustomQueryLegend();
+}
+
+/**
+ * Update legend to include custom clusters with delete buttons
+ * @deprecated Replaced by updateCustomQueryLegend
+ */
+function updateLegendWithCustomClusters() {
+    // No longer used - replaced by updateCustomQueryLegend
+}
+
+/**
+ * Delete a custom cluster
+ * @param {string} clusterId - ID of the custom cluster to delete
+ */
+export async function deleteCustomCluster(clusterId) {
+    // Remove from state
+    const index = customQueryClusters.findIndex(c => c.id === clusterId);
+    if (index === -1) {
+        console.warn('Custom cluster not found:', clusterId);
+        return;
+    }
+    
+    customQueryClusters.splice(index, 1);
+    
+    // Clean up visibility state
+    delete customClusterVisibility[clusterId];
+    
+    // If no more custom clusters, exit custom cluster mode
+    if (customQueryClusters.length === 0) {
+        customClusterMode = false;
+        customClusterVisibility = {};  // Reset visibility state
+        // Reload normal clusters
+        visualizeClusters();
+        // Update normal legend
+        updateLegend();
+    } else {
+        // Re-render the visualization with remaining custom clusters
+        visualizeClustersWithCustomQueries();
+    }
+}
+
+// Make custom cluster functions globally accessible for onclick handlers
+if (typeof window !== 'undefined') {
+    window.searchCustomCluster = searchCustomCluster;
+    window.deleteCustomCluster = deleteCustomCluster;
+    window.toggleCustomClusterVisibility = toggleCustomClusterVisibility;
 }

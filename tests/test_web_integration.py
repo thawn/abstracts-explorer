@@ -1056,6 +1056,49 @@ class TestWebUIErrorHandlingPaths:
         assert "error" in data
         assert "UMAP requires at least" in data["error"]
 
+    def test_custom_cluster_search_with_embeddings(self, web_server):
+        """Test custom cluster search endpoint with real embeddings."""
+        host, port, base_url = web_server
+
+        # Test the custom cluster search with a query
+        search_data = {
+            "query": "machine learning",
+            "distance": 150.0
+        }
+
+        response = requests.post(f"{base_url}/api/clusters/search", json=search_data, timeout=30)
+
+        # Should return 200 OK
+        assert response.status_code == 200
+
+        data = response.json()
+        assert isinstance(data, dict)
+
+        # Verify response structure
+        assert "query" in data
+        assert "distance" in data
+        assert "papers" in data
+        assert "count" in data
+        assert "query_embedding" in data
+
+        # Verify values
+        assert data["query"] == "machine learning"
+        assert data["distance"] == 150.0
+        assert isinstance(data["papers"], list)
+        assert isinstance(data["count"], int)
+        assert data["count"] == len(data["papers"])
+
+        # All papers should have a distance field
+        for paper in data["papers"]:
+            assert "distance" in paper
+            assert isinstance(paper["distance"], (int, float))
+            assert paper["distance"] <= 150.0
+
+        # Papers should be sorted by distance
+        if len(data["papers"]) > 1:
+            for i in range(len(data["papers"]) - 1):
+                assert data["papers"][i]["distance"] <= data["papers"][i + 1]["distance"]
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])

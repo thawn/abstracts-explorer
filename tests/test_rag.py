@@ -895,7 +895,7 @@ class TestRAGChatMCPTools:
             assert "tools" in call_kwargs
             assert "tool_choice" in call_kwargs
             assert call_kwargs["tool_choice"] == "auto"
-            assert len(call_kwargs["tools"]) == 4  # 4 MCP tools
+            assert len(call_kwargs["tools"]) == 5  # 5 MCP tools (including analyze_topic_relevance)
 
     def test_generate_response_without_mcp_tools_schema(self, mock_embeddings_manager, mock_database):
         """Test that MCP tools schema is not passed when disabled."""

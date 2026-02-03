@@ -781,6 +781,65 @@ def precalculate_clusters():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/clusters/search", methods=["POST"])
+def search_custom_cluster():
+    """
+    Find papers within a specified distance from a custom search query.
+    
+    This endpoint treats the search query as a clustering center and returns
+    papers within the specified Euclidean distance radius in embedding space.
+    
+    Request Body
+    ------------
+    {
+        "query": str (required) - The search query text
+        "distance": float (optional, default: 1.1) - Euclidean distance radius
+        "conferences": list[str] (optional) - Filter by conferences
+        "years": list[int] (optional) - Filter by years
+    }
+    
+    Returns
+    -------
+    dict
+        {
+            "query": str - The search query
+            "query_embedding": list[float] - The generated embedding for the query
+            "distance": float - The distance threshold used
+            "papers": list[dict] - Papers within the distance radius with their distances
+            "count": int - Number of papers found
+        }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or "query" not in data:
+            return jsonify({"error": "Missing required field: query"}), 400
+        
+        query = data["query"]
+        distance_threshold = data.get("distance", 1.1)
+        conferences = data.get("conferences")
+        years = data.get("years")
+        
+        # Get embeddings manager and database
+        em = get_embeddings_manager()
+        database = get_database()
+        
+        # Call EmbeddingsManager method directly
+        results = em.find_papers_within_distance(
+            database=database,
+            query=query,
+            distance_threshold=distance_threshold,
+            conferences=conferences,
+            years=years
+        )
+        
+        return jsonify(results)
+        
+    except Exception as e:
+        logger.error(f"Error searching custom cluster: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/years")
 def get_years():
     """
