@@ -1621,9 +1621,12 @@ export async function searchCustomCluster() {
         
         const data = await response.json();
         
+        // Generate unique ID using timestamp and random component
+        const uniqueId = `custom_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
         // Add custom cluster to state
         const customCluster = {
-            id: `custom_${Date.now()}`,
+            id: uniqueId,
             query: data.query,
             distance: data.distance,
             papers: data.papers,
@@ -1668,12 +1671,15 @@ function displayCustomQueryStats(customCluster) {
     // Show the stats div
     statsDiv.classList.remove('hidden');
     
+    // Escape query text to prevent XSS
+    const escapedQuery = escapeHtml(customCluster.query);
+    
     // Build statistics HTML
     const html = `
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             <div class="bg-purple-50 rounded-lg p-4">
                 <div class="text-sm text-gray-600 mb-1">Query</div>
-                <div class="text-xl font-bold text-purple-700">${customCluster.query}</div>
+                <div class="text-xl font-bold text-purple-700">${escapedQuery}</div>
             </div>
             <div class="bg-blue-50 rounded-lg p-4">
                 <div class="text-sm text-gray-600 mb-1">Papers Found</div>
@@ -1755,6 +1761,17 @@ function updateVisualizationWithCustomCluster(customCluster) {
 }
 
 /**
+ * Escape HTML to prevent XSS attacks
+ * @param {string} text - Text to escape
+ * @returns {string} Escaped text
+ */
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+/**
  * Update legend to include custom clusters with delete buttons
  */
 function updateLegendWithCustomClusters() {
@@ -1780,13 +1797,17 @@ function updateLegendWithCustomClusters() {
     `;
     
     customQueryClusters.forEach(cluster => {
+        // Escape user-controlled data to prevent XSS
+        const escapedQuery = escapeHtml(cluster.query);
+        const escapedId = escapeHtml(cluster.id);
+        
         customClustersHtml += `
             <div class="flex items-center justify-between mb-3 p-2 bg-purple-50 rounded-lg">
                 <div class="flex-1">
-                    <div class="font-semibold text-sm text-gray-800">${cluster.query}</div>
+                    <div class="font-semibold text-sm text-gray-800">${escapedQuery}</div>
                     <div class="text-xs text-gray-600">${cluster.count} papers (d=${cluster.distance})</div>
                 </div>
-                <button onclick="deleteCustomCluster('${cluster.id}')" 
+                <button onclick="deleteCustomCluster('${escapedId}')" 
                     class="ml-2 px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-xs">
                     <i class="fas fa-times"></i>
                 </button>
