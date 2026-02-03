@@ -8,7 +8,7 @@ This file contains instructions and conventions for AI assistants working on thi
 
 ## Project Overview
 
-**abstracts-explorer** is a Python package to download conference data and search it with a LLM-based semantic search including document retrieval and question answering.
+**abstracts-explorer** is a Python package to download conference data and search it with LLM-based semantic search, including document retrieval, question answering, clustering, and visualization. It supports multiple database backends (SQLite, PostgreSQL) and includes a web interface and MCP server for LLM integration.
 
 ## Package Manager: uv
 
@@ -102,43 +102,62 @@ def example_function(param1: str, param2: int = 10) -> bool:
 ```
 src/abstracts_explorer/    # Main package
 ├── __init__.py           # Package initialization
-├── database.py           # SQLite database operations
-├── downloader.py         # OpenReview API integration
+├── _version.py           # Auto-generated version (hatch-vcs)
+├── database.py           # Database manager (SQLAlchemy-based)
+├── db_models.py          # SQLAlchemy ORM models (Paper, EmbeddingsMetadata, ClusteringCache)
 ├── embeddings.py         # ChromaDB embeddings management
-├── rag.py                # RAG chat interface
+├── clustering.py         # Clustering & visualization (5 algorithms, auto-labeling)
+├── rag.py                # RAG chat interface with MCP integration
+├── mcp_server.py         # MCP server for LLM cluster analysis
+├── mcp_tools.py          # MCP tools for topic/trend analysis
+├── export_utils.py       # Paper export utilities (ZIP, JSON, Markdown)
 ├── config.py             # Configuration management
 ├── cli.py                # Command-line interface
 ├── plugin.py             # Plugin system and helpers
 ├── paper_utils.py        # Paper formatting utilities
-└── plugins/              # Plugin implementations
+├── plugins/              # Plugin implementations
+│   ├── __init__.py
+│   ├── json_conference_downloader.py  # Base class for JSON downloaders
+│   ├── neurips_downloader.py
+│   ├── iclr_downloader.py
+│   ├── icml_downloader.py
+│   └── ml4ps_downloader.py
+└── web_ui/               # Flask web interface
     ├── __init__.py
-    ├── neurips_downloader.py
-    ├── iclr_downloader.py
-    ├── icml_downloader.py
-    └── ml4ps_downloader.py
+    ├── app.py            # Flask app (25+ API routes)
+    ├── static/           # CSS, JS (modular ES6), vendor files
+    └── templates/        # HTML templates
 
-tests/                     # Test suite (one test file per module)
+tests/                     # Test suite (22 test files)
 ├── conftest.py           # Shared fixtures
 ├── helpers.py            # Shared helper functions
 ├── test_cli.py           # Tests for cli.py
 ├── test_config.py        # Tests for config.py
 ├── test_database.py      # Tests for database.py
-├── test_downloader.py    # Tests for downloader.py
 ├── test_embeddings.py    # Tests for embeddings.py (includes ChromaDB)
+├── test_clustering.py    # Tests for clustering.py
+├── test_chromadb_metadata.py  # Embedding metadata tracking tests
+├── test_multi_database.py     # PostgreSQL support tests
+├── test_export_utils.py  # Tests for export_utils.py
+├── test_mcp_server.py    # Tests for mcp_server.py
+├── test_mcp_tools.py     # Tests for mcp_tools.py
 ├── test_paper_utils.py   # Tests for paper_utils.py
-├── test_plugin.py        # Tests for plugin.py (all plugin functionality)
+├── test_plugin.py        # Tests for plugin.py (plugin system)
 ├── test_plugins_iclr.py  # Tests for plugins/iclr_downloader.py
 ├── test_plugins_ml4ps.py # Tests for plugins/ml4ps_downloader.py
 ├── test_rag.py           # Tests for rag.py
-├── test_web_ui.py        # Tests for web_ui/app.py
-├── test_integration.py   # Integration tests across modules
+├── test_web_ui.py        # Tests for web_ui/app.py (unit tests)
 ├── test_web_integration.py # Web UI integration tests
-└── test_web_e2e.py       # Web UI end-to-end tests
+├── test_web_e2e.py       # Web UI end-to-end tests
+└── test_integration.py   # Integration tests across modules
 
 docs/                      # Sphinx documentation
 ├── conf.py               # Sphinx configuration
 ├── index.md              # Documentation homepage
-├── api/                  # API reference
+├── api/                  # API reference (auto-generated)
+├── docker.md             # Docker/Podman deployment guide
+├── mcp_server.md         # MCP server documentation
+├── plugins.md            # Plugin system guide
 └── *.md                  # User guide pages
 ```
 
@@ -310,9 +329,10 @@ EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b
 LLM_BACKEND_URL=http://localhost:1234
 LLM_BACKEND_AUTH_TOKEN=
 
-# Database Paths
+# Database Settings
+PAPER_DB=data/abstracts.db  # SQLite (default)
+# PAPER_DB=postgresql://user:password@localhost/abstracts  # PostgreSQL option
 EMBEDDING_DB_PATH=chroma_db
-PAPER_DB_PATH=abstracts.db
 
 # RAG Settings
 COLLECTION_NAME=papers
@@ -337,7 +357,16 @@ print(config.llm_backend_url)
 - **chromadb**: Vector embeddings storage
 - **pydantic**: Data validation
 - **beautifulsoup4**: HTML parsing
-- **sqlite3**: Built-in, for paper database
+- **openai**: OpenAI-compatible API client
+- **scikit-learn**: Machine learning utilities
+- **numpy**: Numerical computations
+- **mcp**: Model Context Protocol for LLM integration
+- **sqlalchemy**: ORM for database abstraction (SQLite/PostgreSQL)
+- **psycopg2-binary**: PostgreSQL database driver
+- **numba**: JIT compilation for clustering performance
+- **llvmlite**: LLVM backend for Numba
+- **umap-learn**: UMAP dimensionality reduction
+- **scikit-fuzzy**: Fuzzy C-Means clustering
 
 ### Development Dependencies
 
@@ -355,6 +384,7 @@ Install with `uv sync --extra web`:
 
 - **flask**: Web framework
 - **flask-cors**: CORS support
+- **waitress**: Production WSGI server
 
 ### Documentation Dependencies
 
@@ -385,12 +415,83 @@ open _build/html/index.html
 - **CLI Reference**: Command-line interface documentation
 - **Contributing**: Development guidelines
 - **Changelog**: Links to detailed change logs
+- **Docker Guide**: Container deployment with Docker/Podman
+- **MCP Server**: Model Context Protocol integration
+- **Plugins Guide**: Plugin system and conference downloaders
 
 ### Updating Documentation
 
 1. **User guide**: Edit Markdown files in `docs/`
 2. **API docs**: Update docstrings in source code
 3. **Rebuild**: Run `make html` in `docs/` directory
+
+## Web UI Architecture
+
+### Framework & Structure
+
+- **Backend**: Flask 3.0+ with CORS support
+- **Frontend**: Modular ES6 JavaScript (16+ modules)
+- **Styling**: TailwindCSS with vendor libraries (Chart.js, Plotly.js, Marked.js)
+- **Production Server**: Waitress WSGI server
+
+### API Routes (25+ endpoints)
+
+**Paper Operations:**
+- `GET /api/papers` - List all papers
+- `GET /api/papers/<id>` - Get paper details
+- `POST /api/search` - Keyword/semantic search
+- `POST /api/papers/<id>/rating` - Rate paper
+
+**Semantic Search:**
+- `POST /api/semantic-search` - Vector similarity search
+- `GET /api/embedding-model` - Check embedding model
+
+**RAG Chat:**
+- `POST /api/chat` - Chat with conversation history
+- `POST /api/reset-conversation` - Clear history
+
+**Clustering:**
+- `POST /api/clusters/compute` - Generate clusters
+- `GET /api/clusters/cached` - Get cached results
+
+**Filters & Stats:**
+- `GET /api/stats` - Database statistics
+- `GET /api/filters` - Available filter values
+- `GET /api/available-filters` - Filter metadata
+
+**Export:**
+- `POST /api/export/interesting-papers` - Export papers (ZIP/JSON/Markdown)
+
+### Frontend Architecture (Modular ES6)
+
+**Feature Modules:**
+1. `search.js` - Search functionality
+2. `chat.js` - RAG chat interface
+3. `clusters.js` - Clustering visualization
+4. `filters.js` - Filter panel
+5. `tabs.js` - Tab navigation
+6. `paper-card.js` - Paper display components
+7. `interesting-papers.js` - Saved papers management
+8. `export.js` - Export functionality
+
+**Utility Modules:**
+1. `constants.js` - Configuration constants
+2. `state.js` - Centralized state management (200+ lines)
+3. `dom-utils.js` - DOM manipulation helpers
+4. `api.js` - API client
+5. `markdown-utils.js` - Markdown rendering
+6. `paper-utils.js` - Paper formatting
+7. `chart-utils.js` - Chart.js helpers
+8. `plotly-utils.js` - Plotly.js helpers
+
+**Refactoring Achievement**: Reduced from 2700-line monolithic app.js to 16 focused modules (~2900 lines total)
+
+### UI Tabs
+
+1. **Search**: Keyword and semantic search with filters
+2. **Chat**: RAG interface with conversation history
+3. **Interesting Papers**: Rated/saved papers with export
+4. **Clusters**: Interactive visualization with Plotly.js
 
 ## Git Workflow
 
@@ -429,26 +530,37 @@ See `.gitignore`:
 
 ## External Integrations
 
-### LM Studio
+### LM Studio or Blablador
 
-- **Purpose**: LLM backend for embeddings and chat
-- **URL**: http://localhost:1234 (default)
+- **Purpose**: LLM backend for embeddings, chat, and clustering
+- **URL**: http://localhost:1234 (LM Studio default) or https://blablador.jsc.fz-juelich.de/v1 (Blablador)
 - **API**: OpenAI-compatible endpoints
 - **Models**: Configurable via CHAT_MODEL and EMBEDDING_MODEL
+- **Authentication**: Optional token via LLM_BACKEND_AUTH_TOKEN
 
 ### OpenReview API
 
-- **Purpose**: Download NeurIPS paper data
+- **Purpose**: Download conference paper data (NeurIPS, ICLR, ICML)
 - **Base URL**: https://api.openreview.net
 - **Rate Limits**: Respect API rate limits
 - **Caching**: Use caching to reduce API calls
 
 ### ChromaDB
 
-- **Purpose**: Vector embeddings storage
-- **Path**: Configurable via EMBEDDING_DB_PATH
+- **Purpose**: Vector embeddings storage for semantic search
+- **Path**: Configurable via EMBEDDING_DB_PATH (default: chroma_db)
 - **Collections**: Papers stored in collections
 - **Persistence**: Automatic disk persistence
+- **Metadata**: Tracks embedding model and parameters
+
+### SQLAlchemy Database
+
+- **Purpose**: Paper metadata storage with ORM
+- **Backends**: SQLite (default) or PostgreSQL
+- **Configuration**: Set via PAPER_DB environment variable
+  - SQLite: `PAPER_DB=data/abstracts.db`
+  - PostgreSQL: `PAPER_DB=postgresql://user:password@localhost/abstracts`
+- **Models**: Paper, EmbeddingsMetadata, ClusteringCache
 
 ## Best Practices
 
@@ -486,7 +598,7 @@ See `.gitignore`:
 ### Adding a New Feature
 
 1. Create feature branch
-2. Implement feature with type hints and docstrings
+2. Implement feature with type hints and NumPy-style docstrings
 3. Write comprehensive tests (unit + integration)
 4. Update documentation (docstrings + user guide)
 5. Run tests: `uv run pytest --cov=src/abstracts_explorer`
@@ -510,6 +622,44 @@ See `.gitignore`:
 4. Review in browser
 5. Commit changes
 
+### Adding a New Conference Plugin
+
+1. Create plugin in `src/abstracts_explorer/plugins/`
+2. Inherit from `DownloaderPlugin` or use `LightweightDownloaderPlugin`
+3. Implement `download()` method
+4. Register plugin in `plugins/__init__.py`
+5. Add tests in `tests/test_plugins_<name>.py`
+6. Update `docs/plugins.md` with usage examples
+
+### Common CLI Commands
+
+```bash
+# Download papers
+abstracts-explorer download --conference neurips --year 2025
+
+# Create embeddings
+abstracts-explorer create-embeddings
+
+# Cluster embeddings
+abstracts-explorer cluster-embeddings --n-clusters 8 --output clusters.json
+
+# Start web UI
+abstracts-explorer web-ui
+
+# Start MCP server
+abstracts-explorer mcp-server
+
+# Export papers
+abstracts-explorer export --format zip --output papers.zip
+
+# List available plugins
+abstracts-explorer list-plugins
+
+# Get help
+abstracts-explorer --help
+abstracts-explorer download --help
+```
+
 ## Troubleshooting
 
 ### Tests Failing
@@ -521,10 +671,11 @@ See `.gitignore`:
 
 ### LM Studio Integration Tests Skipping
 
-- Ensure LM Studio is running
+- Ensure LM Studio or Blablador is running
 - Load the configured chat model (CHAT_MODEL)
 - Load the configured embedding model (EMBEDDING_MODEL)
-- Verify URL in .env matches LM Studio (default: http://localhost:1234)
+- Verify URL in .env matches backend (default: http://localhost:1234)
+- Set LLM_BACKEND_AUTH_TOKEN if using Blablador
 
 ### Documentation Build Errors
 
@@ -541,22 +692,73 @@ See `.gitignore`:
 - Check Python path
 - Verify module structure
 
+### Database Errors
+
+- **SQLite**: Check PAPER_DB path exists and is writable
+- **PostgreSQL**: Verify connection string, ensure server is running
+- **Migration**: Run `abstracts-explorer` commands to auto-create tables
+- **Permissions**: Ensure write access to database directory
+
+### Clustering Performance
+
+- **Slow clustering**: Enable caching with ClusteringCache
+- **Memory issues**: Reduce n_components or use PCA instead of t-SNE/UMAP
+- **Numba errors**: Ensure numba and llvmlite are installed correctly
+
 ## Package Information
 
 - **Name**: abstracts-explorer
-- **Version**: 0.1.0
+- **Version**: Dynamic (managed by hatch-vcs)
 - **Python**: >=3.11
 - **License**: Apache-2.0
 - **CLI Command**: `abstracts-explorer`
 
+## Key Features
+
+### Paper Management
+- Download conference data from NeurIPS, ICLR, ICML, ML4PS
+- Store in SQLite (default) or PostgreSQL database
+- Search by keywords, track, decision status
+- Export papers in ZIP, JSON, or Markdown formats
+
+### Semantic Search & RAG
+- Generate embeddings with ChromaDB
+- Find similar papers using vector similarity
+- RAG chat with conversation history
+- Automatic MCP tool integration for clustering questions
+
+### Clustering & Visualization
+- 5 clustering algorithms: K-Means, DBSCAN, Agglomerative, Spectral, Fuzzy C-Means
+- 3 dimensionality reduction methods: PCA, t-SNE, UMAP
+- LLM-powered automatic cluster labeling
+- Interactive visualization in web UI
+- Database-backed caching for performance
+
+### MCP Server
+- FastMCP-based server for LLM integration
+- Tools for topic analysis, trend detection, recent developments
+- Automatic integration with RAG chat
+- Standalone mode for external LLM clients
+
+### Web Interface
+- Flask-based with 25+ API routes
+- 4 main tabs: Search, Chat, Interesting Papers, Clusters
+- Modular ES6 frontend (16+ modules)
+- Real-time clustering visualization
+- Paper rating and export functionality
+
 ## Key Design Decisions
 
-### Database Schema
+### Database Architecture
 
-- **Integer IDs**: Papers use integer primary keys
-- **Authors table**: Separate table with position tracking
-- **Timestamps**: Track creation time for papers
-- **Indexes**: On year, openreview_id for fast queries
+- **ORM**: SQLAlchemy 2.0+ with declarative base
+- **Multi-backend**: SQLite (default) and PostgreSQL support
+- **Models**: 
+  - `Paper` - Main paper table with indexed fields (title, year, openreview_id)
+  - `EmbeddingsMetadata` - Tracks embedding model and parameters
+  - `ClusteringCache` - Caches clustering results for performance
+- **Migration**: Uses SQLAlchemy's metadata.create_all() for schema creation
+- **Indexes**: On year, openreview_id, title for fast queries
 
 ### Configuration Priority
 
@@ -567,17 +769,33 @@ See `.gitignore`:
 
 ### Testing Strategy
 
-- **Unit tests**: Mock all external dependencies
-- **Integration tests**: Conditional on LM Studio availability
+- **Unit tests**: Mock all external dependencies (APIs, LLM backends, databases)
+- **Integration tests**: Conditional on LM Studio/Blablador availability
+- **E2E tests**: Browser automation with Selenium for web UI
 - **Skip conditions**: Tests skip gracefully when dependencies unavailable
 - **Coverage target**: >80% code coverage
+- **Test markers**: `@pytest.mark.slow`, `@pytest.mark.integration`, `@pytest.mark.e2e`
 
 ### Documentation Approach
 
 - **Markdown first**: Use Markdown for all user-facing docs
-- **Auto-generate API**: Extract from docstrings
+- **Auto-generate API**: Extract from NumPy-style docstrings
 - **Examples included**: Every feature has usage examples
-- **Multiple formats**: Support HTML, PDF, ePub
+- **Multiple formats**: Support HTML, PDF, ePub via Sphinx
+
+### Clustering Architecture
+
+- **Reduction methods**: PCA, t-SNE, UMAP (configurable)
+- **Clustering algorithms**: K-Means, DBSCAN, Agglomerative, Spectral, Fuzzy C-Means
+- **Auto-labeling**: LLM-powered cluster naming via TF-IDF keywords
+- **Caching**: Database-backed caching to avoid recomputation
+- **Visualization**: Interactive Plotly charts in web UI
+
+### MCP Integration
+
+- **Server**: FastMCP-based server for LLM cluster analysis
+- **Auto-integration**: RAG chat automatically uses MCP tools when appropriate
+- **Tools**: Topic frequency, trend analysis, recent developments, visualization
 
 ## Contact & Resources
 
@@ -585,59 +803,33 @@ See `.gitignore`:
 - **Tests**: `tests/`
 - **Configuration**: `.env` (create from `.env.example`)
 
-## Docker Compose Testing for Pull Requests
+## Docker/Podman Deployment
 
-When testing changes via Docker Compose during PR development, use the PR-specific image tag instead of `:latest`.
-
-### Quick Reference
+### Quick Start
 
 ```bash
-# 1. Determine your PR number (e.g., PR #40)
-# Look at the PR URL: https://github.com/thawn/abstracts-explorer/pull/40
+# 1. Create .env file with your configuration
+echo "LLM_BACKEND_AUTH_TOKEN=your_token_here" > .env
 
-# 2. Update docker-compose.yml to use PR image
-# Edit line 7 in docker-compose.yml:
-image: ghcr.io/thawn/abstracts-explorer:pr-40
+# 2. Download docker-compose.yml
+curl -o docker-compose.yml https://raw.githubusercontent.com/thawn/abstracts-explorer/refs/heads/main/docker-compose.yml
 
-# 3. Pull the latest PR image
-docker compose pull
+# 3. Start services
+docker compose up -d    # or: podman-compose up -d
 
-# 4. Start all services (PostgreSQL, ChromaDB, web UI)
-docker compose up -d
-
-# 5. Wait for services to be healthy (~10 seconds)
-sleep 10
-
-# 6. Check service status
-docker compose ps
-# All services should show "healthy" status
-
-# 7. Test the web UI
-curl http://localhost:5000/health
-# Should return: {"status":"healthy"}
-
-# 8. View logs if needed
-docker compose logs abstracts-explorer
-docker compose logs chromadb
-docker compose logs postgres
-
-# 9. Stop and clean up
-docker compose down -v
+# 4. Access at http://localhost:5000
 ```
 
 ### Service Architecture
 
-The Docker Compose setup creates an isolated environment with:
-
+Three services on internal network (`abstracts-network`):
 - **abstracts-explorer** (port 5000) - Web UI, accessible from host
-- **postgres** (port 5432) - PostgreSQL database, **internal only**
-- **chromadb** (port 8000) - Vector database, **internal only**
+- **postgres** (port 5432) - PostgreSQL database, internal only
+- **chromadb** (port 8000) - Vector database, internal only
 
-**Security Note:** Database ports are NOT exposed to the host. All inter-service communication happens via Docker's internal network (`abstracts-network`).
+**Security**: Database ports NOT exposed to host. Inter-service communication via Docker network.
 
-### Environment Variables
-
-The setup uses these key environment variables (set in `.env.docker`):
+### Key Environment Variables (.env.docker)
 
 ```bash
 DATABASE_URL=postgresql://abstracts:abstracts_password@postgres:5432/abstracts
@@ -647,54 +839,57 @@ CHAT_MODEL=gemma-3-4b-it-qat
 EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b
 ```
 
-### Common Issues & Solutions
+### Testing PR Changes with Docker
 
-**Issue:** ChromaDB health check fails
-- **Cause:** Health check uses TCP port checking (bash built-in)
-- **Solution:** Check logs with `docker compose logs chromadb`
-
-**Issue:** Cannot access PostgreSQL from host
-- **Cause:** Port 5432 is intentionally not exposed
-- **Solution:** Use `docker compose exec abstracts-explorer psql ...` or temporarily add port mapping for debugging
-
-**Issue:** Web UI shows "Service unavailable"
-- **Cause:** Databases haven't started yet or connection failed
-- **Solution:** Wait ~10 seconds for health checks, then check logs
-
-### PR Image Tags
-
-- **Format:** `ghcr.io/thawn/abstracts-explorer:pr-<number>`
-- **Example:** `ghcr.io/thawn/abstracts-explorer:pr-40`
-- **When built:** Automatically on every push to a pull request
-- **Availability:** Images are kept until PR is merged or closed
-
-### Testing Workflow
-
-1. **Make code changes** and push to your PR branch
-2. **Wait for CI** to build and push the PR image (~5 minutes)
-3. **Update docker-compose.yml** with `pr-<number>` tag
-4. **Test locally** with `docker compose up -d`
-5. **Verify functionality** via web UI and logs
-6. **Clean up** with `docker compose down -v`
-
-### Additional Commands
+When testing PR changes, use PR-specific image tags:
 
 ```bash
-# Execute CLI commands inside container
+# 1. Update docker-compose.yml (line 7)
+image: ghcr.io/thawn/abstracts-explorer:pr-<number>
+
+# 2. Pull and start
+docker compose pull
+docker compose up -d
+
+# 3. Check health
+docker compose ps
+curl http://localhost:5000/health
+
+# 4. View logs
+docker compose logs abstracts-explorer
+
+# 5. Clean up
+docker compose down -v
+```
+
+**PR Image Tags**: Format `ghcr.io/thawn/abstracts-explorer:pr-<number>`, built automatically on push.
+
+### Common Commands
+
+```bash
+# Execute CLI inside container
 docker compose exec abstracts-explorer abstracts-explorer --help
 
 # Interactive shell
 docker compose exec -it abstracts-explorer /bin/bash
 
-# Restart a specific service
+# Restart service
 docker compose restart abstracts-explorer
 
-# View real-time logs
+# Real-time logs
 docker compose logs -f abstracts-explorer
 ```
 
+### Troubleshooting
+
+**ChromaDB health check fails**: Check logs with `docker compose logs chromadb`
+
+**Cannot access PostgreSQL**: Port not exposed intentionally. Use `docker compose exec abstracts-explorer psql ...`
+
+**Web UI unavailable**: Wait ~10 seconds for health checks, then check logs
+
 ---
 
-**Last Updated**: January 17, 2026
+**Last Updated**: February 3, 2026
 
 This file should be kept up-to-date as the project evolves. When making significant changes to conventions or structure, update this file accordingly.
