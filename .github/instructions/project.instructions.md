@@ -128,7 +128,7 @@ src/abstracts_explorer/    # Main package
     ├── static/           # CSS, JS (modular ES6), vendor files
     └── templates/        # HTML templates
 
-tests/                     # Test suite (22 test files)
+tests/                     # Test suite (19 test files)
 ├── conftest.py           # Shared fixtures
 ├── helpers.py            # Shared helper functions
 ├── test_cli.py           # Tests for cli.py
@@ -430,7 +430,7 @@ open _build/html/index.html
 ### Framework & Structure
 
 - **Backend**: Flask 3.0+ with CORS support
-- **Frontend**: Modular ES6 JavaScript (16+ modules)
+- **Frontend**: Modular ES6 JavaScript (15 modules)
 - **Styling**: TailwindCSS with vendor libraries (Chart.js, Plotly.js, Marked.js)
 - **Production Server**: Waitress WSGI server
 
@@ -464,27 +464,28 @@ open _build/html/index.html
 
 ### Frontend Architecture (Modular ES6)
 
-**Feature Modules:**
+**Feature Modules (5):**
 1. `search.js` - Search functionality
 2. `chat.js` - RAG chat interface
-3. `clusters.js` - Clustering visualization
+3. `clustering.js` - Clustering visualization
 4. `filters.js` - Filter panel
-5. `tabs.js` - Tab navigation
-6. `paper-card.js` - Paper display components
-7. `interesting-papers.js` - Saved papers management
-8. `export.js` - Export functionality
+5. `interesting-papers.js` - Saved papers management
 
-**Utility Modules:**
-1. `constants.js` - Configuration constants
-2. `state.js` - Centralized state management (200+ lines)
-3. `dom-utils.js` - DOM manipulation helpers
-4. `api.js` - API client
-5. `markdown-utils.js` - Markdown rendering
-6. `paper-utils.js` - Paper formatting
-7. `chart-utils.js` - Chart.js helpers
-8. `plotly-utils.js` - Plotly.js helpers
+**UI Component Modules (2):**
+1. `tabs.js` - Tab navigation
+2. `paper-card.js` - Paper display components
 
-**Refactoring Achievement**: Reduced from 2700-line monolithic app.js to 16 focused modules (~2900 lines total)
+**Utility Modules (8):**
+1. `state.js` - Centralized state management (200+ lines)
+2. `api-utils.js` - API client
+3. `cluster-utils.js` - Clustering helpers
+4. `constants.js` - Configuration constants
+5. `dom-utils.js` - DOM manipulation helpers
+6. `markdown-utils.js` - Markdown rendering
+7. `sort-utils.js` - Sorting utilities
+8. `ui-utils.js` - UI helpers
+
+**Architecture**: Refactored from 2700-line monolithic app.js to 15 focused modules
 
 ### UI Tabs
 
@@ -743,7 +744,7 @@ abstracts-explorer download --help
 ### Web Interface
 - Flask-based with 25+ API routes
 - 4 main tabs: Search, Chat, Interesting Papers, Clusters
-- Modular ES6 frontend (16+ modules)
+- Modular ES6 frontend (15 modules)
 - Real-time clustering visualization
 - Paper rating and export functionality
 
