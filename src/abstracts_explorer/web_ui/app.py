@@ -781,6 +781,96 @@ def precalculate_clusters():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/clusters/search", methods=["POST"])
+def search_custom_cluster():
+    """
+    Find papers within a specified distance from a custom search query.
+    
+    This endpoint treats the search query as a clustering center and returns
+    papers within the specified Euclidean distance radius in embedding space.
+    
+    Request Body
+    ------------
+    {
+        "query": str (required) - The search query text
+        "distance": float (optional, default: 150) - Euclidean distance radius
+    }
+    
+    Returns
+    -------
+    dict
+        {
+            "query": str - The search query
+            "query_embedding": list[float] - The generated embedding for the query
+            "distance": float - The distance threshold used
+            "papers": list[dict] - Papers within the distance radius with their distances
+            "count": int - Number of papers found
+        }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or "query" not in data:
+            return jsonify({"error": "Missing required field: query"}), 400
+        
+        query = data["query"]
+        distance_threshold = data.get("distance", 150.0)
+        
+        # Get embeddings manager
+        em = get_embeddings_manager()
+        database = get_database()
+        
+        # Generate embedding for the query
+        query_embedding = em.generate_embedding(query)
+        
+        # Get all embeddings from the collection
+        collection = em.collection
+        all_results = collection.get(include=["embeddings", "metadatas"])
+        
+        if not all_results or not all_results.get("embeddings"):
+            return jsonify({"error": "No embeddings found in collection"}), 404
+        
+        # Calculate distances from query embedding to all paper embeddings
+        import numpy as np
+        query_emb_array = np.array(query_embedding)
+        all_embeddings = np.array(all_results["embeddings"])
+        
+        # Calculate Euclidean distances
+        distances = np.linalg.norm(all_embeddings - query_emb_array, axis=1)
+        
+        # Filter papers within distance threshold
+        within_distance = distances <= distance_threshold
+        matching_indices = np.where(within_distance)[0]
+        
+        # Get paper details for matching papers
+        matching_papers = []
+        for idx in matching_indices:
+            paper_id = all_results["ids"][idx]
+            paper_distance = float(distances[idx])
+            
+            # Get full paper details from database
+            paper = database.get_paper_by_openreview_id(paper_id)
+            if paper:
+                paper_dict = get_paper_with_authors(paper, database)
+                paper_dict["distance"] = paper_distance
+                matching_papers.append(paper_dict)
+        
+        # Sort by distance (closest first)
+        matching_papers.sort(key=lambda p: p["distance"])
+        
+        return jsonify({
+            "query": query,
+            "query_embedding": query_embedding,
+            "distance": distance_threshold,
+            "papers": matching_papers,
+            "count": len(matching_papers)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error searching custom cluster: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/years")
 def get_years():
     """

@@ -35,6 +35,10 @@ let currentHierarchyLevel = 0;
 let maxHierarchyLevel = 0;
 let currentParentId = null;
 
+// Custom query clustering state
+let customQueryClusters = [];  // Array of custom query cluster objects
+let customClusterMode = false;  // Whether custom cluster mode is active
+
 /**
  * Initialize default cluster count from backend
  * @async
@@ -1576,4 +1580,259 @@ export async function precalculateClusters() {
     } catch (error) {
         console.warn('Error starting background clustering pre-calculation:', error);
     }
+}
+
+/**
+ * Search for papers within distance of a custom query
+ * @async
+ */
+export async function searchCustomCluster() {
+    const queryInput = document.getElementById('custom-query-input');
+    const distanceInput = document.getElementById('custom-query-distance');
+    const searchBtn = document.getElementById('search-custom-btn');
+    
+    const query = queryInput.value.trim();
+    if (!query) {
+        alert('Please enter a search query');
+        return;
+    }
+    
+    const distance = parseFloat(distanceInput.value);
+    if (isNaN(distance) || distance <= 0) {
+        alert('Please enter a valid distance value');
+        return;
+    }
+    
+    // Disable button and show loading
+    searchBtn.disabled = true;
+    searchBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Searching...';
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/clusters/search`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, distance })
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Add custom cluster to state
+        const customCluster = {
+            id: `custom_${Date.now()}`,
+            query: data.query,
+            distance: data.distance,
+            papers: data.papers,
+            count: data.count,
+            queryEmbedding: data.query_embedding
+        };
+        
+        customQueryClusters.push(customCluster);
+        customClusterMode = true;
+        
+        // Show statistics
+        displayCustomQueryStats(customCluster);
+        
+        // Update visualization to highlight custom cluster
+        if (clusterData) {
+            updateVisualizationWithCustomCluster(customCluster);
+        }
+        
+        // Update legend to include custom cluster
+        updateLegendWithCustomClusters();
+        
+        console.log(`Found ${data.count} papers within distance ${distance} for query: "${query}"`);
+        
+    } catch (error) {
+        console.error('Error searching custom cluster:', error);
+        alert(`Failed to search: ${error.message}`);
+    } finally {
+        // Re-enable button
+        searchBtn.disabled = false;
+        searchBtn.innerHTML = '<i class="fas fa-search mr-2"></i>Search';
+    }
+}
+
+/**
+ * Display statistics for a custom query cluster
+ * @param {Object} customCluster - Custom cluster data
+ */
+function displayCustomQueryStats(customCluster) {
+    const statsDiv = document.getElementById('custom-query-stats');
+    const statsContent = document.getElementById('custom-query-stats-content');
+    
+    // Show the stats div
+    statsDiv.classList.remove('hidden');
+    
+    // Build statistics HTML
+    const html = `
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div class="bg-purple-50 rounded-lg p-4">
+                <div class="text-sm text-gray-600 mb-1">Query</div>
+                <div class="text-xl font-bold text-purple-700">${customCluster.query}</div>
+            </div>
+            <div class="bg-blue-50 rounded-lg p-4">
+                <div class="text-sm text-gray-600 mb-1">Papers Found</div>
+                <div class="text-xl font-bold text-blue-700">${customCluster.count}</div>
+            </div>
+            <div class="bg-green-50 rounded-lg p-4">
+                <div class="text-sm text-gray-600 mb-1">Distance Radius</div>
+                <div class="text-xl font-bold text-green-700">${customCluster.distance.toFixed(1)}</div>
+            </div>
+        </div>
+        <div class="text-sm text-gray-600 mt-4">
+            <strong>Relevance:</strong> ${customCluster.count} papers found within a Euclidean distance of ${customCluster.distance.toFixed(1)} in the embedding space.
+            ${customCluster.count > 0 
+                ? `The closest paper is at distance ${customCluster.papers[0].distance.toFixed(2)}.` 
+                : 'No papers found within this radius.'}
+        </div>
+    `;
+    
+    statsContent.innerHTML = html;
+}
+
+/**
+ * Update visualization to highlight papers in custom cluster
+ * @param {Object} customCluster - Custom cluster data
+ */
+function updateVisualizationWithCustomCluster(customCluster) {
+    if (!clusterData || !clusterData.reduced_embeddings) {
+        console.warn('No cluster data available for visualization update');
+        return;
+    }
+    
+    // Get the plot div
+    const plotDiv = document.getElementById('cluster-plot');
+    
+    // Find indices of papers in the custom cluster
+    const paperIds = new Set(customCluster.papers.map(p => p.openreview_id));
+    const customIndices = [];
+    const customX = [];
+    const customY = [];
+    const customText = [];
+    
+    clusterData.papers.forEach((paper, idx) => {
+        if (paperIds.has(paper.openreview_id)) {
+            customIndices.push(idx);
+            customX.push(clusterData.reduced_embeddings[idx][0]);
+            customY.push(clusterData.reduced_embeddings[idx][1]);
+            
+            // Find the distance for this paper
+            const matchingPaper = customCluster.papers.find(p => p.openreview_id === paper.openreview_id);
+            const distance = matchingPaper ? matchingPaper.distance.toFixed(2) : 'N/A';
+            customText.push(`${paper.title}<br>Distance: ${distance}`);
+        }
+    });
+    
+    // Add a new trace for custom cluster papers
+    const customTrace = {
+        x: customX,
+        y: customY,
+        mode: 'markers',
+        type: 'scatter',
+        name: `Custom: ${customCluster.query}`,
+        text: customText,
+        hoverinfo: 'text',
+        marker: {
+            size: 12,
+            color: 'red',
+            symbol: 'diamond',
+            line: {
+                color: 'darkred',
+                width: 2
+            }
+        },
+        customdata: customIndices.map(idx => clusterData.papers[idx].openreview_id),
+        showlegend: false  // We'll add it to the legend separately
+    };
+    
+    // Add the trace to the existing plot
+    Plotly.addTraces(plotDiv, customTrace);
+}
+
+/**
+ * Update legend to include custom clusters with delete buttons
+ */
+function updateLegendWithCustomClusters() {
+    const legendDiv = document.getElementById('cluster-legend');
+    
+    if (customQueryClusters.length === 0) {
+        // No custom clusters, just update the regular legend
+        return;
+    }
+    
+    // Get existing legend content (regular clusters)
+    const existingContent = legendDiv.innerHTML;
+    
+    // Build custom clusters section
+    let customClustersHtml = `
+        <div class="border-t-2 border-purple-600 pt-4 mt-4">
+            <h4 class="text-md font-bold text-purple-700 mb-3">
+                <i class="fas fa-search mr-2"></i>Custom Queries
+            </h4>
+    `;
+    
+    customQueryClusters.forEach(cluster => {
+        customClustersHtml += `
+            <div class="flex items-center justify-between mb-3 p-2 bg-purple-50 rounded-lg">
+                <div class="flex-1">
+                    <div class="font-semibold text-sm text-gray-800">${cluster.query}</div>
+                    <div class="text-xs text-gray-600">${cluster.count} papers (d=${cluster.distance})</div>
+                </div>
+                <button onclick="deleteCustomCluster('${cluster.id}')" 
+                    class="ml-2 px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-xs">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        `;
+    });
+    
+    customClustersHtml += '</div>';
+    
+    // Prepend custom clusters to legend (but need to check if there's already custom content)
+    // For now, let's just append
+    if (!legendDiv.querySelector('.border-t-2.border-purple-600')) {
+        legendDiv.innerHTML = existingContent + customClustersHtml;
+    }
+}
+
+/**
+ * Delete a custom cluster
+ * @param {string} clusterId - ID of the custom cluster to delete
+ */
+export async function deleteCustomCluster(clusterId) {
+    // Remove from state
+    const index = customQueryClusters.findIndex(c => c.id === clusterId);
+    if (index === -1) {
+        console.warn('Custom cluster not found:', clusterId);
+        return;
+    }
+    
+    customQueryClusters.splice(index, 1);
+    
+    // If no more custom clusters, exit custom cluster mode
+    if (customQueryClusters.length === 0) {
+        customClusterMode = false;
+        // Hide stats div
+        document.getElementById('custom-query-stats').classList.add('hidden');
+        // Reload clusters to remove custom traces
+        await loadClusters();
+    } else {
+        // Re-render the visualization with remaining custom clusters
+        await loadClusters();
+        customQueryClusters.forEach(cluster => {
+            updateVisualizationWithCustomCluster(cluster);
+        });
+        updateLegendWithCustomClusters();
+    }
+}
+
+// Make custom cluster functions globally accessible for onclick handlers
+if (typeof window !== 'undefined') {
+    window.searchCustomCluster = searchCustomCluster;
+    window.deleteCustomCluster = deleteCustomCluster;
 }
