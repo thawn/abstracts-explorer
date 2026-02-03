@@ -794,6 +794,8 @@ def search_custom_cluster():
     {
         "query": str (required) - The search query text
         "distance": float (optional, default: 1.1) - Euclidean distance radius
+        "conferences": list[str] (optional) - Filter by conferences
+        "years": list[int] (optional) - Filter by years
     }
     
     Returns
@@ -815,15 +817,21 @@ def search_custom_cluster():
         
         query = data["query"]
         distance_threshold = data.get("distance", 1.1)
+        conferences = data.get("conferences")
+        years = data.get("years")
         
         # Get embeddings manager and database
         em = get_embeddings_manager()
         database = get_database()
         
-        # Use clustering module function for business logic
-        from abstracts_explorer.clustering import find_papers_within_distance
-        
-        results = find_papers_within_distance(em, database, query, distance_threshold)
+        # Call EmbeddingsManager method directly
+        results = em.find_papers_within_distance(
+            database=database,
+            query=query,
+            distance_threshold=distance_threshold,
+            conferences=conferences,
+            years=years
+        )
         
         return jsonify(results)
         

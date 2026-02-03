@@ -785,6 +785,8 @@ class EmbeddingsManager:
         database,
         query: str,
         distance_threshold: float = 1.1,
+        conferences: Optional[List[str]] = None,
+        years: Optional[List[int]] = None,
     ) -> Dict[str, Any]:
         """
         Find papers within a specified distance from a custom search query.
@@ -800,6 +802,10 @@ class EmbeddingsManager:
             The search query text
         distance_threshold : float, optional
             Euclidean distance radius, by default 1.1
+        conferences : list[str], optional
+            Filter results to only include papers from these conferences
+        years : list[int], optional
+            Filter results to only include papers from these years
         
         Returns
         -------
@@ -825,6 +831,13 @@ class EmbeddingsManager:
         >>> db.connect()
         >>> results = em.find_papers_within_distance(db, "machine learning", 1.1)
         >>> print(f"Found {results['count']} papers")
+        >>> 
+        >>> # With filters
+        >>> results = em.find_papers_within_distance(
+        ...     db, "deep learning", 1.1, 
+        ...     conferences=["NeurIPS"], 
+        ...     years=[2023, 2024]
+        ... )
         """
         from abstracts_explorer.paper_utils import get_paper_with_authors, PaperFormattingError
         
@@ -865,6 +878,15 @@ class EmbeddingsManager:
                     # Get full paper details from database using uid
                     try:
                         paper_dict = get_paper_with_authors(database, paper_id)
+                        
+                        # Apply conference filter if specified
+                        if conferences and paper_dict.get("conference") not in conferences:
+                            continue
+                        
+                        # Apply year filter if specified
+                        if years and paper_dict.get("year") not in years:
+                            continue
+                        
                         paper_dict["distance"] = float(distance)
                         matching_papers.append(paper_dict)
                     except PaperFormattingError:

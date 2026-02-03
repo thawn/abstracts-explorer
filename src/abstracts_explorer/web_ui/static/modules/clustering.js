@@ -1609,10 +1609,29 @@ export async function searchCustomCluster() {
     searchBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Searching...';
     
     try {
+        // Get selected filters from UI
+        const yearSelect = document.getElementById('year-selector');
+        const conferenceSelect = document.getElementById('conference-selector');
+        const selectedYear = yearSelect ? yearSelect.value : '';
+        const selectedConference = conferenceSelect ? conferenceSelect.value : '';
+        
+        // Build request body with optional filters
+        const requestBody = { query, distance };
+        
+        // Add year filter if selected
+        if (selectedYear) {
+            requestBody.years = [parseInt(selectedYear)];
+        }
+        
+        // Add conference filter if selected
+        if (selectedConference) {
+            requestBody.conferences = [selectedConference];
+        }
+        
         const response = await fetch(`${API_BASE}/api/clusters/search`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query, distance })
+            body: JSON.stringify(requestBody)
         });
         
         if (!response.ok) {
