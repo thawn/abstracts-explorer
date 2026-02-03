@@ -1714,5 +1714,164 @@ class TestClusteringEndpoints:
                 assert response.status_code == 500
                 data = response.get_json()
                 assert "error" in data
+    
+    def test_search_custom_cluster_success(self):
+        """Test successful custom cluster search."""
+        from abstracts_explorer.web_ui.app import app
+        import numpy as np
+        
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
+                with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
+                    # Mock embeddings manager
+                    mock_em = Mock()
+                    mock_query_emb = [0.1] * 100  # Mock 100-dim embedding
+                    mock_em.generate_embedding.return_value = mock_query_emb
+                    
+                    # Mock collection results
+                    mock_collection = Mock()
+                    # Create embeddings: 2 close, 1 far
+                    close_emb1 = np.array([0.1] * 100)
+                    close_emb2 = np.array([0.15] * 100)
+                    far_emb = np.array([10.0] * 100)
+                    
+                    mock_collection.get.return_value = {
+                        "ids": ["paper1", "paper2", "paper3"],
+                        "embeddings": [close_emb1.tolist(), close_emb2.tolist(), far_emb.tolist()],
+                        "metadatas": [{"title": "Paper 1"}, {"title": "Paper 2"}, {"title": "Paper 3"}]
+                    }
+                    mock_em.collection = mock_collection
+                    mock_get_em.return_value = mock_em
+                    
+                    # Mock database
+                    mock_db = Mock()
+                    mock_db.get_paper_by_openreview_id.side_effect = lambda pid: {
+                        "openreview_id": pid,
+                        "title": f"Paper {pid[-1]}",
+                        "abstract": f"Abstract for {pid}",
+                        "year": 2025
+                    }
+                    mock_get_db.return_value = mock_db
+                    
+                    # Mock get_paper_with_authors
+                    with patch("abstracts_explorer.web_ui.app.get_paper_with_authors") as mock_get_paper:
+                        mock_get_paper.side_effect = lambda paper, db: {
+                            **paper,
+                            "authors": ["Author 1"]
+                        }
+                        
+                        response = client.post(
+                            "/api/clusters/search",
+                            json={"query": "Uncertainty quantification", "distance": 150}
+                        )
+                        
+                        assert response.status_code == 200
+                        data = response.get_json()
+                        
+                        assert data["query"] == "Uncertainty quantification"
+                        assert data["distance"] == 150
+                        assert "query_embedding" in data
+                        assert "papers" in data
+                        assert data["count"] >= 0  # Should find some papers
+                        
+                        # Check papers are sorted by distance
+                        if len(data["papers"]) > 1:
+                            for i in range(len(data["papers"]) - 1):
+                                assert data["papers"][i]["distance"] <= data["papers"][i + 1]["distance"]
+    
+    def test_search_custom_cluster_missing_query(self):
+        """Test custom cluster search with missing query parameter."""
+        from abstracts_explorer.web_ui.app import app
+        
+        with app.test_client() as client:
+            response = client.post(
+                "/api/clusters/search",
+                json={"distance": 150}  # Missing query
+            )
+            
+            assert response.status_code == 400
+            data = response.get_json()
+            assert "error" in data
+            assert "query" in data["error"].lower()
+    
+    def test_search_custom_cluster_default_distance(self):
+        """Test custom cluster search uses default distance if not provided."""
+        from abstracts_explorer.web_ui.app import app
+        import numpy as np
+        
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
+                with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
+                    # Mock embeddings manager
+                    mock_em = Mock()
+                    mock_em.generate_embedding.return_value = [0.1] * 100
+                    
+                    # Mock collection with one paper that is far away
+                    mock_collection = Mock()
+                    far_emb = np.array([10.0] * 100)
+                    mock_collection.get.return_value = {
+                        "ids": ["paper1"],
+                        "embeddings": [far_emb.tolist()],
+                        "metadatas": [{"title": "Paper 1"}]
+                    }
+                    mock_em.collection = mock_collection
+                    mock_get_em.return_value = mock_em
+                    
+                    mock_db = Mock()
+                    mock_db.get_paper_by_openreview_id.return_value = None  # Paper not found in DB
+                    mock_get_db.return_value = mock_db
+                    
+                    response = client.post(
+                        "/api/clusters/search",
+                        json={"query": "Test query"}  # No distance specified
+                    )
+                    
+                    assert response.status_code == 200
+                    data = response.get_json()
+                    assert data["distance"] == 150.0  # Default value
+                    assert data["query"] == "Test query"
+    
+    def test_search_custom_cluster_no_embeddings(self):
+        """Test custom cluster search when no embeddings exist."""
+        from abstracts_explorer.web_ui.app import app
+        
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
+                with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
+                    mock_em = Mock()
+                    mock_em.generate_embedding.return_value = [0.1] * 100
+                    
+                    # Mock collection with None embeddings
+                    mock_collection = Mock()
+                    mock_collection.get.return_value = None
+                    mock_em.collection = mock_collection
+                    mock_get_em.return_value = mock_em
+                    
+                    mock_db = Mock()
+                    mock_get_db.return_value = mock_db
+                    
+                    response = client.post(
+                        "/api/clusters/search",
+                        json={"query": "Test query", "distance": 100}
+                    )
+                    
+                    assert response.status_code == 404
+                    data = response.get_json()
+                    assert "error" in data
+    
+    def test_search_custom_cluster_error_handling(self):
+        """Test error handling in custom cluster search."""
+        from abstracts_explorer.web_ui.app import app
+        
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_embeddings_manager", side_effect=Exception("Test error")):
+                response = client.post(
+                    "/api/clusters/search",
+                    json={"query": "Test query", "distance": 100}
+                )
+                
+                assert response.status_code == 500
+                data = response.get_json()
+                assert "error" in data
 
 
