@@ -1760,17 +1760,20 @@ function updateVisualizationWithCustomCluster(customCluster) {
 function updateLegendWithCustomClusters() {
     const legendDiv = document.getElementById('cluster-legend');
     
+    // Remove any existing custom clusters section
+    const existingCustomSection = legendDiv.querySelector('.custom-queries-section');
+    if (existingCustomSection) {
+        existingCustomSection.remove();
+    }
+    
     if (customQueryClusters.length === 0) {
-        // No custom clusters, just update the regular legend
+        // No custom clusters, nothing to add
         return;
     }
     
-    // Get existing legend content (regular clusters)
-    const existingContent = legendDiv.innerHTML;
-    
     // Build custom clusters section
     let customClustersHtml = `
-        <div class="border-t-2 border-purple-600 pt-4 mt-4">
+        <div class="custom-queries-section border-t-2 border-purple-600 pt-4 mt-4">
             <h4 class="text-md font-bold text-purple-700 mb-3">
                 <i class="fas fa-search mr-2"></i>Custom Queries
             </h4>
@@ -1793,11 +1796,8 @@ function updateLegendWithCustomClusters() {
     
     customClustersHtml += '</div>';
     
-    // Prepend custom clusters to legend (but need to check if there's already custom content)
-    // For now, let's just append
-    if (!legendDiv.querySelector('.border-t-2.border-purple-600')) {
-        legendDiv.innerHTML = existingContent + customClustersHtml;
-    }
+    // Append custom clusters section to legend
+    legendDiv.insertAdjacentHTML('beforeend', customClustersHtml);
 }
 
 /**
