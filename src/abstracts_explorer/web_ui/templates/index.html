@@ -565,22 +565,12 @@
                         </label>
                         <input type="number" id="custom-query-distance" 
                             class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-600 focus:border-transparent"
-                            value="150" min="1" step="10">
+                            value="1.1" min="0.1" step="0.1">
                     </div>
                     <button onclick="searchCustomCluster()" id="search-custom-btn"
                         class="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 focus:ring-2 focus:ring-purple-600">
                         <i class="fas fa-search mr-2"></i>Search
                     </button>
-                </div>
-            </div>
-
-            <!-- Custom Query Statistics (initially hidden) -->
-            <div id="custom-query-stats" class="hidden bg-white rounded-lg shadow-md p-6 mb-6">
-                <h3 class="text-xl font-bold text-gray-800 mb-4">
-                    <i class="fas fa-chart-bar text-purple-600 mr-2"></i>Query Statistics
-                </h3>
-                <div id="custom-query-stats-content">
-                    <!-- Statistics will be populated here -->
                 </div>
             </div>
 

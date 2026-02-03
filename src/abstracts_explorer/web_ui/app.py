@@ -793,7 +793,7 @@ def search_custom_cluster():
     ------------
     {
         "query": str (required) - The search query text
-        "distance": float (optional, default: 150) - Euclidean distance radius
+        "distance": float (optional, default: 1.1) - Euclidean distance radius
     }
     
     Returns
@@ -814,63 +814,18 @@ def search_custom_cluster():
             return jsonify({"error": "Missing required field: query"}), 400
         
         query = data["query"]
-        distance_threshold = data.get("distance", 150.0)
+        distance_threshold = data.get("distance", 1.1)
         
-        # Get embeddings manager
+        # Get embeddings manager and database
         em = get_embeddings_manager()
         database = get_database()
         
-        # Generate embedding for the query
-        query_embedding = em.generate_embedding(query)
+        # Use clustering module function for business logic
+        from abstracts_explorer.clustering import find_papers_within_distance
         
-        # Get all embeddings from the collection
-        collection = em.collection
-        all_results = collection.get(include=["embeddings", "metadatas"])
+        results = find_papers_within_distance(em, database, query, distance_threshold)
         
-        # Check if we have valid results with embeddings
-        # Use explicit checks to avoid "ambiguous truth value" error with arrays
-        embeddings = all_results.get("embeddings") if all_results else None
-        if embeddings is None or len(embeddings) == 0:
-            return jsonify({"error": "No embeddings found in collection"}), 404
-        
-        # Calculate distances from query embedding to all paper embeddings
-        import numpy as np
-        query_emb_array = np.array(query_embedding)
-        all_embeddings = np.array(all_results["embeddings"])
-        
-        # Calculate Euclidean distances
-        distances = np.linalg.norm(all_embeddings - query_emb_array, axis=1)
-        
-        # Filter papers within distance threshold
-        within_distance = distances <= distance_threshold
-        matching_indices = np.where(within_distance)[0]
-        
-        # Get paper details for matching papers
-        matching_papers = []
-        for idx in matching_indices:
-            paper_id = all_results["ids"][idx]
-            paper_distance = float(distances[idx])
-            
-            # Get full paper details from database using uid
-            try:
-                paper_dict = get_paper_with_authors(database, paper_id)
-                paper_dict["distance"] = paper_distance
-                matching_papers.append(paper_dict)
-            except PaperFormattingError:
-                # Paper not found in database, skip it
-                logger.warning(f"Paper {paper_id} not found in database, skipping")
-                continue
-        
-        # Sort by distance (closest first)
-        matching_papers.sort(key=lambda p: p["distance"])
-        
-        return jsonify({
-            "query": query,
-            "query_embedding": query_embedding,
-            "distance": distance_threshold,
-            "papers": matching_papers,
-            "count": len(matching_papers)
-        })
+        return jsonify(results)
         
     except Exception as e:
         logger.error(f"Error searching custom cluster: {e}", exc_info=True)

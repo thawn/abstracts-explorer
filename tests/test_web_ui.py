@@ -1825,7 +1825,7 @@ class TestClusteringEndpoints:
                     
                     assert response.status_code == 200
                     data = response.get_json()
-                    assert data["distance"] == 150.0  # Default value
+                    assert data["distance"] == 1.1  # New default value
                     assert data["query"] == "Test query"
     
     def test_search_custom_cluster_no_embeddings(self):
@@ -1852,7 +1852,8 @@ class TestClusteringEndpoints:
                         json={"query": "Test query", "distance": 100}
                     )
                     
-                    assert response.status_code == 404
+                    # Now returns 500 since ClusteringError is raised
+                    assert response.status_code == 500
                     data = response.get_json()
                     assert "error" in data
     

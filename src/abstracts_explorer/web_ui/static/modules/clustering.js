@@ -1637,16 +1637,8 @@ export async function searchCustomCluster() {
         customQueryClusters.push(customCluster);
         customClusterMode = true;
         
-        // Show statistics
-        displayCustomQueryStats(customCluster);
-        
-        // Update visualization to highlight custom cluster
-        if (clusterData) {
-            updateVisualizationWithCustomCluster(customCluster);
-        }
-        
-        // Update legend to include custom cluster
-        updateLegendWithCustomClusters();
+        // Re-visualize in custom cluster mode
+        visualizeClustersWithCustomQueries();
         
         console.log(`Found ${data.count} papers within distance ${distance} for query: "${query}"`);
         
@@ -1661,103 +1653,270 @@ export async function searchCustomCluster() {
 }
 
 /**
+ * Visualize clusters with custom queries in custom cluster mode
+ * In this mode:
+ * - All non-matching papers are colored blue
+ * - Each custom query's papers get a unique color
+ * - Query terms are shown as cluster centers (stars)
+ * - Normal legend is replaced with custom query legend
+ */
+function visualizeClustersWithCustomQueries() {
+    if (!clusterData || !clusterData.points) {
+        console.error('No cluster data to visualize');
+        return;
+    }
+    
+    const points = clusterData.points;
+    const traces = [];
+    
+    // Build a set of all paper IDs that match any custom query
+    const matchingPaperIds = new Set();
+    customQueryClusters.forEach(cluster => {
+        cluster.papers.forEach(paper => {
+            // Use uid for matching
+            matchingPaperIds.add(paper.uid);
+        });
+    });
+    
+    // Create a map from paper id to point
+    const paperIdToPoint = {};
+    points.forEach(point => {
+        paperIdToPoint[point.id] = point;
+    });
+    
+    // Collect all non-matching papers (will be colored blue)
+    const nonMatchingPoints = points.filter(p => !matchingPaperIds.has(p.id));
+    
+    // Add trace for non-matching papers (blue)
+    if (nonMatchingPoints.length > 0) {
+        traces.push({
+            x: nonMatchingPoints.map(p => p.x),
+            y: nonMatchingPoints.map(p => p.y),
+            mode: 'markers',
+            type: 'scatter',
+            name: 'Other papers',
+            text: nonMatchingPoints.map(p => p.title || p.id),
+            customdata: nonMatchingPoints.map(p => ({
+                id: p.id,
+                title: p.title || '',
+                year: p.year || '',
+                conference: p.conference || ''
+            })),
+            marker: {
+                color: '#3B82F6',  // Blue color
+                size: 8,
+                opacity: 0.5,
+                line: {
+                    color: 'white',
+                    width: 0.5
+                }
+            },
+            hovertemplate: '<b>%{text}</b><br>' +
+                          'Year: %{customdata.year}<br>' +
+                          'Conference: %{customdata.conference}<br>' +
+                          '<extra></extra>',
+            showlegend: false
+        });
+    }
+    
+    // Add traces for each custom query cluster with unique colors
+    customQueryClusters.forEach((cluster, idx) => {
+        // Assign a distinct color from the color palette
+        const clusterColor = PLOTLY_COLORS[idx % PLOTLY_COLORS.length];
+        
+        // Get the points for papers in this cluster
+        const clusterPoints = cluster.papers
+            .map(paper => paperIdToPoint[paper.uid])
+            .filter(p => p !== undefined);
+        
+        if (clusterPoints.length === 0) {
+            console.warn(`No points found for custom cluster: ${cluster.query}`);
+            return;
+        }
+        
+        // Add trace for cluster papers
+        traces.push({
+            x: clusterPoints.map(p => p.x),
+            y: clusterPoints.map(p => p.y),
+            mode: 'markers',
+            type: 'scatter',
+            name: `${cluster.query} (${cluster.count})`,
+            text: clusterPoints.map(p => p.title || p.id),
+            customdata: clusterPoints.map(p => ({
+                id: p.id,
+                title: p.title || '',
+                year: p.year || '',
+                conference: p.conference || '',
+                distance: cluster.papers.find(cp => cp.uid === p.id)?.distance || 0
+            })),
+            marker: {
+                color: clusterColor,
+                size: 10,
+                opacity: 0.8,
+                line: {
+                    color: 'white',
+                    width: 1
+                }
+            },
+            hovertemplate: '<b>%{text}</b><br>' +
+                          'Year: %{customdata.year}<br>' +
+                          'Conference: %{customdata.conference}<br>' +
+                          'Distance: %{customdata.distance:.3f}<br>' +
+                          '<extra></extra>',
+            legendgroup: cluster.id
+        });
+        
+        // Calculate center position as mean of cluster points
+        const centerX = clusterPoints.reduce((sum, p) => sum + p.x, 0) / clusterPoints.length;
+        const centerY = clusterPoints.reduce((sum, p) => sum + p.y, 0) / clusterPoints.length;
+        
+        // Add cluster center as star marker
+        traces.push({
+            x: [centerX],
+            y: [centerY],
+            mode: 'markers+text',
+            type: 'scatter',
+            name: `${cluster.query} (center)`,
+            text: [cluster.query],
+            textposition: 'top center',
+            marker: {
+                color: clusterColor,
+                symbol: 'star',
+                size: 20,
+                opacity: 1.0,
+                line: {
+                    color: 'white',
+                    width: 2
+                }
+            },
+            hovertemplate: '<b>Query: %{text}</b><br>' +
+                          `Papers: ${cluster.count}<br>` +
+                          '<extra></extra>',
+            showlegend: false,
+            legendgroup: cluster.id
+        });
+    });
+    
+    // Layout configuration
+    const layout = {
+        title: '',
+        xaxis: {
+            title: '',
+            zeroline: false,
+            showgrid: false,
+            showticklabels: false,
+            ticks: ''
+        },
+        yaxis: {
+            title: '',
+            zeroline: false,
+            showgrid: false,
+            showticklabels: false,
+            ticks: ''
+        },
+        hovermode: 'closest',
+        showlegend: false,  // We'll use custom legend
+        plot_bgcolor: 'white',
+        paper_bgcolor: 'white',
+        margin: {
+            l: 50,
+            r: 50,
+            t: 50,
+            b: 50
+        },
+        hoverlabel: {
+            namelength: -1,
+            align: 'left'
+        }
+    };
+    
+    const config = {
+        responsive: true,
+        displayModeBar: true,
+        modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+        displaylogo: false,
+        toImageButtonOptions: {
+            format: 'png',
+            filename: 'custom_cluster_plot',
+            height: 800,
+            width: 800,
+            scale: 2
+        }
+    };
+    
+    const plotDiv = document.getElementById('cluster-plot');
+    Plotly.react(plotDiv, traces, layout, config);
+    
+    // Add click handler
+    plotDiv.on('plotly_click', function(data) {
+        if (data.points.length > 0) {
+            const point = data.points[0];
+            const paperId = point.customdata?.id || point.data.customdata?.[point.pointIndex]?.id;
+            if (paperId) {
+                showClusterPaperDetails(paperId);
+            }
+        }
+    });
+    
+    // Update custom legend
+    updateCustomQueryLegend();
+}
+
+/**
+ * Update custom legend showing only custom queries
+ */
+function updateCustomQueryLegend() {
+    const legendDiv = document.getElementById('cluster-legend');
+    
+    if (customQueryClusters.length === 0) {
+        legendDiv.innerHTML = '<p class="text-gray-500 text-sm">No custom queries</p>';
+        return;
+    }
+    
+    let html = '<div class="space-y-3">';
+    html += '<h4 class="text-md font-bold text-gray-700 mb-3">Custom Queries</h4>';
+    
+    customQueryClusters.forEach((cluster, idx) => {
+        const clusterColor = PLOTLY_COLORS[idx % PLOTLY_COLORS.length];
+        const escapedQuery = escapeHtml(cluster.query);
+        
+        html += `
+            <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100">
+                <div class="flex items-center gap-3 flex-1">
+                    <div class="w-4 h-4 rounded-full" style="background-color: ${clusterColor}"></div>
+                    <div class="flex-1">
+                        <div class="font-semibold text-sm text-gray-800">${escapedQuery}</div>
+                        <div class="text-xs text-gray-600">${cluster.count} papers (d=${cluster.distance.toFixed(2)})</div>
+                    </div>
+                </div>
+                <button onclick="deleteCustomCluster('${cluster.id}')" 
+                    class="ml-2 px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-xs">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    legendDiv.innerHTML = html;
+}
+
+/**
  * Display statistics for a custom query cluster
  * @param {Object} customCluster - Custom cluster data
  */
 function displayCustomQueryStats(customCluster) {
-    const statsDiv = document.getElementById('custom-query-stats');
-    const statsContent = document.getElementById('custom-query-stats-content');
-    
-    // Show the stats div
-    statsDiv.classList.remove('hidden');
-    
-    // Escape query text to prevent XSS
-    const escapedQuery = escapeHtml(customCluster.query);
-    
-    // Build statistics HTML
-    const html = `
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-            <div class="bg-purple-50 rounded-lg p-4">
-                <div class="text-sm text-gray-600 mb-1">Query</div>
-                <div class="text-xl font-bold text-purple-700">${escapedQuery}</div>
-            </div>
-            <div class="bg-blue-50 rounded-lg p-4">
-                <div class="text-sm text-gray-600 mb-1">Papers Found</div>
-                <div class="text-xl font-bold text-blue-700">${customCluster.count}</div>
-            </div>
-            <div class="bg-green-50 rounded-lg p-4">
-                <div class="text-sm text-gray-600 mb-1">Distance Radius</div>
-                <div class="text-xl font-bold text-green-700">${customCluster.distance.toFixed(1)}</div>
-            </div>
-        </div>
-        <div class="text-sm text-gray-600 mt-4">
-            <strong>Relevance:</strong> ${customCluster.count} papers found within a Euclidean distance of ${customCluster.distance.toFixed(1)} in the embedding space.
-            ${customCluster.count > 0 
-                ? `The closest paper is at distance ${customCluster.papers[0].distance.toFixed(2)}.` 
-                : 'No papers found within this radius.'}
-        </div>
-    `;
-    
-    statsContent.innerHTML = html;
+    // Statistics removed per user request
+    // This function is kept for compatibility but does nothing
 }
 
 /**
  * Update visualization to highlight papers in custom cluster
  * @param {Object} customCluster - Custom cluster data
+ * @deprecated This function is no longer used in custom cluster mode
  */
 function updateVisualizationWithCustomCluster(customCluster) {
-    if (!clusterData || !clusterData.reduced_embeddings) {
-        console.warn('No cluster data available for visualization update');
-        return;
-    }
-    
-    // Get the plot div
-    const plotDiv = document.getElementById('cluster-plot');
-    
-    // Find indices of papers in the custom cluster
-    const paperIds = new Set(customCluster.papers.map(p => p.openreview_id));
-    const customIndices = [];
-    const customX = [];
-    const customY = [];
-    const customText = [];
-    
-    clusterData.papers.forEach((paper, idx) => {
-        if (paperIds.has(paper.openreview_id)) {
-            customIndices.push(idx);
-            customX.push(clusterData.reduced_embeddings[idx][0]);
-            customY.push(clusterData.reduced_embeddings[idx][1]);
-            
-            // Find the distance for this paper
-            const matchingPaper = customCluster.papers.find(p => p.openreview_id === paper.openreview_id);
-            const distance = matchingPaper ? matchingPaper.distance.toFixed(2) : 'N/A';
-            customText.push(`${paper.title}<br>Distance: ${distance}`);
-        }
-    });
-    
-    // Add a new trace for custom cluster papers
-    const customTrace = {
-        x: customX,
-        y: customY,
-        mode: 'markers',
-        type: 'scatter',
-        name: `Custom: ${customCluster.query}`,
-        text: customText,
-        hoverinfo: 'text',
-        marker: {
-            size: 12,
-            color: 'red',
-            symbol: 'diamond',
-            line: {
-                color: 'darkred',
-                width: 2
-            }
-        },
-        customdata: customIndices.map(idx => clusterData.papers[idx].openreview_id),
-        showlegend: false  // We'll add it to the legend separately
-    };
-    
-    // Add the trace to the existing plot
-    Plotly.addTraces(plotDiv, customTrace);
+    // No longer used - replaced by visualizeClustersWithCustomQueries
 }
 
 /**
@@ -1773,52 +1932,10 @@ function escapeHtml(text) {
 
 /**
  * Update legend to include custom clusters with delete buttons
+ * @deprecated Replaced by updateCustomQueryLegend
  */
 function updateLegendWithCustomClusters() {
-    const legendDiv = document.getElementById('cluster-legend');
-    
-    // Remove any existing custom clusters section
-    const existingCustomSection = legendDiv.querySelector('.custom-queries-section');
-    if (existingCustomSection) {
-        existingCustomSection.remove();
-    }
-    
-    if (customQueryClusters.length === 0) {
-        // No custom clusters, nothing to add
-        return;
-    }
-    
-    // Build custom clusters section
-    let customClustersHtml = `
-        <div class="custom-queries-section border-t-2 border-purple-600 pt-4 mt-4">
-            <h4 class="text-md font-bold text-purple-700 mb-3">
-                <i class="fas fa-search mr-2"></i>Custom Queries
-            </h4>
-    `;
-    
-    customQueryClusters.forEach(cluster => {
-        // Escape user-controlled data to prevent XSS
-        const escapedQuery = escapeHtml(cluster.query);
-        const escapedId = escapeHtml(cluster.id);
-        
-        customClustersHtml += `
-            <div class="flex items-center justify-between mb-3 p-2 bg-purple-50 rounded-lg">
-                <div class="flex-1">
-                    <div class="font-semibold text-sm text-gray-800">${escapedQuery}</div>
-                    <div class="text-xs text-gray-600">${cluster.count} papers (d=${cluster.distance})</div>
-                </div>
-                <button onclick="deleteCustomCluster('${escapedId}')" 
-                    class="ml-2 px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-xs">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-        `;
-    });
-    
-    customClustersHtml += '</div>';
-    
-    // Append custom clusters section to legend
-    legendDiv.insertAdjacentHTML('beforeend', customClustersHtml);
+    // No longer used - replaced by updateCustomQueryLegend
 }
 
 /**
@@ -1838,17 +1955,13 @@ export async function deleteCustomCluster(clusterId) {
     // If no more custom clusters, exit custom cluster mode
     if (customQueryClusters.length === 0) {
         customClusterMode = false;
-        // Hide stats div
-        document.getElementById('custom-query-stats').classList.add('hidden');
-        // Reload clusters to remove custom traces
-        await loadClusters();
+        // Reload normal clusters
+        visualizeClusters();
+        // Update normal legend
+        updateLegend();
     } else {
         // Re-render the visualization with remaining custom clusters
-        await loadClusters();
-        customQueryClusters.forEach(cluster => {
-            updateVisualizationWithCustomCluster(cluster);
-        });
-        updateLegendWithCustomClusters();
+        visualizeClustersWithCustomQueries();
     }
 }
 
