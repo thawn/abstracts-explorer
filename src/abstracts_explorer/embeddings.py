@@ -779,3 +779,113 @@ class EmbeddingsManager:
         
         # Limit results (filtering already done at database level)
         return papers[:limit]
+
+    def find_papers_within_distance(
+        self,
+        database,
+        query: str,
+        distance_threshold: float = 1.1,
+    ) -> Dict[str, Any]:
+        """
+        Find papers within a specified distance from a custom search query.
+        
+        This method treats the search query as a clustering center and returns
+        papers within the specified Euclidean distance radius in embedding space.
+        
+        Parameters
+        ----------
+        database : DatabaseManager
+            Database manager instance for retrieving paper details
+        query : str
+            The search query text
+        distance_threshold : float, optional
+            Euclidean distance radius, by default 1.1
+        
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - query: str - The search query
+            - query_embedding: list[float] - The generated embedding for the query
+            - distance: float - The distance threshold used
+            - papers: list[dict] - Papers within the distance radius with their distances
+            - count: int - Number of papers found
+        
+        Raises
+        ------
+        EmbeddingsError
+            If embeddings collection is empty or operation fails
+        
+        Examples
+        --------
+        >>> em = EmbeddingsManager()
+        >>> em.connect()
+        >>> em.create_collection()
+        >>> db = DatabaseManager()
+        >>> db.connect()
+        >>> results = em.find_papers_within_distance(db, "machine learning", 1.1)
+        >>> print(f"Found {results['count']} papers")
+        """
+        from abstracts_explorer.paper_utils import get_paper_with_authors, PaperFormattingError
+        
+        if not self.collection:
+            raise EmbeddingsError("Collection not initialized. Call create_collection() first.")
+        
+        if not query or not query.strip():
+            raise EmbeddingsError("Query cannot be empty")
+        
+        try:
+            # Generate embedding for the query
+            query_embedding = self.generate_embedding(query)
+            
+            # Get total count of papers in collection
+            total_count = self.collection.count()
+            if total_count == 0:
+                raise EmbeddingsError("No papers in collection")
+            
+            # Query all papers and get distances
+            # Using collection.query() which returns papers sorted by distance
+            results = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=total_count,  # Get all papers
+                include=["distances", "metadatas"]
+            )
+            
+            # Extract results (query returns nested lists)
+            paper_ids = results['ids'][0] if results.get('ids') else []
+            distances = results['distances'][0] if results.get('distances') else []
+            
+            if not paper_ids:
+                raise EmbeddingsError("No results from collection query")
+            
+            # Filter papers within distance threshold
+            matching_papers = []
+            for idx, (paper_id, distance) in enumerate(zip(paper_ids, distances)):
+                if distance <= distance_threshold:
+                    # Get full paper details from database using uid
+                    try:
+                        paper_dict = get_paper_with_authors(database, paper_id)
+                        paper_dict["distance"] = float(distance)
+                        matching_papers.append(paper_dict)
+                    except PaperFormattingError:
+                        # Paper not found in database, skip it
+                        logger.warning(f"Paper {paper_id} not found in database, skipping")
+                        continue
+                else:
+                    # Since results are sorted by distance, we can break early
+                    break
+            
+            return {
+                "query": query,
+                "query_embedding": query_embedding,
+                "distance": distance_threshold,
+                "papers": matching_papers,
+                "count": len(matching_papers),
+            }
+            
+        except EmbeddingsError:
+            # Re-raise EmbeddingsError as-is
+            raise
+        except Exception as e:
+            logger.error(f"Error finding papers within distance: {e}", exc_info=True)
+            raise EmbeddingsError(f"Failed to find papers within distance: {str(e)}") from e

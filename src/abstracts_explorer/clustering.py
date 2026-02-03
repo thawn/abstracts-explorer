@@ -1988,8 +1988,7 @@ def find_papers_within_distance(
     """
     Find papers within a specified distance from a custom search query.
     
-    This function treats the search query as a clustering center and returns
-    papers within the specified Euclidean distance radius in embedding space.
+    This function is a convenience wrapper that delegates to EmbeddingsManager.
     
     Parameters
     ----------
@@ -2005,17 +2004,13 @@ def find_papers_within_distance(
     Returns
     -------
     dict
-        Dictionary containing:
-        - query: str - The search query
-        - query_embedding: list[float] - The generated embedding for the query
-        - distance: float - The distance threshold used
-        - papers: list[dict] - Papers within the distance radius with their distances
-        - count: int - Number of papers found
+        Dictionary containing query results
+        See EmbeddingsManager.find_papers_within_distance for details
     
     Raises
     ------
     ClusteringError
-        If embeddings collection is empty or operation fails
+        If the operation fails
     
     Examples
     --------
@@ -2026,66 +2021,12 @@ def find_papers_within_distance(
     >>> results = find_papers_within_distance(em, db, "machine learning", 1.1)
     >>> print(f"Found {results['count']} papers")
     """
-    from abstracts_explorer.paper_utils import get_paper_with_authors, PaperFormattingError
-    
     try:
-        # Generate embedding for the query
-        query_embedding = embeddings_manager.generate_embedding(query)
-        
-        # Get all embeddings from the collection
-        collection = embeddings_manager.collection
-        if collection is None:
-            raise ClusteringError("Collection not initialized")
-        
-        all_results = collection.get(include=["embeddings", "metadatas"])
-        
-        # Check if we have valid results with embeddings
-        # Use explicit checks to avoid "ambiguous truth value" error with arrays
-        if all_results is None:
-            raise ClusteringError("No results from collection")
-        
-        embeddings = all_results.get("embeddings")
-        if embeddings is None or len(embeddings) == 0:
-            raise ClusteringError("No embeddings found in collection")
-        
-        # Calculate distances from query embedding to all paper embeddings
-        query_emb_array = np.array(query_embedding)
-        all_embeddings = np.array(all_results["embeddings"])
-        
-        # Calculate Euclidean distances
-        distances = np.linalg.norm(all_embeddings - query_emb_array, axis=1)
-        
-        # Filter papers within distance threshold
-        within_distance = distances <= distance_threshold
-        matching_indices = np.where(within_distance)[0]
-        
-        # Get paper details for matching papers
-        matching_papers = []
-        for idx in matching_indices:
-            paper_id = all_results["ids"][idx]
-            paper_distance = float(distances[idx])
-            
-            # Get full paper details from database using uid
-            try:
-                paper_dict = get_paper_with_authors(database, paper_id)
-                paper_dict["distance"] = paper_distance
-                matching_papers.append(paper_dict)
-            except PaperFormattingError:
-                # Paper not found in database, skip it
-                logger.warning(f"Paper {paper_id} not found in database, skipping")
-                continue
-        
-        # Sort by distance (closest first)
-        matching_papers.sort(key=lambda p: p["distance"])
-        
-        return {
-            "query": query,
-            "query_embedding": query_embedding,
-            "distance": distance_threshold,
-            "papers": matching_papers,
-            "count": len(matching_papers),
-        }
-        
+        return embeddings_manager.find_papers_within_distance(
+            database=database,
+            query=query,
+            distance_threshold=distance_threshold
+        )
     except Exception as e:
         logger.error(f"Error finding papers within distance: {e}", exc_info=True)
         raise ClusteringError(f"Failed to find papers within distance: {str(e)}") from e
