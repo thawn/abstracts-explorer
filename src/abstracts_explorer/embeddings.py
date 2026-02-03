@@ -856,12 +856,35 @@ class EmbeddingsManager:
             if total_count == 0:
                 raise EmbeddingsError("No papers in collection")
             
+            # Build where clause for filtering
+            where_clause: Optional[Dict[str, Any]] = None
+            if conferences or years:
+                filters: list[Dict[str, Any]] = []
+                if conferences:
+                    if len(conferences) == 1:
+                        filters.append({"conference": conferences[0]})
+                    else:
+                        filters.append({"conference": {"$in": conferences}})
+                
+                if years:
+                    if len(years) == 1:
+                        filters.append({"year": years[0]})
+                    else:
+                        filters.append({"year": {"$in": years}})
+                
+                # Combine filters with $and if multiple
+                if len(filters) == 1:
+                    where_clause = filters[0]
+                else:
+                    where_clause = {"$and": filters}
+            
             # Query all papers and get distances
             # Using collection.query() which returns papers sorted by distance
             results = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=total_count,  # Get all papers
-                include=["distances", "metadatas"]
+                include=["distances", "metadatas"],
+                where=where_clause
             )
             
             # Extract results (query returns nested lists)
@@ -878,15 +901,6 @@ class EmbeddingsManager:
                     # Get full paper details from database using uid
                     try:
                         paper_dict = get_paper_with_authors(database, paper_id)
-                        
-                        # Apply conference filter if specified
-                        if conferences and paper_dict.get("conference") not in conferences:
-                            continue
-                        
-                        # Apply year filter if specified
-                        if years and paper_dict.get("year") not in years:
-                            continue
-                        
                         paper_dict["distance"] = float(distance)
                         matching_papers.append(paper_dict)
                     except PaperFormattingError:

@@ -18,6 +18,7 @@ from .mcp_server import (
     get_topic_evolution,
     get_recent_developments,
     get_cluster_visualization,
+    analyze_topic_relevance,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,47 @@ class MCPToolsError(Exception):
 
 # Define MCP tools in OpenAI function calling format
 MCP_TOOLS_SCHEMA = [
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_topic_relevance",
+            "description": (
+                "Analyze the relevance of a research topic by counting papers within a specified "
+                "distance in embedding space. Use this tool when the user asks about: topic relevance, "
+                "popularity of a research area, how many papers cover a topic, or identifying significant "
+                "research themes at a conference."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The topic or research question to analyze (e.g., 'Uncertainty quantification')"
+                    },
+                    "distance_threshold": {
+                        "type": "number",
+                        "description": "Maximum Euclidean distance to consider papers relevant (default: 1.1)",
+                        "default": 1.1
+                    },
+                    "conferences": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Filter by specific conferences (e.g., ['NeurIPS', 'ICLR'])"
+                    },
+                    "years": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Filter by specific years (e.g., [2024, 2025])"
+                    },
+                    "collection_name": {
+                        "type": "string",
+                        "description": "Name of ChromaDB collection (optional)"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
     {
         "type": "function",
         "function": {
@@ -227,7 +269,9 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
     logger.info(f"Executing MCP tool: {tool_name} with arguments: {arguments}")
     
     try:
-        if tool_name == "get_cluster_topics":
+        if tool_name == "analyze_topic_relevance":
+            return analyze_topic_relevance(**arguments)
+        elif tool_name == "get_cluster_topics":
             return get_cluster_topics(**arguments)
         elif tool_name == "get_topic_evolution":
             return get_topic_evolution(**arguments)
@@ -285,7 +329,9 @@ def format_tool_result_for_llm(tool_name: str, result: str) -> str:
             return f"Tool execution failed: {result_data['error']}"
         
         # Format based on tool type
-        if tool_name == "get_cluster_topics":
+        if tool_name == "analyze_topic_relevance":
+            return _format_topic_relevance_result(result_data)
+        elif tool_name == "get_cluster_topics":
             return _format_cluster_topics_result(result_data)
         elif tool_name == "get_topic_evolution":
             return _format_topic_evolution_result(result_data)
@@ -300,6 +346,50 @@ def format_tool_result_for_llm(tool_name: str, result: str) -> str:
     except json.JSONDecodeError:
         logger.warning(f"Failed to parse tool result as JSON: {result[:100]}...")
         return result
+
+
+def _format_topic_relevance_result(data: Dict[str, Any]) -> str:
+    """Format topic relevance result for LLM."""
+    lines = [f"Topic Relevance Analysis for '{data.get('query', 'unknown')}':\n"]
+    
+    total = data.get("total_papers", 0)
+    distance = data.get("distance_threshold", 0)
+    relevance = data.get("relevance_score", 0)
+    
+    lines.append(f"Papers found: {total} within distance {distance}")
+    lines.append(f"Relevance score: {relevance}/100\n")
+    
+    if total > 0:
+        # Show conferences
+        conferences = data.get("conferences", {})
+        if conferences:
+            lines.append("Conferences:")
+            for conf, count in list(conferences.items())[:5]:
+                lines.append(f"  {conf}: {count} papers")
+        
+        # Show years
+        years = data.get("years", {})
+        if years:
+            lines.append("\nYears:")
+            for year, count in sorted(years.items()):
+                lines.append(f"  {year}: {count} papers")
+        
+        # Show sample papers
+        sample_papers = data.get("sample_papers", [])
+        if sample_papers:
+            lines.append("\nClosest papers:")
+            for i, paper in enumerate(sample_papers[:3], 1):
+                title = paper.get("title", "Unknown")
+                dist = paper.get("distance", 0)
+                lines.append(f"  {i}. {title} (distance: {dist:.3f})")
+        
+        closest = data.get("closest_distance")
+        if closest is not None:
+            lines.append(f"\nClosest paper distance: {closest:.3f}")
+    else:
+        lines.append("\nNo papers found matching the query within the distance threshold.")
+    
+    return "\n".join(lines)
 
 
 def _format_cluster_topics_result(data: Dict[str, Any]) -> str:
