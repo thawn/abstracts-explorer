@@ -24,6 +24,22 @@ import {
 import { formatPaperCard } from './paper-card.js';
 
 /**
+ * Track whether donation prompt was shown in this session to avoid being intrusive
+ */
+let donationPromptShownThisSession = false;
+
+/**
+ * Standard donation confirmation message
+ */
+const DONATION_CONFIRMATION_MESSAGE = 
+    'Would you like to donate your paper ratings to help improve our service?\n\n' +
+    '✓ Your data will be fully anonymized\n' +
+    '✓ No personal information will be collected\n' +
+    '✓ Data will only be used to improve paper recommendations\n' +
+    '✓ You can donate as many times as you like\n\n' +
+    'Thank you for contributing to research!';
+
+/**
  * Load and display interesting papers
  * @async
  */
@@ -311,18 +327,23 @@ export async function saveInterestingPapersAsMarkdown(event) {
         return;
     }
 
-    // Show data donation prompt before export
-    const donateMessage = 
-        '💡 Before you export, would you like to donate your ratings to help improve our service?\n\n' +
-        '✓ Fully anonymized - no personal data collected\n' +
-        '✓ Used only to improve recommendations\n' +
-        '✓ Takes just a moment\n\n' +
-        'Click "OK" to donate now (recommended)\n' +
-        'Click "Cancel" to skip and continue with export';
-    
-    if (confirm(donateMessage)) {
-        // User wants to donate - call donation function
-        await donateInterestingPapersData();
+    // Show data donation prompt before export (only once per session to avoid being intrusive)
+    if (!donationPromptShownThisSession) {
+        const donateMessage = 
+            '💡 Before you export, would you like to donate your ratings to help improve our service?\n\n' +
+            '✓ Fully anonymized - no personal data collected\n' +
+            '✓ Used only to improve recommendations\n' +
+            '✓ Takes just a moment\n\n' +
+            'Click "OK" to donate now (recommended)\n' +
+            'Click "Cancel" to skip and continue with export';
+        
+        if (confirm(donateMessage)) {
+            // User wants to donate - call donation function
+            await donateInterestingPapersData();
+        }
+        
+        // Mark that we've shown the prompt this session
+        donationPromptShownThisSession = true;
     }
 
     const button = event.target;
@@ -700,15 +721,7 @@ export async function donateInterestingPapersData() {
     }
 
     // Show confirmation dialog with information about data anonymization
-    const confirmMessage = 
-        'Would you like to donate your paper ratings to help improve our service?\n\n' +
-        '✓ Your data will be fully anonymized\n' +
-        '✓ No personal information will be collected\n' +
-        '✓ Data will only be used to improve paper recommendations\n' +
-        '✓ You can donate as many times as you like\n\n' +
-        'Thank you for contributing to research!';
-    
-    if (!confirm(confirmMessage)) {
+    if (!confirm(DONATION_CONFIRMATION_MESSAGE)) {
         return;
     }
 
