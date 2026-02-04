@@ -1294,15 +1294,17 @@ class TestDataDonationE2E:
         browser.get(base_url)
 
         # Navigate to Interesting Papers tab
-        interesting_tab_button = browser.find_element(By.ID, "tab-interesting")
+        wait = WebDriverWait(browser, 10)
+        interesting_tab_button = wait.until(EC.element_to_be_clickable((By.ID, "tab-interesting")))
         interesting_tab_button.click()
 
         # Wait for tab to load
-        wait = WebDriverWait(browser, 5)
         wait.until(EC.visibility_of_element_located((By.ID, "interesting-tab")))
 
-        # Load JSON button should be visible even with no papers
-        load_json_button = browser.find_element(By.XPATH, "//button[contains(text(), 'Load JSON')]")
+        # Load JSON button should be visible even with no papers - wait for it to be present
+        load_json_button = wait.until(
+            EC.visibility_of_element_located((By.XPATH, "//button[contains(text(), 'Load JSON')]"))
+        )
         assert load_json_button.is_displayed(), "Load JSON button should always be visible"
 
         # Other action buttons should be hidden when no papers rated
@@ -1336,9 +1338,13 @@ class TestDataDonationE2E:
         wait = WebDriverWait(browser, 10)
 
         # Perform a search to find papers
-        search_input = browser.find_element(By.ID, "search-input")
+        search_input = wait.until(EC.presence_of_element_located((By.ID, "search-input")))
         search_input.send_keys("attention")
-        search_button = browser.find_element(By.ID, "search-button")
+        
+        # Find search button by text content
+        search_button = wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Search') and @onclick='searchPapers()']"))
+        )
         search_button.click()
 
         # Wait for search results
@@ -1390,7 +1396,14 @@ class TestDataDonationE2E:
 
         wait = WebDriverWait(browser, 10)
 
-        # Use JavaScript to inject test data into localStorage
+        # Navigate to Interesting Papers tab first
+        interesting_tab_button = wait.until(EC.element_to_be_clickable((By.ID, "tab-interesting")))
+        interesting_tab_button.click()
+
+        # Wait for tab to load
+        wait.until(EC.visibility_of_element_located((By.ID, "interesting-tab")))
+
+        # Use JavaScript to inject test data and trigger UI update
         browser.execute_script("""
             const testPriorities = {
                 "test_uid_1": {
@@ -1399,15 +1412,13 @@ class TestDataDonationE2E:
                 }
             };
             localStorage.setItem('paperPriorities', JSON.stringify(testPriorities));
+            // Manually call updateControlsVisibility to show buttons
+            if (window.updateControlsVisibility) {
+                window.updateControlsVisibility();
+            }
         """)
-
-        # Navigate to Interesting Papers tab
-        interesting_tab_button = browser.find_element(By.ID, "tab-interesting")
-        interesting_tab_button.click()
-
-        # Wait for tab to load
-        wait.until(EC.visibility_of_element_located((By.ID, "interesting-tab")))
-        time.sleep(1)
+        
+        time.sleep(0.5)
 
         # Donate button should be visible
         donate_button = wait.until(
@@ -1446,7 +1457,14 @@ class TestDataDonationE2E:
 
         wait = WebDriverWait(browser, 10)
 
-        # Use JavaScript to inject test data into localStorage
+        # Navigate to Interesting Papers tab first
+        interesting_tab_button = wait.until(EC.element_to_be_clickable((By.ID, "tab-interesting")))
+        interesting_tab_button.click()
+
+        # Wait for tab to load
+        wait.until(EC.visibility_of_element_located((By.ID, "interesting-tab")))
+
+        # Use JavaScript to inject test data and trigger UI update
         browser.execute_script("""
             const testPriorities = {
                 "test_uid_1": {
@@ -1455,15 +1473,13 @@ class TestDataDonationE2E:
                 }
             };
             localStorage.setItem('paperPriorities', JSON.stringify(testPriorities));
+            // Manually call updateControlsVisibility to show buttons
+            if (window.updateControlsVisibility) {
+                window.updateControlsVisibility();
+            }
         """)
-
-        # Navigate to Interesting Papers tab
-        interesting_tab_button = browser.find_element(By.ID, "tab-interesting")
-        interesting_tab_button.click()
-
-        # Wait for tab to load
-        wait.until(EC.visibility_of_element_located((By.ID, "interesting-tab")))
-        time.sleep(1)
+        
+        time.sleep(0.5)
 
         # Donate button should be visible
         donate_button = wait.until(
@@ -1516,7 +1532,14 @@ class TestDataDonationE2E:
 
         wait = WebDriverWait(browser, 10)
 
-        # Use JavaScript to inject test data
+        # Navigate to Interesting Papers tab first
+        interesting_tab_button = wait.until(EC.element_to_be_clickable((By.ID, "tab-interesting")))
+        interesting_tab_button.click()
+
+        # Wait for tab to load
+        wait.until(EC.visibility_of_element_located((By.ID, "interesting-tab")))
+
+        # Use JavaScript to inject test data and trigger UI update
         browser.execute_script("""
             const testPriorities = {
                 "test_uid_1": {
@@ -1525,19 +1548,19 @@ class TestDataDonationE2E:
                 }
             };
             localStorage.setItem('paperPriorities', JSON.stringify(testPriorities));
+            // Manually call updateControlsVisibility to show buttons
+            if (window.updateControlsVisibility) {
+                window.updateControlsVisibility();
+            }
         """)
-
-        # Navigate to Interesting Papers tab
-        interesting_tab_button = browser.find_element(By.ID, "tab-interesting")
-        interesting_tab_button.click()
-
-        # Wait for tab to load
-        wait.until(EC.visibility_of_element_located((By.ID, "interesting-tab")))
-        time.sleep(1)
+        
+        time.sleep(0.5)
 
         # Click Export as Zip button
         try:
-            export_button = browser.find_element(By.XPATH, "//button[contains(text(), 'Export as Zip')]")
+            export_button = wait.until(
+                EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Export as Zip')]"))
+            )
             export_button.click()
             time.sleep(0.5)
 

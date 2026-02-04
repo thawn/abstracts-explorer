@@ -67,7 +67,7 @@ function markDataAsDonated() {
  * Update visibility of control buttons based on whether papers are rated
  * and whether data has been donated
  */
-function updateControlsVisibility() {
+export function updateControlsVisibility() {
     const hasPapers = Object.keys(getAllPaperPriorities()).length > 0;
     const sortControl = document.getElementById('interesting-controls-sort');
     const actionsControl = document.getElementById('interesting-controls-actions');
