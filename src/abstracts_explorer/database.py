@@ -21,7 +21,7 @@ from sqlalchemy.exc import OperationalError, ProgrammingError, IntegrityError
 from abstracts_explorer.plugin import LightweightPaper
 
 # Import SQLAlchemy models
-from abstracts_explorer.db_models import Base, Paper, EmbeddingsMetadata, ClusteringCache
+from abstracts_explorer.db_models import Base, Paper, EmbeddingsMetadata, ClusteringCache, ValidationData
 
 logger = logging.getLogger(__name__)
 
@@ -373,6 +373,85 @@ class DatabaseManager:
 
         logger.debug(f"Successfully inserted {inserted_count} of {len(papers)} papers")
         return inserted_count
+
+    def donate_validation_data(self, paper_priorities: Dict[str, Dict[str, Any]]) -> int:
+        """
+        Store donated paper rating data for validation purposes.
+
+        This method accepts anonymized paper ratings from users and stores them
+        in the validation_data table for improving the service.
+
+        Parameters
+        ----------
+        paper_priorities : Dict[str, Dict[str, Any]]
+            Dictionary mapping paper UIDs to priority data.
+            Each priority data dict must contain:
+            - priority (int): Rating value
+            - searchTerm (str, optional): Search term associated with the rating
+
+        Returns
+        -------
+        int
+            Number of papers successfully donated
+
+        Raises
+        ------
+        ValueError
+            If paper_priorities is empty or contains invalid data format
+        DatabaseError
+            If database operation fails
+
+        Examples
+        --------
+        >>> db = DatabaseManager()
+        >>> with db:
+        ...     priorities = {
+        ...         "abc123": {"priority": 5, "searchTerm": "machine learning"},
+        ...         "def456": {"priority": 4, "searchTerm": "deep learning"}
+        ...     }
+        ...     count = db.donate_validation_data(priorities)
+        ...     print(f"Donated {count} papers")
+        """
+        if not paper_priorities:
+            raise ValueError("No data provided")
+
+        if self._session is None:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            donated_count = 0
+            for paper_uid, priority_data in paper_priorities.items():
+                # Validate data format
+                if not isinstance(priority_data, dict):
+                    raise ValueError(
+                        "Invalid data format. Expected dict with priority and searchTerm"
+                    )
+
+                priority = priority_data.get("priority", 0)
+                search_term = priority_data.get("searchTerm", None)
+
+                # Create validation data entry
+                validation_entry = ValidationData(
+                    paper_uid=paper_uid,
+                    priority=priority,
+                    search_term=search_term
+                )
+                self._session.add(validation_entry)
+                donated_count += 1
+
+            # Commit all changes
+            self._session.commit()
+
+            logger.info(f"Successfully donated {donated_count} papers to validation data")
+            return donated_count
+
+        except ValueError:
+            # Re-raise validation errors without rollback
+            raise
+        except Exception as e:
+            self._session.rollback()
+            logger.error(f"Error donating validation data: {e}", exc_info=True)
+            raise DatabaseError(f"Failed to donate validation data: {e}")
 
     def query(self, sql: str, parameters: tuple = ()) -> List[Dict[str, Any]]:
         """

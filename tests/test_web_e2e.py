@@ -1309,14 +1309,14 @@ class TestDataDonationE2E:
         try:
             donate_button = browser.find_element(By.XPATH, "//button[contains(text(), 'Donate Data')]")
             assert not donate_button.is_displayed(), "Donate Data button should be hidden when no papers"
-        except:
+        except Exception:
             # Button might not be in DOM at all, which is also fine
             pass
 
         try:
             save_json_button = browser.find_element(By.XPATH, "//button[contains(text(), 'Save JSON')]")
             assert not save_json_button.is_displayed(), "Save JSON button should be hidden when no papers"
-        except:
+        except Exception:
             pass
 
     def test_buttons_appear_after_rating_paper(self, web_server, browser):
@@ -1552,7 +1552,7 @@ class TestDataDonationE2E:
             try:
                 alert = browser.switch_to.alert
                 alert.dismiss()
-            except:
+            except Exception:
                 pass
 
             time.sleep(1)
@@ -1569,7 +1569,7 @@ class TestDataDonationE2E:
                 # If there's an alert, it should NOT be about donation
                 assert "donate" not in alert_text.lower() or "before you export" not in alert_text.lower()
                 alert.dismiss()
-            except:
+            except Exception:
                 # No alert is fine - means it went straight to export
                 pass
 

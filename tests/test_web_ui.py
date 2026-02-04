@@ -1876,9 +1876,7 @@ class TestDataDonationEndpoint:
     def test_donate_data_success(self, tmp_path):
         """Test successful data donation."""
         from abstracts_explorer.web_ui.app import app
-        from abstracts_explorer.db_models import ValidationData
         from abstracts_explorer.plugin import LightweightPaper
-        from sqlalchemy.orm import Session
         
         # Create a real test database
         db_path = tmp_path / "test_donate.db"
@@ -1922,16 +1920,15 @@ class TestDataDonationEndpoint:
             assert data["count"] == 1
             assert "Successfully donated" in data["message"]
             
-            # Verify the data was actually stored
-            session = Session(db.engine)
-            try:
-                validation_entries = session.query(ValidationData).all()
-                assert len(validation_entries) == 1
-                assert validation_entries[0].paper_uid == paper_uid
-                assert validation_entries[0].priority == 5
-                assert validation_entries[0].search_term == "machine learning"
-            finally:
-                session.close()
+            # Verify the data was actually stored by creating a fresh database manager
+            db_verify = DatabaseManager()
+            with db_verify:
+                # Query using the database manager's query method
+                results = db_verify.query("SELECT * FROM validation_data")
+                assert len(results) == 1
+                assert results[0]["paper_uid"] == paper_uid
+                assert results[0]["priority"] == 5
+                assert results[0]["search_term"] == "machine learning"
 
     def test_donate_data_no_data(self, client):
         """Test data donation with no data provided."""

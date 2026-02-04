@@ -952,37 +952,9 @@ def donate_data():
 
         database = get_database()
         
-        # Import ValidationData model
-        from abstracts_explorer.db_models import ValidationData
-        from sqlalchemy.orm import Session
-        
-        # Get SQLAlchemy session
-        session = Session(database.engine)
-        
         try:
-            # Insert each paper's data
-            donated_count = 0
-            for paper_uid, priority_data in paper_priorities.items():
-                # Only accept dict format with priority and searchTerm
-                if not isinstance(priority_data, dict):
-                    return jsonify({"error": "Invalid data format. Expected dict with priority and searchTerm"}), 400
-                
-                priority = priority_data.get("priority", 0)
-                search_term = priority_data.get("searchTerm", None)
-                
-                # Create validation data entry
-                validation_entry = ValidationData(
-                    paper_uid=paper_uid,
-                    priority=priority,
-                    search_term=search_term
-                )
-                session.add(validation_entry)
-                donated_count += 1
-            
-            # Commit all changes
-            session.commit()
-            
-            logger.info(f"Successfully donated {donated_count} papers to validation data")
+            # Use DatabaseManager's donate_validation_data method
+            donated_count = database.donate_validation_data(paper_priorities)
             
             return jsonify({
                 "success": True,
@@ -990,11 +962,9 @@ def donate_data():
                 "count": donated_count
             })
             
-        except Exception as e:
-            session.rollback()
-            raise e
-        finally:
-            session.close()
+        except ValueError as e:
+            # Validation errors return 400
+            return jsonify({"error": str(e)}), 400
 
     except Exception as e:
         logger.error(f"Error donating data: {e}", exc_info=True)
