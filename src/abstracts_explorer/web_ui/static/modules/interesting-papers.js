@@ -329,16 +329,15 @@ export async function saveInterestingPapersAsMarkdown(event) {
 
     // Show data donation prompt before export (only once per session to avoid being intrusive)
     if (!donationPromptShownThisSession) {
-        const donateMessage = 
-            '💡 Before you export, would you like to donate your ratings to help improve our service?\n\n' +
-            '✓ Fully anonymized - no personal data collected\n' +
-            '✓ Used only to improve recommendations\n' +
-            '✓ Takes just a moment\n\n' +
+        // Show a brief contextual prompt for export; the full details are in the donation function
+        const exportDonateMessage = 
+            '💡 Before you export, would you like to donate your ratings?\n\n' +
+            'Your data helps improve our service and is fully anonymized.\n\n' +
             'Click "OK" to donate now (recommended)\n' +
             'Click "Cancel" to skip and continue with export';
         
-        if (confirm(donateMessage)) {
-            // User wants to donate - call donation function
+        if (confirm(exportDonateMessage)) {
+            // User wants to donate - call donation function which shows full details
             await donateInterestingPapersData();
         }
         
