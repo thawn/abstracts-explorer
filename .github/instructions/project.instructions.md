@@ -156,13 +156,16 @@ docs/                      # Sphinx documentation
 
 ## Testing Requirements
 
-### Test Framework
+### Test Frameworks
 
 - **Python Framework**: pytest
-- **Coverage**: Use pytest-cov, aim for >90% coverage
-- **Mocking**: Use pytest-mock for external dependencies
+- **JavaScript Framework**: Jest with jsdom
+- **Coverage Target**: >90% for Python, >80% for JavaScript
+- **Mocking**: Use pytest-mock for Python, jest.fn() for JavaScript
 
-### Test Organization Principle
+### Python Testing
+
+#### Test Organization Principle
 
 **One test file per source module**: Each source module should have exactly one corresponding test file with the same base name. This keeps tests organized and easy to find.
 
@@ -176,14 +179,14 @@ Examples:
 - `test_web_integration.py` - Web UI integration tests  
 - `test_web_e2e.py` - End-to-end browser tests
 
-### Test Organization Structure
+#### Test Organization Structure
 
 1. **Unit tests**: Test individual functions/methods in isolation
 2. **Integration tests**: Test component interactions
 3. **Fixtures**: Use fixtures for common setup (databases, temp files)
 4. **Mocking**: Mock external APIs, LLM backends, file I/O
 
-### Writing Tests
+#### Writing Python Tests
 
 ```python
 import pytest
@@ -214,19 +217,149 @@ def test_add_paper(temp_db):
     assert paper['title'] == 'Test Paper'
 ```
 
-### Test Coverage Guidelines
+#### Python Test Coverage Guidelines
 
 - All new functions must have tests
-- Aim for >80% code coverage
+- Aim for >90% code coverage
 - Test both success and error cases
 - Mock external dependencies (API calls, LLM backends)
 - Use `pytest.mark.skipif` for conditional tests (e.g., LM Studio)
 
-### Running Tests
+#### Running Python Tests
 
 ```bash
 # Run all tests
 uv run pytest
+
+# Run with coverage
+uv run pytest --cov=src/abstracts_explorer
+
+# Run specific test file
+uv run pytest tests/test_database.py
+```
+
+### JavaScript Testing
+
+The web UI JavaScript code is tested using Jest with jsdom for DOM simulation.
+
+#### JavaScript Test Organization
+
+Test files are located in `src/abstracts_explorer/web_ui/tests/`:
+
+**Core module tests:**
+- `app.test.js` - Application initialization and module loading
+- `state.test.js` - State management and localStorage
+- `search.test.js` - Search functionality
+- `chat.test.js` - RAG chat interface
+- `clustering.test.js` - Clustering visualization (72 tests)
+- `interesting-papers.test.js` - Paper management and export
+- `filters.test.js` - Filter panel
+- `tabs.test.js` - Tab navigation
+- `paper-card.test.js` - Paper card component
+
+**Utility tests:**
+- `utils.test.js` - All utility modules (api-utils, dom-utils, sort-utils, etc.)
+
+**Configuration:**
+- `setup.js` - Jest setup and global mocks
+- `package.json` - Jest configuration and test scripts
+
+#### Writing JavaScript Tests
+
+**Test Structure:**
+
+```javascript
+import { jest, expect, describe, test, beforeEach } from '@jest/globals';
+import { myFunction } from '../static/modules/my-module.js';
+
+describe('My Module', () => {
+    beforeEach(() => {
+        // Setup DOM
+        document.body.innerHTML = `
+            <div id="test-element"></div>
+        `;
+        
+        // Mock fetch
+        global.fetch = jest.fn();
+        
+        // Reset mocks
+        jest.clearAllMocks();
+    });
+
+    test('should perform expected behavior', async () => {
+        // Arrange
+        global.fetch.mockResolvedValueOnce({
+            json: async () => ({ data: 'test' })
+        });
+        
+        // Act
+        const result = await myFunction();
+        
+        // Assert
+        expect(result).toBe('expected');
+        expect(fetch).toHaveBeenCalled();
+    });
+});
+```
+
+**Key Patterns:**
+
+1. **Mock external dependencies:**
+   - `global.fetch = jest.fn()` for API calls
+   - Mock Plotly for visualization tests
+   - Mock localStorage: `global.localStorage = { getItem: jest.fn(), setItem: jest.fn() }`
+
+2. **Setup minimal DOM:**
+   - Use `document.body.innerHTML` in `beforeEach()`
+   - Include only elements needed for test
+   - Clean up with `jest.clearAllMocks()`
+
+3. **Test user-facing behavior:**
+   - Verify DOM changes
+   - Check state updates
+   - Test event handlers
+   - Don't test implementation details
+
+4. **Async testing:**
+   - Use `async/await` for promises
+   - Mock resolved/rejected promises
+   - Wait for DOM updates
+
+#### JavaScript Test Coverage Guidelines
+
+- All new JavaScript functions should have tests
+- Aim for >80% code coverage (target: >90%)
+- Test success cases, error cases, and edge cases
+- Mock external dependencies (fetch, Plotly, browser APIs)
+- Test DOM manipulation and event handlers
+
+#### Running JavaScript Tests
+
+```bash
+# Install dependencies (first time only)
+npm install
+
+# Run all JavaScript tests
+npm test
+
+# Run with coverage
+npm run test:coverage
+
+# Run in watch mode (for development)
+npm run test:watch
+
+# Run specific test file
+npm test -- clustering.test.js
+```
+
+#### Current JavaScript Coverage
+
+As of the latest update:
+- **Overall**: ~86% line coverage (excluding vendor files)
+- **Utility modules**: 100% coverage
+- **Core modules**: 70-100% coverage
+- **Total tests**: 272 tests
+- **Test suites**: 12 suites
 
 # Run with coverage
 uv run pytest --cov=src/abstracts_explorer --cov-report=html
