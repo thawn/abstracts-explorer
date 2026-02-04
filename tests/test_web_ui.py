@@ -1958,21 +1958,19 @@ class TestDataDonationEndpoint:
         data = response.get_json()
         assert "error" in data
 
-    def test_donate_data_old_format(self, tmp_path):
-        """Test data donation with old integer format for backward compatibility."""
+    def test_donate_data_invalid_format(self, tmp_path):
+        """Test data donation with invalid integer format (should be rejected)."""
         from abstracts_explorer.web_ui.app import app
-        from abstracts_explorer.db_models import ValidationData
-        from sqlalchemy.orm import Session
         
         # Create a real test database
-        db_path = tmp_path / "test_donate_old.db"
+        db_path = tmp_path / "test_donate_invalid.db"
         set_test_db(str(db_path))
         
         db = DatabaseManager()
         with db:
             db.create_tables()
         
-        # Old format: paper_id -> priority (integer)
+        # Old format: paper_id -> priority (integer) - should now be rejected
         paper_priorities = {
             "test1": 5,
             "test2": 3
@@ -1985,20 +1983,11 @@ class TestDataDonationEndpoint:
                 content_type="application/json"
             )
             
-            assert response.status_code == 200
+            # Should return 400 error for invalid format
+            assert response.status_code == 400
             data = response.get_json()
-            assert data["success"] is True
-            assert data["count"] == 2
-            
-            # Verify the data was stored with None as search_term
-            session = Session(db.engine)
-            try:
-                validation_entries = session.query(ValidationData).all()
-                assert len(validation_entries) == 2
-                for entry in validation_entries:
-                    assert entry.search_term is None  # Old format doesn't have search terms
-            finally:
-                session.close()
+            assert "error" in data
+            assert "Invalid data format" in data["error"]
 
     def test_donate_data_database_error(self, client):
         """Test data donation with database error."""
@@ -2028,7 +2017,7 @@ class TestValidationDataModel:
 
     def test_validation_data_creation(self, tmp_path):
         """Test creating a validation data entry."""
-        from abstracts_explorer.db_models import ValidationData, Base
+        from abstracts_explorer.db_models import ValidationData
         from abstracts_explorer.database import DatabaseManager
         from sqlalchemy.orm import Session
         

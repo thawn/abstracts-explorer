@@ -40,6 +40,54 @@ const DONATION_CONFIRMATION_MESSAGE =
     'Thank you for contributing to research!';
 
 /**
+ * Check if data has already been donated for current priorities
+ * @returns {boolean} True if data was already donated
+ */
+function hasDataBeenDonated() {
+    const currentPriorities = JSON.stringify(getAllPaperPriorities());
+    const donatedData = localStorage.getItem('donatedPrioritiesHash');
+    
+    if (!donatedData) {
+        return false;
+    }
+    
+    // Simple hash comparison - if priorities match, data was already donated
+    return donatedData === currentPriorities;
+}
+
+/**
+ * Mark current data as donated
+ */
+function markDataAsDonated() {
+    const currentPriorities = JSON.stringify(getAllPaperPriorities());
+    localStorage.setItem('donatedPrioritiesHash', currentPriorities);
+}
+
+/**
+ * Update visibility of control buttons based on whether papers are rated
+ * and whether data has been donated
+ */
+function updateControlsVisibility() {
+    const hasPapers = Object.keys(getAllPaperPriorities()).length > 0;
+    const sortControl = document.getElementById('interesting-controls-sort');
+    const actionsControl = document.getElementById('interesting-controls-actions');
+    const donateBtn = document.getElementById('donate-data-btn');
+    
+    if (sortControl) {
+        sortControl.classList.toggle('hidden', !hasPapers);
+    }
+    
+    if (actionsControl) {
+        actionsControl.classList.toggle('hidden', !hasPapers);
+    }
+    
+    // Hide donate button if data was already donated
+    if (donateBtn && hasPapers) {
+        donateBtn.classList.toggle('hidden', hasDataBeenDonated());
+    }
+}
+
+/**
  * Load and display interesting papers
  * @async
  */
@@ -47,6 +95,9 @@ export async function loadInterestingPapers() {
     const listDiv = document.getElementById('interesting-papers-list');
     const tabsContainer = document.getElementById('interesting-session-tabs');
     const tabsNav = document.getElementById('interesting-session-tabs-nav');
+
+    // Update visibility of control buttons
+    updateControlsVisibility();
 
     // If no rated papers, show empty state and hide tabs
     if (Object.keys(getAllPaperPriorities()).length === 0) {
@@ -511,6 +562,9 @@ export function handleJSONFileLoad(event) {
                 window.updateInterestingPapersCount();
             }
 
+            // Update controls visibility
+            updateControlsVisibility();
+
             // Reload interesting papers if on that tab
             const currentTab = document.querySelector('.tab-btn.border-purple-600')?.id?.replace('tab-', '');
             if (currentTab === 'interesting') {
@@ -719,6 +773,12 @@ export async function donateInterestingPapersData() {
         return;
     }
 
+    // Check if data was already donated
+    if (hasDataBeenDonated()) {
+        alert('You have already donated this data. Thank you for your contribution!');
+        return;
+    }
+
     // Show confirmation dialog with information about data anonymization
     if (!confirm(DONATION_CONFIRMATION_MESSAGE)) {
         return;
@@ -740,6 +800,12 @@ export async function donateInterestingPapersData() {
         if (!response.ok) {
             throw new Error(result.error || 'Failed to donate data');
         }
+
+        // Mark data as donated
+        markDataAsDonated();
+        
+        // Update button visibility
+        updateControlsVisibility();
 
         alert(`✅ ${result.message}\n\nThank you for helping improve our service!`);
         console.log('Successfully donated data:', result);

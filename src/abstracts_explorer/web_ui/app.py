@@ -936,7 +936,7 @@ def donate_data():
     Parameters
     ----------
     paperPriorities : dict
-        Dictionary mapping paper UIDs to priority data (priority and searchTerm)
+        Dictionary mapping paper UIDs to priority data (dict with priority and searchTerm)
 
     Returns
     -------
@@ -963,13 +963,12 @@ def donate_data():
             # Insert each paper's data
             donated_count = 0
             for paper_uid, priority_data in paper_priorities.items():
-                # Handle both old format (int) and new format (dict)
-                if isinstance(priority_data, dict):
-                    priority = priority_data.get("priority", 0)
-                    search_term = priority_data.get("searchTerm", None)
-                else:
-                    priority = priority_data
-                    search_term = None
+                # Only accept dict format with priority and searchTerm
+                if not isinstance(priority_data, dict):
+                    return jsonify({"error": "Invalid data format. Expected dict with priority and searchTerm"}), 400
+                
+                priority = priority_data.get("priority", 0)
+                search_term = priority_data.get("searchTerm", None)
                 
                 # Create validation data entry
                 validation_entry = ValidationData(
