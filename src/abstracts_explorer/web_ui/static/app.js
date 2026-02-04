@@ -23,7 +23,8 @@ import {
     editSearchTerm,
     editPaperSearchTerm,
     switchInterestingSession,
-    changeInterestingPapersSortOrder
+    changeInterestingPapersSortOrder,
+    donateInterestingPapersData
 } from './modules/interesting-papers.js';
 import {
     loadClusters,
@@ -125,6 +126,7 @@ function attachToWindow() {
     window.editPaperSearchTerm = editPaperSearchTerm;
     window.switchInterestingSession = switchInterestingSession;
     window.changeInterestingPapersSortOrder = changeInterestingPapersSortOrder;
+    window.donateInterestingPapersData = donateInterestingPapersData;
 
     // Clustering module
     window.loadClusters = loadClusters;

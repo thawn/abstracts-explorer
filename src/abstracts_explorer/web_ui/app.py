@@ -928,6 +928,80 @@ def export_interesting_papers():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/donate-data", methods=["POST"])
+def donate_data():
+    """
+    Donate anonymized interesting papers data for validation purposes.
+
+    Parameters
+    ----------
+    paperPriorities : dict
+        Dictionary mapping paper UIDs to priority data (priority and searchTerm)
+
+    Returns
+    -------
+    dict
+        Success message with count of donated papers
+    """
+    try:
+        data = request.json
+        paper_priorities = data.get("paperPriorities", {})
+
+        if not paper_priorities:
+            return jsonify({"error": "No data provided"}), 400
+
+        database = get_database()
+        
+        # Import ValidationData model
+        from abstracts_explorer.db_models import ValidationData
+        from sqlalchemy.orm import Session
+        
+        # Get SQLAlchemy session
+        session = Session(database.engine)
+        
+        try:
+            # Insert each paper's data
+            donated_count = 0
+            for paper_uid, priority_data in paper_priorities.items():
+                # Handle both old format (int) and new format (dict)
+                if isinstance(priority_data, dict):
+                    priority = priority_data.get("priority", 0)
+                    search_term = priority_data.get("searchTerm", None)
+                else:
+                    priority = priority_data
+                    search_term = None
+                
+                # Create validation data entry
+                validation_entry = ValidationData(
+                    paper_uid=paper_uid,
+                    priority=priority,
+                    search_term=search_term
+                )
+                session.add(validation_entry)
+                donated_count += 1
+            
+            # Commit all changes
+            session.commit()
+            
+            logger.info(f"Successfully donated {donated_count} papers to validation data")
+            
+            return jsonify({
+                "success": True,
+                "message": f"Successfully donated {donated_count} paper(s). Thank you for contributing!",
+                "count": donated_count
+            })
+            
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+
+    except Exception as e:
+        logger.error(f"Error donating data: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.errorhandler(404)
 def not_found(e):
     """Handle 404 errors."""

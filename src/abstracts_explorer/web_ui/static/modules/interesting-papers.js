@@ -311,6 +311,20 @@ export async function saveInterestingPapersAsMarkdown(event) {
         return;
     }
 
+    // Show data donation prompt before export
+    const donateMessage = 
+        '💡 Before you export, would you like to donate your ratings to help improve our service?\n\n' +
+        '✓ Fully anonymized - no personal data collected\n' +
+        '✓ Used only to improve recommendations\n' +
+        '✓ Takes just a moment\n\n' +
+        'Click "OK" to donate now (recommended)\n' +
+        'Click "Cancel" to skip and continue with export';
+    
+    if (confirm(donateMessage)) {
+        // User wants to donate - call donation function
+        await donateInterestingPapersData();
+    }
+
     const button = event.target;
     const originalText = button.innerHTML;
     button.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Preparing download...';
@@ -673,4 +687,52 @@ export function generateInterestingPapersMarkdown(papers) {
     }
 
     return markdown;
+}
+
+/**
+ * Donate interesting papers data for validation purposes
+ * @async
+ */
+export async function donateInterestingPapersData() {
+    if (Object.keys(getAllPaperPriorities()).length === 0) {
+        alert('No papers rated yet. Rate some papers before donating data.');
+        return;
+    }
+
+    // Show confirmation dialog with information about data anonymization
+    const confirmMessage = 
+        'Would you like to donate your paper ratings to help improve our service?\n\n' +
+        '✓ Your data will be fully anonymized\n' +
+        '✓ No personal information will be collected\n' +
+        '✓ Data will only be used to improve paper recommendations\n' +
+        '✓ You can donate as many times as you like\n\n' +
+        'Thank you for contributing to research!';
+    
+    if (!confirm(confirmMessage)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/api/donate-data`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                paperPriorities: getAllPaperPriorities()
+            })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.error || 'Failed to donate data');
+        }
+
+        alert(`✅ ${result.message}\n\nThank you for helping improve our service!`);
+        console.log('Successfully donated data:', result);
+    } catch (error) {
+        console.error('Error donating data:', error);
+        alert('❌ Error donating data: ' + error.message + '\n\nPlease try again later.');
+    }
 }
