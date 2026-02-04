@@ -1,0 +1,42 @@
+name: Tests
+
+on:
+    push:
+        branches: [main, develop]
+        paths:
+            - "src/**/*.js"
+            - "src/abstracts_explorer/web_ui/templates/**"
+            - "package.json"
+            - "package-lock.json"
+            - ".github/workflows/js-tests.yml"
+            - ".github/scripts/setup-ci.sh"
+            - ".github/scripts/setup-ci.ps1"
+            - ".github/actions/setup-environment/**"
+    pull_request:
+        branches: [main, develop]
+        paths:
+            - "src/**/*.js"
+            - "src/abstracts_explorer/web_ui/templates/**"
+            - "package.json"
+            - "package-lock.json"
+            - ".github/workflows/js-tests.yml"
+            - ".github/scripts/setup-ci.sh"
+            - ".github/scripts/setup-ci.ps1"
+            - ".github/actions/setup-environment/**"
+    workflow_dispatch:
+
+jobs:
+    javascript-tests:
+        runs-on: ubuntu-latest
+
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Setup Abstracts Explorer Environment
+              uses: ./.github/actions/setup-environment
+              with:
+                  python-version: "3.12"
+                  install-node: "true"
+
+            - name: Run JavaScript tests
+              run: npm test
