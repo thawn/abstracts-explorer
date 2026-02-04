@@ -1870,3 +1870,209 @@ class TestClusteringEndpoints:
                 assert "error" in data
 
 
+class TestDataDonationEndpoint:
+    """Test the data donation endpoint."""
+
+    def test_donate_data_success(self, tmp_path):
+        """Test successful data donation."""
+        from abstracts_explorer.web_ui.app import app
+        from abstracts_explorer.db_models import ValidationData
+        from abstracts_explorer.plugin import LightweightPaper
+        from sqlalchemy.orm import Session
+        
+        # Create a real test database
+        db_path = tmp_path / "test_donate.db"
+        set_test_db(str(db_path))
+        
+        db = DatabaseManager()
+        with db:
+            db.create_tables()
+            
+            # Add a test paper using LightweightPaper
+            paper = LightweightPaper(
+                title="Test Paper 1",
+                authors=["Test Author"],
+                abstract="Test abstract",
+                session="Test Session",
+                poster_position="P1",
+                year=2025,
+                conference="NeurIPS"
+            )
+            db.add_papers([paper])
+        
+        # Get the actual UID that was generated
+        with db:
+            all_papers = db.query("SELECT uid FROM papers LIMIT 1")
+            paper_uid = all_papers[0]["uid"]
+        
+        paper_priorities = {
+            paper_uid: {"priority": 5, "searchTerm": "machine learning"}
+        }
+        
+        with app.test_client() as client:
+            response = client.post(
+                "/api/donate-data",
+                json={"paperPriorities": paper_priorities},
+                content_type="application/json"
+            )
+            
+            assert response.status_code == 200
+            data = response.get_json()
+            assert data["success"] is True
+            assert data["count"] == 1
+            assert "Successfully donated" in data["message"]
+            
+            # Verify the data was actually stored
+            session = Session(db.engine)
+            try:
+                validation_entries = session.query(ValidationData).all()
+                assert len(validation_entries) == 1
+                assert validation_entries[0].paper_uid == paper_uid
+                assert validation_entries[0].priority == 5
+                assert validation_entries[0].search_term == "machine learning"
+            finally:
+                session.close()
+
+    def test_donate_data_no_data(self, client):
+        """Test data donation with no data provided."""
+        response = client.post(
+            "/api/donate-data",
+            json={},
+            content_type="application/json"
+        )
+        
+        assert response.status_code == 400
+        data = response.get_json()
+        assert "error" in data
+        assert "No data provided" in data["error"]
+
+    def test_donate_data_empty_priorities(self, client):
+        """Test data donation with empty priorities."""
+        response = client.post(
+            "/api/donate-data",
+            json={"paperPriorities": {}},
+            content_type="application/json"
+        )
+        
+        assert response.status_code == 400
+        data = response.get_json()
+        assert "error" in data
+
+    def test_donate_data_old_format(self, tmp_path):
+        """Test data donation with old integer format for backward compatibility."""
+        from abstracts_explorer.web_ui.app import app
+        from abstracts_explorer.db_models import ValidationData
+        from sqlalchemy.orm import Session
+        
+        # Create a real test database
+        db_path = tmp_path / "test_donate_old.db"
+        set_test_db(str(db_path))
+        
+        db = DatabaseManager()
+        with db:
+            db.create_tables()
+        
+        # Old format: paper_id -> priority (integer)
+        paper_priorities = {
+            "test1": 5,
+            "test2": 3
+        }
+        
+        with app.test_client() as client:
+            response = client.post(
+                "/api/donate-data",
+                json={"paperPriorities": paper_priorities},
+                content_type="application/json"
+            )
+            
+            assert response.status_code == 200
+            data = response.get_json()
+            assert data["success"] is True
+            assert data["count"] == 2
+            
+            # Verify the data was stored with None as search_term
+            session = Session(db.engine)
+            try:
+                validation_entries = session.query(ValidationData).all()
+                assert len(validation_entries) == 2
+                for entry in validation_entries:
+                    assert entry.search_term is None  # Old format doesn't have search terms
+            finally:
+                session.close()
+
+    def test_donate_data_database_error(self, client):
+        """Test data donation with database error."""
+        from abstracts_explorer.web_ui.app import app
+        
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
+                mock_db = Mock()
+                # Simulate engine creation failure
+                mock_db.engine.side_effect = Exception("Database connection error")
+                mock_get_db.return_value = mock_db
+                
+                response = client.post(
+                    "/api/donate-data",
+                    json={"paperPriorities": {"test1": {"priority": 5, "searchTerm": "test"}}},
+                    content_type="application/json"
+                )
+                
+                # Should catch the exception and return 500
+                assert response.status_code == 500
+                data = response.get_json()
+                assert "error" in data
+
+
+class TestValidationDataModel:
+    """Test the ValidationData database model."""
+
+    def test_validation_data_creation(self, tmp_path):
+        """Test creating a validation data entry."""
+        from abstracts_explorer.db_models import ValidationData, Base
+        from abstracts_explorer.database import DatabaseManager
+        from sqlalchemy.orm import Session
+        
+        # Create test database
+        db_path = tmp_path / "test_validation.db"
+        set_test_db(str(db_path))
+        db = DatabaseManager()
+        
+        with db:
+            db.create_tables()
+            
+            # Create session
+            session = Session(db.engine)
+            
+            try:
+                # Create validation data entry
+                validation_entry = ValidationData(
+                    paper_uid="test123",
+                    priority=5,
+                    search_term="machine learning"
+                )
+                session.add(validation_entry)
+                session.commit()
+                
+                # Query back
+                result = session.query(ValidationData).filter_by(paper_uid="test123").first()
+                assert result is not None
+                assert result.paper_uid == "test123"
+                assert result.priority == 5
+                assert result.search_term == "machine learning"
+                assert result.donated_at is not None
+                
+            finally:
+                session.close()
+
+    def test_validation_data_repr(self):
+        """Test ValidationData string representation."""
+        from abstracts_explorer.db_models import ValidationData
+        
+        entry = ValidationData(paper_uid="test123", priority=5, search_term="test")
+        entry.id = 1
+        
+        repr_str = repr(entry)
+        assert "ValidationData" in repr_str
+        assert "test123" in repr_str
+        assert "5" in repr_str
+
