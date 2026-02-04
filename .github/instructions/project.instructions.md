@@ -21,13 +21,6 @@ This file contains instructions and conventions for AI assistants working on thi
 - **Add dependencies**: `uv add package-name`
 - **Virtual environment**: Automatically created in `.venv/`
 
-### Why uv?
-
-- **10-100x faster** than pip for installation and dependency resolution
-- **Automatic** virtual environment management
-- **Reliable** dependency resolution with lock files
-- **Modern** tooling with better error messages
-
 ### When Writing Code or Instructions
 
 Always use uv commands:
@@ -165,7 +158,7 @@ docs/                      # Sphinx documentation
 
 ### Test Framework
 
-- **Framework**: pytest
+- **Python Framework**: pytest
 - **Coverage**: Use pytest-cov, aim for >90% coverage
 - **Mocking**: Use pytest-mock for external dependencies
 
@@ -254,13 +247,6 @@ uv run pytest -s
 ## Package Management with uv
 
 This project uses **uv** for fast, reliable Python package management.
-
-### Why uv?
-
-- **Fast**: 10-100x faster than pip
-- **Reliable**: Consistent dependency resolution
-- **Compatible**: Works with existing pip/PyPI packages
-- **Modern**: Built-in virtual environment management
 
 ### Basic Commands
 
