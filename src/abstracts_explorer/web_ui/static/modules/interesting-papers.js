@@ -36,7 +36,7 @@ const DONATION_CONFIRMATION_MESSAGE =
     '✓ Your data will be fully anonymized\n' +
     '✓ No personal information will be collected\n' +
     '✓ Data will only be used to improve paper recommendations\n' +
-    '✓ You can donate as many times as you like\n\n' +
+    '\n' +
     'Thank you for contributing to research!';
 
 /**
