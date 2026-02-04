@@ -453,6 +453,11 @@ def _create_chrome_driver():
     -------
     webdriver.Chrome
         Chrome WebDriver instance
+    
+    Raises
+    ------
+    Exception
+        If driver installation or browser creation fails
     """
     chrome_options = ChromeOptions()
     chrome_options.add_argument("--headless")
@@ -463,7 +468,12 @@ def _create_chrome_driver():
 
     # Install driver only once per session
     if _driver_cache["chrome"] is None:
-        _driver_cache["chrome"] = ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install()
+        try:
+            _driver_cache["chrome"] = ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install()
+        except Exception as e:
+            # If driver installation fails (e.g., network issues), mark as unavailable
+            _driver_cache["chrome_available"] = False
+            raise Exception(f"Failed to install ChromeDriver: {e}")
 
     service = ChromeService(_driver_cache["chrome"])
     driver = webdriver.Chrome(service=service, options=chrome_options)
@@ -481,6 +491,11 @@ def _create_firefox_driver():
     -------
     webdriver.Firefox
         Firefox WebDriver instance
+    
+    Raises
+    ------
+    Exception
+        If driver installation or browser creation fails
     """
     firefox_options = FirefoxOptions()
     firefox_options.add_argument("--headless")
@@ -489,7 +504,12 @@ def _create_firefox_driver():
 
     # Install driver only once per session
     if _driver_cache["firefox"] is None:
-        _driver_cache["firefox"] = GeckoDriverManager().install()
+        try:
+            _driver_cache["firefox"] = GeckoDriverManager().install()
+        except Exception as e:
+            # If driver installation fails (e.g., network issues), mark as unavailable
+            _driver_cache["firefox_available"] = False
+            raise Exception(f"Failed to install GeckoDriver: {e}")
 
     service = FirefoxService(_driver_cache["firefox"])
     driver = webdriver.Firefox(service=service, options=firefox_options)
@@ -511,7 +531,7 @@ def browser():
     -----
     Automatically quits the browser after the test.
     Uses headless mode for CI/CD compatibility.
-    Skips test if no browser is available.
+    Skips test if no browser is available or driver installation fails.
 
     Browser selection is controlled by the E2E_BROWSER environment variable:
     - 'chrome': Use Chrome only
@@ -530,18 +550,37 @@ def browser():
         # User explicitly wants Chrome
         if not _check_chrome_available():
             pytest.skip("Chrome browser not available for E2E testing")
-        driver = _create_chrome_driver()
+        try:
+            driver = _create_chrome_driver()
+        except Exception as e:
+            pytest.skip(f"Failed to create Chrome driver: {e}")
     elif browser_pref == "firefox":
         # User explicitly wants Firefox
         if not _check_firefox_available():
             pytest.skip("Firefox browser not available for E2E testing")
-        driver = _create_firefox_driver()
+        try:
+            driver = _create_firefox_driver()
+        except Exception as e:
+            pytest.skip(f"Failed to create Firefox driver: {e}")
     else:
         # Auto mode: try Chrome first, then Firefox
         if _check_chrome_available():
-            driver = _create_chrome_driver()
+            try:
+                driver = _create_chrome_driver()
+            except Exception:
+                # Try Firefox as fallback
+                if _check_firefox_available():
+                    try:
+                        driver = _create_firefox_driver()
+                    except Exception as e:
+                        pytest.skip(f"Failed to create browser drivers: Chrome and Firefox both failed. Last error: {e}")
+                else:
+                    pytest.skip("Chrome driver installation failed and Firefox not available")
         elif _check_firefox_available():
-            driver = _create_firefox_driver()
+            try:
+                driver = _create_firefox_driver()
+            except Exception as e:
+                pytest.skip(f"Failed to create Firefox driver: {e}")
         else:
             pytest.skip("Neither Chrome nor Firefox browser available for E2E testing")
 
