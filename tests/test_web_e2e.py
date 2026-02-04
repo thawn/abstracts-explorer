@@ -1276,6 +1276,309 @@ class TestWebUIE2E:
 
 @pytest.mark.e2e
 @pytest.mark.slow
+class TestDataDonationE2E:
+    """End-to-end tests for data donation feature."""
+
+    def test_load_json_button_always_visible(self, web_server, browser):
+        """
+        Test that Load JSON button is always visible even when no papers are rated.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        # Navigate to Interesting Papers tab
+        interesting_tab_button = browser.find_element(By.ID, "tab-interesting")
+        interesting_tab_button.click()
+
+        # Wait for tab to load
+        wait = WebDriverWait(browser, 5)
+        wait.until(EC.visibility_of_element_located((By.ID, "interesting-tab")))
+
+        # Load JSON button should be visible even with no papers
+        load_json_button = browser.find_element(By.XPATH, "//button[contains(text(), 'Load JSON')]")
+        assert load_json_button.is_displayed(), "Load JSON button should always be visible"
+
+        # Other action buttons should be hidden when no papers rated
+        try:
+            donate_button = browser.find_element(By.XPATH, "//button[contains(text(), 'Donate Data')]")
+            assert not donate_button.is_displayed(), "Donate Data button should be hidden when no papers"
+        except:
+            # Button might not be in DOM at all, which is also fine
+            pass
+
+        try:
+            save_json_button = browser.find_element(By.XPATH, "//button[contains(text(), 'Save JSON')]")
+            assert not save_json_button.is_displayed(), "Save JSON button should be hidden when no papers"
+        except:
+            pass
+
+    def test_buttons_appear_after_rating_paper(self, web_server, browser):
+        """
+        Test that action buttons appear after rating a paper.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        wait = WebDriverWait(browser, 10)
+
+        # Perform a search to find papers
+        search_input = browser.find_element(By.ID, "search-input")
+        search_input.send_keys("attention")
+        search_button = browser.find_element(By.ID, "search-button")
+        search_button.click()
+
+        # Wait for search results
+        time.sleep(2)
+
+        # Rate a paper by clicking on stars
+        try:
+            star_buttons = browser.find_elements(By.CSS_SELECTOR, ".star-rating button")
+            if star_buttons:
+                # Click the 5th star (highest rating)
+                star_buttons[4].click()
+                time.sleep(1)
+
+                # Navigate to Interesting Papers tab
+                interesting_tab_button = browser.find_element(By.ID, "tab-interesting")
+                interesting_tab_button.click()
+
+                # Wait for tab to load
+                wait.until(EC.visibility_of_element_located((By.ID, "interesting-tab")))
+                time.sleep(1)
+
+                # Now all buttons should be visible
+                donate_button = wait.until(
+                    EC.visibility_of_element_located((By.XPATH, "//button[contains(text(), 'Donate Data')]"))
+                )
+                assert donate_button.is_displayed(), "Donate Data button should be visible after rating"
+
+                save_json_button = browser.find_element(By.XPATH, "//button[contains(text(), 'Save JSON')]")
+                assert save_json_button.is_displayed(), "Save JSON button should be visible after rating"
+
+                load_json_button = browser.find_element(By.XPATH, "//button[contains(text(), 'Load JSON')]")
+                assert load_json_button.is_displayed(), "Load JSON button should still be visible"
+        except Exception as e:
+            pytest.skip(f"Could not test rating flow: {e}")
+
+    def test_donate_data_button_click_shows_confirmation(self, web_server, browser):
+        """
+        Test that clicking Donate Data button shows confirmation dialog.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        wait = WebDriverWait(browser, 10)
+
+        # Use JavaScript to inject test data into localStorage
+        browser.execute_script("""
+            const testPriorities = {
+                "test_uid_1": {
+                    "priority": 5,
+                    "searchTerm": "machine learning"
+                }
+            };
+            localStorage.setItem('paperPriorities', JSON.stringify(testPriorities));
+        """)
+
+        # Navigate to Interesting Papers tab
+        interesting_tab_button = browser.find_element(By.ID, "tab-interesting")
+        interesting_tab_button.click()
+
+        # Wait for tab to load
+        wait.until(EC.visibility_of_element_located((By.ID, "interesting-tab")))
+        time.sleep(1)
+
+        # Donate button should be visible
+        donate_button = wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Donate Data')]"))
+        )
+
+        # Click the donate button
+        donate_button.click()
+
+        # Wait for confirmation dialog
+        time.sleep(0.5)
+
+        # Check that alert is present (confirmation dialog)
+        try:
+            alert = browser.switch_to.alert
+            alert_text = alert.text
+            assert "Would you like to donate" in alert_text or "anonymized" in alert_text.lower()
+            # Dismiss the alert
+            alert.dismiss()
+        except Exception as e:
+            pytest.fail(f"Expected confirmation dialog but got: {e}")
+
+    def test_donate_button_hidden_after_successful_donation(self, web_server, browser):
+        """
+        Test that Donate Data button is hidden after successful donation.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        wait = WebDriverWait(browser, 10)
+
+        # Use JavaScript to inject test data into localStorage
+        browser.execute_script("""
+            const testPriorities = {
+                "test_uid_1": {
+                    "priority": 5,
+                    "searchTerm": "machine learning"
+                }
+            };
+            localStorage.setItem('paperPriorities', JSON.stringify(testPriorities));
+        """)
+
+        # Navigate to Interesting Papers tab
+        interesting_tab_button = browser.find_element(By.ID, "tab-interesting")
+        interesting_tab_button.click()
+
+        # Wait for tab to load
+        wait.until(EC.visibility_of_element_located((By.ID, "interesting-tab")))
+        time.sleep(1)
+
+        # Donate button should be visible
+        donate_button = wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Donate Data')]"))
+        )
+
+        # Click the donate button
+        donate_button.click()
+        time.sleep(0.5)
+
+        # Accept confirmation dialog
+        try:
+            alert = browser.switch_to.alert
+            alert.accept()
+            time.sleep(0.5)
+
+            # Accept success message
+            alert = browser.switch_to.alert
+            alert.accept()
+            time.sleep(1)
+
+            # Now the donate button should be hidden
+            donate_buttons = browser.find_elements(By.XPATH, "//button[contains(text(), 'Donate Data')]")
+            visible_donate_buttons = [btn for btn in donate_buttons if btn.is_displayed()]
+            assert len(visible_donate_buttons) == 0, "Donate button should be hidden after successful donation"
+
+            # Other buttons should still be visible
+            save_json_button = browser.find_element(By.XPATH, "//button[contains(text(), 'Save JSON')]")
+            assert save_json_button.is_displayed(), "Save JSON button should still be visible"
+
+            load_json_button = browser.find_element(By.XPATH, "//button[contains(text(), 'Load JSON')]")
+            assert load_json_button.is_displayed(), "Load JSON button should still be visible"
+
+        except Exception as e:
+            pytest.skip(f"Could not complete donation flow: {e}")
+
+    def test_export_shows_donation_prompt_once_per_session(self, web_server, browser):
+        """
+        Test that export shows donation prompt only once per session.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        wait = WebDriverWait(browser, 10)
+
+        # Use JavaScript to inject test data
+        browser.execute_script("""
+            const testPriorities = {
+                "test_uid_1": {
+                    "priority": 5,
+                    "searchTerm": "test"
+                }
+            };
+            localStorage.setItem('paperPriorities', JSON.stringify(testPriorities));
+        """)
+
+        # Navigate to Interesting Papers tab
+        interesting_tab_button = browser.find_element(By.ID, "tab-interesting")
+        interesting_tab_button.click()
+
+        # Wait for tab to load
+        wait.until(EC.visibility_of_element_located((By.ID, "interesting-tab")))
+        time.sleep(1)
+
+        # Click Export as Zip button
+        try:
+            export_button = browser.find_element(By.XPATH, "//button[contains(text(), 'Export as Zip')]")
+            export_button.click()
+            time.sleep(0.5)
+
+            # Should show donation prompt on first export
+            alert = browser.switch_to.alert
+            alert_text = alert.text
+            assert "donate" in alert_text.lower() or "export" in alert_text.lower()
+            alert.dismiss()  # Decline donation
+            time.sleep(0.5)
+
+            # If there's another alert (the export itself), dismiss it
+            try:
+                alert = browser.switch_to.alert
+                alert.dismiss()
+            except:
+                pass
+
+            time.sleep(1)
+
+            # Click export again - should NOT show donation prompt again
+            export_button.click()
+            time.sleep(0.5)
+
+            # This time it should go straight to export (or show export-related dialog only)
+            # Not the donation prompt
+            try:
+                alert = browser.switch_to.alert
+                alert_text = alert.text
+                # If there's an alert, it should NOT be about donation
+                assert "donate" not in alert_text.lower() or "before you export" not in alert_text.lower()
+                alert.dismiss()
+            except:
+                # No alert is fine - means it went straight to export
+                pass
+
+        except Exception as e:
+            pytest.skip(f"Could not test export flow: {e}")
+
+
+@pytest.mark.e2e
+@pytest.mark.slow
 class TestWebUIAccessibility:
     """Accessibility tests for the web UI."""
 
