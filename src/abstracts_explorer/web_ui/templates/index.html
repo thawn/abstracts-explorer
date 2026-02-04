@@ -481,17 +481,19 @@
                                 <i class="fas fa-download mr-2"></i>Export as Zip
                             </button>
                         </div>
-                        <div id="interesting-controls-actions" class="flex items-center space-x-4 hidden">
-                            <button id="donate-data-btn" onclick="donateInterestingPapersData()"
-                                class="px-4 py-2 bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-lg hover:from-yellow-600 hover:to-orange-600 focus:ring-2 focus:ring-yellow-500 focus:ring-offset-2 shadow-md transition-all"
-                                title="Donate your ratings to help improve the service (fully anonymized)">
-                                <i class="fas fa-heart mr-2"></i>Donate Data
-                            </button>
-                            <button onclick="saveInterestingPapersAsJSON()"
-                                class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-600 focus:ring-offset-2"
-                                title="Save rated papers as JSON file">
-                                <i class="fas fa-save mr-2"></i>Save JSON
-                            </button>
+                        <div class="flex items-center space-x-4">
+                            <div id="interesting-controls-actions" class="flex items-center space-x-4 hidden">
+                                <button id="donate-data-btn" onclick="donateInterestingPapersData()"
+                                    class="px-4 py-2 bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-lg hover:from-yellow-600 hover:to-orange-600 focus:ring-2 focus:ring-yellow-500 focus:ring-offset-2 shadow-md transition-all"
+                                    title="Donate your ratings to help improve the service (fully anonymized)">
+                                    <i class="fas fa-heart mr-2"></i>Donate Data
+                                </button>
+                                <button onclick="saveInterestingPapersAsJSON()"
+                                    class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-600 focus:ring-offset-2"
+                                    title="Save rated papers as JSON file">
+                                    <i class="fas fa-save mr-2"></i>Save JSON
+                                </button>
+                            </div>
                             <button onclick="loadInterestingPapersFromJSON()"
                                 class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:ring-2 focus:ring-green-600 focus:ring-offset-2"
                                 title="Load rated papers from JSON file">
