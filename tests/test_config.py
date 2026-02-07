@@ -156,10 +156,9 @@ class TestConfig:
         config = Config(env_path=get_env_test_path())
 
         assert config.data_dir == "data"
-        assert config.chat_model == "diffbot-small-xl-2508"
-        assert config.embedding_model == "text-embedding-qwen3-embedding-4b"
-        assert config.llm_backend_url == "http://localhost:1234"
-        assert config.llm_backend_auth_token == ""
+        assert config.chat_model == "alias-fast"
+        assert config.embedding_model == "alias-qwen3-8b-embeddings"
+        assert config.llm_backend_url == "https://api.helmholtz-blablador.fz-juelich.de"
         assert config.embedding_db == str((Path("data") / "chroma_db").absolute())
         # Test database_url is constructed from PAPER_DB
         assert config.database_url == f"sqlite:///{(Path('data') / 'abstracts.db').absolute()}"
