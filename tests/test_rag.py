@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 from abstracts_explorer.rag import RAGChat, RAGError
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.config import get_config
+from tests.conftest import set_test_embedding_db
 from tests.helpers import requires_lm_studio, create_test_db_with_paper
 
 # Fixtures imported from conftest.py:
@@ -430,24 +431,7 @@ class TestRAGChatIntegration:
 
         config = get_config()
 
-        chroma_path = tmp_path / "chroma_integration"
-        em = EmbeddingsManager(chroma_path=chroma_path)
-        em.connect()
-        em.create_collection(reset=True)
-
-        # Add a test paper (use string uid to match lightweight schema)
-        em.add_paper(
-            {
-                "uid": "1",
-                "abstract": "This paper discusses attention mechanisms in neural networks.",
-                "title": "Attention Mechanisms",
-                "authors": "Test Author",
-                "session": "Test Session",
-                "keywords": "attention, neural networks",
-            }
-        )
-
-        # Create database with test data
+        # Create database with test data FIRST to get the generated UID
         db_path = tmp_path / "test.db"
         db = create_test_db_with_paper(
             db_path,
@@ -460,6 +444,28 @@ class TestRAGChatIntegration:
                 "keywords": "attention, neural networks",
                 "year": 2025,
                 "conference": "NeurIPS",
+            }
+        )
+        
+        # Get the generated UID from the database
+        papers = db.query("SELECT uid FROM papers LIMIT 1")
+        generated_uid = papers[0]["uid"]
+
+        chroma_path = tmp_path / "chroma_integration"
+        set_test_embedding_db(chroma_path)  # Ensure chroma path is clean before test
+        em = EmbeddingsManager()
+        em.connect()
+        em.create_collection(reset=True)
+
+        # Add test paper to ChromaDB using the generated UID from database
+        em.add_paper(
+            {
+                "uid": generated_uid,
+                "abstract": "This paper discusses attention mechanisms in neural networks.",
+                "title": "Attention Mechanisms",
+                "authors": "Test Author",
+                "session": "Test Session",
+                "keywords": "attention, neural networks",
             }
         )
 
@@ -496,24 +502,7 @@ class TestRAGChatIntegration:
 
         config = get_config()
 
-        chroma_path = tmp_path / "chroma_conversation"
-        em = EmbeddingsManager(chroma_path=chroma_path)
-        em.connect()
-        em.create_collection(reset=True)
-
-        # Add test papers (use string uid to match lightweight schema)
-        em.add_paper(
-            {
-                "uid": "1",
-                "abstract": "Transformers are a deep learning architecture based on attention.",
-                "title": "Transformers",
-                "authors": "Vaswani et al.",
-                "session": "Test Session",
-                "keywords": "transformers, attention",
-            }
-        )
-
-        # Create database with test data
+        # Create database with test data FIRST to get the generated UID
         db_path = tmp_path / "test.db"
         db = create_test_db_with_paper(
             db_path,
@@ -526,6 +515,28 @@ class TestRAGChatIntegration:
                 "keywords": "transformers, attention",
                 "year": 2025,
                 "conference": "NeurIPS",
+            }
+        )
+        
+        # Get the generated UID from the database
+        papers = db.query("SELECT uid FROM papers LIMIT 1")
+        generated_uid = papers[0]["uid"]
+
+        chroma_path = tmp_path / "chroma_conversation"
+        set_test_embedding_db(chroma_path)  # Ensure chroma path is clean before test
+        em = EmbeddingsManager()
+        em.connect()
+        em.create_collection(reset=True)
+
+        # Add test paper to ChromaDB using the generated UID from database
+        em.add_paper(
+            {
+                "uid": generated_uid,
+                "abstract": "Transformers are a deep learning architecture based on attention.",
+                "title": "Transformers",
+                "authors": "Vaswani et al.",
+                "session": "Test Session",
+                "keywords": "transformers, attention",
             }
         )
 
@@ -562,24 +573,7 @@ class TestRAGChatIntegration:
 
         config = get_config()
 
-        chroma_path = tmp_path / "chroma_export"
-        em = EmbeddingsManager(chroma_path=chroma_path)
-        em.connect()
-        em.create_collection(reset=True)
-
-        # Add test paper (use string uid to match lightweight schema)
-        em.add_paper(
-            {
-                "uid": "1",
-                "abstract": "Test abstract about machine learning.",
-                "title": "ML Paper",
-                "authors": "Author",
-                "session": "Test Session",
-                "keywords": "machine learning",
-            }
-        )
-
-        # Create database with test data
+        # Create database with test data FIRST to get the generated UID
         db_path = tmp_path / "test.db"
         db = create_test_db_with_paper(
             db_path,
@@ -592,6 +586,28 @@ class TestRAGChatIntegration:
                 "keywords": "machine learning",
                 "year": 2025,
                 "conference": "NeurIPS",
+            }
+        )
+        
+        # Get the generated UID from the database
+        papers = db.query("SELECT uid FROM papers LIMIT 1")
+        generated_uid = papers[0]["uid"]
+
+        chroma_path = tmp_path / "chroma_export"
+        set_test_embedding_db(chroma_path)  # Ensure chroma path is clean before test
+        em = EmbeddingsManager()
+        em.connect()
+        em.create_collection(reset=True)
+
+        # Add test paper to ChromaDB using the generated UID from database
+        em.add_paper(
+            {
+                "uid": generated_uid,
+                "abstract": "Test abstract about machine learning.",
+                "title": "ML Paper",
+                "authors": "Author",
+                "session": "Test Session",
+                "keywords": "machine learning",
             }
         )
 

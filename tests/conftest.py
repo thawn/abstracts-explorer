@@ -83,6 +83,39 @@ def set_test_db(db_path):
     get_config(reload=True, env_path=get_env_test_path())
 
 
+def set_test_embedding_db(embedding_db_path):
+    """
+    Helper function to set PAPER_DB environment variable and reload config.
+
+    This reduces code duplication across test files where the pattern
+    os.environ["PAPER_DB"] = str(db_path) followed by get_config(reload=True)
+    is repeated many times.
+
+    Uses .env.test for all other config values to ensure test consistency.
+
+    Parameters
+    ----------
+    db_path : str or Path
+        Path to the database file
+
+    Examples
+    --------
+    >>> set_test_db(tmp_path / "test.db")
+
+    Notes
+    -----
+    This function uses os.environ directly instead of monkeypatch.setenv
+    so it can be used in contexts where monkeypatch is not available
+    (e.g., in helper functions).
+    """
+    import os
+
+    os.environ["EMBEDDING_DB"] = str(embedding_db_path)
+
+    # Reload config with .env.test to ensure consistent test configuration
+    # The PAPER_DB environment variable will override the value from .env.test
+    get_config(reload=True, env_path=get_env_test_path())
+
 
 @pytest.fixture(scope="session", autouse=True)
 def test_config():
