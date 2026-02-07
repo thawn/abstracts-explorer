@@ -129,7 +129,9 @@ def search_papers(
 
 ## Testing
 
-### Running Tests
+### Python Testing
+
+#### Running Python Tests
 
 ```bash
 # Run all tests (excludes slow tests by default)
@@ -162,7 +164,7 @@ uv run pytest -m ""
 - A chat model loaded in LM Studio
 - Use `pytest -m slow` to run only slow tests
 
-### Test Organization
+#### Python Test Organization
 
 **One test file per module**: Each source module should have exactly one corresponding test file. This makes tests easy to find and maintain.
 
@@ -180,7 +182,7 @@ Examples:
 - `test_web_integration.py` - Web UI integration tests
 - `test_web_e2e.py` - End-to-end browser tests
 
-### Writing Tests
+#### Writing Python Tests
 
 - Use pytest framework
 - Follow the one test file per module principle
@@ -189,7 +191,7 @@ Examples:
 - Mock external dependencies (API calls, LLM backends)
 - Aim for >80% code coverage
 
-### Example Test
+#### Example Python Test
 
 ```python
 import pytest
@@ -217,6 +219,194 @@ def test_add_paper(db):
     paper = db.get_paper_by_id(paper_id)
     assert paper['title'] == 'Test Paper'
 ```
+
+### JavaScript Testing
+
+The web UI uses Jest for JavaScript unit testing with jsdom for DOM simulation.
+
+#### Running JavaScript Tests
+
+```bash
+# Install Node.js dependencies (first time only)
+npm install
+
+# Run all JavaScript tests
+npm test
+
+# Run with coverage report
+npm run test:coverage
+
+# Run tests in watch mode (for development)
+npm run test:watch
+
+# Run specific test file
+npm test -- chat.test.js
+
+# Run with verbose output
+npm test -- --verbose
+```
+
+#### JavaScript Test Coverage
+
+Current JavaScript test coverage (excluding vendor files):
+- **Overall**: ~86% line coverage
+- **Target**: >90% coverage for all modules
+
+Coverage by module:
+- **Utility modules**: 100% coverage (api-utils, cluster-utils, constants, dom-utils, sort-utils)
+- **Core modules**: 70-100% coverage (state, search, chat, tabs, clustering, filters)
+- **Integration modules**: Tested via end-to-end browser tests
+
+#### JavaScript Test Organization
+
+Test files are located in `src/abstracts_explorer/web_ui/tests/`:
+
+- `setup.js` - Jest configuration and global mocks
+- `app.test.js` - Tests for main app initialization
+- `chat.test.js` - Chat module tests
+- `clustering.test.js` - Clustering visualization tests
+- `clustering-hierarchy.test.js` - Hierarchical clustering tests
+- `filters.test.js` - Filter panel tests
+- `interesting-papers.test.js` - Interesting papers management tests
+- `modules.test.js` - Module loading tests
+- `paper-card.test.js` - Paper card component tests
+- `search.test.js` - Search functionality tests
+- `state.test.js` - State management tests
+- `tabs.test.js` - Tab navigation tests
+- `utils.test.js` - Utility function tests
+
+#### Writing JavaScript Tests
+
+**Test Structure:**
+
+```javascript
+import { jest, expect, describe, test, beforeEach } from '@jest/globals';
+import { myFunction } from '../static/modules/my-module.js';
+
+describe('My Module', () => {
+    beforeEach(() => {
+        // Setup DOM
+        document.body.innerHTML = `
+            <div id="test-element"></div>
+        `;
+        
+        // Mock fetch
+        global.fetch = jest.fn();
+        
+        // Reset mocks
+        jest.clearAllMocks();
+    });
+
+    test('should perform expected behavior', () => {
+        // Arrange
+        const input = 'test input';
+        
+        // Act
+        const result = myFunction(input);
+        
+        // Assert
+        expect(result).toBe('expected output');
+    });
+});
+```
+
+**Best Practices:**
+
+1. **Mock external dependencies:**
+   - Use `global.fetch = jest.fn()` to mock API calls
+   - Mock Plotly for visualization tests
+   - Mock localStorage for state tests
+
+2. **Setup DOM elements:**
+   - Create minimal DOM structure needed for tests
+   - Use `document.body.innerHTML` in `beforeEach()`
+   - Clean up with `jest.clearAllMocks()`
+
+3. **Test behavior, not implementation:**
+   - Focus on what the function does, not how
+   - Test user-facing behavior
+   - Verify DOM changes and state updates
+
+4. **Async testing:**
+   ```javascript
+   test('should load data', async () => {
+       global.fetch.mockResolvedValueOnce({
+           json: async () => ({ data: 'test' })
+       });
+       
+       await loadData();
+       
+       expect(fetch).toHaveBeenCalled();
+   });
+   ```
+
+5. **Event handling:**
+   ```javascript
+   test('should handle click event', () => {
+       const button = document.getElementById('my-button');
+       const mockHandler = jest.fn();
+       
+       button.addEventListener('click', mockHandler);
+       button.click();
+       
+       expect(mockHandler).toHaveBeenCalled();
+   });
+   ```
+
+#### Example JavaScript Test
+
+```javascript
+import { jest, expect, describe, test, beforeEach } from '@jest/globals';
+import { searchPapers } from '../static/modules/search.js';
+
+describe('Search Module', () => {
+    beforeEach(() => {
+        document.body.innerHTML = `
+            <input id="search-input" value="transformers" />
+            <div id="search-results"></div>
+        `;
+        
+        global.fetch = jest.fn();
+        jest.clearAllMocks();
+    });
+
+    test('should search for papers', async () => {
+        global.fetch.mockResolvedValueOnce({
+            json: async () => ({
+                papers: [
+                    { id: 1, title: 'Test Paper' }
+                ],
+                count: 1
+            })
+        });
+
+        await searchPapers();
+
+        expect(fetch).toHaveBeenCalledWith(
+            expect.stringContaining('/api/search'),
+            expect.any(Object)
+        );
+        
+        const results = document.getElementById('search-results');
+        expect(results.innerHTML).toContain('Test Paper');
+    });
+});
+```
+
+#### Viewing Coverage Reports
+
+After running `npm run test:coverage`, view the detailed HTML report:
+
+```bash
+# Coverage report is generated in ./coverage directory
+open coverage/index.html
+```
+
+The report shows:
+- Line-by-line coverage highlighting
+- Branch coverage details
+- Function coverage
+- Uncovered code sections
 
 ## Documentation
 

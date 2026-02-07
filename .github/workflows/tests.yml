@@ -6,12 +6,8 @@ on:
         paths:
             - 'src/**/*.py'
             - 'tests/**/*.py'
-            - 'src/abstracts_explorer/web_ui/static/**/*.js'
-            - 'src/abstracts_explorer/web_ui/templates/**'
             - 'pyproject.toml'
             - 'uv.lock'
-            - 'package.json'
-            - 'package-lock.json'
             - '.github/workflows/tests.yml'
             - '.github/scripts/setup-ci.sh'
             - '.github/scripts/setup-ci.ps1'
@@ -21,12 +17,8 @@ on:
         paths:
             - 'src/**/*.py'
             - 'tests/**/*.py'
-            - 'src/abstracts_explorer/web_ui/static/**/*.js'
-            - 'src/abstracts_explorer/web_ui/templates/**'
             - 'pyproject.toml'
             - 'uv.lock'
-            - 'package.json'
-            - 'package-lock.json'
             - '.github/workflows/tests.yml'
             - '.github/scripts/setup-ci.sh'
             - '.github/scripts/setup-ci.ps1'
@@ -72,18 +64,3 @@ jobs:
             - name: Run tests (excluding slow and e2e tests)
               run: |
                   uv run pytest tests/ -v --cov=abstracts_explorer --cov-report=xml --cov-report=term-missing -m "not slow and not e2e"
-
-    javascript-tests:
-        runs-on: ubuntu-latest
-
-        steps:
-            - uses: actions/checkout@v4
-
-            - name: Setup Abstracts Explorer Environment
-              uses: ./.github/actions/setup-environment
-              with:
-                  python-version: '3.12'
-                  install-node: 'true'
-
-            - name: Run JavaScript tests
-              run: npm test
