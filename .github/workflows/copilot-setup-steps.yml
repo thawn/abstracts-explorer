@@ -47,6 +47,11 @@ jobs:
                   npm --version
                   npm list --depth=0
 
+            - name: Install Chrome for E2E tests
+              uses: browser-actions/setup-chrome@v1
+              with:
+                  chrome-version: stable
+
             - name: Run quick tests
               run: |
                   uv run pytest tests/test_cli.py::TestCLI::test_main_no_command

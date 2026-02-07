@@ -17,15 +17,15 @@ from abstracts_explorer.config import get_config
 
 def get_env_test_path() -> Path:
     """
-    Get the path to the .env.test file.
+    Get the path to the .env.tests file.
 
-    This helper function centralizes the logic for finding .env.test,
+    This helper function centralizes the logic for finding .env.tests,
     reducing code duplication across test files.
 
     Returns
     -------
     Path
-        Path to the .env.test file in the repository root.
+        Path to the .env.tests file in the repository root.
 
     Examples
     --------
@@ -33,7 +33,7 @@ def get_env_test_path() -> Path:
     >>> config = get_config(reload=True, env_path=env_test)
     """
     repo_root = Path(__file__).parent.parent
-    return repo_root / ".env.test"
+    return repo_root / ".env.tests"
 
 
 @pytest.fixture(scope="session")

@@ -110,8 +110,8 @@ class TestRAGChatInit:
 
         assert chat.embeddings_manager == mock_embeddings_manager
         assert chat.database == mock_database
-        assert "localhost" in chat.lm_studio_url or "127.0.0.1" in chat.lm_studio_url
-        assert chat.model is not None
+        assert chat.lm_studio_url == "https://api.helmholtz-blablador.fz-juelich.de"
+        assert chat.model == "alias-fast"
         assert chat.max_context_papers > 0
         assert 0 <= chat.temperature <= 1
         assert isinstance(chat.conversation_history, list)
