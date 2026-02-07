@@ -59,6 +59,13 @@ autodoc_default_options = {
     "exclude-members": "__weakref__",
 }
 
+# Mock imports for optional dependencies
+autodoc_mock_imports = [
+    "flask",
+    "flask_cors",
+    "waitress",
+]
+
 # Type hints settings
 autodoc_typehints = "description"
 autodoc_typehints_description_target = "documented"

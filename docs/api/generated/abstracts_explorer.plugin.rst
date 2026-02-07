@@ -9,6 +9,7 @@ abstracts\_explorer.plugin
    .. autosummary::
    
       convert_to_lightweight_schema
+      get_available_filters
       get_plugin
       list_plugin_names
       list_plugins
