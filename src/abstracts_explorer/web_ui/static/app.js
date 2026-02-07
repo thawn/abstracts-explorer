@@ -129,6 +129,7 @@ function attachToWindow() {
     window.changeInterestingPapersSortOrder = changeInterestingPapersSortOrder;
     window.donateInterestingPapersData = donateInterestingPapersData;
     window.updateControlsVisibility = updateControlsVisibility;
+    window.loadPriorities = loadPriorities;  // Expose for testing
 
     // Clustering module
     window.loadClusters = loadClusters;
