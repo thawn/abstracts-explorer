@@ -79,7 +79,7 @@ jobs:
                   BLABLADOR_TOKEN: ${{ secrets.BLABLADOR_TOKEN }}
               run: |
                   # Create .env file for blablador configuration
-                  cat > .env << 'EOF'
+                  cat > .env.test << 'EOF'
                   # Blablador configuration for CI slow tests
                   CHAT_MODEL=alias-fast
                   EMBEDDING_MODEL=alias-embedding
