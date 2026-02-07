@@ -108,3 +108,7 @@ intersphinx_mapping = {
     "numpy": ("https://numpy.org/doc/stable/", None),
     "chromadb": ("https://docs.trychroma.com/", None),
 }
+
+# Configure intersphinx to not fail on network errors
+intersphinx_timeout = 5  # Timeout after 5 seconds instead of hanging
+suppress_warnings = ['app.add_node']  # Suppress node warnings

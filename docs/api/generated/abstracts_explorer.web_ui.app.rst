@@ -1,6 +1,15 @@
 ﻿abstracts\_explorer.web\_ui.app
 ===============================
 
-.. currentmodule:: abstracts_explorer.web_ui
+.. automodule:: abstracts_explorer.web_ui.app
 
-.. autodata:: app
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+   
+      get_database
+      get_embeddings_manager
+      get_rag_chat
+      run_server
+   
