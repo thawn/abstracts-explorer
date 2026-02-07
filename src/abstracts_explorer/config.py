@@ -140,7 +140,7 @@ class Config:
         # Load .env file if it exists
         env_vars = load_env_file(env_path)
 
-        # Merge with actual environment variables (env vars take precedence)
+        # Merge with actual environment variables (environment variables take precedence)
         self._env = {**env_vars, **os.environ}
 
         # Load all configuration values
@@ -168,7 +168,7 @@ class Config:
         # 1. A PostgreSQL URL (e.g., "postgresql://user:pass@host/db")
         # 2. A file path for SQLite (e.g., "abstracts.db" or "/path/to/abstracts.db")
         paper_db = self._get_env("PAPER_DB", default="abstracts.db")
-        
+
         if paper_db.startswith("postgresql://") or paper_db.startswith("sqlite://"):
             # Full database URL provided
             self.database_url = paper_db
@@ -184,7 +184,7 @@ class Config:
         # EMBEDDING_DB can be either a URL (e.g., "http://chromadb:8000")
         # or a file path (e.g., "chroma_db" or "/path/to/chroma_db")
         embedding_db = self._get_env("EMBEDDING_DB", default="chroma_db")
-        
+
         if embedding_db.startswith("http://") or embedding_db.startswith("https://"):
             # URL provided - use as-is
             self.embedding_db = embedding_db
