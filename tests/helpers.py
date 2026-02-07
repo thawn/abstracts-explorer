@@ -123,7 +123,7 @@ def check_lm_studio_available():
         return _lm_studio_available_cache
 
     try:
-        config = get_config(env_path=get_env_test_path())
+        config = get_config(reload=True, env_path=get_env_test_path())
         em = EmbeddingsManager(
             lm_studio_url=config.llm_backend_url,
             auth_token=config.llm_backend_auth_token,
