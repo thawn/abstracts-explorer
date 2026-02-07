@@ -11,9 +11,14 @@
    :recursive:
 
    cli
+   clustering
    config
    database
+   db_models
    embeddings
+   export_utils
+   mcp_server
+   mcp_tools
    paper_utils
    plugin
    plugins
