@@ -16,14 +16,9 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.chrome.options import Options as ChromeOptions
-from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from selenium.common.exceptions import TimeoutException
-from webdriver_manager.chrome import ChromeDriverManager
-from webdriver_manager.firefox import GeckoDriverManager
-from webdriver_manager.core.os_manager import ChromeType
 from abstracts_explorer.database import DatabaseManager
 from tests.helpers import find_free_port
 from tests.conftest import set_test_db
@@ -34,15 +29,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 # Constants for E2E tests
 MOCK_EMBEDDING_DIMENSION = 4096  # Standard dimension for test embeddings
 
-# Module-level cache for driver paths to ensure single installation per session
-# This prevents redundant downloads and installations when running multiple E2E tests
-# The driver is only installed when:
-# 1. Tests with @pytest.mark.e2e are actually executed (not skipped)
-# 2. The browser fixture is requested by a test
-# 3. The driver hasn't been installed yet in this test session
+# Module-level cache for browser availability checks
 _driver_cache = {
-    "chrome": None,
-    "firefox": None,
     "chrome_available": None,
     "firefox_available": None,
 }
@@ -447,7 +435,8 @@ def _create_chrome_driver():
     """
     Create a Chrome WebDriver instance.
 
-    Installs the driver only once per test session using a cache.
+    Uses Selenium's built-in driver management (Selenium 4.6+) which automatically
+    handles driver setup without requiring external downloads.
 
     Returns
     -------
@@ -461,12 +450,8 @@ def _create_chrome_driver():
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920,1080")
 
-    # Install driver only once per session
-    if _driver_cache["chrome"] is None:
-        _driver_cache["chrome"] = ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install()
-
-    service = ChromeService(_driver_cache["chrome"])
-    driver = webdriver.Chrome(service=service, options=chrome_options)
+    # Selenium 4.6+ automatically manages the driver without external downloads
+    driver = webdriver.Chrome(options=chrome_options)
     driver.implicitly_wait(10)
     return driver
 
@@ -475,7 +460,8 @@ def _create_firefox_driver():
     """
     Create a Firefox WebDriver instance.
 
-    Installs the driver only once per test session using a cache.
+    Uses Selenium's built-in driver management (Selenium 4.6+) which automatically
+    handles driver setup without requiring external downloads.
 
     Returns
     -------
@@ -487,12 +473,8 @@ def _create_firefox_driver():
     firefox_options.add_argument("--width=1920")
     firefox_options.add_argument("--height=1080")
 
-    # Install driver only once per session
-    if _driver_cache["firefox"] is None:
-        _driver_cache["firefox"] = GeckoDriverManager().install()
-
-    service = FirefoxService(_driver_cache["firefox"])
-    driver = webdriver.Firefox(service=service, options=firefox_options)
+    # Selenium 4.6+ automatically manages the driver without external downloads
+    driver = webdriver.Firefox(options=firefox_options)
     driver.implicitly_wait(10)
     return driver
 
@@ -1361,17 +1343,17 @@ class TestClusteringTab:
 
         # Wait for page to load
         wait = WebDriverWait(browser, 10)
-        wait.until(EC.presence_of_element_located((By.ID, "clustering-tab")))
+        wait.until(EC.presence_of_element_located((By.ID, "tab-clusters")))
 
         # Find and click clustering tab
-        clustering_tab = browser.find_element(By.ID, "clustering-tab")
+        clustering_tab = browser.find_element(By.ID, "tab-clusters")
         assert clustering_tab.is_displayed(), "Clustering tab should be visible"
         
         clustering_tab.click()
         time.sleep(0.5)
 
         # Verify clustering content is displayed
-        clustering_content = browser.find_element(By.ID, "clustering-content")
+        clustering_content = browser.find_element(By.ID, "clusters-tab")
         assert clustering_content.is_displayed(), "Clustering content should be visible after clicking tab"
 
     def test_clustering_plot_loads(self, web_server, browser):
@@ -1390,7 +1372,7 @@ class TestClusteringTab:
 
         # Navigate to clustering tab
         wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
         clustering_tab.click()
         time.sleep(0.5)
 
@@ -1414,7 +1396,7 @@ class TestClusteringTab:
 
         # Navigate to clustering tab
         wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
         clustering_tab.click()
         time.sleep(1)
 
@@ -1443,7 +1425,7 @@ class TestClusteringTab:
 
         # Navigate to clustering tab
         wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
         clustering_tab.click()
         time.sleep(0.5)
 
@@ -1470,7 +1452,7 @@ class TestClusteringTab:
 
         # Navigate to clustering tab
         wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
         clustering_tab.click()
         time.sleep(0.5)
 
@@ -1501,7 +1483,7 @@ class TestClusteringTab:
 
         # Navigate to clustering tab
         wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
         clustering_tab.click()
         time.sleep(0.5)
 
@@ -1529,7 +1511,7 @@ class TestClusteringTab:
 
         # Navigate to clustering tab
         wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
         clustering_tab.click()
         
         # Wait for plot to potentially load (give it some time)
@@ -1561,7 +1543,7 @@ class TestClusteringTab:
 
         # Navigate to clustering tab
         wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
         clustering_tab.click()
         time.sleep(1)
 
@@ -1595,12 +1577,12 @@ class TestClusteringTab:
 
         # Navigate to clustering tab
         wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
         clustering_tab.click()
         time.sleep(1)
 
         # Check for key UI elements
-        clustering_content = browser.find_element(By.ID, "clustering-content")
+        clustering_content = browser.find_element(By.ID, "clusters-tab")
         
         # Should have some content
         assert clustering_content.text != "", "Clustering content should not be empty"
@@ -1628,7 +1610,7 @@ class TestClusteringTab:
 
         # Navigate to clustering tab
         wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
         clustering_tab.click()
         
         # Wait for plot to potentially load
