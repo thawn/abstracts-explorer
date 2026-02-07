@@ -15,25 +15,25 @@ from abstracts_explorer.plugin import LightweightPaper
 from abstracts_explorer.config import get_config
 
 
-def get_env_example_path() -> Path:
+def get_env_test_path() -> Path:
     """
-    Get the path to the .env.example file.
-    
-    This helper function centralizes the logic for finding .env.example,
+    Get the path to the .env.test file.
+
+    This helper function centralizes the logic for finding .env.test,
     reducing code duplication across test files.
-    
+
     Returns
     -------
     Path
-        Path to the .env.example file in the repository root.
-    
+        Path to the .env.test file in the repository root.
+
     Examples
     --------
-    >>> env_example = get_env_example_path()
-    >>> config = get_config(reload=True, env_path=env_example)
+    >>> env_test = get_env_test_path()
+    >>> config = get_config(reload=True, env_path=env_test)
     """
     repo_root = Path(__file__).parent.parent
-    return repo_root / ".env.example"
+    return repo_root / ".env.test"
 
 
 @pytest.fixture(scope="session")
@@ -52,22 +52,22 @@ def monkeypatch_session():
 def set_test_db(db_path):
     """
     Helper function to set PAPER_DB environment variable and reload config.
-    
+
     This reduces code duplication across test files where the pattern
     os.environ["PAPER_DB"] = str(db_path) followed by get_config(reload=True)
     is repeated many times.
-    
-    Uses .env.example for all other config values to ensure test consistency.
-    
+
+    Uses .env.test for all other config values to ensure test consistency.
+
     Parameters
     ----------
     db_path : str or Path
         Path to the database file
-    
+
     Examples
     --------
     >>> set_test_db(tmp_path / "test.db")
-    
+
     Notes
     -----
     This function uses os.environ directly instead of monkeypatch.setenv
@@ -75,19 +75,21 @@ def set_test_db(db_path):
     (e.g., in helper functions).
     """
     import os
+
     os.environ["PAPER_DB"] = str(db_path)
-    
-    # Reload config with .env.example to ensure consistent test configuration
-    # The PAPER_DB environment variable will override the value from .env.example
-    get_config(reload=True, env_path=get_env_example_path())
+
+    # Reload config with .env.test to ensure consistent test configuration
+    # The PAPER_DB environment variable will override the value from .env.test
+    get_config(reload=True, env_path=get_env_test_path())
+
 
 
 @pytest.fixture(scope="session", autouse=True)
 def test_config():
     """
-    Ensure tests use predictable configuration from .env.example.
+    Ensure tests use predictable configuration from .env.test.
     
-    This fixture loads configuration directly from .env.example to provide
+    This fixture loads configuration directly from .env.test to provide
     consistent defaults for all tests, preventing tests from being affected
     by the user's custom .env file.
     
@@ -95,24 +97,24 @@ def test_config():
     Individual tests can override specific environment variables as needed.
     
     Note: End-to-end tests that require a working LM Studio connection should
-    not use .env.example and will need to reload config without env_path.
+    not use .env.test and will need to reload config without env_path.
     """
     from abstracts_explorer.config import get_config
-    
-    # Find .env.example file
-    env_example = get_env_example_path()
-    
-    if not env_example.exists():
-        # If .env.example doesn't exist, skip this fixture
+
+    # Find .env.test file
+    env_test = get_env_test_path()
+
+    if not env_test.exists():
+        # If .env.test doesn't exist, skip this fixture
         yield
         return
-    
-    # Force config reload with .env.example
+
+    # Force config reload with .env.test
     # This ensures all tests start with predictable configuration values
-    get_config(reload=True, env_path=env_example)
-    
+    get_config(reload=True, env_path=env_test)
+
     yield
-    
+
     # Reload config without env_path to restore user's configuration
     # This uses the default behavior (searching for .env file)
     get_config(reload=True)
@@ -398,39 +400,39 @@ def embeddings_manager(tmp_path, monkeypatch):
     Mocks the OpenAI client to avoid real API calls.
     """
     from unittest.mock import Mock
-    
+
     chroma_path = tmp_path / "test_chroma"
-    
+
     # Set the embedding_db path via environment variable
     monkeypatch.setenv("EMBEDDING_DB", str(chroma_path))
-    
+
     # Force config reload to pick up the environment variable
-    # Use .env.example for consistent test configuration
+    # Use .env.test for consistent test configuration
     from abstracts_explorer.config import get_config
-    _ = get_config(reload=True, env_path=get_env_example_path())  # Force reload but don't need the result
-    
+    _ = get_config(reload=True, env_path=get_env_test_path())  # Force reload but don't need the result
+
     # Create the manager
     em = EmbeddingsManager(
         lm_studio_url="http://localhost:1234",
         collection_name="test_collection",
     )
-    
+
     # Replace the OpenAI client with a mock
     mock_client = Mock()
-    
+
     # Mock embeddings.create()
     mock_embedding_response = Mock()
     mock_embedding_data = Mock()
     mock_embedding_data.embedding = [0.1] * 4096
     mock_embedding_response.data = [mock_embedding_data]
     mock_client.embeddings.create.return_value = mock_embedding_response
-    
+
     # Mock models.list()
     mock_client.models.list.return_value = Mock()
-    
+
     # Set the private attribute directly to avoid triggering lazy loading
     em._openai_client = mock_client
-    
+
     return em
 
 

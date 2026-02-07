@@ -10,6 +10,8 @@ from pathlib import Path
 from abstracts_explorer.config import Config, get_config, load_env_file
 from abstracts_explorer import config as config_module
 
+from tests.conftest import get_env_test_path
+
 
 class TestLoadEnvFile:
     """Test .env file loading."""
@@ -150,9 +152,8 @@ class TestConfig:
         for var in env_vars_to_clear:
             monkeypatch.delenv(var, raising=False)
 
-        # Use .env.example which has the default values
-        env_example = Path(__file__).parent.parent / ".env.example"
-        config = Config(env_path=env_example)
+        # Use .env.test which has the default values
+        config = Config(env_path=get_env_test_path())
 
         assert config.data_dir == "data"
         assert config.chat_model == "diffbot-small-xl-2508"

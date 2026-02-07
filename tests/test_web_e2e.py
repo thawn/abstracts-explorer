@@ -190,11 +190,12 @@ def test_embeddings(test_database, tmp_path_factory):
 
     # Set environment variable for EMBEDDING_DB before creating EmbeddingsManager
     os.environ["EMBEDDING_DB"] = str(embeddings_path)
-    
-    # Force config reload to pick up environment variable with .env.example
+
+    # Force config reload to pick up environment variable with .env.test
     from abstracts_explorer.config import get_config
-    from tests.conftest import get_env_example_path
-    _ = get_config(reload=True, env_path=get_env_example_path())
+    from tests.conftest import get_env_test_path
+
+    _ = get_config(reload=True, env_path=get_env_test_path())
 
     # Initialize embeddings manager
     em = EmbeddingsManager(collection_name=collection_name)
@@ -282,16 +283,17 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     original_paper_db = os.environ.get("PAPER_DB")
     original_embedding_db = os.environ.get("EMBEDDING_DB")
     original_collection_name = os.environ.get("COLLECTION_NAME")
-    
+
     os.environ["PAPER_DB"] = str(test_database)
     os.environ["EMBEDDING_DB"] = str(embeddings_path)
     os.environ["COLLECTION_NAME"] = collection_name
-    
+
     def mock_get_config():
-        # Force reload to pick up environment variables with .env.example
+        # Force reload to pick up environment variables with .env.test
         from abstracts_explorer.config import get_config as real_get_config
-        from tests.conftest import get_env_example_path
-        return real_get_config(reload=True, env_path=get_env_example_path())
+        from tests.conftest import get_env_test_path
+
+        return real_get_config(reload=True, env_path=get_env_test_path())
 
     app_module.get_config = mock_get_config
 
@@ -357,18 +359,18 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     app_module.embeddings_manager = None
     app_module.rag_chat = None
     app_module.get_database = original_get_database
-    
+
     # Restore original environment variables
     if original_paper_db is not None:
         os.environ["PAPER_DB"] = original_paper_db
     elif "PAPER_DB" in os.environ:
         del os.environ["PAPER_DB"]
-    
+
     if original_embedding_db is not None:
         os.environ["EMBEDDING_DB"] = original_embedding_db
     elif "EMBEDDING_DB" in os.environ:
         del os.environ["EMBEDDING_DB"]
-    
+
     if original_collection_name is not None:
         os.environ["COLLECTION_NAME"] = original_collection_name
     elif "COLLECTION_NAME" in os.environ:
