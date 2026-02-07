@@ -205,13 +205,15 @@ class TestMultiDatabaseBackend:
 
 def test_database_url_in_config(tmp_path, monkeypatch):
     """Test that PAPER_DB with database URL is properly loaded from config."""
+    from tests.conftest import get_env_test_path
+    
     db_path = tmp_path / "test.db"
     database_url = f"sqlite:///{db_path}"
     
     # Set environment variable using PAPER_DB (new system)
     set_test_db(database_url)
-    # Reload config to pick up environment variable
-    config = get_config(reload=True)
+    # Get config (already reloaded by set_test_db with .env.test)
+    config = get_config()
     assert config.database_url == database_url
 
 
