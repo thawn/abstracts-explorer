@@ -35,7 +35,7 @@ services:
       # Models
       # For Blablador
       - CHAT_MODEL=alias-fast
-      - EMBEDDING_MODEL=alias-embeddings
+      - EMBEDDING_MODEL=alias-qwen3-8b-embeddings
 
       # For host's LM Studio we recommend
       # - CHAT_MODEL=gemma-3-4b-it-qat
