@@ -717,11 +717,11 @@ class TestWebUIDatabaseNotFound:
     def test_get_database_postgresql_url_connection_failed(self, monkeypatch):
         """Test that get_database uses fallback SQLite when PostgreSQL URL cannot connect."""
         from abstracts_explorer.web_ui.app import app
-        from tests.conftest import get_env_example_path
+        from tests.conftest import get_env_test_path
 
         # Set invalid PostgreSQL URL (but no PAPER_DB, so it falls back to default SQLite)
         monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@nonexistent-host:5432/db")
-        get_config(reload=True, env_path=get_env_example_path())
+        get_config(reload=True, env_path=get_env_test_path())
 
         with app.test_client() as client:
             # Try to access endpoint that uses database
@@ -1870,3 +1870,194 @@ class TestClusteringEndpoints:
                 assert "error" in data
 
 
+class TestDataDonationEndpoint:
+    """Test the data donation endpoint."""
+
+    def test_donate_data_success(self, tmp_path):
+        """Test successful data donation."""
+        from abstracts_explorer.web_ui.app import app
+        from abstracts_explorer.plugin import LightweightPaper
+        
+        # Create a real test database
+        db_path = tmp_path / "test_donate.db"
+        set_test_db(str(db_path))
+        
+        db = DatabaseManager()
+        with db:
+            db.create_tables()
+            
+            # Add a test paper using LightweightPaper
+            paper = LightweightPaper(
+                title="Test Paper 1",
+                authors=["Test Author"],
+                abstract="Test abstract",
+                session="Test Session",
+                poster_position="P1",
+                year=2025,
+                conference="NeurIPS"
+            )
+            db.add_papers([paper])
+        
+        # Get the actual UID that was generated
+        with db:
+            all_papers = db.query("SELECT uid FROM papers LIMIT 1")
+            paper_uid = all_papers[0]["uid"]
+        
+        paper_priorities = {
+            paper_uid: {"priority": 5, "searchTerm": "machine learning"}
+        }
+        
+        with app.test_client() as client:
+            response = client.post(
+                "/api/donate-data",
+                json={"paperPriorities": paper_priorities},
+                content_type="application/json"
+            )
+            
+            assert response.status_code == 200
+            data = response.get_json()
+            assert data["success"] is True
+            assert data["count"] == 1
+            assert "Successfully donated" in data["message"]
+            
+            # Verify the data was actually stored by creating a fresh database manager
+            db_verify = DatabaseManager()
+            with db_verify:
+                # Query using the database manager's query method
+                results = db_verify.query("SELECT * FROM validation_data")
+                assert len(results) == 1
+                assert results[0]["paper_uid"] == paper_uid
+                assert results[0]["priority"] == 5
+                assert results[0]["search_term"] == "machine learning"
+
+    def test_donate_data_no_data(self, client):
+        """Test data donation with no data provided."""
+        response = client.post(
+            "/api/donate-data",
+            json={},
+            content_type="application/json"
+        )
+        
+        assert response.status_code == 400
+        data = response.get_json()
+        assert "error" in data
+        assert "No data provided" in data["error"]
+
+    def test_donate_data_empty_priorities(self, client):
+        """Test data donation with empty priorities."""
+        response = client.post(
+            "/api/donate-data",
+            json={"paperPriorities": {}},
+            content_type="application/json"
+        )
+        
+        assert response.status_code == 400
+        data = response.get_json()
+        assert "error" in data
+
+    def test_donate_data_invalid_format(self, tmp_path):
+        """Test data donation with invalid integer format (should be rejected)."""
+        from abstracts_explorer.web_ui.app import app
+        
+        # Create a real test database
+        db_path = tmp_path / "test_donate_invalid.db"
+        set_test_db(str(db_path))
+        
+        db = DatabaseManager()
+        with db:
+            db.create_tables()
+        
+        # Old format: paper_id -> priority (integer) - should now be rejected
+        paper_priorities = {
+            "test1": 5,
+            "test2": 3
+        }
+        
+        with app.test_client() as client:
+            response = client.post(
+                "/api/donate-data",
+                json={"paperPriorities": paper_priorities},
+                content_type="application/json"
+            )
+            
+            # Should return 400 error for invalid format
+            assert response.status_code == 400
+            data = response.get_json()
+            assert "error" in data
+            assert "Invalid data format" in data["error"]
+
+    def test_donate_data_database_error(self, client):
+        """Test data donation with database error."""
+        from abstracts_explorer.web_ui.app import app
+        
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
+                mock_db = Mock()
+                # Simulate engine creation failure
+                mock_db.engine.side_effect = Exception("Database connection error")
+                mock_get_db.return_value = mock_db
+                
+                response = client.post(
+                    "/api/donate-data",
+                    json={"paperPriorities": {"test1": {"priority": 5, "searchTerm": "test"}}},
+                    content_type="application/json"
+                )
+                
+                # Should catch the exception and return 500
+                assert response.status_code == 500
+                data = response.get_json()
+                assert "error" in data
+
+
+class TestValidationDataModel:
+    """Test the ValidationData database model."""
+
+    def test_validation_data_creation(self, tmp_path):
+        """Test creating a validation data entry."""
+        from abstracts_explorer.db_models import ValidationData
+        from abstracts_explorer.database import DatabaseManager
+        from sqlalchemy.orm import Session
+        
+        # Create test database
+        db_path = tmp_path / "test_validation.db"
+        set_test_db(str(db_path))
+        db = DatabaseManager()
+        
+        with db:
+            db.create_tables()
+            
+            # Create session
+            session = Session(db.engine)
+            
+            try:
+                # Create validation data entry
+                validation_entry = ValidationData(
+                    paper_uid="test123",
+                    priority=5,
+                    search_term="machine learning"
+                )
+                session.add(validation_entry)
+                session.commit()
+                
+                # Query back
+                result = session.query(ValidationData).filter_by(paper_uid="test123").first()
+                assert result is not None
+                assert result.paper_uid == "test123"
+                assert result.priority == 5
+                assert result.search_term == "machine learning"
+                assert result.donated_at is not None
+                
+            finally:
+                session.close()
+
+    def test_validation_data_repr(self):
+        """Test ValidationData string representation."""
+        from abstracts_explorer.db_models import ValidationData
+        
+        entry = ValidationData(paper_uid="test123", priority=5, search_term="test")
+        entry.id = 1
+        
+        repr_str = repr(entry)
+        assert "ValidationData" in repr_str
+        assert "test123" in repr_str
+        assert "5" in repr_str

@@ -411,8 +411,8 @@ def get_config(reload: bool = False, env_path: Optional[Path] = None) -> Config:
     --------
     >>> config = get_config()
     >>> print(config.chat_model)
-    >>> # In tests, use .env.example for consistent values
-    >>> config = get_config(reload=True, env_path=Path(".env.example"))
+    >>> # In tests, use .env.tests for consistent values
+    >>> config = get_config(reload=True, env_path=Path(".env.tests"))
     """
     global _config
     if _config is None or reload:

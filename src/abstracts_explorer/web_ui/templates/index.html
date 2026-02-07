@@ -468,7 +468,7 @@
                     </div>
                     <!-- Right Column: Controls -->
                     <div class="flex flex-col items-end space-y-4">
-                        <div class="flex items-center space-x-4">
+                        <div id="interesting-controls-sort" class="flex items-center space-x-4 hidden">
                             <label for="sort-order" class="text-sm text-gray-600 whitespace-nowrap">Sort by:</label>
                             <select id="sort-order" onchange="changeInterestingPapersSortOrder(this.value)"
                                 class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-600 focus:border-transparent">
@@ -482,11 +482,18 @@
                             </button>
                         </div>
                         <div class="flex items-center space-x-4">
-                            <button onclick="saveInterestingPapersAsJSON()"
-                                class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-600 focus:ring-offset-2"
-                                title="Save rated papers as JSON file">
-                                <i class="fas fa-save mr-2"></i>Save JSON
-                            </button>
+                            <div id="interesting-controls-actions" class="flex items-center space-x-4 hidden">
+                                <button id="donate-data-btn" onclick="donateInterestingPapersData()"
+                                    class="px-4 py-2 bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-lg hover:from-yellow-600 hover:to-orange-600 focus:ring-2 focus:ring-yellow-500 focus:ring-offset-2 shadow-md transition-all"
+                                    title="Donate your ratings to help improve the service (fully anonymized)">
+                                    <i class="fas fa-heart mr-2"></i>Donate Data
+                                </button>
+                                <button onclick="saveInterestingPapersAsJSON()"
+                                    class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-600 focus:ring-offset-2"
+                                    title="Save rated papers as JSON file">
+                                    <i class="fas fa-save mr-2"></i>Save JSON
+                                </button>
+                            </div>
                             <button onclick="loadInterestingPapersFromJSON()"
                                 class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:ring-2 focus:ring-green-600 focus:ring-offset-2"
                                 title="Load rated papers from JSON file">

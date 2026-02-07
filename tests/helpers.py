@@ -12,6 +12,8 @@ from abstracts_explorer.config import get_config
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.database import DatabaseManager
 
+from tests.conftest import get_env_test_path
+
 # Cache for LM Studio availability check to avoid multiple API calls during test collection
 _lm_studio_available_cache = None
 
@@ -121,7 +123,7 @@ def check_lm_studio_available():
         return _lm_studio_available_cache
 
     try:
-        config = get_config()
+        config = get_config(env_path=get_env_test_path())
         em = EmbeddingsManager(
             lm_studio_url=config.llm_backend_url,
             auth_token=config.llm_backend_auth_token,

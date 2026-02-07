@@ -928,6 +928,49 @@ def export_interesting_papers():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/donate-data", methods=["POST"])
+def donate_data():
+    """
+    Donate anonymized interesting papers data for validation purposes.
+
+    Parameters
+    ----------
+    paperPriorities : dict
+        Dictionary mapping paper UIDs to priority data (dict with priority and searchTerm)
+
+    Returns
+    -------
+    dict
+        Success message with count of donated papers
+    """
+    try:
+        data = request.json
+        paper_priorities = data.get("paperPriorities", {})
+
+        if not paper_priorities:
+            return jsonify({"error": "No data provided"}), 400
+
+        database = get_database()
+        
+        try:
+            # Use DatabaseManager's donate_validation_data method
+            donated_count = database.donate_validation_data(paper_priorities)
+            
+            return jsonify({
+                "success": True,
+                "message": f"Successfully donated {donated_count} paper(s). Thank you for contributing!",
+                "count": donated_count
+            })
+            
+        except ValueError as e:
+            # Validation errors return 400
+            return jsonify({"error": str(e)}), 400
+
+    except Exception as e:
+        logger.error(f"Error donating data: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.errorhandler(404)
 def not_found(e):
     """Handle 404 errors."""

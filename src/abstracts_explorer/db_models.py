@@ -170,3 +170,37 @@ class ClusteringCache(Base):
     def __repr__(self) -> str:
         """String representation of ClusteringCache."""
         return f"<ClusteringCache(id={self.id}, method='{self.clustering_method}', n_clusters={self.n_clusters})>"
+
+
+class ValidationData(Base):
+    """
+    Validation data model.
+
+    Stores anonymized user-donated data about interesting papers
+    for validation and service improvement purposes.
+
+    Attributes
+    ----------
+    id : int
+        Auto-incrementing primary key.
+    paper_uid : str
+        Paper UID reference (anonymized - no direct user identification).
+    priority : int
+        User-assigned priority/rating (1-5).
+    search_term : str, optional
+        Search term or context associated with this paper.
+    donated_at : datetime
+        Timestamp when data was donated.
+    """
+
+    __tablename__ = "validation_data"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    paper_uid = Column(String(16), nullable=False, index=True)
+    priority = Column(Integer, nullable=False)
+    search_term = Column(String, nullable=True)
+    donated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now())
+
+    def __repr__(self) -> str:
+        """String representation of ValidationData."""
+        return f"<ValidationData(id={self.id}, paper_uid='{self.paper_uid}', priority={self.priority})>"

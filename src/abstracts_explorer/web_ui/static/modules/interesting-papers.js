@@ -24,6 +24,70 @@ import {
 import { formatPaperCard } from './paper-card.js';
 
 /**
+ * Track whether donation prompt was shown in this session to avoid being intrusive
+ */
+let donationPromptShownThisSession = false;
+
+/**
+ * Standard donation confirmation message
+ */
+const DONATION_CONFIRMATION_MESSAGE = 
+    'Would you like to donate your paper ratings to help improve our service?\n\n' +
+    '✓ Your data will be fully anonymized\n' +
+    '✓ No personal information will be collected\n' +
+    '✓ Data will only be used to improve paper recommendations\n' +
+    '✓ You can donate again, after rating more papers\n\n' +
+    'Thank you for contributing to research!';
+
+/**
+ * Check if data has already been donated for current priorities
+ * @returns {boolean} True if data was already donated
+ */
+function hasDataBeenDonated() {
+    const currentPriorities = JSON.stringify(getAllPaperPriorities());
+    const donatedData = localStorage.getItem('donatedPrioritiesHash');
+    
+    if (!donatedData) {
+        return false;
+    }
+    
+    // Simple hash comparison - if priorities match, data was already donated
+    return donatedData === currentPriorities;
+}
+
+/**
+ * Mark current data as donated
+ */
+function markDataAsDonated() {
+    const currentPriorities = JSON.stringify(getAllPaperPriorities());
+    localStorage.setItem('donatedPrioritiesHash', currentPriorities);
+}
+
+/**
+ * Update visibility of control buttons based on whether papers are rated
+ * and whether data has been donated
+ */
+export function updateControlsVisibility() {
+    const hasPapers = Object.keys(getAllPaperPriorities()).length > 0;
+    const sortControl = document.getElementById('interesting-controls-sort');
+    const actionsControl = document.getElementById('interesting-controls-actions');
+    const donateBtn = document.getElementById('donate-data-btn');
+    
+    if (sortControl) {
+        sortControl.classList.toggle('hidden', !hasPapers);
+    }
+    
+    if (actionsControl) {
+        actionsControl.classList.toggle('hidden', !hasPapers);
+    }
+    
+    // Hide donate button if data was already donated
+    if (donateBtn && hasPapers) {
+        donateBtn.classList.toggle('hidden', hasDataBeenDonated());
+    }
+}
+
+/**
  * Load and display interesting papers
  * @async
  */
@@ -31,6 +95,9 @@ export async function loadInterestingPapers() {
     const listDiv = document.getElementById('interesting-papers-list');
     const tabsContainer = document.getElementById('interesting-session-tabs');
     const tabsNav = document.getElementById('interesting-session-tabs-nav');
+
+    // Update visibility of control buttons
+    updateControlsVisibility();
 
     // If no rated papers, show empty state and hide tabs
     if (Object.keys(getAllPaperPriorities()).length === 0) {
@@ -311,6 +378,24 @@ export async function saveInterestingPapersAsMarkdown(event) {
         return;
     }
 
+    // Show data donation prompt before export (only once per session to avoid being intrusive)
+    if (!donationPromptShownThisSession) {
+        // Show a brief contextual prompt for export; the full details are in the donation function
+        const exportDonateMessage = 
+            '💡 Before you export, would you like to donate your ratings?\n\n' +
+            'Your data helps improve our service and is fully anonymized.\n\n' +
+            'Click "OK" to donate now (recommended)\n' +
+            'Click "Cancel" to skip and continue with export';
+        
+        if (confirm(exportDonateMessage)) {
+            // User wants to donate - call donation function which shows full details
+            await donateInterestingPapersData();
+        }
+        
+        // Mark that we've shown the prompt this session
+        donationPromptShownThisSession = true;
+    }
+
     const button = event.target;
     const originalText = button.innerHTML;
     button.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Preparing download...';
@@ -476,6 +561,9 @@ export function handleJSONFileLoad(event) {
             if (window.updateInterestingPapersCount) {
                 window.updateInterestingPapersCount();
             }
+
+            // Update controls visibility
+            updateControlsVisibility();
 
             // Reload interesting papers if on that tab
             const currentTab = document.querySelector('.tab-btn.border-purple-600')?.id?.replace('tab-', '');
@@ -673,4 +761,56 @@ export function generateInterestingPapersMarkdown(papers) {
     }
 
     return markdown;
+}
+
+/**
+ * Donate interesting papers data for validation purposes
+ * @async
+ */
+export async function donateInterestingPapersData() {
+    if (Object.keys(getAllPaperPriorities()).length === 0) {
+        alert('No papers rated yet. Rate some papers before donating data.');
+        return;
+    }
+
+    // Check if data was already donated
+    if (hasDataBeenDonated()) {
+        alert('You have already donated this data. Thank you for your contribution!');
+        return;
+    }
+
+    // Show confirmation dialog with information about data anonymization
+    if (!confirm(DONATION_CONFIRMATION_MESSAGE)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/api/donate-data`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                paperPriorities: getAllPaperPriorities()
+            })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.error || 'Failed to donate data');
+        }
+
+        // Mark data as donated
+        markDataAsDonated();
+        
+        // Update button visibility
+        updateControlsVisibility();
+
+        alert(`✅ ${result.message}\n\nThank you for helping improve our service!`);
+        console.log('Successfully donated data:', result);
+    } catch (error) {
+        console.error('Error donating data:', error);
+        alert('❌ Error donating data: ' + error.message + '\n\nPlease try again later.');
+    }
 }

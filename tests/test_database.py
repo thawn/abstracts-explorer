@@ -615,3 +615,68 @@ class TestClusteringCache:
         )
         assert cached2 is not None
 
+
+class TestValidationData:
+    """Tests for validation data donation functionality."""
+
+    def test_donate_validation_data_success(self, connected_db):
+        """Test successful donation of validation data."""
+        paper_priorities = {
+            "test_uid_1": {"priority": 5, "searchTerm": "machine learning"},
+            "test_uid_2": {"priority": 4, "searchTerm": "deep learning"},
+        }
+        
+        count = connected_db.donate_validation_data(paper_priorities)
+        assert count == 2
+        
+        # Verify data was stored
+        from abstracts_explorer.db_models import ValidationData
+        from sqlalchemy.orm import Session
+        
+        session = Session(connected_db.engine)
+        try:
+            entries = session.query(ValidationData).all()
+            assert len(entries) == 2
+            
+            # Check first entry
+            entry1 = next(e for e in entries if e.paper_uid == "test_uid_1")
+            assert entry1.priority == 5
+            assert entry1.search_term == "machine learning"
+            
+            # Check second entry
+            entry2 = next(e for e in entries if e.paper_uid == "test_uid_2")
+            assert entry2.priority == 4
+            assert entry2.search_term == "deep learning"
+        finally:
+            session.close()
+
+    def test_donate_validation_data_empty(self, connected_db):
+        """Test donation with empty data raises ValueError."""
+        import pytest
+        
+        with pytest.raises(ValueError, match="No data provided"):
+            connected_db.donate_validation_data({})
+
+    def test_donate_validation_data_invalid_format(self, connected_db):
+        """Test donation with invalid data format raises ValueError."""
+        import pytest
+        
+        paper_priorities = {
+            "test_uid": 5  # Invalid: should be dict, not int
+        }
+        
+        with pytest.raises(ValueError, match="Invalid data format"):
+            connected_db.donate_validation_data(paper_priorities)
+
+    def test_donate_validation_data_not_connected(self):
+        """Test donation without connection raises DatabaseError."""
+        import pytest
+        from abstracts_explorer.database import DatabaseError
+        
+        db = DatabaseManager()
+        # Don't connect
+        
+        with pytest.raises(DatabaseError, match="Not connected"):
+            db.donate_validation_data({"test": {"priority": 5}})
+
+

@@ -21,7 +21,6 @@ release = "0.1.0"
 
 extensions = [
     "sphinx.ext.autodoc",  # Auto-generate documentation from docstrings
-    "sphinx.ext.autosummary",  # Generate summary tables
     "sphinx.ext.napoleon",  # Support for NumPy and Google style docstrings
     "sphinx.ext.viewcode",  # Add links to highlighted source code
     "sphinx.ext.intersphinx",  # Link to other project's documentation
@@ -46,10 +45,6 @@ napoleon_preprocess_types = False
 napoleon_type_aliases = None
 napoleon_attr_annotations = True
 
-# Autosummary settings
-autosummary_generate = True
-autosummary_imported_members = False
-
 # Autodoc settings
 autodoc_default_options = {
     "members": True,
@@ -58,6 +53,13 @@ autodoc_default_options = {
     "undoc-members": True,
     "exclude-members": "__weakref__",
 }
+
+# Mock imports for optional dependencies
+autodoc_mock_imports = [
+    "flask",
+    "flask_cors",
+    "waitress",
+]
 
 # Type hints settings
 autodoc_typehints = "description"
@@ -98,6 +100,8 @@ html_theme_options = {
 # Intersphinx mapping
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
-    "numpy": ("https://numpy.org/doc/stable/", None),
-    "chromadb": ("https://docs.trychroma.com/", None),
 }
+
+# Configure intersphinx to not fail on network errors
+intersphinx_timeout = 5  # Timeout after 5 seconds instead of hanging
+suppress_warnings = ['app.add_node']  # Suppress node warnings

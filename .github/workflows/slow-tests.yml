@@ -74,39 +74,9 @@ jobs:
               with:
                   chrome-version: stable
 
-            - name: Create blablador configuration file
-              env:
-                  BLABLADOR_TOKEN: ${{ secrets.BLABLADOR_TOKEN }}
-              run: |
-                  # Create .env file for blablador configuration
-                  cat > .env << 'EOF'
-                  # Blablador configuration for CI slow tests
-                  CHAT_MODEL=alias-fast
-                  EMBEDDING_MODEL=alias-embedding
-                  LLM_BACKEND_URL=https://api.blablador.com
-                  
-                  # Database paths
-                  DATA_DIR=data
-                  EMBEDDING_DB_PATH=chroma_db
-                  PAPER_DB_PATH=abstracts.db
-                  COLLECTION_NAME=papers
-                  MAX_CONTEXT_PAPERS=5
-                  
-                  # Chat settings
-                  CHAT_TEMPERATURE=0.7
-                  CHAT_MAX_TOKENS=1000
-                  
-                  # Query rewriting settings
-                  ENABLE_QUERY_REWRITING=true
-                  QUERY_SIMILARITY_THRESHOLD=0.7
-                  EOF
-                  # Safely append the auth token on a separate line to avoid shell injection
-                  echo "LLM_BACKEND_AUTH_TOKEN=${BLABLADOR_TOKEN}" >> .env
-                  echo "Created .env configuration file for blablador"
-                  # Show config (but hide the token)
-                  grep -v "LLM_BACKEND_AUTH_TOKEN" .env
-                  echo "LLM_BACKEND_AUTH_TOKEN=***hidden***"
-
             - name: Run slow tests
+              env:
+                  # Pass the Blablador token as an environment variable for the tests
+                  BLABLADOR_TOKEN: ${{ secrets.BLABLADOR_TOKEN }}
               run: |
                   uv run pytest tests/ -v --cov=abstracts_explorer --cov-report=xml --cov-report=term-missing -m "slow"

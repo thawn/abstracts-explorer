@@ -10,7 +10,7 @@ import pytest
 
 from abstracts_explorer import DatabaseManager
 from abstracts_explorer.plugin import LightweightPaper, convert_to_lightweight_schema
-from tests.conftest import set_test_db
+from tests.conftest import set_test_db, set_test_embedding_db
 from tests.helpers import requires_lm_studio
 
 # Fixtures imported from conftest.py:
@@ -545,11 +545,12 @@ class TestIntegration:
             assert db.get_paper_count() == 7
 
         # Step 2: Generate embeddings from database using real LM Studio API
-        with EmbeddingsManager(chroma_path=chroma_path, collection_name="neurips_test") as em:
+        set_test_embedding_db(chroma_path)  # Ensure chroma path is clean before test
+        with EmbeddingsManager(collection_name="neurips_test") as em:
             em.create_collection()
 
             # Embed only papers with non-empty abstracts
-            embedded_count = em.embed_from_database(db_file, where_clause="abstract IS NOT NULL AND abstract != ''")
+            embedded_count = em.embed_from_database(where_clause="abstract IS NOT NULL AND abstract != ''")
 
             # All 7 papers should have abstracts
             assert embedded_count == 7
@@ -612,8 +613,8 @@ class TestIntegration:
             # Close and reopen the manager
             em.close()
 
-        # Reopen and verify data persists
-        with EmbeddingsManager(chroma_path=chroma_path, collection_name="neurips_test") as em:
+        # Reopen and verify data persists (uses the same collection name and chroma path as before)
+        with EmbeddingsManager(collection_name="neurips_test") as em:
             em.create_collection()
 
             stats = em.get_collection_stats()
@@ -642,6 +643,7 @@ class TestIntegration:
 
         # Create test database with papers from different years
         db_file = tmp_path / "test_semantic_search.db"
+        chroma_path = tmp_path / "test_semantic_chroma"
 
         papers = [
             LightweightPaper(
@@ -684,6 +686,7 @@ class TestIntegration:
                 db.add_paper(paper)
 
         # Generate embeddings with real API
+        set_test_embedding_db(chroma_path)  # Ensure chroma path is clean before test
         with EmbeddingsManager(collection_name="semantic_test") as em:
             em.connect()
             em.create_collection(reset=True)
