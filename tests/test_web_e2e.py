@@ -1728,17 +1728,17 @@ class TestClusteringTab:
 
         # Wait for page to load
         wait = WebDriverWait(browser, 10)
-        wait.until(EC.presence_of_element_located((By.ID, "clustering-tab")))
+        wait.until(EC.presence_of_element_located((By.ID, "tab-clusters")))
 
         # Find and click clustering tab
-        clustering_tab = browser.find_element(By.ID, "clustering-tab")
+        clustering_tab = browser.find_element(By.ID, "tab-clusters")
         assert clustering_tab.is_displayed(), "Clustering tab should be visible"
-        
+
         clustering_tab.click()
         time.sleep(0.5)
 
         # Verify clustering content is displayed
-        clustering_content = browser.find_element(By.ID, "clustering-content")
+        clustering_content = browser.find_element(By.ID, "clusters-tab")
         assert clustering_content.is_displayed(), "Clustering content should be visible after clicking tab"
 
     def test_clustering_plot_loads(self, web_server, browser):
@@ -1757,7 +1757,7 @@ class TestClusteringTab:
 
         # Navigate to clustering tab
         wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
         clustering_tab.click()
         time.sleep(0.5)
 
@@ -1781,14 +1781,14 @@ class TestClusteringTab:
 
         # Navigate to clustering tab
         wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
         clustering_tab.click()
         time.sleep(1)
 
         # Check for legend with stats in title
         legend_element = browser.find_element(By.ID, "cluster-legend")
         assert legend_element.is_displayed(), "Cluster legend should be visible"
-        
+
         # Verify legend contains the stats information
         legend_text = legend_element.text
         assert "papers" in legend_text.lower(), "Legend should contain paper count"
@@ -1796,7 +1796,7 @@ class TestClusteringTab:
 
     def test_clustering_filter_dropdown(self, web_server, browser):
         """
-        Test that the cluster filter dropdown is present and functional.
+        Test that the clustering tab has filter/search functionality.
 
         Parameters
         ----------
@@ -1810,16 +1810,16 @@ class TestClusteringTab:
 
         # Navigate to clustering tab
         wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
         clustering_tab.click()
         time.sleep(0.5)
 
-        # Check for filter dropdown
-        filter_dropdown = browser.find_element(By.ID, "cluster-filter")
-        assert filter_dropdown.is_displayed(), "Cluster filter dropdown should be visible"
-        
-        # Verify it's a select element
-        assert filter_dropdown.tag_name == "select", "Filter should be a select element"
+        # Check for custom query search input (this is the filter mechanism)
+        search_input = browser.find_element(By.ID, "custom-query-input")
+        assert search_input.is_displayed(), "Custom query search input should be visible"
+
+        # Verify it's an input element
+        assert search_input.tag_name == "input", "Search should be an input element"
 
     def test_clustering_settings_button(self, web_server, browser):
         """
@@ -1837,20 +1837,21 @@ class TestClusteringTab:
 
         # Navigate to clustering tab
         wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
         clustering_tab.click()
         time.sleep(0.5)
 
-        # Find settings button (look for button with gear icon or settings text)
+        # Find settings button (look for button with openClusterSettings onclick)
         settings_buttons = browser.find_elements(By.TAG_NAME, "button")
         settings_button = None
         for btn in settings_buttons:
-            if "settings" in btn.get_attribute("onclick") or "fa-cog" in btn.get_attribute("innerHTML"):
+            onclick = btn.get_attribute("onclick") or ""
+            if "openClusterSettings" in onclick:
                 settings_button = btn
                 break
-        
-        if settings_button:
-            assert settings_button.is_displayed(), "Settings button should be visible"
+
+        assert settings_button is not None, "Settings button should exist"
+        assert settings_button.is_displayed(), "Settings button should be visible"
 
     def test_clustering_paper_details_panel(self, web_server, browser):
         """
@@ -1868,7 +1869,7 @@ class TestClusteringTab:
 
         # Navigate to clustering tab
         wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
         clustering_tab.click()
         time.sleep(0.5)
 
@@ -1896,9 +1897,9 @@ class TestClusteringTab:
 
         # Navigate to clustering tab
         wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
         clustering_tab.click()
-        
+
         # Wait for plot to potentially load (give it some time)
         time.sleep(2)
 
@@ -1928,14 +1929,14 @@ class TestClusteringTab:
 
         # Navigate to clustering tab
         wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
         clustering_tab.click()
         time.sleep(1)
 
         # Check browser console for errors
         logs = browser.get_log("browser")
         errors = [log for log in logs if log["level"] == "SEVERE"]
-        
+
         # Filter out known harmless errors
         critical_errors = []
         for error in errors:
@@ -1943,7 +1944,7 @@ class TestClusteringTab:
             # Ignore favicon errors and other non-critical issues
             if "favicon" not in message.lower() and "ERR_BLOCKED_BY_CLIENT" not in message:
                 critical_errors.append(error)
-        
+
         assert len(critical_errors) == 0, f"No severe JavaScript errors should occur. Found: {critical_errors}"
 
     def test_clustering_visualization_elements(self, web_server, browser):
@@ -1962,16 +1963,16 @@ class TestClusteringTab:
 
         # Navigate to clustering tab
         wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
         clustering_tab.click()
         time.sleep(1)
 
         # Check for key UI elements
-        clustering_content = browser.find_element(By.ID, "clustering-content")
-        
+        clustering_content = browser.find_element(By.ID, "clusters-tab")
+
         # Should have some content
         assert clustering_content.text != "", "Clustering content should not be empty"
-        
+
         # Check for plot container
         plot = browser.find_element(By.ID, "cluster-plot")
         assert plot is not None, "Cluster plot should exist"
@@ -1995,9 +1996,9 @@ class TestClusteringTab:
 
         # Navigate to clustering tab
         wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "clustering-tab")))
+        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
         clustering_tab.click()
-        
+
         # Wait for plot to potentially load
         time.sleep(3)
 
@@ -2046,20 +2047,20 @@ class TestClusteringTab:
             allMatch: colorMatches.every(m => m.match)
         };
         """
-        
+
         result = browser.execute_script(script)
-        
+
         # Check if plot data was found
         if 'error' in result:
             # Plot might not have data yet, which is ok for this test
             # The important thing is the JavaScript code structure is correct
             return
-        
+
         if result.get('success') and result.get('matches'):
             # Verify all cluster centers have matching colors
             assert result['allMatch'], \
                 f"Not all cluster centers match their point colors: {result['matches']}"
-            
+
             # Log the successful matches
             print(f"Color matching verified for {len(result['matches'])} clusters")
 
