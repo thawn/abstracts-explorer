@@ -101,10 +101,10 @@ jobs:
                   QUERY_SIMILARITY_THRESHOLD=0.7
                   EOF
                   # Safely append the auth token on a separate line to avoid shell injection
-                  echo "LLM_BACKEND_AUTH_TOKEN=${BLABLADOR_TOKEN}" >> .env
+                  echo "LLM_BACKEND_AUTH_TOKEN=${BLABLADOR_TOKEN}" >> .env.test
                   echo "Created .env configuration file for blablador"
                   # Show config (but hide the token)
-                  grep -v "LLM_BACKEND_AUTH_TOKEN" .env
+                  grep -v "LLM_BACKEND_AUTH_TOKEN" .env.test
                   echo "LLM_BACKEND_AUTH_TOKEN=***hidden***"
 
             - name: Run slow tests
