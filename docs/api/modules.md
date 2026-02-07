@@ -2,16 +2,6 @@
 
 Complete API documentation for Abstracts Explorer.
 
-## Modules
-
-```{eval-rst}
-.. autosummary::
-   :toctree: generated
-   :recursive:
-
-   abstracts_explorer
-```
-
 ## Quick Links
 
 - [Database Module](database.md) - SQLite database operations

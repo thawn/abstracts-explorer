@@ -21,7 +21,6 @@ release = "0.1.0"
 
 extensions = [
     "sphinx.ext.autodoc",  # Auto-generate documentation from docstrings
-    "sphinx.ext.autosummary",  # Generate summary tables
     "sphinx.ext.napoleon",  # Support for NumPy and Google style docstrings
     "sphinx.ext.viewcode",  # Add links to highlighted source code
     "sphinx.ext.intersphinx",  # Link to other project's documentation
@@ -45,10 +44,6 @@ napoleon_use_rtype = True
 napoleon_preprocess_types = False
 napoleon_type_aliases = None
 napoleon_attr_annotations = True
-
-# Autosummary settings
-autosummary_generate = True
-autosummary_imported_members = False
 
 # Autodoc settings
 autodoc_default_options = {
@@ -105,8 +100,6 @@ html_theme_options = {
 # Intersphinx mapping
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
-    "numpy": ("https://numpy.org/doc/stable/", None),
-    "chromadb": ("https://docs.trychroma.com/", None),
 }
 
 # Configure intersphinx to not fail on network errors
