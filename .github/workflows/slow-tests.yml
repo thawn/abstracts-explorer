@@ -75,5 +75,8 @@ jobs:
                   chrome-version: stable
 
             - name: Run slow tests
+              env:
+                  # Pass the Blablador token as an environment variable for the tests
+                  BLABLADOR_TOKEN: ${{ secrets.BLABLADOR_TOKEN }}
               run: |
                   uv run pytest tests/ -v --cov=abstracts_explorer --cov-report=xml --cov-report=term-missing -m "slow"
