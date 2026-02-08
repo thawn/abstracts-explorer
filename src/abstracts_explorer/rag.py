@@ -13,7 +13,7 @@ from typing import List, Dict, Optional, Any
 from openai import OpenAI
 
 from .config import get_config
-from .paper_utils import format_search_results, build_context_from_papers, PaperFormattingError
+from .paper_utils import PaperFormattingError
 from .mcp_tools import execute_mcp_tool, format_tool_result_for_llm
 
 logger = logging.getLogger(__name__)
@@ -244,12 +244,11 @@ class RAGChat:
 
     def _analyze_and_route_query(self, user_query: str) -> Dict[str, Any]:
         """
-        Analyze query and decide whether to use tools or search papers.
-
-        Uses the LLM to determine if the query requires MCP tools (for clustering,
-        trends, topic analysis) or if it should be answered with paper retrieval.
-        If tools are needed, returns tool call information. Otherwise, returns
-        a rewritten query optimized for semantic search.
+        Analyze user query and determine which MCP tool to use.
+        
+        This method uses an LLM to analyze the user's question and decide which
+        MCP tool should handle it: clustering/analysis tools or paper search tool.
+        All queries are now routed through MCP tools for a unified interface.
 
         Parameters
         ----------
@@ -260,49 +259,48 @@ class RAGChat:
         -------
         dict
             Dictionary containing:
-            - use_tools: bool - Whether to use MCP tools
-            - tool_calls: list - Tool calls if use_tools is True (can be empty if not detected)
-            - rewritten_query: str - Rewritten query if use_tools is False
+            - use_tools: bool - Always True (unified routing through tools)
+            - tool_calls: list - Tool calls to execute
+            - rewritten_query: None - Not used anymore
             - original_query: str - The original query for reference
 
         Examples
         --------
         >>> chat = RAGChat(em, db)
         >>> result = chat._analyze_and_route_query("What are the main topics?")
-        >>> if result['use_tools']:
-        ...     print("Using tools:", result['tool_calls'])
-        >>> else:
-        ...     print("Searching with:", result['rewritten_query'])
+        >>> print("Tools to execute:", result['tool_calls'])
         """
-        # Build system prompt that decides routing
+        # Build system prompt that decides which tool to use
         if self.enable_mcp_tools:
             system_prompt = (
-                "You are a query analysis assistant. Determine if the user's question requires:\n"
-                "1. MCP TOOLS (clustering analysis) - for questions about:\n"
+                "You are a query routing assistant. Determine which MCP tool should handle the user's question.\n\n"
+                "AVAILABLE TOOLS:\n\n"
+                "1. CLUSTERING/ANALYSIS TOOLS - Use for questions about:\n"
                 "   - Overall topics/themes ('what are the main topics', 'research areas covered')\n"
                 "   - Trends over time ('how has X evolved', 'topic evolution')\n"
                 "   - Recent developments ('latest research on', 'recent papers about')\n"
                 "   - Counting papers by topic ('how many papers about X')\n"
-                "   - Visualization requests ('show me', 'visualize', 'plot')\n\n"
-                "2. PAPER SEARCH - for specific questions about:\n"
-                "   - Particular concepts/techniques\n"
-                "   - Detailed explanations\n"
-                "   - Specific papers or authors\n\n"
-                "If MCP TOOLS are needed, respond with ONLY a valid JSON tool call in one of these formats:\n"
+                "   - Visualization requests ('show me', 'visualize', 'plot')\n"
+                "   Tools: analyze_topic_relevance, get_cluster_topics, get_topic_evolution, "
+                "get_recent_developments, get_cluster_visualization\n\n"
+                "2. PAPER SEARCH TOOL (rewrite_and_search_papers) - Use for:\n"
+                "   - Specific questions about concepts/techniques\n"
+                "   - Detailed explanations of topics\n"
+                "   - Questions about specific papers or authors\n"
+                "   - Questions requiring direct information from papers\n\n"
+                "Respond with ONLY a valid JSON tool call in one of these formats:\n"
                 "- Single: {\"name\": \"tool_name\", \"arguments\": {...}}\n"
                 "- Array: [{\"name\": \"tool1\", \"arguments\": {...}}, ...]\n\n"
-                "If PAPER SEARCH is needed, respond with ONLY a rewritten search query (5-15 words).\n"
+                "For paper search, use: {\"name\": \"rewrite_and_search_papers\", \"arguments\": {\"query\": \"...\", \"n_results\": 5}}\n"
                 "For follow-up questions, incorporate context from previous conversation."
             )
         else:
-            # If MCP tools disabled, just do query rewriting
+            # If MCP tools disabled, default to paper search
             system_prompt = (
-                "You are a query rewriting assistant. Your task is to rewrite user questions "
-                "into effective search queries for finding relevant research papers. "
-                "Convert conversational questions into keyword-based search queries. "
-                "For follow-up questions, incorporate context from previous conversation. "
-                "Output ONLY the rewritten query, nothing else. "
-                "Keep queries concise (5-15 words) and focused on key concepts."
+                "You are a query routing assistant. Since clustering tools are disabled, "
+                "route all queries to the paper search tool. Respond with ONLY a JSON tool call:\n"
+                "{\"name\": \"rewrite_and_search_papers\", \"arguments\": {\"query\": \"<optimized query>\", \"n_results\": 5}}\n"
+                "Optimize the query for semantic search (5-15 keywords)."
             )
 
         # Build messages with conversation history for context
@@ -314,56 +312,55 @@ class RAGChat:
             messages.extend(context_history)
 
         # Add current query
-        if self.enable_mcp_tools:
-            messages.append({
-                "role": "user",
-                "content": f"Analyze this query and respond appropriately: {user_query}"
-            })
-        else:
-            messages.append({
-                "role": "user",
-                "content": f"Rewrite this query: {user_query}"
-            })
+        messages.append({
+            "role": "user",
+            "content": f"Route this query to the appropriate tool: {user_query}"
+        })
 
         try:
-            # Don't pass tools here - we want the model to decide via content
+            # Get routing decision from LLM
             response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 temperature=0.3,  # Lower temperature for consistent decisions
-                max_tokens=200,  # Allow for tool calls or rewritten queries
+                max_tokens=200,  # Allow for tool calls
                 timeout=30,  # Shorter timeout for quick analysis
             )
             response_content = response.choices[0].message.content.strip()
 
-            # Check if response is a tool call (JSON format)
-            if self.enable_mcp_tools:
-                tool_calls = parse_json_tool_call(response_content)
-                if tool_calls:
-                    logger.info(f"Query analysis: Using {len(tool_calls)} MCP tool(s)")
-                    return {
-                        "use_tools": True,
-                        "tool_calls": tool_calls,
-                        "rewritten_query": None,
-                        "original_query": user_query
-                    }
-
-            # Otherwise, treat as rewritten query
-            rewritten = response_content.strip("\"'")
-            logger.info(f"Query analysis: Rewrote query '{user_query}' -> '{rewritten}'")
-            return {
-                "use_tools": False,
-                "tool_calls": [],
-                "rewritten_query": rewritten,
-                "original_query": user_query
-            }
+            # Parse as tool call (should always be JSON format)
+            tool_calls = parse_json_tool_call(response_content)
+            if tool_calls:
+                logger.info(f"Query analysis: Routing to {len(tool_calls)} MCP tool(s)")
+                return {
+                    "use_tools": True,
+                    "tool_calls": tool_calls,
+                    "rewritten_query": None,
+                    "original_query": user_query
+                }
+            else:
+                # Fallback: If parsing fails, default to paper search
+                logger.warning(f"Failed to parse tool call, defaulting to paper search for: {user_query}")
+                return {
+                    "use_tools": True,
+                    "tool_calls": [{
+                        "name": "rewrite_and_search_papers",
+                        "arguments": {"query": user_query, "n_results": 5}
+                    }],
+                    "rewritten_query": None,
+                    "original_query": user_query
+                }
 
         except Exception as e:
-            logger.warning(f"Query analysis failed: {e}, using original query for search")
+            logger.warning(f"Query analysis failed: {e}, defaulting to paper search")
+            # Fallback: route to paper search on error
             return {
-                "use_tools": False,
-                "tool_calls": [],
-                "rewritten_query": user_query,
+                "use_tools": True,
+                "tool_calls": [{
+                    "name": "rewrite_and_search_papers",
+                    "arguments": {"query": user_query, "n_results": 5}
+                }],
+                "rewritten_query": None,
                 "original_query": user_query
             }
 
@@ -461,145 +458,78 @@ class RAGChat:
             if n_results is None:
                 n_results = self.max_context_papers
 
-            # Analyze query and decide routing (tools vs paper search)
+            # Analyze query and decide which tool to use (unified routing)
             if self.enable_query_rewriting:
                 route_info = self._analyze_and_route_query(question)
             else:
-                # If query rewriting disabled, just use original query for search
+                # If query rewriting disabled, default to paper search tool
                 route_info = {
-                    "use_tools": False,
-                    "tool_calls": [],
-                    "rewritten_query": question,
+                    "use_tools": True,
+                    "tool_calls": [{
+                        "name": "rewrite_and_search_papers",
+                        "arguments": {"query": question, "n_results": n_results}
+                    }],
+                    "rewritten_query": None,
                     "original_query": question
                 }
-                logger.info("Query rewriting disabled, using original query")
+                logger.info("Query rewriting disabled, using paper search tool with original query")
 
-            # ROUTE 1: Use MCP Tools
-            if route_info["use_tools"] and route_info["tool_calls"]:
-                logger.info(f"Executing {len(route_info['tool_calls'])} MCP tool(s)")
-                
-                # Execute tools
-                tool_results = []
-                for tool_call in route_info["tool_calls"]:
-                    function_name = tool_call['name']
-                    function_args = tool_call['arguments']
-                    
-                    logger.info(f"Executing tool: {function_name} with args: {function_args}")
-                    tool_result = execute_mcp_tool(function_name, function_args)
-                    formatted_result = format_tool_result_for_llm(function_name, tool_result)
-                    
-                    tool_results.append({
-                        'name': function_name,
-                        'result': formatted_result
-                    })
-                
-                # Build context from tool results
-                tool_context = "\n\n".join([
-                    f"Tool: {tr['name']}\nResult:\n{tr['result']}"
-                    for tr in tool_results
-                ])
-                
-                # Generate response based on tool results
-                logger.info("Generating response from tool results")
-                response_text = self._generate_response_from_context(
-                    question, tool_context, system_prompt, is_tool_result=True
-                )
-                
-                # Store in conversation history
-                self.conversation_history.append({"role": "user", "content": question})
-                self.conversation_history.append({"role": "assistant", "content": response_text})
-                
-                return {
-                    "response": response_text,
-                    "papers": [],  # No papers used for tool-based queries
-                    "metadata": {
-                        "n_papers": 0,
-                        "model": self.model,
-                        "rewritten_query": None,
-                        "used_tools": True,
-                        "tools_executed": [tc['name'] for tc in route_info['tool_calls']],
-                        "retrieved_new_papers": False,
-                    },
-                }
-
-            # ROUTE 2: Use Paper Search
-            rewritten_query = route_info["rewritten_query"]
+            # Execute MCP tools (unified route)
+            logger.info(f"Executing {len(route_info['tool_calls'])} MCP tool(s)")
             
-            # Check if we should retrieve new papers or reuse previous context
-            should_retrieve = self._should_retrieve_papers(rewritten_query) if self.enable_query_rewriting else True
-
-            if should_retrieve:
-                # Search for relevant papers using rewritten query
-                logger.info(f"Searching for papers with rewritten query: {rewritten_query}")
-                search_results = self.embeddings_manager.search_similar(
-                    rewritten_query, n_results=n_results, where=metadata_filter
-                )
-
-                # Store rewritten query for next comparison
-                self.last_search_query = rewritten_query
-
-                if not search_results["ids"][0]:
-                    logger.warning("No relevant papers found")
-                    return {
-                        "response": "I couldn't find any relevant papers to answer your question.",
-                        "papers": [],
-                        "metadata": {"n_papers": 0, "rewritten_query": rewritten_query, "used_tools": False},
-                    }
-
-                # Format context from papers using shared utility
-                papers = format_search_results(search_results, self.database, include_documents=True)
-                context = build_context_from_papers(papers)
-
-                # Cache papers for potential reuse
-                self._cached_papers = papers
-                self._cached_context = context
-            else:
-                # Reuse cached papers and context from previous query
-                logger.info("Reusing cached papers from previous query")
-                papers = getattr(self, "_cached_papers", [])
-                context = getattr(self, "_cached_context", "")
-
-                if not papers:
-                    # Fallback: retrieve papers if cache is empty
-                    logger.warning("Cache empty, retrieving papers")
-                    search_results = self.embeddings_manager.search_similar(
-                        rewritten_query, n_results=n_results, where=metadata_filter
-                    )
-                    self.last_search_query = rewritten_query
-
-                    if not search_results["ids"][0]:
-                        logger.warning("No relevant papers found")
-                        return {
-                            "response": "I couldn't find any relevant papers to answer your question.",
-                            "papers": [],
-                            "metadata": {"n_papers": 0, "rewritten_query": rewritten_query, "used_tools": False},
-                        }
-
-                    # Format context from papers using shared utility
-                    papers = format_search_results(search_results, self.database, include_documents=True)
-                    context = build_context_from_papers(papers)
-
-                    # Cache papers for potential reuse
-                    self._cached_papers = papers
-                    self._cached_context = context
-
-            # Generate response from paper context (no tool decision here)
-            logger.info(f"Generating response using {len(papers)} papers as context")
-            response_text = self._generate_response_from_context(question, context, system_prompt, is_tool_result=False)
-
+            # Execute tools and collect results
+            tool_results = []
+            for tool_call in route_info["tool_calls"]:
+                function_name = tool_call['name']
+                function_args = tool_call['arguments']
+                
+                logger.info(f"Executing tool: {function_name} with args: {function_args}")
+                tool_result = execute_mcp_tool(function_name, function_args)
+                formatted_result = format_tool_result_for_llm(function_name, tool_result)
+                
+                tool_results.append({
+                    'name': function_name,
+                    'result': formatted_result,
+                    'raw_result': tool_result  # Keep raw for paper extraction
+                })
+            
+            # Build context from tool results
+            tool_context = "\n\n".join([
+                f"Tool: {tr['name']}\nResult:\n{tr['result']}"
+                for tr in tool_results
+            ])
+            
+            # Generate response based on tool results
+            logger.info("Generating response from tool results")
+            response_text = self._generate_response_from_context(
+                question, tool_context, system_prompt, is_tool_result=True
+            )
+            
+            # Extract papers if rewrite_and_search_papers was used
+            papers = []
+            for tr in tool_results:
+                if tr['name'] == 'rewrite_and_search_papers':
+                    # Extract papers from the raw tool result
+                    try:
+                        result_json = json.loads(tr['raw_result'])
+                        papers = result_json.get('papers', [])
+                    except json.JSONDecodeError:
+                        logger.warning("Failed to parse papers from rewrite_and_search_papers result")
+            
             # Store in conversation history
             self.conversation_history.append({"role": "user", "content": question})
             self.conversation_history.append({"role": "assistant", "content": response_text})
-
+            
             return {
                 "response": response_text,
                 "papers": papers,
                 "metadata": {
                     "n_papers": len(papers),
                     "model": self.model,
-                    "rewritten_query": rewritten_query,
-                    "retrieved_new_papers": should_retrieve,
-                    "used_tools": False,
+                    "rewritten_query": None,
+                    "used_tools": True,
+                    "tools_executed": [tc['name'] for tc in route_info['tool_calls']],
+                    "retrieved_new_papers": len(papers) > 0,
                 },
             }
 
