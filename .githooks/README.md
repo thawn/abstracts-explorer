@@ -10,10 +10,17 @@ Git hooks in the `.git/hooks/` directory are not version controlled by default. 
 
 ### pre-commit
 
-Runs before each commit. If you're committing changes to HTML, JS, or CSS files, this hook:
+Runs before each commit. This hook performs several checks:
+
+**For HTML, JS, or CSS files:**
 1. Runs `npm run install:vendor` to rebuild vendor files
 2. Checks if vendor files were modified
 3. If vendor files changed, prompts you to stage and commit them
+
+**For Python files:**
+1. Runs **black** formatter to check code formatting (auto-fixes if needed)
+2. Runs **ruff** linter to check code quality
+3. Runs **mypy** for type checking
 
 ### post-checkout
 
@@ -64,10 +71,16 @@ To update a hook:
 ## Files Monitored
 
 The hooks monitor changes to:
+
+**Web UI files:**
 - `src/abstracts_explorer/web_ui/templates/*.html`
 - `src/abstracts_explorer/web_ui/static/*.js`
 - `src/abstracts_explorer/web_ui/static/*.css`
 - `tailwind.config.js`
+
+**Python files (for linting/formatting):**
+- `src/**/*.py`
+- `tests/**/*.py`
 
 ## Bypassing Hooks
 
@@ -88,6 +101,16 @@ To re-enable:
 ```bash
 chmod +x .git/hooks/pre-commit
 ```
+
+## Required Tools
+
+For the pre-commit hook to work fully, you need to install:
+
+- **black**: Python code formatter (`uv sync --extra dev`)
+- **ruff**: Python linter (optional, `uv pip install ruff`)
+- **mypy**: Python type checker (optional, `uv pip install mypy types-requests`)
+
+The hook will skip checks for any missing tools and warn you.
 
 ## More Information
 
