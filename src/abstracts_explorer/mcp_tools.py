@@ -19,6 +19,7 @@ from .mcp_server import (
     get_recent_developments,
     get_cluster_visualization,
     analyze_topic_relevance,
+    rewrite_and_search_papers,
 )
 
 logger = logging.getLogger(__name__)
@@ -231,6 +232,46 @@ MCP_TOOLS_SCHEMA = [
                 "required": []
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rewrite_and_search_papers",
+            "description": (
+                "Rewrite a user query for better semantic search and retrieve relevant papers. "
+                "Use this tool when the user asks specific questions about: research concepts, "
+                "techniques, methods, specific papers, authors, explanations of topics, "
+                "or wants detailed information from the research papers themselves."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The user's question or query to search for"
+                    },
+                    "n_results": {
+                        "type": "integer",
+                        "description": "Number of papers to retrieve (default: 5)"
+                    },
+                    "conferences": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Filter by specific conferences (e.g., ['NeurIPS', 'ICLR'])"
+                    },
+                    "years": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Filter by specific years (e.g., [2024, 2025])"
+                    },
+                    "collection_name": {
+                        "type": "string",
+                        "description": "Name of ChromaDB collection (optional)"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
     }
 ]
 
@@ -269,6 +310,8 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
             return get_recent_developments(**arguments)
         elif tool_name == "get_cluster_visualization":
             return get_cluster_visualization(**arguments)
+        elif tool_name == "rewrite_and_search_papers":
+            return rewrite_and_search_papers(**arguments)
         else:
             # Return error JSON for unknown tools
             error_result = {"error": f"Unknown MCP tool: {tool_name}"}
