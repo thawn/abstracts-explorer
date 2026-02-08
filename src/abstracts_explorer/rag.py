@@ -7,9 +7,8 @@ contextual responses using OpenAI-compatible language model APIs.
 
 import json
 import logging
-import re
 from pathlib import Path
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any
 
 from openai import OpenAI
 
@@ -24,130 +23,6 @@ class RAGError(Exception):
     """Exception raised for RAG-related errors."""
 
     pass
-
-
-def parse_text_tool_calls(response_text: str) -> Tuple[bool, List[Dict[str, Any]]]:
-    """
-    Parse text-based tool calls from LLM response.
-    
-    Some models return tool calls as text instead of proper OpenAI tool calls.
-    This function detects and parses the pattern: [TOOL_CALLS]tool_name{...json...}
-    
-    Parameters
-    ----------
-    response_text : str
-        The LLM response text to parse
-        
-    Returns
-    -------
-    tuple
-        A tuple of (has_tool_calls: bool, tool_calls: List[Dict])
-        - has_tool_calls: True if text-based tool calls were detected
-        - tool_calls: List of parsed tool call dictionaries with 'name' and 'arguments' keys
-        
-    Examples
-    --------
-    >>> text = '[TOOL_CALLS]analyze_topic_relevance{"query": "transformers"}'
-    >>> has_calls, calls = parse_text_tool_calls(text)
-    >>> has_calls
-    True
-    >>> calls[0]['name']
-    'analyze_topic_relevance'
-    """
-    # Pattern to find [TOOL_CALLS]function_name
-    pattern = r'\[TOOL_CALLS\]([a-zA-Z_][a-zA-Z0-9_]*)'
-    
-    tool_calls = []
-    
-    # Find all matches
-    for match in re.finditer(pattern, response_text):
-        function_name = match.group(1)
-        start_pos = match.end()
-        
-        # Find the JSON object or array that follows
-        # Try to extract JSON by matching braces/brackets
-        json_str = _extract_json_from_position(response_text, start_pos)
-        
-        if json_str:
-            try:
-                # Parse the JSON arguments
-                arguments = json.loads(json_str)
-                tool_calls.append({
-                    'name': function_name,
-                    'arguments': arguments
-                })
-                logger.info(f"Parsed text-based tool call: {function_name} with args: {arguments}")
-            except json.JSONDecodeError as e:
-                logger.warning(f"Failed to parse tool arguments for {function_name}: {e}")
-                # Skip this tool call if JSON is invalid
-                continue
-    
-    return len(tool_calls) > 0, tool_calls
-
-
-def _extract_json_from_position(text: str, start_pos: int) -> Optional[str]:
-    """
-    Extract a complete JSON object or array starting from a position in text.
-    
-    This function handles nested braces and brackets to properly extract
-    complete JSON structures, even with nested objects/arrays.
-    
-    Parameters
-    ----------
-    text : str
-        The text to search in
-    start_pos : int
-        Position to start searching for JSON
-        
-    Returns
-    -------
-    str or None
-        The extracted JSON string, or None if no valid JSON found
-    """
-    # Skip whitespace
-    while start_pos < len(text) and text[start_pos].isspace():
-        start_pos += 1
-    
-    if start_pos >= len(text):
-        return None
-    
-    # Determine if it's an object {} or array []
-    start_char = text[start_pos]
-    if start_char not in ['{', '[']:
-        return None
-    
-    end_char = '}' if start_char == '{' else ']'
-    
-    # Count nested braces/brackets to find the matching closing character
-    depth = 0
-    in_string = False
-    escape_next = False
-    
-    for i in range(start_pos, len(text)):
-        char = text[i]
-        
-        if escape_next:
-            escape_next = False
-            continue
-        
-        if char == '\\':
-            escape_next = True
-            continue
-        
-        if char == '"' and not in_string:
-            in_string = True
-        elif char == '"' and in_string:
-            in_string = False
-        elif not in_string:
-            if char == start_char:
-                depth += 1
-            elif char == end_char:
-                depth -= 1
-                if depth == 0:
-                    # Found the matching closing character
-                    return text[start_pos:i+1]
-    
-    return None
 
 
 class RAGChat:
@@ -653,27 +528,18 @@ class RAGChat:
         if self.enable_mcp_tools:
             api_params["tools"] = get_mcp_tools_schema()
             api_params["tool_choice"] = "auto"  # Let the model decide when to use tools
+            api_params["parallel_tool_calls"] = False  # Disable parallel tool calls for better compatibility
 
         # Call OpenAI-compatible API using OpenAI client
         try:
             response = self.openai_client.chat.completions.create(**api_params)
             
-            # Check if the model wants to use tools (proper OpenAI tool calling)
+            # Check if the model wants to use tools
             if self.enable_mcp_tools and response.choices[0].message.tool_calls:
                 return self._handle_tool_calls(response, messages)
             
-            # Get the response content
-            response_content = response.choices[0].message.content
-            
-            # Check for text-based tool calls (e.g., [TOOL_CALLS]function_name{...})
-            if self.enable_mcp_tools and response_content:
-                has_tool_calls, tool_calls = parse_text_tool_calls(response_content)
-                if has_tool_calls:
-                    logger.info(f"Detected {len(tool_calls)} text-based tool call(s)")
-                    return self._handle_text_tool_calls(tool_calls, messages, question)
-            
             # No tool calls, return direct response
-            return response_content
+            return response.choices[0].message.content
 
         except Exception as e:
             raise RAGError(f"Failed to generate response: {str(e)}")
@@ -759,87 +625,6 @@ class RAGChat:
         except Exception as e:
             raise RAGError(f"Failed to generate response after tool calls: {str(e)}")
     
-    def _handle_text_tool_calls(
-        self, 
-        tool_calls: List[Dict[str, Any]], 
-        messages: List[Dict[str, Any]], 
-        original_question: str
-    ) -> str:
-        """
-        Handle text-based tool calls parsed from LLM response.
-        
-        Some models return tool calls as text (e.g., [TOOL_CALLS]function_name{...})
-        instead of proper OpenAI tool calls. This method executes those tools and
-        generates a final response with the tool results.
-        
-        Parameters
-        ----------
-        tool_calls : list
-            List of parsed tool calls with 'name' and 'arguments' keys
-        messages : list
-            The message history to continue the conversation
-        original_question : str
-            The original user question
-            
-        Returns
-        -------
-        str
-            Final response from the LLM after tool execution
-        """
-        logger.info(f"Handling {len(tool_calls)} text-based tool call(s)")
-        
-        # Execute each tool call and collect results
-        tool_results = []
-        for tool_call in tool_calls:
-            function_name = tool_call['name']
-            function_args = tool_call['arguments']
-            
-            logger.info(f"Executing text-based tool: {function_name} with args: {function_args}")
-            
-            # Execute the tool
-            tool_result = execute_mcp_tool(function_name, function_args)
-            
-            # Format the result for better LLM consumption
-            formatted_result = format_tool_result_for_llm(function_name, tool_result)
-            
-            tool_results.append({
-                'name': function_name,
-                'result': formatted_result
-            })
-        
-        # Build a new prompt with tool results to get the final answer
-        tool_results_text = "\n\n".join([
-            f"Tool: {tr['name']}\nResult:\n{tr['result']}"
-            for tr in tool_results
-        ])
-        
-        # Add tool results as a user message for the LLM to formulate the final answer
-        follow_up_message = (
-            f"Based on the following tool execution results, please answer the user's question.\n\n"
-            f"Tool Results:\n{tool_results_text}\n\n"
-            f"Original Question: {original_question}\n\n"
-            f"Please provide a clear, comprehensive answer based on the tool results above."
-        )
-        
-        messages.append({
-            "role": "user",
-            "content": follow_up_message
-        })
-        
-        # Get final response from LLM with tool results
-        # Don't pass tools this time to avoid recursive tool calling
-        try:
-            final_response = self.openai_client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=self.temperature,
-                max_tokens=1000,
-                timeout=180,
-            )
-            return final_response.choices[0].message.content
-        except Exception as e:
-            raise RAGError(f"Failed to generate response after text-based tool calls: {str(e)}")
-
     def export_conversation(self, output_path: Path) -> None:
         """
         Export conversation history to JSON file.
