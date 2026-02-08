@@ -46,6 +46,7 @@ dev = [
     "pytest-mock>=3.11.0",
     "selenium>=4.0.0",
     "webdriver-manager>=4.0.0",
+    "black>=24.0.0",
 ]
 docs = [
     "sphinx>=7.0.0",
@@ -109,3 +110,19 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "if TYPE_CHECKING:",
 ]
+
+[tool.black]
+line-length = 88
+target-version = ["py311", "py312"]
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.venv
+  | \.pytest_cache
+  | __pycache__
+  | build
+  | dist
+  | node_modules
+)/
+'''
