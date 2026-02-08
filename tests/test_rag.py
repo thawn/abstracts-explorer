@@ -213,16 +213,46 @@ class TestRAGChatQuery:
         assert messages[0]["role"] == "system"
         assert messages[0]["content"] == custom_prompt
 
-    def test_query_no_results(self, mock_embeddings_manager_empty, mock_database, mock_lm_studio_response):
+    def test_query_no_results(self, mock_embeddings_manager_empty, mock_database):
         """Test query when no papers are found."""
-        chat = RAGChat(mock_embeddings_manager_empty, mock_database)
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
+            mock_client = Mock()
+            mock_openai_class.return_value = mock_client
+            
+            # Mock responses that check context for empty results
+            def mock_create(**kwargs):
+                messages = kwargs.get("messages", [])
+                # Check if context mentions "No relevant papers found"
+                for msg in messages:
+                    if "No relevant papers found" in msg.get("content", ""):
+                        mock_message = Mock()
+                        mock_message.content = "I couldn't find any relevant papers for this topic."
+                        mock_message.tool_calls = None
+                        mock_choice = Mock()
+                        mock_choice.message = mock_message
+                        mock_response = Mock()
+                        mock_response.choices = [mock_choice]
+                        return mock_response
+                
+                # Default response
+                mock_message = Mock()
+                mock_message.content = "Based on the available information."
+                mock_message.tool_calls = None
+                mock_choice = Mock()
+                mock_choice.message = mock_message
+                mock_response = Mock()
+                mock_response.choices = [mock_choice]
+                return mock_response
+            
+            mock_client.chat.completions.create.side_effect = mock_create
+            
+            chat = RAGChat(mock_embeddings_manager_empty, mock_database)
+            result = chat.query("Unknown topic")
 
-        result = chat.query("Unknown topic")
-
-        assert "response" in result
-        assert "couldn't find any relevant papers" in result["response"].lower()
-        assert result["papers"] == []
-        assert result["metadata"]["n_papers"] == 0
+            assert "response" in result
+            assert "couldn't find any relevant papers" in result["response"].lower()
+            assert result["papers"] == []
+            assert result["metadata"]["n_papers"] == 0
 
     def test_query_api_timeout(self, mock_embeddings_manager, mock_database):
         """Test query with API timeout."""
@@ -638,103 +668,6 @@ class TestRAGChatIntegration:
 class TestRAGChatQueryRewriting:
     """Test RAGChat query rewriting functionality."""
 
-    def test_rewrite_query_success(self, mock_embeddings_manager, mock_database):
-        """Test successful query rewriting."""
-        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
-            mock_client = Mock()
-            mock_openai_class.return_value = mock_client
-            
-            mock_response = Mock()
-            mock_choice = Mock()
-            mock_message = Mock()
-            mock_message.content = "transformer attention mechanism neural networks"
-            mock_choice.message = mock_message
-            mock_response.choices = [mock_choice]
-            mock_client.chat.completions.create.return_value = mock_response
-
-            chat = RAGChat(mock_embeddings_manager, mock_database)
-            rewritten = chat._rewrite_query("What about transformers?")
-
-            assert isinstance(rewritten, str)
-            assert len(rewritten) > 0
-            assert rewritten == "transformer attention mechanism neural networks"
-            mock_client.chat.completions.create.assert_called_once()
-
-    def test_rewrite_query_with_conversation_history(self, mock_embeddings_manager, mock_database):
-        """Test query rewriting with conversation history."""
-        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
-            mock_client = Mock()
-            mock_openai_class.return_value = mock_client
-            
-            mock_response = Mock()
-            mock_choice = Mock()
-            mock_message = Mock()
-            mock_message.content = "transformer attention mechanism applications"
-            mock_choice.message = mock_message
-            mock_response.choices = [mock_choice]
-            mock_client.chat.completions.create.return_value = mock_response
-
-            chat = RAGChat(mock_embeddings_manager, mock_database)
-
-            # Add conversation history
-            chat.conversation_history = [
-                {"role": "user", "content": "Tell me about transformers"},
-                {"role": "assistant", "content": "Transformers use attention..."},
-            ]
-
-            chat._rewrite_query("What are the applications?")
-
-            # Check that conversation history was included
-            call_args = mock_client.chat.completions.create.call_args
-            messages = call_args.kwargs["messages"]
-            assert len(messages) > 2  # System prompt + history + current query
-            assert any(msg["content"] == "Tell me about transformers" for msg in messages)
-
-    def test_rewrite_query_timeout_fallback(self, mock_embeddings_manager, mock_database):
-        """Test query rewriting falls back to original on timeout."""
-        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
-            mock_client = Mock()
-            mock_openai_class.return_value = mock_client
-            mock_client.chat.completions.create.side_effect = Exception("Timeout")
-
-            chat = RAGChat(mock_embeddings_manager, mock_database)
-            original_query = "What is deep learning?"
-            rewritten = chat._rewrite_query(original_query)
-
-            # Should return original query on timeout
-            assert rewritten == original_query
-
-    def test_rewrite_query_http_error_fallback(self, mock_embeddings_manager, mock_database):
-        """Test query rewriting falls back to original on HTTP error."""
-        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
-            mock_client = Mock()
-            mock_openai_class.return_value = mock_client
-            mock_client.chat.completions.create.side_effect = Exception("API error")
-
-            chat = RAGChat(mock_embeddings_manager, mock_database)
-            original_query = "What is neural network?"
-            rewritten = chat._rewrite_query(original_query)
-
-            # Should return original query on error
-            assert rewritten == original_query
-
-    def test_rewrite_query_invalid_response_fallback(self, mock_embeddings_manager, mock_database):
-        """Test query rewriting falls back to original on invalid response."""
-        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
-            mock_client = Mock()
-            mock_openai_class.return_value = mock_client
-            # Mock an invalid response structure
-            mock_response = Mock()
-            mock_response.choices = []
-            mock_client.chat.completions.create.return_value = mock_response
-
-            chat = RAGChat(mock_embeddings_manager, mock_database)
-            original_query = "What is AI?"
-            rewritten = chat._rewrite_query(original_query)
-
-            # Should return original query on invalid response
-            assert rewritten == original_query
-
     def test_should_retrieve_papers_first_query(self, mock_embeddings_manager, mock_database):
         """Test that first query always retrieves papers."""
         chat = RAGChat(mock_embeddings_manager, mock_database)
@@ -771,24 +704,26 @@ class TestRAGChatQueryRewriting:
             mock_client = Mock()
             mock_openai_class.return_value = mock_client
             
-            # Mock both query rewriting and response generation
-            def mock_create_side_effect(*args, **kwargs):
-                mock_response = Mock()
-                mock_choice = Mock()
-                mock_message = Mock()
-
-                # Check if it's a rewriting request (shorter max_tokens)
-                if kwargs.get("max_tokens", 1000) == 100:
-                    mock_message.content = "attention mechanism transformers"
-                else:
-                    mock_message.content = "Response about attention"
-                
-                mock_message.tool_calls = None  # No tool calls
-                mock_choice.message = mock_message
-                mock_response.choices = [mock_choice]
-                return mock_response
-
-            mock_client.chat.completions.create.side_effect = mock_create_side_effect
+            # Mock routing response with JSON tool call
+            mock_route_response = Mock()
+            mock_route_choice = Mock()
+            mock_route_message = Mock()
+            mock_route_message.content = '{"name": "rewrite_and_search_papers", "arguments": {"query": "attention mechanism transformers", "n_results": 5}}'
+            mock_route_choice.message = mock_route_message
+            mock_route_response.choices = [mock_route_choice]
+            
+            # Mock final response
+            mock_final_response = Mock()
+            mock_final_choice = Mock()
+            mock_final_message = Mock()
+            mock_final_message.content = "Response about attention"
+            mock_final_choice.message = mock_final_message
+            mock_final_response.choices = [mock_final_choice]
+            
+            mock_client.chat.completions.create.side_effect = [
+                mock_route_response,
+                mock_final_response
+            ]
 
             chat = RAGChat(mock_embeddings_manager, mock_database)
             chat.enable_query_rewriting = True
@@ -797,8 +732,8 @@ class TestRAGChatQueryRewriting:
 
             assert "response" in result
             assert "metadata" in result
-            assert "rewritten_query" in result["metadata"]
-            assert result["metadata"]["rewritten_query"] == "attention mechanism transformers"
+            # In the new architecture, query rewriting happens through tools
+            assert result["metadata"]["used_tools"] is True
 
     def test_query_with_rewriting_disabled(self, mock_embeddings_manager, mock_database, mock_lm_studio_response):
         """Test query with query rewriting disabled."""
@@ -818,14 +753,15 @@ class TestRAGChatQueryRewriting:
             mock_client = Mock()
             mock_openai_class.return_value = mock_client
 
+            # Mock routing responses
             def mock_create_side_effect(*args, **kwargs):
                 mock_response = Mock()
                 mock_choice = Mock()
                 mock_message = Mock()
 
-                # Check if it's a rewriting request
-                if kwargs.get("max_tokens", 1000) == 100:
-                    mock_message.content = "deep learning networks"
+                # Check if it's a routing request (shorter timeout)
+                if kwargs.get("timeout", 180) == 30:
+                    mock_message.content = '{"name": "rewrite_and_search_papers", "arguments": {"query": "deep learning networks", "n_results": 5}}'
                 else:
                     mock_message.content = "Response"
                 
@@ -933,16 +869,16 @@ class TestRAGChatMCPTools:
                     assert result["metadata"]["n_papers"] == 0  # No papers for tool queries
 
     def test_query_routing_for_paper_search(self, mock_embeddings_manager, mock_database):
-        """Test that queries requiring papers are routed to paper search."""
+        """Test that queries requiring papers are routed to paper search tool."""
         with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
             mock_client = Mock()
             mock_openai_class.return_value = mock_client
             
-            # Mock routing response - returns rewritten query (not JSON tool call)
+            # Mock routing response - returns JSON tool call for rewrite_and_search_papers
             mock_route_response = Mock()
             mock_route_choice = Mock()
             mock_route_message = Mock()
-            mock_route_message.content = "attention mechanism neural networks"
+            mock_route_message.content = '{"name": "rewrite_and_search_papers", "arguments": {"query": "attention mechanism neural networks", "n_results": 5}}'
             mock_route_choice.message = mock_route_message
             mock_route_response.choices = [mock_route_choice]
             
@@ -962,7 +898,7 @@ class TestRAGChatMCPTools:
             # Mock paper search
             mock_embeddings_manager.search_similar.return_value = {
                 "ids": [["1", "2", "3"]],
-                "distances": [[0.1, 0.2, 0.3]],  # Fixed: all floats
+                "distances": [[0.1, 0.2, 0.3]],
                 "metadatas": [[
                     {"openreview_id": "1", "title": "Paper 1", "year": 2024},
                     {"openreview_id": "2", "title": "Paper 2", "year": 2024},
@@ -980,11 +916,12 @@ class TestRAGChatMCPTools:
             chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
             result = chat.query("What is attention mechanism?")
             
-            # Verify papers were searched
+            # Verify papers were searched via the tool
             mock_embeddings_manager.search_similar.assert_called_once()
             
-            # Verify response metadata
-            assert result["metadata"]["used_tools"] is False
+            # In the new architecture, all queries go through tools
+            # rewrite_and_search_papers is a tool, so used_tools should be True
+            assert result["metadata"]["used_tools"] is True
             assert result["metadata"]["n_papers"] == 3
             assert len(result["papers"]) == 3
 
@@ -999,19 +936,13 @@ class TestRAGChatMCPToolsE2E:
                 mock_client = Mock()
                 mock_openai_class.return_value = mock_client
                 
-                # Mock tool call in initial response
-                mock_tool_call = Mock()
-                mock_tool_call.id = "call_123"
-                mock_tool_call.function.name = "get_cluster_topics"
-                mock_tool_call.function.arguments = json.dumps({"n_clusters": 8})
-                
-                mock_initial_response = Mock()
-                mock_choice = Mock()
-                mock_message = Mock()
-                mock_message.content = None
-                mock_message.tool_calls = [mock_tool_call]
-                mock_choice.message = mock_message
-                mock_initial_response.choices = [mock_choice]
+                # Mock routing response with JSON tool call
+                mock_route_response = Mock()
+                mock_route_choice = Mock()
+                mock_route_message = Mock()
+                mock_route_message.content = '{"name": "get_cluster_topics", "arguments": {"n_clusters": 8}}'
+                mock_route_choice.message = mock_route_message
+                mock_route_response.choices = [mock_route_choice]
                 
                 # Mock tool execution result
                 mock_execute.return_value = json.dumps({
@@ -1030,18 +961,16 @@ class TestRAGChatMCPToolsE2E:
                 mock_final_choice = Mock()
                 mock_final_message = Mock()
                 mock_final_message.content = "The main topics include transformers and attention mechanisms."
-                mock_final_message.tool_calls = None
                 mock_final_choice.message = mock_final_message
                 mock_final_response.choices = [mock_final_choice]
                 
-                # Set up create to return initial response first, then final
+                # Set up create to return routing response first, then final
                 mock_client.chat.completions.create.side_effect = [
-                    mock_initial_response,
+                    mock_route_response,
                     mock_final_response
                 ]
                 
                 chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
-                chat.enable_query_rewriting = False  # Disable query rewriting for this test
                 result = chat.query("What are the main research topics at this conference?")
                 
                 # Verify tool was executed
@@ -1057,22 +986,13 @@ class TestRAGChatMCPToolsE2E:
                 mock_client = Mock()
                 mock_openai_class.return_value = mock_client
                 
-                # Mock tool call in initial response
-                mock_tool_call = Mock()
-                mock_tool_call.id = "call_456"
-                mock_tool_call.function.name = "get_topic_evolution"
-                mock_tool_call.function.arguments = json.dumps({
-                    "topic_keywords": "transformers",
-                    "conference": "neurips"
-                })
-                
-                mock_initial_response = Mock()
-                mock_choice = Mock()
-                mock_message = Mock()
-                mock_message.content = None
-                mock_message.tool_calls = [mock_tool_call]
-                mock_choice.message = mock_message
-                mock_initial_response.choices = [mock_choice]
+                # Mock routing response with JSON tool call
+                mock_route_response = Mock()
+                mock_route_choice = Mock()
+                mock_route_message = Mock()
+                mock_route_message.content = '{"name": "get_topic_evolution", "arguments": {"topic_keywords": "transformers", "conference": "neurips"}}'
+                mock_route_choice.message = mock_route_message
+                mock_route_response.choices = [mock_route_choice]
                 
                 # Mock tool execution result
                 mock_execute.return_value = json.dumps({
@@ -1086,18 +1006,16 @@ class TestRAGChatMCPToolsE2E:
                 mock_final_choice = Mock()
                 mock_final_message = Mock()
                 mock_final_message.content = "Transformers have grown from 10 papers in 2020 to 20 papers in 2022."
-                mock_final_message.tool_calls = None
                 mock_final_choice.message = mock_final_message
                 mock_final_response.choices = [mock_final_choice]
                 
-                # Set up create to return initial response first, then final
+                # Set up create to return routing response first, then final
                 mock_client.chat.completions.create.side_effect = [
-                    mock_initial_response,
+                    mock_route_response,
                     mock_final_response
                 ]
                 
                 chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
-                chat.enable_query_rewriting = False  # Disable query rewriting for this test
                 result = chat.query("How have transformers evolved at NeurIPS over the years?")
                 
                 # Verify tool was executed with correct parameters
@@ -1116,22 +1034,13 @@ class TestRAGChatMCPToolsE2E:
                 mock_client = Mock()
                 mock_openai_class.return_value = mock_client
                 
-                # Mock tool call in initial response
-                mock_tool_call = Mock()
-                mock_tool_call.id = "call_789"
-                mock_tool_call.function.name = "get_recent_developments"
-                mock_tool_call.function.arguments = json.dumps({
-                    "topic_keywords": "large language models",
-                    "n_years": 2
-                })
-                
-                mock_initial_response = Mock()
-                mock_choice = Mock()
-                mock_message = Mock()
-                mock_message.content = None
-                mock_message.tool_calls = [mock_tool_call]
-                mock_choice.message = mock_message
-                mock_initial_response.choices = [mock_choice]
+                # Mock routing response with JSON tool call
+                mock_route_response = Mock()
+                mock_route_choice = Mock()
+                mock_route_message = Mock()
+                mock_route_message.content = '{"name": "get_recent_developments", "arguments": {"topic_keywords": "large language models", "n_years": 2}}'
+                mock_route_choice.message = mock_route_message
+                mock_route_response.choices = [mock_route_choice]
                 
                 # Mock tool execution result
                 mock_execute.return_value = json.dumps({
@@ -1148,18 +1057,16 @@ class TestRAGChatMCPToolsE2E:
                 mock_final_choice = Mock()
                 mock_final_message = Mock()
                 mock_final_message.content = "Recent papers include GPT-4 Architecture and Scaling Laws."
-                mock_final_message.tool_calls = None
                 mock_final_choice.message = mock_final_message
                 mock_final_response.choices = [mock_final_choice]
                 
-                # Set up create to return initial response first, then final
+                # Set up create to return routing response first, then final
                 mock_client.chat.completions.create.side_effect = [
-                    mock_initial_response,
+                    mock_route_response,
                     mock_final_response
                 ]
                 
                 chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
-                chat.enable_query_rewriting = False  # Disable query rewriting for this test
                 result = chat.query("What are the latest papers on large language models?")
                 
                 # Verify tool was executed
@@ -1393,16 +1300,16 @@ class TestJSONToolCalls:
                 assert result["metadata"]["used_tools"] is True
     
     def test_json_tool_calls_disabled_when_mcp_disabled(self, mock_embeddings_manager, mock_database):
-        """Test that JSON tool calls are not processed when MCP tools are disabled."""
+        """Test that JSON tool calls are handled when MCP tools are disabled."""
         with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
             mock_client = Mock()
             mock_openai_class.return_value = mock_client
             
-            # Query routing returns rewritten query (not JSON) when tools disabled
+            # Query routing returns JSON for paper search even when MCP tools disabled
             mock_route_response = Mock()
             mock_route_choice = Mock()
             mock_route_message = Mock()
-            mock_route_message.content = "test query"  # Just a rewritten query, not JSON tool call
+            mock_route_message.content = '{"name": "rewrite_and_search_papers", "arguments": {"query": "test query", "n_results": 5}}'
             mock_route_choice.message = mock_route_message
             mock_route_response.choices = [mock_route_choice]
             
@@ -1440,8 +1347,9 @@ class TestJSONToolCalls:
             chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=False)
             result = chat.query("Test query")
             
-            # Should use paper search, not tools
-            assert result["metadata"]["used_tools"] is False
+            # In the new architecture, all queries go through tools (including paper search)
+            # So used_tools is True even when MCP clustering tools are disabled
+            assert result["metadata"]["used_tools"] is True
             assert result["metadata"]["n_papers"] == 3
             
             # Should have made two API calls (routing + generation)
