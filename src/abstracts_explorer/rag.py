@@ -495,9 +495,19 @@ class RAGChat:
             # Enhance system prompt when MCP tools are enabled
             if self.enable_mcp_tools:
                 system_prompt += (
-                    "\n\nYou have access to clustering analysis tools that can help answer questions about "
-                    "overall conference topics, trends over time, and recent developments. Use these tools when appropriate "
-                    "for questions about general themes, topic evolution, or recent research in specific areas."
+                    "\n\n## Available Tools\n"
+                    "You have access to specialized analysis tools. Use them when needed:\n\n"
+                    "1. **analyze_topic_relevance**: When users ask 'how many papers about X' or 'is X a popular topic'\n"
+                    "   Example triggers: 'how many', 'count papers', 'popularity of', 'coverage of'\n\n"
+                    "2. **get_cluster_topics**: When users ask about 'main topics' or 'overall themes'\n"
+                    "   Example triggers: 'what are the main topics', 'overall themes', 'research areas'\n\n"
+                    "3. **get_topic_evolution**: When users ask about trends or changes 'over time'\n"
+                    "   Example triggers: 'how has X evolved', 'trends over time', 'historical development'\n\n"
+                    "4. **get_recent_developments**: When users ask about 'recent' or 'latest' work\n"
+                    "   Example triggers: 'recent papers on', 'latest developments', 'current research'\n\n"
+                    "5. **get_cluster_visualization**: When users ask for visual representation\n"
+                    "   Example triggers: 'show me', 'visualize', 'plot', 'graph'\n\n"
+                    "IMPORTANT: Call these tools using function calling, not by describing them in text."
                 )
 
         # Build messages

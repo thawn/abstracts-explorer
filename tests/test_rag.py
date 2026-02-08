@@ -1059,7 +1059,9 @@ class TestRAGChatMCPTools:
             # Check system prompt mentions tools
             messages = mock_client.chat.completions.create.call_args.kwargs["messages"]
             system_message = messages[0]["content"]
-            assert "clustering analysis tools" in system_message
+            assert "Available Tools" in system_message
+            assert "analyze_topic_relevance" in system_message
+            assert "get_cluster_topics" in system_message
 
     def test_tool_execution_error_handling(self, mock_embeddings_manager, mock_database):
         """Test that tool execution errors are handled gracefully."""
