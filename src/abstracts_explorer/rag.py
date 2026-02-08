@@ -25,6 +25,101 @@ class RAGError(Exception):
     pass
 
 
+def parse_json_tool_call(response_text: str) -> Optional[List[Dict[str, Any]]]:
+    """
+    Parse JSON tool calls from LLM response.
+    
+    Some models return tool calls as JSON objects directly in the response content.
+    This function attempts to parse the response as JSON and extract tool calls.
+    
+    Expected formats:
+    - Single tool: {"name": "tool_name", "arguments": {...}}
+    - Multiple tools: [{"name": "tool_name", "arguments": {...}}, ...]
+    - OpenAI-like: {"tool_calls": [{"function": {"name": "...", "arguments": {...}}}]}
+    
+    Parameters
+    ----------
+    response_text : str
+        The LLM response text to parse
+        
+    Returns
+    -------
+    list or None
+        List of tool call dictionaries with 'name' and 'arguments' keys, or None if not valid JSON tool call
+        
+    Examples
+    --------
+    >>> text = '{"name": "analyze_topic_relevance", "arguments": {"query": "transformers"}}'
+    >>> calls = parse_json_tool_call(text)
+    >>> calls[0]['name']
+    'analyze_topic_relevance'
+    """
+    if not response_text or not response_text.strip():
+        return None
+    
+    try:
+        # Try to parse as JSON
+        parsed = json.loads(response_text.strip())
+        
+        # Handle different JSON formats
+        tool_calls = []
+        
+        # Format 1: Single tool call object {"name": "...", "arguments": {...}}
+        if isinstance(parsed, dict) and "name" in parsed and "arguments" in parsed:
+            tool_calls.append({
+                "name": parsed["name"],
+                "arguments": parsed.get("arguments", {})
+            })
+        
+        # Format 2: Array of tool calls [{"name": "...", "arguments": {...}}, ...]
+        elif isinstance(parsed, list):
+            for item in parsed:
+                if isinstance(item, dict) and "name" in item:
+                    tool_calls.append({
+                        "name": item["name"],
+                        "arguments": item.get("arguments", {})
+                    })
+        
+        # Format 3: OpenAI-like format {"tool_calls": [...]}
+        elif isinstance(parsed, dict) and "tool_calls" in parsed:
+            for tc in parsed["tool_calls"]:
+                if isinstance(tc, dict):
+                    # Handle {"function": {"name": "...", "arguments": {...}}}
+                    if "function" in tc:
+                        func = tc["function"]
+                        if "name" in func:
+                            tool_calls.append({
+                                "name": func["name"],
+                                "arguments": func.get("arguments", {})
+                            })
+                    # Handle direct format {"name": "...", "arguments": {...}}
+                    elif "name" in tc:
+                        tool_calls.append({
+                            "name": tc["name"],
+                            "arguments": tc.get("arguments", {})
+                        })
+        
+        # Format 4: Function call format {"function": {"name": "...", "arguments": {...}}}
+        elif isinstance(parsed, dict) and "function" in parsed:
+            func = parsed["function"]
+            if isinstance(func, dict) and "name" in func:
+                tool_calls.append({
+                    "name": func["name"],
+                    "arguments": func.get("arguments", {})
+                })
+        
+        # Return tool calls if any were found
+        if tool_calls:
+            logger.info(f"Parsed {len(tool_calls)} JSON tool call(s) from response")
+            return tool_calls
+        
+        return None
+    
+    except (json.JSONDecodeError, ValueError, TypeError):
+        # Not valid JSON or doesn't match expected format
+        return None
+
+
 class RAGChat:
     """
     RAG chat interface for querying NeurIPS papers.
@@ -544,12 +639,22 @@ class RAGChat:
         try:
             response = self.openai_client.chat.completions.create(**api_params)
             
-            # Check if the model wants to use tools
+            # Check if the model wants to use tools (proper OpenAI tool calling)
             if self.enable_mcp_tools and response.choices[0].message.tool_calls:
                 return self._handle_tool_calls(response, messages)
             
+            # Get response content
+            response_content = response.choices[0].message.content
+            
+            # Check if response is a JSON tool call
+            if self.enable_mcp_tools and response_content:
+                json_tool_calls = parse_json_tool_call(response_content)
+                if json_tool_calls:
+                    logger.info(f"Detected {len(json_tool_calls)} JSON tool call(s) in response")
+                    return self._handle_json_tool_calls(json_tool_calls, messages, question)
+            
             # No tool calls, return direct response
-            return response.choices[0].message.content
+            return response_content
 
         except Exception as e:
             raise RAGError(f"Failed to generate response: {str(e)}")
@@ -634,6 +739,86 @@ class RAGChat:
             return final_response.choices[0].message.content
         except Exception as e:
             raise RAGError(f"Failed to generate response after tool calls: {str(e)}")
+    
+    def _handle_json_tool_calls(
+        self,
+        tool_calls: List[Dict[str, Any]],
+        messages: List[Dict[str, Any]],
+        original_question: str
+    ) -> str:
+        """
+        Handle JSON tool calls parsed from LLM response.
+        
+        Some models return tool calls as JSON objects directly in the response content.
+        This method executes those tools and generates a final response with the results.
+        
+        Parameters
+        ----------
+        tool_calls : list
+            List of parsed tool calls with 'name' and 'arguments' keys
+        messages : list
+            The message history to continue the conversation
+        original_question : str
+            The original user question
+            
+        Returns
+        -------
+        str
+            Final response from the LLM after tool execution
+        """
+        logger.info(f"Handling {len(tool_calls)} JSON tool call(s)")
+        
+        # Execute each tool call and collect results
+        tool_results = []
+        for tool_call in tool_calls:
+            function_name = tool_call['name']
+            function_args = tool_call['arguments']
+            
+            logger.info(f"Executing JSON tool call: {function_name} with args: {function_args}")
+            
+            # Execute the tool
+            tool_result = execute_mcp_tool(function_name, function_args)
+            
+            # Format the result for better LLM consumption
+            formatted_result = format_tool_result_for_llm(function_name, tool_result)
+            
+            tool_results.append({
+                'name': function_name,
+                'result': formatted_result
+            })
+        
+        # Build a new prompt with tool results to get the final answer
+        tool_results_text = "\n\n".join([
+            f"Tool: {tr['name']}\nResult:\n{tr['result']}"
+            for tr in tool_results
+        ])
+        
+        # Add tool results as a user message for the LLM to formulate the final answer
+        follow_up_message = (
+            f"Based on the following tool execution results, please answer the user's question.\n\n"
+            f"Tool Results:\n{tool_results_text}\n\n"
+            f"Original Question: {original_question}\n\n"
+            f"Please provide a clear, comprehensive answer based on the tool results above."
+        )
+        
+        messages.append({
+            "role": "user",
+            "content": follow_up_message
+        })
+        
+        # Get final response from LLM with tool results
+        # Don't pass tools this time to avoid recursive tool calling
+        try:
+            final_response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=1000,
+                timeout=180,
+            )
+            return final_response.choices[0].message.content
+        except Exception as e:
+            raise RAGError(f"Failed to generate response after JSON tool calls: {str(e)}")
     
     def export_conversation(self, output_path: Path) -> None:
         """
