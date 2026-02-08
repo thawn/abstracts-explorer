@@ -54,7 +54,7 @@ def parse_json_tool_call(response_text: str) -> Optional[List[Dict[str, Any]]]:
     >>> calls[0]['name']
     'analyze_topic_relevance'
     """
-    if not response_text or not response_text.strip():
+    if response_text is None or not isinstance(response_text, str) or not response_text.strip():
         return None
     
     try:
