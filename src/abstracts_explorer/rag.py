@@ -481,6 +481,7 @@ class RAGChat:
             
             # Execute tools and collect results
             tool_results = []
+            retrieved_new_papers = True  # Track if papers were actually retrieved
             for tool_call in route_info["tool_calls"]:
                 function_name = tool_call['name']
                 function_args = tool_call['arguments']
@@ -503,28 +504,45 @@ class RAGChat:
                     if metadata_filter:
                         metadata_filter_arg.update(metadata_filter)
                     
-                    # Search using RAG's embeddings manager
-                    search_results = self.embeddings_manager.search_similar(
-                        query, 
-                        n_results=n, 
-                        where=metadata_filter_arg if metadata_filter_arg else metadata_filter
-                    )
+                    # Check if we should retrieve new papers or use cached
+                    should_retrieve = self._should_retrieve_papers(query)
+                    retrieved_new_papers = should_retrieve  # Track this for metadata
                     
-                    # Format results
-                    from .paper_utils import format_search_results
-                    if not search_results["ids"][0]:
-                        tool_result = json.dumps({
-                            "query": query,
-                            "n_papers": 0,
-                            "papers": [],
-                            "message": "No relevant papers found"
-                        }, indent=2)
+                    if should_retrieve:
+                        # Search using RAG's embeddings manager
+                        search_results = self.embeddings_manager.search_similar(
+                            query, 
+                            n_results=n, 
+                            where=metadata_filter_arg if metadata_filter_arg else metadata_filter
+                        )
+                        
+                        # Format results
+                        from .paper_utils import format_search_results
+                        if not search_results["ids"][0]:
+                            tool_result = json.dumps({
+                                "query": query,
+                                "n_papers": 0,
+                                "papers": [],
+                                "message": "No relevant papers found"
+                            }, indent=2)
+                            papers_list = []
+                        else:
+                            papers_list = format_search_results(search_results, self.database, include_documents=True)
+                            tool_result = json.dumps({
+                                "query": query,
+                                "n_papers": len(papers_list),
+                                "papers": papers_list,
+                            }, indent=2)
+                        
+                        # Cache the results
+                        self.last_search_query = query
+                        self._cached_papers = papers_list
                     else:
-                        papers_list = format_search_results(search_results, self.database, include_documents=True)
+                        # Use cached papers
                         tool_result = json.dumps({
                             "query": query,
-                            "n_papers": len(papers_list),
-                            "papers": papers_list,
+                            "n_papers": len(self._cached_papers),
+                            "papers": self._cached_papers,
                         }, indent=2)
                 else:
                     # Execute other MCP tools normally
@@ -574,7 +592,7 @@ class RAGChat:
                     "rewritten_query": None,
                     "used_tools": True,
                     "tools_executed": [tc['name'] for tc in route_info['tool_calls']],
-                    "retrieved_new_papers": len(papers) > 0,
+                    "retrieved_new_papers": retrieved_new_papers,
                 },
             }
 
