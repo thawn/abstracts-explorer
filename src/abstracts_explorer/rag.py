@@ -484,7 +484,50 @@ class RAGChat:
                 function_args = tool_call['arguments']
                 
                 logger.info(f"Executing tool: {function_name} with args: {function_args}")
-                tool_result = execute_mcp_tool(function_name, function_args)
+                
+                # Special handling for rewrite_and_search_papers to use RAG's own EM/DB
+                if function_name == 'rewrite_and_search_papers':
+                    query = function_args.get('query', question)
+                    n = function_args.get('n_results', n_results)
+                    
+                    # Build metadata filter if provided
+                    metadata_filter_arg = {}
+                    if 'conferences' in function_args:
+                        metadata_filter_arg["conference"] = {"$in": function_args['conferences']}
+                    if 'years' in function_args:
+                        metadata_filter_arg["year"] = {"$in": function_args['years']}
+                    
+                    # Combine with user-provided filter
+                    if metadata_filter:
+                        metadata_filter_arg.update(metadata_filter)
+                    
+                    # Search using RAG's embeddings manager
+                    search_results = self.embeddings_manager.search_similar(
+                        query, 
+                        n_results=n, 
+                        where=metadata_filter_arg if metadata_filter_arg else metadata_filter
+                    )
+                    
+                    # Format results
+                    from .paper_utils import format_search_results
+                    if not search_results["ids"][0]:
+                        tool_result = json.dumps({
+                            "query": query,
+                            "n_papers": 0,
+                            "papers": [],
+                            "message": "No relevant papers found"
+                        }, indent=2)
+                    else:
+                        papers_list = format_search_results(search_results, self.database, include_documents=True)
+                        tool_result = json.dumps({
+                            "query": query,
+                            "n_papers": len(papers_list),
+                            "papers": papers_list,
+                        }, indent=2)
+                else:
+                    # Execute other MCP tools normally
+                    tool_result = execute_mcp_tool(function_name, function_args)
+                
                 formatted_result = format_tool_result_for_llm(function_name, tool_result)
                 
                 tool_results.append({
