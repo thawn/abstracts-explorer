@@ -3,6 +3,11 @@
 
 set -e  # Exit on any error
 
+# Activate virtual environment if it exists
+if [ -f ".venv/bin/activate" ]; then
+    source .venv/bin/activate
+fi
+
 # Check if HTML, JS, or CSS files are being committed
 STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR -- \
     'src/abstracts_explorer/web_ui/templates/*.html' \
@@ -32,14 +37,30 @@ if [ -n "$STAGED_FILES" ]; then
 fi
 
 # Check if Python files are being committed
-PYTHON_FILES=$(git diff --cached --name-only --diff-filter=ACMR -- \
-    'src/**/*.py' \
-    'tests/**/*.py' \
-    2>/dev/null)
+PYTHON_FILES=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '(src|tests)/.*\.py$' || true)
 
 if [ -n "$PYTHON_FILES" ]; then
     echo ""
     echo "🔍 Running linting checks on Python files..."
+    
+    # Check if black is available and run it
+    if command -v black &> /dev/null; then
+        echo "  ✓ Running black..."
+        if ! black --check $PYTHON_FILES 2>/dev/null; then
+            echo ""
+            echo "❌ Black formatting check failed! Auto-formatting files..."
+            black $PYTHON_FILES
+            echo ""
+            echo "✅ Files have been auto-formatted with black."
+            echo "   Please stage the formatted files and commit again:"
+            echo "   git add $PYTHON_FILES"
+            exit 1
+        fi
+        echo "  ✓ Black formatting check passed"
+    else
+        echo "  ⚠️  black not found, skipping black check"
+        echo "     Install with: uv sync --extra dev"
+    fi
     
     # Check if ruff is available
     if command -v ruff &> /dev/null; then
