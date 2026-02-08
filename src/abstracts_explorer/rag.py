@@ -242,7 +242,7 @@ class RAGChat:
             )
         return self._openai_client
 
-    def _analyze_and_route_query(self, user_query: str) -> Dict[str, Any]:
+    def _analyze_and_route_query(self, user_query: str, n_results: int = 5) -> Dict[str, Any]:
         """
         Analyze user query and determine which MCP tool to use.
         
@@ -254,6 +254,8 @@ class RAGChat:
         ----------
         user_query : str
             Original user query or question.
+        n_results : int, optional
+            Number of papers to retrieve for paper search (default: 5).
 
         Returns
         -------
@@ -267,7 +269,7 @@ class RAGChat:
         Examples
         --------
         >>> chat = RAGChat(em, db)
-        >>> result = chat._analyze_and_route_query("What are the main topics?")
+        >>> result = chat._analyze_and_route_query("What are the main topics?", n_results=10)
         >>> print("Tools to execute:", result['tool_calls'])
         """
         # Build system prompt that decides which tool to use
@@ -291,7 +293,7 @@ class RAGChat:
                 "Respond with ONLY a valid JSON tool call in one of these formats:\n"
                 "- Single: {\"name\": \"tool_name\", \"arguments\": {...}}\n"
                 "- Array: [{\"name\": \"tool1\", \"arguments\": {...}}, ...]\n\n"
-                "For paper search, use: {\"name\": \"rewrite_and_search_papers\", \"arguments\": {\"query\": \"...\", \"n_results\": 5}}\n"
+                f"For paper search, use: {{\"name\": \"rewrite_and_search_papers\", \"arguments\": {{\"query\": \"...\", \"n_results\": {n_results}}}}}\n"
                 "For follow-up questions, incorporate context from previous conversation."
             )
         else:
@@ -299,7 +301,7 @@ class RAGChat:
             system_prompt = (
                 "You are a query routing assistant. Since clustering tools are disabled, "
                 "route all queries to the paper search tool. Respond with ONLY a JSON tool call:\n"
-                "{\"name\": \"rewrite_and_search_papers\", \"arguments\": {\"query\": \"<optimized query>\", \"n_results\": 5}}\n"
+                f"{{\"name\": \"rewrite_and_search_papers\", \"arguments\": {{\"query\": \"<optimized query>\", \"n_results\": {n_results}}}}}\n"
                 "Optimize the query for semantic search (5-15 keywords)."
             )
 
@@ -345,7 +347,7 @@ class RAGChat:
                     "use_tools": True,
                     "tool_calls": [{
                         "name": "rewrite_and_search_papers",
-                        "arguments": {"query": user_query, "n_results": 5}
+                        "arguments": {"query": user_query, "n_results": n_results}
                     }],
                     "rewritten_query": None,
                     "original_query": user_query
@@ -358,7 +360,7 @@ class RAGChat:
                 "use_tools": True,
                 "tool_calls": [{
                     "name": "rewrite_and_search_papers",
-                    "arguments": {"query": user_query, "n_results": 5}
+                    "arguments": {"query": user_query, "n_results": n_results}
                 }],
                 "rewritten_query": None,
                 "original_query": user_query
@@ -460,7 +462,7 @@ class RAGChat:
 
             # Analyze query and decide which tool to use (unified routing)
             if self.enable_query_rewriting:
-                route_info = self._analyze_and_route_query(question)
+                route_info = self._analyze_and_route_query(question, n_results=n_results)
             else:
                 # If query rewriting disabled, default to paper search tool
                 route_info = {
