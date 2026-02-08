@@ -50,8 +50,7 @@ MCP_TOOLS_SCHEMA = [
                     },
                     "distance_threshold": {
                         "type": "number",
-                        "description": "Maximum Euclidean distance to consider papers relevant (default: 1.1)",
-                        "default": 1.1
+                        "description": "Maximum Euclidean distance to consider papers relevant (default: 1.1)"
                     },
                     "conferences": {
                         "type": "array",
@@ -86,20 +85,17 @@ MCP_TOOLS_SCHEMA = [
                 "properties": {
                     "n_clusters": {
                         "type": "integer",
-                        "description": "Number of clusters to create (default: 8)",
-                        "default": 8
+                        "description": "Number of clusters to create (default: 8)"
                     },
                     "reduction_method": {
                         "type": "string",
                         "enum": ["pca", "tsne"],
-                        "description": "Dimensionality reduction method (default: 'pca')",
-                        "default": "pca"
+                        "description": "Dimensionality reduction method (default: 'pca')"
                     },
                     "clustering_method": {
                         "type": "string",
                         "enum": ["kmeans", "dbscan", "agglomerative"],
-                        "description": "Clustering algorithm (default: 'kmeans')",
-                        "default": "kmeans"
+                        "description": "Clustering algorithm (default: 'kmeans')"
                     },
                     "collection_name": {
                         "type": "string",
@@ -156,9 +152,9 @@ MCP_TOOLS_SCHEMA = [
         "function": {
             "name": "get_recent_developments",
             "description": (
-                "Find the most important recent developments in a specific topic. "
-                "Use this tool when the user asks about: recent papers, latest research, "
-                "current work, or new developments in a specific area."
+                "Find the most important developments in a specific topic. "
+                "Use this tool when the user asks about: papers on a topic, latest research, "
+                "current work, or developments in a specific area. Can filter by recent years or search all years."
             ),
             "parameters": {
                 "type": "object",
@@ -168,14 +164,12 @@ MCP_TOOLS_SCHEMA = [
                         "description": "Keywords describing the topic to search for"
                     },
                     "n_years": {
-                        "type": "integer",
-                        "description": "Number of recent years to consider (default: 2)",
-                        "default": 2
+                        "type": ["integer", "null"],
+                        "description": "Number of recent years to consider. If null, searches all years (default: 2)"
                     },
                     "n_results": {
                         "type": "integer",
-                        "description": "Number of papers to return (default: 10)",
-                        "default": 10
+                        "description": "Number of papers to return (default: 10)"
                     },
                     "conference": {
                         "type": "string",
@@ -208,26 +202,22 @@ MCP_TOOLS_SCHEMA = [
                 "properties": {
                     "n_clusters": {
                         "type": "integer",
-                        "description": "Number of clusters (default: 8)",
-                        "default": 8
+                        "description": "Number of clusters (default: 8)"
                     },
                     "reduction_method": {
                         "type": "string",
                         "enum": ["pca", "tsne"],
-                        "description": "Reduction method (default: 'tsne')",
-                        "default": "tsne"
+                        "description": "Reduction method (default: 'tsne')"
                     },
                     "clustering_method": {
                         "type": "string",
                         "enum": ["kmeans", "dbscan", "agglomerative"],
-                        "description": "Clustering method (default: 'kmeans')",
-                        "default": "kmeans"
+                        "description": "Clustering method (default: 'kmeans')"
                     },
                     "n_components": {
                         "type": "integer",
                         "enum": [2, 3],
-                        "description": "Number of dimensions: 2 or 3 (default: 2)",
-                        "default": 2
+                        "description": "Number of dimensions: 2 or 3 (default: 2)"
                     },
                     "output_path": {
                         "type": "string",
@@ -241,7 +231,7 @@ MCP_TOOLS_SCHEMA = [
                 "required": []
             }
         }
-    }
+    },
 ]
 
 

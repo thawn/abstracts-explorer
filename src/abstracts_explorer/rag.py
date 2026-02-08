@@ -13,8 +13,8 @@ from typing import List, Dict, Optional, Any
 from openai import OpenAI
 
 from .config import get_config
-from .paper_utils import format_search_results, build_context_from_papers, PaperFormattingError
-from .mcp_tools import get_mcp_tools_schema, execute_mcp_tool, format_tool_result_for_llm
+from .paper_utils import PaperFormattingError
+from .mcp_tools import execute_mcp_tool, format_tool_result_for_llm
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,103 @@ class RAGError(Exception):
     """Exception raised for RAG-related errors."""
 
     pass
+
+
+def parse_json_tool_call(response_text: str) -> Optional[List[Dict[str, Any]]]:
+    """
+    Parse JSON tool calls from LLM response.
+    
+    Some models return tool calls as JSON objects directly in the response content.
+    This function attempts to parse the response as JSON and extract tool calls.
+    
+    Expected formats:
+    - Single tool: {"name": "tool_name", "arguments": {...}}
+    - Multiple tools: [{"name": "tool_name", "arguments": {...}}, ...]
+    - OpenAI-like: {"tool_calls": [{"function": {"name": "...", "arguments": {...}}}]}
+    
+    Parameters
+    ----------
+    response_text : str
+        The LLM response text to parse
+        
+    Returns
+    -------
+    list or None
+        List of tool call dictionaries with 'name' and 'arguments' keys, or None if not valid JSON tool call
+        
+    Examples
+    --------
+    >>> text = '{"name": "analyze_topic_relevance", "arguments": {"query": "transformers"}}'
+    >>> calls = parse_json_tool_call(text)
+    >>> calls[0]['name']
+    'analyze_topic_relevance'
+    """
+    if response_text is None or not isinstance(response_text, str) or not response_text.strip():
+        return None
+    
+    try:
+        # Try to parse as JSON
+        parsed = json.loads(response_text.strip())
+        
+        # Handle different JSON formats
+        tool_calls = []
+        
+        # Format 1: Single tool call object {"name": "...", "arguments": {...}}
+        if isinstance(parsed, dict) and "name" in parsed and "arguments" in parsed:
+            tool_calls.append({
+                "name": parsed["name"],
+                "arguments": parsed.get("arguments", {})
+            })
+        
+        # Format 2: Array of tool calls [{"name": "...", "arguments": {...}}, ...]
+        elif isinstance(parsed, list):
+            for item in parsed:
+                if isinstance(item, dict) and "name" in item:
+                    tool_calls.append({
+                        "name": item["name"],
+                        "arguments": item.get("arguments", {})
+                    })
+        
+        # Format 3: OpenAI-like format {"tool_calls": [...]}
+        elif isinstance(parsed, dict) and "tool_calls" in parsed:
+            for tc in parsed["tool_calls"]:
+                if isinstance(tc, dict):
+                    # Handle {"function": {"name": "...", "arguments": {...}}}
+                    if "function" in tc:
+                        func = tc["function"]
+                        if "name" in func:
+                            tool_calls.append({
+                                "name": func["name"],
+                                "arguments": func.get("arguments", {})
+                            })
+                    # Handle direct format {"name": "...", "arguments": {...}}
+                    elif "name" in tc:
+                        tool_calls.append({
+                            "name": tc["name"],
+                            "arguments": tc.get("arguments", {})
+                        })
+        
+        # Format 4: Function call format {"function": {"name": "...", "arguments": {...}}}
+        elif isinstance(parsed, dict) and "function" in parsed:
+            func = parsed["function"]
+            if isinstance(func, dict) and "name" in func:
+                tool_calls.append({
+                    "name": func["name"],
+                    "arguments": func.get("arguments", {})
+                })
+        
+        # Return tool calls if any were found
+        if tool_calls:
+            logger.info(f"Parsed {len(tool_calls)} JSON tool call(s) from response")
+            return tool_calls
+        
+        logger.debug(f"No JSON tool call(s) found in response {response_text.strip()}")
+        return None
+    
+    except (json.JSONDecodeError, ValueError, TypeError):
+        # Not valid JSON or doesn't match expected format
+        logger.debug(f"Error parsing JSON tool calls. Make sure the model supports tool calling and returns proper JSON formatted responses. Got response from model: {response_text.strip()}")
+        return None
 
 
 class RAGChat:
@@ -147,44 +244,86 @@ class RAGChat:
             )
         return self._openai_client
 
-    def _rewrite_query(self, user_query: str) -> str:
+    def _get_fallback_route_info(self, user_query: str, n_results: int = 5) -> Dict[str, Any]:
         """
-        Rewrite user query into an effective search query.
+        Get fallback route information when routing fails.
+        
+        Returns a route to get_recent_developments as the default fallback.
+        
+        Parameters
+        ----------
+        user_query : str
+            User query to route
+        n_results : int
+            Number of results to return
+            
+        Returns
+        -------
+        dict
+            Route info dictionary
+        """
+        return {
+            "use_tools": True,
+            "tool_calls": [{
+                "name": "get_recent_developments",
+                "arguments": {"topic_keywords": user_query, "n_results": n_results}
+            }],
+            "rewritten_query": None,
+            "original_query": user_query
+        }
 
-        Uses the LLM to transform conversational questions into optimized
-        search queries, considering conversation history for follow-up questions.
+    def _analyze_and_route_query(self, user_query: str, n_results: int = 5) -> Dict[str, Any]:
+        """
+        Analyze user query and determine which MCP tool to use.
+        
+        This method uses an LLM to analyze the user's question and decide which
+        MCP tool should handle it: clustering/analysis tools or paper search tool.
+        All queries are now routed through MCP tools for a unified interface.
 
         Parameters
         ----------
         user_query : str
             Original user query or question.
+        n_results : int, optional
+            Number of papers to retrieve for paper search (default: 5).
 
         Returns
         -------
-        str
-            Rewritten query optimized for semantic search.
-
-        Raises
-        ------
-        RAGError
-            If query rewriting fails.
+        dict
+            Dictionary containing:
+            - use_tools: bool - Always True (unified routing through tools)
+            - tool_calls: list - Tool calls to execute
+            - rewritten_query: None - Not used anymore
+            - original_query: str - The original query for reference
 
         Examples
         --------
         >>> chat = RAGChat(em, db)
-        >>> rewritten = chat._rewrite_query("What about transformers?")
-        >>> print(rewritten)
-        "transformer architecture attention mechanism neural networks"
+        >>> result = chat._analyze_and_route_query("What are the main topics?", n_results=10)
+        >>> print("Tools to execute:", result['tool_calls'])
         """
-        # Build system prompt for query rewriting
-        system_prompt = (
-            "You are a query rewriting assistant. Your task is to rewrite user questions "
-            "into effective search queries for finding relevant research papers. "
-            "Convert conversational questions into keyword-based search queries. "
-            "For follow-up questions, incorporate context from previous conversation. "
-            "Output ONLY the rewritten query, nothing else. "
-            "Keep queries concise (5-15 words) and focused on key concepts."
-        )
+        # Build system prompt that decides which tool to use
+        if self.enable_mcp_tools:
+            system_prompt = (
+                "You are a query routing assistant. Determine which MCP tool should handle the user's question.\n\n"
+                "AVAILABLE TOOLS:\n\n"
+                "Specific questions about a topic ('what is the latest research on ...?', 'Which are the most relevant papers about ...'): get_recent_developments()\n\n"
+                "Identify relevant topics ('what were the hot topics this year?', 'which research areas were covered most this year?'): get_cluster_topics()\n\n"
+                "Identify how relevant a specific topic was this year ('how many papers about ... were published this year?', 'how important was ... at this conference?'): analyze_topic_relevance()\n\n"
+                "Identify trends for specific topics ('how has ... evolved over the years?', 'has .. become more or less relevant?'): get_topic_evolution()\n\n"
+                "Cluster visualization requests ('show me papers clustered by topic.', 'plot an overview of papers with similar paper grouped together'): get_cluster_visualization()\n\n"
+                "Respond with ONLY a valid JSON tool call using standard OpenAI format:\n"
+                "{\"name\": \"tool_name\", \"arguments\": {...}}\n\n"
+                "For follow-up questions, incorporate context from previous conversation."
+            )
+        else:
+            # If MCP tools disabled, use get_recent_developments as fallback
+            system_prompt = (
+                "You are a query routing assistant. Since clustering tools are disabled, "
+                "route all queries to get_recent_developments for paper search. Respond with ONLY a JSON tool call:\n"
+                f"{{\"name\": \"get_recent_developments\", \"arguments\": {{\"topic_keywords\": \"<search keywords>\", \"n_results\": {n_results}}}}}\n"
+                "Extract the key topic keywords from the query (5-15 keywords)."
+            )
 
         # Build messages with conversation history for context
         messages = [{"role": "system", "content": system_prompt}]
@@ -195,32 +334,41 @@ class RAGChat:
             messages.extend(context_history)
 
         # Add current query
-        messages.append(
-            {
-                "role": "user",
-                "content": f"Rewrite this query: {user_query}",
-            }
-        )
+        messages.append({
+            "role": "user",
+            "content": f"Route this query to the appropriate tool: {user_query}"
+        })
 
         try:
+            # Get routing decision from LLM
             response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                temperature=0.3,  # Lower temperature for consistent rewrites
-                max_tokens=100,  # Short rewritten queries
-                timeout=30,  # Shorter timeout for quick rewriting
+                temperature=0.3,  # Lower temperature for consistent decisions
+                max_tokens=200,  # Allow for tool calls
+                timeout=30,  # Shorter timeout for quick analysis
             )
-            rewritten = response.choices[0].message.content.strip()
+            response_content = response.choices[0].message.content.strip()
 
-            # Remove any quotes or extra formatting
-            rewritten = rewritten.strip("\"'")
-
-            logger.info(f"Rewrote query: '{user_query}' -> '{rewritten}'")
-            return rewritten
+            # Parse as tool call (should always be JSON format)
+            tool_calls = parse_json_tool_call(response_content)
+            if tool_calls:
+                logger.info(f"Query analysis: Routing to {len(tool_calls)} MCP tool(s)")
+                return {
+                    "use_tools": True,
+                    "tool_calls": tool_calls,
+                    "rewritten_query": None,
+                    "original_query": user_query
+                }
+            else:
+                # Fallback: If parsing fails, default to get_recent_developments
+                logger.warning(f"Failed to parse tool call, defaulting to get_recent_developments for: {user_query}")
+                return self._get_fallback_route_info(user_query, n_results)
 
         except Exception as e:
-            logger.warning(f"Query rewriting failed: {e}, using original query")
-            return user_query
+            logger.warning(f"Query analysis failed: {e}, defaulting to get_recent_developments")
+            # Fallback: route to get_recent_developments on error
+            return self._get_fallback_route_info(user_query, n_results)
 
     def _should_retrieve_papers(self, rewritten_query: str) -> bool:
         """
@@ -316,87 +464,73 @@ class RAGChat:
             if n_results is None:
                 n_results = self.max_context_papers
 
-            # Rewrite query for better semantic search (if enabled)
+            # Analyze query and decide which tool to use (unified routing)
             if self.enable_query_rewriting:
-                rewritten_query = self._rewrite_query(question)
+                route_info = self._analyze_and_route_query(question, n_results=n_results)
             else:
-                rewritten_query = question
-                logger.info("Query rewriting disabled, using original query")
+                # If query rewriting disabled, default to get_recent_developments tool
+                route_info = self._get_fallback_route_info(question, n_results)
+                logger.info("Query rewriting disabled, using get_recent_developments tool with original query")
 
-            # Check if we should retrieve new papers or reuse previous context
-            should_retrieve = self._should_retrieve_papers(rewritten_query) if self.enable_query_rewriting else True
-
-            if should_retrieve:
-                # Search for relevant papers using rewritten query
-                logger.info(f"Searching for papers with rewritten query: {rewritten_query}")
-                search_results = self.embeddings_manager.search_similar(
-                    rewritten_query, n_results=n_results, where=metadata_filter
-                )
-
-                # Store rewritten query for next comparison
-                self.last_search_query = rewritten_query
-
-                if not search_results["ids"][0]:
-                    logger.warning("No relevant papers found")
-                    return {
-                        "response": "I couldn't find any relevant papers to answer your question.",
-                        "papers": [],
-                        "metadata": {"n_papers": 0, "rewritten_query": rewritten_query},
-                    }
-
-                # Format context from papers using shared utility
-                papers = format_search_results(search_results, self.database, include_documents=True)
-                context = build_context_from_papers(papers)
-
-                # Cache papers for potential reuse
-                self._cached_papers = papers
-                self._cached_context = context
-            else:
-                # Reuse cached papers and context from previous query
-                logger.info("Reusing cached papers from previous query")
-                papers = getattr(self, "_cached_papers", [])
-                context = getattr(self, "_cached_context", "")
-
-                if not papers:
-                    # Fallback: retrieve papers if cache is empty
-                    logger.warning("Cache empty, retrieving papers")
-                    search_results = self.embeddings_manager.search_similar(
-                        rewritten_query, n_results=n_results, where=metadata_filter
-                    )
-                    self.last_search_query = rewritten_query
-
-                    if not search_results["ids"][0]:
-                        logger.warning("No relevant papers found")
-                        return {
-                            "response": "I couldn't find any relevant papers to answer your question.",
-                            "papers": [],
-                            "metadata": {"n_papers": 0, "rewritten_query": rewritten_query},
-                        }
-
-                    # Format context from papers using shared utility
-                    papers = format_search_results(search_results, self.database, include_documents=True)
-                    context = build_context_from_papers(papers)
-
-                    # Cache papers for potential reuse
-                    self._cached_papers = papers
-                    self._cached_context = context
-
-            # Generate response using OpenAI API (uses original question, not rewritten query)
-            logger.info(f"Generating response using {len(papers)} papers as context")
-            response_text = self._generate_response(question, context, system_prompt)
-
+            # Execute MCP tools (unified route)
+            logger.info(f"Executing {len(route_info['tool_calls'])} MCP tool(s)")
+            
+            # Execute tools and collect results
+            tool_results = []
+            for tool_call in route_info["tool_calls"]:
+                function_name = tool_call['name']
+                function_args = tool_call['arguments']
+                
+                logger.info(f"Executing tool: {function_name} with args: {function_args}")
+                
+                # Execute MCP tool
+                tool_result = execute_mcp_tool(function_name, function_args)
+                formatted_result = format_tool_result_for_llm(function_name, tool_result)
+                
+                tool_results.append({
+                    'name': function_name,
+                    'result': formatted_result,
+                    'raw_result': tool_result  # Keep raw for paper extraction
+                })
+            
+            # Build context from tool results
+            tool_context = "\n\n".join([
+                f"Tool: {tr['name']}\nResult:\n{tr['result']}"
+                for tr in tool_results
+            ])
+            
+            # Generate response based on tool results
+            logger.info("Generating response from tool results")
+            response_text = self._generate_response_from_context(
+                question, tool_context, system_prompt, is_tool_result=True
+            )
+            
+            # Extract papers from tool results (if any tool returned papers)
+            papers = []
+            for tr in tool_results:
+                # Extract papers from tools that return them
+                if tr['name'] in ['get_recent_developments', 'analyze_topic_relevance']:
+                    try:
+                        result_json = json.loads(tr['raw_result'])
+                        if 'papers' in result_json:
+                            papers.extend(result_json.get('papers', []))
+                    except json.JSONDecodeError:
+                        logger.warning(f"Failed to parse papers from {tr['name']} result")
+            
             # Store in conversation history
             self.conversation_history.append({"role": "user", "content": question})
             self.conversation_history.append({"role": "assistant", "content": response_text})
-
+            
             return {
                 "response": response_text,
                 "papers": papers,
                 "metadata": {
                     "n_papers": len(papers),
                     "model": self.model,
-                    "rewritten_query": rewritten_query,
-                    "retrieved_new_papers": should_retrieve,
+                    "rewritten_query": None,
+                    "used_tools": True,
+                    "tools_executed": [tc['name'] for tc in route_info['tool_calls']],
+                    "retrieved_new_papers": True,  # Tools always retrieve fresh results
                 },
             }
 
@@ -437,7 +571,7 @@ class RAGChat:
             return self.query(message, n_results=n_results)
         else:
             # Use only conversation history without paper context
-            response_text = self._generate_response(message, "", None)
+            response_text = self._generate_response_from_context(message, "", None, is_tool_result=False)
             self.conversation_history.append({"role": "user", "content": message})
             self.conversation_history.append({"role": "assistant", "content": response_text})
             return {
@@ -460,18 +594,29 @@ class RAGChat:
         self._cached_context = ""
         logger.info("Conversation history and cache reset")
 
-    def _generate_response(self, question: str, context: str, system_prompt: Optional[str] = None) -> str:
+    def _generate_response_from_context(
+        self, 
+        question: str, 
+        context: str, 
+        system_prompt: Optional[str] = None,
+        is_tool_result: bool = False
+    ) -> str:
         """
-        Generate response using OpenAI-compatible API with optional MCP tool support.
+        Generate response from provided context (papers or tool results).
+
+        This method no longer makes tool call decisions. Tool calls are decided
+        earlier in the flow during query analysis.
 
         Parameters
         ----------
         question : str
             User's question.
         context : str
-            Context from papers.
+            Context from papers or tool results.
         system_prompt : str, optional
             Custom system prompt.
+        is_tool_result : bool
+            Whether context comes from tool results (vs papers).
 
         Returns
         -------
@@ -485,19 +630,19 @@ class RAGChat:
         """
         # Default system prompt
         if system_prompt is None:
-            system_prompt = (
-                "You are an AI assistant helping researchers find relevant NeurIPS abstracts. "
-                "Use the provided paper abstracts to answer questions accurately and concisely. "
-                "If the papers don't contain enough information to answer the question, suggest a query that might return more relevant results. "
-                "Always cite which papers you're referencing (e.g., 'Paper 1', 'Paper 2'), using local links: <a href='#paper-1'>Paper-1</a>, <a href='#paper-2'>Paper-2</a> etc."
-            )
-            
-            # Enhance system prompt when MCP tools are enabled
-            if self.enable_mcp_tools:
-                system_prompt += (
-                    "\n\nYou have access to clustering analysis tools that can help answer questions about "
-                    "overall conference topics, trends over time, and recent developments. Use these tools when appropriate "
-                    "for questions about general themes, topic evolution, or recent research in specific areas."
+            if is_tool_result:
+                system_prompt = (
+                    "You are an AI assistant helping researchers analyze conference data. "
+                    "You have been provided with results from clustering and analysis tools. "
+                    "Use these results to answer the user's question accurately and concisely. "
+                    "Present the information in a clear, easy-to-understand format."
+                )
+            else:
+                system_prompt = (
+                    "You are an AI assistant helping researchers find relevant NeurIPS abstracts. "
+                    "Use the provided paper abstracts to answer questions accurately and concisely. "
+                    "If the papers don't contain enough information to answer the question, suggest a query that might return more relevant results. "
+                    "Always cite which papers you're referencing (e.g., 'Paper 1', 'Paper 2'), using local links: <a href='#paper-1'>Paper-1</a>, <a href='#paper-2'>Paper-2</a> etc."
                 )
 
         # Build messages
@@ -509,13 +654,17 @@ class RAGChat:
 
         # Add current question with context
         if context:
-            user_message = f"Context from relevant papers:\n\n{context}\n\nQuestion: {question}"
+            if is_tool_result:
+                user_message = f"Tool Results:\n\n{context}\n\nQuestion: {question}\n\nPlease provide a clear answer based on the tool results above."
+            else:
+                user_message = f"Context from relevant papers:\n\n{context}\n\nQuestion: {question}"
         else:
             user_message = question
 
         messages.append({"role": "user", "content": user_message})
 
-        # Prepare API call parameters
+        # Prepare API call parameters - NO TOOLS passed here
+        # Tool decisions are made earlier in query analysis
         api_params = {
             "model": self.model,
             "messages": messages,
@@ -523,107 +672,16 @@ class RAGChat:
             "max_tokens": 1000,
             "timeout": 180,
         }
-        
-        # Add MCP tools if enabled
-        if self.enable_mcp_tools:
-            api_params["tools"] = get_mcp_tools_schema()
-            api_params["tool_choice"] = "auto"  # Let the model decide when to use tools
 
         # Call OpenAI-compatible API using OpenAI client
         try:
             response = self.openai_client.chat.completions.create(**api_params)
-            
-            # Check if the model wants to use tools
-            if self.enable_mcp_tools and response.choices[0].message.tool_calls:
-                return self._handle_tool_calls(response, messages)
-            
-            # No tool calls, return direct response
             return response.choices[0].message.content
 
         except Exception as e:
             raise RAGError(f"Failed to generate response: {str(e)}")
     
-    def _handle_tool_calls(self, initial_response, messages: List[Dict[str, Any]]) -> str:
-        """
-        Handle tool calls from the LLM response.
-        
-        This method executes requested MCP tools and sends the results back to the LLM
-        to generate a final response.
-        
-        Parameters
-        ----------
-        initial_response
-            The initial API response containing tool calls
-        messages : list
-            The message history to continue the conversation
-            
-        Returns
-        -------
-        str
-            Final response from the LLM after tool execution
-        """
-        assistant_message = initial_response.choices[0].message
-        tool_calls = assistant_message.tool_calls
-        
-        # Add the assistant's tool call message to history
-        tool_calls_data: List[Dict[str, Any]] = [
-            {
-                "id": tc.id,
-                "type": "function",
-                "function": {
-                    "name": tc.function.name,
-                    "arguments": tc.function.arguments
-                }
-            }
-            for tc in tool_calls
-        ]
-        
-        messages.append({
-            "role": "assistant",
-            "content": assistant_message.content,
-            "tool_calls": tool_calls_data
-        })
-        
-        # Execute each tool call
-        for tool_call in tool_calls:
-            function_name = tool_call.function.name
-            
-            try:
-                function_args = json.loads(tool_call.function.arguments)
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse tool arguments: {e}")
-                # Use empty args as fallback
-                function_args = {}
-            
-            logger.info(f"LLM requested tool: {function_name} with args: {function_args}")
-            
-            # Execute the tool
-            tool_result = execute_mcp_tool(function_name, function_args)
-            
-            # Format the result for better LLM consumption
-            formatted_result = format_tool_result_for_llm(function_name, tool_result)
-            
-            # Add tool result to messages
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "name": function_name,
-                "content": formatted_result
-            })
-        
-        # Get final response from LLM with tool results
-        try:
-            final_response = self.openai_client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=self.temperature,
-                max_tokens=1000,
-                timeout=180,
-            )
-            return final_response.choices[0].message.content
-        except Exception as e:
-            raise RAGError(f"Failed to generate response after tool calls: {str(e)}")
-
+    
     def export_conversation(self, output_path: Path) -> None:
         """
         Export conversation history to JSON file.
