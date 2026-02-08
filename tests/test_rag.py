@@ -1373,6 +1373,33 @@ class TestTextBasedToolCalls:
         assert has_calls is False
         assert len(calls) == 0
     
+    def test_parse_text_tool_calls_nested_json(self):
+        """Test parsing tool calls with nested JSON structures."""
+        from abstracts_explorer.rag import parse_text_tool_calls
+        
+        # Test with nested object
+        response = '[TOOL_CALLS]complex_tool{"config": {"nested": "value", "deep": {"level": 2}}, "array": [1, 2, {"inner": "obj"}]}'
+        has_calls, calls = parse_text_tool_calls(response)
+        
+        assert has_calls is True
+        assert len(calls) == 1
+        assert calls[0]['name'] == 'complex_tool'
+        assert calls[0]['arguments']['config']['nested'] == 'value'
+        assert calls[0]['arguments']['config']['deep']['level'] == 2
+        assert calls[0]['arguments']['array'][2]['inner'] == 'obj'
+    
+    def test_parse_text_tool_calls_with_strings_containing_braces(self):
+        """Test parsing tool calls with strings containing braces/brackets."""
+        from abstracts_explorer.rag import parse_text_tool_calls
+        
+        response = '[TOOL_CALLS]test_tool{"query": "test {brackets} and [arrays]", "value": 123}'
+        has_calls, calls = parse_text_tool_calls(response)
+        
+        assert has_calls is True
+        assert len(calls) == 1
+        assert calls[0]['arguments']['query'] == 'test {brackets} and [arrays]'
+        assert calls[0]['arguments']['value'] == 123
+    
     def test_handle_text_tool_calls_integration(self, mock_embeddings_manager, mock_database):
         """Test that text-based tool calls are executed and result in proper response."""
         with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
