@@ -113,10 +113,12 @@ def parse_json_tool_call(response_text: str) -> Optional[List[Dict[str, Any]]]:
             logger.info(f"Parsed {len(tool_calls)} JSON tool call(s) from response")
             return tool_calls
         
+        logger.debug(f"No JSON tool call(s) found in response {response_text.strip()}")
         return None
     
     except (json.JSONDecodeError, ValueError, TypeError):
         # Not valid JSON or doesn't match expected format
+        logger.debug(f"Error parsing JSON tool calls. Make sure the model supports tool calling and returns proper JSON formatted responses. Got response from model: {response_text.strip()}")
         return None
 
 
@@ -242,6 +244,34 @@ class RAGChat:
             )
         return self._openai_client
 
+    def _get_fallback_route_info(self, user_query: str, n_results: int = 5) -> Dict[str, Any]:
+        """
+        Get fallback route information when routing fails.
+        
+        Returns a route to get_recent_developments as the default fallback.
+        
+        Parameters
+        ----------
+        user_query : str
+            User query to route
+        n_results : int
+            Number of results to return
+            
+        Returns
+        -------
+        dict
+            Route info dictionary
+        """
+        return {
+            "use_tools": True,
+            "tool_calls": [{
+                "name": "get_recent_developments",
+                "arguments": {"topic_keywords": user_query, "n_results": n_results}
+            }],
+            "rewritten_query": None,
+            "original_query": user_query
+        }
+
     def _analyze_and_route_query(self, user_query: str, n_results: int = 5) -> Dict[str, Any]:
         """
         Analyze user query and determine which MCP tool to use.
@@ -277,32 +307,22 @@ class RAGChat:
             system_prompt = (
                 "You are a query routing assistant. Determine which MCP tool should handle the user's question.\n\n"
                 "AVAILABLE TOOLS:\n\n"
-                "1. CLUSTERING/ANALYSIS TOOLS - Use for questions about:\n"
-                "   - Overall topics/themes ('what are the main topics', 'research areas covered')\n"
-                "   - Trends over time ('how has X evolved', 'topic evolution')\n"
-                "   - Recent developments ('latest research on', 'recent papers about')\n"
-                "   - Counting papers by topic ('how many papers about X')\n"
-                "   - Visualization requests ('show me', 'visualize', 'plot')\n"
-                "   Tools: analyze_topic_relevance, get_cluster_topics, get_topic_evolution, "
-                "get_recent_developments, get_cluster_visualization\n\n"
-                "2. PAPER SEARCH TOOL (rewrite_and_search_papers) - Use for:\n"
-                "   - Specific questions about concepts/techniques\n"
-                "   - Detailed explanations of topics\n"
-                "   - Questions about specific papers or authors\n"
-                "   - Questions requiring direct information from papers\n\n"
-                "Respond with ONLY a valid JSON tool call in one of these formats:\n"
-                "- Single: {\"name\": \"tool_name\", \"arguments\": {...}}\n"
-                "- Array: [{\"name\": \"tool1\", \"arguments\": {...}}, ...]\n\n"
-                f"For paper search, use: {{\"name\": \"rewrite_and_search_papers\", \"arguments\": {{\"query\": \"...\", \"n_results\": {n_results}}}}}\n"
+                "Specific questions about a topic ('what is the latest research on ...?', 'Which are the most relevant papers about ...'): get_recent_developments()\n\n"
+                "Identify relevant topics ('what were the hot topics this year?', 'which research areas were covered most this year?'): get_cluster_topics()\n\n"
+                "Identify how relevant a specific topic was this year ('how many papers about ... were published this year?', 'how important was ... at this conference?'): analyze_topic_relevance()\n\n"
+                "Identify trends for specific topics ('how has ... evolved over the years?', 'has .. become more or less relevant?'): get_topic_evolution()\n\n"
+                "Cluster visualization requests ('show me papers clustered by topic.', 'plot an overview of papers with similar paper grouped together'): get_cluster_visualization()\n\n"
+                "Respond with ONLY a valid JSON tool call using standard OpenAI format:\n"
+                "{\"name\": \"tool_name\", \"arguments\": {...}}\n\n"
                 "For follow-up questions, incorporate context from previous conversation."
             )
         else:
-            # If MCP tools disabled, default to paper search
+            # If MCP tools disabled, use get_recent_developments as fallback
             system_prompt = (
                 "You are a query routing assistant. Since clustering tools are disabled, "
-                "route all queries to the paper search tool. Respond with ONLY a JSON tool call:\n"
-                f"{{\"name\": \"rewrite_and_search_papers\", \"arguments\": {{\"query\": \"<optimized query>\", \"n_results\": {n_results}}}}}\n"
-                "Optimize the query for semantic search (5-15 keywords)."
+                "route all queries to get_recent_developments for paper search. Respond with ONLY a JSON tool call:\n"
+                f"{{\"name\": \"get_recent_developments\", \"arguments\": {{\"topic_keywords\": \"<search keywords>\", \"n_results\": {n_results}}}}}\n"
+                "Extract the key topic keywords from the query (5-15 keywords)."
             )
 
         # Build messages with conversation history for context
@@ -341,30 +361,14 @@ class RAGChat:
                     "original_query": user_query
                 }
             else:
-                # Fallback: If parsing fails, default to paper search
-                logger.warning(f"Failed to parse tool call, defaulting to paper search for: {user_query}")
-                return {
-                    "use_tools": True,
-                    "tool_calls": [{
-                        "name": "rewrite_and_search_papers",
-                        "arguments": {"query": user_query, "n_results": n_results}
-                    }],
-                    "rewritten_query": None,
-                    "original_query": user_query
-                }
+                # Fallback: If parsing fails, default to get_recent_developments
+                logger.warning(f"Failed to parse tool call, defaulting to get_recent_developments for: {user_query}")
+                return self._get_fallback_route_info(user_query, n_results)
 
         except Exception as e:
-            logger.warning(f"Query analysis failed: {e}, defaulting to paper search")
-            # Fallback: route to paper search on error
-            return {
-                "use_tools": True,
-                "tool_calls": [{
-                    "name": "rewrite_and_search_papers",
-                    "arguments": {"query": user_query, "n_results": n_results}
-                }],
-                "rewritten_query": None,
-                "original_query": user_query
-            }
+            logger.warning(f"Query analysis failed: {e}, defaulting to get_recent_developments")
+            # Fallback: route to get_recent_developments on error
+            return self._get_fallback_route_info(user_query, n_results)
 
     def _should_retrieve_papers(self, rewritten_query: str) -> bool:
         """
@@ -464,90 +468,23 @@ class RAGChat:
             if self.enable_query_rewriting:
                 route_info = self._analyze_and_route_query(question, n_results=n_results)
             else:
-                # If query rewriting disabled, default to paper search tool
-                route_info = {
-                    "use_tools": True,
-                    "tool_calls": [{
-                        "name": "rewrite_and_search_papers",
-                        "arguments": {"query": question, "n_results": n_results}
-                    }],
-                    "rewritten_query": None,
-                    "original_query": question
-                }
-                logger.info("Query rewriting disabled, using paper search tool with original query")
+                # If query rewriting disabled, default to get_recent_developments tool
+                route_info = self._get_fallback_route_info(question, n_results)
+                logger.info("Query rewriting disabled, using get_recent_developments tool with original query")
 
             # Execute MCP tools (unified route)
             logger.info(f"Executing {len(route_info['tool_calls'])} MCP tool(s)")
             
             # Execute tools and collect results
             tool_results = []
-            retrieved_new_papers = True  # Track if papers were actually retrieved
             for tool_call in route_info["tool_calls"]:
                 function_name = tool_call['name']
                 function_args = tool_call['arguments']
                 
                 logger.info(f"Executing tool: {function_name} with args: {function_args}")
                 
-                # Special handling for rewrite_and_search_papers to use RAG's own EM/DB
-                if function_name == 'rewrite_and_search_papers':
-                    query = function_args.get('query', question)
-                    n = function_args.get('n_results', n_results)
-                    
-                    # Build metadata filter if provided
-                    metadata_filter_arg = {}
-                    if 'conferences' in function_args:
-                        metadata_filter_arg["conference"] = {"$in": function_args['conferences']}
-                    if 'years' in function_args:
-                        metadata_filter_arg["year"] = {"$in": function_args['years']}
-                    
-                    # Combine with user-provided filter
-                    if metadata_filter:
-                        metadata_filter_arg.update(metadata_filter)
-                    
-                    # Check if we should retrieve new papers or use cached
-                    should_retrieve = self._should_retrieve_papers(query)
-                    retrieved_new_papers = should_retrieve  # Track this for metadata
-                    
-                    if should_retrieve:
-                        # Search using RAG's embeddings manager
-                        search_results = self.embeddings_manager.search_similar(
-                            query, 
-                            n_results=n, 
-                            where=metadata_filter_arg if metadata_filter_arg else metadata_filter
-                        )
-                        
-                        # Format results
-                        from .paper_utils import format_search_results
-                        if not search_results["ids"][0]:
-                            tool_result = json.dumps({
-                                "query": query,
-                                "n_papers": 0,
-                                "papers": [],
-                                "message": "No relevant papers found"
-                            }, indent=2)
-                            papers_list = []
-                        else:
-                            papers_list = format_search_results(search_results, self.database, include_documents=True)
-                            tool_result = json.dumps({
-                                "query": query,
-                                "n_papers": len(papers_list),
-                                "papers": papers_list,
-                            }, indent=2)
-                        
-                        # Cache the results
-                        self.last_search_query = query
-                        self._cached_papers = papers_list
-                    else:
-                        # Use cached papers
-                        tool_result = json.dumps({
-                            "query": query,
-                            "n_papers": len(self._cached_papers),
-                            "papers": self._cached_papers,
-                        }, indent=2)
-                else:
-                    # Execute other MCP tools normally
-                    tool_result = execute_mcp_tool(function_name, function_args)
-                
+                # Execute MCP tool
+                tool_result = execute_mcp_tool(function_name, function_args)
                 formatted_result = format_tool_result_for_llm(function_name, tool_result)
                 
                 tool_results.append({
@@ -568,16 +505,17 @@ class RAGChat:
                 question, tool_context, system_prompt, is_tool_result=True
             )
             
-            # Extract papers if rewrite_and_search_papers was used
+            # Extract papers from tool results (if any tool returned papers)
             papers = []
             for tr in tool_results:
-                if tr['name'] == 'rewrite_and_search_papers':
-                    # Extract papers from the raw tool result
+                # Extract papers from tools that return them
+                if tr['name'] in ['get_recent_developments', 'analyze_topic_relevance']:
                     try:
                         result_json = json.loads(tr['raw_result'])
-                        papers = result_json.get('papers', [])
+                        if 'papers' in result_json:
+                            papers.extend(result_json.get('papers', []))
                     except json.JSONDecodeError:
-                        logger.warning("Failed to parse papers from rewrite_and_search_papers result")
+                        logger.warning(f"Failed to parse papers from {tr['name']} result")
             
             # Store in conversation history
             self.conversation_history.append({"role": "user", "content": question})
@@ -592,7 +530,7 @@ class RAGChat:
                     "rewritten_query": None,
                     "used_tools": True,
                     "tools_executed": [tc['name'] for tc in route_info['tool_calls']],
-                    "retrieved_new_papers": retrieved_new_papers,
+                    "retrieved_new_papers": True,  # Tools always retrieve fresh results
                 },
             }
 

@@ -98,7 +98,48 @@ def mock_lm_studio_response():
         mock_chat_response.choices = [mock_choice]
         mock_client.chat.completions.create.return_value = mock_chat_response
         
-        yield mock_client
+        yield mock_openai_class
+
+
+@pytest.fixture
+def mock_mcp_tool_execution():
+    """Mock MCP tool execution to return papers."""
+    with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
+        # Return papers in the format that get_recent_developments would return
+        mock_execute.return_value = json.dumps({
+            "topic": "test query",
+            "papers_found": 3,
+            "papers": [
+                {
+                    "id": "1",
+                    "title": "Attention Is All You Need",
+                    "abstract": "The dominant sequence transduction models...",
+                    "year": 2017,
+                    "conference": "NeurIPS",
+                    "session": "Oral",
+                    "relevance_score": 0.95,
+                },
+                {
+                    "id": "2",
+                    "title": "BERT: Pre-training of Deep Bidirectional Transformers",
+                    "abstract": "We introduce BERT...",
+                    "year": 2019,
+                    "conference": "NeurIPS",
+                    "session": "Poster",
+                    "relevance_score": 0.92,
+                },
+                {
+                    "id": "3",
+                    "title": "GPT-3: Language Models are Few-Shot Learners",
+                    "abstract": "We train GPT-3...",
+                    "year": 2020,
+                    "conference": "NeurIPS",
+                    "session": "Oral",
+                    "relevance_score": 0.88,
+                },
+            ],
+        }, indent=2)
+        yield mock_execute
 
 
 class TestRAGChatInit:
@@ -157,7 +198,7 @@ class TestRAGChatInit:
 class TestRAGChatQuery:
     """Test RAGChat query method."""
 
-    def test_query_success(self, mock_embeddings_manager, mock_database, mock_lm_studio_response):
+    def test_query_success(self, mock_embeddings_manager, mock_database, mock_lm_studio_response, mock_mcp_tool_execution):
         """Test successful query with papers."""
         chat = RAGChat(mock_embeddings_manager, mock_database)
 
@@ -171,23 +212,26 @@ class TestRAGChatQuery:
         assert len(result["papers"]) == 3
         assert result["metadata"]["n_papers"] == 3
 
-        # Check that search was called
-        mock_embeddings_manager.search_similar.assert_called_once()
+        # Check that MCP tool was called
+        mock_mcp_tool_execution.assert_called_once()
 
         # Check conversation history
         assert len(chat.conversation_history) == 2
         assert chat.conversation_history[0]["role"] == "user"
         assert chat.conversation_history[1]["role"] == "assistant"
 
-    def test_query_with_n_results(self, mock_embeddings_manager, mock_database, mock_lm_studio_response):
+    def test_query_with_n_results(self, mock_embeddings_manager, mock_database, mock_lm_studio_response, mock_mcp_tool_execution):
         """Test query with custom n_results."""
         chat = RAGChat(mock_embeddings_manager, mock_database)
 
         chat.query("What is deep learning?", n_results=2)
 
-        # Check that n_results was passed
-        call_args = mock_embeddings_manager.search_similar.call_args
-        assert call_args[1]["n_results"] == 2
+        # Check that n_results was passed to the MCP tool
+        call_args = mock_mcp_tool_execution.call_args
+        assert call_args is not None
+        # Check the arguments dict passed to the tool
+        tool_name, tool_args = call_args[0]
+        assert tool_args.get("n_results") == 2
 
     def test_query_with_metadata_filter(self, mock_embeddings_manager, mock_database, mock_lm_studio_response):
         """Test query with metadata filter."""
@@ -708,7 +752,7 @@ class TestRAGChatQueryRewriting:
             mock_route_response = Mock()
             mock_route_choice = Mock()
             mock_route_message = Mock()
-            mock_route_message.content = '{"name": "rewrite_and_search_papers", "arguments": {"query": "attention mechanism transformers", "n_results": 5}}'
+            mock_route_message.content = '{"name": "get_recent_developments", "arguments": {"topic_keywords": "attention mechanism transformers", "n_results": 5}}'
             mock_route_choice.message = mock_route_message
             mock_route_response.choices = [mock_route_choice]
             
@@ -761,7 +805,7 @@ class TestRAGChatQueryRewriting:
 
                 # Check if it's a routing request (shorter timeout)
                 if kwargs.get("timeout", 180) == 30:
-                    mock_message.content = '{"name": "rewrite_and_search_papers", "arguments": {"query": "deep learning networks", "n_results": 5}}'
+                    mock_message.content = '{"name": "get_recent_developments", "arguments": {"topic_keywords": "deep learning networks", "n_results": 5}}'
                 else:
                     mock_message.content = "Response"
                 
@@ -874,11 +918,11 @@ class TestRAGChatMCPTools:
             mock_client = Mock()
             mock_openai_class.return_value = mock_client
             
-            # Mock routing response - returns JSON tool call for rewrite_and_search_papers
+            # Mock routing response - returns JSON tool call for get_recent_developments
             mock_route_response = Mock()
             mock_route_choice = Mock()
             mock_route_message = Mock()
-            mock_route_message.content = '{"name": "rewrite_and_search_papers", "arguments": {"query": "attention mechanism neural networks", "n_results": 5}}'
+            mock_route_message.content = '{"name": "get_recent_developments", "arguments": {"topic_keywords": "attention mechanism neural networks", "n_results": 5}}'
             mock_route_choice.message = mock_route_message
             mock_route_response.choices = [mock_route_choice]
             
@@ -920,7 +964,7 @@ class TestRAGChatMCPTools:
             mock_embeddings_manager.search_similar.assert_called_once()
             
             # In the new architecture, all queries go through tools
-            # rewrite_and_search_papers is a tool, so used_tools should be True
+            # get_recent_developments is a tool, so used_tools should be True
             assert result["metadata"]["used_tools"] is True
             assert result["metadata"]["n_papers"] == 3
             assert len(result["papers"]) == 3
@@ -1309,7 +1353,7 @@ class TestJSONToolCalls:
             mock_route_response = Mock()
             mock_route_choice = Mock()
             mock_route_message = Mock()
-            mock_route_message.content = '{"name": "rewrite_and_search_papers", "arguments": {"query": "test query", "n_results": 5}}'
+            mock_route_message.content = '{"name": "get_recent_developments", "arguments": {"topic_keywords": "test query", "n_results": 5}}'
             mock_route_choice.message = mock_route_message
             mock_route_response.choices = [mock_route_choice]
             
