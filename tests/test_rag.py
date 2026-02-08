@@ -1306,3 +1306,231 @@ class TestRAGChatMCPToolsE2E:
         
         # Note: We can't assert specific tool calls without introspecting the LLM's behavior,
         # but this test ensures the integration works end-to-end with a real LLM
+
+
+class TestTextBasedToolCalls:
+    """Tests for text-based tool call parsing and handling."""
+    
+    def test_parse_text_tool_calls_single(self):
+        """Test parsing a single text-based tool call."""
+        from abstracts_explorer.rag import parse_text_tool_calls
+        
+        response = '[TOOL_CALLS]analyze_topic_relevance{"query": "Uncertainty quantification", "distance_threshold": 1.1}'
+        has_calls, calls = parse_text_tool_calls(response)
+        
+        assert has_calls is True
+        assert len(calls) == 1
+        assert calls[0]['name'] == 'analyze_topic_relevance'
+        assert calls[0]['arguments']['query'] == 'Uncertainty quantification'
+        assert calls[0]['arguments']['distance_threshold'] == 1.1
+    
+    def test_parse_text_tool_calls_with_arrays(self):
+        """Test parsing tool calls with array arguments."""
+        from abstracts_explorer.rag import parse_text_tool_calls
+        
+        response = '[TOOL_CALLS]analyze_topic_relevance{"query": "transformers", "conferences": ["NeurIPS", "ICLR"], "years": [2024, 2025]}'
+        has_calls, calls = parse_text_tool_calls(response)
+        
+        assert has_calls is True
+        assert len(calls) == 1
+        assert calls[0]['name'] == 'analyze_topic_relevance'
+        assert calls[0]['arguments']['conferences'] == ["NeurIPS", "ICLR"]
+        assert calls[0]['arguments']['years'] == [2024, 2025]
+    
+    def test_parse_text_tool_calls_multiple(self):
+        """Test parsing multiple text-based tool calls."""
+        from abstracts_explorer.rag import parse_text_tool_calls
+        
+        response = '''[TOOL_CALLS]get_cluster_topics{"n_clusters": 8}
+        [TOOL_CALLS]get_recent_developments{"topic_keywords": "transformers", "n_years": 2}'''
+        has_calls, calls = parse_text_tool_calls(response)
+        
+        assert has_calls is True
+        assert len(calls) == 2
+        assert calls[0]['name'] == 'get_cluster_topics'
+        assert calls[0]['arguments']['n_clusters'] == 8
+        assert calls[1]['name'] == 'get_recent_developments'
+        assert calls[1]['arguments']['topic_keywords'] == 'transformers'
+    
+    def test_parse_text_tool_calls_no_calls(self):
+        """Test parsing response with no tool calls."""
+        from abstracts_explorer.rag import parse_text_tool_calls
+        
+        response = 'This is a normal response without tool calls.'
+        has_calls, calls = parse_text_tool_calls(response)
+        
+        assert has_calls is False
+        assert len(calls) == 0
+    
+    def test_parse_text_tool_calls_invalid_json(self):
+        """Test parsing tool calls with invalid JSON (should skip that call)."""
+        from abstracts_explorer.rag import parse_text_tool_calls
+        
+        response = '[TOOL_CALLS]bad_tool{invalid json here}'
+        has_calls, calls = parse_text_tool_calls(response)
+        
+        # Should skip the invalid call
+        assert has_calls is False
+        assert len(calls) == 0
+    
+    def test_handle_text_tool_calls_integration(self, mock_embeddings_manager, mock_database):
+        """Test that text-based tool calls are executed and result in proper response."""
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
+            mock_client = Mock()
+            mock_openai_class.return_value = mock_client
+            
+            # First call: Query rewriting - return original query
+            mock_rewrite_response = Mock()
+            mock_rewrite_choice = Mock()
+            mock_rewrite_message = Mock()
+            mock_rewrite_message.content = "transformers"
+            mock_rewrite_choice.message = mock_rewrite_message
+            mock_rewrite_response.choices = [mock_rewrite_choice]
+            
+            # Second call: Model returns text-based tool call
+            mock_first_response = Mock()
+            mock_first_choice = Mock()
+            mock_first_message = Mock()
+            mock_first_message.content = '[TOOL_CALLS]analyze_topic_relevance{"query": "transformers", "distance_threshold": 1.1}'
+            mock_first_message.tool_calls = None
+            mock_first_choice.message = mock_first_message
+            mock_first_response.choices = [mock_first_choice]
+            
+            # Third call: Model generates final answer based on tool results
+            mock_second_response = Mock()
+            mock_second_choice = Mock()
+            mock_second_message = Mock()
+            mock_second_message.content = "Based on the tool results, there are 42 papers about transformers."
+            mock_second_message.tool_calls = None
+            mock_second_choice.message = mock_second_message
+            mock_second_response.choices = [mock_second_choice]
+            
+            # Set up side_effect for sequential calls
+            mock_client.chat.completions.create.side_effect = [
+                mock_rewrite_response,  # Query rewriting
+                mock_first_response,    # Tool call response
+                mock_second_response    # Final answer
+            ]
+            
+            # Mock the tool execution and formatting
+            with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute, \
+                 patch("abstracts_explorer.rag.format_tool_result_for_llm") as mock_format:
+                
+                mock_execute.return_value = json.dumps({
+                    "query": "transformers",
+                    "total_papers": 42,
+                    "relevance_score": 85
+                })
+                mock_format.return_value = "Found 42 papers about transformers with relevance score 85"
+                
+                chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
+                result = chat.query("How many papers about transformers?")
+                
+                # Verify tool was executed
+                mock_execute.assert_called_once_with(
+                    'analyze_topic_relevance',
+                    {'query': 'transformers', 'distance_threshold': 1.1}
+                )
+                
+                # Verify final response contains the answer
+                assert "42 papers" in result["response"]
+    
+    def test_handle_text_tool_calls_multiple_tools(self, mock_embeddings_manager, mock_database):
+        """Test handling multiple text-based tool calls in one response."""
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
+            mock_client = Mock()
+            mock_openai_class.return_value = mock_client
+            
+            # First call: Query rewriting - return simple query
+            mock_rewrite_response = Mock()
+            mock_rewrite_choice = Mock()
+            mock_rewrite_message = Mock()
+            mock_rewrite_message.content = "trending topics"
+            mock_rewrite_choice.message = mock_rewrite_message
+            mock_rewrite_response.choices = [mock_rewrite_choice]
+            
+            # Second call: Model returns multiple text-based tool calls
+            mock_first_response = Mock()
+            mock_first_choice = Mock()
+            mock_first_message = Mock()
+            mock_first_message.content = '''[TOOL_CALLS]get_cluster_topics{"n_clusters": 5}
+            [TOOL_CALLS]get_recent_developments{"topic_keywords": "transformers"}'''
+            mock_first_message.tool_calls = None
+            mock_first_choice.message = mock_first_message
+            mock_first_response.choices = [mock_first_choice]
+            
+            # Third call: Final answer
+            mock_second_response = Mock()
+            mock_second_choice = Mock()
+            mock_second_message = Mock()
+            mock_second_message.content = "Based on clustering and recent papers, transformers are a major topic."
+            mock_second_message.tool_calls = None
+            mock_second_choice.message = mock_second_message
+            mock_second_response.choices = [mock_second_choice]
+            
+            mock_client.chat.completions.create.side_effect = [
+                mock_rewrite_response,  # Query rewriting
+                mock_first_response,    # Tool calls
+                mock_second_response    # Final answer
+            ]
+            
+            # Mock the tool execution and formatting
+            with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute, \
+                 patch("abstracts_explorer.rag.format_tool_result_for_llm") as mock_format:
+                
+                mock_execute.side_effect = [
+                    json.dumps({"clusters": 5, "total_papers": 100}),
+                    json.dumps({"papers": [{"title": "New Transformer"}]})
+                ]
+                mock_format.side_effect = [
+                    "Found 5 clusters with 100 total papers",
+                    "Recent papers include: New Transformer"
+                ]
+                
+                chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
+                result = chat.query("What's trending?")
+                
+                # Verify both tools were executed
+                assert mock_execute.call_count == 2
+                assert mock_execute.call_args_list[0][0] == ('get_cluster_topics', {'n_clusters': 5})
+                assert mock_execute.call_args_list[1][0] == ('get_recent_developments', {'topic_keywords': 'transformers'})
+                
+                # Verify final response
+                assert "transformers" in result["response"].lower()
+    
+    def test_text_tool_calls_disabled_when_mcp_disabled(self, mock_embeddings_manager, mock_database):
+        """Test that text-based tool calls are not processed when MCP tools are disabled."""
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
+            mock_client = Mock()
+            mock_openai_class.return_value = mock_client
+            
+            # First call: Query rewriting - return simple query
+            mock_rewrite_response = Mock()
+            mock_rewrite_choice = Mock()
+            mock_rewrite_message = Mock()
+            mock_rewrite_message.content = "test query"
+            mock_rewrite_choice.message = mock_rewrite_message
+            mock_rewrite_response.choices = [mock_rewrite_choice]
+            
+            # Second call: Model returns text-based tool call
+            mock_response = Mock()
+            mock_choice = Mock()
+            mock_message = Mock()
+            mock_message.content = '[TOOL_CALLS]analyze_topic_relevance{"query": "test"}'
+            mock_message.tool_calls = None
+            mock_choice.message = mock_message
+            mock_response.choices = [mock_choice]
+            
+            mock_client.chat.completions.create.side_effect = [
+                mock_rewrite_response,  # Query rewriting
+                mock_response           # Model response with tool calls
+            ]
+            
+            chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=False)
+            result = chat.query("Test query")
+            
+            # Should return the raw response with [TOOL_CALLS] marker
+            assert "[TOOL_CALLS]" in result["response"]
+            
+            # Should have made two API calls (rewriting + generation, but no follow-up)
+            assert mock_client.chat.completions.create.call_count == 2
