@@ -244,98 +244,6 @@ class RAGChat:
             )
         return self._openai_client
 
-    def _execute_get_recent_developments(self, function_args: Dict[str, Any]) -> str:
-        """
-        Execute get_recent_developments tool using RAG's own EM/DB instances.
-        
-        This ensures integration tests work correctly by using the configured
-        test database and embeddings manager instead of creating new instances.
-        
-        Parameters
-        ----------
-        function_args : dict
-            Arguments for the tool (topic_keywords, n_years, n_results, etc.)
-        
-        Returns
-        -------
-        str
-            JSON string containing tool results
-        """
-        import json
-        from datetime import datetime
-        from .mcp_server import merge_where_clause_with_conference
-        
-        try:
-            # Extract arguments
-            topic_keywords = function_args.get('topic_keywords', '')
-            n_years = function_args.get('n_years', 2)
-            n_results = function_args.get('n_results', 10)
-            conference = function_args.get('conference')
-            where = function_args.get('where')
-            
-            # Calculate year cutoff if filtering by year
-            year_cutoff = None
-            if n_years is not None:
-                current_year = datetime.now().year
-                year_cutoff = current_year - n_years
-            
-            # Build metadata filter
-            try:
-                where_filter = merge_where_clause_with_conference(where, conference)
-            except ValueError as e:
-                logger.error(f"Invalid WHERE clause: {str(e)}")
-                return json.dumps({"error": f"Invalid WHERE clause: {str(e)}"}, indent=2)
-            
-            # Search for papers using RAG's own embeddings manager
-            search_desc = "recent papers" if year_cutoff else "papers"
-            logger.info(f"Searching for {search_desc} about: {topic_keywords}")
-            if where_filter:
-                logger.info(f"Applying WHERE filter: {where_filter}")
-            if year_cutoff:
-                logger.info(f"Year cutoff: {year_cutoff}")
-            
-            results = self.embeddings_manager.search_similar(
-                query=topic_keywords,
-                n_results=n_results * 3 if year_cutoff else n_results,  # Get more if filtering by year
-                where=where_filter,
-            )
-            
-            # Filter and format results
-            papers = []
-            if results["ids"] and results["ids"][0]:
-                for idx, paper_id in enumerate(results["ids"][0]):
-                    metadata = results["metadatas"][0][idx]
-                    year = metadata.get("year")
-                    
-                    # Filter by year if cutoff is set
-                    if year_cutoff is None or (year and year >= year_cutoff):
-                        papers.append({
-                            "id": paper_id,
-                            "title": metadata.get("title", ""),
-                            "year": year,
-                            "conference": metadata.get("conference", ""),
-                            "session": metadata.get("session", ""),
-                            "abstract": results["documents"][0][idx] if "documents" in results and results["documents"][0] else "",
-                            "relevance_score": 1.0 - results["distances"][0][idx] if "distances" in results else None,
-                        })
-                        
-                        if len(papers) >= n_results:
-                            break
-            
-            result = {
-                "topic": topic_keywords,
-                "conference": conference,
-                "year_cutoff": year_cutoff,
-                "papers_found": len(papers),
-                "papers": papers,
-            }
-            
-            return json.dumps(result, indent=2)
-            
-        except Exception as e:
-            logger.error(f"Failed to get recent developments: {str(e)}")
-            return json.dumps({"error": str(e)}, indent=2)
-
     def _get_fallback_route_info(self, user_query: str, n_results: int = 5) -> Dict[str, Any]:
         """
         Get fallback route information when routing fails.
@@ -575,18 +483,8 @@ class RAGChat:
                 
                 logger.info(f"Executing tool: {function_name} with args: {function_args}")
                 
-                # Special handling for get_recent_developments to use RAG's own EM/DB
-                # (but only for real instances, not mocks - for integration tests)
-                from unittest.mock import Mock
-                is_mock = isinstance(self.embeddings_manager, Mock)
-                
-                if function_name == 'get_recent_developments' and not is_mock:
-                    # Use RAG's own EM/DB for integration tests
-                    tool_result = self._execute_get_recent_developments(function_args)
-                else:
-                    # Execute MCP tools normally (for unit tests with mocks or other tools)
-                    tool_result = execute_mcp_tool(function_name, function_args)
-                
+                # Execute MCP tool
+                tool_result = execute_mcp_tool(function_name, function_args)
                 formatted_result = format_tool_result_for_llm(function_name, tool_result)
                 
                 tool_results.append({
