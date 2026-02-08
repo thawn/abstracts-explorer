@@ -152,9 +152,9 @@ MCP_TOOLS_SCHEMA = [
         "function": {
             "name": "get_recent_developments",
             "description": (
-                "Find the most important recent developments in a specific topic. "
-                "Use this tool when the user asks about: recent papers, latest research, "
-                "current work, or new developments in a specific area."
+                "Find the most important developments in a specific topic. "
+                "Use this tool when the user asks about: papers on a topic, latest research, "
+                "current work, or developments in a specific area. Can filter by recent years or search all years."
             ),
             "parameters": {
                 "type": "object",
@@ -164,8 +164,8 @@ MCP_TOOLS_SCHEMA = [
                         "description": "Keywords describing the topic to search for"
                     },
                     "n_years": {
-                        "type": "integer",
-                        "description": "Number of recent years to consider (default: 2)"
+                        "type": ["integer", "null"],
+                        "description": "Number of recent years to consider. If null, searches all years (default: 2)"
                     },
                     "n_results": {
                         "type": "integer",
