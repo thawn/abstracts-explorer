@@ -136,7 +136,7 @@ Benefits:
                 │   Clustering Tools (mcp_server.py)       │
                 │  - get_cluster_topics()                  │
                 │  - get_topic_evolution()                 │
-                │  - get_recent_developments()             │
+                │  - search_papers()             │
                 │  - get_cluster_visualization()           │
                 └─────────────────────────────────────────┘
 ```
