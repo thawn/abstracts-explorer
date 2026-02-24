@@ -105,7 +105,7 @@ def mock_lm_studio_response():
 def mock_mcp_tool_execution():
     """Mock MCP tool execution to return papers."""
     with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
-        # Return papers in the format that get_recent_developments would return
+        # Return papers in the format that search_papers would return
         mock_execute.return_value = json.dumps({
             "topic": "test query",
             "papers_found": 3,
@@ -253,7 +253,7 @@ class TestRAGChatQuery:
             mock_route_response = Mock()
             mock_route_choice = Mock()
             mock_route_message = Mock()
-            mock_route_message.content = '{"name": "get_recent_developments", "arguments": {"topic_keywords": "transformers", "n_results": 5}}'
+            mock_route_message.content = '{"name": "search_papers", "arguments": {"topic_keywords": "transformers", "n_results": 5}}'
             mock_route_choice.message = mock_route_message
             mock_route_response.choices = [mock_route_choice]
             
@@ -301,7 +301,7 @@ class TestRAGChatQuery:
                 mock_route_response = Mock()
                 mock_route_choice = Mock()
                 mock_route_message = Mock()
-                mock_route_message.content = '{"name": "get_recent_developments", "arguments": {"topic_keywords": "Unknown topic", "n_results": 5}}'
+                mock_route_message.content = '{"name": "search_papers", "arguments": {"topic_keywords": "Unknown topic", "n_results": 5}}'
                 mock_route_choice.message = mock_route_message
                 mock_route_response.choices = [mock_route_choice]
                 
@@ -476,7 +476,7 @@ class TestRAGChatConversation:
                     
                     # Routing calls (shorter timeout)
                     if kwargs.get("timeout", 180) == 30:
-                        mock_message.content = '{"name": "get_recent_developments", "arguments": {"topic_keywords": "attention", "n_results": 5}}'
+                        mock_message.content = '{"name": "search_papers", "arguments": {"topic_keywords": "attention", "n_results": 5}}'
                     else:
                         # Generation calls
                         mock_message.content = "Response based on papers"
@@ -829,7 +829,7 @@ class TestRAGChatQueryRewriting:
             mock_route_response = Mock()
             mock_route_choice = Mock()
             mock_route_message = Mock()
-            mock_route_message.content = '{"name": "get_recent_developments", "arguments": {"topic_keywords": "attention mechanism transformers", "n_results": 5}}'
+            mock_route_message.content = '{"name": "search_papers", "arguments": {"topic_keywords": "attention mechanism transformers", "n_results": 5}}'
             mock_route_choice.message = mock_route_message
             mock_route_response.choices = [mock_route_choice]
             
@@ -864,7 +864,7 @@ class TestRAGChatQueryRewriting:
         result = chat.query("What is attention mechanism?")
 
         assert "response" in result
-        # With MCP tools, the query goes through get_recent_developments
+        # With MCP tools, the query goes through search_papers
         mock_mcp_tool_execution.assert_called_once()
 
     def test_query_caching_similar_queries(self, mock_embeddings_manager, mock_database):
@@ -899,7 +899,7 @@ class TestRAGChatQueryRewriting:
 
                     # Check if it's a routing request (shorter timeout)
                     if kwargs.get("timeout", 180) == 30:
-                        mock_message.content = '{"name": "get_recent_developments", "arguments": {"topic_keywords": "deep learning networks", "n_results": 5}}'
+                        mock_message.content = '{"name": "search_papers", "arguments": {"topic_keywords": "deep learning networks", "n_results": 5}}'
                     else:
                         mock_message.content = "Response"
                     
@@ -1053,11 +1053,11 @@ class TestRAGChatMCPTools:
                     ],
                 }, indent=2)
                 
-                # Mock routing response - returns JSON tool call for get_recent_developments
+                # Mock routing response - returns JSON tool call for search_papers
                 mock_route_response = Mock()
                 mock_route_choice = Mock()
                 mock_route_message = Mock()
-                mock_route_message.content = '{"name": "get_recent_developments", "arguments": {"topic_keywords": "attention mechanism neural networks", "n_results": 5}}'
+                mock_route_message.content = '{"name": "search_papers", "arguments": {"topic_keywords": "attention mechanism neural networks", "n_results": 5}}'
                 mock_route_choice.message = mock_route_message
                 mock_route_response.choices = [mock_route_choice]
                 
@@ -1095,17 +1095,17 @@ class TestRAGChatMCPTools:
                 chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
                 result = chat.query("Explain attention mechanism")
                 
-                # Verify get_recent_developments tool was executed
+                # Verify search_papers tool was executed
                 mock_execute.assert_called_once()
                 call_args = mock_execute.call_args[0]
-                assert call_args[0] == "get_recent_developments"
+                assert call_args[0] == "search_papers"
                 
                 # Verify papers were returned
                 assert len(result["papers"]) > 0
                 
                 # Verify metadata shows tools were used
                 assert result["metadata"]["used_tools"] is True
-                assert "get_recent_developments" in result["metadata"]["tools_executed"]
+                assert "search_papers" in result["metadata"]["tools_executed"]
                 assert result["metadata"]["n_papers"] == 3
                 assert len(result["papers"]) == 3
 
@@ -1212,7 +1212,7 @@ class TestRAGChatMCPToolsE2E:
                 assert "2020" in result["response"] or "evolved" in result["response"].lower()
 
     def test_mocked_query_triggers_recent_developments(self, mock_embeddings_manager, mock_database):
-        """Test that a query about recent papers triggers get_recent_developments (mocked)."""
+        """Test that a query about recent papers triggers search_papers (mocked)."""
         with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
             with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
                 mock_client = Mock()
@@ -1222,7 +1222,7 @@ class TestRAGChatMCPToolsE2E:
                 mock_route_response = Mock()
                 mock_route_choice = Mock()
                 mock_route_message = Mock()
-                mock_route_message.content = '{"name": "get_recent_developments", "arguments": {"topic_keywords": "large language models", "n_years": 2}}'
+                mock_route_message.content = '{"name": "search_papers", "arguments": {"topic_keywords": "large language models", "years": [2024, 2025]}}'
                 mock_route_choice.message = mock_route_message
                 mock_route_response.choices = [mock_route_choice]
                 
@@ -1255,8 +1255,8 @@ class TestRAGChatMCPToolsE2E:
                 
                 # Verify tool was executed
                 mock_execute.assert_called_once_with(
-                    "get_recent_developments",
-                    {"topic_keywords": "large language models", "n_years": 2}
+                    "search_papers",
+                    {"topic_keywords": "large language models", "years": [2024, 2025]}
                 )
                 
                 # Verify final response was returned
@@ -1303,7 +1303,7 @@ class TestJSONToolCalls:
         
         json_response = '''[
             {"name": "get_cluster_topics", "arguments": {"n_clusters": 8}},
-            {"name": "get_recent_developments", "arguments": {"topic_keywords": "transformers"}}
+            {"name": "search_papers", "arguments": {"topic_keywords": "transformers"}}
         ]'''
         tool_calls = parse_json_tool_call(json_response)
         
@@ -1311,7 +1311,7 @@ class TestJSONToolCalls:
         assert len(tool_calls) == 2
         assert tool_calls[0]['name'] == 'get_cluster_topics'
         assert tool_calls[0]['arguments']['n_clusters'] == 8
-        assert tool_calls[1]['name'] == 'get_recent_developments'
+        assert tool_calls[1]['name'] == 'search_papers'
         assert tool_calls[1]['arguments']['topic_keywords'] == 'transformers'
     
     def test_parse_json_tool_call_openai_format(self):
@@ -1438,7 +1438,7 @@ class TestJSONToolCalls:
             mock_route_message = Mock()
             mock_route_message.content = '''[
                 {"name": "get_cluster_topics", "arguments": {"n_clusters": 5}},
-                {"name": "get_recent_developments", "arguments": {"topic_keywords": "transformers"}}
+                {"name": "search_papers", "arguments": {"topic_keywords": "transformers"}}
             ]'''
             mock_route_choice.message = mock_route_message
             mock_route_response.choices = [mock_route_choice]
@@ -1476,7 +1476,7 @@ class TestJSONToolCalls:
                 # Verify both tools were executed
                 assert mock_execute.call_count == 2
                 assert mock_execute.call_args_list[0][0] == ('get_cluster_topics', {'n_clusters': 5})
-                assert mock_execute.call_args_list[1][0] == ('get_recent_developments', {'topic_keywords': 'transformers'})
+                assert mock_execute.call_args_list[1][0] == ('search_papers', {'topic_keywords': 'transformers'})
                 
                 # Verify final response
                 assert "transformers" in result["response"].lower()
@@ -1529,7 +1529,7 @@ class TestJSONToolCalls:
                 mock_route_response = Mock()
                 mock_route_choice = Mock()
                 mock_route_message = Mock()
-                mock_route_message.content = '{"name": "get_recent_developments", "arguments": {"topic_keywords": "test query", "n_results": 5}}'
+                mock_route_message.content = '{"name": "search_papers", "arguments": {"topic_keywords": "test query", "n_results": 5}}'
                 mock_route_choice.message = mock_route_message
                 mock_route_response.choices = [mock_route_choice]
                 
