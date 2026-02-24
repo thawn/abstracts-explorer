@@ -16,7 +16,7 @@ Features:
 
 import logging
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from collections import defaultdict, Counter
 from copy import deepcopy
 
@@ -457,26 +457,26 @@ def get_topic_evolution(
 
 
 @mcp.tool()
-def get_recent_developments(
+def search_papers(
     topic_keywords: str,
-    n_years: Optional[int] = 2,
+    years: Optional[List[int]] = None,
     n_results: int = 10,
     conference: Optional[str] = None,
     where: Optional[Dict[str, Any]] = None,
     collection_name: Optional[str] = None,
 ) -> str:
     """
-    Find the most important developments in a specific topic.
+    Search for papers on a specific topic.
 
     This tool searches for the most relevant papers about a topic, optionally
-    filtered by recent years.
+    filtered by specific years.
 
     Parameters
     ----------
     topic_keywords : str
         Keywords describing the topic (e.g., "large language models")
-    n_years : int, optional
-        Number of recent years to consider. If None, searches all years (default: 2)
+    years : list of int, optional
+        List of specific years to filter by (e.g., [2024, 2025]). If None, searches all years.
     n_results : int, optional
         Number of papers to return (default: 10)
     conference : str, optional
@@ -496,7 +496,7 @@ def get_recent_developments(
     Returns
     -------
     str
-        JSON string containing developments
+        JSON string containing search results
     """
     try:
         config = get_config()
@@ -513,13 +513,6 @@ def get_recent_developments(
         db = DatabaseManager()
         db.connect()
         
-        # Calculate year cutoff if filtering by year
-        year_cutoff = None
-        if n_years is not None:
-            from datetime import datetime
-            current_year = datetime.now().year
-            year_cutoff = current_year - n_years
-        
         # Build metadata filter using helper function
         try:
             where_filter = merge_where_clause_with_conference(where, conference)
@@ -528,16 +521,16 @@ def get_recent_developments(
             return json.dumps({"error": f"Invalid WHERE clause: {str(e)}"}, indent=2)
         
         # Search for papers
-        search_desc = "recent papers" if year_cutoff else "papers"
+        search_desc = f"papers from {years}" if years else "papers"
         logger.info(f"Searching for {search_desc} about: {topic_keywords}")
         if where_filter:
             logger.info(f"Applying WHERE filter: {where_filter}")
-        if year_cutoff:
-            logger.info(f"Year cutoff: {year_cutoff}")
+        if years:
+            logger.info(f"Year filter: {years}")
         
         results = em.search_similar(
             query=topic_keywords,
-            n_results=n_results * 3 if year_cutoff else n_results,  # Get more if filtering by year
+            n_results=n_results * 3 if years else n_results,  # Get more if filtering by year
             where=where_filter,
         )
         
@@ -548,8 +541,8 @@ def get_recent_developments(
                 metadata = results["metadatas"][0][idx]
                 year = metadata.get("year")
                 
-                # Filter by year if cutoff is set
-                if year_cutoff is None or (year and year >= year_cutoff):
+                # Filter by years list if provided
+                if years is None or (year and year in years):
                     papers.append({
                         "id": paper_id,
                         "title": metadata.get("title", ""),
@@ -566,7 +559,7 @@ def get_recent_developments(
         result = {
             "topic": topic_keywords,
             "conference": conference,
-            "year_cutoff": year_cutoff,
+            "years_filter": years,
             "papers_found": len(papers),
             "papers": papers,
         }
@@ -578,7 +571,7 @@ def get_recent_developments(
         return json.dumps(result, indent=2)
         
     except Exception as e:
-        logger.error(f"Failed to get recent developments: {str(e)}")
+        logger.error(f"Failed to search papers: {str(e)}")
         return json.dumps({"error": str(e)}, indent=2)
 
 

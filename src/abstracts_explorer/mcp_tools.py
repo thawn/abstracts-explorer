@@ -16,7 +16,7 @@ from typing import Dict, List, Any
 from .mcp_server import (
     get_cluster_topics,
     get_topic_evolution,
-    get_recent_developments,
+    search_papers,
     get_cluster_visualization,
     analyze_topic_relevance,
 )
@@ -150,11 +150,11 @@ MCP_TOOLS_SCHEMA = [
     {
         "type": "function",
         "function": {
-            "name": "get_recent_developments",
+            "name": "search_papers",
             "description": (
-                "Find the most important developments in a specific topic. "
-                "Use this tool when the user asks about: papers on a topic, latest research, "
-                "current work, or developments in a specific area. Can filter by recent years or search all years."
+                "Search for papers on a specific topic. "
+                "Use this tool when the user asks about: papers on a topic, research about something, "
+                "specific work, or wants to find papers related to a particular area. Can filter by specific years or search all years."
             ),
             "parameters": {
                 "type": "object",
@@ -163,9 +163,10 @@ MCP_TOOLS_SCHEMA = [
                         "type": "string",
                         "description": "Keywords describing the topic to search for"
                     },
-                    "n_years": {
-                        "type": ["integer", "null"],
-                        "description": "Number of recent years to consider. If null, searches all years (default: 2)"
+                    "years": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "List of specific years to filter by (e.g., [2024, 2025]). If not provided, searches all years."
                     },
                     "n_results": {
                         "type": "integer",
@@ -265,8 +266,8 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
             return get_cluster_topics(**arguments)
         elif tool_name == "get_topic_evolution":
             return get_topic_evolution(**arguments)
-        elif tool_name == "get_recent_developments":
-            return get_recent_developments(**arguments)
+        elif tool_name == "search_papers":
+            return search_papers(**arguments)
         elif tool_name == "get_cluster_visualization":
             return get_cluster_visualization(**arguments)
         else:
@@ -325,8 +326,8 @@ def format_tool_result_for_llm(tool_name: str, result: str) -> str:
             return _format_cluster_topics_result(result_data)
         elif tool_name == "get_topic_evolution":
             return _format_topic_evolution_result(result_data)
-        elif tool_name == "get_recent_developments":
-            return _format_recent_developments_result(result_data)
+        elif tool_name == "search_papers":
+            return _format_search_papers_result(result_data)
         elif tool_name == "get_cluster_visualization":
             return _format_visualization_result(result_data)
         else:
@@ -419,12 +420,15 @@ def _format_topic_evolution_result(data: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _format_recent_developments_result(data: Dict[str, Any]) -> str:
-    """Format recent developments result for LLM."""
-    lines = [f"Recent Developments in '{data.get('topic', 'unknown')}':\n"]
+def _format_search_papers_result(data: Dict[str, Any]) -> str:
+    """Format search papers result for LLM."""
+    lines = [f"Search Results for '{data.get('topic', 'unknown')}':\n"]
     
     papers = data.get("papers", [])
-    lines.append(f"Found {len(papers)} recent papers:\n")
+    years_filter = data.get("years_filter")
+    if years_filter:
+        lines.append(f"Filtered by years: {years_filter}")
+    lines.append(f"Found {len(papers)} papers:\n")
     
     for i, paper in enumerate(papers[:5], 1):  # Top 5 papers
         title = paper.get("title", "Unknown")
