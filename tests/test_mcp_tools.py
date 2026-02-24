@@ -14,7 +14,7 @@ from abstracts_explorer.mcp_tools import (
     format_tool_result_for_llm,
     _format_cluster_topics_result,
     _format_topic_evolution_result,
-    _format_recent_developments_result,
+    _format_search_papers_result,
     _format_visualization_result,
 )
 
@@ -22,11 +22,11 @@ from abstracts_explorer.mcp_tools import (
 def test_get_mcp_tools_schema():
     """Test that MCP tools schema is in correct OpenAI format."""
     schema = get_mcp_tools_schema()
-    
+
     # Should return a list of tool definitions
     assert isinstance(schema, list)
     assert len(schema) == 5  # 5 MCP tools (including analyze_topic_relevance)
-    
+
     # Check structure of first tool
     tool = schema[0]
     assert tool["type"] == "function"
@@ -34,13 +34,13 @@ def test_get_mcp_tools_schema():
     assert "name" in tool["function"]
     assert "description" in tool["function"]
     assert "parameters" in tool["function"]
-    
+
     # Verify all expected tools are present
     tool_names = [t["function"]["name"] for t in schema]
     assert "analyze_topic_relevance" in tool_names
     assert "get_cluster_topics" in tool_names
     assert "get_topic_evolution" in tool_names
-    assert "get_recent_developments" in tool_names
+    assert "search_papers" in tool_names
     assert "get_cluster_visualization" in tool_names
 
 
@@ -81,19 +81,16 @@ def test_execute_mcp_tool_topic_evolution():
 
 
 def test_execute_mcp_tool_recent_developments():
-    """Test executing get_recent_developments tool."""
-    with patch("abstracts_explorer.mcp_tools.get_recent_developments") as mock_tool:
+    """Test executing search_papers tool."""
+    with patch("abstracts_explorer.mcp_tools.search_papers") as mock_tool:
         mock_result = json.dumps({
             "topic": "LLMs",
             "papers": [{"title": "Paper 1", "year": 2024}]
         })
         mock_tool.return_value = mock_result
-        
-        result = execute_mcp_tool(
-            "get_recent_developments",
-            {"topic_keywords": "LLMs", "n_years": 2}
-        )
-        
+
+        result = execute_mcp_tool("search_papers", {"topic_keywords": "LLMs", "n_years": 2})
+
         assert result == mock_result
         mock_tool.assert_called_once_with(topic_keywords="LLMs", n_years=2)
 
@@ -165,9 +162,9 @@ def test_format_topic_evolution_result():
         },
         "total_papers": 45
     }
-    
+
     result = _format_topic_evolution_result(data)
-    
+
     assert "Topic Evolution Analysis" in result
     assert "transformers" in result
     assert "2022: 10 papers" in result
@@ -176,7 +173,7 @@ def test_format_topic_evolution_result():
     assert "Total papers found: 45" in result
 
 
-def test_format_recent_developments_result():
+def test_format_search_papers_result():
     """Test formatting recent developments result for LLM."""
     data = {
         "topic": "LLMs",
@@ -193,10 +190,10 @@ def test_format_recent_developments_result():
             }
         ]
     }
-    
-    result = _format_recent_developments_result(data)
-    
-    assert "Recent Developments" in result
+
+    result = _format_search_papers_result(data)
+
+    assert "Search Results" in result
     assert "LLMs" in result
     assert "GPT-4 Architecture (2024)" in result
     assert "Scaling Laws for LLMs (2024)" in result
@@ -255,7 +252,7 @@ def test_format_tool_result_unknown_tool():
 def test_mcp_tools_schema_parameters():
     """Test that tool schemas have correct parameter definitions."""
     schema = get_mcp_tools_schema()
-    
+
     # Check get_cluster_topics parameters
     cluster_topics = next(t for t in schema if t["function"]["name"] == "get_cluster_topics")
     params = cluster_topics["function"]["parameters"]["properties"]
@@ -263,16 +260,16 @@ def test_mcp_tools_schema_parameters():
     assert params["n_clusters"]["type"] == "integer"
     assert "clustering_method" in params
     assert params["clustering_method"]["type"] == "string"
-    
+
     # Check get_topic_evolution parameters
     topic_evolution = next(t for t in schema if t["function"]["name"] == "get_topic_evolution")
     params = topic_evolution["function"]["parameters"]
     assert "topic_keywords" in params["properties"]
     assert "topic_keywords" in params["required"]
-    
-    # Check get_recent_developments parameters
-    recent_dev = next(t for t in schema if t["function"]["name"] == "get_recent_developments")
+
+    # Check search_papers parameters
+    recent_dev = next(t for t in schema if t["function"]["name"] == "search_papers")
     params = recent_dev["function"]["parameters"]
     assert "topic_keywords" in params["properties"]
-    assert "n_years" in params["properties"]
+    assert "years" in params["properties"]
     assert "topic_keywords" in params["required"]
