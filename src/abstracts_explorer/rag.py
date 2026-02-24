@@ -248,7 +248,7 @@ class RAGChat:
         """
         Get fallback route information when routing fails.
         
-        Returns a route to get_recent_developments as the default fallback.
+        Returns a route to search_papers as the default fallback.
         
         Parameters
         ----------
@@ -265,7 +265,7 @@ class RAGChat:
         return {
             "use_tools": True,
             "tool_calls": [{
-                "name": "get_recent_developments",
+                "name": "search_papers",
                 "arguments": {"topic_keywords": user_query, "n_results": n_results}
             }],
             "rewritten_query": None,
@@ -307,7 +307,7 @@ class RAGChat:
             system_prompt = (
                 "You are a query routing assistant. Determine which MCP tool should handle the user's question.\n\n"
                 "AVAILABLE TOOLS:\n\n"
-                "Specific questions about a topic ('what is the latest research on ...?', 'Which are the most relevant papers about ...'): get_recent_developments()\n\n"
+                "Specific questions about a topic ('what is the latest research on ...?', 'Which are the most relevant papers about ...'): search_papers()\n\n"
                 "Identify relevant topics ('what were the hot topics this year?', 'which research areas were covered most this year?'): get_cluster_topics()\n\n"
                 "Identify how relevant a specific topic was this year ('how many papers about ... were published this year?', 'how important was ... at this conference?'): analyze_topic_relevance()\n\n"
                 "Identify trends for specific topics ('how has ... evolved over the years?', 'has .. become more or less relevant?'): get_topic_evolution()\n\n"
@@ -317,11 +317,11 @@ class RAGChat:
                 "For follow-up questions, incorporate context from previous conversation."
             )
         else:
-            # If MCP tools disabled, use get_recent_developments as fallback
+            # If MCP tools disabled, use search_papers as fallback
             system_prompt = (
                 "You are a query routing assistant. Since clustering tools are disabled, "
-                "route all queries to get_recent_developments for paper search. Respond with ONLY a JSON tool call:\n"
-                f"{{\"name\": \"get_recent_developments\", \"arguments\": {{\"topic_keywords\": \"<search keywords>\", \"n_results\": {n_results}}}}}\n"
+                "route all queries to search_papers for paper search. Respond with ONLY a JSON tool call:\n"
+                f"{{\"name\": \"search_papers\", \"arguments\": {{\"topic_keywords\": \"<search keywords>\", \"n_results\": {n_results}}}}}\n"
                 "Extract the key topic keywords from the query (5-15 keywords)."
             )
 
@@ -361,13 +361,13 @@ class RAGChat:
                     "original_query": user_query
                 }
             else:
-                # Fallback: If parsing fails, default to get_recent_developments
-                logger.warning(f"Failed to parse tool call, defaulting to get_recent_developments for: {user_query}")
+                # Fallback: If parsing fails, default to search_papers
+                logger.warning(f"Failed to parse tool call, defaulting to search_papers for: {user_query}")
                 return self._get_fallback_route_info(user_query, n_results)
 
         except Exception as e:
-            logger.warning(f"Query analysis failed: {e}, defaulting to get_recent_developments")
-            # Fallback: route to get_recent_developments on error
+            logger.warning(f"Query analysis failed: {e}, defaulting to search_papers")
+            # Fallback: route to search_papers on error
             return self._get_fallback_route_info(user_query, n_results)
 
     def _should_retrieve_papers(self, rewritten_query: str) -> bool:
@@ -468,9 +468,9 @@ class RAGChat:
             if self.enable_query_rewriting:
                 route_info = self._analyze_and_route_query(question, n_results=n_results)
             else:
-                # If query rewriting disabled, default to get_recent_developments tool
+                # If query rewriting disabled, default to search_papers tool
                 route_info = self._get_fallback_route_info(question, n_results)
-                logger.info("Query rewriting disabled, using get_recent_developments tool with original query")
+                logger.info("Query rewriting disabled, using search_papers tool with original query")
 
             # Execute MCP tools (unified route)
             logger.info(f"Executing {len(route_info['tool_calls'])} MCP tool(s)")
@@ -509,7 +509,7 @@ class RAGChat:
             papers = []
             for tr in tool_results:
                 # Extract papers from tools that return them
-                if tr['name'] in ['get_recent_developments', 'analyze_topic_relevance']:
+                if tr['name'] in ['search_papers', 'analyze_topic_relevance']:
                     try:
                         result_json = json.loads(tr['raw_result'])
                         if 'papers' in result_json:
