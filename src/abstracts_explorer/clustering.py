@@ -315,7 +315,7 @@ class ClusteringManager:
 
         try:
             unique_labels = np.unique(self.cluster_labels)
-            n_noise = np.sum(self.cluster_labels == -1)
+            n_noise = int(np.sum(self.cluster_labels == -1))
             n_clusters = len(unique_labels[unique_labels >= 0])
 
             # Count papers in each cluster
