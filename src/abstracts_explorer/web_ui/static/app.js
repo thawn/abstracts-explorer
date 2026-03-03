@@ -1921,7 +1921,7 @@ let currentClusterConfig = {
  */
 async function loadClusters() {
     try {
-        showLoading('cluster-plot', 'Loading clusters...');
+        showClusterLoading('cluster-plot', 'Loading clusters...');
         
         // Try to load cached clusters first
         let response = await fetch('/api/clusters/cached');
@@ -2365,7 +2365,7 @@ async function applyClusterSettings() {
     closeClusterSettings();
     
     // Show loading
-    showLoading('cluster-plot', 'Recomputing clusters with new settings...');
+    showClusterLoading('cluster-plot', 'Recomputing clusters with new settings...');
     
     try {
         // Compute clusters with new settings
