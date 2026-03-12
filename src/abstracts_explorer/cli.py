@@ -40,7 +40,7 @@ def setup_logging(verbosity: int) -> None:
     """
     # Start with default level
     level = logging.WARNING
-    
+
     # Check if verbosity flags were used
     if verbosity == 0:
         # No verbosity flags - check environment variable
@@ -132,7 +132,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
                 print("\n   Use --force to recreate embeddings with the new model.")
                 print("   This will delete existing embeddings and recreate them.\n")
                 response = input("Do you want to recreate embeddings with the new model? (y/N): ")
-                if response.lower() not in ['y', 'yes']:
+                if response.lower() not in ["y", "yes"]:
                     print("\n❌ Aborted by user. Use --force to skip this prompt.")
                     return 1
                 # User confirmed, set force flag
@@ -589,7 +589,7 @@ def download_command(args: argparse.Namespace) -> int:
             db.create_tables()
             count = db.add_papers(papers)
             print(f"✅ Loaded {count:,} papers into database")
-        
+
         config = get_config()
         print(f"\n💾 Database updated: {config.database_url}")
         return 0
@@ -615,6 +615,7 @@ def web_ui_command(args: argparse.Namespace) -> int:
         - port: Port to bind to
         - verbose: Verbosity level (0=WARNING, 1=INFO, 2+=DEBUG)
         - dev: Use Flask development server
+        - threads: Number of Waitress worker threads
 
     Returns
     -------
@@ -634,15 +635,24 @@ def web_ui_command(args: argparse.Namespace) -> int:
             return 1
 
         # Determine debug mode from verbosity level (2+ = DEBUG)
-        debug = getattr(args, 'verbose', 0) >= 2
+        debug = getattr(args, "verbose", 0) >= 2
 
         # Start the server (dev defaults to False for production server)
-        run_server(host=args.host, port=args.port, debug=debug, dev=getattr(args, 'dev', False))
+        run_server(
+            host=args.host,
+            port=args.port,
+            debug=debug,
+            dev=getattr(args, "dev", False),
+            threads=getattr(args, "threads", 6),
+        )
         return 0
 
     except KeyboardInterrupt:
         print("\n\n👋 Server stopped")
         return 0
+    except ValueError as e:
+        print(f"\n❌ Invalid configuration: {e}", file=sys.stderr)
+        return 1
     except FileNotFoundError:
         # Database not found - error message already printed by run_server
         return 1
@@ -694,14 +704,14 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
     print(f"Collection:  {args.collection}")
     print(f"Reduction:   {args.reduction_method} (n_components={args.n_components})")
     print(f"Clustering:  {args.clustering_method}", end="")
-    
+
     if args.clustering_method.lower() == "kmeans" or args.clustering_method.lower() == "agglomerative":
         print(f" (n_clusters={args.n_clusters})")
     elif args.clustering_method.lower() == "dbscan":
         print(f" (eps={args.eps}, min_samples={args.min_samples})")
     else:
         print()
-    
+
     if args.limit:
         print(f"Limit:       {args.limit} papers")
     print("=" * 70)
@@ -723,7 +733,7 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
             n_clusters=args.n_clusters,
             output_path=args.output,
             limit=args.limit,
-            **kwargs
+            **kwargs,
         )
 
         # Display statistics
@@ -731,10 +741,10 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
         print("\n📊 Clustering Results:")
         print(f"   Total papers:  {stats['total_papers']:,}")
         print(f"   Clusters:      {stats['n_clusters']}")
-        if stats['n_noise'] > 0:
+        if stats["n_noise"] > 0:
             print(f"   Noise points:  {stats['n_noise']}")
         print("\n   Cluster sizes:")
-        for cluster_id, size in sorted(stats['cluster_sizes'].items()):
+        for cluster_id, size in sorted(stats["cluster_sizes"].items()):
             print(f"      Cluster {cluster_id}: {size:,} papers")
 
         if args.output:
@@ -751,6 +761,7 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
     except Exception as e:
         print(f"\n❌ Unexpected error: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         return 1
 
@@ -786,7 +797,7 @@ def clear_clustering_cache_command(args: argparse.Namespace) -> int:
         with DatabaseManager() as db:
             # Clear the cache
             count = db.clear_clustering_cache(embedding_model=args.embedding_model)
-            
+
             if count == 0:
                 print("\n✅ No cache entries found to clear.")
             else:
@@ -801,6 +812,7 @@ def clear_clustering_cache_command(args: argparse.Namespace) -> int:
     except Exception as e:
         print(f"\n❌ Error clearing clustering cache: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         return 1
 
@@ -847,6 +859,7 @@ def mcp_server_command(args: argparse.Namespace) -> int:
     except Exception as e:
         print(f"\n❌ Error starting MCP server: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         return 1
 
@@ -1120,6 +1133,12 @@ Examples:
         "--dev",
         action="store_true",
         help="Use Flask development server instead of production server (Waitress). Note: Use -vv to enable debug mode with any server.",
+    )
+    web_parser.add_argument(
+        "--threads",
+        type=int,
+        default=6,
+        help="Number of Waitress worker threads (default: 6). Must be >= 1. Ignored when --dev is set.",
     )
 
     # Cluster embeddings command
