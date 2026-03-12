@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 class MCPToolsError(Exception):
     """Exception raised for MCP tools-related errors."""
+
     pass
 
 
@@ -46,30 +47,27 @@ MCP_TOOLS_SCHEMA = [
                 "properties": {
                     "topic": {
                         "type": "string",
-                        "description": "The topic or research question to analyze (e.g., 'Uncertainty quantification')"
+                        "description": "The topic or research question to analyze (e.g., 'Uncertainty quantification')",
                     },
                     "distance_threshold": {
                         "type": "number",
-                        "description": "Maximum Euclidean distance to consider papers relevant (default: 1.1)"
+                        "description": "Maximum Euclidean distance to consider papers relevant (default: 1.1)",
                     },
                     "conferences": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Filter by specific conferences (e.g., ['NeurIPS', 'ICLR'])"
+                        "description": "Filter by specific conferences (e.g., ['NeurIPS', 'ICLR'])",
                     },
                     "years": {
                         "type": "array",
                         "items": {"type": "integer"},
-                        "description": "Filter by specific years (e.g., [2024, 2025])"
+                        "description": "Filter by specific years (e.g., [2024, 2025])",
                     },
-                    "collection_name": {
-                        "type": "string",
-                        "description": "Name of ChromaDB collection (optional)"
-                    }
+                    "collection_name": {"type": "string", "description": "Name of ChromaDB collection (optional)"},
                 },
-                "required": ["topic"]
-            }
-        }
+                "required": ["topic"],
+            },
+        },
     },
     {
         "type": "function",
@@ -83,28 +81,25 @@ MCP_TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "n_clusters": {
-                        "type": "integer",
-                        "description": "Number of clusters to create (default: 8)"
-                    },
+                    "n_clusters": {"type": "integer", "description": "Number of clusters to create (default: 8)"},
                     "reduction_method": {
                         "type": "string",
                         "enum": ["pca", "tsne"],
-                        "description": "Dimensionality reduction method (default: 'pca')"
+                        "description": "Dimensionality reduction method (default: 'pca')",
                     },
                     "clustering_method": {
                         "type": "string",
                         "enum": ["kmeans", "dbscan", "agglomerative"],
-                        "description": "Clustering algorithm (default: 'kmeans')"
+                        "description": "Clustering algorithm (default: 'kmeans')",
                     },
                     "collection_name": {
                         "type": "string",
-                        "description": "Name of ChromaDB collection (optional, uses config default)"
-                    }
+                        "description": "Name of ChromaDB collection (optional, uses config default)",
+                    },
                 },
-                "required": []
-            }
-        }
+                "required": [],
+            },
+        },
     },
     {
         "type": "function",
@@ -120,32 +115,20 @@ MCP_TOOLS_SCHEMA = [
                 "properties": {
                     "topic_keywords": {
                         "type": "string",
-                        "description": "Keywords describing the topic (e.g., 'transformers attention', 'reinforcement learning')"
+                        "description": "Keywords describing the topic (e.g., 'transformers attention', 'reinforcement learning')",
                     },
                     "conference": {
                         "type": "string",
-                        "description": "Filter by conference name (e.g., 'neurips', 'iclr')"
+                        "description": "Filter by conference name (e.g., 'neurips', 'iclr')",
                     },
-                    "start_year": {
-                        "type": "integer",
-                        "description": "Start year for analysis (inclusive)"
-                    },
-                    "end_year": {
-                        "type": "integer",
-                        "description": "End year for analysis (inclusive)"
-                    },
-                    "where": {
-                        "type": "object",
-                        "description": "Custom ChromaDB WHERE clause for advanced filtering"
-                    },
-                    "collection_name": {
-                        "type": "string",
-                        "description": "Name of ChromaDB collection (optional)"
-                    }
+                    "start_year": {"type": "integer", "description": "Start year for analysis (inclusive)"},
+                    "end_year": {"type": "integer", "description": "End year for analysis (inclusive)"},
+                    "where": {"type": "object", "description": "Custom ChromaDB WHERE clause for advanced filtering"},
+                    "collection_name": {"type": "string", "description": "Name of ChromaDB collection (optional)"},
                 },
-                "required": ["topic_keywords"]
-            }
-        }
+                "required": ["topic_keywords"],
+            },
+        },
     },
     {
         "type": "function",
@@ -161,33 +144,21 @@ MCP_TOOLS_SCHEMA = [
                 "properties": {
                     "topic_keywords": {
                         "type": "string",
-                        "description": "Keywords describing the topic to search for"
+                        "description": "Keywords describing the topic to search for",
                     },
                     "years": {
                         "type": "array",
                         "items": {"type": "integer"},
-                        "description": "List of specific years to filter by (e.g., [2024, 2025]). If not provided, searches all years."
+                        "description": "List of specific years to filter by (e.g., [2024, 2025]). If not provided, searches all years.",
                     },
-                    "n_results": {
-                        "type": "integer",
-                        "description": "Number of papers to return (default: 10)"
-                    },
-                    "conference": {
-                        "type": "string",
-                        "description": "Filter by conference name"
-                    },
-                    "where": {
-                        "type": "object",
-                        "description": "Custom ChromaDB WHERE clause for filtering"
-                    },
-                    "collection_name": {
-                        "type": "string",
-                        "description": "Name of ChromaDB collection (optional)"
-                    }
+                    "n_results": {"type": "integer", "description": "Number of papers to return (default: 10)"},
+                    "conference": {"type": "string", "description": "Filter by conference name"},
+                    "where": {"type": "object", "description": "Custom ChromaDB WHERE clause for filtering"},
+                    "collection_name": {"type": "string", "description": "Name of ChromaDB collection (optional)"},
                 },
-                "required": ["topic_keywords"]
-            }
-        }
+                "required": ["topic_keywords"],
+            },
+        },
     },
     {
         "type": "function",
@@ -201,37 +172,28 @@ MCP_TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "n_clusters": {
-                        "type": "integer",
-                        "description": "Number of clusters (default: 8)"
-                    },
+                    "n_clusters": {"type": "integer", "description": "Number of clusters (default: 8)"},
                     "reduction_method": {
                         "type": "string",
                         "enum": ["pca", "tsne"],
-                        "description": "Reduction method (default: 'tsne')"
+                        "description": "Reduction method (default: 'tsne')",
                     },
                     "clustering_method": {
                         "type": "string",
                         "enum": ["kmeans", "dbscan", "agglomerative"],
-                        "description": "Clustering method (default: 'kmeans')"
+                        "description": "Clustering method (default: 'kmeans')",
                     },
                     "n_components": {
                         "type": "integer",
                         "enum": [2, 3],
-                        "description": "Number of dimensions: 2 or 3 (default: 2)"
+                        "description": "Number of dimensions: 2 or 3 (default: 2)",
                     },
-                    "output_path": {
-                        "type": "string",
-                        "description": "Path to save visualization JSON (optional)"
-                    },
-                    "collection_name": {
-                        "type": "string",
-                        "description": "Name of ChromaDB collection (optional)"
-                    }
+                    "output_path": {"type": "string", "description": "Path to save visualization JSON (optional)"},
+                    "collection_name": {"type": "string", "description": "Name of ChromaDB collection (optional)"},
                 },
-                "required": []
-            }
-        }
+                "required": [],
+            },
+        },
     },
 ]
 
@@ -258,7 +220,7 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
         If tool execution fails or tool is unknown
     """
     logger.info(f"Executing MCP tool: {tool_name} with arguments: {arguments}")
-    
+
     try:
         if tool_name == "analyze_topic_relevance":
             return analyze_topic_relevance(**arguments)
@@ -267,6 +229,10 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
         elif tool_name == "get_topic_evolution":
             return get_topic_evolution(**arguments)
         elif tool_name == "search_papers":
+            # Handle argument name alias: LLM might use 'query' instead of 'topic_keywords'
+            if "query" in arguments and "topic_keywords" not in arguments:
+                arguments = dict(arguments)
+                arguments["topic_keywords"] = arguments.pop("query")
             return search_papers(**arguments)
         elif tool_name == "get_cluster_visualization":
             return get_cluster_visualization(**arguments)
@@ -274,7 +240,7 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
             # Return error JSON for unknown tools
             error_result = {"error": f"Unknown MCP tool: {tool_name}"}
             return json.dumps(error_result, indent=2)
-    
+
     except Exception as e:
         logger.error(f"MCP tool execution failed: {str(e)}")
         error_result = {"error": f"Tool execution failed: {str(e)}"}
@@ -314,11 +280,11 @@ def format_tool_result_for_llm(tool_name: str, result: str) -> str:
     """
     try:
         result_data = json.loads(result)
-        
+
         # Check for errors
         if "error" in result_data:
             return f"Tool execution failed: {result_data['error']}"
-        
+
         # Format based on tool type
         if tool_name == "analyze_topic_relevance":
             return _format_topic_relevance_result(result_data)
@@ -333,7 +299,7 @@ def format_tool_result_for_llm(tool_name: str, result: str) -> str:
         else:
             # Return raw result for unknown tools
             return result
-    
+
     except json.JSONDecodeError:
         logger.warning(f"Failed to parse tool result as JSON: {result[:100]}...")
         return result
@@ -342,14 +308,14 @@ def format_tool_result_for_llm(tool_name: str, result: str) -> str:
 def _format_topic_relevance_result(data: Dict[str, Any]) -> str:
     """Format topic relevance result for LLM."""
     lines = [f"Topic Relevance Analysis for '{data.get('topic', 'unknown')}':\n"]
-    
+
     total = data.get("total_papers", 0)
     distance = data.get("distance_threshold", 0)
     relevance = data.get("relevance_score", 0)
-    
+
     lines.append(f"Papers found: {total} within distance {distance}")
     lines.append(f"Relevance score: {relevance}/100\n")
-    
+
     if total > 0:
         # Show conferences
         conferences = data.get("conferences", {})
@@ -357,14 +323,14 @@ def _format_topic_relevance_result(data: Dict[str, Any]) -> str:
             lines.append("Conferences:")
             for conf, count in list(conferences.items())[:5]:
                 lines.append(f"  {conf}: {count} papers")
-        
+
         # Show years
         years = data.get("years", {})
         if years:
             lines.append("\nYears:")
             for year, count in sorted(years.items()):
                 lines.append(f"  {year}: {count} papers")
-        
+
         # Show sample papers
         sample_papers = data.get("sample_papers", [])
         if sample_papers:
@@ -373,89 +339,89 @@ def _format_topic_relevance_result(data: Dict[str, Any]) -> str:
                 title = paper.get("title", "Unknown")
                 dist = paper.get("distance", 0)
                 lines.append(f"  {i}. {title} (distance: {dist:.3f})")
-        
+
         closest = data.get("closest_distance")
         if closest is not None:
             lines.append(f"\nClosest paper distance: {closest:.3f}")
     else:
         lines.append("\nNo papers found matching the topic within the distance threshold.")
-    
+
     return "\n".join(lines)
 
 
 def _format_cluster_topics_result(data: Dict[str, Any]) -> str:
     """Format cluster topics result for LLM."""
     lines = ["Cluster Analysis Results:\n"]
-    
+
     stats = data.get("statistics", {})
     lines.append(f"Found {stats.get('n_clusters', 0)} clusters covering {stats.get('total_papers', 0)} papers.\n")
-    
+
     clusters = data.get("clusters", [])
     for cluster in clusters[:10]:  # Limit to top 10 clusters
         cluster_id = cluster.get("cluster_id")
         paper_count = cluster.get("paper_count", 0)
         keywords = cluster.get("keywords", [])[:5]  # Top 5 keywords
-        
+
         lines.append(f"\nCluster {cluster_id} ({paper_count} papers):")
         if keywords:
             keyword_strs = [f"{kw['keyword']} ({kw['count']})" for kw in keywords]
             lines.append(f"  Top keywords: {', '.join(keyword_strs)}")
-    
+
     return "\n".join(lines)
 
 
 def _format_topic_evolution_result(data: Dict[str, Any]) -> str:
     """Format topic evolution result for LLM."""
     lines = [f"Topic Evolution Analysis for '{data.get('topic', 'unknown')}':\n"]
-    
+
     year_counts = data.get("year_counts", {})
     if year_counts:
         lines.append("Papers per year:")
         for year, count in sorted(year_counts.items()):
             lines.append(f"  {year}: {count} papers")
-    
+
     total = data.get("total_papers", 0)
     lines.append(f"\nTotal papers found: {total}")
-    
+
     return "\n".join(lines)
 
 
 def _format_search_papers_result(data: Dict[str, Any]) -> str:
     """Format search papers result for LLM."""
     lines = [f"Search Results for '{data.get('topic', 'unknown')}':\n"]
-    
+
     papers = data.get("papers", [])
     years_filter = data.get("years_filter")
     if years_filter:
         lines.append(f"Filtered by years: {years_filter}")
     lines.append(f"Found {len(papers)} papers:\n")
-    
+
     for i, paper in enumerate(papers[:5], 1):  # Top 5 papers
         title = paper.get("title", "Unknown")
         year = paper.get("year", "")
         lines.append(f"{i}. {title} ({year})")
-        
+
         # Add abstract snippet if available
         abstract = paper.get("abstract", "")
         if abstract:
             snippet = abstract[:150] + "..." if len(abstract) > 150 else abstract
             lines.append(f"   {snippet}")
-    
+
     return "\n".join(lines)
 
 
 def _format_visualization_result(data: Dict[str, Any]) -> str:
     """Format visualization result for LLM."""
     lines = ["Cluster Visualization Data Generated:\n"]
-    
+
     stats = data.get("statistics", {})
     n_points = data.get("n_points", 0)
     n_dims = data.get("n_dimensions", 0)
-    
+
     lines.append(f"Generated {n_dims}D visualization with {n_points} points")
     lines.append(f"Clusters: {stats.get('n_clusters', 0)}")
-    
+
     if data.get("visualization_saved"):
         lines.append(f"Saved to: {data.get('output_path')}")
-    
+
     return "\n".join(lines)
