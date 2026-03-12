@@ -577,7 +577,7 @@ def search_papers(
 
 @mcp.tool()
 def analyze_topic_relevance(
-    query: str,
+    topic: str,
     distance_threshold: float = 1.1,
     conferences: Optional[list[str]] = None,
     years: Optional[list[int]] = None,
@@ -586,13 +586,13 @@ def analyze_topic_relevance(
     """
     Analyze the relevance of a topic by counting papers within a specified distance in embedding space.
     
-    This tool measures topic relevance by finding papers semantically similar to the query
+    This tool measures topic relevance by finding papers semantically similar to the topic
     within a specified Euclidean distance threshold. It's useful for identifying how prevalent
     or relevant a research topic is at a conference.
     
     Parameters
     ----------
-    query : str
+    topic : str
         The topic or research question to analyze (e.g., "Uncertainty quantification", 
         "Graph neural networks", "Transformer architectures")
     distance_threshold : float, optional
@@ -609,7 +609,7 @@ def analyze_topic_relevance(
     -------
     str
         JSON string containing:
-        - query: The search query used
+        - topic: The topic analyzed
         - distance_threshold: Distance threshold applied
         - total_papers: Number of papers found within distance
         - conferences: Conferences represented (with counts)
@@ -619,7 +619,7 @@ def analyze_topic_relevance(
     
     Examples
     --------
-    Query: "Uncertainty quantification"
+    Topic: "Uncertainty quantification"
     Result: 75 papers found within distance 1.1
     Interpretation: High relevance - this is a significant topic at the conference
     
@@ -643,7 +643,7 @@ def analyze_topic_relevance(
         db.connect()
         
         # Find papers within distance
-        logger.info(f"Analyzing relevance for topic: {query}")
+        logger.info(f"Analyzing relevance for topic: {topic}")
         logger.info(f"Distance threshold: {distance_threshold}")
         if conferences:
             logger.info(f"Filtering by conferences: {conferences}")
@@ -652,7 +652,7 @@ def analyze_topic_relevance(
         
         result_data = em.find_papers_within_distance(
             database=db,
-            query=query,
+            query=topic,
             distance_threshold=distance_threshold,
             conferences=conferences,
             years=years,
@@ -687,7 +687,7 @@ def analyze_topic_relevance(
         
         # Build result
         result = {
-            "query": query,
+            "topic": topic,
             "distance_threshold": distance_threshold,
             "filters": {
                 "conferences": conferences,

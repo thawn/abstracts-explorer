@@ -49,7 +49,7 @@ def parse_json_tool_call(response_text: str) -> Optional[List[Dict[str, Any]]]:
         
     Examples
     --------
-    >>> text = '{"name": "analyze_topic_relevance", "arguments": {"query": "transformers"}}'
+    >>> text = '{"name": "analyze_topic_relevance", "arguments": {"topic": "transformers"}}'
     >>> calls = parse_json_tool_call(text)
     >>> calls[0]['name']
     'analyze_topic_relevance'
