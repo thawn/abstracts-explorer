@@ -14,7 +14,7 @@ from openai import OpenAI
 
 from .config import get_config
 from .paper_utils import PaperFormattingError
-from .mcp_tools import execute_mcp_tool, format_tool_result_for_llm
+from .mcp_tools import execute_mcp_tool, format_tool_result_for_llm, get_mcp_tools_schema
 
 logger = logging.getLogger(__name__)
 
@@ -261,9 +261,11 @@ class RAGChat:
         """
         Analyze user query and determine which MCP tool to use.
 
-        This method uses an LLM to analyze the user's question and decide which
-        MCP tool should handle it: clustering/analysis tools or paper search tool.
-        All queries are now routed through MCP tools for a unified interface.
+        This method uses an LLM with native OpenAI tool calling to analyze the user's question
+        and decide which MCP tool should handle it.  Native tool calling is used when
+        ``enable_mcp_tools`` is ``True``; for models that do not support the ``tools``
+        parameter, a JSON-in-content fallback is also attempted before defaulting to
+        ``search_papers``.
 
         Parameters
         ----------
@@ -290,18 +292,14 @@ class RAGChat:
         # Build system prompt that decides which tool to use
         if self.enable_mcp_tools:
             system_prompt = (
-                "You are a query routing assistant. Determine which MCP tool should handle the user's question.\n\n"
-                "AVAILABLE TOOLS:\n\n"
-                f"Specific questions about a topic ('what is the latest research on ...?', 'Which are the most relevant papers about ...'): "
-                f'search_papers(topic_keywords="<search keywords>", n_results={n_results})\n\n'
-                "Identify relevant topics ('what were the hot topics this year?', 'which research areas were covered most this year?'): get_cluster_topics()\n\n"
-                "Identify how relevant a specific topic was this year ('how many papers about ... were published this year?', 'how important was ... at this conference?'): "
-                'analyze_topic_relevance(topic="<topic name>")\n\n'
-                "Identify trends for specific topics ('how has ... evolved over the years?', 'has .. become more or less relevant?'): get_topic_evolution()\n\n"
-                "Cluster visualization requests ('show me papers clustered by topic.', 'plot an overview of papers with similar paper grouped together'): get_cluster_visualization()\n\n"
-                "Respond with ONLY a valid JSON tool call using standard OpenAI format:\n"
-                '{"name": "tool_name", "arguments": {...}}\n\n'
-                "For follow-up questions, incorporate context from previous conversation."
+                "You are a query routing assistant. Use the provided tools to answer the user's question.\n\n"
+                "Choose the most appropriate tool based on the question:\n"
+                f"- search_papers: specific questions about a topic, papers about something (use n_results={n_results})\n"
+                "- get_cluster_topics: hot topics, main research areas, overview of covered topics\n"
+                "- analyze_topic_relevance: how many papers about a topic, topic importance/popularity at a conference\n"
+                "- get_topic_evolution: trends over time, how a topic evolved, year-over-year changes\n"
+                "- get_cluster_visualization: visual/graphical cluster view, plot papers grouped by topic\n\n"
+                "For follow-up questions, incorporate context from the previous conversation."
             )
         else:
             # If MCP tools disabled, use search_papers as fallback
@@ -323,31 +321,72 @@ class RAGChat:
         # Add current query
         messages.append({"role": "user", "content": f"Route this query to the appropriate tool: {user_query}"})
 
-        try:
-            # Get routing decision from LLM
-            response = self.openai_client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.3,  # Lower temperature for consistent decisions
-                max_tokens=200,  # Allow for tool calls
-                timeout=30,  # Shorter timeout for quick analysis
-            )
-            response_content = response.choices[0].message.content.strip()
+        # Build API call parameters
+        api_params: Dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.3,  # Lower temperature for consistent decisions
+            "max_tokens": 300,  # Allow for tool calls
+            "timeout": 30,  # Shorter timeout for quick analysis
+        }
 
-            # Parse as tool call (should always be JSON format)
-            tool_calls = parse_json_tool_call(response_content)
-            if tool_calls:
-                logger.info(f"Query analysis: Routing to {len(tool_calls)} MCP tool(s)")
-                return {
-                    "use_tools": True,
-                    "tool_calls": tool_calls,
-                    "rewritten_query": None,
-                    "original_query": user_query,
-                }
-            else:
-                # Fallback: If parsing fails, default to search_papers
-                logger.warning(f"Failed to parse tool call, defaulting to search_papers for: {user_query}")
-                return self._get_fallback_route_info(user_query, n_results)
+        # Use native OpenAI tool calling when MCP tools are enabled.
+        # This is the preferred approach: it works correctly with reasoning models
+        # (e.g. those that prepend <think> blocks) and avoids fragile JSON parsing.
+        if self.enable_mcp_tools:
+            api_params["tools"] = get_mcp_tools_schema()
+            api_params["tool_choice"] = "auto"
+
+        try:
+            response = self.openai_client.chat.completions.create(**api_params)
+            message = response.choices[0].message
+
+            # --- Primary path: native tool calls ---
+            # The OpenAI library returns tool_calls as a plain list (or None).
+            # Using isinstance guards against non-iterable Mock objects in tests.
+            native_tool_calls = message.tool_calls
+            if isinstance(native_tool_calls, list) and native_tool_calls:
+                tool_calls = []
+                for tc in native_tool_calls:
+                    func = getattr(tc, "function", None)
+                    if func is None:
+                        logger.warning(f"Native tool call missing 'function' attribute: {tc}")
+                        continue
+                    try:
+                        args = json.loads(func.arguments)
+                    except json.JSONDecodeError:
+                        logger.warning(
+                            f"Failed to parse native tool call arguments for '{func.name}': {func.arguments!r}"
+                        )
+                        args = {}
+                    tool_calls.append({"name": func.name, "arguments": args})
+                if tool_calls:
+                    logger.info(f"Query analysis: Routing to {len(tool_calls)} MCP tool(s) via native tool calling")
+                    return {
+                        "use_tools": True,
+                        "tool_calls": tool_calls,
+                        "rewritten_query": None,
+                        "original_query": user_query,
+                    }
+
+            # --- Fallback path: JSON in response content ---
+            # Some models (e.g. those that do not support the tools parameter, or older
+            # OpenAI-compatible servers) may still return a JSON tool call in the content.
+            response_content = (message.content or "").strip()
+            if response_content:
+                json_tool_calls = parse_json_tool_call(response_content)
+                if json_tool_calls:
+                    logger.info(f"Query analysis: Routing to {len(json_tool_calls)} MCP tool(s) via JSON fallback")
+                    return {
+                        "use_tools": True,
+                        "tool_calls": json_tool_calls,
+                        "rewritten_query": None,
+                        "original_query": user_query,
+                    }
+
+            # Neither native tool calls nor parseable JSON were found
+            logger.warning(f"Failed to determine routing, defaulting to search_papers for: {user_query}")
+            return self._get_fallback_route_info(user_query, n_results)
 
         except Exception as e:
             logger.warning(f"Query analysis failed: {e}, defaulting to search_papers")
