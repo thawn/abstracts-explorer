@@ -52,13 +52,13 @@ Analyzes how specific topics have evolved over the years.
 
 **Example use case:** "How have topics related to 'transformer architectures' evolved over the years at NeurIPS?"
 
-### 3. `get_recent_developments`
+### 3. `search_papers`
 
 Finds the most important recent developments in a specific topic.
 
 **Parameters:**
 - `topic_keywords` (str): Keywords describing the topic
-- `n_years` (int): Number of recent years to consider (default: 2)
+- `years` (list): List of years to consider (default: None, which means all years)
 - `n_results` (int): Number of papers to return (default: 10)
 - `conference` (str, optional): Filter by conference name
 - `embeddings_path` (str, optional): Path to ChromaDB embeddings database

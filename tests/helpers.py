@@ -18,6 +18,12 @@ from tests.conftest import get_env_test_path
 _lm_studio_available_cache = None
 
 
+def reset_lm_studio_availability_cache():
+    """Reset the cached result of LM Studio availability check."""
+    global _lm_studio_available_cache
+    _lm_studio_available_cache = None
+
+
 def create_test_db_with_paper(db_path, paper_data):
     """
     Create a test database with a single paper.

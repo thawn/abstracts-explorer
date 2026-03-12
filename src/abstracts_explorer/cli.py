@@ -833,10 +833,10 @@ def mcp_server_command(args: argparse.Namespace) -> int:
         print("\nAvailable tools:")
         print("  - get_cluster_topics: Get most frequently mentioned topics from clusters")
         print("  - get_topic_evolution: Analyze how topics evolved over years")
-        print("  - get_recent_developments: Find recent developments in topics")
+        print("  - search_papers: Find abstracts about topics")
         print("  - get_cluster_visualization: Generate cluster visualization data")
         print("\nPress Ctrl+C to stop the server\n")
-        
+
         # Start the MCP server
         run_mcp_server(host=args.host, port=args.port, transport=args.transport)
         return 0

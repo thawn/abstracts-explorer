@@ -16,7 +16,7 @@ Features:
 
 import logging
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from collections import defaultdict, Counter
 from copy import deepcopy
 
@@ -457,26 +457,26 @@ def get_topic_evolution(
 
 
 @mcp.tool()
-def get_recent_developments(
+def search_papers(
     topic_keywords: str,
-    n_years: int = 2,
+    years: Optional[List[int]] = None,
     n_results: int = 10,
     conference: Optional[str] = None,
     where: Optional[Dict[str, Any]] = None,
     collection_name: Optional[str] = None,
 ) -> str:
     """
-    Find the most important recent developments in a specific topic.
+    Search for papers on a specific topic.
 
-    This tool searches for the most relevant papers about a topic from
-    recent years.
+    This tool searches for the most relevant papers about a topic, optionally
+    filtered by specific years.
 
     Parameters
     ----------
     topic_keywords : str
         Keywords describing the topic (e.g., "large language models")
-    n_years : int, optional
-        Number of recent years to consider (default: 2)
+    years : list of int, optional
+        List of specific years to filter by (e.g., [2024, 2025]). If None, searches all years.
     n_results : int, optional
         Number of papers to return (default: 10)
     conference : str, optional
@@ -496,7 +496,7 @@ def get_recent_developments(
     Returns
     -------
     str
-        JSON string containing recent developments
+        JSON string containing search results
     """
     try:
         config = get_config()
@@ -513,11 +513,6 @@ def get_recent_developments(
         db = DatabaseManager()
         db.connect()
         
-        # Calculate year cutoff
-        from datetime import datetime
-        current_year = datetime.now().year
-        year_cutoff = current_year - n_years
-        
         # Build metadata filter using helper function
         try:
             where_filter = merge_where_clause_with_conference(where, conference)
@@ -526,25 +521,29 @@ def get_recent_developments(
             return json.dumps({"error": f"Invalid WHERE clause: {str(e)}"}, indent=2)
         
         # Search for papers
-        logger.info(f"Searching for recent papers about: {topic_keywords}")
+        search_desc = f"papers from {years}" if years else "papers"
+        logger.info(f"Searching for {search_desc} about: {topic_keywords}")
         if where_filter:
             logger.info(f"Applying WHERE filter: {where_filter}")
+        if years:
+            logger.info(f"Year filter: {years}")
+        
         results = em.search_similar(
             query=topic_keywords,
-            n_results=n_results * 3,  # Get more to filter by year
+            n_results=n_results * 3 if years else n_results,  # Get more if filtering by year
             where=where_filter,
         )
         
         # Filter and format results
-        recent_papers = []
+        papers = []
         if results["ids"] and results["ids"][0]:
             for idx, paper_id in enumerate(results["ids"][0]):
                 metadata = results["metadatas"][0][idx]
                 year = metadata.get("year")
                 
-                # Only include recent papers
-                if year and year >= year_cutoff:
-                    recent_papers.append({
+                # Filter by years list if provided
+                if years is None or (year and year in years):
+                    papers.append({
                         "id": paper_id,
                         "title": metadata.get("title", ""),
                         "year": year,
@@ -554,15 +553,15 @@ def get_recent_developments(
                         "relevance_score": 1.0 - results["distances"][0][idx] if "distances" in results else None,
                     })
                     
-                    if len(recent_papers) >= n_results:
+                    if len(papers) >= n_results:
                         break
         
         result = {
             "topic": topic_keywords,
             "conference": conference,
-            "year_cutoff": year_cutoff,
-            "papers_found": len(recent_papers),
-            "papers": recent_papers,
+            "years_filter": years,
+            "papers_found": len(papers),
+            "papers": papers,
         }
         
         # Clean up
@@ -572,13 +571,13 @@ def get_recent_developments(
         return json.dumps(result, indent=2)
         
     except Exception as e:
-        logger.error(f"Failed to get recent developments: {str(e)}")
+        logger.error(f"Failed to search papers: {str(e)}")
         return json.dumps({"error": str(e)}, indent=2)
 
 
 @mcp.tool()
 def analyze_topic_relevance(
-    query: str,
+    topic: str,
     distance_threshold: float = 1.1,
     conferences: Optional[list[str]] = None,
     years: Optional[list[int]] = None,
@@ -587,13 +586,13 @@ def analyze_topic_relevance(
     """
     Analyze the relevance of a topic by counting papers within a specified distance in embedding space.
     
-    This tool measures topic relevance by finding papers semantically similar to the query
+    This tool measures topic relevance by finding papers semantically similar to the topic
     within a specified Euclidean distance threshold. It's useful for identifying how prevalent
     or relevant a research topic is at a conference.
     
     Parameters
     ----------
-    query : str
+    topic : str
         The topic or research question to analyze (e.g., "Uncertainty quantification", 
         "Graph neural networks", "Transformer architectures")
     distance_threshold : float, optional
@@ -610,7 +609,7 @@ def analyze_topic_relevance(
     -------
     str
         JSON string containing:
-        - query: The search query used
+        - topic: The topic analyzed
         - distance_threshold: Distance threshold applied
         - total_papers: Number of papers found within distance
         - conferences: Conferences represented (with counts)
@@ -620,7 +619,7 @@ def analyze_topic_relevance(
     
     Examples
     --------
-    Query: "Uncertainty quantification"
+    Topic: "Uncertainty quantification"
     Result: 75 papers found within distance 1.1
     Interpretation: High relevance - this is a significant topic at the conference
     
@@ -644,7 +643,7 @@ def analyze_topic_relevance(
         db.connect()
         
         # Find papers within distance
-        logger.info(f"Analyzing relevance for topic: {query}")
+        logger.info(f"Analyzing relevance for topic: {topic}")
         logger.info(f"Distance threshold: {distance_threshold}")
         if conferences:
             logger.info(f"Filtering by conferences: {conferences}")
@@ -653,7 +652,7 @@ def analyze_topic_relevance(
         
         result_data = em.find_papers_within_distance(
             database=db,
-            query=query,
+            query=topic,
             distance_threshold=distance_threshold,
             conferences=conferences,
             years=years,
@@ -688,7 +687,7 @@ def analyze_topic_relevance(
         
         # Build result
         result = {
-            "query": query,
+            "topic": topic,
             "distance_threshold": distance_threshold,
             "filters": {
                 "conferences": conferences,

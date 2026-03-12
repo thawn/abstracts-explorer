@@ -20,6 +20,17 @@ from abstracts_explorer.plugins import (
 )
 
 
+def _check_ml4ps_website_available() -> bool:
+    """Return True if the ML4PS website is reachable."""
+    try:
+        response = requests.head(
+            "https://ml4physicalsciences.github.io/2025/", timeout=5
+        )
+        return response.status_code < 400
+    except (requests.RequestException, OSError):
+        return False
+
+
 # ============================================================================
 # Fixtures
 # ============================================================================
@@ -675,8 +686,6 @@ class TestML4PSWebScraping:
 
     def test_fetch_page_success_after_delays(self, ml4ps_plugin, mock_html_page):
         """Test that fetch_page adds exponential backoff delays on retries."""
-        import time
-
         mock_response = Mock()
         mock_response.content = mock_html_page.encode()
         mock_response.raise_for_status = Mock()
@@ -805,42 +814,6 @@ class TestML4PSWebScraping:
 # ============================================================================
 # Unit Tests - Abstract Fetching
 # ============================================================================
-
-
-class TestML4PSAbstractFetching:
-    """Test abstract and OpenReview URL fetching."""
-
-    def test_fetch_abstract_and_openreview(self, ml4ps_plugin, mock_neurips_virtual_page):
-        """Test fetching abstract and OpenReview URL."""
-        mock_response = Mock()
-        mock_response.content = mock_neurips_virtual_page.encode()
-        mock_response.raise_for_status = Mock()
-
-        with patch.object(ml4ps_plugin.session, "get", return_value=mock_response):
-            abstract, openreview_url = ml4ps_plugin._fetch_abstract_and_openreview("123456")
-
-            assert abstract is not None
-            assert "machine learning applications in physics" in abstract.lower()
-            assert openreview_url == "https://openreview.net/forum?id=abc123"
-
-    def test_fetch_single_abstract_success(self, ml4ps_plugin, mock_neurips_virtual_page):
-        """Test fetching abstract for single paper."""
-        paper = {
-            "id": 1,
-            "poster_url": "https://example.com/posters/123456.png",
-        }
-
-        mock_response = Mock()
-        mock_response.content = mock_neurips_virtual_page.encode()
-        mock_response.raise_for_status = Mock()
-
-        with patch.object(ml4ps_plugin.session, "get", return_value=mock_response):
-            updated_paper, success = ml4ps_plugin._fetch_single_abstract(paper)
-
-            assert success
-            assert "abstract" in updated_paper
-            assert "openreview_url" in updated_paper
-            assert updated_paper["neurips_paper_id"] == "123456"
 
 
 class TestML4PSAbstractFetching:
@@ -1324,6 +1297,10 @@ class TestML4PSEndToEnd:
         assert isinstance(plugin, ML4PSDownloaderPlugin)
 
     @pytest.mark.slow
+    @pytest.mark.skipif(
+        not _check_ml4ps_website_available(),
+        reason="ML4PS website not accessible",
+    )
     def test_download_real_data(self, tmp_path):
         """Test downloading real data from ML4PS website."""
         plugin = ML4PSDownloaderPlugin()
