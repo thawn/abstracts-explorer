@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 
 from abstracts_explorer.database import DatabaseError, DatabaseManager
 
@@ -59,7 +60,7 @@ def main() -> int:
         print(f"Updated embedding model metadata: {previous_model!r} -> {updated_model!r}")
         return 0
     except DatabaseError as exc:
-        print(f"Failed to update embedding model metadata: {exc}")
+        print(f"Failed to update embedding model metadata: {exc}", file=sys.stderr)
         return 1
 
 
