@@ -9,6 +9,7 @@ import json
 import pytest
 from unittest.mock import Mock, patch
 import requests
+from bs4 import BeautifulSoup
 
 from abstracts_explorer.plugins.ml4ps_downloader import ML4PSDownloaderPlugin
 from abstracts_explorer.plugins import (
@@ -17,6 +18,17 @@ from abstracts_explorer.plugins import (
     get_plugin,
     list_plugins,
 )
+
+
+def _check_ml4ps_website_available() -> bool:
+    """Return True if the ML4PS website is reachable."""
+    try:
+        response = requests.head(
+            "https://ml4physicalsciences.github.io/2025/", timeout=5
+        )
+        return response.status_code < 400
+    except (requests.RequestException, OSError):
+        return False
 
 
 # ============================================================================
@@ -249,6 +261,19 @@ class TestML4PSPluginHelpers:
         paper_id = ml4ps_plugin._extract_paper_id_from_poster_url(url)
         assert paper_id is None
 
+    def test_clean_text_with_multiple_spaces(self, ml4ps_plugin):
+        """Test cleaning text with multiple spaces."""
+        text = "Test    Title   With    Multiple    Spaces"
+        cleaned = ml4ps_plugin._clean_text(text)
+        assert cleaned == "Test Title With Multiple Spaces"
+
+    def test_clean_text_mixed_brackets(self, ml4ps_plugin):
+        """Test cleaning text with all bracket variations."""
+        text = "Title [paper] [POSTER] [VIDEO] Text"
+        cleaned = ml4ps_plugin._clean_text(text)
+        assert cleaned == "Title Text"
+        assert "[" not in cleaned
+
 
 # ============================================================================
 # Unit Tests - Lightweight Conversion
@@ -297,6 +322,327 @@ class TestML4PSLightweightConversion:
         paper2 = lightweight[1]
         assert paper2["award"] == "Best Poster, Spotlight Talk"
 
+    def test_convert_paper_with_empty_awards(self, ml4ps_plugin):
+        """Test conversion with paper having empty awards list."""
+        papers = [
+            {
+                "id": 1,
+                "title": "Test Paper",
+                "authors_str": "John Doe",
+                "abstract": "Test abstract.",
+                "paper_url": "https://example.com/paper.pdf",
+                "awards": [],
+                "eventtype": "Poster",
+            }
+        ]
+        lightweight = ml4ps_plugin._convert_to_lightweight_format(papers)
+
+        assert "award" not in lightweight[0] or lightweight[0]["award"] is None
+
+    def test_convert_paper_without_optional_urls(self, ml4ps_plugin):
+        """Test conversion with paper missing optional URL fields."""
+        papers = [
+            {
+                "id": 1,
+                "title": "Test Paper",
+                "authors_str": "John Doe",
+                "abstract": "Test abstract.",
+                "paper_url": None,
+                "poster_url": None,
+                "openreview_url": None,
+                "awards": [],
+                "eventtype": "Poster",
+            }
+        ]
+        lightweight = ml4ps_plugin._convert_to_lightweight_format(papers)
+
+        paper = lightweight[0]
+        assert "paper_pdf_url" not in paper or paper.get("paper_pdf_url") is None
+        assert "poster_image_url" not in paper or paper.get("poster_image_url") is None
+
+
+# ============================================================================
+# Unit Tests - Paper Row Extraction
+# ============================================================================
+
+
+class TestML4PSPaperRowExtraction:
+    """Test extraction of paper info from HTML table rows."""
+
+    def test_extract_paper_row_basic(self, ml4ps_plugin):
+        """Test basic paper row extraction."""
+        html = """
+        <tr>
+            <td>1</td>
+            <td>
+                <strong>Test Paper Title</strong><br/>
+                John Doe, Jane Smith<br/>
+                <a href="files/paper1.pdf">paper</a>
+                <a href="assets/posters/123456.png">poster</a>
+            </td>
+        </tr>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        row = soup.find("tr")
+
+        paper = ml4ps_plugin._extract_paper_info_from_row(row)
+
+        assert paper is not None
+        assert paper["id"] == 1
+        assert paper["title"] == "Test Paper Title"
+        assert "John Doe" in paper["authors_str"]
+        assert paper["paper_url"] == "https://ml4physicalsciences.github.io/2025/files/paper1.pdf"
+        assert paper["poster_url"] == "https://ml4physicalsciences.github.io/2025/assets/posters/123456.png"
+
+    def test_extract_paper_row_insufficient_cells(self, ml4ps_plugin):
+        """Test row with insufficient cells."""
+        html = "<tr><td>1</td></tr>"
+        soup = BeautifulSoup(html, "html.parser")
+        row = soup.find("tr")
+
+        paper = ml4ps_plugin._extract_paper_info_from_row(row)
+
+        assert paper is None
+
+    def test_extract_paper_row_non_digit_id(self, ml4ps_plugin):
+        """Test row with non-digit paper ID."""
+        html = """
+        <tr>
+            <td>ABC</td>
+            <td>
+                <strong>Test Paper</strong><br/>
+                John Doe
+            </td>
+        </tr>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        row = soup.find("tr")
+
+        paper = ml4ps_plugin._extract_paper_info_from_row(row)
+
+        assert paper is None
+
+    def test_extract_paper_row_missing_strong_tag(self, ml4ps_plugin):
+        """Test row with missing strong tag (title)."""
+        html = """
+        <tr>
+            <td>1</td>
+            <td>
+                Test Paper Title<br/>
+                John Doe
+            </td>
+        </tr>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        row = soup.find("tr")
+
+        paper = ml4ps_plugin._extract_paper_info_from_row(row)
+
+        assert paper is not None
+        assert paper["title"] == ""
+
+    def test_extract_paper_row_with_video_url(self, ml4ps_plugin):
+        """Test row with video URL."""
+        html = """
+        <tr>
+            <td>1</td>
+            <td>
+                <strong>Test Paper</strong><br/>
+                John Doe<br/>
+                <a href="files/paper1.pdf">paper</a>
+                <a href="assets/posters/123.png">poster</a>
+                <a href="videos/video1.mp4">video</a>
+            </td>
+        </tr>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        row = soup.find("tr")
+
+        paper = ml4ps_plugin._extract_paper_info_from_row(row)
+
+        assert paper is not None
+        assert paper["video_url"] == "https://ml4physicalsciences.github.io/2025/videos/video1.mp4"
+
+    def test_extract_paper_row_spotlight_award(self, ml4ps_plugin):
+        """Test row with Spotlight Talk award."""
+        html = """
+        <tr>
+            <td>1</td>
+            <td>
+                <strong>Test Paper</strong><br/>
+                John Doe<br/>
+                <a href="/files/paper1.pdf">paper</a>
+                Spotlight Talk
+            </td>
+        </tr>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        row = soup.find("tr")
+
+        paper = ml4ps_plugin._extract_paper_info_from_row(row)
+
+        assert paper is not None
+        assert "Spotlight Talk" in paper["awards"]
+        assert paper["eventtype"] == "Spotlight"
+        assert paper["decision"] == "Accept (spotlight)"
+
+    def test_extract_paper_row_best_poster_award(self, ml4ps_plugin):
+        """Test row with Best Poster award."""
+        html = """
+        <tr>
+            <td>1</td>
+            <td>
+                <strong>Test Paper</strong><br/>
+                John Doe<br/>
+                <a href="/files/paper1.pdf">paper</a>
+                Best Poster
+            </td>
+        </tr>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        row = soup.find("tr")
+
+        paper = ml4ps_plugin._extract_paper_info_from_row(row)
+
+        assert paper is not None
+        assert "Best Poster" in paper["awards"]
+
+    def test_extract_paper_row_best_poster_tie_award(self, ml4ps_plugin):
+        """Test row with Best Poster tie award."""
+        html = """
+        <tr>
+            <td>1</td>
+            <td>
+                <strong>Test Paper</strong><br/>
+                John Doe<br/>
+                Best Poster (by Popular Vote -- tie)
+            </td>
+        </tr>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        row = soup.find("tr")
+
+        paper = ml4ps_plugin._extract_paper_info_from_row(row)
+
+        assert paper is not None
+        assert "Best Poster (by Popular Vote -- tie)" in paper["awards"]
+        # Should not also include plain "Best Poster"
+        assert len([a for a in paper["awards"] if a == "Best Poster"]) == 0
+
+    def test_extract_paper_row_best_poster_both_variants(self, ml4ps_plugin):
+        """Test that Best Poster tie is preferred over generic Best Poster."""
+        # When both tie and generic versions are present, only tie should be added
+        html = """
+        <tr>
+            <td>1</td>
+            <td>
+                <strong>Test Paper</strong><br/>
+                John Doe<br/>
+                Best Poster (by Popular Vote -- tie)
+                Best Poster mention
+            </td>
+        </tr>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        row = soup.find("tr")
+
+        paper = ml4ps_plugin._extract_paper_info_from_row(row)
+
+        assert paper is not None
+        # Should only have the tie award due to elif logic
+        assert "Best Poster (by Popular Vote -- tie)" in paper["awards"]
+
+    def test_extract_paper_row_multiple_awards(self, ml4ps_plugin):
+        """Test row with multiple awards."""
+        html = """
+        <tr>
+            <td>1</td>
+            <td>
+                <strong>Test Paper</strong><br/>
+                John Doe<br/>
+                Best Poster
+                Reproducibility Prize
+            </td>
+        </tr>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        row = soup.find("tr")
+
+        paper = ml4ps_plugin._extract_paper_info_from_row(row)
+
+        assert paper is not None
+        assert "Best Poster" in paper["awards"]
+        assert "Reproducibility Prize" in paper["awards"]
+        assert len(paper["awards"]) == 2
+
+    def test_extract_paper_row_authors_inside_br_tag(self, ml4ps_plugin):
+        """Test row with authors inside br tag (old format)."""
+        html = """
+        <tr>
+            <td>1</td>
+            <td>
+                <strong>Test Paper</strong><br>John Doe, Jane Smith</br>
+                <a href="/files/paper1.pdf">paper</a>
+            </td>
+        </tr>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        row = soup.find("tr")
+
+        paper = ml4ps_plugin._extract_paper_info_from_row(row)
+
+        assert paper is not None
+        assert "John Doe" in paper["authors_str"]
+
+    def test_extract_paper_row_authors_after_br_tag(self, ml4ps_plugin):
+        """Test row with authors after br tag (new format)."""
+        html = """
+        <tr>
+            <td>1</td>
+            <td>
+                <strong>Test Paper</strong><br/>
+                <span>John Doe, Jane Smith</span>
+                <a href="/files/paper1.pdf">paper</a>
+            </td>
+        </tr>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        row = soup.find("tr")
+
+        paper = ml4ps_plugin._extract_paper_info_from_row(row)
+
+        assert paper is not None
+        assert "John Doe" in paper["authors_str"]
+
+    def test_extract_paper_row_no_br_tag(self, ml4ps_plugin):
+        """Test row with no br tag (no authors found)."""
+        html = """
+        <tr>
+            <td>1</td>
+            <td>
+                <strong>Test Paper</strong>
+                <a href="/files/paper1.pdf">paper</a>
+            </td>
+        </tr>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        row = soup.find("tr")
+
+        paper = ml4ps_plugin._extract_paper_info_from_row(row)
+
+        assert paper is not None
+        assert paper["authors_str"] == ""
+
+    def test_extract_paper_row_exception_handling(self, ml4ps_plugin):
+        """Test that exceptions are handled gracefully."""
+        html = "<tr><td>not_a_number</td><td>content</td></tr>"
+        soup = BeautifulSoup(html, "html.parser")
+        row = soup.find("tr")
+
+        # This should not raise, but return None
+        paper = ml4ps_plugin._extract_paper_info_from_row(row)
+        assert paper is None
+
 
 # ============================================================================
 # Unit Tests - Web Scraping (Mocked)
@@ -323,14 +669,146 @@ class TestML4PSWebScraping:
             soup = ml4ps_plugin._fetch_page("https://example.com")
             assert soup is None
 
-    @pytest.mark.slow
-    def test_fetch_page_retries(self, ml4ps_plugin):
-        """Test that fetch_page retries on failure."""
+    def test_fetch_page_all_retries_exhausted(self, ml4ps_plugin):
+        """Test fetch_page returns None after all retries exhausted."""
         with patch.object(
-            ml4ps_plugin.session, "get", side_effect=requests.RequestException("Network error")
+            ml4ps_plugin.session,
+            "get",
+            side_effect=[
+                requests.RequestException("Error 1"),
+                requests.RequestException("Error 2"),
+                requests.RequestException("Error 3"),
+            ],
         ) as mock_get:
-            ml4ps_plugin._fetch_page("https://example.com", max_retries=3)
+            soup = ml4ps_plugin._fetch_page("https://example.com", max_retries=3)
+            assert soup is None
             assert mock_get.call_count == 3
+
+    def test_fetch_page_success_after_delays(self, ml4ps_plugin, mock_html_page):
+        """Test that fetch_page adds exponential backoff delays on retries."""
+        mock_response = Mock()
+        mock_response.content = mock_html_page.encode()
+        mock_response.raise_for_status = Mock()
+
+        with patch.object(
+            ml4ps_plugin.session,
+            "get",
+            side_effect=[
+                requests.RequestException("Network error"),
+                requests.RequestException("Network error"),
+                mock_response,
+            ],
+        ):
+            with patch("time.sleep") as mock_sleep:
+                soup = ml4ps_plugin._fetch_page("https://example.com", max_retries=3)
+
+                assert soup is not None
+                # Should have slept with exponential backoff: 2^0=1, 2^1=2
+                assert mock_sleep.call_count == 2
+
+    def test_fetch_page_success_after_retry(self, ml4ps_plugin, mock_html_page):
+        """Test that fetch_page retries and succeeds on second attempt."""
+        mock_response = Mock()
+        mock_response.content = mock_html_page.encode()
+        mock_response.raise_for_status = Mock()
+
+        with patch.object(
+            ml4ps_plugin.session,
+            "get",
+            side_effect=[
+                requests.RequestException("Network error"),
+                mock_response,
+            ],
+        ) as mock_get:
+            soup = ml4ps_plugin._fetch_page("https://example.com", max_retries=3)
+            assert soup is not None
+            assert mock_get.call_count == 2
+
+    def test_scrape_papers_success(self, ml4ps_plugin, mock_html_page):
+        """Test successful scraping of papers."""
+        mock_response = Mock()
+        mock_response.content = mock_html_page.encode()
+        mock_response.raise_for_status = Mock()
+
+        with patch.object(ml4ps_plugin.session, "get", return_value=mock_response):
+            papers = ml4ps_plugin._scrape_papers()
+
+            assert len(papers) > 0
+            assert all("id" in p for p in papers)
+            assert all("title" in p for p in papers)
+            assert all("authors_str" in p for p in papers)
+
+    def test_scrape_papers_no_papers_section(self, ml4ps_plugin):
+        """Test scraping when Papers section not found."""
+        html = "<html><body><h2>Other Section</h2></body></html>"
+        mock_response = Mock()
+        mock_response.content = html.encode()
+        mock_response.raise_for_status = Mock()
+
+        with patch.object(ml4ps_plugin.session, "get", return_value=mock_response):
+            papers = ml4ps_plugin._scrape_papers()
+
+            assert papers == []
+
+    def test_scrape_papers_no_table(self, ml4ps_plugin):
+        """Test scraping when table not found."""
+        html = """
+        <html>
+        <body>
+            <h2>Papers</h2>
+            <div>No table here</div>
+        </body>
+        </html>
+        """
+        mock_response = Mock()
+        mock_response.content = html.encode()
+        mock_response.raise_for_status = Mock()
+
+        with patch.object(ml4ps_plugin.session, "get", return_value=mock_response):
+            papers = ml4ps_plugin._scrape_papers()
+
+            assert papers == []
+
+    def test_scrape_papers_fetch_page_fails(self, ml4ps_plugin):
+        """Test scraping when page fetch fails."""
+        with patch.object(ml4ps_plugin.session, "get", side_effect=requests.RequestException("Network error")):
+            papers = ml4ps_plugin._scrape_papers()
+
+            assert papers == []
+
+    def test_scrape_papers_progress_logging(self, ml4ps_plugin):
+        """Test that progress is logged at 50 paper intervals."""
+        # Create HTML with 150 papers to trigger multiple progress logs
+        rows_html = ""
+        for i in range(1, 151):
+            rows_html += f"""
+            <tr>
+                <td>{i}</td>
+                <td>
+                    <strong>Paper {i}</strong><br/>
+                    Author {i}
+                </td>
+            </tr>
+            """
+
+        html = f"""
+        <html>
+        <body>
+            <h2>Papers</h2>
+            <table>
+                {rows_html}
+            </table>
+        </body>
+        </html>
+        """
+        mock_response = Mock()
+        mock_response.content = html.encode()
+        mock_response.raise_for_status = Mock()
+
+        with patch.object(ml4ps_plugin.session, "get", return_value=mock_response):
+            papers = ml4ps_plugin._scrape_papers()
+
+            assert len(papers) == 150
 
 
 # ============================================================================
@@ -381,6 +859,335 @@ class TestML4PSAbstractFetching:
 
         assert not success
         assert updated_paper == paper
+
+    def test_fetch_single_abstract_invalid_poster_url(self, ml4ps_plugin):
+        """Test fetching abstract when poster URL doesn't contain valid ID."""
+        paper = {"id": 1, "poster_url": "https://example.com/poster.png"}
+
+        updated_paper, success = ml4ps_plugin._fetch_single_abstract(paper)
+
+        assert not success
+        assert updated_paper == paper
+
+    def test_fetch_abstract_with_h4_heading(self, ml4ps_plugin):
+        """Test fetching abstract with h4 heading instead of h3."""
+        html = """
+        <html>
+        <body>
+            <h4>Abstract</h4>
+            <p>This is an abstract with h4 heading.</p>
+        </body>
+        </html>
+        """
+        mock_response = Mock()
+        mock_response.content = html.encode()
+        mock_response.raise_for_status = Mock()
+
+        with patch.object(ml4ps_plugin.session, "get", return_value=mock_response):
+            abstract, _ = ml4ps_plugin._fetch_abstract_and_openreview("123456")
+
+            assert abstract is not None
+            assert "h4 heading" in abstract
+
+    def test_fetch_abstract_with_h5_heading(self, ml4ps_plugin):
+        """Test fetching abstract with h5 heading."""
+        html = """
+        <html>
+        <body>
+            <h5>Abstract</h5>
+            <p>This is an abstract with h5 heading.</p>
+        </body>
+        </html>
+        """
+        mock_response = Mock()
+        mock_response.content = html.encode()
+        mock_response.raise_for_status = Mock()
+
+        with patch.object(ml4ps_plugin.session, "get", return_value=mock_response):
+            abstract, _ = ml4ps_plugin._fetch_abstract_and_openreview("123456")
+
+            assert abstract is not None
+            assert "h5 heading" in abstract
+
+    def test_fetch_abstract_with_div_class(self, ml4ps_plugin):
+        """Test fetching abstract from div with class containing 'abstract'."""
+        html = """
+        <html>
+        <body>
+            <div class="abstract-content">This is an abstract from div.</div>
+        </body>
+        </html>
+        """
+        mock_response = Mock()
+        mock_response.content = html.encode()
+        mock_response.raise_for_status = Mock()
+
+        with patch.object(ml4ps_plugin.session, "get", return_value=mock_response):
+            abstract, _ = ml4ps_plugin._fetch_abstract_and_openreview("123456")
+
+            assert abstract is not None
+            assert "abstract from div" in abstract
+
+    def test_fetch_abstract_with_abstract_p_sibling(self, ml4ps_plugin):
+        """Test fetching abstract when it's in an immediate p sibling after heading."""
+        html = """
+        <html>
+        <body>
+            <h3>Abstract</h3>
+            <p>This is the abstract content.</p>
+        </body>
+        </html>
+        """
+        mock_response = Mock()
+        mock_response.content = html.encode()
+        mock_response.raise_for_status = Mock()
+
+        with patch.object(ml4ps_plugin.session, "get", return_value=mock_response):
+            abstract, _ = ml4ps_plugin._fetch_abstract_and_openreview("123456")
+
+            assert abstract is not None
+            assert "abstract content" in abstract
+
+    def test_fetch_abstract_with_abstract_div_class(self, ml4ps_plugin):
+        """Test fetching abstract from div with abstract class (fallback)."""
+        html = """
+        <html>
+        <body>
+            <div class="abstract-section">
+                <div class="abstract-content">This abstract is in a div with class.</div>
+            </div>
+        </body>
+        </html>
+        """
+        mock_response = Mock()
+        mock_response.content = html.encode()
+        mock_response.raise_for_status = Mock()
+
+        with patch.object(ml4ps_plugin.session, "get", return_value=mock_response):
+            abstract, _ = ml4ps_plugin._fetch_abstract_and_openreview("123456")
+
+            assert abstract is not None
+            assert "div with class" in abstract
+
+    def test_fetch_openreview_with_relative_url(self, ml4ps_plugin):
+        """Test fetching OpenReview URL when it doesn't contain openreview.net."""
+        html = """
+        <html>
+        <body>
+            <a class="action-btn" href="/forum?id=xyz789">Paper Link</a>
+        </body>
+        </html>
+        """
+        mock_response = Mock()
+        mock_response.content = html.encode()
+        mock_response.raise_for_status = Mock()
+
+        with patch.object(ml4ps_plugin.session, "get", return_value=mock_response):
+            _, openreview_url = ml4ps_plugin._fetch_abstract_and_openreview("123456")
+
+            # Relative URL without openreview.net won't be matched
+            assert openreview_url is None
+
+    def test_fetch_openreview_relative_openreview_url(self, ml4ps_plugin):
+        """Test fetching OpenReview URL when it's relative to openreview.net."""
+        html = """
+        <html>
+        <body>
+            <a href="https://openreview.net/forum?id=abc123">OpenReview</a>
+        </body>
+        </html>
+        """
+        mock_response = Mock()
+        mock_response.content = html.encode()
+        mock_response.raise_for_status = Mock()
+
+        with patch.object(ml4ps_plugin.session, "get", return_value=mock_response):
+            _, openreview_url = ml4ps_plugin._fetch_abstract_and_openreview("123456")
+
+            # Fallback mechanism: find any openreview.net link even without action-btn class
+            assert openreview_url == "https://openreview.net/forum?id=abc123"
+
+    def test_fetch_openreview_without_action_btn_class(self, ml4ps_plugin):
+        """Test fetching OpenReview URL without action-btn class."""
+        html = """
+        <html>
+        <body>
+            <a href="https://openreview.net/forum?id=fallback123">Paper Link</a>
+        </body>
+        </html>
+        """
+        mock_response = Mock()
+        mock_response.content = html.encode()
+        mock_response.raise_for_status = Mock()
+
+        with patch.object(ml4ps_plugin.session, "get", return_value=mock_response):
+            _, openreview_url = ml4ps_plugin._fetch_abstract_and_openreview("123456")
+
+            assert openreview_url == "https://openreview.net/forum?id=fallback123"
+
+    def test_fetch_openreview_missing(self, ml4ps_plugin):
+        """Test fetching when OpenReview link is missing."""
+        html = """
+        <html>
+        <body>
+            <h3>Abstract</h3>
+            <p>Some abstract without OpenReview link.</p>
+        </body>
+        </html>
+        """
+        mock_response = Mock()
+        mock_response.content = html.encode()
+        mock_response.raise_for_status = Mock()
+
+        with patch.object(ml4ps_plugin.session, "get", return_value=mock_response):
+            _, openreview_url = ml4ps_plugin._fetch_abstract_and_openreview("123456")
+
+            assert openreview_url is None
+
+    def test_fetch_abstract_page_not_found(self, ml4ps_plugin):
+        """Test fetching when page fetch fails."""
+        with patch.object(ml4ps_plugin.session, "get", side_effect=requests.RequestException("404")):
+            abstract, openreview_url = ml4ps_plugin._fetch_abstract_and_openreview("123456")
+
+            assert abstract is None
+            assert openreview_url is None
+
+
+# ============================================================================
+# Unit Tests - Parallel Abstract Fetching
+# ============================================================================
+
+
+class TestML4PSParallelFetching:
+    """Test parallel abstract fetching."""
+
+    def test_fetch_abstracts_for_papers_empty_list(self, ml4ps_plugin):
+        """Test fetching abstracts for empty paper list."""
+        papers = []
+
+        # Should not raise
+        ml4ps_plugin._fetch_abstracts_for_papers(papers, max_workers=5)
+
+    def test_fetch_abstracts_for_papers_single_worker(self, ml4ps_plugin):
+        """Test fetching abstracts with single worker."""
+        papers = [
+            {"id": 1, "poster_url": "https://example.com/123.png"},
+            {"id": 2, "poster_url": "https://example.com/456.png"},
+        ]
+
+        with patch.object(ml4ps_plugin, "_fetch_single_abstract") as mock_fetch:
+            mock_fetch.return_value = (papers[0], True)
+
+            ml4ps_plugin._fetch_abstracts_for_papers(papers, max_workers=1)
+
+            # Should be called for each paper
+            assert mock_fetch.call_count >= 1
+
+    def test_fetch_abstracts_for_papers_thread_safety(self, ml4ps_plugin):
+        """Test that abstract fetching is thread-safe."""
+        papers = [{"id": i, "poster_url": f"https://example.com/{i}.png"} for i in range(1, 21)]
+
+        with patch.object(ml4ps_plugin, "_fetch_single_abstract") as mock_fetch:
+            # Simulate different outcomes for different papers
+            def side_effect(paper):
+                return paper, paper["id"] % 2 == 0
+
+            mock_fetch.side_effect = side_effect
+
+            # Should not raise
+            ml4ps_plugin._fetch_abstracts_for_papers(papers, max_workers=5)
+
+            # All papers should be processed
+            assert mock_fetch.call_count == len(papers)
+
+    def test_fetch_abstracts_progress_logging(self, ml4ps_plugin):
+        """Test progress logging at 10 paper intervals."""
+        papers = [{"id": i, "poster_url": f"https://example.com/{i}.png"} for i in range(1, 26)]
+
+        with patch.object(ml4ps_plugin, "_fetch_single_abstract") as mock_fetch:
+            mock_fetch.return_value = ({}, True)
+
+            ml4ps_plugin._fetch_abstracts_for_papers(papers, max_workers=5)
+
+            # Should process all papers
+            assert mock_fetch.call_count == 25
+
+
+# ============================================================================
+# Unit Tests - Download Integration
+# ============================================================================
+
+
+class TestML4PSDownloadIntegration:
+    """Test download method integration."""
+
+    @patch.object(ML4PSDownloaderPlugin, "_scrape_papers")
+    @patch.object(ML4PSDownloaderPlugin, "_fetch_abstracts_for_papers")
+    def test_download_with_default_year(self, mock_fetch, mock_scrape, ml4ps_plugin, sample_scraped_papers):
+        """Test download uses default year when None provided."""
+        mock_scrape.return_value = sample_scraped_papers
+
+        result = ml4ps_plugin.download(year=None)
+
+        assert isinstance(result, list)
+        mock_scrape.assert_called_once()
+
+    @patch.object(ML4PSDownloaderPlugin, "_scrape_papers")
+    @patch.object(ML4PSDownloaderPlugin, "_fetch_abstracts_for_papers")
+    def test_download_invalid_year(self, mock_fetch, mock_scrape, ml4ps_plugin):
+        """Test download with invalid year."""
+        with pytest.raises(ValueError):
+            ml4ps_plugin.download(year=2024)
+
+    @patch.object(ML4PSDownloaderPlugin, "_scrape_papers")
+    @patch.object(ML4PSDownloaderPlugin, "_fetch_abstracts_for_papers")
+    def test_download_force_download_flag(
+        self, mock_fetch, mock_scrape, ml4ps_plugin, sample_scraped_papers, tmp_path
+    ):
+        """Test that force_download flag re-downloads even if file exists."""
+        mock_scrape.return_value = sample_scraped_papers
+        output_file = tmp_path / "ml4ps_output.json"
+
+        # Create existing file
+        existing_data = [{"title": "Old Data", "authors": [], "abstract": "", "session": "", "poster_position": ""}]
+        with open(output_file, "w") as f:
+            json.dump(existing_data, f)
+
+        result = ml4ps_plugin.download(year=2025, output_path=str(output_file), force_download=True)
+
+        # Should download new data, not load old file
+        assert len(result) == len(sample_scraped_papers)
+        mock_scrape.assert_called_once()
+
+    @patch.object(ML4PSDownloaderPlugin, "_scrape_papers")
+    @patch.object(ML4PSDownloaderPlugin, "_fetch_abstracts_for_papers")
+    def test_download_no_papers_scraped(self, mock_fetch, mock_scrape, ml4ps_plugin):
+        """Test download when scraping returns empty list."""
+        mock_scrape.return_value = []
+
+        result = ml4ps_plugin.download(year=2025)
+
+        assert result == []
+        mock_fetch.assert_not_called()
+
+    @patch.object(ML4PSDownloaderPlugin, "_scrape_papers")
+    @patch.object(ML4PSDownloaderPlugin, "_fetch_abstracts_for_papers")
+    def test_download_corrupt_json_file_fallback(
+        self, mock_fetch, mock_scrape, ml4ps_plugin, sample_scraped_papers, tmp_path
+    ):
+        """Test that corrupt JSON file falls back to downloading."""
+        mock_scrape.return_value = sample_scraped_papers
+        output_file = tmp_path / "ml4ps_output.json"
+
+        # Create corrupt JSON file
+        with open(output_file, "w") as f:
+            f.write("{ invalid json")
+
+        result = ml4ps_plugin.download(year=2025, output_path=str(output_file), force_download=False)
+
+        # Should fallback to downloading
+        assert len(result) == len(sample_scraped_papers)
+        mock_scrape.assert_called_once()
 
 
 # ============================================================================
@@ -490,6 +1297,10 @@ class TestML4PSEndToEnd:
         assert isinstance(plugin, ML4PSDownloaderPlugin)
 
     @pytest.mark.slow
+    @pytest.mark.skipif(
+        not _check_ml4ps_website_available(),
+        reason="ML4PS website not accessible",
+    )
     def test_download_real_data(self, tmp_path):
         """Test downloading real data from ML4PS website."""
         plugin = ML4PSDownloaderPlugin()
