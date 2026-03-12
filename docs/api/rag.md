@@ -90,7 +90,7 @@ MCP (Model Context Protocol) tools are specialized functions that the LLM can ca
 
 1. **get_cluster_topics** - Analyze overall conference topics
 2. **get_topic_evolution** - Track how topics evolve over time
-3. **get_recent_developments** - Find recent papers in specific areas
+3. **search_papers** - Find recent papers in specific areas
 4. **get_cluster_visualization** - Generate cluster visualizations
 
 ### How It Works
@@ -124,7 +124,7 @@ print(response)
 # Ask about recent work - LLM uses recent developments tool
 response = chat.query("What are the latest papers on reinforcement learning?")
 print(response)
-# The LLM calls get_recent_developments(topic_keywords="reinforcement learning")
+# The LLM calls search_papers(topic_keywords="reinforcement learning")
 ```
 
 ### Tool Selection
@@ -133,7 +133,7 @@ The LLM automatically decides which tool(s) to use based on the question:
 
 - **Questions about "main topics", "themes", "areas"** → Uses `get_cluster_topics`
 - **Questions about "evolution", "trends", "over time"** → Uses `get_topic_evolution`
-- **Questions about "recent", "latest", "new"** → Uses `get_recent_developments`
+- **Questions about "recent", "latest", "new"** → Uses `search_papers`
 - **Questions about specific papers** → Uses standard RAG (no tools)
 
 ### Disabling MCP Tools

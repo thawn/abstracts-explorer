@@ -484,7 +484,7 @@ class TestMCPTools:
             conference="NeurIPS",
             where=where_clause
         )
-        
+
         # Verify result is valid JSON
         result = json.loads(result_str)
         assert result["topic"] == "transformers"
@@ -493,7 +493,7 @@ class TestMCPTools:
         mock_em.search_similar.assert_called_once()
         call_args = mock_em.search_similar.call_args
         where_arg = call_args[1]["where"]
-        
+
         # Should contain $and with both conditions
         assert "$and" in where_arg
         assert {"year": {"$gte": 2024}} in where_arg["$and"]
@@ -502,8 +502,8 @@ class TestMCPTools:
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
     @patch("abstracts_explorer.mcp_server.DatabaseManager")
     @patch("abstracts_explorer.mcp_server.get_config")
-    def test_get_recent_developments_with_where_clause(self, mock_config, mock_db_class, mock_em_class):
-        """Test get_recent_developments tool with custom WHERE clause."""
+    def test_search_papers_with_where_clause(self, mock_config, mock_db_class, mock_em_class):
+        """Test search_papers tool with custom WHERE clause."""
         # Setup config mock
         mock_config_obj = Mock()
         mock_config_obj.embedding_db_path = "chroma_db"
@@ -514,7 +514,7 @@ class TestMCPTools:
         # Setup embeddings manager mock
         mock_em = Mock()
         mock_em_class.return_value = mock_em
-        
+
         # Mock search results with recent papers
         from datetime import datetime
         current_year = datetime.now().year
@@ -533,14 +533,10 @@ class TestMCPTools:
         mock_db_class.return_value = mock_db
 
         # Import and call the tool with WHERE clause
-        from abstracts_explorer.mcp_server import get_recent_developments
+        from abstracts_explorer.mcp_server import search_papers
 
         where_clause = {"session": "Oral"}
-        result_str = get_recent_developments(
-            topic_keywords="llm",
-            where=where_clause,
-            n_years=2
-        )
+        result_str = search_papers(topic_keywords="llm", where=where_clause, years=[current_year, current_year - 1])
         result = json.loads(result_str)
 
         # Verify result
@@ -555,8 +551,8 @@ class TestMCPTools:
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
     @patch("abstracts_explorer.mcp_server.DatabaseManager")
     @patch("abstracts_explorer.mcp_server.get_config")
-    def test_get_recent_developments_complex_where_clause(self, mock_config, mock_db_class, mock_em_class):
-        """Test get_recent_developments with complex WHERE clause using $and."""
+    def test_search_papers_complex_where_clause(self, mock_config, mock_db_class, mock_em_class):
+        """Test search_papers with complex WHERE clause using $and."""
         # Setup config mock
         mock_config_obj = Mock()
         mock_config_obj.embedding_db_path = "chroma_db"
@@ -567,7 +563,7 @@ class TestMCPTools:
         # Setup embeddings manager mock
         mock_em = Mock()
         mock_em_class.return_value = mock_em
-        
+
         from datetime import datetime
         current_year = datetime.now().year
         mock_em.search_similar.return_value = {
@@ -582,7 +578,7 @@ class TestMCPTools:
         mock_db_class.return_value = mock_db
 
         # Import and call the tool with complex WHERE clause
-        from abstracts_explorer.mcp_server import get_recent_developments
+        from abstracts_explorer.mcp_server import search_papers
 
         where_clause = {
             "$and": [
@@ -590,11 +586,8 @@ class TestMCPTools:
                 {"session": {"$in": ["Oral Session 1", "Spotlight Session"]}}
             ]
         }
-        result_str = get_recent_developments(
-            topic_keywords="deep learning",
-            where=where_clause
-        )
-        
+        result_str = search_papers(topic_keywords="deep learning", where=where_clause)
+
         # Verify result is valid JSON
         result = json.loads(result_str)
         assert result["topic"] == "deep learning"
@@ -603,7 +596,7 @@ class TestMCPTools:
         mock_em.search_similar.assert_called_once()
         call_args = mock_em.search_similar.call_args
         where_arg = call_args[1]["where"]
-        
+
         # Should preserve the complex $and structure
         assert "$and" in where_arg
         assert {"year": {"$gte": 2024}} in where_arg["$and"]
