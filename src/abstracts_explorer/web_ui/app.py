@@ -983,7 +983,7 @@ def internal_error(e):
     return jsonify({"error": "Internal server error"}), 500
 
 
-def run_server(host="127.0.0.1", port=5000, debug=False, dev=False):
+def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=6):
     """
     Run the Flask web server.
 
@@ -997,14 +997,16 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False):
         Enable debug mode (default: False)
     dev : bool
         Use Flask development server instead of production server (default: False)
-    
+    threads : int
+        Number of worker threads for Waitress (default: 6)
+
     Raises
     ------
     FileNotFoundError
         If the database file does not exist.
     """
     config = get_config()  # Get config lazily
-    
+
     # Check if database is accessible before starting server
     # For SQLite databases, check if the file exists
     if config.database_url.startswith("sqlite:///"):
@@ -1023,15 +1025,15 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False):
             print("  neurips-abstracts create-embeddings", file=sys.stderr)
             raise FileNotFoundError(f"Database not found: {db_path}")
     # For PostgreSQL, we can't check file existence - connection will be validated at runtime
-    
+
     print("Starting Abstracts Explorer Web Interface...")
     print(f"Database: {config.database_url}")
-    
+
     # Print embeddings configuration
     print(f"Embeddings: {config.embedding_db}")
-    
+
     print(f"Server: http://{host}:{port}")
-    
+
     # Use Flask development server if explicitly requested
     if dev:
         print("\n⚠️  Using Flask development server (not suitable for production)")
@@ -1047,10 +1049,11 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False):
             print("\n✅ Using Waitress production WSGI server")
             if debug:
                 print("⚠️  Debug mode enabled (logging level set to DEBUG via -vv)")
+            print(f"Waitress threads: {threads}")
             print("\nPress CTRL+C to stop the server")
             # Set Flask debug mode even with Waitress for better error messages
             app.debug = debug
-            serve(app, host=host, port=port)
+            serve(app, host=host, port=port, threads=threads)
         except ImportError:
             print("\n⚠️  Waitress not installed, falling back to Flask development server", file=sys.stderr)
             print("   Install Waitress with: pip install waitress", file=sys.stderr)
@@ -1067,7 +1070,8 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=5000, help="Port to bind to")
     parser.add_argument("--debug", action="store_true", help="Enable debug mode (uses Flask dev server)")
     parser.add_argument("--dev", action="store_true", help="Use Flask development server instead of production server")
+    parser.add_argument("--threads", type=int, default=6, help="Number of Waitress worker threads")
 
     args = parser.parse_args()
 
-    run_server(host=args.host, port=args.port, debug=args.debug, dev=args.dev)
+    run_server(host=args.host, port=args.port, debug=args.debug, dev=args.dev, threads=args.threads)
