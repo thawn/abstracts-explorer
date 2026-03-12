@@ -23,10 +23,10 @@ from abstracts_explorer.web_ui import app as flask_app
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.config import get_config
 
-
 # ============================================================
 # Tests from test_web.py
 # ============================================================
+
 
 @pytest.fixture
 def app():
@@ -193,7 +193,9 @@ class TestSearchEndpoint:
 
         # Verify it was NOT called with invalid parameters
         assert "title" not in call_args.kwargs, "search_papers_keyword should NOT be called with 'title' parameter"
-        assert "abstract" not in call_args.kwargs, "search_papers_keyword should NOT be called with 'abstract' parameter"
+        assert (
+            "abstract" not in call_args.kwargs
+        ), "search_papers_keyword should NOT be called with 'abstract' parameter"
 
         # Check response
         assert response.status_code == 200
@@ -366,6 +368,7 @@ if __name__ == "__main__":
 # Tests from test_web_ui_unit.py
 # ============================================================
 
+
 class TestWebUISemanticSearchDetails:
     """Test semantic search result processing (lines 165-183)."""
 
@@ -381,7 +384,7 @@ class TestWebUISemanticSearchDetails:
                     # Setup mock embeddings manager
                     mock_em = Mock()
                     mock_db = Mock()
-                    
+
                     # Mock the search_papers_semantic method to return proper papers
                     mock_papers = [
                         {
@@ -760,11 +763,11 @@ class TestWebUIDatabaseModes:
                 # Access database within app context
                 with app.app_context():
                     database = get_database()
-                    
+
                     # Verify database is connected and functional
                     assert database is not None
                     assert database.database_url == f"sqlite:///{str(db_path)}"
-                    
+
                     # Verify we can query the database
                     count = database.get_paper_count()
                     assert count == 0  # Empty database
@@ -792,11 +795,11 @@ class TestWebUIDatabaseModes:
                 # Access database within app context
                 with app.app_context():
                     database = get_database()
-                    
+
                     # Verify database is connected and functional
                     assert database is not None
                     assert database.database_url == f"sqlite:///{str(db_path)}"
-                    
+
                     # Verify we can query the database
                     count = database.get_paper_count()
                     assert count == 0  # Empty database
@@ -821,7 +824,7 @@ class TestWebUIDatabaseModes:
                 session="Session 1",
                 poster_position="P1",
                 year=2025,
-                conference="Test"
+                conference="Test",
             )
             db.add_paper(paper)
 
@@ -834,7 +837,7 @@ class TestWebUIDatabaseModes:
                 mock_get_config.return_value = mock_config
 
                 response = client.get("/api/stats")
-                
+
                 assert response.status_code == 200
                 data = response.get_json()
                 assert "total_papers" in data
@@ -954,11 +957,11 @@ class TestWebUIRunServer:
                 mock_cfg.paper_db_path = "/some/path/test.db"
                 mock_cfg.embedding_db_path = "/some/path/chroma_db"
                 mock_config.return_value = mock_cfg
-                
+
                 # Mock Waitress serve with timeout
                 with patch("waitress.serve") as mock_serve:
                     mock_serve.side_effect = KeyboardInterrupt()  # Simulate server stop
-                    
+
                     with pytest.raises(KeyboardInterrupt):
                         run_server(host="127.0.0.1", port=5000, debug=False)
 
@@ -978,11 +981,11 @@ class TestWebUIRunServer:
                 mock_cfg.paper_db_path = "/some/path/test.db"
                 mock_cfg.embedding_db_path = "/some/path/chroma_db"
                 mock_config.return_value = mock_cfg
-                
+
                 # Mock Waitress serve with timeout (debug mode now works with Waitress)
                 with patch("waitress.serve") as mock_serve:
                     mock_serve.side_effect = KeyboardInterrupt()  # Simulate server stop
-                    
+
                     with pytest.raises(KeyboardInterrupt):
                         run_server(host="0.0.0.0", port=8080, debug=True)
 
@@ -997,7 +1000,7 @@ class TestWebUIRunServer:
     def test_run_server_database_not_found(self, capsys):
         """Test that run_server raises FileNotFoundError when database doesn't exist."""
         from abstracts_explorer.web_ui import run_server
-        
+
         # Set non-existent database path
         nonexistent_path = "/nonexistent/test.db"
         set_test_db(nonexistent_path)
@@ -1005,11 +1008,11 @@ class TestWebUIRunServer:
         with patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=False):
             with pytest.raises(FileNotFoundError) as exc_info:
                 run_server(host="127.0.0.1", port=5000, debug=False)
-            
+
             # Verify error message includes database filename (platform-independent check)
             # On Unix: "/nonexistent/test.db", on Windows: "D:\nonexistent\test.db"
             assert "test.db" in str(exc_info.value)
-        
+
         # Verify helpful error message was printed
         captured = capsys.readouterr()
         assert "Database not found" in captured.err
@@ -1023,7 +1026,7 @@ class TestConferencePluginMapping:
     def test_ml4ps_conference_name_maps_to_plugin(self):
         """Test that 'ML4PS@Neurips' conference name correctly maps to 'ml4ps' plugin."""
         from abstracts_explorer.plugins import get_plugin, list_plugins
-        
+
         # Get all plugins and build mapping
         plugins = list_plugins()
         conference_to_plugin = {}
@@ -1032,11 +1035,11 @@ class TestConferencePluginMapping:
             plug_name = plugin_info.get("name")
             if conf_name and plug_name:
                 conference_to_plugin[conf_name] = plug_name
-        
+
         # Verify ML4PS@Neurips maps to ml4ps
         assert "ML4PS@Neurips" in conference_to_plugin
         assert conference_to_plugin["ML4PS@Neurips"] == "ml4ps"
-        
+
         # Verify we can get the plugin
         plugin_name = conference_to_plugin["ML4PS@Neurips"]
         plugin = get_plugin(plugin_name)
@@ -1046,20 +1049,20 @@ class TestConferencePluginMapping:
     def test_all_conferences_map_to_plugins(self):
         """Test that all conference names can be mapped to valid plugins."""
         from abstracts_explorer.plugins import get_plugin, list_plugins
-        
+
         # Get all plugins
         plugins = list_plugins()
-        
+
         # Build mapping and verify each conference has a valid plugin
         for plugin_info in plugins:
             conf_name = plugin_info.get("conference_name")
             plug_name = plugin_info.get("name")
-            
+
             if conf_name and plug_name:
                 # Verify we can get the plugin
                 plugin = get_plugin(plug_name)
                 assert plugin is not None, f"Plugin '{plug_name}' for conference '{conf_name}' not found"
-                
+
                 # Verify conference name and plugin name match
                 assert plugin.conference_name == conf_name
 
@@ -1071,21 +1074,21 @@ class TestServerInitialization:
         """Test that run_server uses Waitress by default when available."""
         from abstracts_explorer.web_ui.app import run_server
         from abstracts_explorer.database import DatabaseManager
-        
+
         # Create a test database
         db_path = tmp_path / "test.db"
         set_test_db(db_path)
         db = DatabaseManager()
         with db:
             db.create_tables()
-        
+
         # Mock Waitress serve - need to patch the import inside the function
         with patch("waitress.serve") as mock_serve:
             mock_serve.side_effect = KeyboardInterrupt()  # Simulate Ctrl+C
-            
+
             with pytest.raises(KeyboardInterrupt):
                 run_server(host="127.0.0.1", port=5000, debug=False, dev=False)
-            
+
             # Verify Waitress was called
             mock_serve.assert_called_once()
             call_args = mock_serve.call_args
@@ -1096,28 +1099,25 @@ class TestServerInitialization:
         """Test that run_server uses Flask dev server when dev=True."""
         from abstracts_explorer.web_ui.app import run_server, app
         from abstracts_explorer.database import DatabaseManager
-        
+
         # Create a test database
         db_path = tmp_path / "test.db"
         set_test_db(db_path)
         db = DatabaseManager()
         with db:
             db.create_tables()
-        
+
         # Mock config to use our test database
         with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
-            mock_config.return_value = Mock(
-                database_url=f"sqlite:///{str(db_path)}",
-                embedding_db_path="chroma_db"
-            )
-            
+            mock_config.return_value = Mock(database_url=f"sqlite:///{str(db_path)}", embedding_db_path="chroma_db")
+
             # Mock app.run
             with patch.object(app, "run") as mock_run:
                 mock_run.side_effect = KeyboardInterrupt()  # Simulate Ctrl+C
-                
+
                 with pytest.raises(KeyboardInterrupt):
                     run_server(host="127.0.0.1", port=5000, debug=False, dev=True)
-                
+
                 # Verify Flask dev server was called
                 mock_run.assert_called_once_with(host="127.0.0.1", port=5000, debug=False)
 
@@ -1125,28 +1125,25 @@ class TestServerInitialization:
         """Test that run_server uses Waitress with debug enabled when debug=True."""
         from abstracts_explorer.web_ui.app import run_server, app
         from abstracts_explorer.database import DatabaseManager
-        
+
         # Create a test database
         db_path = tmp_path / "test.db"
         set_test_db(db_path)
         db = DatabaseManager()
         with db:
             db.create_tables()
-        
+
         # Mock config to use our test database
         with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
-            mock_config.return_value = Mock(
-                database_url=f"sqlite:///{str(db_path)}",
-                embedding_db_path="chroma_db"
-            )
-            
+            mock_config.return_value = Mock(database_url=f"sqlite:///{str(db_path)}", embedding_db_path="chroma_db")
+
             # Mock Waitress serve (debug mode now works with Waitress)
             with patch("waitress.serve") as mock_serve:
                 mock_serve.side_effect = KeyboardInterrupt()  # Simulate Ctrl+C
-                
+
                 with pytest.raises(KeyboardInterrupt):
                     run_server(host="127.0.0.1", port=5000, debug=True, dev=False)
-                
+
                 # Verify Waitress was called (debug mode works with production server)
                 mock_serve.assert_called_once()
                 call_args = mock_serve.call_args
@@ -1159,81 +1156,149 @@ class TestServerInitialization:
         """Test that run_server falls back to Flask when Waitress is not available."""
         from abstracts_explorer.web_ui.app import run_server, app
         from abstracts_explorer.database import DatabaseManager
-        
+
         # Create a test database
         db_path = tmp_path / "test.db"
         set_test_db(db_path)
         db = DatabaseManager()
         with db:
             db.create_tables()
-        
+
         # Mock config to use our test database
         with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
-            mock_config.return_value = Mock(
-                database_url=f"sqlite:///{str(db_path)}",
-                embedding_db_path="chroma_db"
-            )
-            
+            mock_config.return_value = Mock(database_url=f"sqlite:///{str(db_path)}", embedding_db_path="chroma_db")
+
             # Mock waitress import to fail
             import builtins
+
             real_import = builtins.__import__
-            
+
             def mock_import(name, *args, **kwargs):
                 if name == "waitress":
                     raise ImportError("Waitress not installed")
                 return real_import(name, *args, **kwargs)
-            
+
             # Mock app.run
             with patch.object(app, "run") as mock_run:
                 mock_run.side_effect = KeyboardInterrupt()
-                
+
                 with patch("builtins.__import__", side_effect=mock_import):
                     with pytest.raises(KeyboardInterrupt):
                         run_server(host="127.0.0.1", port=5000, debug=False, dev=False)
-                
+
                 # Verify Flask was called as fallback
                 mock_run.assert_called_once_with(host="127.0.0.1", port=5000, debug=False)
 
     def test_run_server_missing_database(self, tmp_path):
         """Test that run_server raises FileNotFoundError when database is missing."""
         from abstracts_explorer.web_ui.app import run_server
-        
+
         # Use a non-existent database path
         db_path = tmp_path / "nonexistent.db"
         set_test_db(db_path)
-        
+
         # Should raise FileNotFoundError
         with pytest.raises(FileNotFoundError, match="Database not found"):
             run_server(host="127.0.0.1", port=5000)
 
+    def test_run_server_default_threads(self, tmp_path):
+        """Test that run_server passes default threads=6 to waitress.serve."""
+        from abstracts_explorer.web_ui.app import run_server
+        from abstracts_explorer.database import DatabaseManager
 
-class TestClusteringEndpoints:
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
+        db = DatabaseManager()
+        with db:
+            db.create_tables()
+
+        with patch("waitress.serve") as mock_serve:
+            mock_serve.side_effect = KeyboardInterrupt()
+
+            with pytest.raises(KeyboardInterrupt):
+                run_server(host="127.0.0.1", port=5000)
+
+            mock_serve.assert_called_once()
+            call_args = mock_serve.call_args
+            assert call_args[1]["threads"] == 6
+
+    def test_run_server_custom_threads(self, tmp_path):
+        """Test that run_server forwards a custom threads value to waitress.serve."""
+        from abstracts_explorer.web_ui.app import run_server
+        from abstracts_explorer.database import DatabaseManager
+
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
+        db = DatabaseManager()
+        with db:
+            db.create_tables()
+
+        with patch("waitress.serve") as mock_serve:
+            mock_serve.side_effect = KeyboardInterrupt()
+
+            with pytest.raises(KeyboardInterrupt):
+                run_server(host="127.0.0.1", port=5000, threads=12)
+
+            mock_serve.assert_called_once()
+            call_args = mock_serve.call_args
+            assert call_args[1]["threads"] == 12
+
+    def test_run_server_invalid_threads_raises_value_error(self, tmp_path):
+        """Test that run_server raises ValueError when threads < 1."""
+        from abstracts_explorer.web_ui.app import run_server
+
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
+
+        with pytest.raises(ValueError, match="threads must be >= 1"):
+            run_server(host="127.0.0.1", port=5000, threads=0)
+
+        with pytest.raises(ValueError, match="threads must be >= 1"):
+            run_server(host="127.0.0.1", port=5000, threads=-5)
+
     """Test clustering endpoints and caching functionality."""
 
     def test_clustering_colors_defined_in_javascript(self):
         """Test that the clustering visualization JavaScript has explicit color definitions."""
         # Read the JavaScript file
         # Check constants file for PLOTLY_COLORS
-        constants_path = Path(__file__).parent.parent / "src" / "abstracts_explorer" / "web_ui" / "static" / "modules" / "utils" / "constants.js"
-        with open(constants_path, 'r', encoding='utf-8') as f:
+        constants_path = (
+            Path(__file__).parent.parent
+            / "src"
+            / "abstracts_explorer"
+            / "web_ui"
+            / "static"
+            / "modules"
+            / "utils"
+            / "constants.js"
+        )
+        with open(constants_path, "r", encoding="utf-8") as f:
             constants_content = f.read()
-        
+
         # Check that Plotly colors are defined (using constant naming convention)
         assert "PLOTLY_COLORS = [" in constants_content, "Plotly colors should be explicitly defined in constants.js"
-        
+
         # Check clustering module for color assignment
-        clustering_path = Path(__file__).parent.parent / "src" / "abstracts_explorer" / "web_ui" / "static" / "modules" / "clustering.js"
-        with open(clustering_path, 'r', encoding='utf-8') as f:
+        clustering_path = (
+            Path(__file__).parent.parent
+            / "src"
+            / "abstracts_explorer"
+            / "web_ui"
+            / "static"
+            / "modules"
+            / "clustering.js"
+        )
+        with open(clustering_path, "r", encoding="utf-8") as f:
             clustering_content = f.read()
-        
+
         # Check that colors are explicitly assigned to markers
         assert "color: clusterColor" in clustering_content, "Cluster color should be explicitly assigned to markers"
-        
+
         # Verify the Plotly Dark24 and Light24 color palettes are present
         # Check a few representative colors from both palettes
-        dark24_sample_colors = ['#2E91E5', '#E15F99', '#1CA71C', '#FB0D0D']
-        light24_sample_colors = ['#83BCFF', '#FFC3E0', '#8DFFB7', '#FF8F8F']
-        
+        dark24_sample_colors = ["#2E91E5", "#E15F99", "#1CA71C", "#FB0D0D"]
+        light24_sample_colors = ["#83BCFF", "#FFC3E0", "#8DFFB7", "#FF8F8F"]
+
         for color in dark24_sample_colors + light24_sample_colors:
             assert color in constants_content, f"Plotly color {color} should be in the constants.js"
 
@@ -1242,7 +1307,7 @@ class TestClusteringEndpoints:
         from abstracts_explorer.web_ui.app import app, get_database
         from abstracts_explorer.database import DatabaseManager
         from abstracts_explorer.plugin import LightweightPaper
-        
+
         # Create a database with only old tables (simulate migration scenario)
         db_path = tmp_path / "test.db"
         set_test_db(db_path)
@@ -1257,19 +1322,17 @@ class TestClusteringEndpoints:
                 session="Session 1",
                 poster_position="P1",
                 year=2025,
-                conference="Test"
+                conference="Test",
             )
             db.add_paper(paper)
-        
+
         # Now test that get_database calls create_tables
         with app.test_client():
             with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
                 mock_config.return_value = Mock(
-                    database_url=f"sqlite:///{str(db_path)}",
-                    embedding_db_path="chroma_db",
-                    collection_name="papers"
+                    database_url=f"sqlite:///{str(db_path)}", embedding_db_path="chroma_db", collection_name="papers"
                 )
-                
+
                 # Mock create_tables to verify it's called
                 with patch.object(DatabaseManager, "create_tables") as mock_create_tables:
                     # Access an endpoint that uses get_database
@@ -1281,7 +1344,7 @@ class TestClusteringEndpoints:
     def test_compute_clusters_returns_error_without_embeddings(self):
         """Test that compute_clusters returns error when embeddings manager fails."""
         from abstracts_explorer.web_ui.app import app
-        
+
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
                 with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
@@ -1291,12 +1354,11 @@ class TestClusteringEndpoints:
                         mock_em = Mock()
                         mock_em.collection = None
                         mock_get_em.return_value = mock_em
-                        
+
                         response = client.post(
-                            "/api/clusters/compute",
-                            json={"reduction_method": "pca", "n_components": 2}
+                            "/api/clusters/compute", json={"reduction_method": "pca", "n_components": 2}
                         )
-                        
+
                         assert response.status_code == 500
                         data = response.get_json()
                         assert "error" in data
@@ -1304,14 +1366,14 @@ class TestClusteringEndpoints:
     def test_compute_clusters_uses_cache_when_available(self, tmp_path):
         """Test that compute_clusters uses cached results when available."""
         from abstracts_explorer.web_ui.app import app
-        
+
         # Note: JSON serialization converts int keys to strings
         cached_results = {
             "points": [{"id": "test", "x": 1.0, "y": 2.0, "cluster": 0}],
             "statistics": {"n_clusters": 1, "total_papers": 1},
-            "cluster_centers": {"0": {"x": 1.0, "y": 2.0}}
+            "cluster_centers": {"0": {"x": 1.0, "y": 2.0}},
         }
-        
+
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
@@ -1320,17 +1382,17 @@ class TestClusteringEndpoints:
                         mock_db = Mock()
                         mock_db.get_clustering_cache.return_value = cached_results
                         mock_get_db.return_value = mock_db
-                        
+
                         response = client.post(
                             "/api/clusters/compute",
                             json={
                                 "reduction_method": "pca",
                                 "n_components": 2,
                                 "clustering_method": "kmeans",
-                                "n_clusters": 5
-                            }
+                                "n_clusters": 5,
+                            },
                         )
-                        
+
                         assert response.status_code == 200
                         data = response.get_json()
                         assert data == cached_results
@@ -1340,7 +1402,7 @@ class TestClusteringEndpoints:
     def test_compute_clusters_bypasses_cache_with_force_flag(self, tmp_path):
         """Test that compute_clusters bypasses cache when force=True."""
         from abstracts_explorer.web_ui.app import app
-        
+
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
@@ -1350,7 +1412,7 @@ class TestClusteringEndpoints:
                             mock_db = Mock()
                             mock_db.get_clustering_cache.return_value = {"cached": "data"}
                             mock_get_db.return_value = mock_db
-                            
+
                             # Setup mock clustering manager
                             mock_cm = Mock()
                             mock_cm.load_embeddings.return_value = 10
@@ -1359,14 +1421,14 @@ class TestClusteringEndpoints:
                             mock_cm.get_clustering_results.return_value = {
                                 "points": [],
                                 "statistics": {},
-                                "cluster_centers": {}
+                                "cluster_centers": {},
                             }
                             mock_cm_class.return_value = mock_cm
-                            
+
                             mock_em = Mock()
                             mock_em.get_collection_stats.return_value = {"count": 500}
                             mock_get_em.return_value = mock_em
-                            
+
                             response = client.post(
                                 "/api/clusters/compute",
                                 json={
@@ -1374,10 +1436,10 @@ class TestClusteringEndpoints:
                                     "n_components": 2,
                                     "clustering_method": "kmeans",
                                     "n_clusters": 5,
-                                    "force": True
-                                }
+                                    "force": True,
+                                },
                             )
-                            
+
                             assert response.status_code == 200
                             # Verify cache was NOT queried (force flag bypasses cache)
                             mock_db.get_clustering_cache.assert_not_called()
@@ -1387,7 +1449,7 @@ class TestClusteringEndpoints:
     def test_compute_clusters_bypasses_cache_with_limit(self):
         """Test that compute_clusters bypasses cache when limit is specified."""
         from abstracts_explorer.web_ui.app import app
-        
+
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
@@ -1396,7 +1458,7 @@ class TestClusteringEndpoints:
                             mock_config.return_value = Mock(embedding_model="test-model")
                             mock_db = Mock()
                             mock_get_db.return_value = mock_db
-                            
+
                             # Setup mock clustering manager
                             mock_cm = Mock()
                             mock_cm.load_embeddings.return_value = 5
@@ -1405,14 +1467,14 @@ class TestClusteringEndpoints:
                             mock_cm.get_clustering_results.return_value = {
                                 "points": [],
                                 "statistics": {},
-                                "cluster_centers": {}
+                                "cluster_centers": {},
                             }
                             mock_cm_class.return_value = mock_cm
-                            
+
                             mock_em = Mock()
                             mock_em.get_collection_stats.return_value = {"count": 500}
                             mock_get_em.return_value = mock_em
-                            
+
                             response = client.post(
                                 "/api/clusters/compute",
                                 json={
@@ -1420,10 +1482,10 @@ class TestClusteringEndpoints:
                                     "n_components": 2,
                                     "clustering_method": "kmeans",
                                     "n_clusters": 5,
-                                    "limit": 100
-                                }
+                                    "limit": 100,
+                                },
                             )
-                            
+
                             assert response.status_code == 200
                             # Verify cache was NOT queried (limit bypasses cache)
                             mock_db.get_clustering_cache.assert_not_called()
@@ -1433,13 +1495,13 @@ class TestClusteringEndpoints:
     def test_compute_clusters_saves_to_cache_after_computing(self):
         """Test that compute_clusters saves results to cache after computing."""
         from abstracts_explorer.web_ui.app import app
-        
+
         computed_results = {
             "points": [{"id": "test", "x": 1.0, "y": 2.0, "cluster": 0}],
             "statistics": {"n_clusters": 1, "total_papers": 1},
-            "cluster_centers": {0: {"x": 1.0, "y": 2.0}}
+            "cluster_centers": {0: {"x": 1.0, "y": 2.0}},
         }
-        
+
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
@@ -1449,7 +1511,7 @@ class TestClusteringEndpoints:
                             mock_db = Mock()
                             mock_db.get_clustering_cache.return_value = None  # Cache miss
                             mock_get_db.return_value = mock_db
-                            
+
                             # Setup mock clustering manager
                             mock_cm = Mock()
                             mock_cm.load_embeddings.return_value = 10
@@ -1459,21 +1521,21 @@ class TestClusteringEndpoints:
                             mock_cm.generate_cluster_labels.return_value = None
                             mock_cm.get_clustering_results.return_value = computed_results
                             mock_cm_class.return_value = mock_cm
-                            
+
                             mock_em = Mock()
                             mock_em.get_collection_stats.return_value = {"count": 500}
                             mock_get_em.return_value = mock_em
-                            
+
                             response = client.post(
                                 "/api/clusters/compute",
                                 json={
                                     "reduction_method": "pca",
                                     "n_components": 2,
                                     "clustering_method": "kmeans",
-                                    "n_clusters": 5
-                                }
+                                    "n_clusters": 5,
+                                },
                             )
-                            
+
                             assert response.status_code == 200
                             # Verify cache was saved
                             mock_db.save_clustering_cache.assert_called_once()
@@ -1485,13 +1547,9 @@ class TestClusteringEndpoints:
     def test_compute_clusters_handles_cache_save_failure_gracefully(self):
         """Test that compute_clusters continues even if cache save fails."""
         from abstracts_explorer.web_ui.app import app
-        
-        computed_results = {
-            "points": [],
-            "statistics": {},
-            "cluster_centers": {}
-        }
-        
+
+        computed_results = {"points": [], "statistics": {}, "cluster_centers": {}}
+
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
@@ -1502,7 +1560,7 @@ class TestClusteringEndpoints:
                             mock_db.get_clustering_cache.return_value = None
                             mock_db.save_clustering_cache.side_effect = Exception("Cache save failed")
                             mock_get_db.return_value = mock_db
-                            
+
                             # Setup mock clustering manager
                             mock_cm = Mock()
                             mock_cm.load_embeddings.return_value = 10
@@ -1512,21 +1570,21 @@ class TestClusteringEndpoints:
                             mock_cm.generate_cluster_labels.return_value = None
                             mock_cm.get_clustering_results.return_value = computed_results
                             mock_cm_class.return_value = mock_cm
-                            
+
                             mock_em = Mock()
                             mock_em.get_collection_stats.return_value = {"count": 500}
                             mock_get_em.return_value = mock_em
-                            
+
                             response = client.post(
                                 "/api/clusters/compute",
                                 json={
                                     "reduction_method": "pca",
                                     "n_components": 2,
                                     "clustering_method": "kmeans",
-                                    "n_clusters": 5
-                                }
+                                    "n_clusters": 5,
+                                },
                             )
-                            
+
                             # Should still return success despite cache save failure
                             assert response.status_code == 200
                             data = response.get_json()
@@ -1535,197 +1593,188 @@ class TestClusteringEndpoints:
     def test_get_default_cluster_count(self):
         """Test getting default cluster count based on embeddings."""
         from abstracts_explorer.web_ui.app import app
-        
+
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
                 mock_em = Mock()
                 mock_em.get_collection_stats.return_value = {"count": 250}
                 mock_get_em.return_value = mock_em
-                
+
                 response = client.get("/api/clusters/default-count")
-                
+
                 assert response.status_code == 200
                 data = response.get_json()
-                
+
                 assert "n_clusters" in data
                 assert "n_papers" in data
                 assert data["n_papers"] == 250
                 # For 250 papers: max(2, min(50, 250 // 100)) = max(2, min(500, 2)) = max(2, 2) = 2
                 assert data["n_clusters"] == 2
-    
+
     def test_get_default_cluster_count_large_dataset(self):
         """Test default cluster count with large dataset."""
         from abstracts_explorer.web_ui.app import app
-        
+
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
                 mock_em = Mock()
                 mock_em.get_collection_stats.return_value = {"count": 100000}
                 mock_get_em.return_value = mock_em
-                
+
                 response = client.get("/api/clusters/default-count")
-                
+
                 assert response.status_code == 200
                 data = response.get_json()
-                
+
                 assert data["n_papers"] == 100000
                 # For 100000 papers: max(2, min(50, 100000 // 100)) = max(2, min(1000, 500)) = 500
                 assert data["n_clusters"] == 500
-    
+
     def test_get_default_cluster_count_error(self):
         """Test error handling when getting default cluster count."""
         from abstracts_explorer.web_ui.app import app
-        
+
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_embeddings_manager", side_effect=Exception("Test error")):
                 response = client.get("/api/clusters/default-count")
-                
+
                 assert response.status_code == 500
                 data = response.get_json()
                 assert "error" in data
-    
+
     def test_precalculate_clusters_starts_background_task(self):
         """Test that precalculate endpoint starts background clustering."""
         from abstracts_explorer.web_ui.app import app
-        
+
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em, \
-                 patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db, \
-                 patch("abstracts_explorer.web_ui.app.get_config") as mock_config, \
-                 patch("abstracts_explorer.clustering.ClusteringManager") as MockCM:
-                
+            with (
+                patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em,
+                patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db,
+                patch("abstracts_explorer.web_ui.app.get_config") as mock_config,
+                patch("abstracts_explorer.clustering.ClusteringManager") as MockCM,
+            ):
+
                 # Setup mocks
                 mock_em = Mock()
                 mock_em.get_collection_stats.return_value = {"count": 250}
                 mock_get_em.return_value = mock_em
-                
+
                 mock_db = Mock()
                 mock_db.get_clustering_cache.return_value = None  # No cache exists
                 mock_get_db.return_value = mock_db
-                
+
                 mock_cfg = Mock()
                 mock_cfg.embedding_model = "test-model"
                 mock_config.return_value = mock_cfg
-                
+
                 mock_cm = Mock()
                 mock_cm.get_clustering_results.return_value = {
                     "points": [],
-                    "statistics": {"n_clusters": 5, "total_papers": 250}
+                    "statistics": {"n_clusters": 5, "total_papers": 250},
                 }
                 MockCM.return_value = mock_cm
-                
-                response = client.post(
-                    "/api/clusters/precalculate",
-                    json={"clustering_method": "kmeans"}
-                )
-                
+
+                response = client.post("/api/clusters/precalculate", json={"clustering_method": "kmeans"})
+
                 assert response.status_code == 200
                 data = response.get_json()
-                
+
                 assert data["status"] == "started"
                 assert "message" in data
                 assert "n_clusters" in data
-    
+
     def test_precalculate_clusters_cache_exists(self):
         """Test precalculate when cache already exists."""
         from abstracts_explorer.web_ui.app import app
-        
+
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em, \
-                 patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db, \
-                 patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
-                
+            with (
+                patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em,
+                patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db,
+                patch("abstracts_explorer.web_ui.app.get_config") as mock_config,
+            ):
+
                 mock_em = Mock()
                 mock_em.get_collection_stats.return_value = {"count": 250}
                 mock_get_em.return_value = mock_em
-                
+
                 mock_db = Mock()
                 mock_db.get_clustering_cache.return_value = {
                     "points": [],
-                    "statistics": {"n_clusters": 5}
+                    "statistics": {"n_clusters": 5},
                 }  # Cache exists
                 mock_get_db.return_value = mock_db
-                
+
                 mock_cfg = Mock()
                 mock_cfg.embedding_model = "test-model"
                 mock_config.return_value = mock_cfg
-                
-                response = client.post(
-                    "/api/clusters/precalculate",
-                    json={}
-                )
-                
+
+                response = client.post("/api/clusters/precalculate", json={})
+
                 assert response.status_code == 200
                 data = response.get_json()
-                
+
                 assert data["status"] == "cache_exists"
                 assert "message" in data
-    
+
     def test_precalculate_clusters_with_custom_n_clusters(self):
         """Test precalculate with custom n_clusters value."""
         from abstracts_explorer.web_ui.app import app
-        
+
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em, \
-                 patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db, \
-                 patch("abstracts_explorer.web_ui.app.get_config") as mock_config, \
-                 patch("abstracts_explorer.clustering.ClusteringManager") as MockCM:
-                
+            with (
+                patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em,
+                patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db,
+                patch("abstracts_explorer.web_ui.app.get_config") as mock_config,
+                patch("abstracts_explorer.clustering.ClusteringManager") as MockCM,
+            ):
+
                 mock_em = Mock()
                 mock_get_em.return_value = mock_em
-                
+
                 mock_db = Mock()
                 mock_db.get_clustering_cache.return_value = None
                 mock_get_db.return_value = mock_db
-                
+
                 mock_cfg = Mock()
                 mock_cfg.embedding_model = "test-model"
                 mock_config.return_value = mock_cfg
-                
+
                 mock_cm = Mock()
-                mock_cm.get_clustering_results.return_value = {
-                    "points": [],
-                    "statistics": {"n_clusters": 15}
-                }
+                mock_cm.get_clustering_results.return_value = {"points": [], "statistics": {"n_clusters": 15}}
                 MockCM.return_value = mock_cm
-                
-                response = client.post(
-                    "/api/clusters/precalculate",
-                    json={"n_clusters": 15}
-                )
-                
+
+                response = client.post("/api/clusters/precalculate", json={"n_clusters": 15})
+
                 assert response.status_code == 200
                 data = response.get_json()
-                
+
                 assert data["status"] == "started"
                 assert data["n_clusters"] == 15
-    
+
     def test_precalculate_clusters_error_handling(self):
         """Test error handling in precalculate endpoint."""
         from abstracts_explorer.web_ui.app import app
-        
+
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_embeddings_manager", side_effect=Exception("Test error")):
-                response = client.post(
-                    "/api/clusters/precalculate",
-                    json={}
-                )
-                
+                response = client.post("/api/clusters/precalculate", json={})
+
                 assert response.status_code == 500
                 data = response.get_json()
                 assert "error" in data
-    
+
     def test_search_custom_cluster_success(self):
         """Test successful custom cluster search."""
         from abstracts_explorer.web_ui.app import app
-        
+
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
                 with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                     # Mock embeddings manager
                     mock_em = Mock()
                     mock_query_emb = [0.1] * 100  # Mock 100-dim embedding
-                    
+
                     # Mock the find_papers_within_distance method directly
                     mock_em.find_papers_within_distance.return_value = {
                         "query": "Uncertainty quantification",
@@ -1738,7 +1787,7 @@ class TestClusteringEndpoints:
                                 "abstract": "Abstract for paper1",
                                 "year": 2025,
                                 "authors": ["Author 1"],
-                                "distance": 0.5
+                                "distance": 0.5,
                             },
                             {
                                 "uid": "paper2",
@@ -1746,125 +1795,114 @@ class TestClusteringEndpoints:
                                 "abstract": "Abstract for paper2",
                                 "year": 2025,
                                 "authors": ["Author 2"],
-                                "distance": 1.0
-                            }
+                                "distance": 1.0,
+                            },
                         ],
-                        "count": 2
+                        "count": 2,
                     }
-                    
+
                     mock_get_em.return_value = mock_em
-                    
+
                     # Mock database
                     mock_db = Mock()
                     mock_get_db.return_value = mock_db
-                    
+
                     response = client.post(
-                        "/api/clusters/search",
-                        json={"query": "Uncertainty quantification", "distance": 150}
+                        "/api/clusters/search", json={"query": "Uncertainty quantification", "distance": 150}
                     )
-                    
+
                     assert response.status_code == 200
                     data = response.get_json()
-                    
+
                     assert data["query"] == "Uncertainty quantification"
                     assert data["distance"] == 150
                     assert "query_embedding" in data
                     assert "papers" in data
                     assert data["count"] == 2
-                    
+
                     # Check papers are sorted by distance
                     if len(data["papers"]) > 1:
                         for i in range(len(data["papers"]) - 1):
                             assert data["papers"][i]["distance"] <= data["papers"][i + 1]["distance"]
-    
+
     def test_search_custom_cluster_missing_query(self):
         """Test custom cluster search with missing query parameter."""
         from abstracts_explorer.web_ui.app import app
-        
+
         with app.test_client() as client:
-            response = client.post(
-                "/api/clusters/search",
-                json={"distance": 150}  # Missing query
-            )
-            
+            response = client.post("/api/clusters/search", json={"distance": 150})  # Missing query
+
             assert response.status_code == 400
             data = response.get_json()
             assert "error" in data
             assert "query" in data["error"].lower()
-    
+
     def test_search_custom_cluster_default_distance(self):
         """Test custom cluster search uses default distance if not provided."""
         from abstracts_explorer.web_ui.app import app
-        
+
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
                 with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                     # Mock embeddings manager
                     mock_em = Mock()
-                    
+
                     # Mock find_papers_within_distance to return result with default distance
                     mock_em.find_papers_within_distance.return_value = {
                         "query": "Test query",
                         "query_embedding": [0.1] * 100,
                         "distance": 1.1,
                         "papers": [],
-                        "count": 0
+                        "count": 0,
                     }
-                    
+
                     mock_get_em.return_value = mock_em
-                    
+
                     mock_db = Mock()
                     mock_get_db.return_value = mock_db
-                    
+
                     response = client.post(
-                        "/api/clusters/search",
-                        json={"query": "Test query"}  # No distance specified
+                        "/api/clusters/search", json={"query": "Test query"}  # No distance specified
                     )
-                    
+
                     assert response.status_code == 200
                     data = response.get_json()
                     assert data["distance"] == 1.1  # New default value
                     assert data["query"] == "Test query"
-    
+
     def test_search_custom_cluster_no_embeddings(self):
         """Test custom cluster search when no embeddings exist."""
         from abstracts_explorer.web_ui.app import app
         from abstracts_explorer.embeddings import EmbeddingsError
-        
+
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
                 with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                     mock_em = Mock()
-                    
+
                     # Mock find_papers_within_distance to raise EmbeddingsError
                     mock_em.find_papers_within_distance.side_effect = EmbeddingsError("No papers in collection")
-                    
+
                     mock_get_em.return_value = mock_em
-                    
+
                     mock_db = Mock()
                     mock_get_db.return_value = mock_db
-                    
-                    response = client.post(
-                        "/api/clusters/search",
-                        json={"query": "Test query", "distance": 100}
-                    )
-                    
+
+                    response = client.post("/api/clusters/search", json={"query": "Test query", "distance": 100})
+
                     # Returns 500 since EmbeddingsError is raised and caught as general exception
                     assert response.status_code == 500
                     data = response.get_json()
                     assert "error" in data
-    
+
     def test_search_custom_cluster_error_handling(self):
         """Test error handling in custom cluster search."""
         from abstracts_explorer.web_ui.app import app
-        
+
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_embeddings_manager", side_effect=Exception("Test error")):
-                response = client.post(
-                    "/api/clusters/search",
-                    json={"query": "Test query", "distance": 100}
-                )
-                
+                response = client.post("/api/clusters/search", json={"query": "Test query", "distance": 100})
+
                 assert response.status_code == 500
                 data = response.get_json()
                 assert "error" in data
@@ -1877,15 +1915,15 @@ class TestDataDonationEndpoint:
         """Test successful data donation."""
         from abstracts_explorer.web_ui.app import app
         from abstracts_explorer.plugin import LightweightPaper
-        
+
         # Create a real test database
         db_path = tmp_path / "test_donate.db"
         set_test_db(str(db_path))
-        
+
         db = DatabaseManager()
         with db:
             db.create_tables()
-            
+
             # Add a test paper using LightweightPaper
             paper = LightweightPaper(
                 title="Test Paper 1",
@@ -1894,32 +1932,28 @@ class TestDataDonationEndpoint:
                 session="Test Session",
                 poster_position="P1",
                 year=2025,
-                conference="NeurIPS"
+                conference="NeurIPS",
             )
             db.add_papers([paper])
-        
+
         # Get the actual UID that was generated
         with db:
             all_papers = db.query("SELECT uid FROM papers LIMIT 1")
             paper_uid = all_papers[0]["uid"]
-        
-        paper_priorities = {
-            paper_uid: {"priority": 5, "searchTerm": "machine learning"}
-        }
-        
+
+        paper_priorities = {paper_uid: {"priority": 5, "searchTerm": "machine learning"}}
+
         with app.test_client() as client:
             response = client.post(
-                "/api/donate-data",
-                json={"paperPriorities": paper_priorities},
-                content_type="application/json"
+                "/api/donate-data", json={"paperPriorities": paper_priorities}, content_type="application/json"
             )
-            
+
             assert response.status_code == 200
             data = response.get_json()
             assert data["success"] is True
             assert data["count"] == 1
             assert "Successfully donated" in data["message"]
-            
+
             # Verify the data was actually stored by creating a fresh database manager
             db_verify = DatabaseManager()
             with db_verify:
@@ -1932,12 +1966,8 @@ class TestDataDonationEndpoint:
 
     def test_donate_data_no_data(self, client):
         """Test data donation with no data provided."""
-        response = client.post(
-            "/api/donate-data",
-            json={},
-            content_type="application/json"
-        )
-        
+        response = client.post("/api/donate-data", json={}, content_type="application/json")
+
         assert response.status_code == 400
         data = response.get_json()
         assert "error" in data
@@ -1945,12 +1975,8 @@ class TestDataDonationEndpoint:
 
     def test_donate_data_empty_priorities(self, client):
         """Test data donation with empty priorities."""
-        response = client.post(
-            "/api/donate-data",
-            json={"paperPriorities": {}},
-            content_type="application/json"
-        )
-        
+        response = client.post("/api/donate-data", json={"paperPriorities": {}}, content_type="application/json")
+
         assert response.status_code == 400
         data = response.get_json()
         assert "error" in data
@@ -1958,28 +1984,23 @@ class TestDataDonationEndpoint:
     def test_donate_data_invalid_format(self, tmp_path):
         """Test data donation with invalid integer format (should be rejected)."""
         from abstracts_explorer.web_ui.app import app
-        
+
         # Create a real test database
         db_path = tmp_path / "test_donate_invalid.db"
         set_test_db(str(db_path))
-        
+
         db = DatabaseManager()
         with db:
             db.create_tables()
-        
+
         # Old format: paper_id -> priority (integer) - should now be rejected
-        paper_priorities = {
-            "test1": 5,
-            "test2": 3
-        }
-        
+        paper_priorities = {"test1": 5, "test2": 3}
+
         with app.test_client() as client:
             response = client.post(
-                "/api/donate-data",
-                json={"paperPriorities": paper_priorities},
-                content_type="application/json"
+                "/api/donate-data", json={"paperPriorities": paper_priorities}, content_type="application/json"
             )
-            
+
             # Should return 400 error for invalid format
             assert response.status_code == 400
             data = response.get_json()
@@ -1989,20 +2010,20 @@ class TestDataDonationEndpoint:
     def test_donate_data_database_error(self, client):
         """Test data donation with database error."""
         from abstracts_explorer.web_ui.app import app
-        
+
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 mock_db = Mock()
                 # Simulate engine creation failure
                 mock_db.engine.side_effect = Exception("Database connection error")
                 mock_get_db.return_value = mock_db
-                
+
                 response = client.post(
                     "/api/donate-data",
                     json={"paperPriorities": {"test1": {"priority": 5, "searchTerm": "test"}}},
-                    content_type="application/json"
+                    content_type="application/json",
                 )
-                
+
                 # Should catch the exception and return 500
                 assert response.status_code == 500
                 data = response.get_json()
@@ -2017,28 +2038,24 @@ class TestValidationDataModel:
         from abstracts_explorer.db_models import ValidationData
         from abstracts_explorer.database import DatabaseManager
         from sqlalchemy.orm import Session
-        
+
         # Create test database
         db_path = tmp_path / "test_validation.db"
         set_test_db(str(db_path))
         db = DatabaseManager()
-        
+
         with db:
             db.create_tables()
-            
+
             # Create session
             session = Session(db.engine)
-            
+
             try:
                 # Create validation data entry
-                validation_entry = ValidationData(
-                    paper_uid="test123",
-                    priority=5,
-                    search_term="machine learning"
-                )
+                validation_entry = ValidationData(paper_uid="test123", priority=5, search_term="machine learning")
                 session.add(validation_entry)
                 session.commit()
-                
+
                 # Query back
                 result = session.query(ValidationData).filter_by(paper_uid="test123").first()
                 assert result is not None
@@ -2046,17 +2063,17 @@ class TestValidationDataModel:
                 assert result.priority == 5
                 assert result.search_term == "machine learning"
                 assert result.donated_at is not None
-                
+
             finally:
                 session.close()
 
     def test_validation_data_repr(self):
         """Test ValidationData string representation."""
         from abstracts_explorer.db_models import ValidationData
-        
+
         entry = ValidationData(paper_uid="test123", priority=5, search_term="test")
         entry.id = 1
-        
+
         repr_str = repr(entry)
         assert "ValidationData" in repr_str
         assert "test123" in repr_str
