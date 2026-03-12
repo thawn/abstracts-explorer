@@ -44,7 +44,7 @@ MCP_TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {
+                    "topic": {
                         "type": "string",
                         "description": "The topic or research question to analyze (e.g., 'Uncertainty quantification')"
                     },
@@ -67,7 +67,7 @@ MCP_TOOLS_SCHEMA = [
                         "description": "Name of ChromaDB collection (optional)"
                     }
                 },
-                "required": ["query"]
+                "required": ["topic"]
             }
         }
     },
@@ -341,7 +341,7 @@ def format_tool_result_for_llm(tool_name: str, result: str) -> str:
 
 def _format_topic_relevance_result(data: Dict[str, Any]) -> str:
     """Format topic relevance result for LLM."""
-    lines = [f"Topic Relevance Analysis for '{data.get('query', 'unknown')}':\n"]
+    lines = [f"Topic Relevance Analysis for '{data.get('topic', 'unknown')}':\n"]
     
     total = data.get("total_papers", 0)
     distance = data.get("distance_threshold", 0)
@@ -378,7 +378,7 @@ def _format_topic_relevance_result(data: Dict[str, Any]) -> str:
         if closest is not None:
             lines.append(f"\nClosest paper distance: {closest:.3f}")
     else:
-        lines.append("\nNo papers found matching the query within the distance threshold.")
+        lines.append("\nNo papers found matching the topic within the distance threshold.")
     
     return "\n".join(lines)
 

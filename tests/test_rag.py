@@ -1262,6 +1262,68 @@ class TestRAGChatMCPToolsE2E:
                 # Verify final response was returned
                 assert "GPT-4" in result["response"] or "recent" in result["response"].lower()
 
+    def test_mocked_query_triggers_analyze_topic_relevance(self, mock_embeddings_manager, mock_database):
+        """Test that a query about topic popularity triggers analyze_topic_relevance with 'topic' argument (mocked).
+        
+        This test specifically catches the parameter name mismatch where the model passes 'topic'
+        but the function was previously expecting 'query', causing:
+        'analyze_topic_relevance() got an unexpected keyword argument 'topic''
+        """
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
+            with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
+                mock_client = Mock()
+                mock_openai_class.return_value = mock_client
+                
+                # Mock routing response: model uses 'topic' (not 'query') as the argument name
+                mock_route_response = Mock()
+                mock_route_choice = Mock()
+                mock_route_message = Mock()
+                mock_route_message.content = '{"name": "analyze_topic_relevance", "arguments": {"topic": "uncertainty quantification", "years": [2025]}}'
+                mock_route_choice.message = mock_route_message
+                mock_route_response.choices = [mock_route_choice]
+                
+                # Mock tool execution result
+                mock_execute.return_value = json.dumps({
+                    "topic": "uncertainty quantification",
+                    "total_papers": 42,
+                    "relevance_score": 85.0,
+                    "distance_threshold": 1.1,
+                    "filters": {"conferences": None, "years": [2025]},
+                    "conferences": {"NeurIPS": 42},
+                    "years": {"2025": 42},
+                    "sample_papers": [
+                        {"title": "Uncertainty in Deep Learning", "year": 2025, "conference": "NeurIPS", "distance": 0.5}
+                    ],
+                    "closest_distance": 0.5
+                })
+                
+                # Mock final response after tool execution
+                mock_final_response = Mock()
+                mock_final_choice = Mock()
+                mock_final_message = Mock()
+                mock_final_message.content = "There were 42 papers about uncertainty quantification at NeurIPS 2025."
+                mock_final_choice.message = mock_final_message
+                mock_final_response.choices = [mock_final_choice]
+                
+                # Set up create to return routing response first, then final
+                mock_client.chat.completions.create.side_effect = [
+                    mock_route_response,
+                    mock_final_response
+                ]
+                
+                chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
+                result = chat.query("How many papers about uncertainty quantification were presented at NeurIPS 2025?")
+                
+                # Verify tool was executed with 'topic' (not 'query') as the argument name
+                mock_execute.assert_called_once_with(
+                    "analyze_topic_relevance",
+                    {"topic": "uncertainty quantification", "years": [2025]}
+                )
+                
+                # Verify final response was returned (not the raw tool call)
+                assert "42" in result["response"] or "uncertainty" in result["response"].lower()
+                assert result["metadata"]["used_tools"] is True
+
     @requires_lm_studio
     def test_real_llm_query_triggers_tools(self, mock_embeddings_manager, mock_database):
         """Test with real LLM that it can decide to use MCP tools (requires LM Studio)."""
@@ -1288,13 +1350,13 @@ class TestJSONToolCalls:
         """Test parsing a single JSON tool call."""
         from abstracts_explorer.rag import parse_json_tool_call
         
-        json_response = '{"name": "analyze_topic_relevance", "arguments": {"query": "transformers", "distance_threshold": 1.1}}'
+        json_response = '{"name": "analyze_topic_relevance", "arguments": {"topic": "transformers", "distance_threshold": 1.1}}'
         tool_calls = parse_json_tool_call(json_response)
         
         assert tool_calls is not None
         assert len(tool_calls) == 1
         assert tool_calls[0]['name'] == 'analyze_topic_relevance'
-        assert tool_calls[0]['arguments']['query'] == 'transformers'
+        assert tool_calls[0]['arguments']['topic'] == 'transformers'
         assert tool_calls[0]['arguments']['distance_threshold'] == 1.1
     
     def test_parse_json_tool_call_array(self):
@@ -1323,7 +1385,7 @@ class TestJSONToolCalls:
                 {
                     "function": {
                         "name": "analyze_topic_relevance",
-                        "arguments": {"query": "transformers"}
+                        "arguments": {"topic": "transformers"}
                     }
                 }
             ]
@@ -1333,7 +1395,7 @@ class TestJSONToolCalls:
         assert tool_calls is not None
         assert len(tool_calls) == 1
         assert tool_calls[0]['name'] == 'analyze_topic_relevance'
-        assert tool_calls[0]['arguments']['query'] == 'transformers'
+        assert tool_calls[0]['arguments']['topic'] == 'transformers'
     
     def test_parse_json_tool_call_function_format(self):
         """Test parsing function-only JSON format."""
@@ -1383,7 +1445,7 @@ class TestJSONToolCalls:
             mock_route_response = Mock()
             mock_route_choice = Mock()
             mock_route_message = Mock()
-            mock_route_message.content = '{"name": "analyze_topic_relevance", "arguments": {"query": "transformers", "distance_threshold": 1.1}}'
+            mock_route_message.content = '{"name": "analyze_topic_relevance", "arguments": {"topic": "transformers", "distance_threshold": 1.1}}'
             mock_route_choice.message = mock_route_message
             mock_route_response.choices = [mock_route_choice]
             
@@ -1406,7 +1468,7 @@ class TestJSONToolCalls:
                  patch("abstracts_explorer.rag.format_tool_result_for_llm") as mock_format:
                 
                 mock_execute.return_value = json.dumps({
-                    "query": "transformers",
+                    "topic": "transformers",
                     "total_papers": 42,
                     "relevance_score": 85
                 })
@@ -1415,10 +1477,10 @@ class TestJSONToolCalls:
                 chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
                 result = chat.query("How many papers about transformers?")
                 
-                # Verify tool was executed
+                # Verify tool was executed with correct parameter name 'topic' (not 'query')
                 mock_execute.assert_called_once_with(
                     'analyze_topic_relevance',
-                    {'query': 'transformers', 'distance_threshold': 1.1}
+                    {'topic': 'transformers', 'distance_threshold': 1.1}
                 )
                 
                 # Verify final response contains the answer
