@@ -178,7 +178,7 @@ def stats():
 
         database = get_database()
         stats_data = database.get_stats(year=year, conference=conference)
-        
+
         return jsonify(stats_data)
     except ValueError as e:
         return jsonify({"error": f"Invalid year parameter: {str(e)}"}), 400
@@ -203,11 +203,11 @@ def check_embedding_model():
     try:
         config = get_config()
         database = get_database()
-        
+
         # Get the stored embedding model from the database
         stored_model = database.get_embedding_model()
         current_model = config.embedding_model
-        
+
         # Check compatibility
         if stored_model is None:
             # No model stored yet, considered compatible
@@ -226,13 +226,15 @@ def check_embedding_model():
                 f"are incompatible. Please recreate the embeddings using: "
                 f"neurips-abstracts create-embeddings --force"
             )
-        
-        return jsonify({
-            "compatible": compatible,
-            "stored_model": stored_model,
-            "current_model": current_model,
-            "warning": warning
-        })
+
+        return jsonify(
+            {
+                "compatible": compatible,
+                "stored_model": stored_model,
+                "current_model": current_model,
+                "warning": warning,
+            }
+        )
     except Exception as e:
         logger.error(f"Error in embedding-model-check endpoint: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
@@ -328,7 +330,7 @@ def search():
             # Semantic search using embeddings
             em = get_embeddings_manager()
             database = get_database()
-            
+
             papers = em.search_papers_semantic(
                 query=query,
                 database=database,
@@ -556,11 +558,11 @@ def compute_clusters():
 
         # Get current embedding model
         current_model = config.embedding_model
-        
+
         # Build clustering kwargs for different methods
         clustering_kwargs = {}
         method_lower = clustering_method.lower()
-        
+
         if method_lower == "dbscan":
             clustering_kwargs["eps"] = data.get("eps", 0.5)
             clustering_kwargs["min_samples"] = data.get("min_samples", 5)
@@ -595,7 +597,7 @@ def compute_clusters():
             n_clusters=n_clusters,
             limit=limit,
             force=force,
-            **clustering_kwargs
+            **clustering_kwargs,
         )
 
         return jsonify(results)
@@ -629,10 +631,15 @@ def get_cached_clusters():
         cache_path = Path(cache_file)
 
         if not cache_path.exists():
-            return jsonify({
-                "error": f"Cached clusters file not found: {cache_file}",
-                "hint": "Run 'abstracts-explorer cluster-embeddings --output clusters.json' first"
-            }), 404
+            return (
+                jsonify(
+                    {
+                        "error": f"Cached clusters file not found: {cache_file}",
+                        "hint": "Run 'abstracts-explorer cluster-embeddings --output clusters.json' first",
+                    }
+                ),
+                404,
+            )
 
         with open(cache_path, "r", encoding="utf-8") as f:
             results = json.load(f)
@@ -663,18 +670,15 @@ def get_default_cluster_count():
         from abstracts_explorer.clustering import calculate_default_clusters
 
         em = get_embeddings_manager()
-        
+
         # Get embeddings count
         collection_stats = em.get_collection_stats()
         n_papers = collection_stats["count"]
-        
+
         # Calculate default
         n_clusters = calculate_default_clusters(n_papers)
-        
-        return jsonify({
-            "n_clusters": n_clusters,
-            "n_papers": n_papers
-        })
+
+        return jsonify({"n_clusters": n_clusters, "n_papers": n_papers})
     except Exception as e:
         logger.error(f"Error calculating default cluster count: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
@@ -684,10 +688,10 @@ def get_default_cluster_count():
 def precalculate_clusters():
     """
     Pre-calculate clusters in the background for caching.
-    
+
     This endpoint starts a background clustering computation with default settings
     to populate the cache. It returns immediately without waiting for completion.
-    
+
     Request Body
     ------------
     {
@@ -696,7 +700,7 @@ def precalculate_clusters():
         "clustering_method": str (optional, default: "kmeans"),
         "n_clusters": int (optional, default: None - auto-calculated)
     }
-    
+
     Returns
     -------
     dict
@@ -704,26 +708,26 @@ def precalculate_clusters():
     """
     try:
         import threading
-        
+
         data = request.get_json() or {}
-        
+
         # Get parameters with defaults
         reduction_method = data.get("reduction_method", "pca")
         n_components = data.get("n_components", 2)
         clustering_method = data.get("clustering_method", "kmeans")
         n_clusters = data.get("n_clusters")
-        
+
         # Get config and managers
         config = get_config()
         em = get_embeddings_manager()
         database = get_database()
-        
+
         # Calculate default n_clusters if not provided
         if n_clusters is None:
             collection_stats = em.get_collection_stats()
             n_papers = collection_stats["count"]
             n_clusters = calculate_default_clusters(n_papers)
-        
+
         # Check if cache already exists
         current_model = config.embedding_model
         cached_results = database.get_clustering_cache(
@@ -733,19 +737,16 @@ def precalculate_clusters():
             clustering_method=clustering_method,
             n_clusters=n_clusters if clustering_method.lower() != "dbscan" else None,
         )
-        
+
         if cached_results:
             logger.info("Clustering cache already exists, skipping pre-calculation")
-            return jsonify({
-                "status": "cache_exists",
-                "message": "Clustering cache already exists"
-            })
-        
+            return jsonify({"status": "cache_exists", "message": "Clustering cache already exists"})
+
         # Define background task
         def background_clustering():
             try:
                 logger.info(f"Starting background clustering pre-calculation (n_clusters={n_clusters})")
-                
+
                 # Use shared clustering function
                 compute_clusters_with_cache(
                     embeddings_manager=em,
@@ -758,24 +759,26 @@ def precalculate_clusters():
                     limit=None,
                     force=False,
                 )
-                
+
                 logger.info("Background clustering pre-calculation completed successfully")
-                
+
             except Exception as e:
                 logger.error(f"Error in background clustering: {e}", exc_info=True)
-        
+
         # Start background thread
         thread = threading.Thread(target=background_clustering, daemon=True)
         thread.start()
-        
+
         logger.info(f"Started background clustering pre-calculation with n_clusters={n_clusters}")
-        
-        return jsonify({
-            "status": "started",
-            "message": "Clustering pre-calculation started in background",
-            "n_clusters": n_clusters
-        })
-        
+
+        return jsonify(
+            {
+                "status": "started",
+                "message": "Clustering pre-calculation started in background",
+                "n_clusters": n_clusters,
+            }
+        )
+
     except Exception as e:
         logger.error(f"Error starting clustering pre-calculation: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
@@ -785,10 +788,10 @@ def precalculate_clusters():
 def search_custom_cluster():
     """
     Find papers within a specified distance from a custom search query.
-    
+
     This endpoint treats the search query as a clustering center and returns
     papers within the specified Euclidean distance radius in embedding space.
-    
+
     Request Body
     ------------
     {
@@ -797,7 +800,7 @@ def search_custom_cluster():
         "conferences": list[str] (optional) - Filter by conferences
         "years": list[int] (optional) - Filter by years
     }
-    
+
     Returns
     -------
     dict
@@ -811,30 +814,30 @@ def search_custom_cluster():
     """
     try:
         data = request.get_json()
-        
+
         if not data or "query" not in data:
             return jsonify({"error": "Missing required field: query"}), 400
-        
+
         query = data["query"]
         distance_threshold = data.get("distance", 1.1)
         conferences = data.get("conferences")
         years = data.get("years")
-        
+
         # Get embeddings manager and database
         em = get_embeddings_manager()
         database = get_database()
-        
+
         # Call EmbeddingsManager method directly
         results = em.find_papers_within_distance(
             database=database,
             query=query,
             distance_threshold=distance_threshold,
             conferences=conferences,
-            years=years
+            years=years,
         )
-        
+
         return jsonify(results)
-        
+
     except Exception as e:
         logger.error(f"Error searching custom cluster: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
@@ -951,17 +954,19 @@ def donate_data():
             return jsonify({"error": "No data provided"}), 400
 
         database = get_database()
-        
+
         try:
             # Use DatabaseManager's donate_validation_data method
             donated_count = database.donate_validation_data(paper_priorities)
-            
-            return jsonify({
-                "success": True,
-                "message": f"Successfully donated {donated_count} paper(s). Thank you for contributing!",
-                "count": donated_count
-            })
-            
+
+            return jsonify(
+                {
+                    "success": True,
+                    "message": f"Successfully donated {donated_count} paper(s). Thank you for contributing!",
+                    "count": donated_count,
+                }
+            )
+
         except ValueError as e:
             # Validation errors return 400
             return jsonify({"error": str(e)}), 400
@@ -983,7 +988,7 @@ def internal_error(e):
     return jsonify({"error": "Internal server error"}), 500
 
 
-def run_server(host="127.0.0.1", port=5000, debug=False, dev=False):
+def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=6):
     """
     Run the Flask web server.
 
@@ -997,14 +1002,21 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False):
         Enable debug mode (default: False)
     dev : bool
         Use Flask development server instead of production server (default: False)
-    
+    threads : int
+        Number of worker threads for Waitress (default: 6). Must be >= 1.
+
     Raises
     ------
+    ValueError
+        If threads is less than 1.
     FileNotFoundError
         If the database file does not exist.
     """
+    if threads < 1:
+        raise ValueError(f"threads must be >= 1, got {threads}")
+
     config = get_config()  # Get config lazily
-    
+
     # Check if database is accessible before starting server
     # For SQLite databases, check if the file exists
     if config.database_url.startswith("sqlite:///"):
@@ -1023,15 +1035,15 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False):
             print("  neurips-abstracts create-embeddings", file=sys.stderr)
             raise FileNotFoundError(f"Database not found: {db_path}")
     # For PostgreSQL, we can't check file existence - connection will be validated at runtime
-    
+
     print("Starting Abstracts Explorer Web Interface...")
     print(f"Database: {config.database_url}")
-    
+
     # Print embeddings configuration
     print(f"Embeddings: {config.embedding_db}")
-    
+
     print(f"Server: http://{host}:{port}")
-    
+
     # Use Flask development server if explicitly requested
     if dev:
         print("\n⚠️  Using Flask development server (not suitable for production)")
@@ -1044,13 +1056,15 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False):
         # Use Waitress production server (debug mode works with Waitress too)
         try:
             from waitress import serve  # type: ignore[import-untyped]
+
             print("\n✅ Using Waitress production WSGI server")
             if debug:
                 print("⚠️  Debug mode enabled (logging level set to DEBUG via -vv)")
+            print(f"Waitress threads: {threads}")
             print("\nPress CTRL+C to stop the server")
             # Set Flask debug mode even with Waitress for better error messages
             app.debug = debug
-            serve(app, host=host, port=port)
+            serve(app, host=host, port=port, threads=threads)
         except ImportError:
             print("\n⚠️  Waitress not installed, falling back to Flask development server", file=sys.stderr)
             print("   Install Waitress with: pip install waitress", file=sys.stderr)
@@ -1065,9 +1079,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Abstracts Explorer Web Interface")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind to")
     parser.add_argument("--port", type=int, default=5000, help="Port to bind to")
-    parser.add_argument("--debug", action="store_true", help="Enable debug mode (uses Flask dev server)")
-    parser.add_argument("--dev", action="store_true", help="Use Flask development server instead of production server")
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug mode (verbose logging and Flask debug features; does not change server type)",
+    )
+    parser.add_argument(
+        "--dev", action="store_true", help="Use Flask development server instead of production server"
+    )
+    parser.add_argument("--threads", type=int, default=6, help="Number of Waitress worker threads")
 
     args = parser.parse_args()
 
-    run_server(host=args.host, port=args.port, debug=args.debug, dev=args.dev)
+    run_server(host=args.host, port=args.port, debug=args.debug, dev=args.dev, threads=args.threads)

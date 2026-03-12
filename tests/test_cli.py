@@ -70,7 +70,7 @@ class TestCLI:
     def test_download_command_success(self, tmp_path, capsys):
         """Test download command completes successfully."""
         output_db = tmp_path / "test.db"
-        
+
         # Set PAPER_DB to output location
         set_test_db(output_db)
 
@@ -119,7 +119,7 @@ class TestCLI:
     def test_download_command_failure(self, tmp_path, capsys):
         """Test download command handles errors gracefully."""
         output_db = tmp_path / "test.db"
-        
+
         # Set PAPER_DB to output location
         set_test_db(output_db)
 
@@ -147,10 +147,10 @@ class TestCLI:
         """Test download command uses PAPER_DB when set."""
         # Create a temporary SQLite database for testing
         db_path = tmp_path / "test.db"
-        
+
         # Set PAPER_DB environment variable
         set_test_db(db_path)
-        
+
         # Mock the plugin and its download method
         mock_plugin = Mock()
         mock_plugin.plugin_name = "neurips"
@@ -167,18 +167,18 @@ class TestCLI:
             ),
         ]
         mock_plugin.download.return_value = mock_papers
-        
+
         # Mock get_plugin to return the plugin
         with patch("abstracts_explorer.cli.get_plugin") as mock_get_plugin:
             mock_get_plugin.return_value = mock_plugin
-                
+
             with patch.object(
                 sys,
                 "argv",
                 ["neurips-abstracts", "download", "--year", "2025", "--output", "ignored_path.db"],
             ):
                 exit_code = main()
-        
+
         assert exit_code == 0
         captured = capsys.readouterr()
         assert "Downloaded 1 papers" in captured.out or "Downloaded 1 paper" in captured.out
@@ -201,7 +201,7 @@ class TestCLI:
             # Should raise DatabaseError because database/tables don't exist
             with pytest.raises(Exception) as exc_info:
                 main()
-        
+
         # Verify it's a database-related error
         assert "table" in str(exc_info.value).lower() or "database" in str(exc_info.value).lower()
 
@@ -880,7 +880,7 @@ class TestCLI:
     def test_search_with_db_path_lookup_error(self, tmp_path, capsys, monkeypatch):
         """Test search command when database connection fails (no longer relevant)."""
         from abstracts_explorer.database import DatabaseManager
-        
+
         embeddings_path = tmp_path / "embeddings"
         embeddings_path.mkdir()
 
@@ -959,12 +959,13 @@ class TestCLI:
     def test_clear_clustering_cache_success(self, tmp_path, capsys):
         """Test clear-clustering-cache command clears all cache entries."""
         output_db = tmp_path / "test.db"
-        
+
         # Set PAPER_DB to output location
         set_test_db(output_db)
-        
+
         # Create database and add some cache entries
         from abstracts_explorer.database import DatabaseManager
+
         with DatabaseManager() as db:
             db.create_tables()
             # Add some test cache entries
@@ -978,7 +979,7 @@ class TestCLI:
                     "labels": [0, 1, 2],
                     "reduced_embeddings": [[1, 2], [3, 4], [5, 6]],
                     "statistics": {"total_papers": 3, "n_clusters": 3},
-                }
+                },
             )
             db.save_clustering_cache(
                 embedding_model="test-model-2",
@@ -990,9 +991,9 @@ class TestCLI:
                     "labels": [0, 1],
                     "reduced_embeddings": [[1, 2], [3, 4]],
                     "statistics": {"total_papers": 2, "n_clusters": 2},
-                }
+                },
             )
-        
+
         # Run clear-clustering-cache command
         with patch.object(
             sys,
@@ -1000,11 +1001,11 @@ class TestCLI:
             ["abstracts-explorer", "clear-clustering-cache"],
         ):
             exit_code = main()
-        
+
         assert exit_code == 0
         captured = capsys.readouterr()
         assert "Cleared all 2 clustering cache entries" in captured.out
-        
+
         # Verify cache is cleared
         with DatabaseManager() as db:
             cached = db.get_clustering_cache(
@@ -1012,19 +1013,20 @@ class TestCLI:
                 reduction_method="pca",
                 n_components=2,
                 clustering_method="kmeans",
-                n_clusters=5
+                n_clusters=5,
             )
             assert cached is None
 
     def test_clear_clustering_cache_by_model(self, tmp_path, capsys):
         """Test clear-clustering-cache command with --embedding-model filter."""
         output_db = tmp_path / "test.db"
-        
+
         # Set PAPER_DB to output location
         set_test_db(output_db)
-        
+
         # Create database and add cache entries for different models
         from abstracts_explorer.database import DatabaseManager
+
         with DatabaseManager() as db:
             db.create_tables()
             # Add cache for model1
@@ -1038,9 +1040,9 @@ class TestCLI:
                     "labels": [0, 1, 2],
                     "reduced_embeddings": [[1, 2], [3, 4], [5, 6]],
                     "statistics": {"total_papers": 3, "n_clusters": 3},
-                }
+                },
             )
-            
+
             # Add cache for model2
             db.save_clustering_cache(
                 embedding_model="model2",
@@ -1052,9 +1054,9 @@ class TestCLI:
                     "labels": [0, 1],
                     "reduced_embeddings": [[1, 2], [3, 4]],
                     "statistics": {"total_papers": 2, "n_clusters": 2},
-                }
+                },
             )
-        
+
         # Clear cache only for model1
         with patch.object(
             sys,
@@ -1062,11 +1064,11 @@ class TestCLI:
             ["abstracts-explorer", "clear-clustering-cache", "--embedding-model", "model1"],
         ):
             exit_code = main()
-        
+
         assert exit_code == 0
         captured = capsys.readouterr()
         assert "Cleared 1 clustering cache entry for model: model1" in captured.out
-        
+
         # Verify model1 cache is cleared but model2 remains
         with DatabaseManager() as db:
             cached1 = db.get_clustering_cache(
@@ -1074,31 +1076,32 @@ class TestCLI:
                 reduction_method="pca",
                 n_components=2,
                 clustering_method="kmeans",
-                n_clusters=5
+                n_clusters=5,
             )
             assert cached1 is None
-            
+
             cached2 = db.get_clustering_cache(
                 embedding_model="model2",
                 reduction_method="pca",
                 n_components=2,
                 clustering_method="kmeans",
-                n_clusters=5
+                n_clusters=5,
             )
             assert cached2 is not None
 
     def test_clear_clustering_cache_no_entries(self, tmp_path, capsys):
         """Test clear-clustering-cache command when no cache entries exist."""
         output_db = tmp_path / "test.db"
-        
+
         # Set PAPER_DB to output location
         set_test_db(output_db)
-        
+
         # Create empty database
         from abstracts_explorer.database import DatabaseManager
+
         with DatabaseManager() as db:
             db.create_tables()
-        
+
         # Run clear-clustering-cache command
         with patch.object(
             sys,
@@ -1106,7 +1109,7 @@ class TestCLI:
             ["abstracts-explorer", "clear-clustering-cache"],
         ):
             exit_code = main()
-        
+
         assert exit_code == 0
         captured = capsys.readouterr()
         assert "No cache entries found to clear" in captured.out
@@ -1115,7 +1118,7 @@ class TestCLI:
         """Test clear-clustering-cache command handles errors gracefully."""
         # Set a database path that doesn't exist and can't be created
         set_test_db("/nonexistent/path/test.db")
-        
+
         # Run clear-clustering-cache command
         with patch.object(
             sys,
@@ -1123,7 +1126,7 @@ class TestCLI:
             ["abstracts-explorer", "clear-clustering-cache"],
         ):
             exit_code = main()
-        
+
         assert exit_code == 1
         captured = capsys.readouterr()
         assert "Error clearing clustering cache" in captured.err
@@ -1200,7 +1203,7 @@ class TestChatCommand:
 
         embeddings_path = tmp_path / "chroma_db"
         embeddings_path.mkdir()
-        
+
         # Set up database path
         db_path = tmp_path / "test.db"
         set_test_db(db_path)
@@ -1300,7 +1303,10 @@ class TestWebUICommand:
         args = argparse.Namespace(host="127.0.0.1", port=5000, debug=False)
 
         # Mock run_server to raise FileNotFoundError (as it would when database is missing)
-        with patch("abstracts_explorer.web_ui.run_server", side_effect=FileNotFoundError("Database not found: /nonexistent/test.db")):
+        with patch(
+            "abstracts_explorer.web_ui.run_server",
+            side_effect=FileNotFoundError("Database not found: /nonexistent/test.db"),
+        ):
             exit_code = web_ui_command(args)
 
         # Should exit with code 1 but not show traceback
@@ -1309,6 +1315,34 @@ class TestWebUICommand:
         # Should NOT show "Error starting web server" or traceback
         # The error message is printed by run_server itself before raising the exception
         assert "Error starting web server" not in captured.err
+
+    def test_web_ui_passes_threads_to_run_server(self, capsys):
+        """Test that web-ui command forwards --threads to run_server."""
+        from abstracts_explorer.cli import web_ui_command
+        import argparse
+
+        args = argparse.Namespace(host="127.0.0.1", port=5000, verbose=0, dev=False, threads=10)
+
+        with patch("abstracts_explorer.web_ui.run_server") as mock_run_server:
+            mock_run_server.return_value = None
+            exit_code = web_ui_command(args)
+
+        assert exit_code == 0
+        mock_run_server.assert_called_once_with(host="127.0.0.1", port=5000, debug=False, dev=False, threads=10)
+
+    def test_web_ui_invalid_threads_returns_error(self, capsys):
+        """Test that web-ui command returns exit code 1 when threads < 1."""
+        from abstracts_explorer.cli import web_ui_command
+        import argparse
+
+        args = argparse.Namespace(host="127.0.0.1", port=5000, verbose=0, dev=False, threads=0)
+
+        with patch("abstracts_explorer.web_ui.run_server", side_effect=ValueError("threads must be >= 1, got 0")):
+            exit_code = web_ui_command(args)
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert "Invalid configuration" in captured.err
 
 
 class TestMainDispatch:
