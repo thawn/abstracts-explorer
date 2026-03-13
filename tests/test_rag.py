@@ -1479,6 +1479,39 @@ class TestJSONToolCalls:
         assert parse_json_tool_call("  ") is None
         assert parse_json_tool_call(None) is None
 
+    def test_parse_json_tool_call_with_think_block(self):
+        """Test that <think> blocks before JSON are stripped and the tool call is parsed."""
+        from abstracts_explorer.rag import parse_json_tool_call
+
+        response_with_think = (
+            "<think>The user is asking about papers at NeurIPS 2025. "
+            "I should use analyze_topic_relevance.</think>\n"
+            '{"name": "analyze_topic_relevance", "arguments": {"topic": "uncertainty quantification", "years": [2025]}}'
+        )
+        tool_calls = parse_json_tool_call(response_with_think)
+
+        assert tool_calls is not None
+        assert len(tool_calls) == 1
+        assert tool_calls[0]["name"] == "analyze_topic_relevance"
+        assert tool_calls[0]["arguments"]["topic"] == "uncertainty quantification"
+        assert tool_calls[0]["arguments"]["years"] == [2025]
+
+    def test_parse_json_tool_call_only_think_block(self):
+        """Test that a response containing only a <think> block returns None."""
+        from abstracts_explorer.rag import parse_json_tool_call
+
+        response_only_think = "<think>Just thinking here, no JSON output.</think>"
+        assert parse_json_tool_call(response_only_think) is None
+
+    def test_strip_think_blocks(self):
+        """Test the _strip_think_blocks helper directly."""
+        from abstracts_explorer.rag import _strip_think_blocks
+
+        assert _strip_think_blocks("<think>thinking</think>json content") == "json content"
+        assert _strip_think_blocks("no think block") == "no think block"
+        assert _strip_think_blocks("<think>multi\nline\nthink</think>  result  ") == "result"
+        assert _strip_think_blocks("") == ""
+
     def test_handle_json_tool_calls_integration(self, mock_embeddings_manager, mock_database):
         """Test that JSON tool calls are executed and result in proper response."""
         with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:

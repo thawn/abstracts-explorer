@@ -30,6 +30,7 @@ class TestEmbeddingsManager:
         # Check that embedding_db path exists (only for local paths)
         if not embeddings_manager.embedding_db.startswith("http"):
             from pathlib import Path
+
             assert Path(embeddings_manager.embedding_db).exists()
         embeddings_manager.close()
 
@@ -77,7 +78,7 @@ class TestEmbeddingsManager:
         mock_response = Mock()
         mock_response.side_effect = Exception("API error")
         embeddings_manager.openai_client.embeddings.create = mock_response
-        
+
         with pytest.raises(EmbeddingsError, match="Failed to generate embedding"):
             embeddings_manager.generate_embedding("Test text")
 
@@ -272,11 +273,11 @@ class TestEmbeddingsManager:
 
     def test_embed_from_database_not_found(self, embeddings_manager, tmp_path):
         """Test embedding from non-existent database."""
-        
+
         # Set PAPER_DB to a nonexistent database
         nonexistent_db = tmp_path / "nonexistent.db"
         set_test_db(nonexistent_db)
-        
+
         embeddings_manager.connect()
         embeddings_manager.create_collection()
 
@@ -369,28 +370,26 @@ class TestEmbeddingsManager:
     def test_embed_from_database_sql_error(self, embeddings_manager, tmp_path):
         """Test embedding from database with SQL error."""
         from abstracts_explorer.database import DatabaseManager
-        
+
         # Create database with only embeddings_metadata, but missing papers table
         db_path = tmp_path / "bad.db"
-        
+
         # Use DatabaseManager to connect, but manually create only embeddings_metadata table
         # to simulate a corrupted/incomplete database
         set_test_db(db_path)
         db = DatabaseManager()
         db.connect()
-        
+
         cursor = db.connection.cursor()
         # Create embeddings_metadata table
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE TABLE embeddings_metadata (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 embedding_model TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        """
-        )
+        """)
         # Note: NOT creating the papers table to trigger error
         db.connection.commit()
         db.close()
@@ -487,13 +486,14 @@ class TestEmbeddingsManager:
 
 def test_check_model_compatibility_no_database(embeddings_manager, tmp_path):
     """Test checking model compatibility when database does not exist."""
-    
+
     non_existent_db = tmp_path / "nonexistent.db"
     set_test_db(non_existent_db)
-    
+
     # Since the database doesn't exist, this will raise an error when trying to connect
     # The behavior has changed - we no longer check if db exists before connecting
     from abstracts_explorer.embeddings import EmbeddingsError
+
     with pytest.raises(EmbeddingsError, match="Failed to check model compatibility"):
         embeddings_manager.check_model_compatibility()
 
@@ -501,14 +501,14 @@ def test_check_model_compatibility_no_database(embeddings_manager, tmp_path):
 def test_check_model_compatibility_no_model_stored(embeddings_manager, tmp_path):
     """Test checking model compatibility when no model is stored in database."""
     from abstracts_explorer.database import DatabaseManager
-    
+
     db_path = tmp_path / "test.db"
     set_test_db(db_path)
     with DatabaseManager() as db:
         db.create_tables()
-    
+
     compatible, stored, current = embeddings_manager.check_model_compatibility()
-    
+
     assert compatible is True
     assert stored is None
     assert current == embeddings_manager.model_name
@@ -517,15 +517,15 @@ def test_check_model_compatibility_no_model_stored(embeddings_manager, tmp_path)
 def test_check_model_compatibility_matching_models(embeddings_manager, tmp_path):
     """Test checking model compatibility when models match."""
     from abstracts_explorer.database import DatabaseManager
-    
+
     db_path = tmp_path / "test.db"
     set_test_db(db_path)
     with DatabaseManager() as db:
         db.create_tables()
         db.set_embedding_model(embeddings_manager.model_name)
-    
+
     compatible, stored, current = embeddings_manager.check_model_compatibility()
-    
+
     assert compatible is True
     assert stored == embeddings_manager.model_name
     assert current == embeddings_manager.model_name
@@ -534,17 +534,17 @@ def test_check_model_compatibility_matching_models(embeddings_manager, tmp_path)
 def test_check_model_compatibility_mismatched_models(embeddings_manager, tmp_path):
     """Test checking model compatibility when models differ."""
     from abstracts_explorer.database import DatabaseManager
-    
+
     db_path = tmp_path / "test.db"
     different_model = "different-embedding-model"
-    
+
     set_test_db(db_path)
     with DatabaseManager() as db:
         db.create_tables()
         db.set_embedding_model(different_model)
-    
+
     compatible, stored, current = embeddings_manager.check_model_compatibility()
-    
+
     assert compatible is False
     assert stored == different_model
     assert current == embeddings_manager.model_name
@@ -553,41 +553,41 @@ def test_check_model_compatibility_mismatched_models(embeddings_manager, tmp_pat
 def test_embed_from_database_stores_model(embeddings_manager, test_database):
     """Test that embed_from_database stores the embedding model in the database."""
     from abstracts_explorer.database import DatabaseManager
-    
+
     # Set env var for test_database fixture
     set_test_db(test_database)
-    
+
     embeddings_manager.connect()
     embeddings_manager.create_collection()
-    
+
     # Embed papers
     embeddings_manager.embed_from_database()
-    
+
     # Check that the model was stored
     with DatabaseManager() as db:
         stored_model = db.get_embedding_model()
         assert stored_model == embeddings_manager.model_name
-    
+
     embeddings_manager.close()
 
 
 def test_search_papers_semantic_with_year_filter(embeddings_manager, tmp_path, mock_lm_studio):
     """Test that search_papers_semantic correctly filters by year.
-    
+
     This is a regression test for the bug where year filters were being
     converted to integers but ChromaDB stores metadata as strings, causing
     filters to return 0 results.
     """
     from abstracts_explorer.database import DatabaseManager
     from abstracts_explorer.plugin import LightweightPaper
-    
+
     # Create a database with papers from different years
     db_path = tmp_path / "test_year_filter.db"
     set_test_db(db_path)
-    
+
     with DatabaseManager() as db:
         db.create_tables()
-        
+
         # Add papers with different years
         papers = [
             LightweightPaper(
@@ -613,32 +613,91 @@ def test_search_papers_semantic_with_year_filter(embeddings_manager, tmp_path, m
         ]
         for paper in papers:
             db.add_paper(paper)
-    
+
     # Embed papers
     embeddings_manager.connect()
     embeddings_manager.create_collection()
     embeddings_manager.embed_from_database()
-    
+
     # Test search without filter - should return both papers
     with DatabaseManager() as db:
         results_all = embeddings_manager.search_papers_semantic("paper", database=db, limit=10)
         assert len(results_all) == 2, f"Expected 2 papers without filter, got {len(results_all)}"
-    
+
     # Test search with year filter [2024] - should return only 2024 paper
     with DatabaseManager() as db:
         results_2024 = embeddings_manager.search_papers_semantic("paper", database=db, limit=10, years=[2024])
         assert len(results_2024) == 1, f"Expected 1 paper with year=2024 filter, got {len(results_2024)}"
         assert results_2024[0]["year"] == 2024, f"Expected year 2024, got {results_2024[0]['year']}"
-    
+
     # Test search with year filter [2025] - should return only 2025 paper
     with DatabaseManager() as db:
         results_2025 = embeddings_manager.search_papers_semantic("paper", database=db, limit=10, years=[2025])
         assert len(results_2025) == 1, f"Expected 1 paper with year=2025 filter, got {len(results_2025)}"
         assert results_2025[0]["year"] == 2025, f"Expected year 2025, got {results_2025[0]['year']}"
-    
+
     # Test search with multiple year filters - should return both papers
     with DatabaseManager() as db:
         results_both = embeddings_manager.search_papers_semantic("paper", database=db, limit=10, years=[2024, 2025])
         assert len(results_both) == 2, f"Expected 2 papers with years=[2024, 2025] filter, got {len(results_both)}"
-    
+
     embeddings_manager.close()
+
+
+# --- Tests for conference name normalization ---
+
+
+class TestNormalizeConferenceNames:
+    """Tests for the normalize_conference_names helper function."""
+
+    def test_normalize_neurips_variations(self):
+        """Test that NeurIPS name variations are normalized correctly."""
+        from abstracts_explorer.embeddings import normalize_conference_names
+
+        assert normalize_conference_names(["NeurIPS"]) == ["NeurIPS"]
+        assert normalize_conference_names(["neurips"]) == ["NeurIPS"]
+        assert normalize_conference_names(["NEURIPS"]) == ["NeurIPS"]
+        assert normalize_conference_names(["nips"]) == ["NeurIPS"]
+        assert normalize_conference_names(["Neurips"]) == ["NeurIPS"]
+
+    def test_normalize_iclr_variations(self):
+        """Test that ICLR name variations are normalized correctly."""
+        from abstracts_explorer.embeddings import normalize_conference_names
+
+        assert normalize_conference_names(["ICLR"]) == ["ICLR"]
+        assert normalize_conference_names(["iclr"]) == ["ICLR"]
+
+    def test_normalize_icml_variations(self):
+        """Test that ICML name variations are normalized correctly."""
+        from abstracts_explorer.embeddings import normalize_conference_names
+
+        assert normalize_conference_names(["ICML"]) == ["ICML"]
+        assert normalize_conference_names(["icml"]) == ["ICML"]
+
+    def test_normalize_ml4ps_variations(self):
+        """Test that ML4PS name variations are normalized correctly."""
+        from abstracts_explorer.embeddings import normalize_conference_names
+
+        assert normalize_conference_names(["ml4ps"]) == ["ML4PS@Neurips"]
+        assert normalize_conference_names(["ML4PS@Neurips"]) == ["ML4PS@Neurips"]
+        assert normalize_conference_names(["ml4ps@neurips"]) == ["ML4PS@Neurips"]
+
+    def test_normalize_unknown_conference_unchanged(self):
+        """Test that unknown conference names are returned unchanged."""
+        from abstracts_explorer.embeddings import normalize_conference_names
+
+        assert normalize_conference_names(["CVPR"]) == ["CVPR"]
+        assert normalize_conference_names(["custom_conf"]) == ["custom_conf"]
+
+    def test_normalize_multiple_conferences(self):
+        """Test normalizing a list with multiple conferences."""
+        from abstracts_explorer.embeddings import normalize_conference_names
+
+        result = normalize_conference_names(["neurips", "iclr", "ICML"])
+        assert result == ["NeurIPS", "ICLR", "ICML"]
+
+    def test_normalize_empty_list(self):
+        """Test that empty list returns empty list."""
+        from abstracts_explorer.embeddings import normalize_conference_names
+
+        assert normalize_conference_names([]) == []

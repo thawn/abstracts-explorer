@@ -22,7 +22,7 @@ from copy import deepcopy
 
 from mcp.server.fastmcp import FastMCP
 
-from .embeddings import EmbeddingsManager
+from .embeddings import EmbeddingsManager, normalize_conference_names
 from .database import DatabaseManager
 from .clustering import ClusteringManager, perform_clustering
 from .config import get_config
@@ -35,6 +35,7 @@ mcp = FastMCP("Abstracts Explorer Cluster Analysis")
 
 class ClusterAnalysisError(Exception):
     """Exception raised for cluster analysis errors."""
+
     pass
 
 
@@ -60,10 +61,10 @@ def load_clustering_data(
         If loading fails
     """
     config = get_config()
-    
+
     # Use config defaults if not provided
     collection_name = collection_name or config.collection_name
-    
+
     try:
         # Initialize embeddings manager
         em = EmbeddingsManager(
@@ -71,16 +72,16 @@ def load_clustering_data(
         )
         em.connect()
         em.create_collection()
-        
+
         # Initialize database manager
         db = DatabaseManager()
         db.connect()
-        
+
         # Initialize clustering manager
         cm = ClusteringManager(em, db)
-        
+
         return cm, db
-        
+
     except Exception as e:
         raise ClusterAnalysisError(f"Failed to load clustering data: {str(e)}") from e
 
@@ -118,10 +119,10 @@ def analyze_cluster_topics(
     """
     if cm.cluster_labels is None or cm.paper_ids is None or cm.metadatas is None:
         raise ClusterAnalysisError("Clustering data not loaded. Call load_embeddings() and cluster() first.")
-    
+
     # Find papers in this cluster
     cluster_indices = [i for i, label in enumerate(cm.cluster_labels) if label == cluster_id]
-    
+
     if not cluster_indices:
         return {
             "cluster_id": cluster_id,
@@ -131,37 +132,37 @@ def analyze_cluster_topics(
             "years": {},
             "sample_titles": [],
         }
-    
+
     # Extract metadata for papers in this cluster
     keywords = []
     sessions = []
     years = []
     sample_titles: list[str] = []
-    
+
     for idx in cluster_indices:
         metadata = cm.metadatas[idx]
-        
+
         # Collect keywords
         if metadata.get("keywords"):
             keywords.extend(metadata.get("keywords", "").split(","))
-        
+
         # Collect sessions
         if metadata.get("session"):
             sessions.append(metadata.get("session"))
-        
+
         # Collect years
         if metadata.get("year"):
             years.append(metadata.get("year"))
-        
+
         # Collect sample titles (first 5)
         if len(sample_titles) < 5:
             sample_titles.append(metadata.get("title", ""))
-    
+
     # Count frequencies
     keyword_counts = Counter([k.strip().lower() for k in keywords if k.strip()])
     session_counts = Counter(sessions)
     year_counts = Counter(years)
-    
+
     return {
         "cluster_id": cluster_id,
         "paper_count": len(cluster_indices),
@@ -204,14 +205,14 @@ def get_cluster_topics(
     try:
         config = get_config()
         collection_name = collection_name or config.collection_name
-        
+
         # Load clustering data
         cm, db = load_clustering_data(collection_name)
-        
+
         # Load embeddings
         logger.info("Loading embeddings...")
         cm.load_embeddings()
-        
+
         # Perform clustering on full embeddings
         logger.info(f"Clustering using {clustering_method}...")
         cm.cluster(
@@ -220,7 +221,7 @@ def get_cluster_topics(
             random_state=42,
             use_reduced=False,
         )
-        
+
         # Reduce dimensions for visualization (needed for some methods)
         logger.info(f"Reducing dimensions using {reduction_method}...")
         cm.reduce_dimensions(
@@ -228,27 +229,27 @@ def get_cluster_topics(
             n_components=2,
             random_state=42,
         )
-        
+
         # Get cluster statistics
         stats = cm.get_cluster_statistics()
-        
+
         # Analyze topics for each cluster
         cluster_topics = []
         for cluster_id in range(stats["n_clusters"]):
             topics = analyze_cluster_topics(cm, db, cluster_id)
             cluster_topics.append(topics)
-        
+
         result = {
             "statistics": stats,
             "clusters": cluster_topics,
         }
-        
+
         # Clean up
         cm.embeddings_manager.close()
         db.close()
-        
+
         return json.dumps(result, indent=2)
-        
+
     except Exception as e:
         logger.error(f"Failed to get cluster topics: {str(e)}")
         return json.dumps({"error": str(e)}, indent=2)
@@ -284,15 +285,18 @@ def merge_where_clause_with_conference(
     # Validate where parameter
     if where is not None and not isinstance(where, dict):
         raise ValueError(f"WHERE clause must be a dict, got {type(where).__name__}")
-    
+
     # If no conference, just return a deep copy of WHERE clause (or None)
     if not conference:
         return deepcopy(where) if where else None
-    
+
+    # Normalize conference name to canonical stored form (case-insensitive matching)
+    conference = normalize_conference_names([conference])[0]
+
     # If no WHERE clause, just return conference filter
     if not where:
         return {"conference": conference}
-    
+
     # Check if conference already exists anywhere in WHERE clause
     def has_conference_filter(obj: Any) -> bool:
         """Recursively check if conference filter exists in nested structure."""
@@ -308,21 +312,21 @@ def merge_where_clause_with_conference(
                 if has_conference_filter(item):
                     return True
         return False
-    
+
     # If conference already in WHERE clause, don't add again - return deep copy
     if has_conference_filter(where):
         return deepcopy(where)
-    
+
     # Need to merge conference with WHERE clause - use deep copy to prevent mutations
     where_filter = deepcopy(where)
-    
+
     # If WHERE already has $and, append to it
     if "$and" in where_filter:
         where_filter["$and"].append({"conference": conference})
     else:
         # Create new $and with existing filter and conference
         where_filter = {"$and": [where_filter, {"conference": conference}]}
-    
+
     return where_filter
 
 
@@ -371,25 +375,25 @@ def get_topic_evolution(
     try:
         config = get_config()
         collection_name = collection_name or config.collection_name
-        
+
         # Initialize embeddings manager
         em = EmbeddingsManager(
             collection_name=collection_name,
         )
         em.connect()
         em.create_collection()
-        
+
         # Initialize database
         db = DatabaseManager()
         db.connect()
-        
+
         # Build metadata filter using helper function
         try:
             where_filter = merge_where_clause_with_conference(where, conference)
         except ValueError as e:
             logger.error(f"Invalid WHERE clause: {str(e)}")
             return json.dumps({"error": f"Invalid WHERE clause: {str(e)}"}, indent=2)
-        
+
         # Search for papers related to topic
         logger.info(f"Searching for papers about: {topic_keywords}")
         if where_filter:
@@ -399,33 +403,35 @@ def get_topic_evolution(
             n_results=100,  # Get more results for trend analysis
             where=where_filter,
         )
-        
+
         # Analyze results by year
         year_distribution = defaultdict(list)
         year_counts: Counter[Any] = Counter()
-        
+
         if results["ids"] and results["ids"][0]:
             for idx, paper_id in enumerate(results["ids"][0]):
                 metadata = results["metadatas"][0][idx]
                 year = metadata.get("year")
-                
+
                 # Filter by year range if specified
                 if year:
                     if start_year and year < start_year:
                         continue
                     if end_year and year > end_year:
                         continue
-                    
+
                     year_counts[year] += 1
-                    year_distribution[year].append({
-                        "title": metadata.get("title", ""),
-                        "session": metadata.get("session", ""),
-                        "distance": results["distances"][0][idx] if "distances" in results else None,
-                    })
-        
+                    year_distribution[year].append(
+                        {
+                            "title": metadata.get("title", ""),
+                            "session": metadata.get("session", ""),
+                            "distance": results["distances"][0][idx] if "distances" in results else None,
+                        }
+                    )
+
         # Sort by year
         sorted_years = sorted(year_distribution.keys())
-        
+
         # Build result
         result = {
             "topic": topic_keywords,
@@ -444,13 +450,13 @@ def get_topic_evolution(
                 for year, papers in sorted(year_distribution.items())
             },
         }
-        
+
         # Clean up
         em.close()
         db.close()
-        
+
         return json.dumps(result, indent=2)
-        
+
     except Exception as e:
         logger.error(f"Failed to get topic evolution: {str(e)}")
         return json.dumps({"error": str(e)}, indent=2)
@@ -501,25 +507,25 @@ def search_papers(
     try:
         config = get_config()
         collection_name = collection_name or config.collection_name
-        
+
         # Initialize embeddings manager
         em = EmbeddingsManager(
             collection_name=collection_name,
         )
         em.connect()
         em.create_collection()
-        
+
         # Initialize database
         db = DatabaseManager()
         db.connect()
-        
+
         # Build metadata filter using helper function
         try:
             where_filter = merge_where_clause_with_conference(where, conference)
         except ValueError as e:
             logger.error(f"Invalid WHERE clause: {str(e)}")
             return json.dumps({"error": f"Invalid WHERE clause: {str(e)}"}, indent=2)
-        
+
         # Search for papers
         search_desc = f"papers from {years}" if years else "papers"
         logger.info(f"Searching for {search_desc} about: {topic_keywords}")
@@ -527,35 +533,41 @@ def search_papers(
             logger.info(f"Applying WHERE filter: {where_filter}")
         if years:
             logger.info(f"Year filter: {years}")
-        
+
         results = em.search_similar(
             query=topic_keywords,
             n_results=n_results * 3 if years else n_results,  # Get more if filtering by year
             where=where_filter,
         )
-        
+
         # Filter and format results
         papers = []
         if results["ids"] and results["ids"][0]:
             for idx, paper_id in enumerate(results["ids"][0]):
                 metadata = results["metadatas"][0][idx]
                 year = metadata.get("year")
-                
+
                 # Filter by years list if provided
                 if years is None or (year and year in years):
-                    papers.append({
-                        "id": paper_id,
-                        "title": metadata.get("title", ""),
-                        "year": year,
-                        "conference": metadata.get("conference", ""),
-                        "session": metadata.get("session", ""),
-                        "abstract": results["documents"][0][idx] if "documents" in results and results["documents"][0] else "",
-                        "relevance_score": 1.0 - results["distances"][0][idx] if "distances" in results else None,
-                    })
-                    
+                    papers.append(
+                        {
+                            "id": paper_id,
+                            "title": metadata.get("title", ""),
+                            "year": year,
+                            "conference": metadata.get("conference", ""),
+                            "session": metadata.get("session", ""),
+                            "abstract": (
+                                results["documents"][0][idx]
+                                if "documents" in results and results["documents"][0]
+                                else ""
+                            ),
+                            "relevance_score": 1.0 - results["distances"][0][idx] if "distances" in results else None,
+                        }
+                    )
+
                     if len(papers) >= n_results:
                         break
-        
+
         result = {
             "topic": topic_keywords,
             "conference": conference,
@@ -563,13 +575,13 @@ def search_papers(
             "papers_found": len(papers),
             "papers": papers,
         }
-        
+
         # Clean up
         em.close()
         db.close()
-        
+
         return json.dumps(result, indent=2)
-        
+
     except Exception as e:
         logger.error(f"Failed to search papers: {str(e)}")
         return json.dumps({"error": str(e)}, indent=2)
@@ -585,15 +597,15 @@ def analyze_topic_relevance(
 ) -> str:
     """
     Analyze the relevance of a topic by counting papers within a specified distance in embedding space.
-    
+
     This tool measures topic relevance by finding papers semantically similar to the topic
     within a specified Euclidean distance threshold. It's useful for identifying how prevalent
     or relevant a research topic is at a conference.
-    
+
     Parameters
     ----------
     topic : str
-        The topic or research question to analyze (e.g., "Uncertainty quantification", 
+        The topic or research question to analyze (e.g., "Uncertainty quantification",
         "Graph neural networks", "Transformer architectures")
     distance_threshold : float, optional
         Maximum Euclidean distance in embedding space to consider papers relevant (default: 1.1).
@@ -604,7 +616,7 @@ def analyze_topic_relevance(
         Filter results to specific years (e.g., [2024, 2025])
     collection_name : str, optional
         Name of ChromaDB collection (uses config default if not provided)
-    
+
     Returns
     -------
     str
@@ -616,32 +628,32 @@ def analyze_topic_relevance(
         - years: Years represented (with counts)
         - sample_papers: Sample of closest papers with titles and distances
         - relevance_score: Normalized relevance score (0-100 scale)
-    
+
     Examples
     --------
     Topic: "Uncertainty quantification"
     Result: 75 papers found within distance 1.1
     Interpretation: High relevance - this is a significant topic at the conference
-    
-    Query: "Quantum machine learning" 
+
+    Query: "Quantum machine learning"
     Result: 3 papers found within distance 1.1
     Interpretation: Low relevance - emerging or niche topic
     """
     try:
         config = get_config()
         collection_name = collection_name or config.collection_name
-        
+
         # Initialize embeddings manager
         em = EmbeddingsManager(
             collection_name=collection_name,
         )
         em.connect()
         em.create_collection()
-        
+
         # Initialize database
         db = DatabaseManager()
         db.connect()
-        
+
         # Find papers within distance
         logger.info(f"Analyzing relevance for topic: {topic}")
         logger.info(f"Distance threshold: {distance_threshold}")
@@ -649,7 +661,7 @@ def analyze_topic_relevance(
             logger.info(f"Filtering by conferences: {conferences}")
         if years:
             logger.info(f"Filtering by years: {years}")
-        
+
         result_data = em.find_papers_within_distance(
             database=db,
             query=topic,
@@ -657,11 +669,11 @@ def analyze_topic_relevance(
             conferences=conferences,
             years=years,
         )
-        
+
         # Analyze results
         papers = result_data["papers"]
         total_papers = len(papers)
-        
+
         # Count by conference
         conference_counts: Counter[str] = Counter()
         year_counts: Counter[int] = Counter()
@@ -670,21 +682,23 @@ def analyze_topic_relevance(
                 conference_counts[paper["conference"]] += 1
             if paper.get("year"):
                 year_counts[paper["year"]] += 1
-        
+
         # Calculate relevance score (0-100 scale)
         # Based on number of papers found - adjust scale as needed
         relevance_score = min(100, (total_papers / 10) * 100) if total_papers > 0 else 0
-        
+
         # Get sample papers (top 5 closest)
         sample_papers = []
         for paper in papers[:5]:
-            sample_papers.append({
-                "title": paper.get("title", ""),
-                "year": paper.get("year"),
-                "conference": paper.get("conference", ""),
-                "distance": paper.get("distance"),
-            })
-        
+            sample_papers.append(
+                {
+                    "title": paper.get("title", ""),
+                    "year": paper.get("year"),
+                    "conference": paper.get("conference", ""),
+                    "distance": paper.get("distance"),
+                }
+            )
+
         # Build result
         result = {
             "topic": topic,
@@ -700,13 +714,13 @@ def analyze_topic_relevance(
             "sample_papers": sample_papers,
             "closest_distance": papers[0].get("distance") if papers else None,
         }
-        
+
         # Clean up
         em.close()
         db.close()
-        
+
         return json.dumps(result, indent=2)
-        
+
     except Exception as e:
         logger.error(f"Failed to analyze topic relevance: {str(e)}")
         return json.dumps({"error": str(e)}, indent=2)
@@ -750,7 +764,7 @@ def get_cluster_visualization(
     try:
         config = get_config()
         collection_name = collection_name or config.collection_name
-        
+
         # Perform clustering
         logger.info("Performing clustering for visualization...")
         results = perform_clustering(
@@ -762,7 +776,7 @@ def get_cluster_visualization(
             output_path=output_path,
             random_state=42,
         )
-        
+
         # Format result
         result = {
             "n_dimensions": n_components,
@@ -772,9 +786,9 @@ def get_cluster_visualization(
             "visualization_saved": output_path is not None,
             "output_path": output_path if output_path else None,
         }
-        
+
         return json.dumps(result, indent=2)
-        
+
     except Exception as e:
         logger.error(f"Failed to generate cluster visualization: {str(e)}")
         return json.dumps({"error": str(e)}, indent=2)
@@ -802,10 +816,11 @@ def run_mcp_server(
     >>> run_mcp_server(host="0.0.0.0", port=8000)
     """
     logger.info(f"Starting MCP server on {host}:{port} with {transport} transport")
-    
+
     if transport == "stdio":
         # Run with stdio transport (for local CLI integration)
         import asyncio
+
         asyncio.run(mcp.run_stdio_async())
     else:
         # Run with SSE transport (for HTTP integration)
@@ -818,6 +833,6 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
-    
+
     # Run server
     run_mcp_server()

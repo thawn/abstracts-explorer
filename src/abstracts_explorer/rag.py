@@ -7,6 +7,7 @@ contextual responses using OpenAI-compatible language model APIs.
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 
@@ -25,12 +26,35 @@ class RAGError(Exception):
     pass
 
 
+def _strip_think_blocks(text: str) -> str:
+    """
+    Remove ``<think>...</think>`` blocks from an LLM response.
+
+    Some reasoning models (e.g. DeepSeek-R1) prepend chain-of-thought content
+    inside ``<think>`` tags before the actual JSON output.  Stripping these
+    blocks allows the JSON parser to operate on the clean output.
+
+    Parameters
+    ----------
+    text : str
+        Raw LLM response text.
+
+    Returns
+    -------
+    str
+        Response text with all ``<think>`` blocks removed and whitespace stripped.
+    """
+    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    return cleaned.strip()
+
+
 def parse_json_tool_call(response_text: str) -> Optional[List[Dict[str, Any]]]:
     """
     Parse JSON tool calls from LLM response.
 
     Some models return tool calls as JSON objects directly in the response content.
     This function attempts to parse the response as JSON and extract tool calls.
+    ``<think>`` blocks (emitted by reasoning models) are stripped before parsing.
 
     Expected formats:
     - Single tool: {"name": "tool_name", "arguments": {...}}
@@ -57,9 +81,14 @@ def parse_json_tool_call(response_text: str) -> Optional[List[Dict[str, Any]]]:
     if response_text is None or not isinstance(response_text, str) or not response_text.strip():
         return None
 
+    # Strip <think>...</think> blocks emitted by reasoning models before parsing JSON
+    cleaned_text = _strip_think_blocks(response_text)
+    if not cleaned_text:
+        return None
+
     try:
         # Try to parse as JSON
-        parsed = json.loads(response_text.strip())
+        parsed = json.loads(cleaned_text)
 
         # Handle different JSON formats
         tool_calls = []
@@ -98,13 +127,13 @@ def parse_json_tool_call(response_text: str) -> Optional[List[Dict[str, Any]]]:
             logger.info(f"Parsed {len(tool_calls)} JSON tool call(s) from response")
             return tool_calls
 
-        logger.debug(f"No JSON tool call(s) found in response {response_text.strip()}")
+        logger.debug(f"No JSON tool call(s) found in response {cleaned_text}")
         return None
 
     except (json.JSONDecodeError, ValueError, TypeError):
         # Not valid JSON or doesn't match expected format
         logger.debug(
-            f"Error parsing JSON tool calls. Make sure the model supports tool calling and returns proper JSON formatted responses. Got response from model: {response_text.strip()}"
+            f"Error parsing JSON tool calls. Make sure the model supports tool calling and returns proper JSON formatted responses. Got response from model: {cleaned_text}"
         )
         return None
 
@@ -353,12 +382,19 @@ class RAGChat:
                         logger.warning(f"Native tool call missing 'function' attribute: {tc}")
                         continue
                     try:
-                        args = json.loads(func.arguments)
-                    except json.JSONDecodeError:
+                        args_raw = func.arguments
+                        # Some backends return arguments already parsed as a dict
+                        if isinstance(args_raw, dict):
+                            args = args_raw
+                        else:
+                            args = json.loads(args_raw)
+                    except (json.JSONDecodeError, TypeError):
                         logger.warning(
                             f"Failed to parse native tool call arguments for '{func.name}': {func.arguments!r}"
                         )
-                        args = {}
+                        # Skip this tool call rather than executing it with empty args,
+                        # which could cause unexpected behavior in the tool function.
+                        continue
                     tool_calls.append({"name": func.name, "arguments": args})
                 if tool_calls:
                     logger.info(f"Query analysis: Routing to {len(tool_calls)} MCP tool(s) via native tool calling")
