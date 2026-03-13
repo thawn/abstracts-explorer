@@ -20,7 +20,6 @@ from abstracts_explorer.evaluation import (
     EvaluationError,
     Evaluator,
     _parse_json_array,
-    _sample_papers_context,
     format_eval_result_detail,
     format_eval_summary,
 )
@@ -432,17 +431,18 @@ class TestParseJsonArray:
 
 
 class TestSamplePapersContext:
-    """Tests for _sample_papers_context helper."""
+    """Tests for Evaluator._sample_papers_context method."""
 
-    def test_sample_papers_from_db(self, eval_db_with_papers):
+    def test_sample_papers_from_db(self, evaluator_with_papers):
         """Test sampling papers for context."""
-        context = _sample_papers_context(eval_db_with_papers, n_papers=2)
+        context = evaluator_with_papers._sample_papers_context(n_papers=2)
         assert "Paper" in context
         assert len(context) > 0
 
-    def test_sample_papers_empty_db(self, eval_db):
+    def test_sample_papers_empty_db(self, eval_db, mock_em):
         """Test sampling from empty database."""
-        context = _sample_papers_context(eval_db)
+        evaluator = Evaluator(embeddings_manager=mock_em, db=eval_db)
+        context = evaluator._sample_papers_context()
         assert "no papers" in context
 
 

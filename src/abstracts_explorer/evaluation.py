@@ -137,7 +137,7 @@ Score the actual answer (1-5) and explain briefly.
 
 
 # ---------------------------------------------------------------------------
-#  Helper utilities (module-level, usable without an Evaluator instance)
+#  Helper utilities (module-level, no Evaluator instance required)
 # ---------------------------------------------------------------------------
 
 
@@ -175,41 +175,6 @@ def _parse_json_array(text: str) -> List[Dict[str, Any]]:
     if not isinstance(parsed, list):
         raise EvaluationError(f"Expected JSON array, got {type(parsed).__name__}")
     return parsed
-
-
-def _sample_papers_context(db: DatabaseManager, n_papers: int = 10) -> str:
-    """
-    Sample random papers from the database and format them as context.
-
-    Parameters
-    ----------
-    db : DatabaseManager
-        Connected database manager.
-    n_papers : int
-        Number of papers to sample.
-
-    Returns
-    -------
-    str
-        Formatted paper context string.
-    """
-    total = db.get_paper_count()
-    if total == 0:
-        return "(no papers in database)"
-
-    # Fetch a random page of papers
-    all_papers = db.search_papers(limit=min(total, 200))
-    sampled = random.sample(all_papers, min(n_papers, len(all_papers)))
-
-    lines: List[str] = []
-    for i, p in enumerate(sampled, 1):
-        title = p.get("title", "Untitled")
-        abstract = (p.get("abstract") or "")[:200]
-        year = p.get("year", "")
-        conf = p.get("conference", "")
-        keywords = p.get("keywords", "")
-        lines.append(f"Paper {i}: {title} ({conf} {year})\n  Keywords: {keywords}\n  Abstract: {abstract}...")
-    return "\n\n".join(lines)
 
 
 def format_eval_summary(summary: Dict[str, Any], run_id: str) -> str:
@@ -376,6 +341,38 @@ class Evaluator:
     #  Q/A pair generation
     # ------------------------------------------------------------------
 
+    def _sample_papers_context(self, n_papers: int = 10) -> str:
+        """
+        Sample random papers from the database and format them as context.
+
+        Parameters
+        ----------
+        n_papers : int
+            Number of papers to sample.
+
+        Returns
+        -------
+        str
+            Formatted paper context string.
+        """
+        total = self.db.get_paper_count()
+        if total == 0:
+            return "(no papers in database)"
+
+        # Fetch a random page of papers
+        all_papers = self.db.search_papers(limit=min(total, 200))
+        sampled = random.sample(all_papers, min(n_papers, len(all_papers)))
+
+        lines: List[str] = []
+        for i, p in enumerate(sampled, 1):
+            title = p.get("title", "Untitled")
+            abstract = (p.get("abstract") or "")[:200]
+            year = p.get("year", "")
+            conf = p.get("conference", "")
+            keywords = p.get("keywords", "")
+            lines.append(f"Paper {i}: {title} ({conf} {year})\n  Keywords: {keywords}\n  Abstract: {abstract}...")
+        return "\n\n".join(lines)
+
     def generate_qa_pairs(
         self,
         n_pairs_per_tool: int = 2,
@@ -419,7 +416,7 @@ class Evaluator:
         if invalid:
             raise EvaluationError(f"Unknown tool(s): {', '.join(sorted(invalid))}")
 
-        papers_context = _sample_papers_context(self.db)
+        papers_context = self._sample_papers_context()
         all_pairs: List[Dict[str, Any]] = []
 
         for tool_name in target_tools:
