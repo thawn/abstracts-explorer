@@ -21,9 +21,7 @@ from .plugins import get_plugin, list_plugins, list_plugin_names
 from .mcp_server import run_mcp_server
 from .evaluation import (
     EvaluationError,
-    generate_qa_pairs,
-    store_qa_pairs,
-    run_evaluation,
+    Evaluator,
     format_eval_summary,
     format_eval_result_detail,
 )
@@ -907,6 +905,11 @@ def eval_generate_command(args: argparse.Namespace) -> int:
     print("=" * 70)
 
     try:
+        # Initialize embeddings manager for its openai_client
+        em = EmbeddingsManager(
+            lm_studio_url=args.lm_studio_url,
+        )
+
         with DatabaseManager() as db:
             db.create_tables()
 
@@ -916,18 +919,17 @@ def eval_generate_command(args: argparse.Namespace) -> int:
                 return 1
             print(f"\n📊 Found {total_papers:,} papers in database")
 
+            evaluator = Evaluator(embeddings_manager=em, db=db, model=args.model)
+
             print("\n🤖 Generating Q/A pairs...")
-            pairs = generate_qa_pairs(
-                db=db,
+            pairs = evaluator.generate_qa_pairs(
                 n_pairs_per_tool=args.n_pairs,
                 tools=args.tools if args.tools else None,
                 generate_followups=not args.no_followups,
                 n_followups=args.n_followups,
-                model=args.model,
-                lm_studio_url=args.lm_studio_url,
             )
 
-            count = store_qa_pairs(db, pairs)
+            count = evaluator.store_qa_pairs(pairs)
             print(f"\n✅ Generated and stored {count} Q/A pair(s)")
 
             # Show summary by tool
@@ -1125,18 +1127,14 @@ def eval_run_command(args: argparse.Namespace) -> int:
             actual_count = min(pair_count, args.limit) if args.limit else pair_count
             print(f"\n📊 Evaluating {actual_count} Q/A pair(s)...")
 
-            run_id = run_evaluation(
-                db=db,
-                embeddings_manager=em,
-                model=args.model,
-                lm_studio_url=args.lm_studio_url,
+            evaluator = Evaluator(embeddings_manager=em, db=db, model=args.model)
+            run_id = evaluator.run_evaluation(
                 verified_only=not args.include_unverified,
                 limit=args.limit,
             )
 
             # Show summary
-            summary = db.get_eval_run_summary(run_id)
-            print(f"\n{format_eval_summary(summary, run_id)}")
+            print(f"\n{evaluator.format_run_summary(run_id)}")
 
         em.close()
         return 0

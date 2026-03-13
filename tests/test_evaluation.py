@@ -4,8 +4,7 @@ Tests for the evaluation module.
 This module tests:
 - Database models (EvalQAPair, EvalResult)
 - Database CRUD methods for evaluation data
-- Q/A pair generation logic
-- Evaluation runner and scoring
+- Evaluator class (Q/A pair generation, evaluation runner)
 - Result formatting
 - CLI eval sub-commands
 """
@@ -19,13 +18,11 @@ import pytest
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.evaluation import (
     EvaluationError,
+    Evaluator,
     _parse_json_array,
     _sample_papers_context,
     format_eval_result_detail,
     format_eval_summary,
-    generate_qa_pairs,
-    store_qa_pairs,
-    run_evaluation,
 )
 from abstracts_explorer.cli import main
 from abstracts_explorer.plugin import LightweightPaper
@@ -126,6 +123,26 @@ def verified_eval_db(eval_db_with_pairs):
     for p in pairs:
         eval_db_with_pairs.update_eval_qa_pair(p["id"], verified=1)
     return eval_db_with_pairs
+
+
+@pytest.fixture
+def mock_em():
+    """A mock EmbeddingsManager with a mock openai_client."""
+    em = Mock()
+    em.openai_client = Mock()
+    return em
+
+
+@pytest.fixture
+def evaluator_with_papers(eval_db_with_papers, mock_em):
+    """Evaluator backed by a database with papers and a mocked embeddings manager."""
+    return Evaluator(embeddings_manager=mock_em, db=eval_db_with_papers)
+
+
+@pytest.fixture
+def evaluator_verified(verified_eval_db, mock_em):
+    """Evaluator backed by a database with verified Q/A pairs."""
+    return Evaluator(embeddings_manager=mock_em, db=verified_eval_db)
 
 
 # ---------------------------------------------------------------------------
@@ -429,10 +446,29 @@ class TestSamplePapersContext:
         assert "no papers" in context
 
 
-class TestGenerateQAPairs:
-    """Tests for generate_qa_pairs function."""
+class TestEvaluatorClass:
+    """Tests for the Evaluator class constructor and properties."""
 
-    def test_generate_qa_pairs_basic(self, eval_db_with_papers):
+    def test_evaluator_requires_embeddings_manager(self, eval_db):
+        """Test that Evaluator raises when embeddings_manager is None."""
+        with pytest.raises(EvaluationError, match="embeddings_manager is required"):
+            Evaluator(embeddings_manager=None, db=eval_db)
+
+    def test_evaluator_requires_db(self, mock_em):
+        """Test that Evaluator raises when db is None."""
+        with pytest.raises(EvaluationError, match="db is required"):
+            Evaluator(embeddings_manager=mock_em, db=None)
+
+    def test_evaluator_openai_client_delegates(self, eval_db, mock_em):
+        """Test that openai_client property delegates to EmbeddingsManager."""
+        evaluator = Evaluator(embeddings_manager=mock_em, db=eval_db)
+        assert evaluator.openai_client is mock_em.openai_client
+
+
+class TestGenerateQAPairs:
+    """Tests for Evaluator.generate_qa_pairs method."""
+
+    def test_generate_qa_pairs_basic(self, evaluator_with_papers):
         """Test basic Q/A pair generation with mocked LLM."""
         mock_response = Mock()
         mock_response.choices = [
@@ -450,23 +486,20 @@ class TestGenerateQAPairs:
             )
         ]
 
-        mock_client = Mock()
-        mock_client.chat.completions.create.return_value = mock_response
+        evaluator_with_papers.openai_client.chat.completions.create.return_value = mock_response
 
-        with patch("abstracts_explorer.evaluation._get_openai_client", return_value=mock_client):
-            pairs = generate_qa_pairs(
-                db=eval_db_with_papers,
-                n_pairs_per_tool=1,
-                tools=["search_papers"],
-                generate_followups=False,
-            )
+        pairs = evaluator_with_papers.generate_qa_pairs(
+            n_pairs_per_tool=1,
+            tools=["search_papers"],
+            generate_followups=False,
+        )
 
         assert len(pairs) == 1
         assert pairs[0]["tool_name"] == "search_papers"
         assert pairs[0]["turn_number"] == 0
         assert pairs[0]["query"] == "What papers discuss deep learning?"
 
-    def test_generate_qa_pairs_with_followups(self, eval_db_with_papers):
+    def test_generate_qa_pairs_with_followups(self, evaluator_with_papers):
         """Test Q/A pair generation with follow-ups."""
         # Initial pair response
         initial_response = Mock()
@@ -497,49 +530,45 @@ class TestGenerateQAPairs:
             )
         ]
 
-        mock_client = Mock()
-        mock_client.chat.completions.create.side_effect = [initial_response, followup_response]
+        evaluator_with_papers.openai_client.chat.completions.create.side_effect = [
+            initial_response,
+            followup_response,
+        ]
 
-        with patch("abstracts_explorer.evaluation._get_openai_client", return_value=mock_client):
-            pairs = generate_qa_pairs(
-                db=eval_db_with_papers,
-                n_pairs_per_tool=1,
-                tools=["get_cluster_topics"],
-                generate_followups=True,
-                n_followups=1,
-            )
+        pairs = evaluator_with_papers.generate_qa_pairs(
+            n_pairs_per_tool=1,
+            tools=["get_cluster_topics"],
+            generate_followups=True,
+            n_followups=1,
+        )
 
         assert len(pairs) == 2
         assert pairs[0]["turn_number"] == 0
         assert pairs[1]["turn_number"] == 1
         assert pairs[0]["conversation_id"] == pairs[1]["conversation_id"]
 
-    def test_generate_qa_pairs_unknown_tool(self, eval_db_with_papers):
+    def test_generate_qa_pairs_unknown_tool(self, evaluator_with_papers):
         """Test that unknown tool names raise an error."""
         with pytest.raises(EvaluationError, match="Unknown tool"):
-            generate_qa_pairs(
-                db=eval_db_with_papers,
+            evaluator_with_papers.generate_qa_pairs(
                 tools=["nonexistent_tool"],
             )
 
-    def test_generate_qa_pairs_llm_failure(self, eval_db_with_papers):
+    def test_generate_qa_pairs_llm_failure(self, evaluator_with_papers):
         """Test graceful handling of LLM failure."""
-        mock_client = Mock()
-        mock_client.chat.completions.create.side_effect = Exception("API timeout")
+        evaluator_with_papers.openai_client.chat.completions.create.side_effect = Exception("API timeout")
 
-        with patch("abstracts_explorer.evaluation._get_openai_client", return_value=mock_client):
-            with pytest.raises(EvaluationError, match="LLM call failed"):
-                generate_qa_pairs(
-                    db=eval_db_with_papers,
-                    tools=["search_papers"],
-                    generate_followups=False,
-                )
+        with pytest.raises(EvaluationError, match="LLM call failed"):
+            evaluator_with_papers.generate_qa_pairs(
+                tools=["search_papers"],
+                generate_followups=False,
+            )
 
 
 class TestStoreQAPairs:
-    """Tests for store_qa_pairs function."""
+    """Tests for Evaluator.store_qa_pairs method."""
 
-    def test_store_pairs(self, eval_db):
+    def test_store_pairs(self, eval_db, mock_em):
         """Test persisting Q/A pairs to database."""
         pairs = [
             {
@@ -560,7 +589,8 @@ class TestStoreQAPairs:
             },
         ]
 
-        count = store_qa_pairs(eval_db, pairs)
+        evaluator = Evaluator(embeddings_manager=mock_em, db=eval_db)
+        count = evaluator.store_qa_pairs(pairs)
         assert count == 2
         assert eval_db.get_eval_qa_pair_count() == 2
 
@@ -571,19 +601,17 @@ class TestStoreQAPairs:
 
 
 class TestRunEvaluation:
-    """Tests for the evaluation runner."""
+    """Tests for the Evaluator.run_evaluation method."""
 
-    def test_run_evaluation_no_pairs(self, eval_db):
+    def test_run_evaluation_no_pairs(self, eval_db, mock_em):
         """Test that running with no pairs raises an error."""
-        mock_em = Mock()
+        evaluator = Evaluator(embeddings_manager=mock_em, db=eval_db)
 
         with pytest.raises(EvaluationError, match="No Q/A pairs found"):
-            run_evaluation(db=eval_db, embeddings_manager=mock_em)
+            evaluator.run_evaluation()
 
-    def test_run_evaluation_basic(self, verified_eval_db):
+    def test_run_evaluation_basic(self, evaluator_verified):
         """Test basic evaluation run with mocked RAG and judge."""
-        mock_em = Mock()
-
         # Mock RAG query result
         mock_rag_result = {
             "response": "Deep learning and RL are the main topics.",
@@ -597,27 +625,18 @@ class TestRunEvaluation:
         # Mock judge response
         mock_judge_response = Mock()
         mock_judge_response.choices = [Mock(message=Mock(content='{"score": 4, "reasoning": "Good answer."}'))]
+        evaluator_verified.openai_client.chat.completions.create.return_value = mock_judge_response
 
-        mock_client = Mock()
-        mock_client.chat.completions.create.return_value = mock_judge_response
-
-        with (
-            patch("abstracts_explorer.evaluation._get_openai_client", return_value=mock_client),
-            patch("abstracts_explorer.rag.RAGChat") as MockRAG,
-        ):
+        with patch("abstracts_explorer.rag.RAGChat") as MockRAG:
             mock_rag_instance = MockRAG.return_value
             mock_rag_instance.query.return_value = mock_rag_result
 
-            run_id = run_evaluation(
-                db=verified_eval_db,
-                embeddings_manager=mock_em,
-                verified_only=True,
-            )
+            run_id = evaluator_verified.run_evaluation(verified_only=True)
 
         assert run_id.startswith("eval-")
 
         # Verify results were stored
-        results = verified_eval_db.get_eval_results(run_id=run_id)
+        results = evaluator_verified.db.get_eval_results(run_id=run_id)
         assert len(results) == 3  # 3 verified pairs
 
         # Check scores
@@ -625,25 +644,15 @@ class TestRunEvaluation:
             assert r["answer_score"] == 4.0
             assert r["actual_answer"] is not None
 
-    def test_run_evaluation_with_error(self, verified_eval_db):
+    def test_run_evaluation_with_error(self, evaluator_verified):
         """Test evaluation handles query errors gracefully."""
-        mock_em = Mock()
-        mock_client = Mock()
-        # Judge won't be called if query fails
-
-        with (
-            patch("abstracts_explorer.evaluation._get_openai_client", return_value=mock_client),
-            patch("abstracts_explorer.rag.RAGChat") as MockRAG,
-        ):
+        with patch("abstracts_explorer.rag.RAGChat") as MockRAG:
             mock_rag_instance = MockRAG.return_value
             mock_rag_instance.query.side_effect = Exception("Connection timeout")
 
-            run_id = run_evaluation(
-                db=verified_eval_db,
-                embeddings_manager=mock_em,
-            )
+            run_id = evaluator_verified.run_evaluation()
 
-        results = verified_eval_db.get_eval_results(run_id=run_id)
+        results = evaluator_verified.db.get_eval_results(run_id=run_id)
         assert len(results) == 3
         for r in results:
             assert r["error"] is not None
@@ -771,11 +780,14 @@ class TestCLIEvalCommands:
         mock_response.choices = [
             Mock(message=Mock(content=json.dumps([{"query": "Test query", "expected_answer": "Test answer"}])))
         ]
-        mock_client = Mock()
-        mock_client.chat.completions.create.return_value = mock_response
+        mock_openai_client = Mock()
+        mock_openai_client.chat.completions.create.return_value = mock_response
+
+        mock_em_instance = Mock()
+        mock_em_instance.openai_client = mock_openai_client
 
         with (
-            patch("abstracts_explorer.evaluation._get_openai_client", return_value=mock_client),
+            patch("abstracts_explorer.cli.EmbeddingsManager", return_value=mock_em_instance),
             patch.object(
                 sys,
                 "argv",

@@ -2,8 +2,8 @@
 Automatic Evaluation
 ====================
 
-This module implements automatic evaluation of the RAG system.  It provides
-functions for:
+This module implements automatic evaluation of the RAG system via the
+:class:`Evaluator` class.  It provides methods for:
 
 * Generating evaluation Q/A pairs from the paper database and MCP tools
   using an LLM.
@@ -15,14 +15,14 @@ functions for:
 import json
 import logging
 import random
+import re
 import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from openai import OpenAI
-
 from .config import get_config
 from .database import DatabaseManager
+from .embeddings import EmbeddingsManager
 
 logger = logging.getLogger(__name__)
 
@@ -38,14 +38,14 @@ class EvaluationError(Exception):
 # ---------------------------------------------------------------------------
 
 _TOOL_DESCRIPTIONS: Dict[str, str] = {
-    "search_papers": ("Search for papers on a specific topic. Returns relevant papers from the database."),
-    "get_cluster_topics": ("Get the main research topics from clustering analysis of paper embeddings."),
+    "search_papers": "Search for papers on a specific topic. Returns relevant papers from the database.",
+    "get_cluster_topics": "Get the main research topics from clustering analysis of paper embeddings.",
     "analyze_topic_relevance": (
         "Analyze the relevance and popularity of a research topic by counting "
         "papers within a specified distance in embedding space."
     ),
-    "get_topic_evolution": ("Analyze how a specific topic has evolved over the years."),
-    "get_cluster_visualization": ("Generate visualization data for clustered paper embeddings."),
+    "get_topic_evolution": "Analyze how a specific topic has evolved over the years.",
+    "get_cluster_visualization": "Generate visualization data for clustered paper embeddings.",
 }
 
 _QA_GENERATION_SYSTEM_PROMPT = """\
@@ -137,33 +137,44 @@ Score the actual answer (1-5) and explain briefly.
 
 
 # ---------------------------------------------------------------------------
-#  Q/A pair generation
+#  Helper utilities (module-level, usable without an Evaluator instance)
 # ---------------------------------------------------------------------------
 
 
-def _get_openai_client(
-    lm_studio_url: Optional[str] = None,
-    auth_token: Optional[str] = None,
-) -> OpenAI:
+def _parse_json_array(text: str) -> List[Dict[str, Any]]:
     """
-    Create an OpenAI client from config or explicit parameters.
+    Parse a JSON array from LLM output, tolerating markdown fences.
 
     Parameters
     ----------
-    lm_studio_url : str, optional
-        API base URL.  Falls back to config.
-    auth_token : str, optional
-        Bearer token.  Falls back to config.
+    text : str
+        Raw LLM output that should contain a JSON array.
 
     Returns
     -------
-    OpenAI
-        Initialised client.
+    list of dict
+        Parsed array elements.
+
+    Raises
+    ------
+    EvaluationError
+        If parsing fails.
     """
-    config = get_config()
-    url = (lm_studio_url or config.llm_backend_url).rstrip("/")
-    token = auth_token if auth_token is not None else config.llm_backend_auth_token
-    return OpenAI(base_url=f"{url}/v1", api_key=token or "lm-studio-local")
+    # Strip <think> blocks
+    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    # Strip markdown code fences
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    cleaned = cleaned.strip()
+
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        raise EvaluationError(f"Failed to parse LLM JSON output: {exc}\nRaw output:\n{text[:500]}") from exc
+
+    if not isinstance(parsed, list):
+        raise EvaluationError(f"Expected JSON array, got {type(parsed).__name__}")
+    return parsed
 
 
 def _sample_papers_context(db: DatabaseManager, n_papers: int = 10) -> str:
@@ -197,411 +208,8 @@ def _sample_papers_context(db: DatabaseManager, n_papers: int = 10) -> str:
         year = p.get("year", "")
         conf = p.get("conference", "")
         keywords = p.get("keywords", "")
-        lines.append(f"Paper {i}: {title} ({conf} {year})\n" f"  Keywords: {keywords}\n" f"  Abstract: {abstract}...")
+        lines.append(f"Paper {i}: {title} ({conf} {year})\n  Keywords: {keywords}\n  Abstract: {abstract}...")
     return "\n\n".join(lines)
-
-
-def _parse_json_array(text: str) -> List[Dict[str, Any]]:
-    """
-    Parse a JSON array from LLM output, tolerating markdown fences.
-
-    Parameters
-    ----------
-    text : str
-        Raw LLM output that should contain a JSON array.
-
-    Returns
-    -------
-    list of dict
-        Parsed array elements.
-
-    Raises
-    ------
-    EvaluationError
-        If parsing fails.
-    """
-    import re
-
-    # Strip <think> blocks
-    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
-    # Strip markdown code fences
-    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-    cleaned = re.sub(r"\s*```$", "", cleaned)
-    cleaned = cleaned.strip()
-
-    try:
-        parsed = json.loads(cleaned)
-    except json.JSONDecodeError as exc:
-        raise EvaluationError(f"Failed to parse LLM JSON output: {exc}\nRaw output:\n{text[:500]}") from exc
-
-    if not isinstance(parsed, list):
-        raise EvaluationError(f"Expected JSON array, got {type(parsed).__name__}")
-    return parsed
-
-
-def generate_qa_pairs(
-    db: DatabaseManager,
-    n_pairs_per_tool: int = 2,
-    tools: Optional[List[str]] = None,
-    generate_followups: bool = True,
-    n_followups: int = 1,
-    model: Optional[str] = None,
-    lm_studio_url: Optional[str] = None,
-    auth_token: Optional[str] = None,
-) -> List[Dict[str, Any]]:
-    """
-    Generate evaluation Q/A pairs using an LLM.
-
-    For each requested MCP tool a set of query/answer pairs is generated
-    based on papers sampled from the database.  Optionally, follow-up
-    questions are generated for each initial pair.
-
-    Parameters
-    ----------
-    db : DatabaseManager
-        Connected database with papers.
-    n_pairs_per_tool : int
-        Number of initial Q/A pairs to generate per tool.
-    tools : list of str, optional
-        MCP tool names to generate pairs for.  Defaults to all tools.
-    generate_followups : bool
-        Whether to generate follow-up questions.
-    n_followups : int
-        Number of follow-up turns per initial pair.
-    model : str, optional
-        Chat model name.  Falls back to config default.
-    lm_studio_url : str, optional
-        LLM backend URL.  Falls back to config default.
-    auth_token : str, optional
-        Auth token.  Falls back to config default.
-
-    Returns
-    -------
-    list of dict
-        Generated pairs, each with keys: ``conversation_id``,
-        ``turn_number``, ``query``, ``expected_answer``, ``tool_name``,
-        ``source_info``.
-
-    Raises
-    ------
-    EvaluationError
-        If generation fails.
-    """
-    config = get_config()
-    client = _get_openai_client(lm_studio_url, auth_token)
-    chat_model = model or config.chat_model
-
-    available_tools = list(_TOOL_DESCRIPTIONS.keys())
-    target_tools = tools if tools else available_tools
-    invalid = set(target_tools) - set(available_tools)
-    if invalid:
-        raise EvaluationError(f"Unknown tool(s): {', '.join(sorted(invalid))}")
-
-    papers_context = _sample_papers_context(db)
-    all_pairs: List[Dict[str, Any]] = []
-
-    for tool_name in target_tools:
-        logger.info(f"Generating {n_pairs_per_tool} Q/A pair(s) for tool: {tool_name}")
-        tool_desc = _TOOL_DESCRIPTIONS[tool_name]
-
-        user_prompt = _QA_GENERATION_USER_PROMPT.format(
-            n_pairs=n_pairs_per_tool,
-            tool_name=tool_name,
-            tool_description=tool_desc,
-            papers_context=papers_context,
-        )
-
-        try:
-            resp = client.chat.completions.create(
-                model=chat_model,
-                messages=[
-                    {"role": "system", "content": _QA_GENERATION_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.7,
-                max_tokens=2000,
-                timeout=120,
-            )
-            raw = resp.choices[0].message.content or ""
-            pairs = _parse_json_array(raw)
-        except EvaluationError:
-            raise
-        except Exception as exc:
-            raise EvaluationError(f"LLM call failed for tool {tool_name}: {exc}") from exc
-
-        for pair in pairs[:n_pairs_per_tool]:
-            conv_id = uuid.uuid4().hex[:12]
-            entry = {
-                "conversation_id": conv_id,
-                "turn_number": 0,
-                "query": pair.get("query", ""),
-                "expected_answer": pair.get("expected_answer", ""),
-                "tool_name": tool_name,
-                "source_info": json.dumps({"model": chat_model, "tool": tool_name}),
-            }
-            all_pairs.append(entry)
-
-            # Generate follow-ups
-            if generate_followups and n_followups > 0:
-                followup_prompt = _FOLLOWUP_GENERATION_PROMPT.format(
-                    n_followups=n_followups,
-                    initial_query=entry["query"],
-                    initial_answer=entry["expected_answer"],
-                    papers_context=papers_context,
-                )
-                try:
-                    fu_resp = client.chat.completions.create(
-                        model=chat_model,
-                        messages=[
-                            {"role": "system", "content": _QA_GENERATION_SYSTEM_PROMPT},
-                            {"role": "user", "content": followup_prompt},
-                        ],
-                        temperature=0.7,
-                        max_tokens=2000,
-                        timeout=120,
-                    )
-                    fu_raw = fu_resp.choices[0].message.content or ""
-                    followups = _parse_json_array(fu_raw)
-                except Exception as exc:
-                    logger.warning(f"Failed to generate follow-ups for conv {conv_id}: {exc}")
-                    followups = []
-
-                for idx, fu in enumerate(followups[:n_followups], 1):
-                    all_pairs.append(
-                        {
-                            "conversation_id": conv_id,
-                            "turn_number": idx,
-                            "query": fu.get("query", ""),
-                            "expected_answer": fu.get("expected_answer", ""),
-                            "tool_name": tool_name,
-                            "source_info": json.dumps(
-                                {"model": chat_model, "tool": tool_name, "followup_of": conv_id}
-                            ),
-                        }
-                    )
-
-    logger.info(f"Generated {len(all_pairs)} Q/A pairs total")
-    return all_pairs
-
-
-def store_qa_pairs(db: DatabaseManager, pairs: List[Dict[str, Any]]) -> int:
-    """
-    Persist generated Q/A pairs into the database.
-
-    Parameters
-    ----------
-    db : DatabaseManager
-        Connected database.
-    pairs : list of dict
-        Pairs as returned by :func:`generate_qa_pairs`.
-
-    Returns
-    -------
-    int
-        Number of pairs stored.
-    """
-    count = 0
-    for p in pairs:
-        db.add_eval_qa_pair(
-            conversation_id=p["conversation_id"],
-            turn_number=p["turn_number"],
-            query=p["query"],
-            expected_answer=p["expected_answer"],
-            tool_name=p.get("tool_name"),
-            source_info=p.get("source_info"),
-        )
-        count += 1
-    return count
-
-
-# ---------------------------------------------------------------------------
-#  Evaluation runner
-# ---------------------------------------------------------------------------
-
-
-def _judge_answer(
-    client: OpenAI,
-    model: str,
-    query: str,
-    expected_answer: str,
-    actual_answer: str,
-) -> Dict[str, Any]:
-    """
-    Use LLM-as-judge to score an answer.
-
-    Parameters
-    ----------
-    client : OpenAI
-        OpenAI client.
-    model : str
-        Judge model name.
-    query : str
-        Original query.
-    expected_answer : str
-        Reference answer.
-    actual_answer : str
-        RAG system output.
-
-    Returns
-    -------
-    dict
-        ``{"score": int, "reasoning": str}``
-    """
-    import re
-
-    user_prompt = _JUDGE_USER_PROMPT.format(
-        query=query,
-        expected_answer=expected_answer,
-        actual_answer=actual_answer,
-    )
-    try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": _JUDGE_SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.1,
-            max_tokens=300,
-            timeout=60,
-        )
-        raw = resp.choices[0].message.content or ""
-        # Strip <think> blocks
-        cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
-        # Strip markdown fences
-        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-        cleaned = re.sub(r"\s*```$", "", cleaned)
-        parsed = json.loads(cleaned.strip())
-        score = max(1, min(5, int(parsed.get("score", 3))))
-        return {"score": score, "reasoning": parsed.get("reasoning", "")}
-    except Exception as exc:
-        logger.warning(f"Judge scoring failed: {exc}")
-        return {"score": None, "reasoning": f"Judge error: {exc}"}
-
-
-def run_evaluation(
-    db: DatabaseManager,
-    embeddings_manager: Any,
-    model: Optional[str] = None,
-    lm_studio_url: Optional[str] = None,
-    auth_token: Optional[str] = None,
-    verified_only: bool = True,
-    limit: Optional[int] = None,
-) -> str:
-    """
-    Run evaluation on stored Q/A pairs and record results.
-
-    Executes each stored query through the RAG system, scores the output
-    with an LLM judge, and stores the results in the database.
-
-    Parameters
-    ----------
-    db : DatabaseManager
-        Connected database containing Q/A pairs.
-    embeddings_manager : EmbeddingsManager
-        Connected embeddings manager for RAG.
-    model : str, optional
-        Chat model to use.  Falls back to config.
-    lm_studio_url : str, optional
-        LLM backend URL.  Falls back to config.
-    auth_token : str, optional
-        Auth token.  Falls back to config.
-    verified_only : bool
-        If ``True``, only evaluate verified pairs (default).
-    limit : int, optional
-        Maximum number of pairs to evaluate.
-
-    Returns
-    -------
-    str
-        The ``run_id`` for the evaluation run.
-
-    Raises
-    ------
-    EvaluationError
-        If evaluation fails.
-    """
-    from .rag import RAGChat
-
-    config = get_config()
-    chat_model = model or config.chat_model
-    client = _get_openai_client(lm_studio_url, auth_token)
-
-    pairs = db.get_eval_qa_pairs(verified_only=verified_only, limit=limit)
-    if not pairs:
-        raise EvaluationError("No Q/A pairs found for evaluation. Generate and verify pairs first.")
-
-    run_id = f"eval-{uuid.uuid4().hex[:8]}"
-    logger.info(f"Starting evaluation run {run_id} with {len(pairs)} pair(s)")
-
-    # Group pairs by conversation for multi-turn handling
-    conversations: Dict[str, List[Dict[str, Any]]] = {}
-    for p in pairs:
-        conv_id = p["conversation_id"]
-        conversations.setdefault(conv_id, []).append(p)
-    for turns in conversations.values():
-        turns.sort(key=lambda x: x["turn_number"])
-
-    # Initialise a RAGChat instance for each conversation
-    for conv_id, turns in conversations.items():
-        rag = RAGChat(
-            embeddings_manager=embeddings_manager,
-            database=db,
-            lm_studio_url=lm_studio_url,
-            model=chat_model,
-        )
-
-        for pair in turns:
-            qa_pair_id = pair["id"]
-            query_text = pair["query"]
-            expected = pair["expected_answer"]
-            expected_tool = pair.get("tool_name")
-
-            start = time.time()
-            actual_answer = None
-            actual_tool = None
-            error_msg = None
-
-            try:
-                result = rag.query(query_text)
-                actual_answer = result.get("response", "")
-                tools_used = result.get("metadata", {}).get("tools_executed", [])
-                actual_tool = tools_used[0] if tools_used else None
-            except Exception as exc:
-                error_msg = str(exc)
-                logger.warning(f"Query failed for pair {qa_pair_id}: {exc}")
-
-            elapsed_ms = int((time.time() - start) * 1000)
-
-            # Tool correctness
-            tool_correct = None
-            if expected_tool and actual_tool is not None:
-                tool_correct = 1 if actual_tool == expected_tool else 0
-
-            # LLM judge scoring
-            judge_result: Dict[str, Any] = {"score": None, "reasoning": ""}
-            if actual_answer and not error_msg:
-                judge_result = _judge_answer(client, chat_model, query_text, expected, actual_answer)
-
-            db.add_eval_result(
-                run_id=run_id,
-                qa_pair_id=qa_pair_id,
-                actual_answer=actual_answer,
-                actual_tool_name=actual_tool,
-                answer_score=judge_result.get("score"),
-                tool_correct=tool_correct,
-                latency_ms=elapsed_ms,
-                error=error_msg,
-                judge_reasoning=judge_result.get("reasoning", ""),
-            )
-
-    logger.info(f"Evaluation run {run_id} complete")
-    return run_id
-
-
-# ---------------------------------------------------------------------------
-#  Results formatting
-# ---------------------------------------------------------------------------
 
 
 def format_eval_summary(summary: Dict[str, Any], run_id: str) -> str:
@@ -683,7 +291,8 @@ def format_eval_result_detail(result: Dict[str, Any], qa_pair: Optional[Dict[str
     if tc is not None:
         expected_tool = qa_pair.get("tool_name", "?") if qa_pair else "?"
         lines.append(
-            f"Tool:     {'✅ correct' if tc else '❌ wrong'} (expected: {expected_tool}, got: {result.get('actual_tool_name', '?')})"
+            f"Tool:     {'✅ correct' if tc else '❌ wrong'}"
+            f" (expected: {expected_tool}, got: {result.get('actual_tool_name', '?')})"
         )
 
     if result.get("latency_ms"):
@@ -697,3 +306,405 @@ def format_eval_result_detail(result: Dict[str, Any], qa_pair: Optional[Dict[str
         lines.append(f"Judge:    {reasoning[:200]}")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+#  Evaluator class
+# ---------------------------------------------------------------------------
+
+
+class Evaluator:
+    """
+    Automatic evaluation of the RAG system.
+
+    Wraps all evaluation operations — Q/A pair generation, evaluation
+    execution, and result storage — sharing a single
+    :class:`~abstracts_explorer.embeddings.EmbeddingsManager` and its
+    ``openai_client`` for LLM calls.
+
+    Parameters
+    ----------
+    embeddings_manager : EmbeddingsManager
+        A connected embeddings manager.  Its ``openai_client`` property is
+        used for all LLM calls (generation and judging).
+    db : DatabaseManager
+        A connected database manager.
+    model : str, optional
+        Chat model name.  Falls back to config default.
+
+    Examples
+    --------
+    >>> em = EmbeddingsManager()
+    >>> em.connect()
+    >>> with DatabaseManager() as db:
+    ...     evaluator = Evaluator(em, db)
+    ...     pairs = evaluator.generate_qa_pairs(n_pairs_per_tool=2)
+    ...     evaluator.store_qa_pairs(pairs)
+    ...     run_id = evaluator.run_evaluation()
+    ...     print(evaluator.format_run_summary(run_id))
+    """
+
+    def __init__(
+        self,
+        embeddings_manager: EmbeddingsManager,
+        db: DatabaseManager,
+        model: Optional[str] = None,
+    ):
+        if embeddings_manager is None:
+            raise EvaluationError("embeddings_manager is required.")
+        if db is None:
+            raise EvaluationError("db is required.")
+
+        config = get_config()
+        self.embeddings_manager = embeddings_manager
+        self.db = db
+        self.model = model or config.chat_model
+
+    @property
+    def openai_client(self):
+        """
+        OpenAI client shared with the embeddings manager.
+
+        Returns
+        -------
+        OpenAI
+            The lazily-initialised client from ``EmbeddingsManager``.
+        """
+        return self.embeddings_manager.openai_client
+
+    # ------------------------------------------------------------------
+    #  Q/A pair generation
+    # ------------------------------------------------------------------
+
+    def generate_qa_pairs(
+        self,
+        n_pairs_per_tool: int = 2,
+        tools: Optional[List[str]] = None,
+        generate_followups: bool = True,
+        n_followups: int = 1,
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate evaluation Q/A pairs using the LLM.
+
+        For each requested MCP tool a set of query/answer pairs is
+        generated based on papers sampled from the database.  Optionally,
+        follow-up questions are generated for each initial pair.
+
+        Parameters
+        ----------
+        n_pairs_per_tool : int
+            Number of initial Q/A pairs to generate per tool.
+        tools : list of str, optional
+            MCP tool names to generate pairs for.  Defaults to all tools.
+        generate_followups : bool
+            Whether to generate follow-up questions.
+        n_followups : int
+            Number of follow-up turns per initial pair.
+
+        Returns
+        -------
+        list of dict
+            Generated pairs, each with keys: ``conversation_id``,
+            ``turn_number``, ``query``, ``expected_answer``,
+            ``tool_name``, ``source_info``.
+
+        Raises
+        ------
+        EvaluationError
+            If generation fails.
+        """
+        available_tools = list(_TOOL_DESCRIPTIONS.keys())
+        target_tools = tools if tools else available_tools
+        invalid = set(target_tools) - set(available_tools)
+        if invalid:
+            raise EvaluationError(f"Unknown tool(s): {', '.join(sorted(invalid))}")
+
+        papers_context = _sample_papers_context(self.db)
+        all_pairs: List[Dict[str, Any]] = []
+
+        for tool_name in target_tools:
+            logger.info(f"Generating {n_pairs_per_tool} Q/A pair(s) for tool: {tool_name}")
+            tool_desc = _TOOL_DESCRIPTIONS[tool_name]
+
+            user_prompt = _QA_GENERATION_USER_PROMPT.format(
+                n_pairs=n_pairs_per_tool,
+                tool_name=tool_name,
+                tool_description=tool_desc,
+                papers_context=papers_context,
+            )
+
+            try:
+                resp = self.openai_client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": _QA_GENERATION_SYSTEM_PROMPT},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=0.7,
+                    max_tokens=2000,
+                    timeout=120,
+                )
+                raw = resp.choices[0].message.content or ""
+                pairs = _parse_json_array(raw)
+            except EvaluationError:
+                raise
+            except Exception as exc:
+                raise EvaluationError(f"LLM call failed for tool {tool_name}: {exc}") from exc
+
+            for pair in pairs[:n_pairs_per_tool]:
+                conv_id = uuid.uuid4().hex[:12]
+                entry = {
+                    "conversation_id": conv_id,
+                    "turn_number": 0,
+                    "query": pair.get("query", ""),
+                    "expected_answer": pair.get("expected_answer", ""),
+                    "tool_name": tool_name,
+                    "source_info": json.dumps({"model": self.model, "tool": tool_name}),
+                }
+                all_pairs.append(entry)
+
+                # Generate follow-ups
+                if generate_followups and n_followups > 0:
+                    followup_prompt = _FOLLOWUP_GENERATION_PROMPT.format(
+                        n_followups=n_followups,
+                        initial_query=entry["query"],
+                        initial_answer=entry["expected_answer"],
+                        papers_context=papers_context,
+                    )
+                    try:
+                        fu_resp = self.openai_client.chat.completions.create(
+                            model=self.model,
+                            messages=[
+                                {"role": "system", "content": _QA_GENERATION_SYSTEM_PROMPT},
+                                {"role": "user", "content": followup_prompt},
+                            ],
+                            temperature=0.7,
+                            max_tokens=2000,
+                            timeout=120,
+                        )
+                        fu_raw = fu_resp.choices[0].message.content or ""
+                        followups = _parse_json_array(fu_raw)
+                    except Exception as exc:
+                        logger.warning(f"Failed to generate follow-ups for conv {conv_id}: {exc}")
+                        followups = []
+
+                    for idx, fu in enumerate(followups[:n_followups], 1):
+                        all_pairs.append(
+                            {
+                                "conversation_id": conv_id,
+                                "turn_number": idx,
+                                "query": fu.get("query", ""),
+                                "expected_answer": fu.get("expected_answer", ""),
+                                "tool_name": tool_name,
+                                "source_info": json.dumps(
+                                    {"model": self.model, "tool": tool_name, "followup_of": conv_id}
+                                ),
+                            }
+                        )
+
+        logger.info(f"Generated {len(all_pairs)} Q/A pairs total")
+        return all_pairs
+
+    def store_qa_pairs(self, pairs: List[Dict[str, Any]]) -> int:
+        """
+        Persist generated Q/A pairs into the database.
+
+        Parameters
+        ----------
+        pairs : list of dict
+            Pairs as returned by :meth:`generate_qa_pairs`.
+
+        Returns
+        -------
+        int
+            Number of pairs stored.
+        """
+        count = 0
+        for p in pairs:
+            self.db.add_eval_qa_pair(
+                conversation_id=p["conversation_id"],
+                turn_number=p["turn_number"],
+                query=p["query"],
+                expected_answer=p["expected_answer"],
+                tool_name=p.get("tool_name"),
+                source_info=p.get("source_info"),
+            )
+            count += 1
+        return count
+
+    # ------------------------------------------------------------------
+    #  Evaluation runner
+    # ------------------------------------------------------------------
+
+    def _judge_answer(
+        self,
+        query: str,
+        expected_answer: str,
+        actual_answer: str,
+    ) -> Dict[str, Any]:
+        """
+        Use LLM-as-judge to score an answer.
+
+        Parameters
+        ----------
+        query : str
+            Original query.
+        expected_answer : str
+            Reference answer.
+        actual_answer : str
+            RAG system output.
+
+        Returns
+        -------
+        dict
+            ``{"score": int, "reasoning": str}``
+        """
+        user_prompt = _JUDGE_USER_PROMPT.format(
+            query=query,
+            expected_answer=expected_answer,
+            actual_answer=actual_answer,
+        )
+        try:
+            resp = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": _JUDGE_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.1,
+                max_tokens=300,
+                timeout=60,
+            )
+            raw = resp.choices[0].message.content or ""
+            # Strip <think> blocks
+            cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+            # Strip markdown fences
+            cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+            cleaned = re.sub(r"\s*```$", "", cleaned)
+            parsed = json.loads(cleaned.strip())
+            score = max(1, min(5, int(parsed.get("score", 3))))
+            return {"score": score, "reasoning": parsed.get("reasoning", "")}
+        except Exception as exc:
+            logger.warning(f"Judge scoring failed: {exc}")
+            return {"score": None, "reasoning": f"Judge error: {exc}"}
+
+    def run_evaluation(
+        self,
+        verified_only: bool = True,
+        limit: Optional[int] = None,
+    ) -> str:
+        """
+        Run evaluation on stored Q/A pairs and record results.
+
+        Executes each stored query through the RAG system, scores the
+        output with an LLM judge, and stores the results in the database.
+
+        Parameters
+        ----------
+        verified_only : bool
+            If ``True``, only evaluate verified pairs (default).
+        limit : int, optional
+            Maximum number of pairs to evaluate.
+
+        Returns
+        -------
+        str
+            The ``run_id`` for the evaluation run.
+
+        Raises
+        ------
+        EvaluationError
+            If evaluation fails.
+        """
+        from .rag import RAGChat
+
+        pairs = self.db.get_eval_qa_pairs(verified_only=verified_only, limit=limit)
+        if not pairs:
+            raise EvaluationError("No Q/A pairs found for evaluation. Generate and verify pairs first.")
+
+        run_id = f"eval-{uuid.uuid4().hex[:8]}"
+        logger.info(f"Starting evaluation run {run_id} with {len(pairs)} pair(s)")
+
+        # Group pairs by conversation for multi-turn handling
+        conversations: Dict[str, List[Dict[str, Any]]] = {}
+        for p in pairs:
+            conv_id = p["conversation_id"]
+            conversations.setdefault(conv_id, []).append(p)
+        for turns in conversations.values():
+            turns.sort(key=lambda x: x["turn_number"])
+
+        # Initialise a RAGChat instance for each conversation
+        for conv_id, turns in conversations.items():
+            rag = RAGChat(
+                embeddings_manager=self.embeddings_manager,
+                database=self.db,
+                model=self.model,
+            )
+
+            for pair in turns:
+                qa_pair_id = pair["id"]
+                query_text = pair["query"]
+                expected = pair["expected_answer"]
+                expected_tool = pair.get("tool_name")
+
+                start = time.time()
+                actual_answer = None
+                actual_tool = None
+                error_msg = None
+
+                try:
+                    result = rag.query(query_text)
+                    actual_answer = result.get("response", "")
+                    tools_used = result.get("metadata", {}).get("tools_executed", [])
+                    actual_tool = tools_used[0] if tools_used else None
+                except Exception as exc:
+                    error_msg = str(exc)
+                    logger.warning(f"Query failed for pair {qa_pair_id}: {exc}")
+
+                elapsed_ms = int((time.time() - start) * 1000)
+
+                # Tool correctness
+                tool_correct = None
+                if expected_tool and actual_tool is not None:
+                    tool_correct = 1 if actual_tool == expected_tool else 0
+
+                # LLM judge scoring
+                judge_result: Dict[str, Any] = {"score": None, "reasoning": ""}
+                if actual_answer and not error_msg:
+                    judge_result = self._judge_answer(query_text, expected, actual_answer)
+
+                self.db.add_eval_result(
+                    run_id=run_id,
+                    qa_pair_id=qa_pair_id,
+                    actual_answer=actual_answer,
+                    actual_tool_name=actual_tool,
+                    answer_score=judge_result.get("score"),
+                    tool_correct=tool_correct,
+                    latency_ms=elapsed_ms,
+                    error=error_msg,
+                    judge_reasoning=judge_result.get("reasoning", ""),
+                )
+
+        logger.info(f"Evaluation run {run_id} complete")
+        return run_id
+
+    # ------------------------------------------------------------------
+    #  Convenience formatting delegators
+    # ------------------------------------------------------------------
+
+    def format_run_summary(self, run_id: str) -> str:
+        """
+        Compute and format the summary for *run_id*.
+
+        Parameters
+        ----------
+        run_id : str
+            Evaluation run identifier.
+
+        Returns
+        -------
+        str
+            Human-readable summary.
+        """
+        summary = self.db.get_eval_run_summary(run_id)
+        return format_eval_summary(summary, run_id)
