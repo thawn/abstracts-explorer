@@ -1012,16 +1012,16 @@ def eval_verify_command(args: argparse.Namespace) -> int:
                 print(f"Status:   {status_map.get(pair['verified'], 'unknown')}")
 
                 try:
-                    choice = input("\n[a/r/e/E/s/q]: ").strip().lower()
+                    choice = input("\n[a/r/e/E/s/q]: ").strip()
                 except (EOFError, KeyboardInterrupt):
                     print("\n\n👋 Verification stopped.")
                     break
 
-                if choice == "a":
+                if choice in ("a", "A"):
                     db.update_eval_qa_pair(pair["id"], verified=1)
                     accepted += 1
                     print("✅ Accepted\n")
-                elif choice == "r":
+                elif choice in ("r", "R"):
                     db.update_eval_qa_pair(pair["id"], verified=-1)
                     rejected += 1
                     print("❌ Rejected\n")
@@ -1037,7 +1037,7 @@ def eval_verify_command(args: argparse.Namespace) -> int:
                         print("✏️  Updated and accepted\n")
                     else:
                         print("⏭️  Skipped (empty input)\n")
-                elif choice == "E" or choice == "ea":
+                elif choice in ("E", "ea"):
                     try:
                         new_answer = input("New answer: ").strip()
                     except (EOFError, KeyboardInterrupt):
@@ -1049,7 +1049,7 @@ def eval_verify_command(args: argparse.Namespace) -> int:
                         print("✏️  Updated and accepted\n")
                     else:
                         print("⏭️  Skipped (empty input)\n")
-                elif choice == "q":
+                elif choice in ("q", "Q"):
                     print("👋 Quitting verification.")
                     break
                 else:
