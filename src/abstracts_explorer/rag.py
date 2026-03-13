@@ -14,6 +14,7 @@ from typing import List, Dict, Optional, Any
 from openai import OpenAI
 
 from .config import get_config
+from .database import DatabaseError
 from .paper_utils import PaperFormattingError
 from .mcp_tools import execute_mcp_tool, format_tool_result_for_llm, get_mcp_tools_schema
 
@@ -369,7 +370,7 @@ class RAGChat:
                 filter_options = self.database.get_filter_options()
                 db_conferences = filter_options.get("conferences", [])
                 db_years = filter_options.get("years", [])
-            except Exception:
+            except DatabaseError:
                 logger.debug("Could not retrieve filter options from database, using schema without enums")
                 db_conferences = []
                 db_years = []
