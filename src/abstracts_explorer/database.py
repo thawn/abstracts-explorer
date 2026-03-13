@@ -21,7 +21,15 @@ from sqlalchemy.exc import OperationalError, ProgrammingError, IntegrityError
 from abstracts_explorer.plugin import LightweightPaper
 
 # Import SQLAlchemy models
-from abstracts_explorer.db_models import Base, Paper, EmbeddingsMetadata, ClusteringCache, ValidationData
+from abstracts_explorer.db_models import (
+    Base,
+    Paper,
+    EmbeddingsMetadata,
+    ClusteringCache,
+    ValidationData,
+    EvalQAPair,
+    EvalResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,11 +70,11 @@ class DatabaseManager:
     def __init__(self):
         """
         Initialize the DatabaseManager.
-        
+
         Reads database configuration from the config file.
         """
         from abstracts_explorer.config import get_config
-        
+
         config = get_config()
         self.database_url = config.database_url
 
@@ -114,9 +122,9 @@ class DatabaseManager:
 
             # Create a session
             self._session = self.SessionLocal()
-            
+
             # Set legacy connection attribute to provide raw database connection for backward compatibility
-            # This allows tests to use .connection.cursor() 
+            # This allows tests to use .connection.cursor()
             self._raw_connection = self.engine.raw_connection()
             self.connection = self._raw_connection.driver_connection
 
@@ -144,7 +152,7 @@ class DatabaseManager:
         if self._session:
             self._session.close()
             self._session = None
-        if hasattr(self, '_raw_connection') and self._raw_connection:
+        if hasattr(self, "_raw_connection") and self._raw_connection:
             self._raw_connection.close()
             self._raw_connection = None
         if self.engine:
@@ -171,7 +179,7 @@ class DatabaseManager:
         - papers: Main table for paper information with lightweight ML4PS schema
         - embeddings_metadata: Metadata about embeddings (model used, creation date)
         - clustering_cache: Cache for clustering results
-        
+
         This method is idempotent - it can be called multiple times without error.
         Tables are only created if they don't already exist.
 
@@ -262,9 +270,7 @@ class DatabaseManager:
             uid = hashlib.sha256(uid_source.encode("utf-8")).hexdigest()[:16]
 
             # Check if paper already exists (by UID)
-            existing = self._session.execute(
-                select(Paper).where(Paper.uid == uid)
-            ).scalar_one_or_none()
+            existing = self._session.execute(select(Paper).where(Paper.uid == uid)).scalar_one_or_none()
 
             if existing:
                 logger.debug(f"Skipping duplicate paper: {title} (uid: {uid})")
@@ -423,19 +429,13 @@ class DatabaseManager:
             for paper_uid, priority_data in paper_priorities.items():
                 # Validate data format
                 if not isinstance(priority_data, dict):
-                    raise ValueError(
-                        "Invalid data format. Expected dict with priority and searchTerm"
-                    )
+                    raise ValueError("Invalid data format. Expected dict with priority and searchTerm")
 
                 priority = priority_data.get("priority", 0)
                 search_term = priority_data.get("searchTerm", None)
 
                 # Create validation data entry
-                validation_entry = ValidationData(
-                    paper_uid=paper_uid,
-                    priority=priority,
-                    search_term=search_term
-                )
+                validation_entry = ValidationData(paper_uid=paper_uid, priority=priority, search_term=search_term)
                 self._session.add(validation_entry)
                 donated_count += 1
 
@@ -492,25 +492,25 @@ class DatabaseManager:
             # Convert ? placeholders to :0, :1, :2 for SQLAlchemy
             # Count the number of ? placeholders
             param_count = sql.count("?")
-            
+
             # Replace ? with numbered parameters
             converted_sql = sql
             for i in range(param_count):
                 converted_sql = converted_sql.replace("?", f":param{i}", 1)
-            
+
             # Create parameter dict
             param_dict = {f"param{i}": parameters[i] for i in range(len(parameters))}
-            
+
             # Execute raw SQL using text()
             result = self._session.execute(text(converted_sql), param_dict)
-            
+
             # Convert result to list of dicts
             rows = []
             for row in result:
                 # Convert row to dict
                 row_dict = dict(row._mapping)
                 rows.append(row_dict)
-            
+
             return rows
         except Exception as e:
             raise DatabaseError(f"Query failed: {str(e)}") from e
@@ -533,9 +533,7 @@ class DatabaseManager:
             raise DatabaseError("Not connected to database")
 
         try:
-            count = self._session.execute(
-                select(func.count()).select_from(Paper)
-            ).scalar()
+            count = self._session.execute(select(func.count()).select_from(Paper)).scalar()
             return count or 0
         except Exception as e:
             raise DatabaseError(f"Failed to count papers: {str(e)}") from e
@@ -655,10 +653,10 @@ class DatabaseManager:
     ) -> List[Dict[str, Any]]:
         """
         Perform keyword-based search with filtering and author parsing.
-        
+
         This is a convenience method that wraps search_papers and formats
         the results for web API consumption, including author parsing.
-        
+
         Parameters
         ----------
         query : str
@@ -671,12 +669,12 @@ class DatabaseManager:
             Filter by publication years
         conferences : list of str, optional
             Filter by conference names
-            
+
         Returns
         -------
         list of dict
             List of paper dictionaries with parsed authors
-            
+
         Examples
         --------
         >>> papers = db.search_papers_keyword(
@@ -693,34 +691,30 @@ class DatabaseManager:
             conferences=conferences,
             limit=limit,
         )
-        
+
         # Convert to list of dicts for JSON serialization
         papers = [dict(p) for p in papers]
-        
+
         # Parse authors from comma-separated string for each paper
         for paper in papers:
             if "authors" in paper and paper["authors"]:
                 paper["authors"] = [a.strip() for a in paper["authors"].split(";")]
             else:
                 paper["authors"] = []
-        
+
         return papers
 
-    def get_stats(
-        self,
-        year: Optional[int] = None,
-        conference: Optional[str] = None
-    ) -> Dict[str, Any]:
+    def get_stats(self, year: Optional[int] = None, conference: Optional[str] = None) -> Dict[str, Any]:
         """
         Get database statistics, optionally filtered by year and conference.
-        
+
         Parameters
         ----------
         year : int, optional
             Filter by specific year
         conference : str, optional
             Filter by specific conference
-            
+
         Returns
         -------
         dict
@@ -728,34 +722,34 @@ class DatabaseManager:
             - total_papers: int - Number of papers matching filters
             - year: int or None - Filter year if provided
             - conference: str or None - Filter conference if provided
-            
+
         Examples
         --------
         >>> stats = db.get_stats()
         >>> print(f"Total papers: {stats['total_papers']}")
-        
+
         >>> stats_2024 = db.get_stats(year=2024)
         >>> print(f"Papers in 2024: {stats_2024['total_papers']}")
         """
         # Build WHERE clause for filtered count
         conditions: List[str] = []
         parameters: List[Any] = []
-        
+
         if year is not None:
             conditions.append("year = ?")
             parameters.append(year)
-        
+
         if conference is not None:
             conditions.append("conference = ?")
             parameters.append(conference)
-        
+
         if conditions:
             where_clause = " AND ".join(conditions)
             result = self.query(f"SELECT COUNT(*) as count FROM papers WHERE {where_clause}", tuple(parameters))
             total_papers = result[0]["count"] if result else 0
         else:
             total_papers = self.get_paper_count()
-        
+
         return {
             "total_papers": total_papers,
             "year": year,
@@ -873,9 +867,7 @@ class DatabaseManager:
 
         try:
             # Get all author fields
-            stmt = select(Paper.authors).where(
-                and_(Paper.authors.isnot(None), Paper.authors != "")
-            )
+            stmt = select(Paper.authors).where(and_(Paper.authors.isnot(None), Paper.authors != ""))
             results = self._session.execute(stmt).scalars().all()
 
             # Extract unique author names
@@ -948,12 +940,7 @@ class DatabaseManager:
             sessions = list(sessions_result)
 
             # Get distinct years (not filtered)
-            years_stmt = (
-                select(Paper.year)
-                .distinct()
-                .where(Paper.year.isnot(None))
-                .order_by(Paper.year.desc())
-            )
+            years_stmt = select(Paper.year).distinct().where(Paper.year.isnot(None)).order_by(Paper.year.desc())
             years_result = self._session.execute(years_stmt).scalars().all()
             years = list(years_result)
 
@@ -1002,11 +989,7 @@ class DatabaseManager:
 
         try:
             # Get the most recent embedding model entry
-            stmt = (
-                select(EmbeddingsMetadata.embedding_model)
-                .order_by(EmbeddingsMetadata.updated_at.desc())
-                .limit(1)
-            )
+            stmt = select(EmbeddingsMetadata.embedding_model).order_by(EmbeddingsMetadata.updated_at.desc()).limit(1)
             result = self._session.execute(stmt).scalar_one_or_none()
             return result
         except Exception as e:
@@ -1046,11 +1029,7 @@ class DatabaseManager:
             if count and count > 0:
                 # Update the most recent record
                 # Get the most recent entry
-                latest_stmt = (
-                    select(EmbeddingsMetadata)
-                    .order_by(EmbeddingsMetadata.updated_at.desc())
-                    .limit(1)
-                )
+                latest_stmt = select(EmbeddingsMetadata).order_by(EmbeddingsMetadata.updated_at.desc()).limit(1)
                 latest = self._session.execute(latest_stmt).scalar_one()
                 latest.embedding_model = model_name
                 latest.updated_at = datetime.now(timezone.utc)
@@ -1107,7 +1086,7 @@ class DatabaseManager:
 
         try:
             import json
-            
+
             # Build query conditions
             stmt = select(ClusteringCache).where(
                 and_(
@@ -1125,17 +1104,17 @@ class DatabaseManager:
             # Get all matching results (we'll filter by params in Python)
             stmt = stmt.order_by(ClusteringCache.created_at.desc())
             results = self._session.execute(stmt).scalars().all()
-            
+
             if not results:
                 return None
-            
+
             # If no clustering_params specified, return first match
             if clustering_params is None:
                 if results[0].clustering_params is None:
                     return json.loads(results[0].results_json)
                 # If cache has params but query doesn't, consider it a miss
                 return None
-            
+
             # Filter by clustering_params
             params_json = json.dumps(clustering_params, sort_keys=True)
             for result in results:
@@ -1146,7 +1125,7 @@ class DatabaseManager:
                 cached_params_json = json.dumps(cached_params, sort_keys=True)
                 if cached_params_json == params_json:
                     return json.loads(result.results_json)
-            
+
             return None
 
         except Exception as e:
@@ -1248,9 +1227,7 @@ class DatabaseManager:
         try:
             if embedding_model:
                 # Delete only for specific model
-                stmt = select(ClusteringCache).where(
-                    ClusteringCache.embedding_model == embedding_model
-                )
+                stmt = select(ClusteringCache).where(ClusteringCache.embedding_model == embedding_model)
             else:
                 # Delete all
                 stmt = select(ClusteringCache)
@@ -1273,3 +1250,444 @@ class DatabaseManager:
         except Exception as e:
             self._session.rollback()
             raise DatabaseError(f"Failed to clear clustering cache: {str(e)}") from e
+
+    # ------------------------------------------------------------------ #
+    #  Evaluation Q/A pair and result methods                              #
+    # ------------------------------------------------------------------ #
+
+    def add_eval_qa_pair(
+        self,
+        conversation_id: str,
+        turn_number: int,
+        query: str,
+        expected_answer: str,
+        tool_name: Optional[str] = None,
+        source_info: Optional[str] = None,
+    ) -> int:
+        """
+        Insert a single evaluation Q/A pair.
+
+        Parameters
+        ----------
+        conversation_id : str
+            Identifier grouping turns in a conversation.
+        turn_number : int
+            Position within the conversation (0 = first).
+        query : str
+            The user query text.
+        expected_answer : str
+            The expected/reference answer.
+        tool_name : str, optional
+            MCP tool expected to be invoked.
+        source_info : str, optional
+            JSON metadata about how the pair was generated.
+
+        Returns
+        -------
+        int
+            Primary key of the inserted row.
+
+        Raises
+        ------
+        DatabaseError
+            If insertion fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            pair = EvalQAPair(
+                conversation_id=conversation_id,
+                turn_number=turn_number,
+                query=query,
+                expected_answer=expected_answer,
+                tool_name=tool_name,
+                source_info=source_info,
+            )
+            self._session.add(pair)
+            self._session.commit()
+            return pair.id
+        except Exception as e:
+            self._session.rollback()
+            raise DatabaseError(f"Failed to add eval QA pair: {str(e)}") from e
+
+    def get_eval_qa_pairs(
+        self,
+        verified_only: bool = False,
+        tool_name: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve evaluation Q/A pairs with optional filters.
+
+        Parameters
+        ----------
+        verified_only : bool
+            If ``True``, return only pairs with ``verified == 1``.
+        tool_name : str, optional
+            Filter by expected MCP tool name.
+        conversation_id : str, optional
+            Filter by conversation.
+        limit : int, optional
+            Maximum number of pairs to return.
+        offset : int
+            Number of rows to skip (for pagination).
+
+        Returns
+        -------
+        list of dict
+            Matching Q/A pairs as dictionaries.
+
+        Raises
+        ------
+        DatabaseError
+            If query fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            stmt = select(EvalQAPair)
+            if verified_only:
+                stmt = stmt.where(EvalQAPair.verified == 1)
+            if tool_name:
+                stmt = stmt.where(EvalQAPair.tool_name == tool_name)
+            if conversation_id:
+                stmt = stmt.where(EvalQAPair.conversation_id == conversation_id)
+            stmt = stmt.order_by(EvalQAPair.conversation_id, EvalQAPair.turn_number)
+            if offset:
+                stmt = stmt.offset(offset)
+            if limit:
+                stmt = stmt.limit(limit)
+
+            rows = self._session.execute(stmt).scalars().all()
+            return [
+                {
+                    "id": r.id,
+                    "conversation_id": r.conversation_id,
+                    "turn_number": r.turn_number,
+                    "query": r.query,
+                    "expected_answer": r.expected_answer,
+                    "tool_name": r.tool_name,
+                    "verified": r.verified,
+                    "source_info": r.source_info,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            raise DatabaseError(f"Failed to get eval QA pairs: {str(e)}") from e
+
+    def get_eval_qa_pair_count(self, verified_only: bool = False) -> int:
+        """
+        Count evaluation Q/A pairs.
+
+        Parameters
+        ----------
+        verified_only : bool
+            If ``True``, count only verified pairs.
+
+        Returns
+        -------
+        int
+            Number of matching pairs.
+
+        Raises
+        ------
+        DatabaseError
+            If query fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            stmt = select(func.count()).select_from(EvalQAPair)
+            if verified_only:
+                stmt = stmt.where(EvalQAPair.verified == 1)
+            return self._session.execute(stmt).scalar() or 0
+        except Exception as e:
+            raise DatabaseError(f"Failed to count eval QA pairs: {str(e)}") from e
+
+    def update_eval_qa_pair(self, pair_id: int, **fields) -> bool:
+        """
+        Update fields on an existing Q/A pair.
+
+        Parameters
+        ----------
+        pair_id : int
+            Primary key of the pair to update.
+        **fields
+            Keyword arguments mapping column names to new values.
+            Supported keys: ``query``, ``expected_answer``, ``tool_name``,
+            ``verified``, ``source_info``.
+
+        Returns
+        -------
+        bool
+            ``True`` if a row was updated, ``False`` if the pair was not found.
+
+        Raises
+        ------
+        DatabaseError
+            If update fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        allowed = {"query", "expected_answer", "tool_name", "verified", "source_info"}
+        to_set = {k: v for k, v in fields.items() if k in allowed}
+        if not to_set:
+            return False
+
+        try:
+            pair = self._session.get(EvalQAPair, pair_id)
+            if pair is None:
+                return False
+            for k, v in to_set.items():
+                setattr(pair, k, v)
+            self._session.commit()
+            return True
+        except Exception as e:
+            self._session.rollback()
+            raise DatabaseError(f"Failed to update eval QA pair: {str(e)}") from e
+
+    def delete_eval_qa_pair(self, pair_id: int) -> bool:
+        """
+        Delete an evaluation Q/A pair by ID.
+
+        Parameters
+        ----------
+        pair_id : int
+            Primary key of the pair to delete.
+
+        Returns
+        -------
+        bool
+            ``True`` if a row was deleted, ``False`` if pair was not found.
+
+        Raises
+        ------
+        DatabaseError
+            If deletion fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            pair = self._session.get(EvalQAPair, pair_id)
+            if pair is None:
+                return False
+            self._session.delete(pair)
+            self._session.commit()
+            return True
+        except Exception as e:
+            self._session.rollback()
+            raise DatabaseError(f"Failed to delete eval QA pair: {str(e)}") from e
+
+    def add_eval_result(
+        self,
+        run_id: str,
+        qa_pair_id: int,
+        actual_answer: Optional[str] = None,
+        actual_tool_name: Optional[str] = None,
+        answer_score: Optional[float] = None,
+        tool_correct: Optional[int] = None,
+        latency_ms: Optional[int] = None,
+        error: Optional[str] = None,
+        judge_reasoning: Optional[str] = None,
+    ) -> int:
+        """
+        Insert a single evaluation result.
+
+        Parameters
+        ----------
+        run_id : str
+            Identifier for the evaluation run.
+        qa_pair_id : int
+            ID of the evaluated Q/A pair.
+        actual_answer : str, optional
+            Answer produced by the RAG system.
+        actual_tool_name : str, optional
+            MCP tool actually invoked.
+        answer_score : float, optional
+            LLM-judged quality score (1–5).
+        tool_correct : int, optional
+            1 if the correct tool was used, 0 otherwise.
+        latency_ms : int, optional
+            Query latency in milliseconds.
+        error : str, optional
+            Error message if the query failed.
+        judge_reasoning : str, optional
+            LLM judge's reasoning for the score.
+
+        Returns
+        -------
+        int
+            Primary key of the inserted row.
+
+        Raises
+        ------
+        DatabaseError
+            If insertion fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            result = EvalResult(
+                run_id=run_id,
+                qa_pair_id=qa_pair_id,
+                actual_answer=actual_answer,
+                actual_tool_name=actual_tool_name,
+                answer_score=answer_score,
+                tool_correct=tool_correct,
+                latency_ms=latency_ms,
+                error=error,
+                judge_reasoning=judge_reasoning,
+            )
+            self._session.add(result)
+            self._session.commit()
+            return result.id
+        except Exception as e:
+            self._session.rollback()
+            raise DatabaseError(f"Failed to add eval result: {str(e)}") from e
+
+    def get_eval_results(
+        self,
+        run_id: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve evaluation results with optional run filter.
+
+        Parameters
+        ----------
+        run_id : str, optional
+            Filter by evaluation run. If ``None``, return results from all runs.
+        limit : int, optional
+            Maximum number of results to return.
+        offset : int
+            Number of rows to skip.
+
+        Returns
+        -------
+        list of dict
+            Evaluation results as dictionaries.
+
+        Raises
+        ------
+        DatabaseError
+            If query fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            stmt = select(EvalResult)
+            if run_id:
+                stmt = stmt.where(EvalResult.run_id == run_id)
+            stmt = stmt.order_by(EvalResult.id)
+            if offset:
+                stmt = stmt.offset(offset)
+            if limit:
+                stmt = stmt.limit(limit)
+
+            rows = self._session.execute(stmt).scalars().all()
+            return [
+                {
+                    "id": r.id,
+                    "run_id": r.run_id,
+                    "qa_pair_id": r.qa_pair_id,
+                    "actual_answer": r.actual_answer,
+                    "actual_tool_name": r.actual_tool_name,
+                    "answer_score": r.answer_score,
+                    "tool_correct": r.tool_correct,
+                    "latency_ms": r.latency_ms,
+                    "error": r.error,
+                    "judge_reasoning": r.judge_reasoning,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            raise DatabaseError(f"Failed to get eval results: {str(e)}") from e
+
+    def get_eval_run_ids(self) -> List[str]:
+        """
+        Return distinct evaluation run IDs, most recent first.
+
+        Returns
+        -------
+        list of str
+            Distinct run IDs ordered by most recent creation date.
+
+        Raises
+        ------
+        DatabaseError
+            If query fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            stmt = select(EvalResult.run_id).distinct().order_by(EvalResult.run_id.desc())
+            return list(self._session.execute(stmt).scalars().all())
+        except Exception as e:
+            raise DatabaseError(f"Failed to get eval run IDs: {str(e)}") from e
+
+    def get_eval_run_summary(self, run_id: str) -> Dict[str, Any]:
+        """
+        Compute summary statistics for an evaluation run.
+
+        Parameters
+        ----------
+        run_id : str
+            The evaluation run identifier.
+
+        Returns
+        -------
+        dict
+            Dictionary with keys:
+            - total : int – number of evaluated pairs
+            - avg_score : float or None – mean answer quality score
+            - tool_accuracy : float or None – fraction of correct tool selections
+            - avg_latency_ms : float or None – mean latency
+            - error_count : int – number of queries that produced errors
+
+        Raises
+        ------
+        DatabaseError
+            If query fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            results = self.get_eval_results(run_id=run_id)
+            if not results:
+                return {
+                    "total": 0,
+                    "avg_score": None,
+                    "tool_accuracy": None,
+                    "avg_latency_ms": None,
+                    "error_count": 0,
+                }
+
+            total = len(results)
+            scores = [r["answer_score"] for r in results if r["answer_score"] is not None]
+            tool_vals = [r["tool_correct"] for r in results if r["tool_correct"] is not None]
+            latencies = [r["latency_ms"] for r in results if r["latency_ms"] is not None]
+            errors = sum(1 for r in results if r["error"])
+
+            return {
+                "total": total,
+                "avg_score": (sum(scores) / len(scores)) if scores else None,
+                "tool_accuracy": (sum(tool_vals) / len(tool_vals)) if tool_vals else None,
+                "avg_latency_ms": (sum(latencies) / len(latencies)) if latencies else None,
+                "error_count": errors,
+            }
+        except Exception as e:
+            raise DatabaseError(f"Failed to compute eval run summary: {str(e)}") from e
