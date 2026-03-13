@@ -363,7 +363,20 @@ class RAGChat:
         # This is the preferred approach: it works correctly with reasoning models
         # (e.g. those that prepend <think> blocks) and avoids fragile JSON parsing.
         if self.enable_mcp_tools:
-            api_params["tools"] = get_mcp_tools_schema()
+            # Inject available conferences/years from the database as enum
+            # constraints so the model picks exact stored values.
+            try:
+                filter_options = self.database.get_filter_options()
+                db_conferences = filter_options.get("conferences", [])
+                db_years = filter_options.get("years", [])
+            except Exception:
+                logger.debug("Could not retrieve filter options from database, using schema without enums")
+                db_conferences = []
+                db_years = []
+            api_params["tools"] = get_mcp_tools_schema(
+                conferences=db_conferences or None,
+                years=db_years or None,
+            )
             api_params["tool_choice"] = "auto"
 
         try:

@@ -23,47 +23,6 @@ from .database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
-# Map of lowercase conference name variations to their canonical stored form.
-# The canonical forms match the ``conference_name`` attribute used by each plugin
-# (e.g. "NeurIPS" from neurips_downloader.py, "ML4PS@Neurips" from ml4ps_downloader.py).
-# The mixed-case values are intentional – they reproduce the exact strings stored in ChromaDB.
-_CONFERENCE_CANONICAL: Dict[str, str] = {
-    "neurips": "NeurIPS",
-    "nips": "NeurIPS",
-    "iclr": "ICLR",
-    "icml": "ICML",
-    "ml4ps": "ML4PS@Neurips",
-    "ml4ps@neurips": "ML4PS@Neurips",
-}
-
-
-def normalize_conference_names(names: List[str]) -> List[str]:
-    """
-    Normalize conference names to their canonical stored form.
-
-    Converts input names to the canonical form used when papers are stored
-    (e.g. ``"neurips"`` → ``"NeurIPS"``), enabling case-insensitive filtering
-    against ChromaDB metadata.  Unknown names are returned unchanged.
-
-    Parameters
-    ----------
-    names : list of str
-        Conference names to normalize (e.g. ``["NeurIPS", "iclr"]``).
-
-    Returns
-    -------
-    list of str
-        Normalized conference names.
-
-    Examples
-    --------
-    >>> normalize_conference_names(["neurips", "ICLR"])
-    ['NeurIPS', 'ICLR']
-    >>> normalize_conference_names(["nips", "unknown_conf"])
-    ['NeurIPS', 'unknown_conf']
-    """
-    return [_CONFERENCE_CANONICAL.get(name.lower(), name) for name in names]
-
 
 class EmbeddingsError(Exception):
     """Exception raised for embedding operations."""
@@ -790,8 +749,7 @@ class EmbeddingsManager:
             year_strs: List[str] = [str(y) for y in years]
             filter_conditions.append({"year": {"$in": year_strs}})
         if conferences:
-            normalized_confs = normalize_conference_names(conferences)
-            filter_conditions.append({"conference": {"$in": normalized_confs}})
+            filter_conditions.append({"conference": {"$in": conferences}})
 
         # Use $and operator if multiple conditions, otherwise use single condition
         where_filter: Optional[Dict[str, Any]] = None
@@ -903,12 +861,10 @@ class EmbeddingsManager:
             if conferences or years:
                 filters: list[Dict[str, Any]] = []
                 if conferences:
-                    # Normalize to canonical stored form (case-insensitive matching)
-                    normalized = normalize_conference_names(conferences)
-                    if len(normalized) == 1:
-                        filters.append({"conference": normalized[0]})
+                    if len(conferences) == 1:
+                        filters.append({"conference": conferences[0]})
                     else:
-                        filters.append({"conference": {"$in": normalized}})
+                        filters.append({"conference": {"$in": conferences}})
 
                 if years:
                     # Convert years to strings to match ChromaDB metadata storage format

@@ -64,6 +64,11 @@ def mock_database():
         return [paper] if paper else []
 
     mock_db.query.side_effect = mock_query_side_effect
+    mock_db.get_filter_options.return_value = {
+        "sessions": [],
+        "years": [2025, 2024],
+        "conferences": ["NeurIPS"],
+    }
 
     return mock_db
 

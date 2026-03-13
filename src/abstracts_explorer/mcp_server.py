@@ -22,7 +22,7 @@ from copy import deepcopy
 
 from mcp.server.fastmcp import FastMCP
 
-from .embeddings import EmbeddingsManager, normalize_conference_names
+from .embeddings import EmbeddingsManager
 from .database import DatabaseManager
 from .clustering import ClusteringManager, perform_clustering
 from .config import get_config
@@ -289,9 +289,6 @@ def merge_where_clause_with_conference(
     # If no conference, just return a deep copy of WHERE clause (or None)
     if not conference:
         return deepcopy(where) if where else None
-
-    # Normalize conference name to canonical stored form (case-insensitive matching)
-    conference = normalize_conference_names([conference])[0]
 
     # If no WHERE clause, just return conference filter
     if not where:
