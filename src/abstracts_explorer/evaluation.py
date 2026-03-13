@@ -462,6 +462,11 @@ class Evaluator:
                     "source_info": json.dumps({"model": self.model, "tool": tool_name}),
                 }
                 all_pairs.append(entry)
+                logger.info(
+                    f"[{tool_name}] turn 0 (conv {conv_id})\n"
+                    f"  Query:    {entry['query']}\n"
+                    f"  Expected: {entry['expected_answer']}"
+                )
 
                 # Generate follow-ups
                 if generate_followups and n_followups > 0:
@@ -489,17 +494,21 @@ class Evaluator:
                         followups = []
 
                     for idx, fu in enumerate(followups[:n_followups], 1):
-                        all_pairs.append(
-                            {
-                                "conversation_id": conv_id,
-                                "turn_number": idx,
-                                "query": fu.get("query", ""),
-                                "expected_answer": fu.get("expected_answer", ""),
-                                "tool_name": tool_name,
-                                "source_info": json.dumps(
-                                    {"model": self.model, "tool": tool_name, "followup_of": conv_id}
-                                ),
-                            }
+                        fu_entry = {
+                            "conversation_id": conv_id,
+                            "turn_number": idx,
+                            "query": fu.get("query", ""),
+                            "expected_answer": fu.get("expected_answer", ""),
+                            "tool_name": tool_name,
+                            "source_info": json.dumps(
+                                {"model": self.model, "tool": tool_name, "followup_of": conv_id}
+                            ),
+                        }
+                        all_pairs.append(fu_entry)
+                        logger.info(
+                            f"[{tool_name}] turn {idx} (conv {conv_id})\n"
+                            f"  Query:    {fu_entry['query']}\n"
+                            f"  Expected: {fu_entry['expected_answer']}"
                         )
 
         logger.info(f"Generated {len(all_pairs)} Q/A pairs total")
