@@ -99,14 +99,14 @@ class EmbeddingsManager:
         self.lm_studio_url = (lm_studio_url or config.llm_backend_url).rstrip("/")
         self.llm_backend_auth_token = auth_token or config.llm_backend_auth_token
         self.model_name = model_name or config.embedding_model
-        
+
         # Get ChromaDB configuration from config
         self.embedding_db = config.embedding_db
-        
+
         self.collection_name = collection_name or config.collection_name
         self.client: Optional[Any] = None  # chromadb.Client
         self.collection: Optional[Any] = None  # chromadb.Collection
-        
+
         # OpenAI client - lazy loaded on first use to avoid API calls during test collection
         self._openai_client: Optional[OpenAI] = None
 
@@ -114,9 +114,9 @@ class EmbeddingsManager:
     def openai_client(self) -> OpenAI:
         """
         Get the OpenAI client, creating it lazily on first access.
-        
+
         This lazy loading prevents API calls during test collection.
-        
+
         Returns
         -------
         OpenAI
@@ -124,8 +124,7 @@ class EmbeddingsManager:
         """
         if self._openai_client is None:
             self._openai_client = OpenAI(
-                base_url=f"{self.lm_studio_url}/v1",
-                api_key=self.llm_backend_auth_token or "lm-studio-local"
+                base_url=f"{self.lm_studio_url}/v1", api_key=self.llm_backend_auth_token or "lm-studio-local"
             )
         return self._openai_client
 
@@ -148,7 +147,7 @@ class EmbeddingsManager:
                 parsed = urlparse(self.embedding_db)
                 host = parsed.hostname or "localhost"
                 port = parsed.port or 8000
-                
+
                 self.client = chromadb.HttpClient(
                     host=host,
                     port=port,
@@ -241,11 +240,8 @@ class EmbeddingsManager:
             raise EmbeddingsError("Cannot generate embedding for empty text")
 
         try:
-            response = self.openai_client.embeddings.create(
-                model=self.model_name,
-                input=text
-            )
-            
+            response = self.openai_client.embeddings.create(model=self.model_name, input=text)
+
             if not response.data or len(response.data) == 0:
                 raise EmbeddingsError("No embedding data in API response")
 
@@ -702,10 +698,10 @@ class EmbeddingsManager:
     ) -> List[Dict[str, Any]]:
         """
         Perform semantic search for papers using embeddings.
-        
+
         This function combines embedding-based similarity search with metadata filtering
         and retrieves complete paper information from the database.
-        
+
         Parameters
         ----------
         query : str
@@ -720,17 +716,17 @@ class EmbeddingsManager:
             Filter by publication years
         conferences : list of str, optional
             Filter by conference names
-            
+
         Returns
         -------
         list of dict
             List of paper dictionaries with complete information
-            
+
         Raises
         ------
         EmbeddingsError
             If search fails
-            
+
         Examples
         --------
         >>> papers = em.search_papers_semantic(
@@ -741,7 +737,7 @@ class EmbeddingsManager:
         ... )
         """
         from .paper_utils import format_search_results, PaperFormattingError
-        
+
         # Build metadata filter for embeddings search
         # NOTE: All metadata is stored as strings in ChromaDB (see add_paper method, line 445)
         # so we must convert filter values to strings for matching
@@ -754,29 +750,31 @@ class EmbeddingsManager:
             filter_conditions.append({"year": {"$in": year_strs}})
         if conferences:
             filter_conditions.append({"conference": {"$in": conferences}})
-        
+
         # Use $and operator if multiple conditions, otherwise use single condition
         where_filter: Optional[Dict[str, Any]] = None
         if len(filter_conditions) > 1:
             where_filter = {"$and": filter_conditions}
         elif len(filter_conditions) == 1:
             where_filter = filter_conditions[0]
-        
-        logger.info(f"Semantic search - query: {query}, filter: sessions={sessions}, years={years}, conferences={conferences}")
+
+        logger.info(
+            f"Semantic search - query: {query}, filter: sessions={sessions}, years={years}, conferences={conferences}"
+        )
         logger.info(f"Where filter: {where_filter}")
-        
+
         # Get more results initially to account for filtering
         results = self.search_similar(query, n_results=limit * 2, where=where_filter)
-        
+
         logger.info(f"Search results count: {len(results.get('ids', [[]])[0]) if results else 0}")
-        
+
         # Transform ChromaDB results to paper format using shared utility
         try:
             papers = format_search_results(results, database, include_documents=False)
         except PaperFormattingError:
             # No valid papers found
             return []
-        
+
         # Limit results (filtering already done at database level)
         return papers[:limit]
 
@@ -790,10 +788,10 @@ class EmbeddingsManager:
     ) -> Dict[str, Any]:
         """
         Find papers within a specified distance from a custom search query.
-        
+
         This method treats the search query as a clustering center and returns
         papers within the specified Euclidean distance radius in embedding space.
-        
+
         Parameters
         ----------
         database : DatabaseManager
@@ -806,7 +804,7 @@ class EmbeddingsManager:
             Filter results to only include papers from these conferences
         years : list[int], optional
             Filter results to only include papers from these years
-        
+
         Returns
         -------
         dict
@@ -816,12 +814,12 @@ class EmbeddingsManager:
             - distance: float - The distance threshold used
             - papers: list[dict] - Papers within the distance radius with their distances
             - count: int - Number of papers found
-        
+
         Raises
         ------
         EmbeddingsError
             If embeddings collection is empty or operation fails
-        
+
         Examples
         --------
         >>> em = EmbeddingsManager()
@@ -831,32 +829,34 @@ class EmbeddingsManager:
         >>> db.connect()
         >>> results = em.find_papers_within_distance(db, "machine learning", 1.1)
         >>> print(f"Found {results['count']} papers")
-        >>> 
+        >>>
         >>> # With filters
         >>> results = em.find_papers_within_distance(
-        ...     db, "deep learning", 1.1, 
-        ...     conferences=["NeurIPS"], 
+        ...     db, "deep learning", 1.1,
+        ...     conferences=["NeurIPS"],
         ...     years=[2023, 2024]
         ... )
         """
         from abstracts_explorer.paper_utils import get_paper_with_authors, PaperFormattingError
-        
+
         if not self.collection:
             raise EmbeddingsError("Collection not initialized. Call create_collection() first.")
-        
+
         if not query or not query.strip():
             raise EmbeddingsError("Query cannot be empty")
-        
+
         try:
             # Generate embedding for the query
             query_embedding = self.generate_embedding(query)
-            
+
             # Get total count of papers in collection
             total_count = self.collection.count()
             if total_count == 0:
                 raise EmbeddingsError("No papers in collection")
-            
+
             # Build where clause for filtering
+            # NOTE: All metadata is stored as strings in ChromaDB (see add_paper method),
+            # so we must convert filter values to strings for matching.
             where_clause: Optional[Dict[str, Any]] = None
             if conferences or years:
                 filters: list[Dict[str, Any]] = []
@@ -865,35 +865,37 @@ class EmbeddingsManager:
                         filters.append({"conference": conferences[0]})
                     else:
                         filters.append({"conference": {"$in": conferences}})
-                
+
                 if years:
-                    if len(years) == 1:
-                        filters.append({"year": years[0]})
+                    # Convert years to strings to match ChromaDB metadata storage format
+                    year_strs: List[str] = [str(y) for y in years]
+                    if len(year_strs) == 1:
+                        filters.append({"year": year_strs[0]})
                     else:
-                        filters.append({"year": {"$in": years}})
-                
+                        filters.append({"year": {"$in": year_strs}})
+
                 # Combine filters with $and if multiple
                 if len(filters) == 1:
                     where_clause = filters[0]
                 else:
                     where_clause = {"$and": filters}
-            
+
             # Query all papers and get distances
             # Using collection.query() which returns papers sorted by distance
             results = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=total_count,  # Get all papers
                 include=["distances", "metadatas"],
-                where=where_clause
+                where=where_clause,
             )
-            
+
             # Extract results (query returns nested lists)
-            paper_ids = results['ids'][0] if results.get('ids') else []
-            distances = results['distances'][0] if results.get('distances') else []
-            
+            paper_ids = results["ids"][0] if results.get("ids") else []
+            distances = results["distances"][0] if results.get("distances") else []
+
             if not paper_ids:
                 raise EmbeddingsError("No results from collection query")
-            
+
             # Filter papers within distance threshold
             matching_papers = []
             for idx, (paper_id, distance) in enumerate(zip(paper_ids, distances)):
@@ -910,7 +912,7 @@ class EmbeddingsManager:
                 else:
                     # Since results are sorted by distance, we can break early
                     break
-            
+
             return {
                 "query": query,
                 "query_embedding": query_embedding,
@@ -918,7 +920,7 @@ class EmbeddingsManager:
                 "papers": matching_papers,
                 "count": len(matching_papers),
             }
-            
+
         except EmbeddingsError:
             # Re-raise EmbeddingsError as-is
             raise

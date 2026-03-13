@@ -9,9 +9,10 @@ The integration allows the LLM to automatically decide when to use clustering to
 to answer questions about conference topics, trends, and developments.
 """
 
+import copy
 import json
 import logging
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 from .mcp_server import (
     get_cluster_topics,
@@ -247,16 +248,66 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
         return json.dumps(error_result, indent=2)
 
 
-def get_mcp_tools_schema() -> List[Dict[str, Any]]:
+def get_mcp_tools_schema(
+    conferences: Optional[List[str]] = None,
+    years: Optional[List[int]] = None,
+) -> List[Dict[str, Any]]:
     """
     Get the MCP tools schema for OpenAI function calling.
+
+    When *conferences* or *years* are provided (typically queried from the
+    database), they are injected as ``enum`` constraints into every tool
+    property that accepts conference or year values.  This lets the LLM
+    pick from the exact values stored in the database instead of guessing.
+
+    Parameters
+    ----------
+    conferences : list of str, optional
+        Available conference names (e.g. ``["NeurIPS", "ICLR"]``).
+        Injected as ``enum`` into conference-related properties.
+    years : list of int, optional
+        Available years (e.g. ``[2024, 2025]``).
+        Injected as ``enum`` into year-related properties.
 
     Returns
     -------
     list
         List of tool definitions in OpenAI format
     """
-    return MCP_TOOLS_SCHEMA
+    schema: List[Dict[str, Any]] = copy.deepcopy(MCP_TOOLS_SCHEMA)
+
+    if not conferences and not years:
+        return schema
+
+    for tool in schema:
+        func_def: Dict[str, Any] = tool.get("function", {})
+        params: Dict[str, Any] = func_def.get("parameters", {})
+        props: Dict[str, Any] = params.get("properties", {})
+
+        if conferences:
+            # Single-value conference fields (type: string)
+            if "conference" in props and props["conference"].get("type") == "string":
+                props["conference"]["enum"] = conferences
+
+            # Array conference fields (type: array, items: {type: string})
+            if "conferences" in props and props["conferences"].get("type") == "array":
+                items = props["conferences"].get("items", {})
+                if items.get("type") == "string":
+                    items["enum"] = conferences
+
+        if years:
+            # Array year fields (type: array, items: {type: integer})
+            if "years" in props and props["years"].get("type") == "array":
+                items = props["years"].get("items", {})
+                if items.get("type") == "integer":
+                    items["enum"] = years
+
+            # Single integer year fields
+            for key in ("start_year", "end_year"):
+                if key in props and props[key].get("type") == "integer":
+                    props[key]["enum"] = years
+
+    return schema
 
 
 def format_tool_result_for_llm(tool_name: str, result: str) -> str:

@@ -47,14 +47,11 @@ def test_get_mcp_tools_schema():
 def test_execute_mcp_tool_cluster_topics():
     """Test executing get_cluster_topics tool."""
     with patch("abstracts_explorer.mcp_tools.get_cluster_topics") as mock_tool:
-        mock_result = json.dumps({
-            "statistics": {"n_clusters": 5, "total_papers": 100},
-            "clusters": []
-        })
+        mock_result = json.dumps({"statistics": {"n_clusters": 5, "total_papers": 100}, "clusters": []})
         mock_tool.return_value = mock_result
-        
+
         result = execute_mcp_tool("get_cluster_topics", {"n_clusters": 5})
-        
+
         assert result == mock_result
         mock_tool.assert_called_once_with(n_clusters=5)
 
@@ -62,31 +59,19 @@ def test_execute_mcp_tool_cluster_topics():
 def test_execute_mcp_tool_topic_evolution():
     """Test executing get_topic_evolution tool."""
     with patch("abstracts_explorer.mcp_tools.get_topic_evolution") as mock_tool:
-        mock_result = json.dumps({
-            "topic": "transformers",
-            "year_counts": {"2023": 10, "2024": 15}
-        })
+        mock_result = json.dumps({"topic": "transformers", "year_counts": {"2023": 10, "2024": 15}})
         mock_tool.return_value = mock_result
-        
-        result = execute_mcp_tool(
-            "get_topic_evolution",
-            {"topic_keywords": "transformers", "conference": "neurips"}
-        )
-        
+
+        result = execute_mcp_tool("get_topic_evolution", {"topic_keywords": "transformers", "conference": "neurips"})
+
         assert result == mock_result
-        mock_tool.assert_called_once_with(
-            topic_keywords="transformers",
-            conference="neurips"
-        )
+        mock_tool.assert_called_once_with(topic_keywords="transformers", conference="neurips")
 
 
 def test_execute_mcp_tool_recent_developments():
     """Test executing search_papers tool."""
     with patch("abstracts_explorer.mcp_tools.search_papers") as mock_tool:
-        mock_result = json.dumps({
-            "topic": "LLMs",
-            "papers": [{"title": "Paper 1", "year": 2024}]
-        })
+        mock_result = json.dumps({"topic": "LLMs", "papers": [{"title": "Paper 1", "year": 2024}]})
         mock_tool.return_value = mock_result
 
         result = execute_mcp_tool("search_papers", {"topic_keywords": "LLMs", "n_years": 2})
@@ -98,7 +83,7 @@ def test_execute_mcp_tool_recent_developments():
 def test_execute_mcp_tool_unknown():
     """Test executing unknown tool raises error."""
     result = execute_mcp_tool("unknown_tool", {})
-    
+
     # Should return error JSON
     result_data = json.loads(result)
     assert "error" in result_data
@@ -109,9 +94,9 @@ def test_execute_mcp_tool_exception_handling():
     """Test that tool execution exceptions are caught and returned as JSON."""
     with patch("abstracts_explorer.mcp_tools.get_cluster_topics") as mock_tool:
         mock_tool.side_effect = Exception("Database connection failed")
-        
+
         result = execute_mcp_tool("get_cluster_topics", {})
-        
+
         result_data = json.loads(result)
         assert "error" in result_data
         assert "Tool execution failed" in result_data["error"]
@@ -125,23 +110,14 @@ def test_format_cluster_topics_result():
             {
                 "cluster_id": 0,
                 "paper_count": 50,
-                "keywords": [
-                    {"keyword": "transformer", "count": 30},
-                    {"keyword": "attention", "count": 25}
-                ]
+                "keywords": [{"keyword": "transformer", "count": 30}, {"keyword": "attention", "count": 25}],
             },
-            {
-                "cluster_id": 1,
-                "paper_count": 60,
-                "keywords": [
-                    {"keyword": "reinforcement learning", "count": 40}
-                ]
-            }
-        ]
+            {"cluster_id": 1, "paper_count": 60, "keywords": [{"keyword": "reinforcement learning", "count": 40}]},
+        ],
     }
-    
+
     result = _format_cluster_topics_result(data)
-    
+
     assert "Cluster Analysis Results" in result
     assert "3 clusters" in result
     assert "150 papers" in result
@@ -153,15 +129,7 @@ def test_format_cluster_topics_result():
 
 def test_format_topic_evolution_result():
     """Test formatting topic evolution result for LLM."""
-    data = {
-        "topic": "transformers",
-        "year_counts": {
-            "2022": 10,
-            "2023": 15,
-            "2024": 20
-        },
-        "total_papers": 45
-    }
+    data = {"topic": "transformers", "year_counts": {"2022": 10, "2023": 15, "2024": 20}, "total_papers": 45}
 
     result = _format_topic_evolution_result(data)
 
@@ -181,14 +149,10 @@ def test_format_search_papers_result():
             {
                 "title": "GPT-4 Architecture",
                 "year": 2024,
-                "abstract": "This paper presents the architecture of GPT-4..."
+                "abstract": "This paper presents the architecture of GPT-4...",
             },
-            {
-                "title": "Scaling Laws for LLMs",
-                "year": 2024,
-                "abstract": "We study scaling laws..."
-            }
-        ]
+            {"title": "Scaling Laws for LLMs", "year": 2024, "abstract": "We study scaling laws..."},
+        ],
     }
 
     result = _format_search_papers_result(data)
@@ -207,11 +171,11 @@ def test_format_visualization_result():
         "n_points": 500,
         "statistics": {"n_clusters": 8},
         "visualization_saved": True,
-        "output_path": "/tmp/clusters.json"
+        "output_path": "/tmp/clusters.json",
     }
-    
+
     result = _format_visualization_result(data)
-    
+
     assert "Cluster Visualization Data Generated" in result
     assert "2D visualization" in result
     assert "500 points" in result
@@ -222,9 +186,9 @@ def test_format_visualization_result():
 def test_format_tool_result_with_error():
     """Test formatting tool result when error is present."""
     error_result = json.dumps({"error": "Database not found"})
-    
+
     result = format_tool_result_for_llm("get_cluster_topics", error_result)
-    
+
     assert "Tool execution failed" in result
     assert "Database not found" in result
 
@@ -232,9 +196,9 @@ def test_format_tool_result_with_error():
 def test_format_tool_result_invalid_json():
     """Test formatting tool result with invalid JSON."""
     invalid_result = "This is not JSON"
-    
+
     result = format_tool_result_for_llm("get_cluster_topics", invalid_result)
-    
+
     # Should return the original result
     assert result == invalid_result
 
@@ -242,9 +206,9 @@ def test_format_tool_result_invalid_json():
 def test_format_tool_result_unknown_tool():
     """Test formatting result for unknown tool."""
     result_json = json.dumps({"some": "data"})
-    
+
     result = format_tool_result_for_llm("unknown_tool", result_json)
-    
+
     # Should return raw result for unknown tools
     assert result == result_json
 
@@ -273,3 +237,68 @@ def test_mcp_tools_schema_parameters():
     assert "topic_keywords" in params["properties"]
     assert "years" in params["properties"]
     assert "topic_keywords" in params["required"]
+
+
+def test_get_mcp_tools_schema_with_conferences_enum():
+    """Test that passing conferences injects enum into the schema."""
+    conferences = ["NeurIPS", "ICLR", "ICML"]
+    schema = get_mcp_tools_schema(conferences=conferences)
+
+    # analyze_topic_relevance has an array 'conferences' field
+    atr = next(t for t in schema if t["function"]["name"] == "analyze_topic_relevance")
+    items = atr["function"]["parameters"]["properties"]["conferences"]["items"]
+    assert items["enum"] == conferences
+
+    # search_papers has a single-string 'conference' field
+    sp = next(t for t in schema if t["function"]["name"] == "search_papers")
+    assert sp["function"]["parameters"]["properties"]["conference"]["enum"] == conferences
+
+    # get_topic_evolution has a single-string 'conference' field
+    te = next(t for t in schema if t["function"]["name"] == "get_topic_evolution")
+    assert te["function"]["parameters"]["properties"]["conference"]["enum"] == conferences
+
+
+def test_get_mcp_tools_schema_with_years_enum():
+    """Test that passing years injects enum into the schema."""
+    years = [2023, 2024, 2025]
+    schema = get_mcp_tools_schema(years=years)
+
+    # analyze_topic_relevance has array 'years' field
+    atr = next(t for t in schema if t["function"]["name"] == "analyze_topic_relevance")
+    items = atr["function"]["parameters"]["properties"]["years"]["items"]
+    assert items["enum"] == years
+
+    # search_papers has array 'years' field
+    sp = next(t for t in schema if t["function"]["name"] == "search_papers")
+    items = sp["function"]["parameters"]["properties"]["years"]["items"]
+    assert items["enum"] == years
+
+    # get_topic_evolution has start_year/end_year integer fields
+    te = next(t for t in schema if t["function"]["name"] == "get_topic_evolution")
+    props = te["function"]["parameters"]["properties"]
+    assert props["start_year"]["enum"] == years
+    assert props["end_year"]["enum"] == years
+
+
+def test_get_mcp_tools_schema_without_args_has_no_enum():
+    """Test that calling without arguments produces no enum constraints."""
+    schema = get_mcp_tools_schema()
+
+    atr = next(t for t in schema if t["function"]["name"] == "analyze_topic_relevance")
+    items = atr["function"]["parameters"]["properties"]["conferences"]["items"]
+    assert "enum" not in items
+
+    sp = next(t for t in schema if t["function"]["name"] == "search_papers")
+    assert "enum" not in sp["function"]["parameters"]["properties"]["conference"]
+
+
+def test_get_mcp_tools_schema_does_not_mutate_base():
+    """Test that dynamic schema generation does not mutate the base schema."""
+    # Call once with enums to verify it doesn't leak into a subsequent call
+    get_mcp_tools_schema(conferences=["NeurIPS"])
+    schema2 = get_mcp_tools_schema()
+
+    # schema2 should not have the enum from schema1
+    atr = next(t for t in schema2 if t["function"]["name"] == "analyze_topic_relevance")
+    items = atr["function"]["parameters"]["properties"]["conferences"]["items"]
+    assert "enum" not in items

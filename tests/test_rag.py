@@ -64,6 +64,11 @@ def mock_database():
         return [paper] if paper else []
 
     mock_db.query.side_effect = mock_query_side_effect
+    mock_db.get_filter_options.return_value = {
+        "sessions": [],
+        "years": [2025, 2024],
+        "conferences": ["NeurIPS"],
+    }
 
     return mock_db
 
@@ -87,17 +92,19 @@ def mock_lm_studio_response():
     with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
         mock_client = Mock()
         mock_openai_class.return_value = mock_client
-        
+
         # Mock chat.completions.create()
         mock_chat_response = Mock()
         mock_choice = Mock()
         mock_message = Mock()
-        mock_message.content = "Based on Paper 1 and Paper 2, attention mechanisms allow models to focus on relevant parts of the input."
+        mock_message.content = (
+            "Based on Paper 1 and Paper 2, attention mechanisms allow models to focus on relevant parts of the input."
+        )
         mock_message.tool_calls = None  # No tool calls for standard RAG
         mock_choice.message = mock_message
         mock_chat_response.choices = [mock_choice]
         mock_client.chat.completions.create.return_value = mock_chat_response
-        
+
         yield mock_openai_class
 
 
@@ -106,39 +113,42 @@ def mock_mcp_tool_execution():
     """Mock MCP tool execution to return papers."""
     with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
         # Return papers in the format that search_papers would return
-        mock_execute.return_value = json.dumps({
-            "topic": "test query",
-            "papers_found": 3,
-            "papers": [
-                {
-                    "id": "1",
-                    "title": "Attention Is All You Need",
-                    "abstract": "The dominant sequence transduction models...",
-                    "year": 2017,
-                    "conference": "NeurIPS",
-                    "session": "Oral",
-                    "relevance_score": 0.95,
-                },
-                {
-                    "id": "2",
-                    "title": "BERT: Pre-training of Deep Bidirectional Transformers",
-                    "abstract": "We introduce BERT...",
-                    "year": 2019,
-                    "conference": "NeurIPS",
-                    "session": "Poster",
-                    "relevance_score": 0.92,
-                },
-                {
-                    "id": "3",
-                    "title": "GPT-3: Language Models are Few-Shot Learners",
-                    "abstract": "We train GPT-3...",
-                    "year": 2020,
-                    "conference": "NeurIPS",
-                    "session": "Oral",
-                    "relevance_score": 0.88,
-                },
-            ],
-        }, indent=2)
+        mock_execute.return_value = json.dumps(
+            {
+                "topic": "test query",
+                "papers_found": 3,
+                "papers": [
+                    {
+                        "id": "1",
+                        "title": "Attention Is All You Need",
+                        "abstract": "The dominant sequence transduction models...",
+                        "year": 2017,
+                        "conference": "NeurIPS",
+                        "session": "Oral",
+                        "relevance_score": 0.95,
+                    },
+                    {
+                        "id": "2",
+                        "title": "BERT: Pre-training of Deep Bidirectional Transformers",
+                        "abstract": "We introduce BERT...",
+                        "year": 2019,
+                        "conference": "NeurIPS",
+                        "session": "Poster",
+                        "relevance_score": 0.92,
+                    },
+                    {
+                        "id": "3",
+                        "title": "GPT-3: Language Models are Few-Shot Learners",
+                        "abstract": "We train GPT-3...",
+                        "year": 2020,
+                        "conference": "NeurIPS",
+                        "session": "Oral",
+                        "relevance_score": 0.88,
+                    },
+                ],
+            },
+            indent=2,
+        )
         yield mock_execute
 
 
@@ -198,7 +208,9 @@ class TestRAGChatInit:
 class TestRAGChatQuery:
     """Test RAGChat query method."""
 
-    def test_query_success(self, mock_embeddings_manager, mock_database, mock_lm_studio_response, mock_mcp_tool_execution):
+    def test_query_success(
+        self, mock_embeddings_manager, mock_database, mock_lm_studio_response, mock_mcp_tool_execution
+    ):
         """Test successful query with papers."""
         chat = RAGChat(mock_embeddings_manager, mock_database)
 
@@ -220,7 +232,9 @@ class TestRAGChatQuery:
         assert chat.conversation_history[0]["role"] == "user"
         assert chat.conversation_history[1]["role"] == "assistant"
 
-    def test_query_with_n_results(self, mock_embeddings_manager, mock_database, mock_lm_studio_response, mock_mcp_tool_execution):
+    def test_query_with_n_results(
+        self, mock_embeddings_manager, mock_database, mock_lm_studio_response, mock_mcp_tool_execution
+    ):
         """Test query with custom n_results."""
         chat = RAGChat(mock_embeddings_manager, mock_database)
 
@@ -233,7 +247,9 @@ class TestRAGChatQuery:
         tool_name, tool_args = call_args[0]
         assert tool_args.get("n_results") == 2
 
-    def test_query_with_metadata_filter(self, mock_embeddings_manager, mock_database, mock_lm_studio_response, mock_mcp_tool_execution):
+    def test_query_with_metadata_filter(
+        self, mock_embeddings_manager, mock_database, mock_lm_studio_response, mock_mcp_tool_execution
+    ):
         """Test query with metadata filter."""
         chat = RAGChat(mock_embeddings_manager, mock_database)
 
@@ -248,15 +264,17 @@ class TestRAGChatQuery:
         with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
             mock_client = Mock()
             mock_openai_class.return_value = mock_client
-            
+
             # Mock routing response
             mock_route_response = Mock()
             mock_route_choice = Mock()
             mock_route_message = Mock()
-            mock_route_message.content = '{"name": "search_papers", "arguments": {"topic_keywords": "transformers", "n_results": 5}}'
+            mock_route_message.content = (
+                '{"name": "search_papers", "arguments": {"topic_keywords": "transformers", "n_results": 5}}'
+            )
             mock_route_choice.message = mock_route_message
             mock_route_response.choices = [mock_route_choice]
-            
+
             # Mock final response
             mock_final_response = Mock()
             mock_final_choice = Mock()
@@ -264,12 +282,9 @@ class TestRAGChatQuery:
             mock_final_message.content = "Based on the papers, transformers are..."
             mock_final_choice.message = mock_final_message
             mock_final_response.choices = [mock_final_choice]
-            
-            mock_client.chat.completions.create.side_effect = [
-                mock_route_response,
-                mock_final_response
-            ]
-            
+
+            mock_client.chat.completions.create.side_effect = [mock_route_response, mock_final_response]
+
             chat = RAGChat(mock_embeddings_manager, mock_database)
             custom_prompt = "You are a helpful assistant specializing in machine learning."
 
@@ -288,23 +303,28 @@ class TestRAGChatQuery:
         with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
             mock_client = Mock()
             mock_openai_class.return_value = mock_client
-            
+
             # Mock MCP tool execution to return empty results
             with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
-                mock_execute.return_value = json.dumps({
-                    "topic": "Unknown topic",
-                    "papers_found": 0,
-                    "papers": [],
-                }, indent=2)
-                
+                mock_execute.return_value = json.dumps(
+                    {
+                        "topic": "Unknown topic",
+                        "papers_found": 0,
+                        "papers": [],
+                    },
+                    indent=2,
+                )
+
                 # Mock routing response - returns JSON tool call
                 mock_route_response = Mock()
                 mock_route_choice = Mock()
                 mock_route_message = Mock()
-                mock_route_message.content = '{"name": "search_papers", "arguments": {"topic_keywords": "Unknown topic", "n_results": 5}}'
+                mock_route_message.content = (
+                    '{"name": "search_papers", "arguments": {"topic_keywords": "Unknown topic", "n_results": 5}}'
+                )
                 mock_route_choice.message = mock_route_message
                 mock_route_response.choices = [mock_route_choice]
-                
+
                 # Mock final response - LLM says couldn't find papers
                 mock_final_response = Mock()
                 mock_final_choice = Mock()
@@ -312,12 +332,9 @@ class TestRAGChatQuery:
                 mock_final_message.content = "I couldn't find any relevant papers for this topic."
                 mock_final_choice.message = mock_final_message
                 mock_final_response.choices = [mock_final_choice]
-                
-                mock_client.chat.completions.create.side_effect = [
-                    mock_route_response,
-                    mock_final_response
-                ]
-                
+
+                mock_client.chat.completions.create.side_effect = [mock_route_response, mock_final_response]
+
                 chat = RAGChat(mock_embeddings_manager_empty, mock_database)
                 result = chat.query("Unknown topic")
 
@@ -380,7 +397,9 @@ class TestRAGChatQuery:
 class TestRAGChatChat:
     """Test RAGChat chat method."""
 
-    def test_chat_with_context(self, mock_embeddings_manager, mock_database, mock_lm_studio_response, mock_mcp_tool_execution):
+    def test_chat_with_context(
+        self, mock_embeddings_manager, mock_database, mock_lm_studio_response, mock_mcp_tool_execution
+    ):
         """Test chat with context retrieval."""
         chat = RAGChat(mock_embeddings_manager, mock_database)
 
@@ -403,7 +422,9 @@ class TestRAGChatChat:
         # Search should not be called when use_context=False
         mock_embeddings_manager.search_similar.assert_not_called()
 
-    def test_chat_custom_n_results(self, mock_embeddings_manager, mock_database, mock_lm_studio_response, mock_mcp_tool_execution):
+    def test_chat_custom_n_results(
+        self, mock_embeddings_manager, mock_database, mock_lm_studio_response, mock_mcp_tool_execution
+    ):
         """Test chat with custom n_results."""
         chat = RAGChat(mock_embeddings_manager, mock_database)
 
@@ -454,40 +475,61 @@ class TestRAGChatConversation:
             with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
                 mock_client = Mock()
                 mock_openai_class.return_value = mock_client
-                
+
                 # Mock tool execution
-                mock_execute.return_value = json.dumps({
-                    "topic": "attention",
-                    "papers_found": 2,
-                    "papers": [
-                        {"id": "1", "title": "Paper 1", "abstract": "About attention", "year": 2023, "conference": "NeurIPS", "session": "Oral", "relevance_score": 0.95},
-                        {"id": "2", "title": "Paper 2", "abstract": "More attention", "year": 2023, "conference": "NeurIPS", "session": "Poster", "relevance_score": 0.90},
-                    ],
-                }, indent=2)
-                
+                mock_execute.return_value = json.dumps(
+                    {
+                        "topic": "attention",
+                        "papers_found": 2,
+                        "papers": [
+                            {
+                                "id": "1",
+                                "title": "Paper 1",
+                                "abstract": "About attention",
+                                "year": 2023,
+                                "conference": "NeurIPS",
+                                "session": "Oral",
+                                "relevance_score": 0.95,
+                            },
+                            {
+                                "id": "2",
+                                "title": "Paper 2",
+                                "abstract": "More attention",
+                                "year": 2023,
+                                "conference": "NeurIPS",
+                                "session": "Poster",
+                                "relevance_score": 0.90,
+                            },
+                        ],
+                    },
+                    indent=2,
+                )
+
                 # Track all calls
                 call_count = [0]
-                
+
                 def mock_create_side_effect(*args, **kwargs):
                     call_count[0] += 1
                     mock_response = Mock()
                     mock_choice = Mock()
                     mock_message = Mock()
-                    
+
                     # Routing calls (shorter timeout)
                     if kwargs.get("timeout", 180) == 30:
-                        mock_message.content = '{"name": "search_papers", "arguments": {"topic_keywords": "attention", "n_results": 5}}'
+                        mock_message.content = (
+                            '{"name": "search_papers", "arguments": {"topic_keywords": "attention", "n_results": 5}}'
+                        )
                     else:
                         # Generation calls
                         mock_message.content = "Response based on papers"
-                    
+
                     mock_message.tool_calls = None
                     mock_choice.message = mock_message
                     mock_response.choices = [mock_choice]
                     return mock_response
-                
+
                 mock_client.chat.completions.create.side_effect = mock_create_side_effect
-                
+
                 chat = RAGChat(mock_embeddings_manager, mock_database)
 
                 # First query
@@ -498,7 +540,7 @@ class TestRAGChatConversation:
 
                 # Check the API was called multiple times (routing + generation for each query)
                 assert mock_client.chat.completions.create.call_count >= 4  # 2 routing + 2 generation
-                
+
                 # Get the last call (should have conversation history)
                 last_call = mock_client.chat.completions.create.call_args
                 assert last_call is not None
@@ -559,11 +601,11 @@ class TestRAGChatExport:
 class TestRAGChatIntegration:
     """
     Integration tests requiring a running LM Studio instance.
-    
+
     These tests verify end-to-end functionality with real LM Studio API.
     Mocked versions of these tests exist in other test classes:
     - test_real_query: See TestRAGChatQuery.test_query_success
-    - test_real_conversation: See TestRAGChatChat.test_chat_with_context and 
+    - test_real_conversation: See TestRAGChatChat.test_chat_with_context and
       TestRAGChatConversation.test_conversation_history_accumulates
     - test_real_export: See TestRAGChatExport.test_export_conversation
     """
@@ -572,7 +614,7 @@ class TestRAGChatIntegration:
     def test_real_query(self, tmp_path):
         """
         Test real query with actual LM Studio backend using configured model.
-        
+
         This integration test verifies the complete RAG query workflow with real API.
         For unit testing without LM Studio, see TestRAGChatQuery.test_query_success.
         """
@@ -595,9 +637,9 @@ class TestRAGChatIntegration:
                 "keywords": "attention, neural networks",
                 "year": 2025,
                 "conference": "NeurIPS",
-            }
+            },
         )
-        
+
         # Get the generated UID from the database
         papers = db.query("SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
@@ -644,7 +686,7 @@ class TestRAGChatIntegration:
     def test_real_conversation(self, tmp_path):
         """
         Test real conversation with actual LM Studio backend using configured model.
-        
+
         This integration test verifies multi-turn conversation with real API.
         For unit testing without LM Studio, see TestRAGChatChat.test_chat_with_context
         and TestRAGChatConversation.test_conversation_history_accumulates.
@@ -666,9 +708,9 @@ class TestRAGChatIntegration:
                 "keywords": "transformers, attention",
                 "year": 2025,
                 "conference": "NeurIPS",
-            }
+            },
         )
-        
+
         # Get the generated UID from the database
         papers = db.query("SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
@@ -716,7 +758,7 @@ class TestRAGChatIntegration:
     def test_real_export(self, tmp_path):
         """
         Test exporting real conversation with configured model.
-        
+
         This integration test verifies conversation export with real API.
         For unit testing without LM Studio, see TestRAGChatExport.test_export_conversation.
         """
@@ -737,9 +779,9 @@ class TestRAGChatIntegration:
                 "keywords": "machine learning",
                 "year": 2025,
                 "conference": "NeurIPS",
-            }
+            },
         )
-        
+
         # Get the generated UID from the database
         papers = db.query("SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
@@ -824,7 +866,7 @@ class TestRAGChatQueryRewriting:
         with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
             mock_client = Mock()
             mock_openai_class.return_value = mock_client
-            
+
             # Mock routing response with JSON tool call
             mock_route_response = Mock()
             mock_route_choice = Mock()
@@ -832,7 +874,7 @@ class TestRAGChatQueryRewriting:
             mock_route_message.content = '{"name": "search_papers", "arguments": {"topic_keywords": "attention mechanism transformers", "n_results": 5}}'
             mock_route_choice.message = mock_route_message
             mock_route_response.choices = [mock_route_choice]
-            
+
             # Mock final response
             mock_final_response = Mock()
             mock_final_choice = Mock()
@@ -840,11 +882,8 @@ class TestRAGChatQueryRewriting:
             mock_final_message.content = "Response about attention"
             mock_final_choice.message = mock_final_message
             mock_final_response.choices = [mock_final_choice]
-            
-            mock_client.chat.completions.create.side_effect = [
-                mock_route_response,
-                mock_final_response
-            ]
+
+            mock_client.chat.completions.create.side_effect = [mock_route_response, mock_final_response]
 
             chat = RAGChat(mock_embeddings_manager, mock_database)
             chat.enable_query_rewriting = True
@@ -856,7 +895,9 @@ class TestRAGChatQueryRewriting:
             # In the new architecture, query rewriting happens through tools
             assert result["metadata"]["used_tools"] is True
 
-    def test_query_with_rewriting_disabled(self, mock_embeddings_manager, mock_database, mock_lm_studio_response, mock_mcp_tool_execution):
+    def test_query_with_rewriting_disabled(
+        self, mock_embeddings_manager, mock_database, mock_lm_studio_response, mock_mcp_tool_execution
+    ):
         """Test query with query rewriting disabled."""
         chat = RAGChat(mock_embeddings_manager, mock_database)
         chat.enable_query_rewriting = False
@@ -875,21 +916,24 @@ class TestRAGChatQueryRewriting:
 
             # Mock tool execution to return papers
             with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
-                mock_execute.return_value = json.dumps({
-                    "topic": "deep learning",
-                    "papers_found": 3,
-                    "papers": [
-                        {
-                            "id": "1",
-                            "title": "Deep Learning Paper",
-                            "abstract": "About deep learning...",
-                            "year": 2023,
-                            "conference": "NeurIPS",
-                            "session": "Oral",
-                            "relevance_score": 0.95,
-                        },
-                    ],
-                }, indent=2)
+                mock_execute.return_value = json.dumps(
+                    {
+                        "topic": "deep learning",
+                        "papers_found": 3,
+                        "papers": [
+                            {
+                                "id": "1",
+                                "title": "Deep Learning Paper",
+                                "abstract": "About deep learning...",
+                                "year": 2023,
+                                "conference": "NeurIPS",
+                                "session": "Oral",
+                                "relevance_score": 0.95,
+                            },
+                        ],
+                    },
+                    indent=2,
+                )
 
                 # Mock routing responses
                 def mock_create_side_effect(*args, **kwargs):
@@ -902,7 +946,7 @@ class TestRAGChatQueryRewriting:
                         mock_message.content = '{"name": "search_papers", "arguments": {"topic_keywords": "deep learning networks", "n_results": 5}}'
                     else:
                         mock_message.content = "Response"
-                    
+
                     mock_message.tool_calls = None  # No tool calls
                     mock_choice.message = mock_message
                     mock_response.choices = [mock_choice]
@@ -926,7 +970,7 @@ class TestRAGChatQueryRewriting:
                 # We verify both queries were routed and executed
                 assert tool_call_count_1 == 1  # First query executed tool
                 assert tool_call_count_2 == 2  # Second query also executed tool
-                
+
                 # Both should return valid responses
                 assert "response" in result1
                 assert "response" in result2
@@ -957,13 +1001,13 @@ class TestRAGChatMCPTools:
     def test_init_with_mcp_tools_enabled(self, mock_embeddings_manager, mock_database):
         """Test that MCP tools can be enabled during initialization."""
         chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
-        
+
         assert chat.enable_mcp_tools is True
 
     def test_init_with_mcp_tools_disabled(self, mock_embeddings_manager, mock_database):
         """Test that MCP tools can be disabled during initialization."""
         chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=False)
-        
+
         assert chat.enable_mcp_tools is False
 
     def test_query_routing_for_tool_call(self, mock_embeddings_manager, mock_database):
@@ -973,7 +1017,7 @@ class TestRAGChatMCPTools:
                 with patch("abstracts_explorer.rag.format_tool_result_for_llm") as mock_format:
                     mock_client = Mock()
                     mock_openai_class.return_value = mock_client
-                    
+
                     # Mock routing response - returns JSON tool call
                     mock_route_response = Mock()
                     mock_route_choice = Mock()
@@ -981,31 +1025,33 @@ class TestRAGChatMCPTools:
                     mock_route_message.content = '{"name": "get_cluster_topics", "arguments": {"n_clusters": 8}}'
                     mock_route_choice.message = mock_route_message
                     mock_route_response.choices = [mock_route_choice]
-                    
+
                     # Mock final response generation
                     mock_final_response = Mock()
                     mock_final_choice = Mock()
                     mock_final_message = Mock()
-                    mock_final_message.content = "The main topics are transformers, diffusion models, and reinforcement learning."
+                    mock_final_message.content = (
+                        "The main topics are transformers, diffusion models, and reinforcement learning."
+                    )
                     mock_final_choice.message = mock_final_message
                     mock_final_response.choices = [mock_final_choice]
-                    
+
                     mock_client.chat.completions.create.side_effect = [
                         mock_route_response,  # Routing/analysis call
-                        mock_final_response   # Response generation call
+                        mock_final_response,  # Response generation call
                     ]
-                    
+
                     # Mock tool execution
                     mock_execute.return_value = '{"topics": ["transformers", "diffusion", "RL"]}'
                     mock_format.return_value = "Topics: transformers, diffusion, RL"
-                    
+
                     chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
                     result = chat.query("What are the main topics?")
-                    
+
                     # Verify tool was executed
                     mock_execute.assert_called_once()
                     assert mock_execute.call_args[0][0] == "get_cluster_topics"
-                    
+
                     # Verify response metadata
                     assert result["metadata"]["used_tools"] is True
                     assert "get_cluster_topics" in result["metadata"]["tools_executed"]
@@ -1017,42 +1063,45 @@ class TestRAGChatMCPTools:
             with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
                 mock_client = Mock()
                 mock_openai_class.return_value = mock_client
-                
+
                 # Mock tool execution to return papers
-                mock_execute.return_value = json.dumps({
-                    "topic": "attention mechanism",
-                    "papers_found": 3,
-                    "papers": [
-                        {
-                            "id": "1",
-                            "title": "Attention Mechanisms",
-                            "abstract": "About attention...",
-                            "year": 2023,
-                            "conference": "NeurIPS",
-                            "session": "Oral",
-                            "relevance_score": 0.95,
-                        },
-                        {
-                            "id": "2",
-                            "title": "Neural Attention",
-                            "abstract": "More about attention...",
-                            "year": 2023,
-                            "conference": "NeurIPS",
-                            "session": "Poster",
-                            "relevance_score": 0.90,
-                        },
-                        {
-                            "id": "3",
-                            "title": "Attention Networks",
-                            "abstract": "Even more attention...",
-                            "year": 2023,
-                            "conference": "NeurIPS",
-                            "session": "Spotlight",
-                            "relevance_score": 0.85,
-                        },
-                    ],
-                }, indent=2)
-                
+                mock_execute.return_value = json.dumps(
+                    {
+                        "topic": "attention mechanism",
+                        "papers_found": 3,
+                        "papers": [
+                            {
+                                "id": "1",
+                                "title": "Attention Mechanisms",
+                                "abstract": "About attention...",
+                                "year": 2023,
+                                "conference": "NeurIPS",
+                                "session": "Oral",
+                                "relevance_score": 0.95,
+                            },
+                            {
+                                "id": "2",
+                                "title": "Neural Attention",
+                                "abstract": "More about attention...",
+                                "year": 2023,
+                                "conference": "NeurIPS",
+                                "session": "Poster",
+                                "relevance_score": 0.90,
+                            },
+                            {
+                                "id": "3",
+                                "title": "Attention Networks",
+                                "abstract": "Even more attention...",
+                                "year": 2023,
+                                "conference": "NeurIPS",
+                                "session": "Spotlight",
+                                "relevance_score": 0.85,
+                            },
+                        ],
+                    },
+                    indent=2,
+                )
+
                 # Mock routing response - returns JSON tool call for search_papers
                 mock_route_response = Mock()
                 mock_route_choice = Mock()
@@ -1060,7 +1109,7 @@ class TestRAGChatMCPTools:
                 mock_route_message.content = '{"name": "search_papers", "arguments": {"topic_keywords": "attention mechanism neural networks", "n_results": 5}}'
                 mock_route_choice.message = mock_route_message
                 mock_route_response.choices = [mock_route_choice]
-                
+
                 # Mock final response
                 mock_final_response = Mock()
                 mock_final_choice = Mock()
@@ -1068,41 +1117,43 @@ class TestRAGChatMCPTools:
                 mock_final_message.content = "Attention mechanisms allow models to focus..."
                 mock_final_choice.message = mock_final_message
                 mock_final_response.choices = [mock_final_choice]
-                
+
                 mock_client.chat.completions.create.side_effect = [
                     mock_route_response,  # Routing/analysis call
-                    mock_final_response   # Response generation call
+                    mock_final_response,  # Response generation call
                 ]
-                
+
                 # Mock paper search
                 mock_embeddings_manager.search_similar.return_value = {
                     "ids": [["1", "2", "3"]],
                     "distances": [[0.1, 0.2, 0.3]],
-                    "metadatas": [[
-                        {"openreview_id": "1", "title": "Paper 1", "year": 2024},
-                        {"openreview_id": "2", "title": "Paper 2", "year": 2024},
-                        {"openreview_id": "3", "title": "Paper 3", "year": 2024},
-                    ]],
+                    "metadatas": [
+                        [
+                            {"openreview_id": "1", "title": "Paper 1", "year": 2024},
+                            {"openreview_id": "2", "title": "Paper 2", "year": 2024},
+                            {"openreview_id": "3", "title": "Paper 3", "year": 2024},
+                        ]
+                    ],
                     "documents": [["Abstract 1", "Abstract 2", "Abstract 3"]],
                 }
-                
+
                 mock_database.get_paper_by_openreview_id.side_effect = [
                     {"openreview_id": "1", "title": "Paper 1", "abstract": "Abstract 1"},
                     {"openreview_id": "2", "title": "Paper 2", "abstract": "Abstract 2"},
                     {"openreview_id": "3", "title": "Paper 3", "abstract": "Abstract 3"},
                 ]
-                
+
                 chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
                 result = chat.query("Explain attention mechanism")
-                
+
                 # Verify search_papers tool was executed
                 mock_execute.assert_called_once()
                 call_args = mock_execute.call_args[0]
                 assert call_args[0] == "search_papers"
-                
+
                 # Verify papers were returned
                 assert len(result["papers"]) > 0
-                
+
                 # Verify metadata shows tools were used
                 assert result["metadata"]["used_tools"] is True
                 assert "search_papers" in result["metadata"]["tools_executed"]
@@ -1119,7 +1170,7 @@ class TestRAGChatMCPToolsE2E:
             with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
                 mock_client = Mock()
                 mock_openai_class.return_value = mock_client
-                
+
                 # Mock routing response with JSON tool call
                 mock_route_response = Mock()
                 mock_route_choice = Mock()
@@ -1127,19 +1178,21 @@ class TestRAGChatMCPToolsE2E:
                 mock_route_message.content = '{"name": "get_cluster_topics", "arguments": {"n_clusters": 8}}'
                 mock_route_choice.message = mock_route_message
                 mock_route_response.choices = [mock_route_choice]
-                
+
                 # Mock tool execution result
-                mock_execute.return_value = json.dumps({
-                    "statistics": {"n_clusters": 8, "total_papers": 100},
-                    "clusters": [
-                        {
-                            "cluster_id": 0,
-                            "paper_count": 20,
-                            "keywords": [{"keyword": "transformers", "count": 15}]
-                        }
-                    ]
-                })
-                
+                mock_execute.return_value = json.dumps(
+                    {
+                        "statistics": {"n_clusters": 8, "total_papers": 100},
+                        "clusters": [
+                            {
+                                "cluster_id": 0,
+                                "paper_count": 20,
+                                "keywords": [{"keyword": "transformers", "count": 15}],
+                            }
+                        ],
+                    }
+                )
+
                 # Mock final response after tool execution
                 mock_final_response = Mock()
                 mock_final_choice = Mock()
@@ -1147,19 +1200,16 @@ class TestRAGChatMCPToolsE2E:
                 mock_final_message.content = "The main topics include transformers and attention mechanisms."
                 mock_final_choice.message = mock_final_message
                 mock_final_response.choices = [mock_final_choice]
-                
+
                 # Set up create to return routing response first, then final
-                mock_client.chat.completions.create.side_effect = [
-                    mock_route_response,
-                    mock_final_response
-                ]
-                
+                mock_client.chat.completions.create.side_effect = [mock_route_response, mock_final_response]
+
                 chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
                 result = chat.query("What are the main research topics at this conference?")
-                
+
                 # Verify tool was executed
                 mock_execute.assert_called_once_with("get_cluster_topics", {"n_clusters": 8})
-                
+
                 # Verify final response was returned
                 assert "main topics" in result["response"].lower() or "transformers" in result["response"].lower()
 
@@ -1169,7 +1219,7 @@ class TestRAGChatMCPToolsE2E:
             with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
                 mock_client = Mock()
                 mock_openai_class.return_value = mock_client
-                
+
                 # Mock routing response with JSON tool call
                 mock_route_response = Mock()
                 mock_route_choice = Mock()
@@ -1177,14 +1227,12 @@ class TestRAGChatMCPToolsE2E:
                 mock_route_message.content = '{"name": "get_topic_evolution", "arguments": {"topic_keywords": "transformers", "conference": "neurips"}}'
                 mock_route_choice.message = mock_route_message
                 mock_route_response.choices = [mock_route_choice]
-                
+
                 # Mock tool execution result
-                mock_execute.return_value = json.dumps({
-                    "topic": "transformers",
-                    "year_counts": {"2020": 10, "2021": 15, "2022": 20},
-                    "total_papers": 45
-                })
-                
+                mock_execute.return_value = json.dumps(
+                    {"topic": "transformers", "year_counts": {"2020": 10, "2021": 15, "2022": 20}, "total_papers": 45}
+                )
+
                 # Mock final response after tool execution
                 mock_final_response = Mock()
                 mock_final_choice = Mock()
@@ -1192,22 +1240,18 @@ class TestRAGChatMCPToolsE2E:
                 mock_final_message.content = "Transformers have grown from 10 papers in 2020 to 20 papers in 2022."
                 mock_final_choice.message = mock_final_message
                 mock_final_response.choices = [mock_final_choice]
-                
+
                 # Set up create to return routing response first, then final
-                mock_client.chat.completions.create.side_effect = [
-                    mock_route_response,
-                    mock_final_response
-                ]
-                
+                mock_client.chat.completions.create.side_effect = [mock_route_response, mock_final_response]
+
                 chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
                 result = chat.query("How have transformers evolved at NeurIPS over the years?")
-                
+
                 # Verify tool was executed with correct parameters
                 mock_execute.assert_called_once_with(
-                    "get_topic_evolution",
-                    {"topic_keywords": "transformers", "conference": "neurips"}
+                    "get_topic_evolution", {"topic_keywords": "transformers", "conference": "neurips"}
                 )
-                
+
                 # Verify final response was returned
                 assert "2020" in result["response"] or "evolved" in result["response"].lower()
 
@@ -1217,7 +1261,7 @@ class TestRAGChatMCPToolsE2E:
             with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
                 mock_client = Mock()
                 mock_openai_class.return_value = mock_client
-                
+
                 # Mock routing response with JSON tool call
                 mock_route_response = Mock()
                 mock_route_choice = Mock()
@@ -1225,17 +1269,19 @@ class TestRAGChatMCPToolsE2E:
                 mock_route_message.content = '{"name": "search_papers", "arguments": {"topic_keywords": "large language models", "years": [2024, 2025]}}'
                 mock_route_choice.message = mock_route_message
                 mock_route_response.choices = [mock_route_choice]
-                
+
                 # Mock tool execution result
-                mock_execute.return_value = json.dumps({
-                    "topic": "large language models",
-                    "papers_found": 5,
-                    "papers": [
-                        {"title": "GPT-4 Architecture", "year": 2024},
-                        {"title": "Scaling Laws", "year": 2024}
-                    ]
-                })
-                
+                mock_execute.return_value = json.dumps(
+                    {
+                        "topic": "large language models",
+                        "papers_found": 5,
+                        "papers": [
+                            {"title": "GPT-4 Architecture", "year": 2024},
+                            {"title": "Scaling Laws", "year": 2024},
+                        ],
+                    }
+                )
+
                 # Mock final response after tool execution
                 mock_final_response = Mock()
                 mock_final_choice = Mock()
@@ -1243,28 +1289,24 @@ class TestRAGChatMCPToolsE2E:
                 mock_final_message.content = "Recent papers include GPT-4 Architecture and Scaling Laws."
                 mock_final_choice.message = mock_final_message
                 mock_final_response.choices = [mock_final_choice]
-                
+
                 # Set up create to return routing response first, then final
-                mock_client.chat.completions.create.side_effect = [
-                    mock_route_response,
-                    mock_final_response
-                ]
-                
+                mock_client.chat.completions.create.side_effect = [mock_route_response, mock_final_response]
+
                 chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
                 result = chat.query("What are the latest papers on large language models?")
-                
+
                 # Verify tool was executed
                 mock_execute.assert_called_once_with(
-                    "search_papers",
-                    {"topic_keywords": "large language models", "years": [2024, 2025]}
+                    "search_papers", {"topic_keywords": "large language models", "years": [2024, 2025]}
                 )
-                
+
                 # Verify final response was returned
                 assert "GPT-4" in result["response"] or "recent" in result["response"].lower()
 
     def test_mocked_query_triggers_analyze_topic_relevance(self, mock_embeddings_manager, mock_database):
         """Test that a query about topic popularity triggers analyze_topic_relevance with 'topic' argument (mocked).
-        
+
         This test specifically catches the parameter name mismatch where the model passes 'topic'
         but the function was previously expecting 'query', causing:
         'analyze_topic_relevance() got an unexpected keyword argument 'topic''
@@ -1273,7 +1315,7 @@ class TestRAGChatMCPToolsE2E:
             with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
                 mock_client = Mock()
                 mock_openai_class.return_value = mock_client
-                
+
                 # Mock routing response: model uses 'topic' (not 'query') as the argument name
                 mock_route_response = Mock()
                 mock_route_choice = Mock()
@@ -1281,22 +1323,29 @@ class TestRAGChatMCPToolsE2E:
                 mock_route_message.content = '{"name": "analyze_topic_relevance", "arguments": {"topic": "uncertainty quantification", "years": [2025]}}'
                 mock_route_choice.message = mock_route_message
                 mock_route_response.choices = [mock_route_choice]
-                
+
                 # Mock tool execution result
-                mock_execute.return_value = json.dumps({
-                    "topic": "uncertainty quantification",
-                    "total_papers": 42,
-                    "relevance_score": 85.0,
-                    "distance_threshold": 1.1,
-                    "filters": {"conferences": None, "years": [2025]},
-                    "conferences": {"NeurIPS": 42},
-                    "years": {"2025": 42},
-                    "sample_papers": [
-                        {"title": "Uncertainty in Deep Learning", "year": 2025, "conference": "NeurIPS", "distance": 0.5}
-                    ],
-                    "closest_distance": 0.5
-                })
-                
+                mock_execute.return_value = json.dumps(
+                    {
+                        "topic": "uncertainty quantification",
+                        "total_papers": 42,
+                        "relevance_score": 85.0,
+                        "distance_threshold": 1.1,
+                        "filters": {"conferences": None, "years": [2025]},
+                        "conferences": {"NeurIPS": 42},
+                        "years": {"2025": 42},
+                        "sample_papers": [
+                            {
+                                "title": "Uncertainty in Deep Learning",
+                                "year": 2025,
+                                "conference": "NeurIPS",
+                                "distance": 0.5,
+                            }
+                        ],
+                        "closest_distance": 0.5,
+                    }
+                )
+
                 # Mock final response after tool execution
                 mock_final_response = Mock()
                 mock_final_choice = Mock()
@@ -1304,22 +1353,20 @@ class TestRAGChatMCPToolsE2E:
                 mock_final_message.content = "There were 42 papers about uncertainty quantification at NeurIPS 2025."
                 mock_final_choice.message = mock_final_message
                 mock_final_response.choices = [mock_final_choice]
-                
+
                 # Set up create to return routing response first, then final
-                mock_client.chat.completions.create.side_effect = [
-                    mock_route_response,
-                    mock_final_response
-                ]
-                
+                mock_client.chat.completions.create.side_effect = [mock_route_response, mock_final_response]
+
                 chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
-                result = chat.query("How many papers about uncertainty quantification were presented at NeurIPS 2025?")
-                
+                result = chat.query(
+                    "How many papers about uncertainty quantification were presented at NeurIPS 2025?"
+                )
+
                 # Verify tool was executed with 'topic' (not 'query') as the argument name
                 mock_execute.assert_called_once_with(
-                    "analyze_topic_relevance",
-                    {"topic": "uncertainty quantification", "years": [2025]}
+                    "analyze_topic_relevance", {"topic": "uncertainty quantification", "years": [2025]}
                 )
-                
+
                 # Verify final response was returned (not the raw tool call)
                 assert "42" in result["response"] or "uncertainty" in result["response"].lower()
                 assert result["metadata"]["used_tools"] is True
@@ -1329,58 +1376,60 @@ class TestRAGChatMCPToolsE2E:
         """Test with real LLM that it can decide to use MCP tools (requires LM Studio)."""
         # This test requires a real LLM backend running
         # It will be skipped if LM Studio is not available
-        
+
         chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
-        
+
         # Query that should trigger clustering tools
         result = chat.query("What are the main research topics covered in the conference?")
-        
+
         # Verify we got a response
         assert "response" in result
         assert len(result["response"]) > 0
-        
+
         # Note: We can't assert specific tool calls without introspecting the LLM's behavior,
         # but this test ensures the integration works end-to-end with a real LLM
 
 
 class TestJSONToolCalls:
     """Tests for JSON-based tool call detection and handling."""
-    
+
     def test_parse_json_tool_call_single(self):
         """Test parsing a single JSON tool call."""
         from abstracts_explorer.rag import parse_json_tool_call
-        
-        json_response = '{"name": "analyze_topic_relevance", "arguments": {"topic": "transformers", "distance_threshold": 1.1}}'
+
+        json_response = (
+            '{"name": "analyze_topic_relevance", "arguments": {"topic": "transformers", "distance_threshold": 1.1}}'
+        )
         tool_calls = parse_json_tool_call(json_response)
-        
+
         assert tool_calls is not None
         assert len(tool_calls) == 1
-        assert tool_calls[0]['name'] == 'analyze_topic_relevance'
-        assert tool_calls[0]['arguments']['topic'] == 'transformers'
-        assert tool_calls[0]['arguments']['distance_threshold'] == 1.1
-    
+        assert tool_calls[0]["name"] == "analyze_topic_relevance"
+        assert tool_calls[0]["arguments"]["topic"] == "transformers"
+        assert tool_calls[0]["arguments"]["distance_threshold"] == 1.1
+
     def test_parse_json_tool_call_array(self):
         """Test parsing multiple JSON tool calls in array format."""
         from abstracts_explorer.rag import parse_json_tool_call
-        
-        json_response = '''[
+
+        json_response = """[
             {"name": "get_cluster_topics", "arguments": {"n_clusters": 8}},
             {"name": "search_papers", "arguments": {"topic_keywords": "transformers"}}
-        ]'''
+        ]"""
         tool_calls = parse_json_tool_call(json_response)
-        
+
         assert tool_calls is not None
         assert len(tool_calls) == 2
-        assert tool_calls[0]['name'] == 'get_cluster_topics'
-        assert tool_calls[0]['arguments']['n_clusters'] == 8
-        assert tool_calls[1]['name'] == 'search_papers'
-        assert tool_calls[1]['arguments']['topic_keywords'] == 'transformers'
-    
+        assert tool_calls[0]["name"] == "get_cluster_topics"
+        assert tool_calls[0]["arguments"]["n_clusters"] == 8
+        assert tool_calls[1]["name"] == "search_papers"
+        assert tool_calls[1]["arguments"]["topic_keywords"] == "transformers"
+
     def test_parse_json_tool_call_openai_format(self):
         """Test parsing OpenAI-like JSON format."""
         from abstracts_explorer.rag import parse_json_tool_call
-        
-        json_response = '''{
+
+        json_response = """{
             "tool_calls": [
                 {
                     "function": {
@@ -1389,58 +1438,91 @@ class TestJSONToolCalls:
                     }
                 }
             ]
-        }'''
+        }"""
         tool_calls = parse_json_tool_call(json_response)
-        
+
         assert tool_calls is not None
         assert len(tool_calls) == 1
-        assert tool_calls[0]['name'] == 'analyze_topic_relevance'
-        assert tool_calls[0]['arguments']['topic'] == 'transformers'
-    
+        assert tool_calls[0]["name"] == "analyze_topic_relevance"
+        assert tool_calls[0]["arguments"]["topic"] == "transformers"
+
     def test_parse_json_tool_call_function_format(self):
         """Test parsing function-only JSON format."""
         from abstracts_explorer.rag import parse_json_tool_call
-        
+
         json_response = '{"function": {"name": "get_cluster_topics", "arguments": {"n_clusters": 5}}}'
         tool_calls = parse_json_tool_call(json_response)
-        
+
         assert tool_calls is not None
         assert len(tool_calls) == 1
-        assert tool_calls[0]['name'] == 'get_cluster_topics'
-        assert tool_calls[0]['arguments']['n_clusters'] == 5
-    
+        assert tool_calls[0]["name"] == "get_cluster_topics"
+        assert tool_calls[0]["arguments"]["n_clusters"] == 5
+
     def test_parse_json_tool_call_not_json(self):
         """Test that non-JSON responses return None."""
         from abstracts_explorer.rag import parse_json_tool_call
-        
+
         text_response = "This is a regular text response, not JSON."
         tool_calls = parse_json_tool_call(text_response)
-        
+
         assert tool_calls is None
-    
+
     def test_parse_json_tool_call_invalid_format(self):
         """Test that JSON without tool call structure returns None."""
         from abstracts_explorer.rag import parse_json_tool_call
-        
+
         json_response = '{"message": "This is just a JSON message", "value": 123}'
         tool_calls = parse_json_tool_call(json_response)
-        
+
         assert tool_calls is None
-    
+
     def test_parse_json_tool_call_empty(self):
         """Test that empty input returns None."""
         from abstracts_explorer.rag import parse_json_tool_call
-        
+
         assert parse_json_tool_call("") is None
         assert parse_json_tool_call("  ") is None
         assert parse_json_tool_call(None) is None
-    
+
+    def test_parse_json_tool_call_with_think_block(self):
+        """Test that <think> blocks before JSON are stripped and the tool call is parsed."""
+        from abstracts_explorer.rag import parse_json_tool_call
+
+        response_with_think = (
+            "<think>The user is asking about papers at NeurIPS 2025. "
+            "I should use analyze_topic_relevance.</think>\n"
+            '{"name": "analyze_topic_relevance", "arguments": {"topic": "uncertainty quantification", "years": [2025]}}'
+        )
+        tool_calls = parse_json_tool_call(response_with_think)
+
+        assert tool_calls is not None
+        assert len(tool_calls) == 1
+        assert tool_calls[0]["name"] == "analyze_topic_relevance"
+        assert tool_calls[0]["arguments"]["topic"] == "uncertainty quantification"
+        assert tool_calls[0]["arguments"]["years"] == [2025]
+
+    def test_parse_json_tool_call_only_think_block(self):
+        """Test that a response containing only a <think> block returns None."""
+        from abstracts_explorer.rag import parse_json_tool_call
+
+        response_only_think = "<think>Just thinking here, no JSON output.</think>"
+        assert parse_json_tool_call(response_only_think) is None
+
+    def test_strip_think_blocks(self):
+        """Test the _strip_think_blocks helper directly."""
+        from abstracts_explorer.rag import _strip_think_blocks
+
+        assert _strip_think_blocks("<think>thinking</think>json content") == "json content"
+        assert _strip_think_blocks("no think block") == "no think block"
+        assert _strip_think_blocks("<think>multi\nline\nthink</think>  result  ") == "result"
+        assert _strip_think_blocks("") == ""
+
     def test_handle_json_tool_calls_integration(self, mock_embeddings_manager, mock_database):
         """Test that JSON tool calls are executed and result in proper response."""
         with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
             mock_client = Mock()
             mock_openai_class.return_value = mock_client
-            
+
             # First call: Query routing - returns JSON tool call
             mock_route_response = Mock()
             mock_route_choice = Mock()
@@ -1448,7 +1530,7 @@ class TestJSONToolCalls:
             mock_route_message.content = '{"name": "analyze_topic_relevance", "arguments": {"topic": "transformers", "distance_threshold": 1.1}}'
             mock_route_choice.message = mock_route_message
             mock_route_response.choices = [mock_route_choice]
-            
+
             # Second call: Model generates final answer based on tool results
             mock_final_response = Mock()
             mock_final_choice = Mock()
@@ -1456,56 +1538,54 @@ class TestJSONToolCalls:
             mock_final_message.content = "Based on the tool results, there are 42 papers about transformers."
             mock_final_choice.message = mock_final_message
             mock_final_response.choices = [mock_final_choice]
-            
+
             # Set up side_effect for sequential calls
             mock_client.chat.completions.create.side_effect = [
                 mock_route_response,  # Query routing
-                mock_final_response   # Final answer
+                mock_final_response,  # Final answer
             ]
-            
+
             # Mock the tool execution and formatting
-            with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute, \
-                 patch("abstracts_explorer.rag.format_tool_result_for_llm") as mock_format:
-                
-                mock_execute.return_value = json.dumps({
-                    "topic": "transformers",
-                    "total_papers": 42,
-                    "relevance_score": 85
-                })
+            with (
+                patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute,
+                patch("abstracts_explorer.rag.format_tool_result_for_llm") as mock_format,
+            ):
+
+                mock_execute.return_value = json.dumps(
+                    {"topic": "transformers", "total_papers": 42, "relevance_score": 85}
+                )
                 mock_format.return_value = "Found 42 papers about transformers with relevance score 85"
-                
+
                 chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
                 result = chat.query("How many papers about transformers?")
-                
+
                 # Verify tool was executed with correct parameter name 'topic' (not 'query')
                 mock_execute.assert_called_once_with(
-                    'analyze_topic_relevance',
-                    {'topic': 'transformers', 'distance_threshold': 1.1}
+                    "analyze_topic_relevance", {"topic": "transformers", "distance_threshold": 1.1}
                 )
-                
+
                 # Verify final response contains the answer
                 assert "42 papers" in result["response"]
                 # Verify metadata shows tools were used
                 assert result["metadata"]["used_tools"] is True
-    
+
     def test_handle_json_tool_calls_array(self, mock_embeddings_manager, mock_database):
         """Test handling multiple JSON tool calls in array format."""
         with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
             mock_client = Mock()
             mock_openai_class.return_value = mock_client
-            
+
             # First call: Query routing - returns JSON array of tool calls
             mock_route_response = Mock()
             mock_route_choice = Mock()
             mock_route_message = Mock()
-            mock_route_message.content = '''[
+            mock_route_message.content = """[
                 {"name": "get_cluster_topics", "arguments": {"n_clusters": 5}},
                 {"name": "search_papers", "arguments": {"topic_keywords": "transformers"}}
-            ]'''
+            ]"""
             mock_route_choice.message = mock_route_message
             mock_route_response.choices = [mock_route_choice]
-            
-            
+
             # Second call: Final answer
             mock_final_response = Mock()
             mock_final_choice = Mock()
@@ -1513,88 +1593,92 @@ class TestJSONToolCalls:
             mock_final_message.content = "Based on clustering and recent papers, transformers are a major topic."
             mock_final_choice.message = mock_final_message
             mock_final_response.choices = [mock_final_choice]
-            
-            mock_client.chat.completions.create.side_effect = [
-                mock_route_response,
-                mock_final_response
-            ]
-            
+
+            mock_client.chat.completions.create.side_effect = [mock_route_response, mock_final_response]
+
             # Mock the tool execution
-            with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute, \
-                 patch("abstracts_explorer.rag.format_tool_result_for_llm") as mock_format:
-                
+            with (
+                patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute,
+                patch("abstracts_explorer.rag.format_tool_result_for_llm") as mock_format,
+            ):
+
                 mock_execute.side_effect = [
                     json.dumps({"clusters": 5, "total_papers": 100}),
-                    json.dumps({"papers": [{"title": "New Transformer"}]})
+                    json.dumps({"papers": [{"title": "New Transformer"}]}),
                 ]
                 mock_format.side_effect = [
                     "Found 5 clusters with 100 total papers",
-                    "Recent papers include: New Transformer"
+                    "Recent papers include: New Transformer",
                 ]
-                
+
                 chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
                 result = chat.query("What's trending?")
-                
+
                 # Verify both tools were executed
                 assert mock_execute.call_count == 2
-                assert mock_execute.call_args_list[0][0] == ('get_cluster_topics', {'n_clusters': 5})
-                assert mock_execute.call_args_list[1][0] == ('search_papers', {'topic_keywords': 'transformers'})
-                
+                assert mock_execute.call_args_list[0][0] == ("get_cluster_topics", {"n_clusters": 5})
+                assert mock_execute.call_args_list[1][0] == ("search_papers", {"topic_keywords": "transformers"})
+
                 # Verify final response
                 assert "transformers" in result["response"].lower()
                 # Verify metadata shows tools were used
                 assert result["metadata"]["used_tools"] is True
-    
+
     def test_json_tool_calls_disabled_when_mcp_disabled(self, mock_embeddings_manager, mock_database):
         """Test that JSON tool calls are handled when MCP tools are disabled."""
         with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
             with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
                 mock_client = Mock()
                 mock_openai_class.return_value = mock_client
-                
+
                 # Mock tool execution to return papers
-                mock_execute.return_value = json.dumps({
-                    "topic": "test query",
-                    "papers_found": 3,
-                    "papers": [
-                        {
-                            "id": "1",
-                            "title": "Paper 1",
-                            "abstract": "Abstract 1",
-                            "year": 2024,
-                            "conference": "NeurIPS",
-                            "session": "Oral",
-                            "relevance_score": 0.95,
-                        },
-                        {
-                            "id": "2",
-                            "title": "Paper 2",
-                            "abstract": "Abstract 2",
-                            "year": 2024,
-                            "conference": "NeurIPS",
-                            "session": "Poster",
-                            "relevance_score": 0.90,
-                        },
-                        {
-                            "id": "3",
-                            "title": "Paper 3",
-                            "abstract": "Abstract 3",
-                            "year": 2024,
-                            "conference": "NeurIPS",
-                            "session": "Spotlight",
-                            "relevance_score": 0.85,
-                        },
-                    ],
-                }, indent=2)
-                
+                mock_execute.return_value = json.dumps(
+                    {
+                        "topic": "test query",
+                        "papers_found": 3,
+                        "papers": [
+                            {
+                                "id": "1",
+                                "title": "Paper 1",
+                                "abstract": "Abstract 1",
+                                "year": 2024,
+                                "conference": "NeurIPS",
+                                "session": "Oral",
+                                "relevance_score": 0.95,
+                            },
+                            {
+                                "id": "2",
+                                "title": "Paper 2",
+                                "abstract": "Abstract 2",
+                                "year": 2024,
+                                "conference": "NeurIPS",
+                                "session": "Poster",
+                                "relevance_score": 0.90,
+                            },
+                            {
+                                "id": "3",
+                                "title": "Paper 3",
+                                "abstract": "Abstract 3",
+                                "year": 2024,
+                                "conference": "NeurIPS",
+                                "session": "Spotlight",
+                                "relevance_score": 0.85,
+                            },
+                        ],
+                    },
+                    indent=2,
+                )
+
                 # Query routing returns JSON for paper search even when MCP tools disabled
                 mock_route_response = Mock()
                 mock_route_choice = Mock()
                 mock_route_message = Mock()
-                mock_route_message.content = '{"name": "search_papers", "arguments": {"topic_keywords": "test query", "n_results": 5}}'
+                mock_route_message.content = (
+                    '{"name": "search_papers", "arguments": {"topic_keywords": "test query", "n_results": 5}}'
+                )
                 mock_route_choice.message = mock_route_message
                 mock_route_response.choices = [mock_route_choice]
-                
+
                 # Second call: Final response generation
                 mock_response = Mock()
                 mock_choice = Mock()
@@ -1602,19 +1686,268 @@ class TestJSONToolCalls:
                 mock_message.content = "Here are some relevant papers about test query..."
                 mock_choice.message = mock_message
                 mock_response.choices = [mock_choice]
-                
-                mock_client.chat.completions.create.side_effect = [
-                    mock_route_response,
-                    mock_response
-                ]
-                
+
+                mock_client.chat.completions.create.side_effect = [mock_route_response, mock_response]
+
                 chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=False)
                 result = chat.query("Test query")
-                
+
                 # In the new architecture, all queries go through tools (including paper search)
                 # So used_tools is True even when MCP clustering tools are disabled
                 assert result["metadata"]["used_tools"] is True
                 assert result["metadata"]["n_papers"] == 3
-                
+
                 # Should have made two API calls (routing + generation)
                 assert mock_client.chat.completions.create.call_count == 2
+
+
+class TestNativeToolCalling:
+    """Tests for native OpenAI tool calling (tools parameter)."""
+
+    def _make_tool_call_mock(self, name: str, arguments: dict):
+        """Helper to create a mock native tool call object."""
+        tc = Mock()
+        tc.function.name = name
+        tc.function.arguments = json.dumps(arguments)
+        return tc
+
+    def test_native_tool_call_single(self, mock_embeddings_manager, mock_database):
+        """Test that native tool calls are parsed correctly."""
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
+            with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
+                mock_client = Mock()
+                mock_openai_class.return_value = mock_client
+
+                # Routing response uses native tool_calls (list), not JSON content
+                mock_route_message = Mock()
+                mock_route_message.tool_calls = [
+                    self._make_tool_call_mock(
+                        "analyze_topic_relevance", {"topic": "uncertainty quantification", "years": [2025]}
+                    )
+                ]
+                mock_route_message.content = None  # No content when using native tool calls
+                mock_route_choice = Mock()
+                mock_route_choice.message = mock_route_message
+                mock_route_response = Mock()
+                mock_route_response.choices = [mock_route_choice]
+
+                # Final generation response
+                mock_final_message = Mock()
+                mock_final_message.content = "There were 42 papers about uncertainty quantification at NeurIPS 2025."
+                mock_final_message.tool_calls = None
+                mock_final_choice = Mock()
+                mock_final_choice.message = mock_final_message
+                mock_final_response = Mock()
+                mock_final_response.choices = [mock_final_choice]
+
+                mock_client.chat.completions.create.side_effect = [mock_route_response, mock_final_response]
+
+                mock_execute.return_value = json.dumps(
+                    {"topic": "uncertainty quantification", "total_papers": 42, "relevance_score": 85}
+                )
+
+                chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
+                result = chat.query(
+                    "How many papers about uncertainty quantification were published at NeurIPS 2025?"
+                )
+
+                # Verify native tool call was parsed and executed correctly
+                mock_execute.assert_called_once_with(
+                    "analyze_topic_relevance", {"topic": "uncertainty quantification", "years": [2025]}
+                )
+                assert result["metadata"]["used_tools"] is True
+                assert "analyze_topic_relevance" in result["metadata"]["tools_executed"]
+
+    def test_native_tool_call_multiple(self, mock_embeddings_manager, mock_database):
+        """Test that multiple native tool calls are handled correctly."""
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
+            with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
+                mock_client = Mock()
+                mock_openai_class.return_value = mock_client
+
+                # Routing response with two native tool calls
+                mock_route_message = Mock()
+                mock_route_message.tool_calls = [
+                    self._make_tool_call_mock("get_cluster_topics", {"n_clusters": 8}),
+                    self._make_tool_call_mock("search_papers", {"topic_keywords": "transformers", "n_results": 5}),
+                ]
+                mock_route_message.content = None
+                mock_route_choice = Mock()
+                mock_route_choice.message = mock_route_message
+                mock_route_response = Mock()
+                mock_route_response.choices = [mock_route_choice]
+
+                mock_final_message = Mock()
+                mock_final_message.content = "Here are the topics and related papers."
+                mock_final_message.tool_calls = None
+                mock_final_choice = Mock()
+                mock_final_choice.message = mock_final_message
+                mock_final_response = Mock()
+                mock_final_response.choices = [mock_final_choice]
+
+                mock_client.chat.completions.create.side_effect = [mock_route_response, mock_final_response]
+                mock_execute.side_effect = [
+                    json.dumps({"clusters": []}),
+                    json.dumps({"papers": []}),
+                ]
+
+                chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
+                result = chat.query("Show topics and recent transformer papers")
+
+                assert mock_execute.call_count == 2
+                assert mock_execute.call_args_list[0][0] == ("get_cluster_topics", {"n_clusters": 8})
+                assert mock_execute.call_args_list[1][0] == (
+                    "search_papers",
+                    {"topic_keywords": "transformers", "n_results": 5},
+                )
+                assert result["metadata"]["used_tools"] is True
+
+    def test_native_tool_call_tools_param_passed_to_api(self, mock_embeddings_manager, mock_database):
+        """Test that the tools parameter is passed to the OpenAI API when MCP tools are enabled."""
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
+            with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
+                mock_client = Mock()
+                mock_openai_class.return_value = mock_client
+
+                mock_execute.return_value = json.dumps({"topic": "test", "papers_found": 0, "papers": []})
+
+                # Return a response without tool calls so we fall through to fallback
+                mock_route_message = Mock()
+                mock_route_message.tool_calls = None
+                mock_route_message.content = '{"name": "search_papers", "arguments": {"topic_keywords": "test"}}'
+                mock_route_choice = Mock()
+                mock_route_choice.message = mock_route_message
+                mock_route_response = Mock()
+                mock_route_response.choices = [mock_route_choice]
+
+                mock_final_message = Mock()
+                mock_final_message.content = "Response text"
+                mock_final_message.tool_calls = None
+                mock_final_choice = Mock()
+                mock_final_choice.message = mock_final_message
+                mock_final_response = Mock()
+                mock_final_response.choices = [mock_final_choice]
+
+                mock_client.chat.completions.create.side_effect = [mock_route_response, mock_final_response]
+
+                chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
+                chat.query("test query")
+
+                # Verify the routing API call included the tools parameter
+                routing_call = mock_client.chat.completions.create.call_args_list[0]
+                assert "tools" in routing_call.kwargs
+                assert "tool_choice" in routing_call.kwargs
+                assert routing_call.kwargs["tool_choice"] == "auto"
+
+    def test_native_tool_call_no_tools_param_when_mcp_disabled(self, mock_embeddings_manager, mock_database):
+        """Test that the tools parameter is NOT passed when MCP tools are disabled."""
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
+            with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
+                mock_client = Mock()
+                mock_openai_class.return_value = mock_client
+
+                mock_execute.return_value = json.dumps({"topic": "test", "papers_found": 0, "papers": []})
+
+                mock_route_message = Mock()
+                mock_route_message.tool_calls = None
+                mock_route_message.content = '{"name": "search_papers", "arguments": {"topic_keywords": "test"}}'
+                mock_route_choice = Mock()
+                mock_route_choice.message = mock_route_message
+                mock_route_response = Mock()
+                mock_route_response.choices = [mock_route_choice]
+
+                mock_final_message = Mock()
+                mock_final_message.content = "Response text"
+                mock_final_message.tool_calls = None
+                mock_final_choice = Mock()
+                mock_final_choice.message = mock_final_message
+                mock_final_response = Mock()
+                mock_final_response.choices = [mock_final_choice]
+
+                mock_client.chat.completions.create.side_effect = [mock_route_response, mock_final_response]
+
+                chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=False)
+                chat.query("test query")
+
+                # Verify the routing API call did NOT include the tools parameter
+                routing_call = mock_client.chat.completions.create.call_args_list[0]
+                assert "tools" not in routing_call.kwargs
+                assert "tool_choice" not in routing_call.kwargs
+
+    def test_native_tool_call_fallback_to_json_when_no_tool_calls(self, mock_embeddings_manager, mock_database):
+        """Test that JSON content fallback is used when native tool_calls is None."""
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
+            with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
+                mock_client = Mock()
+                mock_openai_class.return_value = mock_client
+
+                # Routing response: tool_calls is None, but content has JSON (backward compat)
+                mock_route_message = Mock()
+                mock_route_message.tool_calls = None
+                mock_route_message.content = '{"name": "get_cluster_topics", "arguments": {"n_clusters": 5}}'
+                mock_route_choice = Mock()
+                mock_route_choice.message = mock_route_message
+                mock_route_response = Mock()
+                mock_route_response.choices = [mock_route_choice]
+
+                mock_final_message = Mock()
+                mock_final_message.content = "The main topics are..."
+                mock_final_message.tool_calls = None
+                mock_final_choice = Mock()
+                mock_final_choice.message = mock_final_message
+                mock_final_response = Mock()
+                mock_final_response.choices = [mock_final_choice]
+
+                mock_client.chat.completions.create.side_effect = [mock_route_response, mock_final_response]
+                mock_execute.return_value = json.dumps(
+                    {"statistics": {"n_clusters": 5, "total_papers": 50}, "clusters": []}
+                )
+
+                chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
+                result = chat.query("What are the main topics?")
+
+                # JSON fallback should have worked
+                mock_execute.assert_called_once_with("get_cluster_topics", {"n_clusters": 5})
+                assert result["metadata"]["used_tools"] is True
+
+    def test_native_tool_call_with_think_block_in_content(self, mock_embeddings_manager, mock_database):
+        """Test that <think> blocks in content don't break routing when native tool calls are used."""
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
+            with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
+                mock_client = Mock()
+                mock_openai_class.return_value = mock_client
+
+                # Native tool call (model used proper tool calling)
+                mock_route_message = Mock()
+                mock_route_message.tool_calls = [
+                    self._make_tool_call_mock("analyze_topic_relevance", {"topic": "uncertainty quantification"})
+                ]
+                # Content may contain a <think> block but it's irrelevant when tool_calls is set
+                mock_route_message.content = "<think>The user asks about uncertainty quantification papers...</think>"
+                mock_route_choice = Mock()
+                mock_route_choice.message = mock_route_message
+                mock_route_response = Mock()
+                mock_route_response.choices = [mock_route_choice]
+
+                mock_final_message = Mock()
+                mock_final_message.content = "There were 42 papers about uncertainty quantification."
+                mock_final_message.tool_calls = None
+                mock_final_choice = Mock()
+                mock_final_choice.message = mock_final_message
+                mock_final_response = Mock()
+                mock_final_response.choices = [mock_final_choice]
+
+                mock_client.chat.completions.create.side_effect = [mock_route_response, mock_final_response]
+                mock_execute.return_value = json.dumps(
+                    {"topic": "uncertainty quantification", "total_papers": 42, "relevance_score": 80}
+                )
+
+                chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
+                result = chat.query("How many papers about uncertainty quantification were published?")
+
+                # Native tool call should have been used despite <think> in content
+                mock_execute.assert_called_once_with(
+                    "analyze_topic_relevance", {"topic": "uncertainty quantification"}
+                )
+                assert result["metadata"]["used_tools"] is True
+                assert "analyze_topic_relevance" in result["metadata"]["tools_executed"]
