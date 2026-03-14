@@ -9,13 +9,14 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+from typing import Optional
 
 from tqdm import tqdm
 
 from .config import get_config
 from .database import DatabaseManager
 from .embeddings import EmbeddingsManager, EmbeddingsError
-from .clustering import perform_clustering, ClusteringError
+from .clustering import perform_clustering, compute_clusters_with_cache, ClusteringError
 from .rag import RAGChat, RAGError
 from .plugins import get_plugin, list_plugins, list_plugin_names
 from .mcp_server import run_mcp_server
@@ -817,6 +818,101 @@ def clear_clustering_cache_command(args: argparse.Namespace) -> int:
         return 1
 
 
+def pre_generate_clustering_command(args: argparse.Namespace) -> int:
+    """
+    Pre-generate default clustering results and hierarchical labels.
+
+    Runs agglomerative clustering with default settings and generates
+    hierarchical labels, persisting both to the database cache.  This
+    command should be run once after ``create-embeddings`` to warm the
+    cache so that the first web-UI request for clusters is fast.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments containing:
+        - collection: Name of the ChromaDB collection
+        - linkage: Agglomerative linkage method
+        - n_clusters: Number of clusters (0 = auto-calculate)
+        - reduction_method: Dimensionality reduction method for visualization
+
+    Returns
+    -------
+    int
+        Exit code (0 for success, non-zero for failure)
+    """
+    config = get_config()
+
+    # Validate embeddings database exists (for local paths only)
+    if not config.embedding_db.startswith("http://") and not config.embedding_db.startswith("https://"):
+        from pathlib import Path
+
+        embeddings_path = Path(config.embedding_db)
+        if not embeddings_path.exists():
+            print(f"❌ Error: Embeddings database not found: {embeddings_path}", file=sys.stderr)
+            print("\nYou can create embeddings using:", file=sys.stderr)
+            print("  abstracts-explorer create-embeddings", file=sys.stderr)
+            return 1
+
+    linkage = args.linkage
+    # args.n_clusters is 0 when the user wants auto-calculation.
+    # We pass None to compute_clusters_with_cache so it calculates
+    # the default based on the corpus size.
+    n_clusters_arg: Optional[int] = args.n_clusters if args.n_clusters > 0 else None
+    reduction_method = args.reduction_method
+
+    print("Abstracts Explorer - Pre-generate Clustering")
+    print("=" * 70)
+    print(f"Embeddings:       {config.embedding_db}")
+    print(f"Collection:       {args.collection}")
+    print(f"Clustering:       agglomerative (linkage={linkage})")
+    print(f"N-clusters:       {'auto' if n_clusters_arg is None else n_clusters_arg}")
+    print(f"Reduction:        {reduction_method} (for initial visualization)")
+    print("=" * 70)
+
+    try:
+        em = EmbeddingsManager(
+            collection_name=args.collection,
+        )
+        em.connect()
+
+        with DatabaseManager() as db:
+            print("\n🚀 Starting agglomerative clustering pipeline...")
+            results = compute_clusters_with_cache(
+                embeddings_manager=em,
+                database=db,
+                embedding_model=config.embedding_model,
+                reduction_method=reduction_method,
+                n_components=2,
+                clustering_method="agglomerative",
+                n_clusters=n_clusters_arg,
+                limit=None,
+                force=args.force,
+                linkage=linkage,
+            )
+
+        stats = results.get("statistics", {})
+        print("\n📊 Clustering Results:")
+        print(
+            f"   Total papers:  {stats.get('total_papers', 'N/A'):,}"
+            if isinstance(stats.get("total_papers"), int)
+            else f"   Total papers:  {stats.get('total_papers', 'N/A')}"
+        )
+        print(f"   Clusters:      {stats.get('n_clusters', 'N/A')}")
+        print("\n✅ Default clustering results and hierarchical labels cached successfully.")
+        return 0
+
+    except ClusteringError as e:
+        print(f"\n❌ Clustering error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"\n❌ Unexpected error: {e}", file=sys.stderr)
+        import traceback
+
+        traceback.print_exc()
+        return 1
+
+
 def mcp_server_command(args: argparse.Namespace) -> int:
     """
     Start the MCP server for cluster analysis.
@@ -1231,6 +1327,60 @@ Examples:
         help="Only clear cache for this embedding model (optional)",
     )
 
+    # Pre-generate clustering command
+    pre_gen_parser = subparsers.add_parser(
+        "pre-generate-clustering",
+        help="Pre-generate default clustering results and hierarchical labels",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+Pre-generate default clustering results and hierarchical labels.
+
+Runs agglomerative clustering with the given settings and persists the
+results (including hierarchical labels) to the database cache.  Run this
+command once after create-embeddings to warm the cache so that the first
+web-UI request for clusters is served instantly.
+
+Examples:
+  # Pre-generate with default settings
+  abstracts-explorer pre-generate-clustering
+
+  # Use a specific linkage and force recompute
+  abstracts-explorer pre-generate-clustering --linkage complete --force
+        """,
+    )
+    pre_gen_parser.add_argument(
+        "--collection",
+        type=str,
+        default=config.collection_name,
+        help=f"Name of the ChromaDB collection (default: {config.collection_name})",
+    )
+    pre_gen_parser.add_argument(
+        "--linkage",
+        type=str,
+        choices=["ward", "complete", "average", "single"],
+        default="ward",
+        help="Agglomerative linkage method (default: ward)",
+    )
+    pre_gen_parser.add_argument(
+        "--n-clusters",
+        type=int,
+        default=0,
+        help="Number of clusters (default: 0 = auto-calculate based on corpus size)",
+    )
+    pre_gen_parser.add_argument(
+        "--reduction-method",
+        type=str,
+        choices=["pca", "tsne", "umap"],
+        default="pca",
+        help="Dimensionality reduction method for the initial visualization (default: pca)",
+    )
+    pre_gen_parser.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Force recompute even if cache already exists",
+    )
+
     # MCP Server command
     mcp_parser = subparsers.add_parser(
         "mcp-server",
@@ -1299,6 +1449,8 @@ Examples:
         return cluster_embeddings_command(args)
     elif args.command == "clear-clustering-cache":
         return clear_clustering_cache_command(args)
+    elif args.command == "pre-generate-clustering":
+        return pre_generate_clustering_command(args)
     elif args.command == "mcp-server":
         return mcp_server_command(args)
     else:

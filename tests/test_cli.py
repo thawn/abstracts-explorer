@@ -968,29 +968,25 @@ class TestCLI:
 
         with DatabaseManager() as db:
             db.create_tables()
-            # Add some test cache entries
+            # Add some test cache entries (new format)
             db.save_clustering_cache(
                 embedding_model="test-model-1",
-                reduction_method="pca",
-                n_components=2,
                 clustering_method="kmeans",
                 n_clusters=5,
                 results={
-                    "labels": [0, 1, 2],
-                    "reduced_embeddings": [[1, 2], [3, 4], [5, 6]],
-                    "statistics": {"total_papers": 3, "n_clusters": 3},
+                    "paper_ids": ["p1", "p2"],
+                    "cluster_assignments": [0, 1],
+                    "statistics": {"total_papers": 2, "n_clusters": 2},
                 },
             )
             db.save_clustering_cache(
                 embedding_model="test-model-2",
-                reduction_method="pca",
-                n_components=2,
                 clustering_method="kmeans",
                 n_clusters=5,
                 results={
-                    "labels": [0, 1],
-                    "reduced_embeddings": [[1, 2], [3, 4]],
-                    "statistics": {"total_papers": 2, "n_clusters": 2},
+                    "paper_ids": ["p1"],
+                    "cluster_assignments": [0],
+                    "statistics": {"total_papers": 1, "n_clusters": 1},
                 },
             )
 
@@ -1010,8 +1006,6 @@ class TestCLI:
         with DatabaseManager() as db:
             cached = db.get_clustering_cache(
                 embedding_model="test-model-1",
-                reduction_method="pca",
-                n_components=2,
                 clustering_method="kmeans",
                 n_clusters=5,
             )
@@ -1032,28 +1026,24 @@ class TestCLI:
             # Add cache for model1
             db.save_clustering_cache(
                 embedding_model="model1",
-                reduction_method="pca",
-                n_components=2,
                 clustering_method="kmeans",
                 n_clusters=5,
                 results={
-                    "labels": [0, 1, 2],
-                    "reduced_embeddings": [[1, 2], [3, 4], [5, 6]],
-                    "statistics": {"total_papers": 3, "n_clusters": 3},
+                    "paper_ids": ["p1", "p2"],
+                    "cluster_assignments": [0, 1],
+                    "statistics": {"total_papers": 2, "n_clusters": 2},
                 },
             )
 
             # Add cache for model2
             db.save_clustering_cache(
                 embedding_model="model2",
-                reduction_method="pca",
-                n_components=2,
                 clustering_method="kmeans",
                 n_clusters=5,
                 results={
-                    "labels": [0, 1],
-                    "reduced_embeddings": [[1, 2], [3, 4]],
-                    "statistics": {"total_papers": 2, "n_clusters": 2},
+                    "paper_ids": ["p1"],
+                    "cluster_assignments": [0],
+                    "statistics": {"total_papers": 1, "n_clusters": 1},
                 },
             )
 
@@ -1073,8 +1063,6 @@ class TestCLI:
         with DatabaseManager() as db:
             cached1 = db.get_clustering_cache(
                 embedding_model="model1",
-                reduction_method="pca",
-                n_components=2,
                 clustering_method="kmeans",
                 n_clusters=5,
             )
@@ -1082,8 +1070,6 @@ class TestCLI:
 
             cached2 = db.get_clustering_cache(
                 embedding_model="model2",
-                reduction_method="pca",
-                n_components=2,
                 clustering_method="kmeans",
                 n_clusters=5,
             )
@@ -1130,6 +1116,129 @@ class TestCLI:
         assert exit_code == 1
         captured = capsys.readouterr()
         assert "Error clearing clustering cache" in captured.err
+
+    def test_pre_generate_clustering_missing_embeddings(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering fails when embeddings DB doesn't exist."""
+        patch_get_config_for_test(monkeypatch, tmp_path / "nonexistent")
+
+        with patch.object(
+            sys,
+            "argv",
+            ["abstracts-explorer", "pre-generate-clustering"],
+        ):
+            exit_code = main()
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert "Embeddings database not found" in captured.err
+
+    def test_pre_generate_clustering_success(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering command runs successfully."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+
+        set_test_db(tmp_path / "test.db")
+
+        mock_results = {
+            "points": [],
+            "statistics": {"total_papers": 10, "n_clusters": 2, "n_noise": 0, "cluster_sizes": {}},
+        }
+
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+        ):
+            mock_em = Mock()
+            mock_em_class.return_value = mock_em
+
+            mock_compute.return_value = mock_results
+
+            with patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "pre-generate-clustering"],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "cached successfully" in captured.out
+        mock_compute.assert_called_once()
+        # Verify agglomerative clustering was requested
+        call_kwargs = mock_compute.call_args[1]
+        assert call_kwargs["clustering_method"] == "agglomerative"
+        assert call_kwargs["linkage"] == "ward"
+        # n_clusters=None means auto-calculate based on corpus size
+        assert call_kwargs["n_clusters"] is None
+
+    def test_pre_generate_clustering_custom_options(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering with custom linkage and force flag."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+
+        set_test_db(tmp_path / "test.db")
+
+        mock_results = {
+            "points": [],
+            "statistics": {"total_papers": 5, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
+        }
+
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+        ):
+            mock_em = Mock()
+            mock_em_class.return_value = mock_em
+            mock_compute.return_value = mock_results
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "abstracts-explorer",
+                    "pre-generate-clustering",
+                    "--linkage",
+                    "complete",
+                    "--n-clusters",
+                    "4",
+                    "--force",
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        call_kwargs = mock_compute.call_args[1]
+        assert call_kwargs["linkage"] == "complete"
+        assert call_kwargs["n_clusters"] == 4
+        assert call_kwargs["force"] is True
+
+    def test_pre_generate_clustering_error(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering handles errors gracefully."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+
+        set_test_db(tmp_path / "test.db")
+
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+        ):
+            mock_em_class.return_value = Mock()
+            mock_compute.side_effect = Exception("Clustering failed")
+
+            with patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "pre-generate-clustering"],
+            ):
+                exit_code = main()
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert "Unexpected error" in captured.err
 
 
 class TestChatCommand:

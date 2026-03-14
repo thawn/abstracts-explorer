@@ -90,7 +90,9 @@ class Paper(Base):
     award = Column(String, nullable=True)
     year = Column(Integer, nullable=True, index=True)
     conference = Column(String, nullable=True, index=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now())
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now()
+    )
 
     def __repr__(self) -> str:
         """String representation of Paper."""
@@ -119,8 +121,16 @@ class EmbeddingsMetadata(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     embedding_model = Column(String, nullable=False)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
 
     def __repr__(self) -> str:
         """String representation of EmbeddingsMetadata."""
@@ -131,7 +141,9 @@ class ClusteringCache(Base):
     """
     Clustering cache model.
 
-    Stores cached clustering results with parameters and metadata.
+    Stores cached clustering results (cluster assignments and labels) without
+    visualization coordinates. The dimensionality reduction for visualization
+    is performed on demand and is not part of the cache key.
 
     Attributes
     ----------
@@ -139,10 +151,12 @@ class ClusteringCache(Base):
         Auto-incrementing primary key.
     embedding_model : str
         Name of the embedding model used.
-    reduction_method : str
-        Dimensionality reduction method used (e.g., 'pca', 'tsne').
-    n_components : int
-        Number of dimensions after reduction.
+    reduction_method : str, optional
+        Retained for backward compatibility only – no longer part of the
+        cache key. New entries store ``"none"``.
+    n_components : int, optional
+        Retained for backward compatibility only – no longer part of the
+        cache key. New entries store ``0``.
     clustering_method : str
         Clustering algorithm used (e.g., 'kmeans', 'dbscan').
     n_clusters : int, optional
@@ -150,7 +164,8 @@ class ClusteringCache(Base):
     clustering_params : str
         JSON string of additional clustering parameters.
     results_json : str
-        JSON string containing full clustering results.
+        JSON string containing clustering results (paper_ids,
+        cluster_assignments, labels, hierarchy, statistics) – no x/y coords.
     created_at : datetime
         Timestamp when cache was created.
     """
@@ -165,11 +180,54 @@ class ClusteringCache(Base):
     n_clusters = Column(Integer, nullable=True)
     clustering_params = Column(Text, nullable=True)
     results_json = Column(Text, nullable=False)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now())
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now()
+    )
 
     def __repr__(self) -> str:
         """String representation of ClusteringCache."""
         return f"<ClusteringCache(id={self.id}, method='{self.clustering_method}', n_clusters={self.n_clusters})>"
+
+
+class HierarchicalLabelCache(Base):
+    """
+    Hierarchical label cache model.
+
+    Stores cached hierarchical cluster labels for agglomerative clustering.
+    Labels are independent of the number of clusters or distance threshold and
+    are reused for all agglomerative clustering settings that share the same
+    embedding model and linkage method.
+
+    Attributes
+    ----------
+    id : int
+        Auto-incrementing primary key.
+    embedding_model : str
+        Name of the embedding model used.
+    linkage : str
+        Linkage method used in agglomerative clustering (e.g., 'ward').
+    labels_json : str
+        JSON string mapping node IDs to their generated labels.
+    created_at : datetime
+        Timestamp when cache was created.
+    """
+
+    __tablename__ = "hierarchical_label_cache"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    embedding_model = Column(String, nullable=False, index=True)
+    linkage = Column(String, nullable=False, default="ward")
+    labels_json = Column(Text, nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        """String representation of HierarchicalLabelCache."""
+        return f"<HierarchicalLabelCache(id={self.id}, model='{self.embedding_model}', linkage='{self.linkage}')>"
 
 
 class ValidationData(Base):
@@ -199,7 +257,9 @@ class ValidationData(Base):
     paper_uid = Column(String(16), nullable=False, index=True)
     priority = Column(Integer, nullable=False)
     search_term = Column(String, nullable=True)
-    donated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now())
+    donated_at = Column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now()
+    )
 
     def __repr__(self) -> str:
         """String representation of ValidationData."""

@@ -732,8 +732,6 @@ def precalculate_clusters():
         current_model = config.embedding_model
         cached_results = database.get_clustering_cache(
             embedding_model=current_model,
-            reduction_method=reduction_method,
-            n_components=n_components,
             clustering_method=clustering_method,
             n_clusters=n_clusters if clustering_method.lower() != "dbscan" else None,
         )

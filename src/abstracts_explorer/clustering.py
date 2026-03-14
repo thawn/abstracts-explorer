@@ -437,9 +437,10 @@ class ClusteringManager:
                 # Handle agglomerative with distance_threshold or n_clusters
                 # Filter out parameters that don't belong to AgglomerativeClustering
                 # (e.g., 'affinity' and 'n_neighbors' are for spectral clustering)
-                agg_kwargs = {k: v for k, v in kwargs.items() 
-                             if k not in ['affinity', 'n_neighbors', 'eps', 'min_samples', 'm']}
-                
+                agg_kwargs = {
+                    k: v for k, v in kwargs.items() if k not in ["affinity", "n_neighbors", "eps", "min_samples", "m"]
+                }
+
                 if distance_threshold is not None:
                     self.clusterer = AgglomerativeClustering(
                         n_clusters=None,
@@ -889,9 +890,7 @@ class ClusteringManager:
                                 try:
                                     # Convert paper IDs to indices for metadata lookup
                                     sample_indices = [
-                                        paper_id_to_idx[pid]
-                                        for pid in node_info["samples"]
-                                        if pid in paper_id_to_idx
+                                        paper_id_to_idx[pid] for pid in node_info["samples"] if pid in paper_id_to_idx
                                     ]
                                     label = self._generate_parent_label_llm(child_labels, sample_indices)
                                     hierarchical_labels[node_id] = label
@@ -1882,18 +1881,49 @@ def compute_clusters_with_cache(
         elif clustering_method.lower() == "dbscan":
             cache_n_clusters = None  # DBSCAN doesn't use n_clusters
 
-        cached_results = database.get_clustering_cache(
+        cached_data = database.get_clustering_cache(
             embedding_model=embedding_model,
-            reduction_method=reduction_method,
-            n_components=n_components,
             clustering_method=clustering_method,
             n_clusters=cache_n_clusters,
             clustering_params=cache_params if cache_params else None,
         )
 
-        if cached_results:
-            logger.info("Using cached clustering results")
-            return cached_results
+        if cached_data:
+            logger.info("Using cached clustering results – re-applying reduction for visualization...")
+            # Restore cluster assignments onto a fresh ClusteringManager so that
+            # we can apply the requested reduction method without re-clustering.
+            cm_cached = ClusteringManager(embeddings_manager)
+            cm_cached.load_embeddings(limit=limit)
+
+            cached_paper_ids: List[str] = cached_data["paper_ids"]
+            cached_assignments: List[int] = cached_data["cluster_assignments"]
+            id_to_cluster: Dict[str, int] = dict(zip(cached_paper_ids, cached_assignments))
+
+            # Map cached assignments to current paper order (papers may be
+            # returned in a different order by ChromaDB on each call).
+            # Papers that are not in the cache get assigned to cluster -1 (noise).
+            # This can happen if new embeddings have been added since the cache was
+            # created.  In that case the user should clear the cache and recompute.
+            current_ids = cm_cached.paper_ids or []
+            missing = [pid for pid in current_ids if pid not in id_to_cluster]
+            if missing:
+                logger.warning(
+                    f"{len(missing)} paper(s) are not in the clustering cache "
+                    f"(e.g. '{missing[0]}'). They will be assigned to cluster -1. "
+                    "Run with force=True (or clear the cache) to recompute."
+                )
+            cm_cached.cluster_labels = np.array([id_to_cluster.get(pid, -1) for pid in current_ids])
+
+            if cached_data.get("cluster_labels"):
+                cm_cached.cluster_label_names = {int(k): v for k, v in cached_data["cluster_labels"].items()}
+            if cached_data.get("cluster_keywords"):
+                cm_cached.cluster_keywords = {int(k): v for k, v in cached_data["cluster_keywords"].items()}
+            if cached_data.get("cluster_hierarchy"):
+                cm_cached.cluster_hierarchy = cached_data["cluster_hierarchy"]
+
+            # Apply the requested reduction method for visualization
+            cm_cached.reduce_dimensions(method=reduction_method, n_components=n_components)
+            return cm_cached.get_clustering_results()
 
     # Cache miss or forced recompute - compute clusters
     logger.info("Computing new clustering results...")
@@ -1932,29 +1962,55 @@ def compute_clusters_with_cache(
 
     # Generate hierarchical labels for agglomerative clustering
     if clustering_method.lower() == "agglomerative" and cm.cluster_hierarchy is not None:
-        logger.info("Generating hierarchical labels for agglomerative clustering...")
-        try:
-            # Check if use_llm_labels is specified in kwargs, default to True
-            use_llm = clustering_kwargs.get("use_llm_labels", True)
-            hierarchical_labels = cm.generate_hierarchical_labels(use_llm=use_llm, max_keywords=5)
-            # Update the tree nodes with the generated labels
-            if "tree" in cm.cluster_hierarchy and "nodes" in cm.cluster_hierarchy["tree"]:
-                for node_id, label in hierarchical_labels.items():
-                    node_id_int = int(node_id)
-                    if node_id_int in cm.cluster_hierarchy["tree"]["nodes"]:
-                        cm.cluster_hierarchy["tree"]["nodes"][node_id_int]["label"] = label
-            logger.info(f"Generated labels for {len(hierarchical_labels)} hierarchy nodes (LLM: {use_llm})")
-        except Exception as e:
-            logger.warning(f"Failed to generate hierarchical labels: {e}")
-            # Continue without hierarchical labels
+        # Determine linkage for the hierarchical label cache key
+        linkage_method = clustering_kwargs.get("linkage", "ward")
+        use_llm = clustering_kwargs.get("use_llm_labels", True)
 
-    # Get results
+        # Try to load hierarchical labels from dedicated cache first
+        cached_hier_labels = database.get_hierarchical_label_cache(
+            embedding_model=embedding_model,
+            linkage=linkage_method,
+        )
+
+        if cached_hier_labels:
+            logger.info(f"Using cached hierarchical labels ({len(cached_hier_labels)} nodes)")
+            hierarchical_labels = cached_hier_labels
+        else:
+            logger.info("Generating hierarchical labels for agglomerative clustering...")
+            try:
+                hierarchical_labels = cm.generate_hierarchical_labels(use_llm=use_llm, max_keywords=5)
+                # Persist to dedicated hierarchical label cache
+                if not limit:
+                    try:
+                        database.save_hierarchical_label_cache(
+                            embedding_model=embedding_model,
+                            labels=hierarchical_labels,
+                            linkage=linkage_method,
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to save hierarchical label cache: {e}")
+            except Exception as e:
+                logger.warning(f"Failed to generate hierarchical labels: {e}")
+                hierarchical_labels = {}
+                # Continue without hierarchical labels
+
+        # Apply labels to tree nodes
+        if hierarchical_labels and "tree" in cm.cluster_hierarchy and "nodes" in cm.cluster_hierarchy["tree"]:
+            for node_id, label in hierarchical_labels.items():
+                node_id_int = int(node_id)
+                if node_id_int in cm.cluster_hierarchy["tree"]["nodes"]:
+                    cm.cluster_hierarchy["tree"]["nodes"][node_id_int]["label"] = label
+        logger.info(
+            f"Applied {len(hierarchical_labels)} hierarchical labels "
+            f"(LLM: {use_llm}, cached: {cached_hier_labels is not None})"
+        )
+
+    # Get visualization results (includes x/y from reduction above)
     results = cm.get_clustering_results()
 
-    # Save to cache if no limit was applied
+    # Build cache payload: cluster assignments + labels + hierarchy, NO x/y.
     if not limit:
         try:
-            # Use same logic as cache lookup for consistency
             save_n_clusters: Optional[int] = n_clusters
             save_params = clustering_kwargs.copy() if clustering_kwargs else {}
 
@@ -1964,12 +2020,22 @@ def compute_clusters_with_cache(
             elif clustering_method.lower() == "dbscan":
                 save_n_clusters = None  # DBSCAN doesn't use n_clusters
 
+            cache_payload: Dict[str, Any] = {
+                "paper_ids": cm.paper_ids,
+                "cluster_assignments": (cm.cluster_labels.tolist() if cm.cluster_labels is not None else []),
+                "statistics": results.get("statistics", {}),
+            }
+            if cm.cluster_label_names:
+                cache_payload["cluster_labels"] = {str(k): v for k, v in cm.cluster_label_names.items()}
+            if cm.cluster_keywords:
+                cache_payload["cluster_keywords"] = {str(k): v for k, v in cm.cluster_keywords.items()}
+            if cm.cluster_hierarchy:
+                cache_payload["cluster_hierarchy"] = cm.cluster_hierarchy
+
             database.save_clustering_cache(
                 embedding_model=embedding_model,
-                reduction_method=reduction_method,
-                n_components=n_components,
                 clustering_method=clustering_method,
-                results=results,
+                results=cache_payload,
                 n_clusters=save_n_clusters,
                 clustering_params=save_params if save_params else None,
             )

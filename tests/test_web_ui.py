@@ -1367,8 +1367,15 @@ class TestServerInitialization:
         """Test that compute_clusters uses cached results when available."""
         from abstracts_explorer.web_ui.app import app
 
-        # Note: JSON serialization converts int keys to strings
-        cached_results = {
+        # New cache format: paper_ids + cluster_assignments (no x/y)
+        cached_data = {
+            "paper_ids": ["test"],
+            "cluster_assignments": [0],
+            "statistics": {"n_clusters": 1, "total_papers": 1},
+        }
+
+        # Expected visualization results returned after reduction is re-applied
+        visualization_results = {
             "points": [{"id": "test", "x": 1.0, "y": 2.0, "cluster": 0}],
             "statistics": {"n_clusters": 1, "total_papers": 1},
             "cluster_centers": {"0": {"x": 1.0, "y": 2.0}},
@@ -1377,27 +1384,43 @@ class TestServerInitialization:
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
-                    with patch("abstracts_explorer.web_ui.app.get_embeddings_manager"):
-                        mock_config.return_value = Mock(embedding_model="test-model")
-                        mock_db = Mock()
-                        mock_db.get_clustering_cache.return_value = cached_results
-                        mock_get_db.return_value = mock_db
+                    with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
+                        with patch("abstracts_explorer.clustering.ClusteringManager") as mock_cm_class:
+                            mock_config.return_value = Mock(embedding_model="test-model")
+                            mock_db = Mock()
+                            mock_db.get_clustering_cache.return_value = cached_data
+                            mock_get_db.return_value = mock_db
 
-                        response = client.post(
-                            "/api/clusters/compute",
-                            json={
-                                "reduction_method": "pca",
-                                "n_components": 2,
-                                "clustering_method": "kmeans",
-                                "n_clusters": 5,
-                            },
-                        )
+                            mock_em = Mock()
+                            mock_em.get_collection_stats.return_value = {"count": 1}
+                            mock_get_em.return_value = mock_em
 
-                        assert response.status_code == 200
-                        data = response.get_json()
-                        assert data == cached_results
-                        # Verify cache was queried
-                        mock_db.get_clustering_cache.assert_called_once()
+                            # Mock the ClusteringManager used for cache-hit path
+                            mock_cm = Mock()
+                            mock_cm.paper_ids = ["test"]
+                            mock_cm.load_embeddings.return_value = 1
+                            mock_cm.reduce_dimensions.return_value = None
+                            mock_cm.get_clustering_results.return_value = visualization_results
+                            mock_cm_class.return_value = mock_cm
+
+                            response = client.post(
+                                "/api/clusters/compute",
+                                json={
+                                    "reduction_method": "pca",
+                                    "n_components": 2,
+                                    "clustering_method": "kmeans",
+                                    "n_clusters": 5,
+                                },
+                            )
+
+                            assert response.status_code == 200
+                            data = response.get_json()
+                            assert data == visualization_results
+                            # Verify cache was queried
+                            mock_db.get_clustering_cache.assert_called_once()
+                            # Verify reduction was re-applied (no re-clustering)
+                            mock_cm.cluster.assert_not_called()
+                            mock_cm.reduce_dimensions.assert_called_once()
 
     def test_compute_clusters_bypasses_cache_with_force_flag(self, tmp_path):
         """Test that compute_clusters bypasses cache when force=True."""
@@ -1514,6 +1537,11 @@ class TestServerInitialization:
 
                             # Setup mock clustering manager
                             mock_cm = Mock()
+                            mock_cm.paper_ids = ["test"]
+                            mock_cm.cluster_labels = None
+                            mock_cm.cluster_label_names = None
+                            mock_cm.cluster_keywords = None
+                            mock_cm.cluster_hierarchy = None
                             mock_cm.load_embeddings.return_value = 10
                             mock_cm.cluster.return_value = None
                             mock_cm.reduce_dimensions.return_value = None
@@ -1541,8 +1569,12 @@ class TestServerInitialization:
                             mock_db.save_clustering_cache.assert_called_once()
                             call_args = mock_db.save_clustering_cache.call_args
                             assert call_args[1]["embedding_model"] == "test-model"
-                            assert call_args[1]["reduction_method"] == "pca"
-                            assert call_args[1]["results"] == computed_results
+                            # reduction_method is no longer part of the save call
+                            assert "reduction_method" not in call_args[1]
+                            # Cache payload uses new format (paper_ids, not points)
+                            saved_results = call_args[1]["results"]
+                            assert "paper_ids" in saved_results
+                            assert "cluster_assignments" in saved_results
 
     def test_compute_clusters_handles_cache_save_failure_gracefully(self):
         """Test that compute_clusters continues even if cache save fails."""
