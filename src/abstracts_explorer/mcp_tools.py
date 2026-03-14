@@ -10,9 +10,10 @@ to answer questions about conference topics, trends, and developments.
 """
 
 import copy
+import inspect
 import json
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Callable, Dict, List, Any, Optional
 
 from .mcp_server import (
     get_cluster_topics,
@@ -152,7 +153,47 @@ def _normalize_analyze_topic_relevance_args(arguments: Dict[str, Any]) -> Dict[s
     return args
 
 
-# Define MCP tools in OpenAI function calling format
+def _filter_unknown_kwargs(func: Callable, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Filter out keyword arguments that are not accepted by *func*, logging a
+    warning for each unexpected key.
+
+    This makes MCP tool dispatch tolerant of extra keys that an LLM may send
+    (e.g. it produces ``{"year": 2025}`` in addition to ``{"years": [2025]}``
+    after normalisation has already renamed the field).
+
+    Parameters
+    ----------
+    func : callable
+        The target function whose signature is used to determine valid keys.
+    kwargs : dict
+        Keyword arguments intended for *func*.
+
+    Returns
+    -------
+    dict
+        A copy of *kwargs* with unrecognised keys removed.
+    """
+    try:
+        sig = inspect.signature(func)
+        valid_params = set(sig.parameters.keys())
+        # If the function accepts **kwargs itself, pass everything through
+        has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+        if has_var_keyword:
+            return dict(kwargs)
+    except (ValueError, TypeError):
+        # If we can't inspect the signature, pass everything through unchanged
+        return dict(kwargs)
+
+    filtered: Dict[str, Any] = {}
+    for key, value in kwargs.items():
+        if key in valid_params:
+            filtered[key] = value
+        else:
+            logger.warning(f"Ignoring unknown argument '{key}' for {func.__name__}(); " "this key will be dropped.")
+    return filtered
+
+
 MCP_TOOLS_SCHEMA = [
     {
         "type": "function",
@@ -326,7 +367,9 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
 
     Arguments are normalized before dispatch to handle common LLM output
     quirks (e.g. ``"year"`` instead of ``"years"``, list values for scalar
-    string fields).
+    string fields).  After normalization, any keyword arguments that are not
+    accepted by the target function are silently dropped with a ``WARNING``
+    log entry so that tools never raise ``TypeError`` for unexpected keys.
 
     Parameters
     ----------
@@ -349,19 +392,24 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
 
     try:
         if tool_name == "analyze_topic_relevance":
-            return analyze_topic_relevance(**_normalize_analyze_topic_relevance_args(arguments))
+            args = _filter_unknown_kwargs(analyze_topic_relevance, _normalize_analyze_topic_relevance_args(arguments))
+            return analyze_topic_relevance(**args)
         elif tool_name == "get_cluster_topics":
-            return get_cluster_topics(**arguments)
+            args = _filter_unknown_kwargs(get_cluster_topics, arguments)
+            return get_cluster_topics(**args)
         elif tool_name == "get_topic_evolution":
-            return get_topic_evolution(**_normalize_get_topic_evolution_args(arguments))
+            args = _filter_unknown_kwargs(get_topic_evolution, _normalize_get_topic_evolution_args(arguments))
+            return get_topic_evolution(**args)
         elif tool_name == "search_papers":
             # Normalize argument names/types — LLMs may send 'query', 'year', or list values
             args = _normalize_search_papers_args(arguments)
             if "query" in args and "topic_keywords" not in args:
                 args["topic_keywords"] = args.pop("query")
+            args = _filter_unknown_kwargs(search_papers, args)
             return search_papers(**args)
         elif tool_name == "get_cluster_visualization":
-            return get_cluster_visualization(**arguments)
+            args = _filter_unknown_kwargs(get_cluster_visualization, arguments)
+            return get_cluster_visualization(**args)
         else:
             # Return error JSON for unknown tools
             error_result = {"error": f"Unknown MCP tool: {tool_name}"}

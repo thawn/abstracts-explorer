@@ -6,6 +6,7 @@ including tool schema generation, execution, and result formatting.
 """
 
 import json
+from typing import Any
 from unittest.mock import patch, Mock
 
 from abstracts_explorer.mcp_tools import (
@@ -19,6 +20,7 @@ from abstracts_explorer.mcp_tools import (
     _normalize_search_papers_args,
     _normalize_get_topic_evolution_args,
     _normalize_analyze_topic_relevance_args,
+    _filter_unknown_kwargs,
 )
 
 
@@ -432,6 +434,71 @@ class TestNormalizeAnalyzeTopicRelevanceArgs:
 
 
 # ---------------------------------------------------------------------------
+# _filter_unknown_kwargs tests
+# ---------------------------------------------------------------------------
+
+
+class TestFilterUnknownKwargs:
+    """Tests for _filter_unknown_kwargs()."""
+
+    def test_valid_kwargs_pass_through(self):
+        """All valid kwargs are retained unchanged."""
+
+        def func(a: int, b: str = "hello") -> str:
+            return f"{a} {b}"
+
+        result = _filter_unknown_kwargs(func, {"a": 1, "b": "world"})
+        assert result == {"a": 1, "b": "world"}
+
+    def test_unknown_key_is_dropped(self, caplog):
+        """Unknown kwargs are dropped with a warning."""
+
+        def func(a: int) -> int:
+            return a
+
+        with caplog.at_level("WARNING", logger="abstracts_explorer.mcp_tools"):
+            result = _filter_unknown_kwargs(func, {"a": 1, "unknown_key": "ignored"})
+
+        assert result == {"a": 1}
+        assert "unknown_key" in caplog.text
+
+    def test_all_unknown_drops_all(self, caplog):
+        """When all kwargs are unknown, result is empty dict with warnings."""
+
+        def func() -> None:
+            pass
+
+        with caplog.at_level("WARNING", logger="abstracts_explorer.mcp_tools"):
+            result = _filter_unknown_kwargs(func, {"x": 1, "y": 2})
+
+        assert result == {}
+        assert "x" in caplog.text
+        assert "y" in caplog.text
+
+    def test_function_with_var_keyword_passes_all(self):
+        """Functions that accept **kwargs receive all arguments."""
+
+        def func(a: int, **kwargs: Any) -> None:
+            pass
+
+        args = {"a": 1, "extra": "allowed"}
+        result = _filter_unknown_kwargs(func, args)
+        assert result == args
+
+    def test_real_search_papers_unknown_key_dropped(self, caplog):
+        """Unknown key 'n_years' is silently dropped for search_papers."""
+        from abstracts_explorer.mcp_server import search_papers
+
+        with caplog.at_level("WARNING", logger="abstracts_explorer.mcp_tools"):
+            result = _filter_unknown_kwargs(search_papers, {"topic_keywords": "RL", "n_years": 5, "n_results": 3})
+
+        assert "topic_keywords" in result
+        assert "n_results" in result
+        assert "n_years" not in result
+        assert "n_years" in caplog.text
+
+
+# ---------------------------------------------------------------------------
 # End-to-end tests for execute_mcp_tool() — each MCP tool exercised through
 # the full dispatch path with mocked backends.
 # ---------------------------------------------------------------------------
@@ -507,6 +574,30 @@ class TestExecuteMCPToolE2E:
         kwargs = mock_fn.call_args[1]
         assert kwargs["topic_keywords"] == "llm trends"
         assert "query" not in kwargs
+
+    def test_search_papers_unknown_kwarg_does_not_raise(self):
+        """search_papers does not raise TypeError for unknown kwargs; result has no error."""
+        mock_result = json.dumps({"topic": "RL", "papers": [], "papers_found": 0})
+        with patch("abstracts_explorer.mcp_tools.search_papers", return_value=mock_result):
+            result = execute_mcp_tool(
+                "search_papers",
+                {"topic_keywords": "RL", "n_results": 3, "totally_unknown_param": "should be ignored"},
+            )
+
+        data = json.loads(result)
+        assert "error" not in data
+
+    def test_get_cluster_topics_unknown_kwarg_does_not_raise(self):
+        """get_cluster_topics does not raise TypeError for unknown kwargs."""
+        mock_result = json.dumps({"statistics": {"n_clusters": 2}, "clusters": []})
+        with patch("abstracts_explorer.mcp_tools.get_cluster_topics", return_value=mock_result):
+            result = execute_mcp_tool(
+                "get_cluster_topics",
+                {"n_clusters": 3, "unknown_extra": "ignored"},
+            )
+
+        data = json.loads(result)
+        assert "error" not in data
 
     def test_search_papers_real_execution(self):
         """search_papers executes end-to-end with mocked EmbeddingsManager and DatabaseManager."""
