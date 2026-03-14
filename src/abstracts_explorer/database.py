@@ -21,7 +21,14 @@ from sqlalchemy.exc import OperationalError, ProgrammingError, IntegrityError
 from abstracts_explorer.plugin import LightweightPaper
 
 # Import SQLAlchemy models
-from abstracts_explorer.db_models import Base, Paper, EmbeddingsMetadata, ClusteringCache, ValidationData
+from abstracts_explorer.db_models import (
+    Base,
+    Paper,
+    EmbeddingsMetadata,
+    ClusteringCache,
+    HierarchicalLabelCache,
+    ValidationData,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,11 +69,11 @@ class DatabaseManager:
     def __init__(self):
         """
         Initialize the DatabaseManager.
-        
+
         Reads database configuration from the config file.
         """
         from abstracts_explorer.config import get_config
-        
+
         config = get_config()
         self.database_url = config.database_url
 
@@ -114,9 +121,9 @@ class DatabaseManager:
 
             # Create a session
             self._session = self.SessionLocal()
-            
+
             # Set legacy connection attribute to provide raw database connection for backward compatibility
-            # This allows tests to use .connection.cursor() 
+            # This allows tests to use .connection.cursor()
             self._raw_connection = self.engine.raw_connection()
             self.connection = self._raw_connection.driver_connection
 
@@ -144,7 +151,7 @@ class DatabaseManager:
         if self._session:
             self._session.close()
             self._session = None
-        if hasattr(self, '_raw_connection') and self._raw_connection:
+        if hasattr(self, "_raw_connection") and self._raw_connection:
             self._raw_connection.close()
             self._raw_connection = None
         if self.engine:
@@ -171,7 +178,7 @@ class DatabaseManager:
         - papers: Main table for paper information with lightweight ML4PS schema
         - embeddings_metadata: Metadata about embeddings (model used, creation date)
         - clustering_cache: Cache for clustering results
-        
+
         This method is idempotent - it can be called multiple times without error.
         Tables are only created if they don't already exist.
 
@@ -262,9 +269,7 @@ class DatabaseManager:
             uid = hashlib.sha256(uid_source.encode("utf-8")).hexdigest()[:16]
 
             # Check if paper already exists (by UID)
-            existing = self._session.execute(
-                select(Paper).where(Paper.uid == uid)
-            ).scalar_one_or_none()
+            existing = self._session.execute(select(Paper).where(Paper.uid == uid)).scalar_one_or_none()
 
             if existing:
                 logger.debug(f"Skipping duplicate paper: {title} (uid: {uid})")
@@ -423,19 +428,13 @@ class DatabaseManager:
             for paper_uid, priority_data in paper_priorities.items():
                 # Validate data format
                 if not isinstance(priority_data, dict):
-                    raise ValueError(
-                        "Invalid data format. Expected dict with priority and searchTerm"
-                    )
+                    raise ValueError("Invalid data format. Expected dict with priority and searchTerm")
 
                 priority = priority_data.get("priority", 0)
                 search_term = priority_data.get("searchTerm", None)
 
                 # Create validation data entry
-                validation_entry = ValidationData(
-                    paper_uid=paper_uid,
-                    priority=priority,
-                    search_term=search_term
-                )
+                validation_entry = ValidationData(paper_uid=paper_uid, priority=priority, search_term=search_term)
                 self._session.add(validation_entry)
                 donated_count += 1
 
@@ -492,25 +491,25 @@ class DatabaseManager:
             # Convert ? placeholders to :0, :1, :2 for SQLAlchemy
             # Count the number of ? placeholders
             param_count = sql.count("?")
-            
+
             # Replace ? with numbered parameters
             converted_sql = sql
             for i in range(param_count):
                 converted_sql = converted_sql.replace("?", f":param{i}", 1)
-            
+
             # Create parameter dict
             param_dict = {f"param{i}": parameters[i] for i in range(len(parameters))}
-            
+
             # Execute raw SQL using text()
             result = self._session.execute(text(converted_sql), param_dict)
-            
+
             # Convert result to list of dicts
             rows = []
             for row in result:
                 # Convert row to dict
                 row_dict = dict(row._mapping)
                 rows.append(row_dict)
-            
+
             return rows
         except Exception as e:
             raise DatabaseError(f"Query failed: {str(e)}") from e
@@ -533,9 +532,7 @@ class DatabaseManager:
             raise DatabaseError("Not connected to database")
 
         try:
-            count = self._session.execute(
-                select(func.count()).select_from(Paper)
-            ).scalar()
+            count = self._session.execute(select(func.count()).select_from(Paper)).scalar()
             return count or 0
         except Exception as e:
             raise DatabaseError(f"Failed to count papers: {str(e)}") from e
@@ -655,10 +652,10 @@ class DatabaseManager:
     ) -> List[Dict[str, Any]]:
         """
         Perform keyword-based search with filtering and author parsing.
-        
+
         This is a convenience method that wraps search_papers and formats
         the results for web API consumption, including author parsing.
-        
+
         Parameters
         ----------
         query : str
@@ -671,12 +668,12 @@ class DatabaseManager:
             Filter by publication years
         conferences : list of str, optional
             Filter by conference names
-            
+
         Returns
         -------
         list of dict
             List of paper dictionaries with parsed authors
-            
+
         Examples
         --------
         >>> papers = db.search_papers_keyword(
@@ -693,34 +690,30 @@ class DatabaseManager:
             conferences=conferences,
             limit=limit,
         )
-        
+
         # Convert to list of dicts for JSON serialization
         papers = [dict(p) for p in papers]
-        
+
         # Parse authors from comma-separated string for each paper
         for paper in papers:
             if "authors" in paper and paper["authors"]:
                 paper["authors"] = [a.strip() for a in paper["authors"].split(";")]
             else:
                 paper["authors"] = []
-        
+
         return papers
 
-    def get_stats(
-        self,
-        year: Optional[int] = None,
-        conference: Optional[str] = None
-    ) -> Dict[str, Any]:
+    def get_stats(self, year: Optional[int] = None, conference: Optional[str] = None) -> Dict[str, Any]:
         """
         Get database statistics, optionally filtered by year and conference.
-        
+
         Parameters
         ----------
         year : int, optional
             Filter by specific year
         conference : str, optional
             Filter by specific conference
-            
+
         Returns
         -------
         dict
@@ -728,34 +721,34 @@ class DatabaseManager:
             - total_papers: int - Number of papers matching filters
             - year: int or None - Filter year if provided
             - conference: str or None - Filter conference if provided
-            
+
         Examples
         --------
         >>> stats = db.get_stats()
         >>> print(f"Total papers: {stats['total_papers']}")
-        
+
         >>> stats_2024 = db.get_stats(year=2024)
         >>> print(f"Papers in 2024: {stats_2024['total_papers']}")
         """
         # Build WHERE clause for filtered count
         conditions: List[str] = []
         parameters: List[Any] = []
-        
+
         if year is not None:
             conditions.append("year = ?")
             parameters.append(year)
-        
+
         if conference is not None:
             conditions.append("conference = ?")
             parameters.append(conference)
-        
+
         if conditions:
             where_clause = " AND ".join(conditions)
             result = self.query(f"SELECT COUNT(*) as count FROM papers WHERE {where_clause}", tuple(parameters))
             total_papers = result[0]["count"] if result else 0
         else:
             total_papers = self.get_paper_count()
-        
+
         return {
             "total_papers": total_papers,
             "year": year,
@@ -873,9 +866,7 @@ class DatabaseManager:
 
         try:
             # Get all author fields
-            stmt = select(Paper.authors).where(
-                and_(Paper.authors.isnot(None), Paper.authors != "")
-            )
+            stmt = select(Paper.authors).where(and_(Paper.authors.isnot(None), Paper.authors != ""))
             results = self._session.execute(stmt).scalars().all()
 
             # Extract unique author names
@@ -948,12 +939,7 @@ class DatabaseManager:
             sessions = list(sessions_result)
 
             # Get distinct years (not filtered)
-            years_stmt = (
-                select(Paper.year)
-                .distinct()
-                .where(Paper.year.isnot(None))
-                .order_by(Paper.year.desc())
-            )
+            years_stmt = select(Paper.year).distinct().where(Paper.year.isnot(None)).order_by(Paper.year.desc())
             years_result = self._session.execute(years_stmt).scalars().all()
             years = list(years_result)
 
@@ -1002,11 +988,7 @@ class DatabaseManager:
 
         try:
             # Get the most recent embedding model entry
-            stmt = (
-                select(EmbeddingsMetadata.embedding_model)
-                .order_by(EmbeddingsMetadata.updated_at.desc())
-                .limit(1)
-            )
+            stmt = select(EmbeddingsMetadata.embedding_model).order_by(EmbeddingsMetadata.updated_at.desc()).limit(1)
             result = self._session.execute(stmt).scalar_one_or_none()
             return result
         except Exception as e:
@@ -1046,11 +1028,7 @@ class DatabaseManager:
             if count and count > 0:
                 # Update the most recent record
                 # Get the most recent entry
-                latest_stmt = (
-                    select(EmbeddingsMetadata)
-                    .order_by(EmbeddingsMetadata.updated_at.desc())
-                    .limit(1)
-                )
+                latest_stmt = select(EmbeddingsMetadata).order_by(EmbeddingsMetadata.updated_at.desc()).limit(1)
                 latest = self._session.execute(latest_stmt).scalar_one()
                 latest.embedding_model = model_name
                 latest.updated_at = datetime.now(timezone.utc)
@@ -1068,8 +1046,6 @@ class DatabaseManager:
     def get_clustering_cache(
         self,
         embedding_model: str,
-        reduction_method: str,
-        n_components: int,
         clustering_method: str,
         n_clusters: Optional[int] = None,
         clustering_params: Optional[Dict[str, Any]] = None,
@@ -1077,14 +1053,18 @@ class DatabaseManager:
         """
         Get cached clustering results matching the parameters.
 
+        The cache stores cluster assignments and labels without visualization
+        coordinates (which depend on the reduction method). The reduction method
+        is therefore not part of the cache key.
+
+        Results saved with the legacy format (containing a ``"points"`` key with
+        x/y coordinates) are treated as cache misses so that they are
+        transparently replaced by the new format on the next computation.
+
         Parameters
         ----------
         embedding_model : str
             Name of the embedding model.
-        reduction_method : str
-            Dimensionality reduction method.
-        n_components : int
-            Number of components after reduction.
         clustering_method : str
             Clustering algorithm used.
         n_clusters : int, optional
@@ -1107,13 +1087,12 @@ class DatabaseManager:
 
         try:
             import json
-            
-            # Build query conditions
+
+            # Build query conditions – reduction_method / n_components are no
+            # longer part of the cache key.
             stmt = select(ClusteringCache).where(
                 and_(
                     ClusteringCache.embedding_model == embedding_model,
-                    ClusteringCache.reduction_method == reduction_method,
-                    ClusteringCache.n_components == n_components,
                     ClusteringCache.clustering_method == clustering_method,
                 )
             )
@@ -1125,17 +1104,21 @@ class DatabaseManager:
             # Get all matching results (we'll filter by params in Python)
             stmt = stmt.order_by(ClusteringCache.created_at.desc())
             results = self._session.execute(stmt).scalars().all()
-            
+
             if not results:
                 return None
-            
-            # If no clustering_params specified, return first match
+
+            # If no clustering_params specified, return first new-format match
             if clustering_params is None:
-                if results[0].clustering_params is None:
-                    return json.loads(results[0].results_json)
-                # If cache has params but query doesn't, consider it a miss
+                for result in results:
+                    if result.clustering_params is not None:
+                        continue
+                    data = json.loads(result.results_json)
+                    # Only return new-format entries (have paper_ids, not points)
+                    if "paper_ids" in data:
+                        return data
                 return None
-            
+
             # Filter by clustering_params
             params_json = json.dumps(clustering_params, sort_keys=True)
             for result in results:
@@ -1145,8 +1128,11 @@ class DatabaseManager:
                 cached_params = json.loads(result.clustering_params)
                 cached_params_json = json.dumps(cached_params, sort_keys=True)
                 if cached_params_json == params_json:
-                    return json.loads(result.results_json)
-            
+                    data = json.loads(result.results_json)
+                    # Only return new-format entries
+                    if "paper_ids" in data:
+                        return data
+
             return None
 
         except Exception as e:
@@ -1155,8 +1141,6 @@ class DatabaseManager:
     def save_clustering_cache(
         self,
         embedding_model: str,
-        reduction_method: str,
-        n_components: int,
         clustering_method: str,
         results: Dict[str, Any],
         n_clusters: Optional[int] = None,
@@ -1165,18 +1149,23 @@ class DatabaseManager:
         """
         Save clustering results to cache.
 
+        Only cluster assignments and labels are cached – visualization
+        coordinates (x/y) are excluded so that a different reduction method
+        can be applied on cache retrieval without re-running clustering.
+
+        The ``reduction_method`` and ``n_components`` columns are kept in the
+        database for backward compatibility but are stored as the sentinel
+        values ``"none"`` / ``0`` and are not used as cache keys.
+
         Parameters
         ----------
         embedding_model : str
             Name of the embedding model.
-        reduction_method : str
-            Dimensionality reduction method.
-        n_components : int
-            Number of components after reduction.
         clustering_method : str
             Clustering algorithm used.
         results : dict
-            Clustering results to cache.
+            Clustering results to cache.  Must contain ``paper_ids`` and
+            ``cluster_assignments`` keys (new format).
         n_clusters : int, optional
             Number of clusters (for kmeans/agglomerative).
         clustering_params : dict, optional
@@ -1197,11 +1186,12 @@ class DatabaseManager:
             results_json = json.dumps(results)
             params_json = json.dumps(clustering_params) if clustering_params else None
 
-            # Create new cache entry
+            # Create new cache entry.  reduction_method / n_components are stored
+            # as sentinel values ("none" / 0) since they are no longer cache keys.
             cache_entry = ClusteringCache(
                 embedding_model=embedding_model,
-                reduction_method=reduction_method,
-                n_components=n_components,
+                reduction_method="none",
+                n_components=0,
                 clustering_method=clustering_method,
                 n_clusters=n_clusters,
                 clustering_params=params_json,
@@ -1212,8 +1202,7 @@ class DatabaseManager:
             self._session.commit()
 
             logger.info(
-                f"Saved clustering cache: {clustering_method} with {n_clusters} clusters, "
-                f"model={embedding_model}, reduction={reduction_method}"
+                f"Saved clustering cache: {clustering_method} with {n_clusters} clusters, " f"model={embedding_model}"
             )
 
         except Exception as e:
@@ -1248,9 +1237,7 @@ class DatabaseManager:
         try:
             if embedding_model:
                 # Delete only for specific model
-                stmt = select(ClusteringCache).where(
-                    ClusteringCache.embedding_model == embedding_model
-                )
+                stmt = select(ClusteringCache).where(ClusteringCache.embedding_model == embedding_model)
             else:
                 # Delete all
                 stmt = select(ClusteringCache)
@@ -1273,3 +1260,110 @@ class DatabaseManager:
         except Exception as e:
             self._session.rollback()
             raise DatabaseError(f"Failed to clear clustering cache: {str(e)}") from e
+
+    # ------------------------------------------------------------------
+    # Hierarchical label cache
+    # ------------------------------------------------------------------
+
+    def get_hierarchical_label_cache(
+        self,
+        embedding_model: str,
+        linkage: str = "ward",
+    ) -> Optional[Dict[int, str]]:
+        """
+        Get cached hierarchical labels for agglomerative clustering.
+
+        Hierarchical labels are independent of the number of clusters and
+        the distance threshold, so they are reused for all agglomerative
+        clustering settings that share the same embedding model and linkage.
+
+        Parameters
+        ----------
+        embedding_model : str
+            Name of the embedding model.
+        linkage : str, optional
+            Agglomerative linkage method (default: ``"ward"``).
+
+        Returns
+        -------
+        dict or None
+            Mapping of ``{node_id: label}`` (integer keys), or ``None`` if
+            no entry is found.
+
+        Raises
+        ------
+        DatabaseError
+            If query fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            import json
+
+            stmt = (
+                select(HierarchicalLabelCache)
+                .where(
+                    and_(
+                        HierarchicalLabelCache.embedding_model == embedding_model,
+                        HierarchicalLabelCache.linkage == linkage,
+                    )
+                )
+                .order_by(HierarchicalLabelCache.created_at.desc())
+                .limit(1)
+            )
+            result = self._session.execute(stmt).scalars().first()
+            if result is None:
+                return None
+            raw = json.loads(result.labels_json)
+            # JSON keys are always strings – convert back to int
+            return {int(k): v for k, v in raw.items()}
+
+        except Exception as e:
+            raise DatabaseError(f"Failed to get hierarchical label cache: {str(e)}") from e
+
+    def save_hierarchical_label_cache(
+        self,
+        embedding_model: str,
+        labels: Dict[int, str],
+        linkage: str = "ward",
+    ) -> None:
+        """
+        Save hierarchical cluster labels to cache.
+
+        Parameters
+        ----------
+        embedding_model : str
+            Name of the embedding model.
+        labels : dict
+            Mapping of ``{node_id: label}`` to store.
+        linkage : str, optional
+            Agglomerative linkage method (default: ``"ward"``).
+
+        Raises
+        ------
+        DatabaseError
+            If save fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            import json
+
+            labels_json = json.dumps({str(k): v for k, v in labels.items()})
+            entry = HierarchicalLabelCache(
+                embedding_model=embedding_model,
+                linkage=linkage,
+                labels_json=labels_json,
+            )
+            self._session.add(entry)
+            self._session.commit()
+            logger.info(
+                f"Saved hierarchical label cache: {len(labels)} labels, "
+                f"model={embedding_model}, linkage={linkage}"
+            )
+
+        except Exception as e:
+            self._session.rollback()
+            raise DatabaseError(f"Failed to save hierarchical label cache: {str(e)}") from e
