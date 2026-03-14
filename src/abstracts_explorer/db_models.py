@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column,
+    Float,
     Integer,
     String,
     Text,
@@ -90,7 +91,9 @@ class Paper(Base):
     award = Column(String, nullable=True)
     year = Column(Integer, nullable=True, index=True)
     conference = Column(String, nullable=True, index=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now())
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now()
+    )
 
     def __repr__(self) -> str:
         """String representation of Paper."""
@@ -119,8 +122,16 @@ class EmbeddingsMetadata(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     embedding_model = Column(String, nullable=False)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
 
     def __repr__(self) -> str:
         """String representation of EmbeddingsMetadata."""
@@ -165,7 +176,9 @@ class ClusteringCache(Base):
     n_clusters = Column(Integer, nullable=True)
     clustering_params = Column(Text, nullable=True)
     results_json = Column(Text, nullable=False)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now())
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now()
+    )
 
     def __repr__(self) -> str:
         """String representation of ClusteringCache."""
@@ -199,8 +212,137 @@ class ValidationData(Base):
     paper_uid = Column(String(16), nullable=False, index=True)
     priority = Column(Integer, nullable=False)
     search_term = Column(String, nullable=True)
-    donated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now())
+    donated_at = Column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now()
+    )
 
     def __repr__(self) -> str:
         """String representation of ValidationData."""
         return f"<ValidationData(id={self.id}, paper_uid='{self.paper_uid}', priority={self.priority})>"
+
+
+class EvalQAPair(Base):
+    """
+    Evaluation query/answer pair.
+
+    Stores queries and their expected answers for automatic evaluation of the
+    RAG system. Supports multi-turn conversations via ``conversation_id`` and
+    ``turn_number``.
+
+    Attributes
+    ----------
+    id : int
+        Auto-incrementing primary key.
+    conversation_id : str
+        Groups related queries in a conversation. All turns in the same
+        conversation share this ID.
+    turn_number : int
+        Position within the conversation (0 = initial query, 1+ = follow-ups).
+    query : str
+        The user query text.
+    expected_answer : str
+        The expected/reference answer.
+    tool_name : str, optional
+        The MCP tool expected to be invoked for this query.
+    verified : int
+        Verification status: 0 = unverified, 1 = verified/approved,
+        -1 = rejected/deleted.
+    source_info : str, optional
+        JSON string with metadata about how the pair was generated
+        (e.g. paper UIDs used, generation model).
+    created_at : datetime
+        Timestamp when the pair was created.
+    updated_at : datetime
+        Timestamp when the pair was last modified.
+    """
+
+    __tablename__ = "eval_qa_pairs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    conversation_id = Column(String, nullable=False, index=True)
+    turn_number = Column(Integer, nullable=False, default=0)
+    query = Column(Text, nullable=False)
+    expected_answer = Column(Text, nullable=False)
+    tool_name = Column(String, nullable=True, index=True)
+    verified = Column(Integer, nullable=False, default=0)
+    source_info = Column(Text, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        """String representation of EvalQAPair."""
+        return (
+            f"<EvalQAPair(id={self.id}, conv='{self.conversation_id}', "
+            f"turn={self.turn_number}, tool='{self.tool_name}')>"
+        )
+
+
+class EvalResult(Base):
+    """
+    Evaluation run result for a single Q/A pair.
+
+    Stores the actual output from the RAG system when evaluated against a
+    stored :class:`EvalQAPair`, together with scoring metrics.
+
+    Attributes
+    ----------
+    id : int
+        Auto-incrementing primary key.
+    run_id : str
+        Identifier grouping results from the same evaluation run.
+    qa_pair_id : int
+        ID of the :class:`EvalQAPair` that was evaluated.
+    actual_answer : str, optional
+        The answer produced by the RAG system.
+    actual_tool_name : str, optional
+        The MCP tool actually invoked by the RAG system.
+    answer_score : float, optional
+        LLM-judged quality score (1–5 scale).
+    tool_correct : int, optional
+        Whether the correct tool was used (1 = yes, 0 = no).
+    latency_ms : int, optional
+        Wall-clock time for the query in milliseconds.
+    error : str, optional
+        Error message if the query failed.
+    judge_reasoning : str, optional
+        The LLM judge's reasoning for the assigned score.
+    created_at : datetime
+        Timestamp when the result was recorded.
+    """
+
+    __tablename__ = "eval_results"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String, nullable=False, index=True)
+    qa_pair_id = Column(Integer, nullable=False, index=True)
+    actual_answer = Column(Text, nullable=True)
+    actual_tool_name = Column(String, nullable=True)
+    answer_score = Column(Float, nullable=True)
+    tool_correct = Column(Integer, nullable=True)
+    latency_ms = Column(Integer, nullable=True)
+    error = Column(Text, nullable=True)
+    judge_reasoning = Column(Text, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        """String representation of EvalResult."""
+        return (
+            f"<EvalResult(id={self.id}, run='{self.run_id}', "
+            f"qa_pair={self.qa_pair_id}, score={self.answer_score})>"
+        )
