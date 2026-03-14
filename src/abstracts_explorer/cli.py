@@ -998,13 +998,26 @@ def eval_verify_command(args: argparse.Namespace) -> int:
                 review_set = unverified
 
             print(f"📝 Reviewing {len(review_set)} Q/A pair(s)")
-            print("Commands: [a]ccept, [r]eject, [e]dit query, [E]dit answer, [s]kip, [q]uit\n")
+            print("Commands: [a]ccept, [r]eject, [e]dit query, [E]dit answer, [s]kip, [h]elp, [q]uit\n")
+
+            _VERIFY_HELP = (
+                "  [a]  accept         — mark as verified\n"
+                "  [r]  reject         — mark as rejected\n"
+                "  [e]  edit query     — edit the query text, then accept\n"
+                "  [E]  edit answer    — edit the expected answer, then accept\n"
+                "  [s]  skip           — leave unchanged and move to the next pair\n"
+                "  [h]  help           — show this help message\n"
+                "  [q]  quit           — stop verification and show summary\n"
+            )
 
             accepted = 0
             rejected = 0
             edited = 0
+            quit_requested = False
 
             for i, pair in enumerate(review_set, 1):
+                if quit_requested:
+                    break
                 print(f"--- Pair {i}/{len(review_set)} (ID: {pair['id']}) ---")
                 print(f"Tool:     {pair.get('tool_name', 'N/A')}")
                 print(f"Conv:     {pair['conversation_id']} turn {pair['turn_number']}")
@@ -1013,49 +1026,65 @@ def eval_verify_command(args: argparse.Namespace) -> int:
                 status_map = {0: "unverified", 1: "verified", -1: "rejected"}
                 print(f"Status:   {status_map.get(pair['verified'], 'unknown')}")
 
-                try:
-                    choice = input("\n[a/r/e/E/s/q]: ").strip()
-                except (EOFError, KeyboardInterrupt):
-                    print("\n\n👋 Verification stopped.")
-                    break
+                action_taken = False
+                while not action_taken:
+                    try:
+                        choice = input("\n[a/r/e/E/s/h/q]: ").strip()
+                    except (EOFError, KeyboardInterrupt):
+                        print("\n\n👋 Verification stopped.")
+                        quit_requested = True
+                        action_taken = True
+                        continue
 
-                if choice in ("a", "A"):
-                    db.update_eval_qa_pair(pair["id"], verified=1)
-                    accepted += 1
-                    print("✅ Accepted\n")
-                elif choice in ("r", "R"):
-                    db.update_eval_qa_pair(pair["id"], verified=-1)
-                    rejected += 1
-                    print("❌ Rejected\n")
-                elif choice == "e":
-                    try:
-                        new_query = input("New query: ").strip()
-                    except (EOFError, KeyboardInterrupt):
-                        print("\n\n👋 Verification stopped.")
-                        break
-                    if new_query:
-                        db.update_eval_qa_pair(pair["id"], query=new_query, verified=1)
-                        edited += 1
-                        print("✏️  Updated and accepted\n")
+                    if choice == "h":
+                        print(_VERIFY_HELP)
+                    elif choice in ("a", "A"):
+                        db.update_eval_qa_pair(pair["id"], verified=1)
+                        accepted += 1
+                        print("✅ Accepted\n")
+                        action_taken = True
+                    elif choice in ("r", "R"):
+                        db.update_eval_qa_pair(pair["id"], verified=-1)
+                        rejected += 1
+                        print("❌ Rejected\n")
+                        action_taken = True
+                    elif choice == "e":
+                        try:
+                            new_query = input("New query: ").strip()
+                        except (EOFError, KeyboardInterrupt):
+                            print("\n\n👋 Verification stopped.")
+                            quit_requested = True
+                            action_taken = True
+                            continue
+                        if new_query:
+                            db.update_eval_qa_pair(pair["id"], query=new_query, verified=1)
+                            edited += 1
+                            print("✏️  Updated and accepted\n")
+                        else:
+                            print("⏭️  Skipped (empty input)\n")
+                        action_taken = True
+                    elif choice in ("E", "ea"):
+                        try:
+                            new_answer = input("New answer: ").strip()
+                        except (EOFError, KeyboardInterrupt):
+                            print("\n\n👋 Verification stopped.")
+                            quit_requested = True
+                            action_taken = True
+                            continue
+                        if new_answer:
+                            db.update_eval_qa_pair(pair["id"], expected_answer=new_answer, verified=1)
+                            edited += 1
+                            print("✏️  Updated and accepted\n")
+                        else:
+                            print("⏭️  Skipped (empty input)\n")
+                        action_taken = True
+                    elif choice in ("q", "Q"):
+                        print("👋 Quitting verification.")
+                        quit_requested = True
+                        action_taken = True
                     else:
-                        print("⏭️  Skipped (empty input)\n")
-                elif choice in ("E", "ea"):
-                    try:
-                        new_answer = input("New answer: ").strip()
-                    except (EOFError, KeyboardInterrupt):
-                        print("\n\n👋 Verification stopped.")
-                        break
-                    if new_answer:
-                        db.update_eval_qa_pair(pair["id"], expected_answer=new_answer, verified=1)
-                        edited += 1
-                        print("✏️  Updated and accepted\n")
-                    else:
-                        print("⏭️  Skipped (empty input)\n")
-                elif choice in ("q", "Q"):
-                    print("👋 Quitting verification.")
-                    break
-                else:
-                    print("⏭️  Skipped\n")
+                        print("⏭️  Skipped\n")
+                        action_taken = True
 
             print(f"\n📊 Summary: {accepted} accepted, {rejected} rejected, {edited} edited")
         return 0

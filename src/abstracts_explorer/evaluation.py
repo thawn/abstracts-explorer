@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 from .config import get_config
 from .database import DatabaseManager
 from .embeddings import EmbeddingsManager
+from .mcp_tools import execute_mcp_tool, format_tool_result_for_llm
 
 logger = logging.getLogger(__name__)
 
@@ -48,41 +49,49 @@ _TOOL_DESCRIPTIONS: Dict[str, str] = {
     "get_cluster_visualization": "Generate visualization data for clustered paper embeddings.",
 }
 
+_TOOL_ARGUMENT_EXAMPLES: Dict[str, str] = {
+    "search_papers": '{"topic_keywords": "deep learning", "n_results": 5}',
+    "get_cluster_topics": '{"n_clusters": 8}',
+    "analyze_topic_relevance": '{"topic": "transformers", "distance_threshold": 1.1}',
+    "get_topic_evolution": '{"topic_keywords": "reinforcement learning"}',
+    "get_cluster_visualization": '{"n_clusters": 8, "reduction_method": "pca"}',
+}
+
 _QA_GENERATION_SYSTEM_PROMPT = """\
 You are an expert evaluation dataset creator for a conference paper search and \
 analysis system.  The system allows users to search papers, analyze research \
 topics, track topic evolution, and visualize clusters.
 
-Your task is to generate realistic evaluation query/answer pairs that test the \
-system's capabilities.  Each pair consists of a user *query* and the *expected \
-answer* the system should produce.
+Your task is to generate realistic evaluation queries that test the system's \
+capabilities.  Each entry consists of a user *query* and the *tool_arguments* \
+needed to call the corresponding MCP tool.  The actual expected answer will be \
+produced by running the tool.
 
 IMPORTANT RULES:
 1. Queries must be natural questions a researcher would ask.
-2. Answers should be based ONLY on the provided paper information.
-3. Each query must clearly map to one of the available MCP tools.
-4. Include specific details from the papers (titles, topics, years) in answers.
-5. Keep answers concise but informative (2-5 sentences).
+2. Each query must clearly map to the specified MCP tool.
+3. tool_arguments must be a valid JSON object matching the tool's parameter schema.
+4. Base queries on the provided paper information (topics, titles, conferences, years).
 """
 
 _QA_GENERATION_USER_PROMPT = """\
-Generate {n_pairs} evaluation query/answer pair(s) for the MCP tool \
-"{tool_name}".
+Generate {n_pairs} evaluation query(ies) for the MCP tool "{tool_name}".
 
 Tool description: {tool_description}
+Example tool arguments: {tool_arguments_example}
 
 Here are some papers from the database to base your queries on:
 {papers_context}
 
 Respond with a JSON array.  Each element must have these keys:
 - "query": the user's natural-language question
-- "expected_answer": a concise reference answer based on the papers above
+- "tool_arguments": a JSON object of arguments to call the "{tool_name}" tool
 
 Example format:
 [
   {{
     "query": "What are the main topics in NeurIPS 2025?",
-    "expected_answer": "Based on the analysis ..."
+    "tool_arguments": {{"n_clusters": 8}}
   }}
 ]
 
@@ -91,18 +100,21 @@ Return ONLY the JSON array, no other text.
 
 _FOLLOWUP_GENERATION_PROMPT = """\
 Given the following initial query and answer, generate {n_followups} natural \
-follow-up question(s) and their expected answers.  The follow-ups should \
-explore the topic deeper or ask for clarification.
+follow-up question(s).  The follow-ups should explore the topic deeper or ask \
+for clarification.
 
 Initial query: {initial_query}
 Initial answer: {initial_answer}
+
+Tool to use: {tool_name}
+Example tool arguments: {tool_arguments_example}
 
 Available papers for context:
 {papers_context}
 
 Respond with a JSON array.  Each element must have these keys:
 - "query": the follow-up question
-- "expected_answer": the expected answer
+- "tool_arguments": a JSON object of arguments to call the "{tool_name}" tool
 
 Return ONLY the JSON array, no other text.
 """
@@ -422,11 +434,13 @@ class Evaluator:
         for tool_name in target_tools:
             logger.info(f"Generating {n_pairs_per_tool} Q/A pair(s) for tool: {tool_name}")
             tool_desc = _TOOL_DESCRIPTIONS[tool_name]
+            tool_args_example = _TOOL_ARGUMENT_EXAMPLES[tool_name]
 
             user_prompt = _QA_GENERATION_USER_PROMPT.format(
                 n_pairs=n_pairs_per_tool,
                 tool_name=tool_name,
                 tool_description=tool_desc,
+                tool_arguments_example=tool_args_example,
                 papers_context=papers_context,
             )
 
@@ -450,13 +464,26 @@ class Evaluator:
 
             for pair in pairs[:n_pairs_per_tool]:
                 conv_id = uuid.uuid4().hex[:12]
+                query = pair.get("query", "")
+                tool_args = pair.get("tool_arguments", {})
+                if isinstance(tool_args, str):
+                    try:
+                        tool_args = json.loads(tool_args)
+                    except json.JSONDecodeError:
+                        tool_args = {}
+
+                # Execute the MCP tool to obtain the real expected answer
+                expected_answer = self._run_tool_for_answer(tool_name, tool_args, conv_id, turn=0)
+                if expected_answer is None:
+                    continue  # tool returned an error; skip this pair
+
                 entry = {
                     "conversation_id": conv_id,
                     "turn_number": 0,
-                    "query": pair.get("query", ""),
-                    "expected_answer": pair.get("expected_answer", ""),
+                    "query": query,
+                    "expected_answer": expected_answer,
                     "tool_name": tool_name,
-                    "source_info": json.dumps({"model": self.model, "tool": tool_name}),
+                    "source_info": json.dumps({"model": self.model, "tool": tool_name, "tool_args": tool_args}),
                 }
                 all_pairs.append(entry)
                 logger.info(
@@ -471,6 +498,8 @@ class Evaluator:
                         n_followups=n_followups,
                         initial_query=entry["query"],
                         initial_answer=entry["expected_answer"],
+                        tool_name=tool_name,
+                        tool_arguments_example=tool_args_example,
                         papers_context=papers_context,
                     )
                     try:
@@ -491,14 +520,31 @@ class Evaluator:
                         followups = []
 
                     for idx, fu in enumerate(followups[:n_followups], 1):
+                        fu_query = fu.get("query", "")
+                        fu_tool_args = fu.get("tool_arguments", {})
+                        if isinstance(fu_tool_args, str):
+                            try:
+                                fu_tool_args = json.loads(fu_tool_args)
+                            except json.JSONDecodeError:
+                                fu_tool_args = {}
+
+                        fu_answer = self._run_tool_for_answer(tool_name, fu_tool_args, conv_id, turn=idx)
+                        if fu_answer is None:
+                            continue  # tool returned an error; skip this follow-up
+
                         fu_entry = {
                             "conversation_id": conv_id,
                             "turn_number": idx,
-                            "query": fu.get("query", ""),
-                            "expected_answer": fu.get("expected_answer", ""),
+                            "query": fu_query,
+                            "expected_answer": fu_answer,
                             "tool_name": tool_name,
                             "source_info": json.dumps(
-                                {"model": self.model, "tool": tool_name, "followup_of": conv_id}
+                                {
+                                    "model": self.model,
+                                    "tool": tool_name,
+                                    "followup_of": conv_id,
+                                    "tool_args": fu_tool_args,
+                                }
                             ),
                         }
                         all_pairs.append(fu_entry)
@@ -510,6 +556,55 @@ class Evaluator:
 
         logger.info(f"Generated {len(all_pairs)} Q/A pairs total")
         return all_pairs
+
+    def _run_tool_for_answer(
+        self, tool_name: str, tool_args: Dict[str, Any], conv_id: str, turn: int
+    ) -> Optional[str]:
+        """
+        Execute an MCP tool and return its formatted output as an expected answer.
+
+        Parameters
+        ----------
+        tool_name : str
+            The MCP tool to execute.
+        tool_args : Dict[str, Any]
+            Arguments for the tool call.
+        conv_id : str
+            Conversation ID (used only for log messages).
+        turn : int
+            Turn number (used only for log messages).
+
+        Returns
+        -------
+        str or None
+            Formatted tool output, or ``None`` if the tool returned an error or
+            the result is not a valid JSON string.
+        """
+        try:
+            raw_result = execute_mcp_tool(tool_name, tool_args)
+            if not isinstance(raw_result, str):
+                logger.warning(
+                    f"MCP tool {tool_name} returned unexpected type {type(raw_result).__name__} "
+                    f"(conv {conv_id}, turn {turn}) — skipping pair"
+                )
+                return None
+            try:
+                result_data = json.loads(raw_result)
+            except json.JSONDecodeError as exc:
+                logger.warning(
+                    f"MCP tool {tool_name} returned invalid JSON (conv {conv_id}, turn {turn}): {exc} — skipping pair"
+                )
+                return None
+            if isinstance(result_data, dict) and "error" in result_data:
+                logger.warning(
+                    f"MCP tool {tool_name} returned error (conv {conv_id}, turn {turn}): "
+                    f"{result_data['error']} — skipping pair"
+                )
+                return None
+            return format_tool_result_for_llm(tool_name, raw_result)
+        except Exception as exc:
+            logger.warning(f"MCP tool {tool_name} failed (conv {conv_id}, turn {turn}): {exc} — skipping pair")
+            return None
 
     def store_qa_pairs(self, pairs: List[Dict[str, Any]]) -> int:
         """

@@ -469,7 +469,7 @@ class TestGenerateQAPairs:
     """Tests for Evaluator.generate_qa_pairs method."""
 
     def test_generate_qa_pairs_basic(self, evaluator_with_papers):
-        """Test basic Q/A pair generation with mocked LLM."""
+        """Test basic Q/A pair generation with mocked LLM and MCP tool."""
         mock_response = Mock()
         mock_response.choices = [
             Mock(
@@ -478,7 +478,7 @@ class TestGenerateQAPairs:
                         [
                             {
                                 "query": "What papers discuss deep learning?",
-                                "expected_answer": "There is a paper about deep learning for image classification.",
+                                "tool_arguments": {"topic_keywords": "deep learning", "n_results": 5},
                             }
                         ]
                     )
@@ -488,16 +488,22 @@ class TestGenerateQAPairs:
 
         evaluator_with_papers.openai_client.chat.completions.create.return_value = mock_response
 
-        pairs = evaluator_with_papers.generate_qa_pairs(
-            n_pairs_per_tool=1,
-            tools=["search_papers"],
-            generate_followups=False,
-        )
+        with patch(
+            "abstracts_explorer.evaluation.execute_mcp_tool",
+            return_value='{"papers": [{"title": "Deep Learning Paper", "abstract": "..."}]}',
+        ):
+            pairs = evaluator_with_papers.generate_qa_pairs(
+                n_pairs_per_tool=1,
+                tools=["search_papers"],
+                generate_followups=False,
+            )
 
         assert len(pairs) == 1
         assert pairs[0]["tool_name"] == "search_papers"
         assert pairs[0]["turn_number"] == 0
         assert pairs[0]["query"] == "What papers discuss deep learning?"
+        # expected_answer comes from the tool output, not the LLM
+        assert pairs[0]["expected_answer"] != ""
 
     def test_generate_qa_pairs_with_followups(self, evaluator_with_papers):
         """Test Q/A pair generation with follow-ups."""
@@ -506,9 +512,7 @@ class TestGenerateQAPairs:
         initial_response.choices = [
             Mock(
                 message=Mock(
-                    content=json.dumps(
-                        [{"query": "What are main topics?", "expected_answer": "Deep learning and RL."}]
-                    )
+                    content=json.dumps([{"query": "What are main topics?", "tool_arguments": {"n_clusters": 8}}])
                 )
             )
         ]
@@ -522,7 +526,7 @@ class TestGenerateQAPairs:
                         [
                             {
                                 "query": "Tell me more about RL papers.",
-                                "expected_answer": "There is a paper on RL in robotics.",
+                                "tool_arguments": {"n_clusters": 8},
                             }
                         ]
                     )
@@ -535,17 +539,47 @@ class TestGenerateQAPairs:
             followup_response,
         ]
 
-        pairs = evaluator_with_papers.generate_qa_pairs(
-            n_pairs_per_tool=1,
-            tools=["get_cluster_topics"],
-            generate_followups=True,
-            n_followups=1,
-        )
+        with patch(
+            "abstracts_explorer.evaluation.execute_mcp_tool",
+            return_value='{"topics": ["deep learning", "RL"]}',
+        ):
+            pairs = evaluator_with_papers.generate_qa_pairs(
+                n_pairs_per_tool=1,
+                tools=["get_cluster_topics"],
+                generate_followups=True,
+                n_followups=1,
+            )
 
         assert len(pairs) == 2
         assert pairs[0]["turn_number"] == 0
         assert pairs[1]["turn_number"] == 1
         assert pairs[0]["conversation_id"] == pairs[1]["conversation_id"]
+
+    def test_generate_qa_pairs_tool_error_skips_pair(self, evaluator_with_papers):
+        """Test that pairs are skipped when the MCP tool returns an error."""
+        mock_response = Mock()
+        mock_response.choices = [
+            Mock(
+                message=Mock(
+                    content=json.dumps(
+                        [{"query": "What papers?", "tool_arguments": {"topic_keywords": "deep learning"}}]
+                    )
+                )
+            )
+        ]
+        evaluator_with_papers.openai_client.chat.completions.create.return_value = mock_response
+
+        with patch(
+            "abstracts_explorer.evaluation.execute_mcp_tool",
+            return_value='{"error": "no embeddings loaded"}',
+        ):
+            pairs = evaluator_with_papers.generate_qa_pairs(
+                n_pairs_per_tool=1,
+                tools=["search_papers"],
+                generate_followups=False,
+            )
+
+        assert len(pairs) == 0
 
     def test_generate_qa_pairs_unknown_tool(self, evaluator_with_papers):
         """Test that unknown tool names raise an error."""
@@ -778,7 +812,13 @@ class TestCLIEvalCommands:
         """Test successful Q/A pair generation via CLI."""
         mock_response = Mock()
         mock_response.choices = [
-            Mock(message=Mock(content=json.dumps([{"query": "Test query", "expected_answer": "Test answer"}])))
+            Mock(
+                message=Mock(
+                    content=json.dumps(
+                        [{"query": "Test query", "tool_arguments": {"topic_keywords": "deep learning"}}]
+                    )
+                )
+            )
         ]
         mock_openai_client = Mock()
         mock_openai_client.chat.completions.create.return_value = mock_response
@@ -788,6 +828,10 @@ class TestCLIEvalCommands:
 
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager", return_value=mock_em_instance),
+            patch(
+                "abstracts_explorer.evaluation.execute_mcp_tool",
+                return_value='{"papers": [{"title": "Test Paper", "abstract": "test"}]}',
+            ),
             patch.object(
                 sys,
                 "argv",
