@@ -31,6 +31,127 @@ class MCPToolsError(Exception):
     pass
 
 
+def _normalize_search_papers_args(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalise argument shapes produced by LLMs for the ``search_papers`` tool.
+
+    LLMs occasionally produce slightly wrong argument shapes, e.g. a singular
+    ``"year"`` key instead of ``"years"``, or a list for scalar string fields.
+    This function corrects those mismatches so the downstream function call
+    always receives the expected types.
+
+    Normalizations applied:
+    * ``year`` (int or list) → ``years`` (list of int)
+    * ``topic_keywords`` as a list → joined string
+    * ``conference`` as a list → first element string
+    * ``conferences`` (list, wrong field name) → ``conference`` (str, first element)
+
+    Parameters
+    ----------
+    arguments : dict
+        Raw arguments dict coming from the LLM / ``execute_mcp_tool`` caller.
+
+    Returns
+    -------
+    dict
+        A new dict with normalized argument values.
+    """
+    args = dict(arguments)
+
+    # Normalize 'year' → 'years' (LLMs often use singular form)
+    if "year" in args and "years" not in args:
+        year_val = args.pop("year")
+        if isinstance(year_val, list):
+            args["years"] = year_val
+        else:
+            args["years"] = [year_val]
+    elif "year" in args:
+        args.pop("year")  # 'years' already present; drop the duplicate
+
+    # Normalize topic_keywords: list → space-joined string
+    if "topic_keywords" in args and isinstance(args["topic_keywords"], list):
+        args["topic_keywords"] = " ".join(str(k) for k in args["topic_keywords"])
+
+    # Normalize conference: list → first element string
+    if "conference" in args and isinstance(args["conference"], list):
+        args["conference"] = args["conference"][0] if args["conference"] else None
+
+    # Normalize 'conferences' (wrong field name) → 'conference' if not already set
+    if "conferences" in args and "conference" not in args:
+        conferences_val = args.pop("conferences")
+        if isinstance(conferences_val, list) and conferences_val:
+            args["conference"] = conferences_val[0]
+        elif isinstance(conferences_val, str):
+            args["conference"] = conferences_val
+    elif "conferences" in args:
+        args.pop("conferences")  # 'conference' already present; drop duplicate
+
+    return args
+
+
+def _normalize_get_topic_evolution_args(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalise argument shapes produced by LLMs for the ``get_topic_evolution`` tool.
+
+    Parameters
+    ----------
+    arguments : dict
+        Raw arguments dict from the LLM.
+
+    Returns
+    -------
+    dict
+        A new dict with normalized argument values.
+    """
+    args = dict(arguments)
+
+    # Normalize topic_keywords: list → space-joined string
+    if "topic_keywords" in args and isinstance(args["topic_keywords"], list):
+        args["topic_keywords"] = " ".join(str(k) for k in args["topic_keywords"])
+
+    # Normalize conference: list → first element string
+    if "conference" in args and isinstance(args["conference"], list):
+        args["conference"] = args["conference"][0] if args["conference"] else None
+
+    # Normalize start_year / end_year: list → first element int
+    for key in ("start_year", "end_year"):
+        if key in args and isinstance(args[key], list):
+            args[key] = args[key][0] if args[key] else None
+
+    return args
+
+
+def _normalize_analyze_topic_relevance_args(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalise argument shapes produced by LLMs for the ``analyze_topic_relevance`` tool.
+
+    Parameters
+    ----------
+    arguments : dict
+        Raw arguments dict from the LLM.
+
+    Returns
+    -------
+    dict
+        A new dict with normalized argument values.
+    """
+    args = dict(arguments)
+
+    # Normalize topic: list → space-joined string
+    if "topic" in args and isinstance(args["topic"], list):
+        args["topic"] = " ".join(str(k) for k in args["topic"])
+
+    # Normalize conference → conferences if wrong field name used
+    if "conference" in args and "conferences" not in args:
+        conf_val = args.pop("conference")
+        if isinstance(conf_val, str):
+            args["conferences"] = [conf_val]
+        elif isinstance(conf_val, list):
+            args["conferences"] = conf_val
+
+    return args
+
+
 # Define MCP tools in OpenAI function calling format
 MCP_TOOLS_SCHEMA = [
     {
@@ -203,6 +324,10 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
     """
     Execute an MCP tool with the given arguments.
 
+    Arguments are normalized before dispatch to handle common LLM output
+    quirks (e.g. ``"year"`` instead of ``"years"``, list values for scalar
+    string fields).
+
     Parameters
     ----------
     tool_name : str
@@ -224,17 +349,17 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
 
     try:
         if tool_name == "analyze_topic_relevance":
-            return analyze_topic_relevance(**arguments)
+            return analyze_topic_relevance(**_normalize_analyze_topic_relevance_args(arguments))
         elif tool_name == "get_cluster_topics":
             return get_cluster_topics(**arguments)
         elif tool_name == "get_topic_evolution":
-            return get_topic_evolution(**arguments)
+            return get_topic_evolution(**_normalize_get_topic_evolution_args(arguments))
         elif tool_name == "search_papers":
-            # Handle argument name alias: LLM might use 'query' instead of 'topic_keywords'
-            if "query" in arguments and "topic_keywords" not in arguments:
-                arguments = dict(arguments)
-                arguments["topic_keywords"] = arguments.pop("query")
-            return search_papers(**arguments)
+            # Normalize argument names/types — LLMs may send 'query', 'year', or list values
+            args = _normalize_search_papers_args(arguments)
+            if "query" in args and "topic_keywords" not in args:
+                args["topic_keywords"] = args.pop("query")
+            return search_papers(**args)
         elif tool_name == "get_cluster_visualization":
             return get_cluster_visualization(**arguments)
         else:

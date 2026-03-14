@@ -6,7 +6,7 @@ including tool schema generation, execution, and result formatting.
 """
 
 import json
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 from abstracts_explorer.mcp_tools import (
     get_mcp_tools_schema,
@@ -16,6 +16,9 @@ from abstracts_explorer.mcp_tools import (
     _format_topic_evolution_result,
     _format_search_papers_result,
     _format_visualization_result,
+    _normalize_search_papers_args,
+    _normalize_get_topic_evolution_args,
+    _normalize_analyze_topic_relevance_args,
 )
 
 
@@ -302,3 +305,422 @@ def test_get_mcp_tools_schema_does_not_mutate_base():
     atr = next(t for t in schema2 if t["function"]["name"] == "analyze_topic_relevance")
     items = atr["function"]["parameters"]["properties"]["conferences"]["items"]
     assert "enum" not in items
+
+
+# ---------------------------------------------------------------------------
+# Argument normalization unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeSearchPapersArgs:
+    """Tests for _normalize_search_papers_args()."""
+
+    def test_year_singular_int(self):
+        """'year' as int is converted to 'years' list."""
+        result = _normalize_search_papers_args({"topic_keywords": "RL", "year": 2025})
+        assert result["years"] == [2025]
+        assert "year" not in result
+
+    def test_year_singular_list(self):
+        """'year' as list is renamed to 'years'."""
+        result = _normalize_search_papers_args({"topic_keywords": "RL", "year": [2024, 2025]})
+        assert result["years"] == [2024, 2025]
+        assert "year" not in result
+
+    def test_year_and_years_coexist_drops_year(self):
+        """When both 'year' and 'years' are present, 'year' is dropped."""
+        result = _normalize_search_papers_args({"topic_keywords": "RL", "year": 2023, "years": [2024]})
+        assert result["years"] == [2024]
+        assert "year" not in result
+
+    def test_topic_keywords_list_joined(self):
+        """topic_keywords as list is joined into a space-separated string."""
+        result = _normalize_search_papers_args(
+            {"topic_keywords": ["reinforcement learning", "autoregressive", "image editing"]}
+        )
+        assert result["topic_keywords"] == "reinforcement learning autoregressive image editing"
+
+    def test_conference_list_first_element(self):
+        """conference as list uses the first element."""
+        result = _normalize_search_papers_args({"topic_keywords": "RL", "conference": ["NeurIPS", "ICLR"]})
+        assert result["conference"] == "NeurIPS"
+
+    def test_conference_empty_list_becomes_none(self):
+        """conference as empty list becomes None."""
+        result = _normalize_search_papers_args({"topic_keywords": "RL", "conference": []})
+        assert result["conference"] is None
+
+    def test_conferences_wrong_field_name(self):
+        """'conferences' (wrong plural field) is mapped to 'conference'."""
+        result = _normalize_search_papers_args({"topic_keywords": "RL", "conferences": ["NeurIPS"]})
+        assert result["conference"] == "NeurIPS"
+        assert "conferences" not in result
+
+    def test_valid_args_unchanged(self):
+        """Already-valid args are passed through unchanged."""
+        args = {"topic_keywords": "deep learning", "years": [2024, 2025], "n_results": 5}
+        result = _normalize_search_papers_args(args)
+        assert result == args
+
+    def test_full_llm_malformed_args(self):
+        """Full example matching the reported error case."""
+        raw = {
+            "topic_keywords": ["reinforcement learning", "autoregressive", "image editing"],
+            "conference": ["NeurIPS"],
+            "year": [2025],
+            "n_results": 2,
+        }
+        result = _normalize_search_papers_args(raw)
+        assert result["topic_keywords"] == "reinforcement learning autoregressive image editing"
+        assert result["conference"] == "NeurIPS"
+        assert result["years"] == [2025]
+        assert result["n_results"] == 2
+        assert "year" not in result
+
+
+class TestNormalizeGetTopicEvolutionArgs:
+    """Tests for _normalize_get_topic_evolution_args()."""
+
+    def test_topic_keywords_list_joined(self):
+        """topic_keywords list is joined into a string."""
+        result = _normalize_get_topic_evolution_args({"topic_keywords": ["transformers", "attention"]})
+        assert result["topic_keywords"] == "transformers attention"
+
+    def test_conference_list_first_element(self):
+        """conference list uses first element."""
+        result = _normalize_get_topic_evolution_args({"topic_keywords": "RL", "conference": ["NeurIPS", "ICLR"]})
+        assert result["conference"] == "NeurIPS"
+
+    def test_start_end_year_list(self):
+        """start_year and end_year as list use first element."""
+        result = _normalize_get_topic_evolution_args(
+            {"topic_keywords": "RL", "start_year": [2022], "end_year": [2025]}
+        )
+        assert result["start_year"] == 2022
+        assert result["end_year"] == 2025
+
+    def test_valid_args_unchanged(self):
+        """Already-valid args pass through unchanged."""
+        args = {"topic_keywords": "transformers", "start_year": 2022, "end_year": 2025}
+        assert _normalize_get_topic_evolution_args(args) == args
+
+
+class TestNormalizeAnalyzeTopicRelevanceArgs:
+    """Tests for _normalize_analyze_topic_relevance_args()."""
+
+    def test_topic_list_joined(self):
+        """topic as list is joined into a string."""
+        result = _normalize_analyze_topic_relevance_args({"topic": ["deep learning", "transformers"]})
+        assert result["topic"] == "deep learning transformers"
+
+    def test_conference_to_conferences(self):
+        """conference (singular) is renamed to conferences (list)."""
+        result = _normalize_analyze_topic_relevance_args({"topic": "RL", "conference": "NeurIPS"})
+        assert result["conferences"] == ["NeurIPS"]
+        assert "conference" not in result
+
+    def test_conference_list_to_conferences(self):
+        """conference as list becomes conferences."""
+        result = _normalize_analyze_topic_relevance_args({"topic": "RL", "conference": ["NeurIPS", "ICLR"]})
+        assert result["conferences"] == ["NeurIPS", "ICLR"]
+        assert "conference" not in result
+
+    def test_valid_args_unchanged(self):
+        """Already-valid args pass through unchanged."""
+        args = {"topic": "deep learning", "conferences": ["NeurIPS"], "years": [2024]}
+        assert _normalize_analyze_topic_relevance_args(args) == args
+
+
+# ---------------------------------------------------------------------------
+# End-to-end tests for execute_mcp_tool() — each MCP tool exercised through
+# the full dispatch path with mocked backends.
+# ---------------------------------------------------------------------------
+
+
+class TestExecuteMCPToolE2E:
+    """End-to-end tests for execute_mcp_tool() through the full dispatch path."""
+
+    # ------------------------------------------------------------------
+    # search_papers
+    # ------------------------------------------------------------------
+
+    def test_search_papers_basic(self):
+        """search_papers executes and returns valid JSON."""
+        mock_result = json.dumps(
+            {
+                "topic": "deep learning",
+                "papers": [{"title": "DL Paper", "year": 2025}],
+                "papers_found": 1,
+            }
+        )
+        with patch("abstracts_explorer.mcp_tools.search_papers", return_value=mock_result) as mock_fn:
+            result = execute_mcp_tool("search_papers", {"topic_keywords": "deep learning", "n_results": 3})
+
+        assert json.loads(result)["topic"] == "deep learning"
+        mock_fn.assert_called_once_with(topic_keywords="deep learning", n_results=3)
+
+    def test_search_papers_year_singular_normalized(self):
+        """search_papers normalizes 'year' (singular) to 'years'."""
+        mock_result = json.dumps({"topic": "RL", "papers": [], "papers_found": 0})
+        with patch("abstracts_explorer.mcp_tools.search_papers", return_value=mock_result) as mock_fn:
+            execute_mcp_tool(
+                "search_papers",
+                {"topic_keywords": "RL", "year": 2025, "conference": "NeurIPS"},
+            )
+
+        kwargs = mock_fn.call_args[1]
+        assert kwargs["years"] == [2025]
+        assert "year" not in kwargs
+
+    def test_search_papers_full_llm_malformed(self):
+        """search_papers handles the exact malformed args from reported error."""
+        mock_result = json.dumps({"topic": "RL", "papers": [], "papers_found": 0})
+        with patch("abstracts_explorer.mcp_tools.search_papers", return_value=mock_result) as mock_fn:
+            result = execute_mcp_tool(
+                "search_papers",
+                {
+                    "topic_keywords": ["reinforcement learning", "autoregressive", "image editing"],
+                    "conference": ["NeurIPS"],
+                    "year": [2025],
+                    "n_results": 2,
+                },
+            )
+
+        # Must not return an error
+        result_data = json.loads(result)
+        assert "error" not in result_data
+
+        # Verify search_papers was called with normalized args
+        mock_fn.assert_called_once()
+        kwargs = mock_fn.call_args[1]
+        assert kwargs["topic_keywords"] == "reinforcement learning autoregressive image editing"
+        assert kwargs["conference"] == "NeurIPS"
+        assert kwargs["years"] == [2025]
+        assert kwargs["n_results"] == 2
+
+    def test_search_papers_query_alias(self):
+        """search_papers maps 'query' to 'topic_keywords' (legacy alias)."""
+        mock_result = json.dumps({"topic": "llm", "papers": [], "papers_found": 0})
+        with patch("abstracts_explorer.mcp_tools.search_papers", return_value=mock_result) as mock_fn:
+            execute_mcp_tool("search_papers", {"query": "llm trends"})
+
+        kwargs = mock_fn.call_args[1]
+        assert kwargs["topic_keywords"] == "llm trends"
+        assert "query" not in kwargs
+
+    def test_search_papers_real_execution(self):
+        """search_papers executes end-to-end with mocked EmbeddingsManager and DatabaseManager."""
+        mock_em = Mock()
+        mock_em.search_similar.return_value = {
+            "ids": [["p1", "p2"]],
+            "metadatas": [
+                [
+                    {"title": "Paper 1", "year": 2025, "conference": "NeurIPS", "session": "ML"},
+                    {"title": "Paper 2", "year": 2025, "conference": "NeurIPS", "session": "DL"},
+                ]
+            ],
+            "distances": [[0.1, 0.3]],
+            "documents": [["Abstract 1", "Abstract 2"]],
+        }
+
+        mock_db = Mock()
+
+        with (
+            patch("abstracts_explorer.mcp_server.EmbeddingsManager", return_value=mock_em),
+            patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),
+            patch("abstracts_explorer.mcp_server.get_config") as mock_cfg,
+        ):
+            mock_cfg.return_value = Mock(collection_name="papers")
+            result = execute_mcp_tool("search_papers", {"topic_keywords": "deep learning", "n_results": 2})
+
+        data = json.loads(result)
+        assert "error" not in data
+        assert "papers" in data
+        assert len(data["papers"]) == 2
+        assert data["papers"][0]["title"] == "Paper 1"
+
+    # ------------------------------------------------------------------
+    # get_cluster_topics
+    # ------------------------------------------------------------------
+
+    def test_get_cluster_topics_real_execution(self):
+        """get_cluster_topics executes end-to-end with mocked clustering stack."""
+        import numpy as np
+
+        mock_cm = Mock()
+        mock_cm.load_embeddings.return_value = 10
+        mock_cm.cluster.return_value = np.array([0, 0, 1, 1, 0])
+        mock_cm.reduce_dimensions.return_value = np.zeros((5, 2))
+        mock_cm.get_cluster_statistics.return_value = {
+            "n_clusters": 2,
+            "n_noise": 0,
+            "cluster_sizes": {0: 3, 1: 2},
+            "total_papers": 5,
+        }
+        mock_cm.paper_ids = ["p1", "p2", "p3", "p4", "p5"]
+        mock_cm.cluster_labels = np.array([0, 0, 1, 1, 0])
+        mock_cm.metadatas = [
+            {"title": "A", "keywords": "ml", "session": "S1", "year": 2025},
+            {"title": "B", "keywords": "dl", "session": "S1", "year": 2025},
+            {"title": "C", "keywords": "nlp", "session": "S2", "year": 2025},
+            {"title": "D", "keywords": "nlp", "session": "S2", "year": 2025},
+            {"title": "E", "keywords": "ml", "session": "S1", "year": 2025},
+        ]
+        mock_cm.embeddings_manager = Mock()
+        mock_db = Mock()
+
+        with patch("abstracts_explorer.mcp_server.load_clustering_data", return_value=(mock_cm, mock_db)):
+            result = execute_mcp_tool("get_cluster_topics", {"n_clusters": 2})
+
+        data = json.loads(result)
+        assert "error" not in data
+        assert "clusters" in data
+        assert data["statistics"]["n_clusters"] == 2
+
+    # ------------------------------------------------------------------
+    # get_topic_evolution
+    # ------------------------------------------------------------------
+
+    def test_get_topic_evolution_real_execution(self):
+        """get_topic_evolution executes end-to-end with mocked EmbeddingsManager."""
+        mock_em = Mock()
+        mock_em.search_similar.return_value = {
+            "ids": [["p1", "p2", "p3"]],
+            "metadatas": [
+                [
+                    {"title": "Paper 2022", "year": 2022, "session": "ML"},
+                    {"title": "Paper 2023", "year": 2023, "session": "ML"},
+                    {"title": "Paper 2024", "year": 2024, "session": "ML"},
+                ]
+            ],
+            "distances": [[0.1, 0.2, 0.3]],
+        }
+        mock_db = Mock()
+
+        with (
+            patch("abstracts_explorer.mcp_server.EmbeddingsManager", return_value=mock_em),
+            patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),
+            patch("abstracts_explorer.mcp_server.get_config") as mock_cfg,
+        ):
+            mock_cfg.return_value = Mock(collection_name="papers")
+            result = execute_mcp_tool("get_topic_evolution", {"topic_keywords": "transformers"})
+
+        data = json.loads(result)
+        assert "error" not in data
+        assert data["topic"] == "transformers"
+        assert data["total_papers"] == 3
+        assert "year_counts" in data
+
+    def test_get_topic_evolution_conference_list_normalized(self):
+        """get_topic_evolution normalizes conference as list to string."""
+        mock_em = Mock()
+        mock_em.search_similar.return_value = {
+            "ids": [["p1"]],
+            "metadatas": [[{"title": "P", "year": 2025, "session": "S"}]],
+            "distances": [[0.1]],
+        }
+        mock_db = Mock()
+
+        with (
+            patch("abstracts_explorer.mcp_server.EmbeddingsManager", return_value=mock_em),
+            patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),
+            patch("abstracts_explorer.mcp_server.get_config") as mock_cfg,
+        ):
+            mock_cfg.return_value = Mock(collection_name="papers")
+            # conference passed as list — should not raise
+            result = execute_mcp_tool(
+                "get_topic_evolution",
+                {"topic_keywords": "RL", "conference": ["NeurIPS"]},
+            )
+
+        data = json.loads(result)
+        assert "error" not in data
+
+    # ------------------------------------------------------------------
+    # analyze_topic_relevance
+    # ------------------------------------------------------------------
+
+    def test_analyze_topic_relevance_real_execution(self):
+        """analyze_topic_relevance executes end-to-end with mocked EmbeddingsManager."""
+        mock_em = Mock()
+        mock_em.find_papers_within_distance.return_value = {
+            "papers": [
+                {"title": "Paper 1", "year": 2025, "conference": "NeurIPS", "distance": 0.5},
+                {"title": "Paper 2", "year": 2025, "conference": "NeurIPS", "distance": 1.0},
+            ]
+        }
+
+        with (
+            patch("abstracts_explorer.mcp_server.EmbeddingsManager", return_value=mock_em),
+            patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=Mock()),
+            patch("abstracts_explorer.mcp_server.get_config") as mock_cfg,
+        ):
+            mock_cfg.return_value = Mock(collection_name="papers")
+            result = execute_mcp_tool(
+                "analyze_topic_relevance",
+                {"topic": "deep learning", "distance_threshold": 1.1},
+            )
+
+        data = json.loads(result)
+        assert "error" not in data
+        assert "topic" in data
+        assert data["topic"] == "deep learning"
+        assert data["total_papers"] == 2
+
+    def test_analyze_topic_relevance_conference_singular_normalized(self):
+        """analyze_topic_relevance maps 'conference' (singular) to 'conferences'."""
+        mock_em = Mock()
+        mock_em.find_papers_within_distance.return_value = {
+            "papers": [{"title": "P", "year": 2025, "conference": "NeurIPS", "distance": 0.5}]
+        }
+
+        with (
+            patch("abstracts_explorer.mcp_server.EmbeddingsManager", return_value=mock_em),
+            patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=Mock()),
+            patch("abstracts_explorer.mcp_server.get_config") as mock_cfg,
+        ):
+            mock_cfg.return_value = Mock(collection_name="papers")
+            # 'conference' (singular) should not crash
+            result = execute_mcp_tool(
+                "analyze_topic_relevance",
+                {"topic": "RL", "conference": "NeurIPS"},
+            )
+
+        data = json.loads(result)
+        assert "error" not in data
+
+    # ------------------------------------------------------------------
+    # get_cluster_visualization
+    # ------------------------------------------------------------------
+
+    def test_get_cluster_visualization_real_execution(self):
+        """get_cluster_visualization executes end-to-end with mocked perform_clustering."""
+        mock_viz_result = {
+            "n_dimensions": 2,
+            "n_points": 10,
+            "statistics": {"n_clusters": 3},
+            "visualization_saved": False,
+            "points": [],
+        }
+
+        with patch(
+            "abstracts_explorer.mcp_tools.get_cluster_visualization",
+            return_value=json.dumps(mock_viz_result),
+        ) as mock_fn:
+            result = execute_mcp_tool("get_cluster_visualization", {"n_clusters": 3})
+
+        data = json.loads(result)
+        assert "error" not in data
+        assert data["statistics"]["n_clusters"] == 3
+        mock_fn.assert_called_once_with(n_clusters=3)
+
+    # ------------------------------------------------------------------
+    # Unknown tool
+    # ------------------------------------------------------------------
+
+    def test_unknown_tool_returns_error_json(self):
+        """Unknown tool name returns error JSON without raising."""
+        result = execute_mcp_tool("nonexistent_tool", {"x": 1})
+        data = json.loads(result)
+        assert "error" in data
+        assert "Unknown MCP tool" in data["error"]
