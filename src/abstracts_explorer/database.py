@@ -1108,11 +1108,15 @@ class DatabaseManager:
             if not results:
                 return None
 
-            # If no clustering_params specified, return first new-format match
+            # When no clustering_params are requested, find the first entry whose
+            # stored clustering_params is also NULL and whose results are in the
+            # new format (contain "paper_ids" rather than "points").
+            # Entries that have extra params stored (e.g. distance_threshold) are
+            # skipped here because they represent different clustering runs.
             if clustering_params is None:
                 for result in results:
                     if result.clustering_params is not None:
-                        continue
+                        continue  # entry has extra params – not a match for a no-param query
                     data = json.loads(result.results_json)
                     # Only return new-format entries (have paper_ids, not points)
                     if "paper_ids" in data:

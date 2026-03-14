@@ -9,6 +9,7 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+from typing import Optional
 
 from tqdm import tqdm
 
@@ -854,7 +855,10 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
             return 1
 
     linkage = args.linkage
-    n_clusters_arg: int = args.n_clusters  # 0 means auto-calculate
+    # args.n_clusters is 0 when the user wants auto-calculation.
+    # We pass None to compute_clusters_with_cache so it calculates
+    # the default based on the corpus size.
+    n_clusters_arg: Optional[int] = args.n_clusters if args.n_clusters > 0 else None
     reduction_method = args.reduction_method
 
     print("Abstracts Explorer - Pre-generate Clustering")
@@ -862,7 +866,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     print(f"Embeddings:       {config.embedding_db}")
     print(f"Collection:       {args.collection}")
     print(f"Clustering:       agglomerative (linkage={linkage})")
-    print(f"N-clusters:       {'auto' if n_clusters_arg == 0 else n_clusters_arg}")
+    print(f"N-clusters:       {'auto' if n_clusters_arg is None else n_clusters_arg}")
     print(f"Reduction:        {reduction_method} (for initial visualization)")
     print("=" * 70)
 
@@ -881,7 +885,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
                 reduction_method=reduction_method,
                 n_components=2,
                 clustering_method="agglomerative",
-                n_clusters=n_clusters_arg if n_clusters_arg > 0 else None,
+                n_clusters=n_clusters_arg,
                 limit=None,
                 force=args.force,
                 linkage=linkage,

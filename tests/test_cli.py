@@ -1169,6 +1169,8 @@ class TestCLI:
         call_kwargs = mock_compute.call_args[1]
         assert call_kwargs["clustering_method"] == "agglomerative"
         assert call_kwargs["linkage"] == "ward"
+        # n_clusters=None means auto-calculate based on corpus size
+        assert call_kwargs["n_clusters"] is None
 
     def test_pre_generate_clustering_custom_options(self, tmp_path, capsys, monkeypatch):
         """Test pre-generate-clustering with custom linkage and force flag."""

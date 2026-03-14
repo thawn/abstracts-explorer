@@ -1901,7 +1901,18 @@ def compute_clusters_with_cache(
 
             # Map cached assignments to current paper order (papers may be
             # returned in a different order by ChromaDB on each call).
-            cm_cached.cluster_labels = np.array([id_to_cluster.get(pid, -1) for pid in (cm_cached.paper_ids or [])])
+            # Papers that are not in the cache get assigned to cluster -1 (noise).
+            # This can happen if new embeddings have been added since the cache was
+            # created.  In that case the user should clear the cache and recompute.
+            current_ids = cm_cached.paper_ids or []
+            missing = [pid for pid in current_ids if pid not in id_to_cluster]
+            if missing:
+                logger.warning(
+                    f"{len(missing)} paper(s) are not in the clustering cache "
+                    f"(e.g. '{missing[0]}'). They will be assigned to cluster -1. "
+                    "Run with force=True (or clear the cache) to recompute."
+                )
+            cm_cached.cluster_labels = np.array([id_to_cluster.get(pid, -1) for pid in current_ids])
 
             if cached_data.get("cluster_labels"):
                 cm_cached.cluster_label_names = {int(k): v for k, v in cached_data["cluster_labels"].items()}
