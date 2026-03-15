@@ -58,12 +58,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
-from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
-from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering, SpectralClustering
 from sklearn.preprocessing import StandardScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
-from umap import UMAP
 
 try:
     import skfuzzy as fuzz
@@ -292,9 +288,13 @@ class ClusteringManager:
                 scaled_embeddings = self.scaler.transform(self.embeddings)
 
             if method.lower() == "pca":
+                from sklearn.decomposition import PCA  # lazy import to reduce initial load time
+
                 reducer = PCA(n_components=n_components, random_state=random_state, **kwargs)
                 logger.info(f"Applying PCA to reduce to {n_components} dimensions")
             elif method.lower() == "tsne":
+                from sklearn.manifold import TSNE  # lazy import to reduce initial load time
+
                 # t-SNE parameters
                 perplexity = kwargs.pop("perplexity", min(30, len(self.embeddings) - 1))
                 max_iter = kwargs.pop("max_iter", 1000)
@@ -307,6 +307,8 @@ class ClusteringManager:
                 )
                 logger.info(f"Applying t-SNE to reduce to {n_components} dimensions (perplexity={perplexity})")
             elif method.lower() == "umap":
+                from umap import UMAP  # lazy import to reduce initial load time
+
                 # UMAP parameters
                 # UMAP requires a sufficient number of samples for spectral initialization
                 # Practical minimum is around max(n_components + 1, 4) for reliable operation
@@ -422,11 +424,15 @@ class ClusteringManager:
 
         try:
             if method.lower() == "kmeans":
+                from sklearn.cluster import KMeans  # lazy import to reduce initial load time
+
                 self.clusterer = KMeans(n_clusters=n_clusters, random_state=random_state, **kwargs)
                 logger.info(f"Applying K-Means clustering with {n_clusters} clusters")
                 self.cluster_labels = self.clusterer.fit_predict(data_to_cluster)
 
             elif method.lower() == "dbscan":
+                from sklearn.cluster import DBSCAN  # lazy import to reduce initial load time
+
                 eps = kwargs.pop("eps", 0.5)
                 min_samples = kwargs.pop("min_samples", 5)
                 self.clusterer = DBSCAN(eps=eps, min_samples=min_samples, **kwargs)
@@ -434,12 +440,14 @@ class ClusteringManager:
                 self.cluster_labels = self.clusterer.fit_predict(data_to_cluster)
 
             elif method.lower() == "agglomerative":
+                from sklearn.cluster import AgglomerativeClustering  # lazy import to reduce initial load time
+
                 # Handle agglomerative with distance_threshold or n_clusters
                 # Filter out parameters that don't belong to AgglomerativeClustering
                 # (e.g., 'affinity' and 'n_neighbors' are for spectral clustering)
                 agg_kwargs = {k: v for k, v in kwargs.items() 
                              if k not in ['affinity', 'n_neighbors', 'eps', 'min_samples', 'm']}
-                
+
                 if distance_threshold is not None:
                     self.clusterer = AgglomerativeClustering(
                         n_clusters=None,
@@ -490,6 +498,8 @@ class ClusteringManager:
                 logger.info(f"Fuzzy C-Means completed with FPC={fpc:.4f}")
 
             elif method.lower() == "spectral":
+                from sklearn.cluster import SpectralClustering  # lazy import to reduce initial load time
+
                 # Spectral clustering parameters
                 affinity = kwargs.pop("affinity", "rbf")
                 n_neighbors = kwargs.pop("n_neighbors", 10)
@@ -544,6 +554,8 @@ class ClusteringManager:
         The hierarchy is stored in self.cluster_hierarchy as a dictionary
         mapping cluster IDs to their children and parent information.
         """
+        from sklearn.cluster import AgglomerativeClustering  # lazy import to reduce initial load time
+
         if not isinstance(self.clusterer, AgglomerativeClustering):
             return
 
