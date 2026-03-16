@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import create_engine, select, func, or_, and_, text
+from sqlalchemy import create_engine, select, delete, func, or_, and_, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError, ProgrammingError, IntegrityError
@@ -1485,6 +1485,32 @@ class DatabaseManager:
         except Exception as e:
             self._session.rollback()
             raise DatabaseError(f"Failed to delete eval QA pair: {str(e)}") from e
+
+    def delete_verified_eval_qa_pairs(self) -> int:
+        """
+        Delete all verified (accepted) evaluation Q/A pairs.
+
+        Returns
+        -------
+        int
+            Number of pairs deleted.
+
+        Raises
+        ------
+        DatabaseError
+            If deletion fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            result = self._session.execute(delete(EvalQAPair).where(EvalQAPair.verified == 1))
+            count = result.rowcount
+            self._session.commit()
+            return count
+        except Exception as e:
+            self._session.rollback()
+            raise DatabaseError(f"Failed to delete verified eval QA pairs: {str(e)}") from e
 
     def add_eval_result(
         self,

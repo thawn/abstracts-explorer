@@ -291,10 +291,54 @@ class TestEvalQAPairModel:
         result = eval_db.delete_eval_qa_pair(99999)
         assert result is False
 
+    def test_delete_verified_eval_qa_pairs_empty(self, eval_db):
+        """Deleting verified pairs when there are none returns 0."""
+        count = eval_db.delete_verified_eval_qa_pairs()
+        assert count == 0
 
-# ---------------------------------------------------------------------------
-#  Tests: EvalResult database methods
-# ---------------------------------------------------------------------------
+    def test_delete_verified_eval_qa_pairs_only_verified(self, eval_db):
+        """Only verified pairs are deleted; unverified ones remain."""
+        # Add one verified pair
+        pid1 = eval_db.add_eval_qa_pair(
+            conversation_id="c1",
+            turn_number=0,
+            query="verified query",
+            expected_answer="verified answer",
+        )
+        eval_db.update_eval_qa_pair(pid1, verified=1)
+
+        # Add one unverified pair
+        eval_db.add_eval_qa_pair(
+            conversation_id="c2",
+            turn_number=0,
+            query="unverified query",
+            expected_answer="unverified answer",
+        )
+
+        assert eval_db.get_eval_qa_pair_count(verified_only=True) == 1
+        assert eval_db.get_eval_qa_pair_count() == 2
+
+        deleted = eval_db.delete_verified_eval_qa_pairs()
+        assert deleted == 1
+
+        # Only unverified pair survives
+        assert eval_db.get_eval_qa_pair_count() == 1
+        assert eval_db.get_eval_qa_pair_count(verified_only=True) == 0
+
+    def test_delete_verified_eval_qa_pairs_multiple(self, eval_db):
+        """All verified pairs are deleted."""
+        for i in range(3):
+            pid = eval_db.add_eval_qa_pair(
+                conversation_id=f"c{i}",
+                turn_number=0,
+                query=f"query {i}",
+                expected_answer=f"answer {i}",
+            )
+            eval_db.update_eval_qa_pair(pid, verified=1)
+
+        deleted = eval_db.delete_verified_eval_qa_pairs()
+        assert deleted == 3
+        assert eval_db.get_eval_qa_pair_count() == 0
 
 
 class TestEvalResultModel:
@@ -900,3 +944,62 @@ class TestCLIEvalCommands:
             assert exit_code == 0
             captured = capsys.readouterr()
             assert "Result #" in captured.out
+
+
+# ---------------------------------------------------------------------------
+#  Tests: eval clear CLI sub-command
+# ---------------------------------------------------------------------------
+
+
+class TestCLIEvalClear:
+    """Tests for the 'eval clear' CLI sub-command."""
+
+    def test_eval_clear_no_pairs(self, eval_db, capsys):
+        """eval clear with no accepted pairs prints a friendly message."""
+        with patch.object(sys, "argv", ["abstracts-explorer", "eval", "clear", "--yes"]):
+            exit_code = main()
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "No accepted Q/A pairs found" in captured.out
+
+    def test_eval_clear_with_yes_flag(self, eval_db_with_pairs, capsys):
+        """eval clear --yes deletes verified pairs without prompting."""
+        # Mark pair 1 as verified
+        eval_db_with_pairs.update_eval_qa_pair(1, verified=1)
+        initial = eval_db_with_pairs.get_eval_qa_pair_count(verified_only=True)
+        assert initial >= 1
+
+        with patch.object(sys, "argv", ["abstracts-explorer", "eval", "clear", "--yes"]):
+            exit_code = main()
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Deleted" in captured.out
+        assert eval_db_with_pairs.get_eval_qa_pair_count(verified_only=True) == 0
+
+    def test_eval_clear_confirmation_yes(self, eval_db_with_pairs, capsys):
+        """eval clear with interactive 'y' confirmation deletes pairs."""
+        eval_db_with_pairs.update_eval_qa_pair(1, verified=1)
+
+        with (
+            patch.object(sys, "argv", ["abstracts-explorer", "eval", "clear"]),
+            patch("builtins.input", return_value="y"),
+        ):
+            exit_code = main()
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Deleted" in captured.out
+
+    def test_eval_clear_confirmation_no(self, eval_db_with_pairs, capsys):
+        """eval clear with 'n' answer aborts without deleting."""
+        eval_db_with_pairs.update_eval_qa_pair(1, verified=1)
+        count_before = eval_db_with_pairs.get_eval_qa_pair_count(verified_only=True)
+
+        with (
+            patch.object(sys, "argv", ["abstracts-explorer", "eval", "clear"]),
+            patch("builtins.input", return_value="n"),
+        ):
+            exit_code = main()
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Aborted" in captured.out
+        assert eval_db_with_pairs.get_eval_qa_pair_count(verified_only=True) == count_before

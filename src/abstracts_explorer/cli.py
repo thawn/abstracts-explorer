@@ -1264,6 +1264,50 @@ def eval_results_command(args: argparse.Namespace) -> int:
         return 1
 
 
+def eval_clear_command(args: argparse.Namespace) -> int:
+    """
+    Delete all accepted (verified) evaluation Q/A pairs.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments containing:
+        - yes: Skip confirmation prompt
+
+    Returns
+    -------
+    int
+        Exit code (0 for success, non-zero for failure)
+    """
+    try:
+        with DatabaseManager() as db:
+            db.create_tables()
+
+            count = db.get_eval_qa_pair_count(verified_only=True)
+            if count == 0:
+                print("No accepted Q/A pairs found — nothing to clear.")
+                return 0
+
+            print(f"⚠️  This will permanently delete {count} accepted Q/A pair(s).")
+            if not args.yes:
+                answer = input("Are you sure? [y/N]: ").strip().lower()
+                if answer not in ("y", "yes"):
+                    print("Aborted.")
+                    return 0
+
+            deleted = db.delete_verified_eval_qa_pairs()
+            print(f"✅ Deleted {deleted} accepted Q/A pair(s).")
+
+        return 0
+
+    except Exception as e:
+        print(f"\n❌ Error: {e}", file=sys.stderr)
+        import traceback
+
+        traceback.print_exc()
+        return 1
+
+
 def main() -> int:
     """
     Main entry point for the CLI.
@@ -1689,6 +1733,7 @@ Sub-commands:
   verify     Interactively verify/edit/delete Q/A pairs
   run        Run evaluation on stored Q/A pairs
   results    Browse and display evaluation results
+  clear      Delete all accepted Q/A pairs
 
 Examples:
   # Generate Q/A pairs for all MCP tools
@@ -1711,6 +1756,12 @@ Examples:
 
   # Show a random sample of 5 detailed results
   abstracts-explorer eval results --detail --sample 5
+
+  # Clear all accepted pairs (with confirmation)
+  abstracts-explorer eval clear
+
+  # Clear all accepted pairs without confirmation prompt
+  abstracts-explorer eval clear --yes
         """,
     )
     eval_subparsers = eval_parser.add_subparsers(dest="eval_command", help="Evaluation sub-commands")
@@ -1842,6 +1893,19 @@ Examples:
         help="Randomly sample N results for browsing",
     )
 
+    # eval clear
+    eval_clear_parser = eval_subparsers.add_parser(
+        "clear",
+        help="Delete all accepted (verified) Q/A pairs",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    eval_clear_parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Skip confirmation prompt",
+    )
+
     args = parser.parse_args()
 
     # Setup logging based on verbosity
@@ -1879,6 +1943,8 @@ Examples:
             return eval_run_command(args)
         elif args.eval_command == "results":
             return eval_results_command(args)
+        elif args.eval_command == "clear":
+            return eval_clear_command(args)
         else:
             eval_parser.print_help()
             return 1
