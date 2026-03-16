@@ -6,7 +6,7 @@ Large language models and agentic AI systems are increasingly being adopted as t
 
 This workshop brings together developers and users of agentic ML tools for science to openly exchange practical knowledge and experience. Rather than focusing on algorithmic novelty, we emphasize **engineering reality**: Which design patterns lead to reliable agentic behavior? Where do current LLM-based tools fall short in scientific contexts? How do we evaluate whether an agentic tool genuinely accelerates research or merely creates an illusion of productivity?
 
-As a basis for discussion, we present concrete example projects that tackle different facets of agentic scientific tooling — from semantic literature exploration with retrieval-augmented generation and clustering MCP tools to knowledge-graph-based reasoning systems. By dissecting these systems in detail, including their failures and limitations, we aim to distill transferable principles for the community.
+As a basis for discussion, we present concrete example projects that tackle different facets of agentic scientific tooling — from semantic literature exploration with retrieval-augmented generation and clustering MCP tools to machine learning project planning systems. By dissecting these systems in detail, including their failures and limitations, we aim to distill transferable principles for the community.
 
 ### Guiding Questions
 
@@ -19,7 +19,7 @@ As a basis for discussion, we present concrete example projects that tackle diff
 
 1. **Abstracts Explorer** — An open-source Python toolkit combining LLM-based semantic search, unsupervised clustering, and RAG to explore conference proceedings (NeurIPS, ICLR, ICML) at scale. Features native MCP integration for LLM-driven topic and trend analysis, a Flask web interface, and Docker-based deployment. ([github.com/thawn/abstracts-explorer](https://github.com/thawn/abstracts-explorer))
 
-2. **Voucher Canvas Agent** — A prototype system for building and querying scientific knowledge graphs using LLMs. It integrates with existing graph databases and provides a simple API for querying and updating the knowledge base. ([github.com/thawn/voucher-canvas-agent](https://github.com/thawn/voucher-canvas-agent))
+2. **Voucher Canvas Agent** — an AI-powered exploration agent designed to help users plan machine learning projects. It uses a multi-container architecture with a LangGraph agent and a custom exploration server.
 
 ## Agenda
 
@@ -29,7 +29,7 @@ As a basis for discussion, we present concrete example projects that tackle diff
 | ------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | ~30 min | **Introduction to Agentic AI for Science**                                                                                             |
 | ~30 min | **Project Presentation: Abstracts Explorer**                                                                                           |
-| ~30 min | **Project Presentation: Voucher Canvas Agent Reasoner**                                                                                |
+| ~30 min | **Project Presentation: Voucher Canvas Agent**                                                                                |
 | ~15 min | *Break*                                                                                                                                |
 | ~30 min | **Project Presentation: TBD**                                                                                                          |
 | ~15 min | **General Discussion** — Cross-cutting themes: What design patterns transferred? Where did things break? What would we do differently? |
@@ -59,4 +59,4 @@ The workshop combines **presentation-driven discussion** in the morning with **h
 ## Organizers
 
 Till Korten is a Helmholtz AI Consultant and developer of Abstracts Explorer
-Haider Khan is a Helmholtz AI Consultant and developer of Knowledge Graph Reasoner
+Haider Khan is a Helmholtz AI Consultant and developer of Voucher Canvas Agent
