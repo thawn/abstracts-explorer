@@ -23,7 +23,7 @@ As a basis for discussion, we present concrete example projects that tackle diff
 
 ## Agenda
 
-### Morning — Presentations — Architecture walk-through, live demo, design trade-offs, and lessons learned & Discussion (2 h)
+### Presentations — Architecture walk-through, live demo, design trade-offs, and lessons learned & Discussion (2 h)
 
 | Time    | Session                                                                                                                                |
 | ------- | -------------------------------------------------------------------------------------------------------------------------------------- |
@@ -34,7 +34,7 @@ As a basis for discussion, we present concrete example projects that tackle diff
 | ~30 min | **Project Presentation: TBD**                                                                                                          |
 | ~15 min | **General Discussion** — Cross-cutting themes: What design patterns transferred? Where did things break? What would we do differently? |
 
-### Afternoon — Hackathon (2 h)
+### Hackathon (2 h)
 
 Participants form small groups to **build or plan** agentic ML tools hands-on. Groups self-organize around topics proposed in the morning discussion. Possible tracks include:
 
