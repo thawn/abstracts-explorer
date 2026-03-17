@@ -127,6 +127,14 @@ services:
       # Logging configuration
       # Set log level: DEBUG, INFO, WARNING (default), ERROR, CRITICAL
       - LOG_LEVEL=WARNING
+
+      # Reverse-proxy hop counts for werkzeug ProxyFix.
+      # 1 = trust one proxy layer (default, matches the nginx service above).
+      # Set to 0 to disable, or increase for additional proxy layers.
+      - PROXY_X_FOR=1
+      - PROXY_X_PROTO=1
+      - PROXY_X_HOST=1
+      - PROXY_X_PREFIX=1
     
     # Use host network mode for easier access to host's LM Studio
     # Uncomment if using LM Studio on host
