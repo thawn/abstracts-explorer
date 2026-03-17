@@ -2,12 +2,33 @@
 # Compatible with Docker Compose v2+ and Podman Compose
 
 services:
+  # Nginx reverse proxy with SSL termination
+  # Listens on ports 80 (redirect to HTTPS) and 443 (HTTPS).
+  #
+  # REQUIRED before starting: create a ./certs/ directory containing:
+  #   cert.pem  — your SSL certificate (or full chain)
+  #   key.pem   — your SSL private key
+  # The nginx container will fail to start if either file is missing.
+  nginx:
+    image: nginx:stable-alpine
+    container_name: abstracts-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      abstracts-explorer:
+        condition: service_healthy
+    restart: unless-stopped
+
   # Main Abstracts Explorer application
+  # Port 5000 is intentionally not exposed to the host; all external traffic
+  # is routed through the nginx reverse proxy above.
   abstracts-explorer:
     image: ghcr.io/thawn/abstracts-explorer:latest
     container_name: abstracts-explorer
-    ports:
-      - "5000:5000"
     volumes:
       # Persist data directory
       - abstracts-data:/app/data

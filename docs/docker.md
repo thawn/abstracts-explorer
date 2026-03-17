@@ -65,7 +65,45 @@ podman-compose exec abstracts-explorer \
 
 ### 6. Access the Web UI
 
-Open http://localhost:5000 in your browser.
+Open https://localhost in your browser (HTTP on port 80 is automatically redirected to HTTPS).
+
+## HTTPS / SSL Setup
+
+The Docker Compose configuration includes an **nginx reverse proxy** that handles SSL
+termination.  Waitress (the application server) continues to serve plain HTTP on port
+5000 inside the container network while nginx exposes the service securely on port 443.
+
+### Certificate files
+
+Before starting the services you must place your SSL certificate and private key in a
+`certs/` directory next to `docker-compose.yml`:
+
+```
+certs/
+├── cert.pem   ← your certificate (or full chain)
+└── key.pem    ← your private key
+```
+
+The files are mounted into the nginx container as read-only at
+`/etc/nginx/certs/`.
+
+> **Note:** The nginx configuration (`nginx/nginx.conf`) references these paths.  If
+> your certificate files have different names, update the `ssl_certificate` and
+> `ssl_certificate_key` directives in `nginx/nginx.conf` accordingly.
+
+### Changing the server name
+
+By default nginx uses `server_name _;` (match any hostname).  If you want to restrict
+it to a specific domain, edit `nginx/nginx.conf` and replace `_` with your domain:
+
+```nginx
+server_name abstracts.example.com;
+```
+
+### HTTP → HTTPS redirect
+
+Port 80 is always redirected to HTTPS.  Port 5000 is **not** exposed to the host;
+all traffic must go through nginx on port 443.
 
 ## Testing Pull Requests
 
@@ -97,7 +135,9 @@ docker compose ps
 docker compose logs abstracts-explorer
 
 # Access web UI
-curl http://localhost:5000/health
+# - If you have a CA-signed certificate omit the -k flag
+# - -k skips certificate verification (only use for self-signed/test certificates)
+curl -k https://localhost/health
 ```
 
 **Note:** PR images are automatically built and pushed when commits are made to pull requests. They're tagged with `pr-<number>` for easy testing.
@@ -199,10 +239,16 @@ services:
 
 ## Services
 
-The Docker Compose setup includes three services that work together:
+The Docker Compose setup includes four services that work together:
+
+### Nginx Reverse Proxy (nginx)
+- **Ports:** 80 (HTTP → HTTPS redirect), 443 (HTTPS)
+- **Purpose:** SSL termination and reverse proxy to the application
+- **Config:** `./nginx/nginx.conf` (mounted read-only)
+- **Certs:** `./certs/` directory (mounted read-only)
 
 ### Main Application (abstracts-explorer)
-- **Port:** 5000 (exposed to host)
+- **Port:** 5000 (internal only, not exposed to host — access via nginx)
 - **Volumes:** `abstracts-data`
 - **Purpose:** Web UI and CLI tools
 - **Image:** `ghcr.io/thawn/abstracts-explorer:latest`
@@ -220,7 +266,7 @@ The Docker Compose setup includes three services that work together:
 - **Data:** Persisted in `postgres-data` volume
 - **Credentials:** Set in `docker-compose.yml` (change for production!)
 
-**Security Note:** Database ports (5432, 8000) are **not exposed** to the host system. Only the web UI port (5000) is accessible from outside the container network. All inter-service communication happens via Docker's internal network.
+**Security Note:** Database ports (5432, 8000) and the application port (5000) are **not exposed** to the host system. Only the nginx ports (80, 443) are accessible from outside the container network. All inter-service communication happens via Docker's internal network.
 
 ## Common Commands
 
@@ -280,8 +326,9 @@ podman-compose restart chromadb
 
 ### Container Won't Start
 - Check logs: `podman-compose logs abstracts-explorer`
-- Verify port 5000 is available: `lsof -i :5000`
+- Verify ports 80 and 443 are available: `lsof -i :80 -i :443`
 - Rebuild: `podman-compose build --no-cache && podman-compose up -d`
+- Ensure `./certs/cert.pem` and `./certs/key.pem` exist before starting nginx
 
 ### Cannot Connect to LM Studio
 - Ensure LM Studio server is running with models loaded
@@ -304,6 +351,7 @@ podman unshare chown 1000:1000 /path/to/volume
 
 ### Cannot Access Databases from Host
 - Database ports (5432, 8000) are **intentionally not exposed** for security
+- The application port (5000) is also internal — use https://localhost instead
 - Access via application container: `podman-compose exec abstracts-explorer psql`
 - For debugging, temporarily add port mappings to `docker-compose.yml`
 
@@ -322,7 +370,7 @@ services:
 
 1. **Change default passwords** in `docker-compose.yml`
 2. **Use external secrets** for tokens
-3. **Enable HTTPS** with a reverse proxy (nginx, traefik)
+3. **HTTPS is enabled by default** via the built-in nginx reverse proxy (see [HTTPS / SSL Setup](#https--ssl-setup))
 4. **Set resource limits** for memory and CPU
 5. **Configure monitoring** and health checks
 6. **Use specific image tags** instead of `latest` (e.g., `v1.0.0` or `sha-5f8567d` for precise version control)

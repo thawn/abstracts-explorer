@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 from flask import Flask, render_template, request, jsonify, g, send_file
 from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
@@ -37,6 +38,13 @@ PACKAGE_DIR = Path(__file__).parent
 # Initialize Flask app with correct template/static folders
 app = Flask(__name__, template_folder=str(PACKAGE_DIR / "templates"), static_folder=str(PACKAGE_DIR / "static"))
 CORS(app)
+
+# Apply ProxyFix so Flask correctly interprets X-Forwarded-* headers set by a
+# reverse proxy (e.g. nginx).  x_for=1 / x_proto=1 / x_host=1 / x_prefix=1
+# means we trust exactly one proxy hop, which matches the nginx setup in
+# docker-compose.yml.  When the app is run directly (no proxy), no
+# X-Forwarded-* headers are present so ProxyFix is a no-op.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)  # type: ignore[assignment]
 
 # Initialize components (lazy loading)
 embeddings_manager = None
