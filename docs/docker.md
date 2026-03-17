@@ -212,6 +212,31 @@ docker compose -f docker-compose.letsencrypt.yml exec certbot \
 In both setups port 80 is redirected to HTTPS and port 5000 is **not** exposed to the
 host; all traffic must go through nginx on port 443.
 
+### Security hardening
+
+Both nginx configurations include the following security hardening out of the box:
+
+| Setting | Value / Behaviour |
+|---|---|
+| **TLS protocol** | TLS 1.3 only (TLS 1.2 disabled; see comments in config to re-enable for legacy clients) |
+| **TLS 1.2 ciphers** (if re-enabled) | ECDHE + AES-GCM + ChaCha20-Poly1305 only; weak/export ciphers excluded |
+| **SSL session tickets** | Disabled (`ssl_session_tickets off`) to preserve forward secrecy |
+| **SSL session cache** | Shared 10 MB cache, 1 day timeout |
+| **OCSP stapling** | Enabled — reduces handshake latency and supports revocation checking |
+| **Server version** | Hidden (`server_tokens off`) |
+| **HSTS** | `max-age=63072000; includeSubDomains` (2 years) |
+| **X-Content-Type-Options** | `nosniff` |
+| **X-Frame-Options** | `SAMEORIGIN` |
+| **Referrer-Policy** | `strict-origin-when-cross-origin` |
+| **X-XSS-Protection** | `1; mode=block` |
+| **X-Powered-By** | Stripped from upstream responses |
+
+> **OCSP stapling note (Option 1 — existing cert):** OCSP stapling requires a certificate
+> issued by a public CA and the full certificate chain in `cert.pem`.  If you are using a
+> self-signed certificate, remove the `ssl_stapling`, `ssl_stapling_verify`,
+> `ssl_trusted_certificate`, `resolver`, and `resolver_timeout` lines from
+> `nginx/nginx.conf`.
+
 ## Testing Pull Requests
 
 To test changes from a pull request before they're merged:
@@ -436,6 +461,7 @@ podman-compose restart chromadb
 - Verify ports 80 and 443 are available: `lsof -i :80 -i :443`
 - Rebuild: `podman-compose build --no-cache && podman-compose up -d`
 - **Existing cert setup:** ensure `./certs/cert.pem` and `./certs/key.pem` exist before starting nginx
+- **Existing cert + self-signed cert:** remove the `ssl_stapling*`, `resolver`, and `resolver_timeout` lines from `nginx/nginx.conf` — OCSP stapling is not available for self-signed certificates
 - **Let's Encrypt setup:** ensure you ran the Certbot standalone command (Step 2) before starting the stack
 
 ### Cannot Connect to LM Studio
