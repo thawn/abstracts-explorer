@@ -36,6 +36,10 @@ LLM_BACKEND_AUTH_TOKEN=your_blablador_token_here
 curl -L https://github.com/thawn/abstracts-explorer/raw/main/docker-compose.yml -o docker-compose.yml
 ```
 
+> **HTTPS certificates required** — the default `docker-compose.yml` uses nginx with
+> your own certificate files.  See [HTTPS / SSL Setup](#https--ssl-setup) below for
+> how to place your certificate (Option 1) or use Let's Encrypt (Option 2).
+
 ### 3. Start Services
 
 ```bash
@@ -69,13 +73,29 @@ Open https://localhost in your browser (HTTP on port 80 is automatically redirec
 
 ## HTTPS / SSL Setup
 
-The Docker Compose configuration includes an **nginx reverse proxy** that handles SSL
-termination.  Waitress (the application server) continues to serve plain HTTP on port
-5000 inside the container network while nginx exposes the service securely on port 443.
+Both Docker Compose files include an **nginx reverse proxy** that handles SSL termination.
+Waitress (the application server) continues to serve plain HTTP on port 5000 inside the
+container network while nginx exposes the service securely on port 443.
 
-### Certificate files
+Choose the approach that matches your situation:
 
-Before starting the services you must place your SSL certificate and private key in a
+| Approach | Compose file | When to use |
+|---|---|---|
+| **Existing certificate** | `docker-compose.yml` | You already have a valid certificate (e.g. from your institution or a wildcard cert) |
+| **Let's Encrypt** | `docker-compose.letsencrypt.yml` | You need a free, automatically renewed certificate for a public domain |
+
+---
+
+### Option 1: Existing Certificate
+
+> Compose file: `docker-compose.yml`
+
+Use this when you already have a valid SSL certificate (e.g. issued by your institution,
+a wildcard cert, or any other CA).
+
+#### Certificate files
+
+Before starting the services place your SSL certificate and private key in a
 `certs/` directory next to `docker-compose.yml`:
 
 ```
@@ -84,26 +104,113 @@ certs/
 └── key.pem    ← your private key
 ```
 
-The files are mounted into the nginx container as read-only at
-`/etc/nginx/certs/`.
+The files are mounted into the nginx container as read-only at `/etc/nginx/certs/`.
 
 > **Note:** The nginx configuration (`nginx/nginx.conf`) references these paths.  If
 > your certificate files have different names, update the `ssl_certificate` and
 > `ssl_certificate_key` directives in `nginx/nginx.conf` accordingly.
 
-### Changing the server name
+#### Changing the server name
 
-By default nginx uses `server_name _;` (match any hostname).  If you want to restrict
-it to a specific domain, edit `nginx/nginx.conf` and replace `_` with your domain:
+By default nginx uses `server_name _;` (match any hostname).  To restrict it to a
+specific domain, edit `nginx/nginx.conf` and replace `_` with your domain:
 
 ```nginx
 server_name abstracts.example.com;
 ```
 
+#### Start the stack
+
+```bash
+docker compose up -d
+```
+
+---
+
+### Option 2: Let's Encrypt Certificate
+
+> Compose file: `docker-compose.letsencrypt.yml`
+
+Use this when you need a free, automatically renewed certificate from
+[Let's Encrypt](https://letsencrypt.org/).
+
+> **Requirements**
+> - A **public domain** that points to this server (Let's Encrypt cannot issue
+>   certificates for `localhost` or private IP addresses).
+> - Ports **80** and **443** must be reachable from the internet so Let's Encrypt can
+>   verify domain ownership.
+
+#### Step 1 — Replace the placeholder domain
+
+Edit **both** `docker-compose.letsencrypt.yml` **and** `nginx/nginx.letsencrypt.conf`,
+replacing every occurrence of `abstracts.example.com` with your real domain.
+
+#### Step 2 — Obtain the initial certificate
+
+Run Certbot once in standalone mode *before* starting the stack (nginx must not be
+running yet so that Certbot can bind to port 80):
+
+```bash
+# Docker
+docker run --rm \
+  -p 80:80 \
+  -v letsencrypt-certs:/etc/letsencrypt \
+  certbot/certbot certonly --standalone \
+  --domain abstracts.example.com \
+  --email your@email.com \
+  --agree-tos --non-interactive
+
+# Podman
+podman run --rm \
+  -p 80:80 \
+  -v letsencrypt-certs:/etc/letsencrypt \
+  certbot/certbot certonly --standalone \
+  --domain abstracts.example.com \
+  --email your@email.com \
+  --agree-tos --non-interactive
+```
+
+#### Step 3 — Start the stack
+
+```bash
+docker compose -f docker-compose.letsencrypt.yml up -d
+```
+
+#### Automatic renewal
+
+The `certbot` service in `docker-compose.letsencrypt.yml` checks for renewal every
+12 hours.  Let's Encrypt certificates expire after 90 days; renewal is attempted
+automatically when fewer than 30 days remain.
+
+After a successful renewal, nginx must be **reloaded** to activate the new certificate
+(certbot and nginx run in separate containers, so this cannot happen automatically).
+Run this command once after renewal:
+
+```bash
+docker compose -f docker-compose.letsencrypt.yml exec nginx nginx -s reload
+```
+
+To automate the reload, add a daily host cron job (replace `docker` with `podman`
+if using Podman):
+
+```bash
+# Add via: crontab -e
+0 3 * * * docker exec abstracts-nginx nginx -s reload
+```
+
+To force an immediate renewal:
+
+```bash
+docker compose -f docker-compose.letsencrypt.yml exec certbot \
+  certbot renew --webroot -w /var/www/certbot --force-renewal
+```
+
+---
+
 ### HTTP → HTTPS redirect
 
-Port 80 is always redirected to HTTPS.  Port 5000 is **not** exposed to the host;
-all traffic must go through nginx on port 443.
+In both setups port 80 is redirected to HTTPS and port 5000 is **not** exposed to the
+host; all traffic must go through nginx on port 443.
 
 ## Testing Pull Requests
 
@@ -328,7 +435,8 @@ podman-compose restart chromadb
 - Check logs: `podman-compose logs abstracts-explorer`
 - Verify ports 80 and 443 are available: `lsof -i :80 -i :443`
 - Rebuild: `podman-compose build --no-cache && podman-compose up -d`
-- Ensure `./certs/cert.pem` and `./certs/key.pem` exist before starting nginx
+- **Existing cert setup:** ensure `./certs/cert.pem` and `./certs/key.pem` exist before starting nginx
+- **Let's Encrypt setup:** ensure you ran the Certbot standalone command (Step 2) before starting the stack
 
 ### Cannot Connect to LM Studio
 - Ensure LM Studio server is running with models loaded
@@ -368,9 +476,9 @@ services:
 
 ## Production Deployment
 
-1. **Change default passwords** in `docker-compose.yml`
+1. **Change default passwords** in your compose file
 2. **Use external secrets** for tokens
-3. **HTTPS is enabled by default** via the built-in nginx reverse proxy (see [HTTPS / SSL Setup](#https--ssl-setup))
+3. **HTTPS is enabled by default** via the built-in nginx reverse proxy — see [Option 1](#option-1-existing-certificate) for an existing cert or [Option 2](#option-2-lets-encrypt-certificate) for Let's Encrypt
 4. **Set resource limits** for memory and CPU
 5. **Configure monitoring** and health checks
 6. **Use specific image tags** instead of `latest` (e.g., `v1.0.0` or `sha-5f8567d` for precise version control)
