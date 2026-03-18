@@ -7,6 +7,7 @@ This module provides downloadable plugin implementations for different data sour
 Available plugins:
 - ICLRDownloaderPlugin: Official ICLR conference data
 - ICMLDownloaderPlugin: Official ICML conference data
+- IEEEVISDownloaderPlugin: Official IEEE VIS conference data
 - ML4PSDownloaderPlugin: ML4PS workshop data
 - NeurIPSDownloaderPlugin: Official NeurIPS conference data
 
@@ -37,6 +38,7 @@ from abstracts_explorer.plugin import (
 # Import actual plugin implementations
 from .iclr_downloader import ICLRDownloaderPlugin
 from .icml_downloader import ICMLDownloaderPlugin
+from .ieeevis_downloader import IEEEVISDownloaderPlugin
 from .ml4ps_downloader import ML4PSDownloaderPlugin
 from .neurips_downloader import NeurIPSDownloaderPlugin
 
@@ -61,6 +63,7 @@ __all__ = [
     # Plugin implementations
     "ICLRDownloaderPlugin",
     "ICMLDownloaderPlugin",
+    "IEEEVISDownloaderPlugin",
     "ML4PSDownloaderPlugin",
     "NeurIPSDownloaderPlugin",
 ]
