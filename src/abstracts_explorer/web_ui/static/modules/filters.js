@@ -66,6 +66,24 @@ export async function loadFilterOptions() {
                     });
                 }
             }
+
+            // Apply defaults only on initial load (when nothing is selected yet)
+            if (conferenceSelect && !conferenceSelect.value && availableData.default_conference) {
+                const defaultConf = String(availableData.default_conference);
+                const confOption = Array.from(conferenceSelect.options).find(opt => opt.value === defaultConf);
+                if (confOption) {
+                    conferenceSelect.value = defaultConf;
+                    updateYearsForConference();
+                }
+            }
+
+            if (yearSelect && !yearSelect.value && availableData.default_year != null) {
+                const defaultYear = String(availableData.default_year);
+                const yearOption = Array.from(yearSelect.options).find(opt => opt.value === defaultYear);
+                if (yearOption) {
+                    yearSelect.value = defaultYear;
+                }
+            }
         }
 
         // Clear and repopulate search session filter

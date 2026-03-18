@@ -308,6 +308,9 @@ def get_available_filters_endpoint():
     """
     try:
         filters = get_available_filters()
+        config = get_config()
+        filters["default_conference"] = config.default_conference
+        filters["default_year"] = config.default_year if config.default_year else None
         return jsonify(filters)
     except Exception as e:
         logger.error(f"Error in available-filters endpoint: {e}", exc_info=True)
