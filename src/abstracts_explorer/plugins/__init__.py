@@ -5,6 +5,7 @@ Download Plugins
 This module provides downloadable plugin implementations for different data sources.
 
 Available plugins:
+- CHIDownloaderPlugin: ACM CHI conference data (from SIGCHI program JSON)
 - ICLRDownloaderPlugin: Official ICLR conference data
 - ICMLDownloaderPlugin: Official ICML conference data
 - IEEEVISDownloaderPlugin: Official IEEE VIS conference data
@@ -36,6 +37,7 @@ from abstracts_explorer.plugin import (
 )
 
 # Import actual plugin implementations
+from .chi_downloader import CHIDownloaderPlugin
 from .iclr_downloader import ICLRDownloaderPlugin
 from .icml_downloader import ICMLDownloaderPlugin
 from .ieeevis_downloader import IEEEVISDownloaderPlugin
@@ -61,6 +63,7 @@ __all__ = [
     "validate_lightweight_paper",
     "validate_lightweight_papers",
     # Plugin implementations
+    "CHIDownloaderPlugin",
     "ICLRDownloaderPlugin",
     "ICMLDownloaderPlugin",
     "IEEEVISDownloaderPlugin",

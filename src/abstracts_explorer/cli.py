@@ -577,6 +577,11 @@ def download_command(args: argparse.Namespace) -> int:
         if plugin_name == "ml4ps":
             kwargs["max_workers"] = getattr(args, "max_workers", 20)
 
+        if plugin_name == "chi":
+            input_file = getattr(args, "input_file", None)
+            if input_file:
+                kwargs["input_path"] = input_file
+
         # Download data using plugin
         json_path = output_path.parent / f"{plugin_name}_{args.year}.json"
         papers = plugin.download(year=args.year, output_path=str(json_path), force_download=args.force, **kwargs)
@@ -925,6 +930,7 @@ Download papers from various sources using plugins.
 Available plugins:
   neurips  - Official NeurIPS conference data (2013-2025)
   ml4ps    - ML4PS (Machine Learning for Physical Sciences) workshop (2025)
+  chi      - ACM CHI conference data (2023-2025, requires manual JSON download)
 
 Examples:
   # Download NeurIPS 2025 papers
@@ -932,6 +938,9 @@ Examples:
 
   # Download ML4PS 2025 workshop papers with abstracts
   neurips-abstracts download --plugin ml4ps --year 2025
+
+  # Load CHI 2024 papers from a pre-downloaded JSON
+  abstracts-explorer download --plugin chi --year 2024 --input-file chi_2024_program.json
 
   # List available plugins
   neurips-abstracts download --list-plugins
@@ -970,6 +979,16 @@ Examples:
         type=int,
         default=20,
         help="Maximum parallel workers for fetching data (default: 20)",
+    )
+    download_parser.add_argument(
+        "--input-file",
+        type=str,
+        default=None,
+        dest="input_file",
+        help=(
+            "Path to a pre-downloaded conference JSON file. "
+            "Required for the 'chi' plugin (download the file from programs.sigchi.org)."
+        ),
     )
 
     # Create embeddings command
