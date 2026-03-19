@@ -131,7 +131,7 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
             raise ValueError(
                 "CHI conference data must be downloaded manually from the SIGCHI program PWA.\n"
                 f"  1. Go to https://programs.sigchi.org/chi/{example_year}\n"
-                "  2. Click 'Get conference data JSON'\n"
+                "  2. Scroll to the very bottom of the page and click 'Get conference data JSON'\n"
                 "  3. Pass the downloaded file with --input-file <path>"
             )
 
