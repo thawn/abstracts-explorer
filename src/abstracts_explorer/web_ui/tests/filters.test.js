@@ -87,6 +87,85 @@ describe('Filters Module', () => {
             const yearSelect = document.getElementById('year-selector');
             expect(yearSelect.options.length).toBeGreaterThan(1);
         });
+
+        it('should call window.loadStats when a default conference is applied', async () => {
+            const mockLoadStats = jest.fn();
+            window.loadStats = mockLoadStats;
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    conferences: ['NeurIPS', 'ICLR'],
+                    years: [2024, 2025],
+                    conference_years: { 'NeurIPS': [2024, 2025], 'ICLR': [2024] },
+                    default_conference: 'NeurIPS',
+                    default_year: null
+                })
+            });
+
+            await loadFilterOptions();
+
+            const conferenceSelect = document.getElementById('conference-selector');
+            expect(conferenceSelect.value).toBe('NeurIPS');
+            expect(mockLoadStats).toHaveBeenCalled();
+
+            delete window.loadStats;
+        });
+
+        it('should call window.loadStats when a default year is applied', async () => {
+            const mockLoadStats = jest.fn();
+            window.loadStats = mockLoadStats;
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    conferences: [],
+                    years: [2024, 2025],
+                    conference_years: {},
+                    default_conference: '',
+                    default_year: 2025
+                })
+            });
+
+            await loadFilterOptions();
+
+            const yearSelect = document.getElementById('year-selector');
+            expect(yearSelect.value).toBe('2025');
+            expect(mockLoadStats).toHaveBeenCalled();
+
+            delete window.loadStats;
+        });
+
+        it('should not call window.loadStats when no defaults are configured', async () => {
+            const mockLoadStats = jest.fn();
+            window.loadStats = mockLoadStats;
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    conferences: ['NeurIPS'],
+                    years: [2024],
+                    conference_years: { 'NeurIPS': [2024] },
+                    default_conference: '',
+                    default_year: null
+                })
+            });
+
+            await loadFilterOptions();
+
+            expect(mockLoadStats).not.toHaveBeenCalled();
+
+            delete window.loadStats;
+        });
     });
 
     describe('selectAllFilter', () => {

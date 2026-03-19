@@ -68,12 +68,14 @@ export async function loadFilterOptions() {
             }
 
             // Apply defaults only on initial load (when nothing is selected yet)
+            let defaultApplied = false;
             if (conferenceSelect && !conferenceSelect.value && availableData.default_conference) {
                 const defaultConf = String(availableData.default_conference);
                 const confOption = Array.from(conferenceSelect.options).find(opt => opt.value === defaultConf);
                 if (confOption) {
                     conferenceSelect.value = defaultConf;
                     updateYearsForConference();
+                    defaultApplied = true;
                 }
             }
 
@@ -82,7 +84,13 @@ export async function loadFilterOptions() {
                 const yearOption = Array.from(yearSelect.options).find(opt => opt.value === defaultYear);
                 if (yearOption) {
                     yearSelect.value = defaultYear;
+                    defaultApplied = true;
                 }
+            }
+
+            // Refresh stats to reflect the newly applied defaults
+            if (defaultApplied && window.loadStats) {
+                window.loadStats();
             }
         }
 
