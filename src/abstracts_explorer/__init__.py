@@ -106,12 +106,43 @@ For simpler use cases, use `LightweightDownloaderPlugin` which only requires ess
     register_plugin(MyLightweightPlugin())
 """
 
-from .config import Config, get_config
-from .database import DatabaseManager
-from .embeddings import EmbeddingsManager
-from .clustering import ClusteringManager, ClusteringError, perform_clustering
-from .rag import RAGChat
-from .plugins import (
+import logging
+
+
+def _configure_package_logging() -> None:
+    """
+    Configure package-level logging at import time.
+
+    Sets the log level for the abstracts_explorer package based on the
+    LOG_LEVEL environment variable or .env file. Defaults to WARNING to
+    prevent plugin import messages from appearing during normal startup.
+
+    This runs before plugin imports to ensure INFO-level plugin registration
+    messages are suppressed unless LOG_LEVEL is explicitly configured.
+    """
+    from .config import get_config
+
+    config = get_config()
+    level_name = config.log_level or "WARNING"
+    level_map = {
+        "DEBUG": logging.DEBUG,
+        "INFO": logging.INFO,
+        "WARNING": logging.WARNING,
+        "ERROR": logging.ERROR,
+        "CRITICAL": logging.CRITICAL,
+    }
+    level = level_map.get(level_name, logging.WARNING)
+    logging.getLogger("abstracts_explorer").setLevel(level)
+
+
+_configure_package_logging()
+
+from .config import Config, get_config  # noqa: E402
+from .database import DatabaseManager  # noqa: E402
+from .embeddings import EmbeddingsManager  # noqa: E402
+from .clustering import ClusteringManager, ClusteringError, perform_clustering  # noqa: E402
+from .rag import RAGChat  # noqa: E402
+from .plugins import (  # noqa: E402
     DownloaderPlugin,
     LightweightDownloaderPlugin,
     PluginRegistry,
@@ -122,7 +153,7 @@ from .plugins import (
 )
 
 # Import plugins to auto-register them
-from . import plugins  # noqa: F401
+from . import plugins  # noqa: E402, F401
 
 __version__ = "0.1.0"
 __all__ = [
