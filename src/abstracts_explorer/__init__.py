@@ -107,7 +107,6 @@ For simpler use cases, use `LightweightDownloaderPlugin` which only requires ess
 """
 
 import logging
-import os
 
 
 def _configure_package_logging() -> None:
@@ -121,16 +120,10 @@ def _configure_package_logging() -> None:
     This runs before plugin imports to ensure INFO-level plugin registration
     messages are suppressed unless LOG_LEVEL is explicitly configured.
     """
-    # Check environment variable first (highest priority)
-    level_name = os.environ.get("LOG_LEVEL", "").upper()
+    from .config import get_config
 
-    # Fall back to .env file if not set in environment
-    if not level_name:
-        from .config import load_env_file
-
-        env_vars = load_env_file()
-        level_name = env_vars.get("LOG_LEVEL", "WARNING").upper()
-
+    config = get_config()
+    level_name = config.log_level or "WARNING"
     level_map = {
         "DEBUG": logging.DEBUG,
         "INFO": logging.INFO,

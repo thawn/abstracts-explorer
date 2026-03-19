@@ -2038,9 +2038,11 @@ class TestPackageLogging:
 
     def test_configure_package_logging_default_warning(self, monkeypatch):
         """Test that package logger is set to WARNING by default."""
+        from tests.conftest import get_env_test_path
         from abstracts_explorer import _configure_package_logging
 
         monkeypatch.delenv("LOG_LEVEL", raising=False)
+        get_config(reload=True, env_path=get_env_test_path())
 
         _configure_package_logging()
 
@@ -2051,6 +2053,7 @@ class TestPackageLogging:
         from abstracts_explorer import _configure_package_logging
 
         monkeypatch.setenv("LOG_LEVEL", "INFO")
+        get_config(reload=True)
 
         _configure_package_logging()
 
@@ -2061,6 +2064,7 @@ class TestPackageLogging:
         from abstracts_explorer import _configure_package_logging
 
         monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+        get_config(reload=True)
 
         _configure_package_logging()
 
@@ -2071,6 +2075,7 @@ class TestPackageLogging:
         from abstracts_explorer import _configure_package_logging
 
         monkeypatch.setenv("LOG_LEVEL", "INVALID")
+        get_config(reload=True)
 
         _configure_package_logging()
 
@@ -2083,10 +2088,10 @@ class TestPackageLogging:
         # No LOG_LEVEL in environment
         monkeypatch.delenv("LOG_LEVEL", raising=False)
 
-        # Create a .env file in a temp dir and change to it
+        # Create a .env file in a temp dir and reload config from it
         env_file = tmp_path / ".env"
         env_file.write_text("LOG_LEVEL=DEBUG\n")
-        monkeypatch.chdir(tmp_path)
+        get_config(reload=True, env_path=env_file)
 
         _configure_package_logging()
 
