@@ -66,6 +66,9 @@ def setup_logging(verbosity: int) -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
         force=True,  # Force reconfiguration even if logging is already configured
     )
+    # Reset the package logger so it inherits the newly configured root level.
+    # This overrides the level set at import time by _configure_package_logging().
+    logging.getLogger("abstracts_explorer").setLevel(logging.NOTSET)
 
 
 def create_embeddings_command(args: argparse.Namespace) -> int:
