@@ -678,6 +678,81 @@ class TestStoreQAPairs:
 # ---------------------------------------------------------------------------
 
 
+class TestJudgeAnswer:
+    """Tests for Evaluator._judge_answer robustness."""
+
+    def _make_evaluator(self, eval_db, mock_em):
+        return Evaluator(embeddings_manager=mock_em, db=eval_db)
+
+    def _make_judge_resp(self, content):
+        resp = Mock()
+        resp.choices = [Mock(message=Mock(content=content))]
+        return resp
+
+    def test_judge_plain_json(self, eval_db, mock_em):
+        """Judge parses a plain JSON object."""
+        ev = self._make_evaluator(eval_db, mock_em)
+        ev.openai_client.chat.completions.create.return_value = self._make_judge_resp(
+            '{"score": 4, "reasoning": "ok"}'
+        )
+        result = ev._judge_answer("q", "expected", "actual")
+        assert result["score"] == 4
+        assert result["reasoning"] == "ok"
+
+    def test_judge_markdown_fenced(self, eval_db, mock_em):
+        """Judge strips markdown fences before parsing."""
+        ev = self._make_evaluator(eval_db, mock_em)
+        ev.openai_client.chat.completions.create.return_value = self._make_judge_resp(
+            '```json\n{"score": 3, "reasoning": "partial"}\n```'
+        )
+        result = ev._judge_answer("q", "expected", "actual")
+        assert result["score"] == 3
+
+    def test_judge_preamble_text(self, eval_db, mock_em):
+        """Judge extracts JSON even when the model adds preamble text."""
+        ev = self._make_evaluator(eval_db, mock_em)
+        ev.openai_client.chat.completions.create.return_value = self._make_judge_resp(
+            'Here is my evaluation:\n{"score": 5, "reasoning": "excellent"}'
+        )
+        result = ev._judge_answer("q", "expected", "actual")
+        assert result["score"] == 5
+
+    def test_judge_null_score_defaults_to_3(self, eval_db, mock_em):
+        """Judge handles null score gracefully by defaulting to 3."""
+        ev = self._make_evaluator(eval_db, mock_em)
+        ev.openai_client.chat.completions.create.return_value = self._make_judge_resp(
+            '{"score": null, "reasoning": "could not decide"}'
+        )
+        result = ev._judge_answer("q", "expected", "actual")
+        assert result["score"] == 3
+
+    def test_judge_clamps_score(self, eval_db, mock_em):
+        """Judge clamps scores to the 1-5 range."""
+        ev = self._make_evaluator(eval_db, mock_em)
+        ev.openai_client.chat.completions.create.return_value = self._make_judge_resp(
+            '{"score": 10, "reasoning": ""}'
+        )
+        result = ev._judge_answer("q", "expected", "actual")
+        assert result["score"] == 5
+
+    def test_judge_no_json_returns_none(self, eval_db, mock_em):
+        """Judge returns None score when no JSON object is found."""
+        ev = self._make_evaluator(eval_db, mock_em)
+        ev.openai_client.chat.completions.create.return_value = self._make_judge_resp("The answer is great.")
+        result = ev._judge_answer("q", "expected", "actual")
+        assert result["score"] is None
+        assert "Judge error" in result["reasoning"]
+
+    def test_judge_think_block_then_json(self, eval_db, mock_em):
+        """Judge strips <think> block before extracting JSON."""
+        ev = self._make_evaluator(eval_db, mock_em)
+        ev.openai_client.chat.completions.create.return_value = self._make_judge_resp(
+            '<think>Let me think...</think>\n{"score": 2, "reasoning": "poor"}'
+        )
+        result = ev._judge_answer("q", "expected", "actual")
+        assert result["score"] == 2
+
+
 class TestRunEvaluation:
     """Tests for the Evaluator.run_evaluation method."""
 
@@ -721,6 +796,27 @@ class TestRunEvaluation:
         for r in results:
             assert r["answer_score"] == 4.0
             assert r["actual_answer"] is not None
+
+    def test_run_evaluation_none_response(self, evaluator_verified):
+        """Test evaluation handles None response from RAG (e.g. empty LLM content)."""
+        mock_rag_result = {
+            "response": None,  # can happen when message.content is None
+            "papers": [],
+            "metadata": {"tools_executed": [], "n_papers": 0},
+        }
+
+        with patch("abstracts_explorer.rag.RAGChat") as MockRAG:
+            mock_rag_instance = MockRAG.return_value
+            mock_rag_instance.query.return_value = mock_rag_result
+
+            run_id = evaluator_verified.run_evaluation(verified_only=True)
+
+        results = evaluator_verified.db.get_eval_results(run_id=run_id)
+        assert len(results) == 3
+        for r in results:
+            # Score should be None (judge never called) but no error
+            assert r["answer_score"] is None
+            assert r["error"] is None
 
     def test_run_evaluation_with_error(self, evaluator_verified):
         """Test evaluation handles query errors gracefully."""

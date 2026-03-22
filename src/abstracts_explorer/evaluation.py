@@ -677,13 +677,26 @@ class Evaluator:
                 timeout=60,
             )
             raw = resp.choices[0].message.content or ""
+            logger.debug(f"Judge raw response: {raw[:200]}")
             # Strip <think> blocks
             cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
             # Strip markdown fences
-            cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-            cleaned = re.sub(r"\s*```$", "", cleaned)
-            parsed = json.loads(cleaned.strip())
-            score = max(1, min(5, int(parsed.get("score", 3))))
+            cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.MULTILINE)
+            cleaned = re.sub(r"\s*```$", "", cleaned, flags=re.MULTILINE)
+            cleaned = cleaned.strip()
+            # Use raw_decode to extract the first JSON object even if the model
+            # adds preamble text (e.g. "Here is my evaluation: {…}")
+            decoder = json.JSONDecoder()
+            start = cleaned.find("{")
+            if start == -1:
+                raise ValueError(f"No JSON object found in judge response: {cleaned[:200]!r}")
+            parsed, _ = decoder.raw_decode(cleaned, start)
+            score_raw = parsed.get("score")
+            if score_raw is None:
+                logger.warning("Judge returned null score, defaulting to 3")
+                score = 3
+            else:
+                score = max(1, min(5, int(score_raw)))
             return {"score": score, "reasoning": parsed.get("reasoning", "")}
         except Exception as exc:
             logger.warning(f"Judge scoring failed: {exc}")
@@ -755,7 +768,7 @@ class Evaluator:
 
                 try:
                     result = rag.query(query_text)
-                    actual_answer = result.get("response", "")
+                    actual_answer = (result.get("response") or "").strip()
                     tools_used = result.get("metadata", {}).get("tools_executed", [])
                     actual_tool = tools_used[0] if tools_used else None
                 except Exception as exc:
@@ -773,6 +786,8 @@ class Evaluator:
                 judge_result: Dict[str, Any] = {"score": None, "reasoning": ""}
                 if actual_answer and not error_msg:
                     judge_result = self._judge_answer(query_text, expected, actual_answer)
+                elif not error_msg:
+                    logger.warning(f"Skipping judge for pair {qa_pair_id}: empty response from RAG")
 
                 self.db.add_eval_result(
                     run_id=run_id,
