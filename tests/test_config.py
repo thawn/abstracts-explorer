@@ -312,6 +312,28 @@ PAPER_DB=/absolute/path/to/papers.db
         # URLs should remain unchanged
         assert config.embedding_db == "http://chromadb:8000"
 
+    def test_config_default_conference_and_year(self, tmp_path):
+        """Test that DEFAULT_CONFERENCE and DEFAULT_YEAR can be configured."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("""
+DEFAULT_CONFERENCE=NeurIPS
+DEFAULT_YEAR=2024
+""")
+
+        config = Config(env_path=env_file)
+
+        assert config.default_conference == "NeurIPS"
+        assert config.default_year == 2024
+
+    def test_config_default_conference_and_year_defaults(self, tmp_path):
+        """Test that DEFAULT_CONFERENCE and DEFAULT_YEAR default to empty/zero."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("")
+
+        config = Config(env_path=env_file)
+
+        assert config.default_conference == ""
+        assert config.default_year == 0
     def test_config_imprint_link_default(self, tmp_path):
         """Test that imprint_link defaults to empty string."""
         env_file = tmp_path / ".env"

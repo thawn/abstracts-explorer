@@ -214,6 +214,10 @@ class Config:
         self.enable_query_rewriting = self._get_env_bool("ENABLE_QUERY_REWRITING", default=True)
         self.query_similarity_threshold = self._get_env_float("QUERY_SIMILARITY_THRESHOLD", default=0.7)
 
+        # Web UI Default Filters
+        self.default_conference = self._get_env("DEFAULT_CONFERENCE", default="")
+        self.default_year = self._get_env_int("DEFAULT_YEAR", default=0)
+
         # Logging Configuration
         self.log_level = self._get_env("LOG_LEVEL", default="").upper()
 
