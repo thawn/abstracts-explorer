@@ -115,6 +115,18 @@ class Config:
     log_level : str
         Logging level from environment (WARNING, INFO, DEBUG). Empty string if not set.
         Used by setup_logging() to set the default log level when verbosity flags are not used.
+    proxy_x_for : int
+        Number of trusted ``X-Forwarded-For`` proxy hops (ProxyFix).
+        Set to 0 to disable; set to the number of reverse-proxy layers in front of the app.
+    proxy_x_proto : int
+        Number of trusted ``X-Forwarded-Proto`` proxy hops (ProxyFix).
+    proxy_x_host : int
+        Number of trusted ``X-Forwarded-Host`` proxy hops (ProxyFix).
+    proxy_x_prefix : int
+        Number of trusted ``X-Forwarded-Prefix`` proxy hops (ProxyFix).
+    imprint_link : str
+        Optional URL for an imprint/legal notice page. If set, a link is shown in the web UI footer.
+        Empty string by default (no imprint link shown).
 
     Examples
     --------
@@ -202,8 +214,24 @@ class Config:
         self.enable_query_rewriting = self._get_env_bool("ENABLE_QUERY_REWRITING", default=True)
         self.query_similarity_threshold = self._get_env_float("QUERY_SIMILARITY_THRESHOLD", default=0.7)
 
+        # Web UI Default Filters
+        self.default_conference = self._get_env("DEFAULT_CONFERENCE", default="")
+        self.default_year = self._get_env_int("DEFAULT_YEAR", default=0)
+
         # Logging Configuration
         self.log_level = self._get_env("LOG_LEVEL", default="").upper()
+
+        # Reverse-proxy hop counts for werkzeug ProxyFix.
+        # Set to 0 to disable; set to the number of reverse-proxy layers in front of
+        # the app (default 1 matches the single nginx layer in docker-compose.yml).
+        self.proxy_x_for = self._get_env_int("PROXY_X_FOR", default=1)
+        self.proxy_x_proto = self._get_env_int("PROXY_X_PROTO", default=1)
+        self.proxy_x_host = self._get_env_int("PROXY_X_HOST", default=1)
+        self.proxy_x_prefix = self._get_env_int("PROXY_X_PREFIX", default=1)
+
+        # Web UI Footer Configuration
+        # Optional imprint/legal notice URL shown in the footer (empty = not shown)
+        self.imprint_link = self._get_env("IMPRINT_LINK", default="")
 
     def _get_env(self, key: str, default: str = "") -> str:
         """

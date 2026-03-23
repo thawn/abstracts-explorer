@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 from flask import Flask, render_template, request, jsonify, g, send_file
 from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
@@ -37,6 +38,23 @@ PACKAGE_DIR = Path(__file__).parent
 # Initialize Flask app with correct template/static folders
 app = Flask(__name__, template_folder=str(PACKAGE_DIR / "templates"), static_folder=str(PACKAGE_DIR / "static"))
 CORS(app)
+
+# Apply ProxyFix so Flask correctly interprets X-Forwarded-* headers set by a
+# reverse proxy (e.g. nginx).  The hop counts are read from environment variables
+# (PROXY_X_FOR, PROXY_X_PROTO, PROXY_X_HOST, PROXY_X_PREFIX) so the number of
+# trusted proxy layers can be tuned in docker-compose.yml or the .env file
+# without rebuilding the image.  The defaults (1) match the single nginx layer
+# in docker-compose.yml.  Set any value to 0 to disable that header entirely.
+# When the app is run directly (no proxy), no X-Forwarded-* headers are present
+# so ProxyFix is a no-op regardless of the configured values.
+_config = get_config()
+app.wsgi_app = ProxyFix(  # type: ignore[assignment]
+    app.wsgi_app,
+    x_for=_config.proxy_x_for,
+    x_proto=_config.proxy_x_proto,
+    x_host=_config.proxy_x_host,
+    x_prefix=_config.proxy_x_prefix,
+)
 
 # Initialize components (lazy loading)
 embeddings_manager = None
@@ -128,7 +146,7 @@ def index():
     str
         Rendered HTML template
     """
-    return render_template("index.html", version=__version__)
+    return render_template("index.html", version=__version__, imprint_link=_config.imprint_link)
 
 
 @app.route("/health")
@@ -290,6 +308,9 @@ def get_available_filters_endpoint():
     """
     try:
         filters = get_available_filters()
+        config = get_config()
+        filters["default_conference"] = config.default_conference
+        filters["default_year"] = config.default_year if config.default_year else None
         return jsonify(filters)
     except Exception as e:
         logger.error(f"Error in available-filters endpoint: {e}", exc_info=True)

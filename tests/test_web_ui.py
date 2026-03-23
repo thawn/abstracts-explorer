@@ -111,9 +111,34 @@ class TestWebInterface:
         response = client.get("/")
         assert response.status_code == 200
         # Check that version is present in footer
-        assert b"Powered by Abstracts Explorer version" in response.data
+        assert b"Powered by" in response.data
+        assert b"Abstracts Explorer" in response.data
+        # Ensure "Abstracts Explorer" links to the GitHub project page
+        assert b"https://github.com/thawn/abstracts-explorer" in response.data
         # Ensure the template variable was replaced (not left as {{ version }})
         assert b"{{ version }}" not in response.data
+
+    def test_index_no_imprint_link_by_default(self, client):
+        """Test that the imprint link is not shown by default."""
+        response = client.get("/")
+        assert response.status_code == 200
+        assert b"Imprint" not in response.data
+
+    def test_index_imprint_link_shown_when_configured(self, client):
+        """Test that the imprint link is shown when IMPRINT_LINK is configured."""
+        import importlib
+
+        web_app_module = importlib.import_module("abstracts_explorer.web_ui.app")
+
+        original_imprint_link = web_app_module._config.imprint_link
+        try:
+            web_app_module._config.imprint_link = "https://example.com/imprint"
+            response = client.get("/")
+            assert response.status_code == 200
+            assert b"Imprint" in response.data
+            assert b"https://example.com/imprint" in response.data
+        finally:
+            web_app_module._config.imprint_link = original_imprint_link
 
     def test_stats_endpoint_no_db(self, client):
         """Test stats endpoint when database doesn't exist."""
@@ -132,6 +157,48 @@ class TestWebInterface:
         response = client.get("/api/years")
         # Should return error if DB doesn't exist
         assert response.status_code in [200, 500]
+
+    def test_available_filters_includes_defaults(self, client):
+        """Test that /api/available-filters includes default_conference and default_year."""
+        from unittest.mock import patch
+
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+
+        with patch.object(
+            app_module, "get_available_filters", return_value={"conferences": [], "years": [], "conference_years": {}}
+        ):
+            with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
+                mock_cfg.return_value.default_conference = "NeurIPS"
+                mock_cfg.return_value.default_year = 2024
+                response = client.get("/api/available-filters")
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["default_conference"] == "NeurIPS"
+        assert data["default_year"] == 2024
+
+    def test_available_filters_empty_defaults(self, client):
+        """Test that /api/available-filters returns null default_year when not set."""
+        from unittest.mock import patch
+
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+
+        with patch.object(
+            app_module, "get_available_filters", return_value={"conferences": [], "years": [], "conference_years": {}}
+        ):
+            with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
+                mock_cfg.return_value.default_conference = ""
+                mock_cfg.return_value.default_year = 0
+                response = client.get("/api/available-filters")
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["default_conference"] == ""
+        assert data["default_year"] is None
 
 
 class TestSearchEndpoint:

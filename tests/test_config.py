@@ -19,8 +19,7 @@ class TestLoadEnvFile:
     def test_load_env_file_basic(self, tmp_path):
         """Test loading a basic .env file."""
         env_file = tmp_path / ".env"
-        env_file.write_text(
-            """
+        env_file.write_text("""
 # Comment line
 CHAT_MODEL=test-model
 EMBEDDING_MODEL=test-embedding
@@ -28,8 +27,7 @@ LLM_BACKEND_URL=http://test:8080
 
 # Another comment
 MAX_CONTEXT_PAPERS=10
-"""
-        )
+""")
 
         env_vars = load_env_file(env_file)
 
@@ -41,13 +39,11 @@ MAX_CONTEXT_PAPERS=10
     def test_load_env_file_with_quotes(self, tmp_path):
         """Test loading .env file with quoted values."""
         env_file = tmp_path / ".env"
-        env_file.write_text(
-            """
+        env_file.write_text("""
 CHAT_MODEL="quoted-model"
 EMBEDDING_MODEL='single-quoted'
 LLM_BACKEND_URL=http://localhost:1234
-"""
-        )
+""")
 
         env_vars = load_env_file(env_file)
 
@@ -58,16 +54,14 @@ LLM_BACKEND_URL=http://localhost:1234
     def test_load_env_file_empty_lines(self, tmp_path):
         """Test loading .env file with empty lines."""
         env_file = tmp_path / ".env"
-        env_file.write_text(
-            """
+        env_file.write_text("""
 CHAT_MODEL=model1
 
 EMBEDDING_MODEL=model2
 
 
 LLM_BACKEND_URL=http://test
-"""
-        )
+""")
 
         env_vars = load_env_file(env_file)
 
@@ -170,8 +164,7 @@ class TestConfig:
     def test_config_from_env_file(self, tmp_path):
         """Test loading configuration from .env file."""
         env_file = tmp_path / ".env"
-        env_file.write_text(
-            """
+        env_file.write_text("""
 CHAT_MODEL=custom-chat-model
 EMBEDDING_MODEL=custom-embedding
 LLM_BACKEND_URL=http://custom:9999
@@ -182,8 +175,7 @@ COLLECTION_NAME=custom_collection
 MAX_CONTEXT_PAPERS=15
 CHAT_TEMPERATURE=0.9
 CHAT_MAX_TOKENS=4000
-"""
-        )
+""")
 
         config = Config(env_path=env_file)
 
@@ -213,13 +205,11 @@ CHAT_MAX_TOKENS=4000
     def test_config_type_conversion(self, tmp_path):
         """Test configuration type conversion for int and float."""
         env_file = tmp_path / ".env"
-        env_file.write_text(
-            """
+        env_file.write_text("""
 MAX_CONTEXT_PAPERS=20
 CHAT_TEMPERATURE=0.5
 CHAT_MAX_TOKENS=500
-"""
-        )
+""")
 
         config = Config(env_path=env_file)
 
@@ -301,12 +291,10 @@ CHAT_MAX_TOKENS=500
     def test_config_absolute_paths_unchanged(self, tmp_path):
         """Test that absolute paths are not modified."""
         env_file = tmp_path / ".env"
-        env_file.write_text(
-            """
+        env_file.write_text("""
 EMBEDDING_DB=/absolute/path/to/chroma_db
 PAPER_DB=/absolute/path/to/papers.db
-"""
-        )
+""")
 
         config = Config(env_path=env_file)
 
@@ -323,6 +311,46 @@ PAPER_DB=/absolute/path/to/papers.db
 
         # URLs should remain unchanged
         assert config.embedding_db == "http://chromadb:8000"
+
+    def test_config_default_conference_and_year(self, tmp_path):
+        """Test that DEFAULT_CONFERENCE and DEFAULT_YEAR can be configured."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("""
+DEFAULT_CONFERENCE=NeurIPS
+DEFAULT_YEAR=2024
+""")
+
+        config = Config(env_path=env_file)
+
+        assert config.default_conference == "NeurIPS"
+        assert config.default_year == 2024
+
+    def test_config_default_conference_and_year_defaults(self, tmp_path):
+        """Test that DEFAULT_CONFERENCE and DEFAULT_YEAR default to empty/zero."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("")
+
+        config = Config(env_path=env_file)
+
+        assert config.default_conference == ""
+        assert config.default_year == 0
+    def test_config_imprint_link_default(self, tmp_path):
+        """Test that imprint_link defaults to empty string."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("")
+
+        config = Config(env_path=env_file)
+
+        assert config.imprint_link == ""
+
+    def test_config_imprint_link_from_env(self, tmp_path):
+        """Test loading IMPRINT_LINK from .env file."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("IMPRINT_LINK=https://example.com/imprint")
+
+        config = Config(env_path=env_file)
+
+        assert config.imprint_link == "https://example.com/imprint"
 
 
 class TestGetConfig:
