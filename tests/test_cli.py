@@ -7,6 +7,7 @@ including the download and create-embeddings commands.
 
 import sys
 import logging
+import contextlib
 from unittest.mock import Mock, patch
 import pytest
 from abstracts_explorer.cli import (
@@ -2006,3 +2007,141 @@ class TestLogging:
 
         # Check that root logger falls back to WARNING
         assert logging.root.level == logging.WARNING
+
+    def test_setup_logging_resets_package_logger(self, monkeypatch):
+        """Test that setup_logging resets the abstracts_explorer package logger to NOTSET."""
+        from tests.conftest import get_env_test_path
+
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+        get_config(reload=True, env_path=get_env_test_path())
+
+        setup_logging(1)  # INFO
+
+        # Package logger should be NOTSET so it inherits from root
+        assert logging.getLogger("abstracts_explorer").level == logging.NOTSET
+
+    def test_setup_logging_package_logger_inherits_root(self, monkeypatch):
+        """Test that after setup_logging, the package logger inherits the root level."""
+        from tests.conftest import get_env_test_path
+
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+        get_config(reload=True, env_path=get_env_test_path())
+
+        setup_logging(1)  # INFO
+
+        # Effective level of package logger should match root (INFO)
+        assert logging.getLogger("abstracts_explorer").getEffectiveLevel() == logging.INFO
+
+
+class TestPackageLogging:
+    """Test cases for package-level logging configuration at import time."""
+
+    def test_configure_package_logging_default_warning(self, monkeypatch):
+        """Test that package logger is set to WARNING by default."""
+        from tests.conftest import get_env_test_path
+        from abstracts_explorer import _configure_package_logging
+
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+        get_config(reload=True, env_path=get_env_test_path())
+
+        _configure_package_logging()
+
+        assert logging.getLogger("abstracts_explorer").level == logging.WARNING
+
+    def test_configure_package_logging_env_var_info(self, monkeypatch):
+        """Test that LOG_LEVEL=INFO env var is respected at import time."""
+        from abstracts_explorer import _configure_package_logging
+
+        monkeypatch.setenv("LOG_LEVEL", "INFO")
+        get_config(reload=True)
+
+        _configure_package_logging()
+
+        assert logging.getLogger("abstracts_explorer").level == logging.INFO
+
+    def test_configure_package_logging_env_var_debug(self, monkeypatch):
+        """Test that LOG_LEVEL=DEBUG env var is respected at import time."""
+        from abstracts_explorer import _configure_package_logging
+
+        monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+        get_config(reload=True)
+
+        _configure_package_logging()
+
+        assert logging.getLogger("abstracts_explorer").level == logging.DEBUG
+
+    def test_configure_package_logging_env_var_invalid(self, monkeypatch):
+        """Test that an invalid LOG_LEVEL falls back to WARNING."""
+        from abstracts_explorer import _configure_package_logging
+
+        monkeypatch.setenv("LOG_LEVEL", "INVALID")
+        get_config(reload=True)
+
+        _configure_package_logging()
+
+        assert logging.getLogger("abstracts_explorer").level == logging.WARNING
+
+    def test_configure_package_logging_env_file(self, monkeypatch, tmp_path):
+        """Test that LOG_LEVEL in .env file is respected at import time."""
+        from abstracts_explorer import _configure_package_logging
+
+        # No LOG_LEVEL in environment
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+
+        # Create a .env file in a temp dir and reload config from it
+        env_file = tmp_path / ".env"
+        env_file.write_text("LOG_LEVEL=DEBUG\n")
+        get_config(reload=True, env_path=env_file)
+
+        _configure_package_logging()
+
+        assert logging.getLogger("abstracts_explorer").level == logging.DEBUG
+
+    def test_plugin_info_messages_suppressed_at_default_level(self, monkeypatch):
+        """Test that plugin registration INFO messages are suppressed at default WARNING level."""
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+
+        # Ensure package logger is at WARNING
+        logging.getLogger("abstracts_explorer").setLevel(logging.WARNING)
+
+        # Capture log records from the plugin logger
+        plugin_logger = logging.getLogger("abstracts_explorer.plugin")
+        with self._capture_logs(plugin_logger, logging.INFO) as captured:
+            # Simulate a plugin registration
+            plugin_logger.info("Registered plugin: test")
+
+        # INFO message should NOT have been captured (WARNING level blocks it)
+        assert len(captured) == 0
+
+    def test_plugin_info_messages_visible_at_info_level(self, monkeypatch):
+        """Test that plugin registration INFO messages are shown when LOG_LEVEL=INFO."""
+        monkeypatch.setenv("LOG_LEVEL", "INFO")
+
+        # Ensure package logger is at INFO
+        logging.getLogger("abstracts_explorer").setLevel(logging.INFO)
+
+        # Capture log records from the plugin logger
+        plugin_logger = logging.getLogger("abstracts_explorer.plugin")
+        with self._capture_logs(plugin_logger, logging.INFO) as captured:
+            plugin_logger.info("Registered plugin: test")
+
+        # INFO message should have been captured
+        assert len(captured) == 1
+        assert "Registered plugin: test" in captured[0].getMessage()
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _capture_logs(logger, level):
+        """Context manager to capture log records from a logger."""
+        records = []
+
+        class _Handler(logging.Handler):
+            def emit(self, record):
+                records.append(record)
+
+        handler = _Handler(level)
+        logger.addHandler(handler)
+        try:
+            yield records
+        finally:
+            logger.removeHandler(handler)

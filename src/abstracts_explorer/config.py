@@ -124,6 +124,9 @@ class Config:
         Number of trusted ``X-Forwarded-Host`` proxy hops (ProxyFix).
     proxy_x_prefix : int
         Number of trusted ``X-Forwarded-Prefix`` proxy hops (ProxyFix).
+    imprint_link : str
+        Optional URL for an imprint/legal notice page. If set, a link is shown in the web UI footer.
+        Empty string by default (no imprint link shown).
 
     Examples
     --------
@@ -225,6 +228,10 @@ class Config:
         self.proxy_x_proto = self._get_env_int("PROXY_X_PROTO", default=1)
         self.proxy_x_host = self._get_env_int("PROXY_X_HOST", default=1)
         self.proxy_x_prefix = self._get_env_int("PROXY_X_PREFIX", default=1)
+
+        # Web UI Footer Configuration
+        # Optional imprint/legal notice URL shown in the footer (empty = not shown)
+        self.imprint_link = self._get_env("IMPRINT_LINK", default="")
 
     def _get_env(self, key: str, default: str = "") -> str:
         """

@@ -334,6 +334,23 @@ DEFAULT_YEAR=2024
 
         assert config.default_conference == ""
         assert config.default_year == 0
+    def test_config_imprint_link_default(self, tmp_path):
+        """Test that imprint_link defaults to empty string."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("")
+
+        config = Config(env_path=env_file)
+
+        assert config.imprint_link == ""
+
+    def test_config_imprint_link_from_env(self, tmp_path):
+        """Test loading IMPRINT_LINK from .env file."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("IMPRINT_LINK=https://example.com/imprint")
+
+        config = Config(env_path=env_file)
+
+        assert config.imprint_link == "https://example.com/imprint"
 
 
 class TestGetConfig:
