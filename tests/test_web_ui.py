@@ -111,9 +111,34 @@ class TestWebInterface:
         response = client.get("/")
         assert response.status_code == 200
         # Check that version is present in footer
-        assert b"Powered by Abstracts Explorer version" in response.data
+        assert b"Powered by" in response.data
+        assert b"Abstracts Explorer" in response.data
+        # Ensure "Abstracts Explorer" links to the GitHub project page
+        assert b"https://github.com/thawn/abstracts-explorer" in response.data
         # Ensure the template variable was replaced (not left as {{ version }})
         assert b"{{ version }}" not in response.data
+
+    def test_index_no_imprint_link_by_default(self, client):
+        """Test that the imprint link is not shown by default."""
+        response = client.get("/")
+        assert response.status_code == 200
+        assert b"Imprint" not in response.data
+
+    def test_index_imprint_link_shown_when_configured(self, client):
+        """Test that the imprint link is shown when IMPRINT_LINK is configured."""
+        import importlib
+
+        web_app_module = importlib.import_module("abstracts_explorer.web_ui.app")
+
+        original_imprint_link = web_app_module._config.imprint_link
+        try:
+            web_app_module._config.imprint_link = "https://example.com/imprint"
+            response = client.get("/")
+            assert response.status_code == 200
+            assert b"Imprint" in response.data
+            assert b"https://example.com/imprint" in response.data
+        finally:
+            web_app_module._config.imprint_link = original_imprint_link
 
     def test_stats_endpoint_no_db(self, client):
         """Test stats endpoint when database doesn't exist."""

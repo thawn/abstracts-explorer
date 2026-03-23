@@ -146,7 +146,7 @@ def index():
     str
         Rendered HTML template
     """
-    return render_template("index.html", version=__version__)
+    return render_template("index.html", version=__version__, imprint_link=_config.imprint_link)
 
 
 @app.route("/health")
