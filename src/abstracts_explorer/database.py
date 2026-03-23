@@ -1121,14 +1121,10 @@ class DatabaseManager:
             if not results:
                 return None
 
-<<<<<<< copilot/improve-clustering-cache
             # When no clustering_params are requested, find the first entry whose
             # stored clustering_params is also NULL.
             # Entries that have extra params stored (e.g. distance_threshold) are
             # skipped here because they represent different clustering runs.
-=======
-            # If no clustering_params specified, return first match
->>>>>>> main
             if clustering_params is None:
                 for result in results:
                     if result.clustering_params is not None:
@@ -1278,7 +1274,6 @@ class DatabaseManager:
             self._session.rollback()
             raise DatabaseError(f"Failed to clear clustering cache: {str(e)}") from e
 
-<<<<<<< copilot/improve-clustering-cache
     # ------------------------------------------------------------------
     # Hierarchical label cache
     # ------------------------------------------------------------------
@@ -1307,7 +1302,85 @@ class DatabaseManager:
         dict or None
             Mapping of ``{node_id: label}`` (integer keys), or ``None`` if
             no entry is found.
-=======
+
+        Raises
+        ------
+        DatabaseError
+            If query fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            import json
+
+            stmt = (
+                select(HierarchicalLabelCache)
+                .where(
+                    and_(
+                        HierarchicalLabelCache.embedding_model == embedding_model,
+                        HierarchicalLabelCache.linkage == linkage,
+                    )
+                )
+                .order_by(HierarchicalLabelCache.created_at.desc())
+                .limit(1)
+            )
+            result = self._session.execute(stmt).scalars().first()
+            if result is None:
+                return None
+            raw = json.loads(result.labels_json)
+            # JSON keys are always strings – convert back to int
+            return {int(k): v for k, v in raw.items()}
+
+        except Exception as e:
+            raise DatabaseError(f"Failed to get hierarchical label cache: {str(e)}") from e
+
+    def save_hierarchical_label_cache(
+        self,
+        embedding_model: str,
+        labels: Dict[int, str],
+        linkage: str = "ward",
+    ) -> None:
+        """
+        Save hierarchical cluster labels to cache.
+
+        Parameters
+        ----------
+        embedding_model : str
+            Name of the embedding model.
+        labels : dict
+            Mapping of ``{node_id: label}`` to store.
+        linkage : str, optional
+            Agglomerative linkage method (default: ``"ward"``).
+
+        Raises
+        ------
+        DatabaseError
+            If save fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            import json
+
+            labels_json = json.dumps({str(k): v for k, v in labels.items()})
+            entry = HierarchicalLabelCache(
+                embedding_model=embedding_model,
+                linkage=linkage,
+                labels_json=labels_json,
+            )
+            self._session.add(entry)
+            self._session.commit()
+            logger.info(
+                f"Saved hierarchical label cache: {len(labels)} labels, "
+                f"model={embedding_model}, linkage={linkage}"
+            )
+
+        except Exception as e:
+            self._session.rollback()
+            raise DatabaseError(f"Failed to save hierarchical label cache: {str(e)}") from e
+
     # ------------------------------------------------------------------ #
     #  Evaluation Q/A pair and result methods                              #
     # ------------------------------------------------------------------ #
@@ -1396,7 +1469,6 @@ class DatabaseManager:
         -------
         list of dict
             Matching Q/A pairs as dictionaries.
->>>>>>> main
 
         Raises
         ------
@@ -1407,48 +1479,6 @@ class DatabaseManager:
             raise DatabaseError("Not connected to database")
 
         try:
-<<<<<<< copilot/improve-clustering-cache
-            import json
-
-            stmt = (
-                select(HierarchicalLabelCache)
-                .where(
-                    and_(
-                        HierarchicalLabelCache.embedding_model == embedding_model,
-                        HierarchicalLabelCache.linkage == linkage,
-                    )
-                )
-                .order_by(HierarchicalLabelCache.created_at.desc())
-                .limit(1)
-            )
-            result = self._session.execute(stmt).scalars().first()
-            if result is None:
-                return None
-            raw = json.loads(result.labels_json)
-            # JSON keys are always strings – convert back to int
-            return {int(k): v for k, v in raw.items()}
-
-        except Exception as e:
-            raise DatabaseError(f"Failed to get hierarchical label cache: {str(e)}") from e
-
-    def save_hierarchical_label_cache(
-        self,
-        embedding_model: str,
-        labels: Dict[int, str],
-        linkage: str = "ward",
-    ) -> None:
-        """
-        Save hierarchical cluster labels to cache.
-
-        Parameters
-        ----------
-        embedding_model : str
-            Name of the embedding model.
-        labels : dict
-            Mapping of ``{node_id: label}`` to store.
-        linkage : str, optional
-            Agglomerative linkage method (default: ``"ward"``).
-=======
             stmt = select(EvalQAPair)
             if verified_only:
                 stmt = stmt.where(EvalQAPair.verified == 1)
@@ -1626,41 +1656,16 @@ class DatabaseManager:
         -------
         int
             Number of rows deleted.
->>>>>>> main
 
         Raises
         ------
         DatabaseError
-<<<<<<< copilot/improve-clustering-cache
-            If save fails.
-=======
             If deletion fails.
->>>>>>> main
         """
         if not self._session:
             raise DatabaseError("Not connected to database")
 
         try:
-<<<<<<< copilot/improve-clustering-cache
-            import json
-
-            labels_json = json.dumps({str(k): v for k, v in labels.items()})
-            entry = HierarchicalLabelCache(
-                embedding_model=embedding_model,
-                linkage=linkage,
-                labels_json=labels_json,
-            )
-            self._session.add(entry)
-            self._session.commit()
-            logger.info(
-                f"Saved hierarchical label cache: {len(labels)} labels, "
-                f"model={embedding_model}, linkage={linkage}"
-            )
-
-        except Exception as e:
-            self._session.rollback()
-            raise DatabaseError(f"Failed to save hierarchical label cache: {str(e)}") from e
-=======
             stmt = delete(EvalResult)
             if run_id is not None:
                 stmt = stmt.where(EvalResult.run_id == run_id)
@@ -1890,4 +1895,3 @@ class DatabaseManager:
             }
         except Exception as e:
             raise DatabaseError(f"Failed to compute eval run summary: {str(e)}") from e
->>>>>>> main
