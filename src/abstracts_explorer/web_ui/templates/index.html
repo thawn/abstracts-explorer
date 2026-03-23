@@ -610,8 +610,11 @@
     <footer class="bg-gray-800 text-white mt-12">
         <div class="container mx-auto px-4 py-6">
             <div class="text-center">
-                <p class="text-sm">Powered by Abstracts Explorer version {{ version }}</p>
+                <p class="text-sm">Powered by <a href="https://github.com/thawn/abstracts-explorer" class="underline hover:text-gray-300" target="_blank" rel="noopener noreferrer">Abstracts Explorer</a> version {{ version }}</p>
                 <p class="text-xs text-gray-400 mt-2">Open source project for exploring conference abstracts</p>
+                {% if imprint_link %}
+                <p class="text-xs text-gray-400 mt-2"><a href="{{ imprint_link }}" class="underline hover:text-gray-300" target="_blank" rel="noopener noreferrer">Imprint</a></p>
+                {% endif %}
             </div>
         </div>
     </footer>
