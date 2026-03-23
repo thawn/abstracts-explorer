@@ -1643,12 +1643,15 @@ class DatabaseManager:
 
     def get_eval_run_ids(self) -> List[str]:
         """
-        Return distinct evaluation run IDs, most recent first.
+        Return distinct evaluation run IDs ordered by run time, oldest first.
+
+        The ordering is determined by the minimum ``created_at`` timestamp of
+        all results in each run, so the most recent run appears last.
 
         Returns
         -------
         list of str
-            Distinct run IDs ordered by most recent creation date.
+            Distinct run IDs ordered chronologically (oldest to newest).
 
         Raises
         ------
@@ -1659,8 +1662,10 @@ class DatabaseManager:
             raise DatabaseError("Not connected to database")
 
         try:
-            stmt = select(EvalResult.run_id).distinct().order_by(EvalResult.run_id.desc())
-            return list(self._session.execute(stmt).scalars().all())
+            stmt = (
+                select(EvalResult.run_id).group_by(EvalResult.run_id).order_by(func.min(EvalResult.created_at).asc())
+            )
+            return [row.run_id for row in self._session.execute(stmt).all()]
         except Exception as e:
             raise DatabaseError(f"Failed to get eval run IDs: {str(e)}") from e
 
@@ -1677,11 +1682,13 @@ class DatabaseManager:
         -------
         dict
             Dictionary with keys:
+
             - total : int – number of evaluated pairs
             - avg_score : float or None – mean answer quality score
             - tool_accuracy : float or None – fraction of correct tool selections
             - avg_latency_ms : float or None – mean latency
             - error_count : int – number of queries that produced errors
+            - run_date : datetime or None – timestamp of the first result in the run
 
         Raises
         ------
@@ -1700,6 +1707,7 @@ class DatabaseManager:
                     "tool_accuracy": None,
                     "avg_latency_ms": None,
                     "error_count": 0,
+                    "run_date": None,
                 }
 
             total = len(results)
@@ -1708,12 +1716,17 @@ class DatabaseManager:
             latencies = [r["latency_ms"] for r in results if r["latency_ms"] is not None]
             errors = sum(1 for r in results if r["error"])
 
+            # Determine the timestamp of the earliest result in this run
+            stmt = select(func.min(EvalResult.created_at)).where(EvalResult.run_id == run_id)
+            run_date = self._session.execute(stmt).scalar()
+
             return {
                 "total": total,
                 "avg_score": (sum(scores) / len(scores)) if scores else None,
                 "tool_accuracy": (sum(tool_vals) / len(tool_vals)) if tool_vals else None,
                 "avg_latency_ms": (sum(latencies) / len(latencies)) if latencies else None,
                 "error_count": errors,
+                "run_date": run_date,
             }
         except Exception as e:
             raise DatabaseError(f"Failed to compute eval run summary: {str(e)}") from e

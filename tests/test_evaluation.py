@@ -386,7 +386,7 @@ class TestEvalResultModel:
         assert len(results) == 2
 
     def test_get_eval_run_ids(self, eval_db):
-        """Test getting distinct run IDs."""
+        """Test getting distinct run IDs in chronological order (oldest first)."""
         eval_db.add_eval_result(run_id="run-002", qa_pair_id=1)
         eval_db.add_eval_result(run_id="run-001", qa_pair_id=2)
 
@@ -395,6 +395,9 @@ class TestEvalResultModel:
         assert len(run_ids) == 2
         assert "run-001" in run_ids
         assert "run-002" in run_ids
+        # run-002 was inserted first, so it should appear first
+        assert run_ids[0] == "run-002"
+        assert run_ids[-1] == "run-001"
 
     def test_get_eval_run_summary(self, eval_db):
         """Test computing run summary statistics."""
@@ -425,6 +428,7 @@ class TestEvalResultModel:
         assert summary["tool_accuracy"] == pytest.approx(0.5)
         assert summary["avg_latency_ms"] == pytest.approx(2066.67, abs=1)
         assert summary["error_count"] == 1
+        assert summary["run_date"] is not None
 
     def test_get_eval_run_summary_empty(self, eval_db):
         """Test summary for non-existent run."""
@@ -434,6 +438,7 @@ class TestEvalResultModel:
         assert summary["tool_accuracy"] is None
         assert summary["avg_latency_ms"] is None
         assert summary["error_count"] == 0
+        assert summary["run_date"] is None
 
 
 # ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@ including downloading data, creating databases, and generating embeddings.
 import argparse
 import logging
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from tqdm import tqdm
@@ -1208,11 +1209,11 @@ def eval_results_command(args: argparse.Namespace) -> int:
                 print("No evaluation results found. Run 'eval run' first.")
                 return 0
 
-            # Determine which run to show
+            # Determine which run to show (runs are oldest-first, so [-1] is the most recent)
             if args.run_id:
                 target_run = args.run_id
             else:
-                target_run = run_ids[0]
+                target_run = run_ids[-1]
                 print(f"Showing latest run: {target_run}")
 
             if target_run not in run_ids:
@@ -1246,13 +1247,18 @@ def eval_results_command(args: argparse.Namespace) -> int:
                     print(format_eval_result_detail(r, qa))
                     print()
 
-            # List all available runs
-            if len(run_ids) > 1:
+            # List all available runs (oldest first, so most recent is shown last)
+            if len(run_ids) >= 1:
                 print(f"\n📁 Available runs ({len(run_ids)}):")
                 for rid in run_ids:
                     s = db.get_eval_run_summary(rid)
                     score_str = f"{s['avg_score']:.2f}" if s.get("avg_score") else "N/A"
-                    print(f"   {rid}: {s['total']} pairs, avg score: {score_str}")
+                    run_date = s.get("run_date")
+                    date_str = (
+                        run_date.strftime("%Y-%m-%d %H:%M") if isinstance(run_date, datetime) else "unknown date"
+                    )
+                    marker = " ◀ current" if rid == target_run else ""
+                    print(f"   {date_str}  {rid}: {s['total']} pairs, avg score: {score_str}{marker}")
 
         return 0
 

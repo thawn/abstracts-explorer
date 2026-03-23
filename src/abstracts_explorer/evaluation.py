@@ -18,6 +18,7 @@ import random
 import re
 import time
 import uuid
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from .config import get_config
@@ -208,8 +209,14 @@ def format_eval_summary(summary: Dict[str, Any], run_id: str) -> str:
     lines = [
         f"Evaluation Run: {run_id}",
         "=" * 50,
-        f"Total pairs evaluated: {summary['total']}",
     ]
+
+    run_date = summary.get("run_date")
+    if run_date is not None:
+        date_str = run_date.strftime("%Y-%m-%d %H:%M:%S") if isinstance(run_date, datetime) else str(run_date)
+        lines.append(f"Run date:              {date_str}")
+
+    lines.append(f"Total pairs evaluated: {summary['total']}")
 
     avg = summary.get("avg_score")
     if avg is not None:
