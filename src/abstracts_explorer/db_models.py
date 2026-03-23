@@ -141,9 +141,10 @@ class ClusteringCache(Base):
     """
     Clustering cache model.
 
-    Stores cached clustering results (cluster assignments and labels) without
-    visualization coordinates. The dimensionality reduction for visualization
-    is performed on demand and is not part of the cache key.
+    Stores cached clustering results including visualization coordinates.
+    When only the dimensionality reduction method changes, the clustering
+    results (assignments, labels, hierarchy) are reused and only the reduction
+    is re-applied, avoiding expensive re-clustering.
 
     Attributes
     ----------
@@ -151,12 +152,10 @@ class ClusteringCache(Base):
         Auto-incrementing primary key.
     embedding_model : str
         Name of the embedding model used.
-    reduction_method : str, optional
-        Retained for backward compatibility only – no longer part of the
-        cache key. New entries store ``"none"``.
-    n_components : int, optional
-        Retained for backward compatibility only – no longer part of the
-        cache key. New entries store ``0``.
+    reduction_method : str
+        Dimensionality reduction method used (e.g., 'pca', 'tsne').
+    n_components : int
+        Number of dimensions after reduction.
     clustering_method : str
         Clustering algorithm used (e.g., 'kmeans', 'dbscan').
     n_clusters : int, optional
@@ -164,8 +163,8 @@ class ClusteringCache(Base):
     clustering_params : str
         JSON string of additional clustering parameters.
     results_json : str
-        JSON string containing clustering results (paper_ids,
-        cluster_assignments, labels, hierarchy, statistics) – no x/y coords.
+        JSON string containing full clustering results including points
+        with visualization coordinates.
     created_at : datetime
         Timestamp when cache was created.
     """

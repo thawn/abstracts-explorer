@@ -800,13 +800,21 @@ class TestClusteringCache:
         db.connect()
         db.create_tables()
 
-        # Create mock results in new cache format (paper_ids + cluster_assignments)
-        results1 = {"paper_ids": ["p1"], "cluster_assignments": [0], "statistics": {"n_clusters": 2}}
-        results2 = {"paper_ids": ["p1"], "cluster_assignments": [1], "statistics": {"n_clusters": 3}}
+        # Create mock results
+        results1 = {
+            "points": [{"id": "p1", "x": 0, "y": 0, "cluster": 0}],
+            "statistics": {"n_clusters": 2},
+        }
+        results2 = {
+            "points": [{"id": "p1", "x": 1, "y": 1, "cluster": 1}],
+            "statistics": {"n_clusters": 3},
+        }
 
         # Save first result with distance_threshold=1.0
         db.save_clustering_cache(
             embedding_model="model1",
+            reduction_method="pca",
+            n_components=2,
             clustering_method="agglomerative",
             results=results1,
             n_clusters=None,
@@ -816,6 +824,8 @@ class TestClusteringCache:
         # Save second result with distance_threshold=2.0
         db.save_clustering_cache(
             embedding_model="model1",
+            reduction_method="pca",
+            n_components=2,
             clustering_method="agglomerative",
             results=results2,
             n_clusters=None,
@@ -825,6 +835,8 @@ class TestClusteringCache:
         # Retrieve with distance_threshold=1.0 should get results1
         cached = db.get_clustering_cache(
             embedding_model="model1",
+            reduction_method="pca",
+            n_components=2,
             clustering_method="agglomerative",
             n_clusters=None,
             clustering_params={"distance_threshold": 1.0, "linkage": "ward"},
@@ -835,6 +847,8 @@ class TestClusteringCache:
         # Retrieve with distance_threshold=2.0 should get results2
         cached = db.get_clustering_cache(
             embedding_model="model1",
+            reduction_method="pca",
+            n_components=2,
             clustering_method="agglomerative",
             n_clusters=None,
             clustering_params={"distance_threshold": 2.0, "linkage": "ward"},
@@ -845,6 +859,8 @@ class TestClusteringCache:
         # Retrieve with distance_threshold=3.0 should return None (cache miss)
         cached = db.get_clustering_cache(
             embedding_model="model1",
+            reduction_method="pca",
+            n_components=2,
             clustering_method="agglomerative",
             n_clusters=None,
             clustering_params={"distance_threshold": 3.0, "linkage": "ward"},
@@ -866,11 +882,16 @@ class TestClusteringCache:
         db.connect()
         db.create_tables()
 
-        # Save result without params (new format)
-        results = {"paper_ids": ["p1", "p2"], "cluster_assignments": [0, 1], "statistics": {"n_clusters": 5}}
+        # Save result without params
+        results = {
+            "points": [{"id": "p1", "x": 0, "y": 0, "cluster": 0}],
+            "statistics": {"n_clusters": 5},
+        }
 
         db.save_clustering_cache(
             embedding_model="model1",
+            reduction_method="pca",
+            n_components=2,
             clustering_method="kmeans",
             results=results,
             n_clusters=5,
@@ -879,53 +900,20 @@ class TestClusteringCache:
 
         # Retrieve without params should work
         cached = db.get_clustering_cache(
-            embedding_model="model1", clustering_method="kmeans", n_clusters=5, clustering_params=None
+            embedding_model="model1",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            n_clusters=5,
+            clustering_params=None,
         )
         assert cached is not None
         assert cached["statistics"]["n_clusters"] == 5
 
         db.close()
 
-    def test_cache_ignores_old_format(self, tmp_path):
-        """Test that legacy cache entries (with 'points' key) are treated as misses."""
-        from abstracts_explorer.database import DatabaseManager
-        from abstracts_explorer.db_models import ClusteringCache
-        from tests.conftest import set_test_db
-        import json
-
-        db_path = tmp_path / "test_old_format.db"
-        set_test_db(db_path)
-
-        db = DatabaseManager()
-        db.connect()
-        db.create_tables()
-
-        # Insert a legacy-format entry directly
-        old_results = {"points": [{"x": 0, "y": 0, "cluster": 0}], "statistics": {"n_clusters": 3}}
-        entry = ClusteringCache(
-            embedding_model="model1",
-            reduction_method="pca",
-            n_components=2,
-            clustering_method="kmeans",
-            n_clusters=3,
-            clustering_params=None,
-            results_json=json.dumps(old_results),
-        )
-        db._session.add(entry)
-        db._session.commit()
-
-        # Should return None (legacy entry ignored)
-        cached = db.get_clustering_cache(
-            embedding_model="model1",
-            clustering_method="kmeans",
-            n_clusters=3,
-        )
-        assert cached is None
-
-        db.close()
-
-    def test_different_reduction_methods_share_cache(self, tmp_path):
-        """Changing reduction method should NOT cause a cache miss."""
+    def test_different_reduction_methods_reuse_clustering(self, tmp_path):
+        """Changing reduction method should find clustering results via clustering-only lookup."""
         from abstracts_explorer.database import DatabaseManager
         from tests.conftest import set_test_db
 
@@ -936,24 +924,39 @@ class TestClusteringCache:
         db.connect()
         db.create_tables()
 
-        results = {"paper_ids": ["p1", "p2"], "cluster_assignments": [0, 1], "statistics": {"n_clusters": 2}}
+        results = {
+            "points": [{"id": "p1", "x": 1.0, "y": 2.0, "cluster": 0}],
+            "statistics": {"n_clusters": 2},
+        }
 
-        # Save once (reduction_method / n_components no longer matter)
+        # Save with pca
         db.save_clustering_cache(
             embedding_model="model1",
+            reduction_method="pca",
+            n_components=2,
             clustering_method="kmeans",
             results=results,
             n_clusters=2,
         )
 
-        # Retrieve – reduction_method is NOT part of the key anymore
-        cached = db.get_clustering_cache(
+        # Exact match with tsne should miss
+        cached_exact = db.get_clustering_cache(
+            embedding_model="model1",
+            reduction_method="tsne",
+            n_components=2,
+            clustering_method="kmeans",
+            n_clusters=2,
+        )
+        assert cached_exact is None
+
+        # Clustering-only lookup (no reduction_method) should find the pca entry
+        cached_any = db.get_clustering_cache(
             embedding_model="model1",
             clustering_method="kmeans",
             n_clusters=2,
         )
-        assert cached is not None
-        assert cached["statistics"]["n_clusters"] == 2
+        assert cached_any is not None
+        assert cached_any["statistics"]["n_clusters"] == 2
 
         db.close()
 

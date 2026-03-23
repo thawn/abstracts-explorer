@@ -968,24 +968,26 @@ class TestCLI:
 
         with DatabaseManager() as db:
             db.create_tables()
-            # Add some test cache entries (new format)
+            # Add some test cache entries
             db.save_clustering_cache(
                 embedding_model="test-model-1",
+                reduction_method="pca",
+                n_components=2,
                 clustering_method="kmeans",
                 n_clusters=5,
                 results={
-                    "paper_ids": ["p1", "p2"],
-                    "cluster_assignments": [0, 1],
-                    "statistics": {"total_papers": 2, "n_clusters": 2},
+                    "points": [{"id": "p1", "x": 1, "y": 2, "cluster": 0}],
+                    "statistics": {"total_papers": 1, "n_clusters": 1},
                 },
             )
             db.save_clustering_cache(
                 embedding_model="test-model-2",
+                reduction_method="pca",
+                n_components=2,
                 clustering_method="kmeans",
                 n_clusters=5,
                 results={
-                    "paper_ids": ["p1"],
-                    "cluster_assignments": [0],
+                    "points": [{"id": "p1", "x": 1, "y": 2, "cluster": 0}],
                     "statistics": {"total_papers": 1, "n_clusters": 1},
                 },
             )
@@ -1006,6 +1008,8 @@ class TestCLI:
         with DatabaseManager() as db:
             cached = db.get_clustering_cache(
                 embedding_model="test-model-1",
+                reduction_method="pca",
+                n_components=2,
                 clustering_method="kmeans",
                 n_clusters=5,
             )
@@ -1026,23 +1030,25 @@ class TestCLI:
             # Add cache for model1
             db.save_clustering_cache(
                 embedding_model="model1",
+                reduction_method="pca",
+                n_components=2,
                 clustering_method="kmeans",
                 n_clusters=5,
                 results={
-                    "paper_ids": ["p1", "p2"],
-                    "cluster_assignments": [0, 1],
-                    "statistics": {"total_papers": 2, "n_clusters": 2},
+                    "points": [{"id": "p1", "x": 1, "y": 2, "cluster": 0}],
+                    "statistics": {"total_papers": 1, "n_clusters": 1},
                 },
             )
 
             # Add cache for model2
             db.save_clustering_cache(
                 embedding_model="model2",
+                reduction_method="pca",
+                n_components=2,
                 clustering_method="kmeans",
                 n_clusters=5,
                 results={
-                    "paper_ids": ["p1"],
-                    "cluster_assignments": [0],
+                    "points": [{"id": "p1", "x": 1, "y": 2, "cluster": 0}],
                     "statistics": {"total_papers": 1, "n_clusters": 1},
                 },
             )
@@ -1063,6 +1069,8 @@ class TestCLI:
         with DatabaseManager() as db:
             cached1 = db.get_clustering_cache(
                 embedding_model="model1",
+                reduction_method="pca",
+                n_components=2,
                 clustering_method="kmeans",
                 n_clusters=5,
             )
@@ -1070,6 +1078,8 @@ class TestCLI:
 
             cached2 = db.get_clustering_cache(
                 embedding_model="model2",
+                reduction_method="pca",
+                n_components=2,
                 clustering_method="kmeans",
                 n_clusters=5,
             )

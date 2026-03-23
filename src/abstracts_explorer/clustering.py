@@ -1881,49 +1881,95 @@ def compute_clusters_with_cache(
         elif clustering_method.lower() == "dbscan":
             cache_n_clusters = None  # DBSCAN doesn't use n_clusters
 
-        cached_data = database.get_clustering_cache(
+        # Level 1: Try exact match (same clustering params AND same reduction method)
+        exact_cached = database.get_clustering_cache(
+            embedding_model=embedding_model,
+            reduction_method=reduction_method,
+            n_components=n_components,
+            clustering_method=clustering_method,
+            n_clusters=cache_n_clusters,
+            clustering_params=cache_params if cache_params else None,
+        )
+
+        if exact_cached:
+            logger.info("Using exact cached clustering results (including reduction)")
+            return exact_cached
+
+        # Level 2: Try clustering-only match (same clustering params, any reduction)
+        clustering_cached = database.get_clustering_cache(
             embedding_model=embedding_model,
             clustering_method=clustering_method,
             n_clusters=cache_n_clusters,
             clustering_params=cache_params if cache_params else None,
         )
 
-        if cached_data:
-            logger.info("Using cached clustering results – re-applying reduction for visualization...")
-            # Restore cluster assignments onto a fresh ClusteringManager so that
-            # we can apply the requested reduction method without re-clustering.
+        if clustering_cached:
+            logger.info("Reusing cached clustering results – re-applying reduction for visualization...")
+            # We have cached clustering with a different reduction method.
+            # Re-apply the requested reduction method on the embeddings.
             cm_cached = ClusteringManager(embeddings_manager)
             cm_cached.load_embeddings(limit=limit)
 
-            cached_paper_ids: List[str] = cached_data["paper_ids"]
-            cached_assignments: List[int] = cached_data["cluster_assignments"]
-            id_to_cluster: Dict[str, int] = dict(zip(cached_paper_ids, cached_assignments))
+            # Restore cluster assignments from the cached results
+            if "points" in clustering_cached:
+                # Reconstruct cluster assignments from points
+                point_id_to_cluster: Dict[str, int] = {}
+                for point in clustering_cached["points"]:
+                    pid = point.get("id") or point.get("paper_id", "")
+                    point_id_to_cluster[pid] = point.get("cluster", -1)
 
-            # Map cached assignments to current paper order (papers may be
-            # returned in a different order by ChromaDB on each call).
-            # Papers that are not in the cache get assigned to cluster -1 (noise).
-            # This can happen if new embeddings have been added since the cache was
-            # created.  In that case the user should clear the cache and recompute.
-            current_ids = cm_cached.paper_ids or []
-            missing = [pid for pid in current_ids if pid not in id_to_cluster]
-            if missing:
-                logger.warning(
-                    f"{len(missing)} paper(s) are not in the clustering cache "
-                    f"(e.g. '{missing[0]}'). They will be assigned to cluster -1. "
-                    "Run with force=True (or clear the cache) to recompute."
-                )
-            cm_cached.cluster_labels = np.array([id_to_cluster.get(pid, -1) for pid in current_ids])
+                current_ids = cm_cached.paper_ids or []
+                missing = [pid for pid in current_ids if pid not in point_id_to_cluster]
+                if missing:
+                    logger.warning(
+                        f"{len(missing)} paper(s) are not in the clustering cache "
+                        f"(e.g. '{missing[0]}'). They will be assigned to cluster -1. "
+                        "Run with force=True (or clear the cache) to recompute."
+                    )
+                cm_cached.cluster_labels = np.array([point_id_to_cluster.get(pid, -1) for pid in current_ids])
 
-            if cached_data.get("cluster_labels"):
-                cm_cached.cluster_label_names = {int(k): v for k, v in cached_data["cluster_labels"].items()}
-            if cached_data.get("cluster_keywords"):
-                cm_cached.cluster_keywords = {int(k): v for k, v in cached_data["cluster_keywords"].items()}
-            if cached_data.get("cluster_hierarchy"):
-                cm_cached.cluster_hierarchy = cached_data["cluster_hierarchy"]
+                # Restore labels and hierarchy from cached results
+                if clustering_cached.get("cluster_labels"):
+                    cm_cached.cluster_label_names = {
+                        int(k): v for k, v in clustering_cached["cluster_labels"].items()
+                    }
+                if clustering_cached.get("cluster_keywords"):
+                    cm_cached.cluster_keywords = {int(k): v for k, v in clustering_cached["cluster_keywords"].items()}
+                if clustering_cached.get("cluster_hierarchy"):
+                    cm_cached.cluster_hierarchy = clustering_cached["cluster_hierarchy"]
+            else:
+                logger.warning("Cached clustering results have unexpected format (no 'points' key). Re-computing.")
+                # Fall through to full recompute below
+                clustering_cached = None
+
+        if clustering_cached:
 
             # Apply the requested reduction method for visualization
             cm_cached.reduce_dimensions(method=reduction_method, n_components=n_components)
-            return cm_cached.get_clustering_results()
+            results = cm_cached.get_clustering_results()
+
+            # Save the new result (with new reduction method) to cache
+            try:
+                save_n_clusters: Optional[int] = n_clusters
+                save_params = clustering_kwargs.copy() if clustering_kwargs else {}
+                if clustering_method.lower() == "agglomerative" and "distance_threshold" in save_params:
+                    save_n_clusters = None
+                elif clustering_method.lower() == "dbscan":
+                    save_n_clusters = None
+
+                database.save_clustering_cache(
+                    embedding_model=embedding_model,
+                    reduction_method=reduction_method,
+                    n_components=n_components,
+                    clustering_method=clustering_method,
+                    results=results,
+                    n_clusters=save_n_clusters,
+                    clustering_params=save_params if save_params else None,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to save clustering cache: {e}")
+
+            return results
 
     # Cache miss or forced recompute - compute clusters
     logger.info("Computing new clustering results...")
@@ -2005,13 +2051,13 @@ def compute_clusters_with_cache(
             f"(LLM: {use_llm}, cached: {cached_hier_labels is not None})"
         )
 
-    # Get visualization results (includes x/y from reduction above)
+    # Get full results (includes x/y from reduction above)
     results = cm.get_clustering_results()
 
-    # Build cache payload: cluster assignments + labels + hierarchy, NO x/y.
+    # Save to cache if no limit was applied
     if not limit:
         try:
-            save_n_clusters: Optional[int] = n_clusters
+            save_n_clusters = n_clusters
             save_params = clustering_kwargs.copy() if clustering_kwargs else {}
 
             # Special handling for agglomerative with distance_threshold
@@ -2020,22 +2066,12 @@ def compute_clusters_with_cache(
             elif clustering_method.lower() == "dbscan":
                 save_n_clusters = None  # DBSCAN doesn't use n_clusters
 
-            cache_payload: Dict[str, Any] = {
-                "paper_ids": cm.paper_ids,
-                "cluster_assignments": (cm.cluster_labels.tolist() if cm.cluster_labels is not None else []),
-                "statistics": results.get("statistics", {}),
-            }
-            if cm.cluster_label_names:
-                cache_payload["cluster_labels"] = {str(k): v for k, v in cm.cluster_label_names.items()}
-            if cm.cluster_keywords:
-                cache_payload["cluster_keywords"] = {str(k): v for k, v in cm.cluster_keywords.items()}
-            if cm.cluster_hierarchy:
-                cache_payload["cluster_hierarchy"] = cm.cluster_hierarchy
-
             database.save_clustering_cache(
                 embedding_model=embedding_model,
+                reduction_method=reduction_method,
+                n_components=n_components,
                 clustering_method=clustering_method,
-                results=cache_payload,
+                results=results,
                 n_clusters=save_n_clusters,
                 clustering_params=save_params if save_params else None,
             )

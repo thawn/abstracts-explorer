@@ -1049,17 +1049,17 @@ class DatabaseManager:
         clustering_method: str,
         n_clusters: Optional[int] = None,
         clustering_params: Optional[Dict[str, Any]] = None,
+        reduction_method: Optional[str] = None,
+        n_components: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Get cached clustering results matching the parameters.
 
-        The cache stores cluster assignments and labels without visualization
-        coordinates (which depend on the reduction method). The reduction method
-        is therefore not part of the cache key.
-
-        Results saved with the legacy format (containing a ``"points"`` key with
-        x/y coordinates) are treated as cache misses so that they are
-        transparently replaced by the new format on the next computation.
+        When ``reduction_method`` and ``n_components`` are provided, only
+        entries that match exactly (including the reduction method) are
+        returned.  When they are omitted (``None``), the reduction method
+        is ignored and the most recent entry matching the clustering
+        parameters is returned.
 
         Parameters
         ----------
@@ -1071,6 +1071,12 @@ class DatabaseManager:
             Number of clusters (for kmeans/agglomerative).
         clustering_params : dict, optional
             Additional clustering parameters (e.g., distance_threshold, eps).
+        reduction_method : str, optional
+            Dimensionality reduction method.  When provided, the query
+            requires an exact match on this column.
+        n_components : int, optional
+            Number of components after reduction.  When provided, the query
+            requires an exact match on this column.
 
         Returns
         -------
@@ -1088,14 +1094,19 @@ class DatabaseManager:
         try:
             import json
 
-            # Build query conditions – reduction_method / n_components are no
-            # longer part of the cache key.
+            # Build query conditions
             stmt = select(ClusteringCache).where(
                 and_(
                     ClusteringCache.embedding_model == embedding_model,
                     ClusteringCache.clustering_method == clustering_method,
                 )
             )
+
+            # Optionally filter by reduction method / n_components
+            if reduction_method is not None:
+                stmt = stmt.where(ClusteringCache.reduction_method == reduction_method)
+            if n_components is not None:
+                stmt = stmt.where(ClusteringCache.n_components == n_components)
 
             # Add n_clusters condition if provided
             if n_clusters is not None:
@@ -1109,18 +1120,14 @@ class DatabaseManager:
                 return None
 
             # When no clustering_params are requested, find the first entry whose
-            # stored clustering_params is also NULL and whose results are in the
-            # new format (contain "paper_ids" rather than "points").
+            # stored clustering_params is also NULL.
             # Entries that have extra params stored (e.g. distance_threshold) are
             # skipped here because they represent different clustering runs.
             if clustering_params is None:
                 for result in results:
                     if result.clustering_params is not None:
                         continue  # entry has extra params – not a match for a no-param query
-                    data = json.loads(result.results_json)
-                    # Only return new-format entries (have paper_ids, not points)
-                    if "paper_ids" in data:
-                        return data
+                    return json.loads(result.results_json)
                 return None
 
             # Filter by clustering_params
@@ -1132,10 +1139,7 @@ class DatabaseManager:
                 cached_params = json.loads(result.clustering_params)
                 cached_params_json = json.dumps(cached_params, sort_keys=True)
                 if cached_params_json == params_json:
-                    data = json.loads(result.results_json)
-                    # Only return new-format entries
-                    if "paper_ids" in data:
-                        return data
+                    return json.loads(result.results_json)
 
             return None
 
@@ -1145,6 +1149,8 @@ class DatabaseManager:
     def save_clustering_cache(
         self,
         embedding_model: str,
+        reduction_method: str,
+        n_components: int,
         clustering_method: str,
         results: Dict[str, Any],
         n_clusters: Optional[int] = None,
@@ -1153,23 +1159,24 @@ class DatabaseManager:
         """
         Save clustering results to cache.
 
-        Only cluster assignments and labels are cached – visualization
-        coordinates (x/y) are excluded so that a different reduction method
-        can be applied on cache retrieval without re-running clustering.
-
-        The ``reduction_method`` and ``n_components`` columns are kept in the
-        database for backward compatibility but are stored as the sentinel
-        values ``"none"`` / ``0`` and are not used as cache keys.
+        The full results including visualization coordinates are stored.
+        The ``reduction_method`` and ``n_components`` are stored so that
+        an exact-match lookup can return cached points directly.  When only
+        the reduction method changes, the clustering results are reused and
+        only the reduction is re-applied.
 
         Parameters
         ----------
         embedding_model : str
             Name of the embedding model.
+        reduction_method : str
+            Dimensionality reduction method.
+        n_components : int
+            Number of components after reduction.
         clustering_method : str
             Clustering algorithm used.
         results : dict
-            Clustering results to cache.  Must contain ``paper_ids`` and
-            ``cluster_assignments`` keys (new format).
+            Clustering results to cache (full results including points).
         n_clusters : int, optional
             Number of clusters (for kmeans/agglomerative).
         clustering_params : dict, optional
@@ -1190,12 +1197,11 @@ class DatabaseManager:
             results_json = json.dumps(results)
             params_json = json.dumps(clustering_params) if clustering_params else None
 
-            # Create new cache entry.  reduction_method / n_components are stored
-            # as sentinel values ("none" / 0) since they are no longer cache keys.
+            # Create new cache entry
             cache_entry = ClusteringCache(
                 embedding_model=embedding_model,
-                reduction_method="none",
-                n_components=0,
+                reduction_method=reduction_method,
+                n_components=n_components,
                 clustering_method=clustering_method,
                 n_clusters=n_clusters,
                 clustering_params=params_json,
@@ -1206,7 +1212,8 @@ class DatabaseManager:
             self._session.commit()
 
             logger.info(
-                f"Saved clustering cache: {clustering_method} with {n_clusters} clusters, " f"model={embedding_model}"
+                f"Saved clustering cache: {clustering_method} with {n_clusters} clusters, "
+                f"model={embedding_model}, reduction={reduction_method}"
             )
 
         except Exception as e:

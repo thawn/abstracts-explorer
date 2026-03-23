@@ -461,53 +461,63 @@ class TestClusteringCache:
         """Test that get_clustering_cache returns None when no cache exists."""
         cache = connected_db.get_clustering_cache(
             embedding_model="test-model",
+            reduction_method="pca",
+            n_components=2,
             clustering_method="kmeans",
             n_clusters=5,
         )
         assert cache is None
 
     def test_save_and_get_clustering_cache(self, connected_db):
-        """Test saving and retrieving clustering cache (new format)."""
-        # New cache format stores cluster assignments, not x/y coordinates
+        """Test saving and retrieving clustering cache."""
+        # Create sample clustering results
         results = {
-            "paper_ids": ["paper1", "paper2"],
-            "cluster_assignments": [0, 1],
+            "points": [
+                {"id": "paper1", "x": 1.0, "y": 2.0, "cluster": 0},
+                {"id": "paper2", "x": 3.0, "y": 4.0, "cluster": 1},
+            ],
             "statistics": {"n_clusters": 2, "total_papers": 2},
-            "cluster_labels": {"0": "Cluster A", "1": "Cluster B"},
+            "cluster_centers": {0: {"x": 1.0, "y": 2.0}, 1: {"x": 3.0, "y": 4.0}},
         }
 
         # Save cache
         connected_db.save_clustering_cache(
             embedding_model="test-model",
+            reduction_method="pca",
+            n_components=2,
             clustering_method="kmeans",
             results=results,
             n_clusters=2,
         )
 
-        # Retrieve cache
+        # Retrieve cache with exact match
         cached = connected_db.get_clustering_cache(
             embedding_model="test-model",
+            reduction_method="pca",
+            n_components=2,
             clustering_method="kmeans",
             n_clusters=2,
         )
 
         assert cached is not None
-        assert cached["paper_ids"] == results["paper_ids"]
-        assert cached["cluster_assignments"] == results["cluster_assignments"]
+        assert cached["points"] == results["points"]
         assert cached["statistics"] == results["statistics"]
-        assert cached["cluster_labels"] == results["cluster_labels"]
+        # JSON serialization converts int keys to strings
+        assert cached["cluster_centers"]["0"] == results["cluster_centers"][0]
+        assert cached["cluster_centers"]["1"] == results["cluster_centers"][1]
 
     def test_cache_invalidation_by_embedding_model(self, connected_db):
         """Test that cache is invalidated when embedding model changes."""
         results = {
-            "paper_ids": ["p1"],
-            "cluster_assignments": [0],
+            "points": [{"id": "p1", "x": 1.0, "y": 2.0, "cluster": 0}],
             "statistics": {"n_clusters": 1},
         }
 
         # Save with model1
         connected_db.save_clustering_cache(
             embedding_model="model1",
+            reduction_method="pca",
+            n_components=2,
             clustering_method="kmeans",
             results=results,
             n_clusters=5,
@@ -516,56 +526,79 @@ class TestClusteringCache:
         # Try to get with model2 - should return None
         cached = connected_db.get_clustering_cache(
             embedding_model="model2",
+            reduction_method="pca",
+            n_components=2,
             clustering_method="kmeans",
             n_clusters=5,
         )
         assert cached is None
 
-    def test_cache_reduction_method_not_in_key(self, connected_db):
-        """Test that reduction_method is NOT part of the cache key (new behaviour)."""
+    def test_cache_reuse_on_different_reduction_method(self, connected_db):
+        """Test that clustering results are reusable when only reduction_method differs."""
         results = {
-            "paper_ids": ["p1"],
-            "cluster_assignments": [0],
+            "points": [{"id": "p1", "x": 1.0, "y": 2.0, "cluster": 0}],
             "statistics": {"n_clusters": 2},
         }
 
-        # Save once
+        # Save with pca
         connected_db.save_clustering_cache(
             embedding_model="model1",
+            reduction_method="pca",
+            n_components=2,
             clustering_method="kmeans",
             results=results,
             n_clusters=2,
         )
 
-        # Lookup without specifying reduction_method – should hit the cache
+        # Exact match with pca should work
         cached = connected_db.get_clustering_cache(
             embedding_model="model1",
+            reduction_method="pca",
+            n_components=2,
             clustering_method="kmeans",
             n_clusters=2,
         )
         assert cached is not None
-        assert cached["statistics"]["n_clusters"] == 2
+
+        # Exact match with tsne should miss
+        cached_tsne = connected_db.get_clustering_cache(
+            embedding_model="model1",
+            reduction_method="tsne",
+            n_components=2,
+            clustering_method="kmeans",
+            n_clusters=2,
+        )
+        assert cached_tsne is None
+
+        # Clustering-only match (no reduction_method) should find the pca entry
+        cached_any = connected_db.get_clustering_cache(
+            embedding_model="model1",
+            clustering_method="kmeans",
+            n_clusters=2,
+        )
+        assert cached_any is not None
+        assert cached_any["statistics"]["n_clusters"] == 2
 
     def test_clear_clustering_cache(self, connected_db):
         """Test clearing clustering cache."""
-        results = {
-            "paper_ids": [],
-            "cluster_assignments": [],
-            "statistics": {},
-        }
+        results = {"points": [], "statistics": {}}
 
         # Save two cache entries
         connected_db.save_clustering_cache(
             embedding_model="model1",
+            reduction_method="pca",
+            n_components=2,
             clustering_method="kmeans",
             results=results,
             n_clusters=5,
         )
         connected_db.save_clustering_cache(
             embedding_model="model1",
+            reduction_method="tsne",
+            n_components=2,
             clustering_method="kmeans",
             results=results,
-            n_clusters=8,
+            n_clusters=5,
         )
 
         # Clear all cache
@@ -575,6 +608,8 @@ class TestClusteringCache:
         # Verify cache is empty
         cached = connected_db.get_clustering_cache(
             embedding_model="model1",
+            reduction_method="pca",
+            n_components=2,
             clustering_method="kmeans",
             n_clusters=5,
         )
@@ -582,21 +617,21 @@ class TestClusteringCache:
 
     def test_clear_clustering_cache_by_model(self, connected_db):
         """Test clearing clustering cache for specific model."""
-        results = {
-            "paper_ids": [],
-            "cluster_assignments": [],
-            "statistics": {},
-        }
+        results = {"points": [], "statistics": {}}
 
         # Save cache for two models
         connected_db.save_clustering_cache(
             embedding_model="model1",
+            reduction_method="pca",
+            n_components=2,
             clustering_method="kmeans",
             results=results,
             n_clusters=5,
         )
         connected_db.save_clustering_cache(
             embedding_model="model2",
+            reduction_method="pca",
+            n_components=2,
             clustering_method="kmeans",
             results=results,
             n_clusters=5,
@@ -609,6 +644,8 @@ class TestClusteringCache:
         # Verify model1 cache is cleared but model2 remains
         cached1 = connected_db.get_clustering_cache(
             embedding_model="model1",
+            reduction_method="pca",
+            n_components=2,
             clustering_method="kmeans",
             n_clusters=5,
         )
@@ -616,6 +653,8 @@ class TestClusteringCache:
 
         cached2 = connected_db.get_clustering_cache(
             embedding_model="model2",
+            reduction_method="pca",
+            n_components=2,
             clustering_method="kmeans",
             n_clusters=5,
         )
