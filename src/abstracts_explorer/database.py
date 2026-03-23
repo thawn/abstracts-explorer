@@ -1512,6 +1512,41 @@ class DatabaseManager:
             self._session.rollback()
             raise DatabaseError(f"Failed to delete verified eval QA pairs: {str(e)}") from e
 
+    def delete_eval_results(self, run_id: Optional[str] = None) -> int:
+        """
+        Delete stored evaluation results, optionally filtered to a single run.
+
+        Parameters
+        ----------
+        run_id : str, optional
+            If supplied, only results for this run are deleted.
+            If ``None``, **all** stored results are deleted.
+
+        Returns
+        -------
+        int
+            Number of rows deleted.
+
+        Raises
+        ------
+        DatabaseError
+            If deletion fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            stmt = delete(EvalResult)
+            if run_id is not None:
+                stmt = stmt.where(EvalResult.run_id == run_id)
+            result = self._session.execute(stmt)
+            count = result.rowcount
+            self._session.commit()
+            return count
+        except Exception as e:
+            self._session.rollback()
+            raise DatabaseError(f"Failed to delete eval results: {str(e)}") from e
+
     def add_eval_result(
         self,
         run_id: str,

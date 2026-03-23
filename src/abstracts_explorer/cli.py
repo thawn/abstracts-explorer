@@ -1194,6 +1194,8 @@ def eval_results_command(args: argparse.Namespace) -> int:
         - run_id: Specific run to show (or latest)
         - sample: Random sample size for browsing
         - detail: Show detailed per-pair results
+        - clear: Delete results for the selected run
+        - yes: Skip confirmation prompt when clearing
 
     Returns
     -------
@@ -1220,6 +1222,20 @@ def eval_results_command(args: argparse.Namespace) -> int:
                 print(f"❌ Run '{target_run}' not found.", file=sys.stderr)
                 print(f"Available runs: {', '.join(run_ids)}")
                 return 1
+
+            # Handle --clear option
+            if getattr(args, "clear", False):
+                n = len(db.get_eval_results(run_id=target_run))
+                if not getattr(args, "yes", False):
+                    confirm = input(
+                        f"⚠️  This will permanently delete {n} result(s) for run '{target_run}'. Are you sure? [y/N]: "
+                    )
+                    if confirm.strip().lower() != "y":
+                        print("Aborted.")
+                        return 0
+                deleted = db.delete_eval_results(run_id=target_run)
+                print(f"✅ Deleted {deleted} result(s) for run '{target_run}'.")
+                return 0
 
             # Show summary
             summary = db.get_eval_run_summary(target_run)
@@ -1897,6 +1913,17 @@ Examples:
         type=int,
         default=None,
         help="Randomly sample N results for browsing",
+    )
+    eval_results_parser.add_argument(
+        "--clear",
+        action="store_true",
+        help="Delete all stored evaluation results for the selected run",
+    )
+    eval_results_parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Skip confirmation prompt when using --clear",
     )
 
     # eval clear

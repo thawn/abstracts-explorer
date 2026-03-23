@@ -440,6 +440,32 @@ class TestEvalResultModel:
         assert summary["error_count"] == 0
         assert summary["run_date"] is None
 
+    def test_delete_eval_results_by_run(self, eval_db):
+        """Test deleting evaluation results for a specific run."""
+        eval_db.add_eval_result(run_id="run-001", qa_pair_id=1, answer_score=4.0)
+        eval_db.add_eval_result(run_id="run-001", qa_pair_id=2, answer_score=3.0)
+        eval_db.add_eval_result(run_id="run-002", qa_pair_id=3, answer_score=5.0)
+
+        count = eval_db.delete_eval_results(run_id="run-001")
+        assert count == 2
+        remaining = eval_db.get_eval_results()
+        assert len(remaining) == 1
+        assert remaining[0]["run_id"] == "run-002"
+
+    def test_delete_eval_results_all(self, eval_db):
+        """Test deleting all evaluation results."""
+        eval_db.add_eval_result(run_id="run-001", qa_pair_id=1)
+        eval_db.add_eval_result(run_id="run-002", qa_pair_id=2)
+
+        count = eval_db.delete_eval_results()
+        assert count == 2
+        assert eval_db.get_eval_results() == []
+
+    def test_delete_eval_results_none_found(self, eval_db):
+        """Test deleting results for a non-existent run returns 0."""
+        count = eval_db.delete_eval_results(run_id="nonexistent")
+        assert count == 0
+
 
 # ---------------------------------------------------------------------------
 #  Tests: Evaluation module functions
@@ -1104,3 +1130,80 @@ class TestCLIEvalClear:
         captured = capsys.readouterr()
         assert "Aborted" in captured.out
         assert eval_db_with_pairs.get_eval_qa_pair_count(verified_only=True) == count_before
+
+
+# ---------------------------------------------------------------------------
+#  Tests: eval results --clear CLI sub-command
+# ---------------------------------------------------------------------------
+
+
+class TestCLIEvalResultsClear:
+    """Tests for the 'eval results --clear' option."""
+
+    def test_eval_results_clear_with_yes(self, eval_db_with_pairs, capsys):
+        """eval results --clear --yes deletes results for the latest run."""
+        eval_db_with_pairs.add_eval_result(
+            run_id="run-to-clear",
+            qa_pair_id=1,
+            actual_answer="ans",
+            answer_score=4.0,
+        )
+        eval_db_with_pairs.add_eval_result(
+            run_id="run-to-clear",
+            qa_pair_id=2,
+            actual_answer="ans2",
+            answer_score=3.0,
+        )
+        assert len(eval_db_with_pairs.get_eval_results(run_id="run-to-clear")) == 2
+
+        with patch.object(sys, "argv", ["abstracts-explorer", "eval", "results", "--clear", "--yes"]):
+            exit_code = main()
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Deleted" in captured.out
+        assert "run-to-clear" in captured.out
+        assert len(eval_db_with_pairs.get_eval_results(run_id="run-to-clear")) == 0
+
+    def test_eval_results_clear_confirmation_no(self, eval_db_with_pairs, capsys):
+        """eval results --clear with 'n' aborts without deleting."""
+        eval_db_with_pairs.add_eval_result(
+            run_id="run-keep",
+            qa_pair_id=1,
+            answer_score=4.0,
+        )
+
+        with (
+            patch.object(sys, "argv", ["abstracts-explorer", "eval", "results", "--clear"]),
+            patch("builtins.input", return_value="n"),
+        ):
+            exit_code = main()
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Aborted" in captured.out
+        assert len(eval_db_with_pairs.get_eval_results(run_id="run-keep")) == 1
+
+    def test_eval_results_clear_confirmation_uppercase_no(self, eval_db_with_pairs, capsys):
+        """eval results --clear with 'N' (uppercase) aborts without deleting."""
+        eval_db_with_pairs.add_eval_result(
+            run_id="run-keep2",
+            qa_pair_id=1,
+            answer_score=4.0,
+        )
+
+        with (
+            patch.object(sys, "argv", ["abstracts-explorer", "eval", "results", "--clear"]),
+            patch("builtins.input", return_value="N"),
+        ):
+            exit_code = main()
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Aborted" in captured.out
+        assert len(eval_db_with_pairs.get_eval_results(run_id="run-keep2")) == 1
+
+    def test_eval_results_clear_no_results(self, eval_db, capsys):
+        """eval results --clear with no runs prints a friendly message."""
+        with patch.object(sys, "argv", ["abstracts-explorer", "eval", "results", "--clear", "--yes"]):
+            exit_code = main()
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "No evaluation results found" in captured.out

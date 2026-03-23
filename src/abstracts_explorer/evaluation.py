@@ -261,12 +261,12 @@ def format_eval_result_detail(result: Dict[str, Any], qa_pair: Optional[Dict[str
 
     if qa_pair:
         lines.append(f"Query:    {qa_pair['query']}")
-        lines.append(f"Expected: {qa_pair['expected_answer'][:200]}...")
+        lines.append(f"Expected: {qa_pair['expected_answer']}")
     else:
         lines.append(f"QA Pair ID: {result['qa_pair_id']}")
 
     actual = result.get("actual_answer") or "(no answer)"
-    lines.append(f"Actual:   {actual[:200]}...")
+    lines.append(f"Actual:   {actual}")
 
     score = result.get("answer_score")
     lines.append(f"Score:    {score}/5" if score else "Score:    N/A")
@@ -287,7 +287,7 @@ def format_eval_result_detail(result: Dict[str, Any], qa_pair: Optional[Dict[str
 
     reasoning = result.get("judge_reasoning")
     if reasoning:
-        lines.append(f"Judge:    {reasoning[:200]}")
+        lines.append(f"Judge:    {reasoning}")
 
     return "\n".join(lines)
 
