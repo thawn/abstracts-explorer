@@ -433,6 +433,114 @@ class TestCLI:
         # Verify create_collection was called with reset=True
         mock_em.create_collection.assert_called_once_with(reset=True)
 
+    def test_create_embeddings_requests_per_minute(self, tmp_path, capsys, monkeypatch):
+        """Test create-embeddings with --requests-per-minute flag."""
+        from abstracts_explorer import DatabaseManager
+
+        # Create a test database
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
+        with DatabaseManager() as db:
+            db.create_tables()
+            papers = [
+                LightweightPaper(
+                    title="Test",
+                    abstract="Abstract",
+                    authors=["Test Author"],
+                    session="Test Session",
+                    poster_position="P1",
+                    year=2025,
+                    conference="NeurIPS",
+                )
+            ]
+            db.add_papers(papers)
+
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+            mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
+            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.embed_from_database.return_value = 1
+            mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
+            mock_em.__enter__ = Mock(return_value=mock_em)
+            mock_em.__exit__ = Mock(return_value=False)
+            MockEM.return_value = mock_em
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "neurips-abstracts",
+                    "create-embeddings",
+                    "--requests-per-minute",
+                    "30",
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "30 req/min" in captured.out
+
+        # Verify EmbeddingsManager was initialized with requests_per_minute=30
+        MockEM.assert_called_once()
+        call_kwargs = MockEM.call_args.kwargs
+        assert call_kwargs["requests_per_minute"] == 30
+
+    def test_create_embeddings_requests_per_minute_zero(self, tmp_path, capsys, monkeypatch):
+        """Test create-embeddings with --requests-per-minute 0 disables rate limiting."""
+        from abstracts_explorer import DatabaseManager
+
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
+        with DatabaseManager() as db:
+            db.create_tables()
+            papers = [
+                LightweightPaper(
+                    title="Test",
+                    abstract="Abstract",
+                    authors=["Test Author"],
+                    session="Test Session",
+                    poster_position="P1",
+                    year=2025,
+                    conference="NeurIPS",
+                )
+            ]
+            db.add_papers(papers)
+
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+            mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
+            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.embed_from_database.return_value = 1
+            mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
+            mock_em.__enter__ = Mock(return_value=mock_em)
+            mock_em.__exit__ = Mock(return_value=False)
+            MockEM.return_value = mock_em
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "neurips-abstracts",
+                    "create-embeddings",
+                    "--requests-per-minute",
+                    "0",
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "disabled" in captured.out
+
+        MockEM.assert_called_once()
+        call_kwargs = MockEM.call_args.kwargs
+        assert call_kwargs["requests_per_minute"] == 0
+
     def test_create_embeddings_custom_model(self, tmp_path, capsys):
         """Test create-embeddings with custom model settings."""
         from abstracts_explorer import DatabaseManager

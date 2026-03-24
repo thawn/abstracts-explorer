@@ -10,6 +10,7 @@ embeddings and stores them in ChromaDB for efficient similarity search.
 """
 
 import logging
+import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -48,6 +49,9 @@ class EmbeddingsManager:
         Name of the embedding model, by default "text-embedding-qwen3-embedding-4b"
     collection_name : str, optional
         Name of the ChromaDB collection, by default "papers"
+    requests_per_minute : int, optional
+        Maximum number of API requests per minute. Set to 0 to disable rate limiting.
+        If None, uses the value from config (default: 60).
 
     Attributes
     ----------
@@ -79,6 +83,7 @@ class EmbeddingsManager:
         auth_token: Optional[str] = None,
         model_name: Optional[str] = None,
         collection_name: Optional[str] = None,
+        requests_per_minute: Optional[int] = None,
     ):
         """
         Initialize the EmbeddingsManager.
@@ -93,6 +98,9 @@ class EmbeddingsManager:
             Name of the embedding model. If None, uses config value.
         collection_name : str, optional
             Name of the ChromaDB collection. If None, uses config value.
+        requests_per_minute : int, optional
+            Maximum number of API requests per minute. Set to 0 to disable rate limiting.
+            If None, uses the value from config (default: 60).
         """
         config = get_config()
         self.lm_studio_url = (lm_studio_url or config.llm_backend_url).rstrip("/")
@@ -108,6 +116,13 @@ class EmbeddingsManager:
 
         # OpenAI client - lazy loaded on first use to avoid API calls during test collection
         self._openai_client: Optional[OpenAI] = None
+
+        # Rate limiting: maximum API requests per minute (0 = unlimited)
+        self.requests_per_minute = (
+            requests_per_minute if requests_per_minute is not None else config.requests_per_minute
+        )
+        # Timestamp of the last API request (monotonic clock)
+        self._last_request_time: float = 0.0
 
     @property
     def client(self) -> Any:
@@ -263,6 +278,9 @@ class EmbeddingsManager:
         """
         Generate embedding for a given text using OpenAI-compatible API.
 
+        Respects the ``requests_per_minute`` rate limit by sleeping between
+        calls when necessary.
+
         Parameters
         ----------
         text : str
@@ -288,7 +306,15 @@ class EmbeddingsManager:
         if not text or not text.strip():
             raise EmbeddingsError("Cannot generate embedding for empty text")
 
+        # Apply rate limiting before the API call
+        if self.requests_per_minute > 0:
+            min_interval = 60.0 / self.requests_per_minute
+            elapsed = time.monotonic() - self._last_request_time
+            if elapsed < min_interval:
+                time.sleep(min_interval - elapsed)
+
         try:
+            self._last_request_time = time.monotonic()
             response = self.openai_client.embeddings.create(model=self.model_name, input=text)
 
             if not response.data or len(response.data) == 0:

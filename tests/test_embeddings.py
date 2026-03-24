@@ -3,7 +3,7 @@ Tests for the embeddings module.
 """
 
 import pytest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from abstracts_explorer.embeddings import EmbeddingsError, EmbeddingsManager
 from tests.conftest import set_test_db
@@ -665,3 +665,144 @@ def test_search_papers_semantic_with_year_filter(embeddings_manager, tmp_path, m
         assert len(results_both) == 2, f"Expected 2 papers with years=[2024, 2025] filter, got {len(results_both)}"
 
     embeddings_manager.close()
+
+
+class TestRateLimiting:
+    """Tests for rate limiting in EmbeddingsManager."""
+
+    def test_default_requests_per_minute_from_config(self, embeddings_manager):
+        """Test that requests_per_minute is initialized from config (default 60)."""
+        # The fixture does not pass requests_per_minute explicitly, so it uses config default
+        assert isinstance(embeddings_manager.requests_per_minute, int)
+        assert embeddings_manager.requests_per_minute >= 0
+
+    def test_requests_per_minute_explicit(self, tmp_path, monkeypatch):
+        """Test that requests_per_minute can be set explicitly."""
+        from tests.conftest import get_env_test_path
+        from abstracts_explorer.config import get_config
+
+        monkeypatch.setenv("EMBEDDING_DB", str(tmp_path / "chroma"))
+        get_config(reload=True, env_path=get_env_test_path())
+
+        em = EmbeddingsManager(requests_per_minute=120)
+        assert em.requests_per_minute == 120
+
+    def test_requests_per_minute_zero_disables_limiting(self, tmp_path, monkeypatch):
+        """Test that setting requests_per_minute=0 disables rate limiting."""
+        from tests.conftest import get_env_test_path
+        from abstracts_explorer.config import get_config
+
+        monkeypatch.setenv("EMBEDDING_DB", str(tmp_path / "chroma"))
+        get_config(reload=True, env_path=get_env_test_path())
+
+        em = EmbeddingsManager(requests_per_minute=0)
+        assert em.requests_per_minute == 0
+
+    def test_rate_limiting_sleeps_between_requests(self, tmp_path, monkeypatch):
+        """Test that rate limiting causes sleep between rapid consecutive requests."""
+        from tests.conftest import get_env_test_path
+        from abstracts_explorer.config import get_config
+        from unittest.mock import Mock
+
+        monkeypatch.setenv("EMBEDDING_DB", str(tmp_path / "chroma"))
+        get_config(reload=True, env_path=get_env_test_path())
+
+        # Use 60 req/min → 1 second minimum interval between requests
+        em = EmbeddingsManager(requests_per_minute=60)
+
+        # Set up mock OpenAI client
+        mock_client = Mock()
+        mock_embedding_data = Mock()
+        mock_embedding_data.embedding = [0.1] * 4096
+        mock_response = Mock()
+        mock_response.data = [mock_embedding_data]
+        mock_client.embeddings.create.return_value = mock_response
+        em._openai_client = mock_client
+
+        sleep_calls = []
+
+        def fake_sleep(duration):
+            sleep_calls.append(duration)
+
+        with patch("abstracts_explorer.embeddings.time.sleep", side_effect=fake_sleep):
+            with patch("abstracts_explorer.embeddings.time.monotonic") as mock_mono:
+                # First call: _last_request_time=0, monotonic()=0 → elapsed=0 → sleep needed
+                mock_mono.side_effect = [0.0, 0.0, 0.1]  # elapsed check, set _last, next elapsed
+                em.generate_embedding("First text")
+
+                # Second call happens immediately (monotonic returns 0.1, last was 0.0)
+                # elapsed = 0.1 < 1.0 → sleep(0.9)
+                mock_mono.side_effect = [0.1, 0.1]
+                em.generate_embedding("Second text")
+
+        # First call: elapsed = 0 - 0 = 0 which is >= 0 (just barely, so no sleep on first)
+        # Actually: first call _last_request_time starts at 0.0, monotonic returns 0.0,
+        # elapsed = 0.0 - 0.0 = 0.0, min_interval = 1.0, sleep(1.0) called
+        assert len(sleep_calls) >= 1
+        assert sleep_calls[0] > 0
+
+    def test_no_sleep_when_rate_limit_disabled(self, tmp_path, monkeypatch):
+        """Test that no sleep occurs when requests_per_minute=0."""
+        from tests.conftest import get_env_test_path
+        from abstracts_explorer.config import get_config
+        from unittest.mock import Mock
+
+        monkeypatch.setenv("EMBEDDING_DB", str(tmp_path / "chroma"))
+        get_config(reload=True, env_path=get_env_test_path())
+
+        em = EmbeddingsManager(requests_per_minute=0)
+
+        # Set up mock OpenAI client
+        mock_client = Mock()
+        mock_embedding_data = Mock()
+        mock_embedding_data.embedding = [0.1] * 4096
+        mock_response = Mock()
+        mock_response.data = [mock_embedding_data]
+        mock_client.embeddings.create.return_value = mock_response
+        em._openai_client = mock_client
+
+        sleep_calls = []
+
+        def fake_sleep(duration):
+            sleep_calls.append(duration)
+
+        with patch("abstracts_explorer.embeddings.time.sleep", side_effect=fake_sleep):
+            em.generate_embedding("First text")
+            em.generate_embedding("Second text")
+
+        # No sleep should be called when rate limiting is disabled
+        assert len(sleep_calls) == 0
+
+    def test_no_sleep_when_sufficient_time_elapsed(self, tmp_path, monkeypatch):
+        """Test that no sleep occurs when enough time has already passed between requests."""
+        from tests.conftest import get_env_test_path
+        from abstracts_explorer.config import get_config
+        from unittest.mock import Mock
+
+        monkeypatch.setenv("EMBEDDING_DB", str(tmp_path / "chroma"))
+        get_config(reload=True, env_path=get_env_test_path())
+
+        # 60 req/min → 1 second minimum interval
+        em = EmbeddingsManager(requests_per_minute=60)
+        em._last_request_time = 0.0  # Simulate last request was at t=0
+
+        # Set up mock OpenAI client
+        mock_client = Mock()
+        mock_embedding_data = Mock()
+        mock_embedding_data.embedding = [0.1] * 4096
+        mock_response = Mock()
+        mock_response.data = [mock_embedding_data]
+        mock_client.embeddings.create.return_value = mock_response
+        em._openai_client = mock_client
+
+        sleep_calls = []
+
+        def fake_sleep(duration):
+            sleep_calls.append(duration)
+
+        with patch("abstracts_explorer.embeddings.time.sleep", side_effect=fake_sleep):
+            with patch("abstracts_explorer.embeddings.time.monotonic", return_value=2.0):
+                # elapsed = 2.0 - 0.0 = 2.0 > 1.0 → no sleep needed
+                em.generate_embedding("Some text")
+
+        assert len(sleep_calls) == 0

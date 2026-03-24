@@ -127,6 +127,9 @@ class Config:
     imprint_link : str
         Optional URL for an imprint/legal notice page. If set, a link is shown in the web UI footer.
         Empty string by default (no imprint link shown).
+    requests_per_minute : int
+        Maximum number of embedding API requests per minute (default: 60).
+        Set to 0 to disable rate limiting.
 
     Examples
     --------
@@ -232,6 +235,10 @@ class Config:
         # Web UI Footer Configuration
         # Optional imprint/legal notice URL shown in the footer (empty = not shown)
         self.imprint_link = self._get_env("IMPRINT_LINK", default="")
+
+        # Embedding API Rate Limiting
+        # Maximum number of API requests per minute (0 = no limit)
+        self.requests_per_minute = self._get_env_int("REQUESTS_PER_MINUTE", default=60)
 
     def _get_env(self, key: str, default: str = "") -> str:
         """
