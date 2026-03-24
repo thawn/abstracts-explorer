@@ -314,8 +314,8 @@ class EmbeddingsManager:
                 time.sleep(min_interval - elapsed)
 
         try:
-            self._last_request_time = time.monotonic()
             response = self.openai_client.embeddings.create(model=self.model_name, input=text)
+            self._last_request_time = time.monotonic()
 
             if not response.data or len(response.data) == 0:
                 raise EmbeddingsError("No embedding data in API response")

@@ -726,18 +726,17 @@ class TestRateLimiting:
 
         with patch("abstracts_explorer.embeddings.time.sleep", side_effect=fake_sleep):
             with patch("abstracts_explorer.embeddings.time.monotonic") as mock_mono:
-                # First call: _last_request_time=0, monotonic()=0 → elapsed=0 → sleep needed
-                mock_mono.side_effect = [0.0, 0.0, 0.1]  # elapsed check, set _last, next elapsed
+                # First call: _last_request_time=0.0, monotonic()=0.0
+                # elapsed = 0.0 - 0.0 = 0.0 < min_interval (1.0) → sleep(1.0) is called
+                mock_mono.side_effect = [0.0, 0.0, 0.1]  # rate-limit check, post-call update, next check
                 em.generate_embedding("First text")
 
-                # Second call happens immediately (monotonic returns 0.1, last was 0.0)
-                # elapsed = 0.1 < 1.0 → sleep(0.9)
+                # Second call: monotonic returns 0.1, last was 0.0
+                # elapsed = 0.1 < 1.0 → sleep(0.9) is called
                 mock_mono.side_effect = [0.1, 0.1]
                 em.generate_embedding("Second text")
 
-        # First call: elapsed = 0 - 0 = 0 which is >= 0 (just barely, so no sleep on first)
-        # Actually: first call _last_request_time starts at 0.0, monotonic returns 0.0,
-        # elapsed = 0.0 - 0.0 = 0.0, min_interval = 1.0, sleep(1.0) called
+        # Both calls are rapid enough that sleep is triggered at least once
         assert len(sleep_calls) >= 1
         assert sleep_calls[0] > 0
 
