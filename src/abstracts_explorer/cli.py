@@ -1794,7 +1794,7 @@ Examples:
     cluster_parser.add_argument(
         "--reduction-method",
         type=str,
-        choices=["pca", "tsne"],
+        choices=["pca", "tsne", "umap"],
         default="pca",
         help="Dimensionality reduction method (default: pca)",
     )
