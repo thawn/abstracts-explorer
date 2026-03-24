@@ -879,8 +879,31 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     reduction_method = args.reduction_method
 
     # Build optional conference/year filters
-    conferences: Optional[list] = [args.conference] if getattr(args, "conference", None) else None
+    raw_conference: Optional[str] = getattr(args, "conference", None) or None
     years: Optional[list] = getattr(args, "years", None) or None
+
+    # Resolve conference name case-insensitively against stored names in the DB.
+    conferences: Optional[list] = None
+    if raw_conference:
+        try:
+            with DatabaseManager() as _db_resolve:
+                opts = _db_resolve.get_filter_options()
+                stored_conferences: list = opts.get("conferences", [])
+            match = next(
+                (c for c in stored_conferences if c.lower() == raw_conference.lower()),
+                None,
+            )
+            if match is None:
+                # No exact case-insensitive match; use the raw value and let
+                # compute_clusters_with_cache surface any "no papers" error.
+                conferences = [raw_conference]
+            else:
+                if match != raw_conference:
+                    print(f"ℹ️  Resolved conference '{raw_conference}' → '{match}'")
+                conferences = [match]
+        except Exception:
+            # Fall back gracefully if the DB isn't available yet.
+            conferences = [raw_conference]
 
     print("Abstracts Explorer - Pre-generate Clustering")
     print("=" * 70)

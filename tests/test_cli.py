@@ -1407,8 +1407,53 @@ class TestCLI:
         assert call_kwargs["conferences"] is None
         assert call_kwargs["years"] is None
 
+    def test_pre_generate_clustering_conference_case_insensitive(self, tmp_path, capsys, monkeypatch):
+        """Test that --conference is resolved case-insensitively from stored names."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+        set_test_db(tmp_path / "test.db")
 
-class TestChatCommand:
+        mock_results = {
+            "points": [],
+            "statistics": {"total_papers": 50, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
+        }
+
+        # DatabaseManager.get_filter_options returns the canonical spelling
+        mock_filter_opts = {"conferences": ["ML4PS@NeurIPS", "NeurIPS"], "years": [2024], "sessions": []}
+
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
+        ):
+            mock_em = Mock()
+            mock_em_class.return_value = mock_em
+            mock_compute.return_value = mock_results
+
+            # DatabaseManager used as context manager for conference resolution
+            mock_db_instance = Mock()
+            mock_db_instance.get_filter_options.return_value = mock_filter_opts
+            mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
+            mock_db_instance.__exit__ = Mock(return_value=False)
+            mock_db_class.return_value = mock_db_instance
+
+            # User types the conference name in wrong case
+            with patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "pre-generate-clustering", "--conference", "ml4ps@neurips"],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        call_kwargs = mock_compute.call_args[1]
+        # Should use the canonical spelling, not the user-supplied lower-case version
+        assert call_kwargs["conferences"] == ["ML4PS@NeurIPS"]
+        captured = capsys.readouterr()
+        # Should print a resolution notice
+        assert "ml4ps@neurips" in captured.out.lower()
+
     """Test cases for the chat command."""
 
     def test_chat_embeddings_not_found(self, tmp_path, capsys, monkeypatch):
