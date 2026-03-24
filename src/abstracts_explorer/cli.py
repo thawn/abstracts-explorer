@@ -1778,9 +1778,39 @@ Examples:
         help="Number of Waitress worker threads (default: 6). Must be >= 1. Ignored when --dev is set.",
     )
 
-    # Cluster embeddings command
-    cluster_parser = subparsers.add_parser(
-        "cluster-embeddings",
+    # -------------------------------------------------------------------------
+    # Clustering command (parent with sub-subcommands)
+    # -------------------------------------------------------------------------
+    clustering_parser = subparsers.add_parser(
+        "clustering",
+        help="Clustering-related commands (run, clear-cache, pre-generate)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+Clustering-related commands.
+
+Sub-commands:
+  run            Cluster embeddings and export results
+  clear-cache    Clear clustering cache from the database
+  pre-generate   Pre-generate default clustering results and hierarchical labels
+
+Examples:
+  # Cluster with default settings
+  abstracts-explorer clustering run
+
+  # Clear the cache
+  abstracts-explorer clustering clear-cache
+
+  # Warm the cache for ML4PS@NeurIPS
+  abstracts-explorer clustering pre-generate --conference "ML4PS@NeurIPS"
+        """,
+    )
+    clustering_subparsers = clustering_parser.add_subparsers(
+        dest="clustering_command", help="Clustering sub-commands"
+    )
+
+    # clustering run
+    cluster_parser = clustering_subparsers.add_parser(
+        "run",
         help="Cluster embeddings for visualization",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Perform dimensionality reduction and clustering on paper embeddings.",
@@ -1842,10 +1872,10 @@ Examples:
         help="Maximum number of embeddings to process (optional)",
     )
 
-    # Clear clustering cache command
-    clear_cache_parser = subparsers.add_parser(
-        "clear-clustering-cache",
-        help="Clear clustering cache from database",
+    # clustering clear-cache
+    clear_cache_parser = clustering_subparsers.add_parser(
+        "clear-cache",
+        help="Clear clustering cache from the database",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="""
 Clear clustering cache from the database.
@@ -1855,10 +1885,10 @@ You can optionally filter by embedding model to clear only specific entries.
 
 Examples:
   # Clear all clustering cache entries
-  abstracts-explorer clear-clustering-cache
-  
+  abstracts-explorer clustering clear-cache
+
   # Clear cache for a specific embedding model
-  abstracts-explorer clear-clustering-cache --embedding-model text-embedding-3-large
+  abstracts-explorer clustering clear-cache --embedding-model text-embedding-3-large
         """,
     )
     clear_cache_parser.add_argument(
@@ -1868,9 +1898,9 @@ Examples:
         help="Only clear cache for this embedding model (optional)",
     )
 
-    # Pre-generate clustering command
-    pre_gen_parser = subparsers.add_parser(
-        "pre-generate-clustering",
+    # clustering pre-generate
+    pre_gen_parser = clustering_subparsers.add_parser(
+        "pre-generate",
         help="Pre-generate default clustering results and hierarchical labels",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="""
@@ -1883,16 +1913,16 @@ web-UI request for clusters is served instantly.
 
 Examples:
   # Pre-generate for ML4PS@NeurIPS (all years)
-  abstracts-explorer pre-generate-clustering --conference "ML4PS@NeurIPS"
+  abstracts-explorer clustering pre-generate --conference "ML4PS@NeurIPS"
 
   # Pre-generate for a specific conference and year
-  abstracts-explorer pre-generate-clustering --conference NeurIPS --years 2024
+  abstracts-explorer clustering pre-generate --conference NeurIPS --years 2024
 
   # Pre-generate for multiple years
-  abstracts-explorer pre-generate-clustering --conference NeurIPS --years 2023 2024
+  abstracts-explorer clustering pre-generate --conference NeurIPS --years 2023 2024
 
   # Use a specific linkage and force recompute
-  abstracts-explorer pre-generate-clustering --linkage complete --force
+  abstracts-explorer clustering pre-generate --linkage complete --force
         """,
     )
     pre_gen_parser.add_argument(
@@ -2213,12 +2243,19 @@ Examples:
         return chat_command(args)
     elif args.command == "web-ui":
         return web_ui_command(args)
-    elif args.command == "cluster-embeddings":
-        return cluster_embeddings_command(args)
-    elif args.command == "clear-clustering-cache":
-        return clear_clustering_cache_command(args)
-    elif args.command == "pre-generate-clustering":
-        return pre_generate_clustering_command(args)
+    elif args.command == "clustering":
+        if not hasattr(args, "clustering_command") or not args.clustering_command:
+            clustering_parser.print_help()
+            return 1
+        if args.clustering_command == "run":
+            return cluster_embeddings_command(args)
+        elif args.clustering_command == "clear-cache":
+            return clear_clustering_cache_command(args)
+        elif args.clustering_command == "pre-generate":
+            return pre_generate_clustering_command(args)
+        else:
+            clustering_parser.print_help()
+            return 1
     elif args.command == "mcp-server":
         return mcp_server_command(args)
     elif args.command == "eval":

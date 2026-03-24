@@ -997,7 +997,7 @@ class TestCLI:
         with patch.object(
             sys,
             "argv",
-            ["abstracts-explorer", "clear-clustering-cache"],
+            ["abstracts-explorer", "clustering", "clear-cache"],
         ):
             exit_code = main()
 
@@ -1058,7 +1058,7 @@ class TestCLI:
         with patch.object(
             sys,
             "argv",
-            ["abstracts-explorer", "clear-clustering-cache", "--embedding-model", "model1"],
+            ["abstracts-explorer", "clustering", "clear-cache", "--embedding-model", "model1"],
         ):
             exit_code = main()
 
@@ -1103,7 +1103,7 @@ class TestCLI:
         with patch.object(
             sys,
             "argv",
-            ["abstracts-explorer", "clear-clustering-cache"],
+            ["abstracts-explorer", "clustering", "clear-cache"],
         ):
             exit_code = main()
 
@@ -1120,7 +1120,7 @@ class TestCLI:
         with patch.object(
             sys,
             "argv",
-            ["abstracts-explorer", "clear-clustering-cache"],
+            ["abstracts-explorer", "clustering", "clear-cache"],
         ):
             exit_code = main()
 
@@ -1135,7 +1135,7 @@ class TestCLI:
         with patch.object(
             sys,
             "argv",
-            ["abstracts-explorer", "pre-generate-clustering"],
+            ["abstracts-explorer", "clustering", "pre-generate"],
         ):
             exit_code = main()
 
@@ -1178,7 +1178,7 @@ class TestCLI:
                 "statistics": {"total_papers": 5, "n_clusters": 2, "n_noise": 0, "cluster_sizes": {}},
             }
 
-            with patch.object(sys, "argv", ["abstracts-explorer", "pre-generate-clustering"]):
+            with patch.object(sys, "argv", ["abstracts-explorer", "clustering", "pre-generate"]):
                 exit_code = main()
 
         assert exit_code == 0
@@ -1215,7 +1215,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "pre-generate-clustering"],
+                ["abstracts-explorer", "clustering", "pre-generate"],
             ):
                 exit_code = main()
 
@@ -1258,7 +1258,8 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
-                    "pre-generate-clustering",
+                    "clustering",
+                    "pre-generate",
                     "--linkage",
                     "complete",
                     "--n-clusters",
@@ -1295,7 +1296,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "pre-generate-clustering"],
+                ["abstracts-explorer", "clustering", "pre-generate"],
             ):
                 exit_code = main()
 
@@ -1326,7 +1327,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "pre-generate-clustering", "--conference", "ML4PS@NeurIPS"],
+                ["abstracts-explorer", "clustering", "pre-generate", "--conference", "ML4PS@NeurIPS"],
             ):
                 exit_code = main()
 
@@ -1362,7 +1363,8 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
-                    "pre-generate-clustering",
+                    "clustering",
+                    "pre-generate",
                     "--conference",
                     "NeurIPS",
                     "--years",
@@ -1403,7 +1405,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "pre-generate-clustering"],
+                ["abstracts-explorer", "clustering", "pre-generate"],
             ):
                 exit_code = main()
 
@@ -1447,7 +1449,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "pre-generate-clustering", "--conference", "ml4ps@neurips"],
+                ["abstracts-explorer", "clustering", "pre-generate", "--conference", "ml4ps@neurips"],
             ):
                 exit_code = main()
 
