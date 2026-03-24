@@ -1906,14 +1906,6 @@ def compute_clusters_with_cache(
     ...     n_clusters=5
     ... )
     """
-    # Get embeddings count to calculate default n_clusters if needed
-    collection_stats = embeddings_manager.get_collection_stats()
-    n_papers = collection_stats["count"]
-
-    # Calculate default n_clusters if not provided
-    if n_clusters is None:
-        n_clusters = calculate_default_clusters(n_papers)
-        logger.info(f"Auto-calculated n_clusters={n_clusters} based on {n_papers} papers")
 
     # Check if cache exists and is valid
     if not force and not limit:  # Only use cache if not limiting results
