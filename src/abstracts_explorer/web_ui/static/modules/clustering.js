@@ -8,6 +8,7 @@ import { API_BASE, PLOTLY_COLORS } from './utils/constants.js';
 import { showLoading, showErrorInElement } from './utils/ui-utils.js';
 import { sortClustersBySizeDesc } from './utils/sort-utils.js';
 import { getClusterLabelWithCount } from './utils/cluster-utils.js';
+import { getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
 import { formatPaperCard } from './paper-card.js';
 
 // Cluster state
@@ -86,6 +87,13 @@ export async function loadClusters() {
         
         // Initialize default cluster count if not set
         await initDefaultClusterCount();
+
+        // Build request body with current config and active conference/year filters
+        const computeBody = { ...currentClusterConfig };
+        const selectedConference = getSelectedConference();
+        const selectedYears = getSelectedYears();
+        if (selectedConference) computeBody.conferences = [selectedConference];
+        if (selectedYears.length > 0) computeBody.years = selectedYears;
         
         // Try to load cached clusters first
         let response = await fetch(`${API_BASE}/api/clusters/cached`);
@@ -96,7 +104,7 @@ export async function loadClusters() {
             response = await fetch(`${API_BASE}/api/clusters/compute`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(currentClusterConfig)
+                body: JSON.stringify(computeBody)
             });
         }
         
@@ -1454,10 +1462,17 @@ export async function applyClusterSettings() {
     showLoading('cluster-plot', 'Recomputing clusters with new settings...');
     
     try {
+        // Include current conference/year filters in the recompute request
+        const computeBody = { ...currentClusterConfig };
+        const selectedConference = getSelectedConference();
+        const selectedYears = getSelectedYears();
+        if (selectedConference) computeBody.conferences = [selectedConference];
+        if (selectedYears.length > 0) computeBody.years = selectedYears;
+
         const response = await fetch(`${API_BASE}/api/clusters/compute`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(currentClusterConfig)
+            body: JSON.stringify(computeBody)
         });
         
         if (!response.ok) {
@@ -1563,6 +1578,13 @@ export async function precalculateClusters() {
             clustering_method: currentClusterConfig.clustering_method,
             n_clusters: currentClusterConfig.n_clusters
         };
+
+        // Add selected conference and years so the backend only clusters the
+        // currently visible subset (not all conferences/years).
+        const selectedConference = getSelectedConference();
+        const selectedYears = getSelectedYears();
+        if (selectedConference) config.conferences = [selectedConference];
+        if (selectedYears.length > 0) config.years = selectedYears;
         
         console.log('Starting background clustering pre-calculation...');
         

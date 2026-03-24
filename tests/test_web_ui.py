@@ -1558,7 +1558,7 @@ class TestServerInitialization:
                             # Verify cache was NOT queried (limit bypasses cache)
                             mock_db.get_clustering_cache.assert_not_called()
                             # Verify clustering was computed with limit
-                            mock_cm.load_embeddings.assert_called_once_with(limit=100)
+                            mock_cm.load_embeddings.assert_called_once_with(limit=100, conferences=None, years=None)
 
     def test_compute_clusters_saves_to_cache_after_computing(self):
         """Test that compute_clusters saves results to cache after computing."""

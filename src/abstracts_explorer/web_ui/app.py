@@ -10,6 +10,7 @@ import sys
 import logging
 import json
 from pathlib import Path
+from typing import Any, Dict, Optional
 from flask import Flask, render_template, request, jsonify, g, send_file
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -571,6 +572,8 @@ def compute_clusters():
         n_clusters = data.get("n_clusters")  # None means auto-calculate
         limit = data.get("limit")
         force = data.get("force", False)
+        conferences = data.get("conferences") or None  # list[str] or None
+        years = data.get("years") or None  # list[int] or None
 
         # Get config and database
         config = get_config()
@@ -618,6 +621,8 @@ def compute_clusters():
             n_clusters=n_clusters,
             limit=limit,
             force=force,
+            conferences=conferences,
+            years=years,
             **clustering_kwargs,
         )
 
@@ -737,6 +742,8 @@ def precalculate_clusters():
         n_components = data.get("n_components", 2)
         clustering_method = data.get("clustering_method", "kmeans")
         n_clusters = data.get("n_clusters")
+        conferences = data.get("conferences") or None  # list[str] or None
+        years = data.get("years") or None  # list[int] or None
 
         # Get config and managers
         config = get_config()
@@ -749,6 +756,15 @@ def precalculate_clusters():
             n_papers = collection_stats["count"]
             n_clusters = calculate_default_clusters(n_papers)
 
+        # Build cache params to check (same logic as compute_clusters_with_cache)
+        cache_check_params: Optional[Dict[str, Any]] = None
+        if conferences or years:
+            cache_check_params = {}
+            if conferences:
+                cache_check_params["conferences"] = sorted(conferences)
+            if years:
+                cache_check_params["years"] = sorted([int(y) for y in years])
+
         # Check if cache already exists
         current_model = config.embedding_model
         cached_results = database.get_clustering_cache(
@@ -757,6 +773,7 @@ def precalculate_clusters():
             n_components=n_components,
             clustering_method=clustering_method,
             n_clusters=n_clusters if clustering_method.lower() != "dbscan" else None,
+            clustering_params=cache_check_params,
         )
 
         if cached_results:
@@ -779,6 +796,8 @@ def precalculate_clusters():
                     n_clusters=n_clusters,
                     limit=None,
                     force=False,
+                    conferences=conferences,
+                    years=years,
                 )
 
                 logger.info("Background clustering pre-calculation completed successfully")

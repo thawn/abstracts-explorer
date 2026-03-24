@@ -29,11 +29,10 @@ describe('Filters Module', () => {
                 <option value="Session 1">Session 1</option>
                 <option value="Session 2">Session 2</option>
             </select>
-            <select id="year-selector">
+            <select id="year-selector" multiple>
                 <option value="">All Years</option>
             </select>
             <select id="conference-selector">
-                <option value="">All Conferences</option>
             </select>
             <div id="settings-modal" class="hidden" data-context=""></div>
             <div id="modal-title"></div>
@@ -142,7 +141,7 @@ describe('Filters Module', () => {
             delete window.loadStats;
         });
 
-        it('should not call window.loadStats when no defaults are configured', async () => {
+        it('should select the first conference and call window.loadStats even when no default_conference is configured', async () => {
             const mockLoadStats = jest.fn();
             window.loadStats = mockLoadStats;
 
@@ -162,7 +161,8 @@ describe('Filters Module', () => {
 
             await loadFilterOptions();
 
-            expect(mockLoadStats).not.toHaveBeenCalled();
+            // Without "All Conferences", a conference is always selected on initial load
+            expect(mockLoadStats).toHaveBeenCalled();
 
             delete window.loadStats;
         });

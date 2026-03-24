@@ -5,6 +5,7 @@
  */
 
 import { API_BASE } from './utils/constants.js';
+import { getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
 
 /**
  * Load filter options from API
@@ -15,12 +16,12 @@ export async function loadFilterOptions() {
         // Get selected year and conference from header
         const yearSelect = document.getElementById('year-selector');
         const conferenceSelect = document.getElementById('conference-selector');
-        const selectedYear = yearSelect ? yearSelect.value : '';
-        const selectedConference = conferenceSelect ? conferenceSelect.value : '';
+        const selectedConference = getSelectedConference();
+        const selectedYears = getSelectedYears();
 
         // Build query params for filters
         const filterParams = new URLSearchParams();
-        if (selectedYear) filterParams.append('year', selectedYear);
+        if (selectedYears.length === 1) filterParams.append('year', selectedYears[0]);
         if (selectedConference) filterParams.append('conference', selectedConference);
 
         // Load session, topic, eventtype filters from database
@@ -43,7 +44,7 @@ export async function loadFilterOptions() {
             window.conferenceYearsMap = availableData.conference_years || {};
             window.allYears = availableData.years || [];
 
-            // Populate year selector in header
+            // Populate year selector in header (only on initial load when just "All Years" is present)
             if (yearSelect && yearSelect.options.length === 1) {
                 if (availableData.years && availableData.years.length > 0) {
                     availableData.years.forEach(year => {
@@ -55,8 +56,10 @@ export async function loadFilterOptions() {
                 }
             }
 
-            // Populate conference selector in header
-            if (conferenceSelect && conferenceSelect.options.length === 1) {
+            // Populate conference selector in header (only on initial load when empty)
+            // Track if we just populated it to apply defaults afterward.
+            let conferencesJustPopulated = false;
+            if (conferenceSelect && conferenceSelect.options.length === 0) {
                 if (availableData.conferences && availableData.conferences.length > 0) {
                     availableData.conferences.forEach(conference => {
                         const option = document.createElement('option');
@@ -64,26 +67,39 @@ export async function loadFilterOptions() {
                         option.textContent = conference;
                         conferenceSelect.appendChild(option);
                     });
+                    conferencesJustPopulated = true;
                 }
             }
 
-            // Apply defaults only on initial load (when nothing is selected yet)
+            // Apply defaults only on initial load (right after the selectors were populated)
             let defaultApplied = false;
-            if (conferenceSelect && !conferenceSelect.value && availableData.default_conference) {
+            if (conferencesJustPopulated && availableData.default_conference) {
                 const defaultConf = String(availableData.default_conference);
                 const confOption = Array.from(conferenceSelect.options).find(opt => opt.value === defaultConf);
                 if (confOption) {
                     conferenceSelect.value = defaultConf;
                     updateYearsForConference();
                     defaultApplied = true;
+                } else if (conferenceSelect.options.length > 0) {
+                    // Fall back to first available conference when default not found
+                    conferenceSelect.selectedIndex = 0;
+                    updateYearsForConference();
+                    defaultApplied = true;
                 }
+            } else if (conferencesJustPopulated && conferenceSelect && conferenceSelect.options.length > 0) {
+                // No specific default but conferences were just populated — select the first one
+                conferenceSelect.selectedIndex = 0;
+                updateYearsForConference();
+                defaultApplied = true;
             }
 
-            if (yearSelect && !yearSelect.value && availableData.default_year != null) {
+            if (yearSelect && getSelectedYears().length === 0 && availableData.default_year != null) {
                 const defaultYear = String(availableData.default_year);
                 const yearOption = Array.from(yearSelect.options).find(opt => opt.value === defaultYear);
                 if (yearOption) {
-                    yearSelect.value = defaultYear;
+                    // Deselect "All Years" and select the default year
+                    Array.from(yearSelect.options).forEach(o => o.selected = false);
+                    yearOption.selected = true;
                     defaultApplied = true;
                 }
             }
@@ -314,7 +330,8 @@ export function updateYearsForConference() {
     }
 
     const selectedConference = conferenceSelect.value;
-    const currentYear = yearSelect.value;
+    // Preserve currently selected years (multi-select)
+    const currentYears = getSelectedYears().map(String);
 
     yearSelect.innerHTML = '<option value="">All Years</option>';
 
@@ -337,11 +354,15 @@ export function updateYearsForConference() {
         }
     }
 
-    // Restore previous selection if available
+    // Restore previous selections that are still available; fall back to "All Years"
     const availableYears = Array.from(yearSelect.options).map(opt => opt.value);
-    if (currentYear && availableYears.includes(currentYear)) {
-        yearSelect.value = currentYear;
+    const validYears = currentYears.filter(y => availableYears.includes(y));
+    if (validYears.length > 0) {
+        Array.from(yearSelect.options).forEach(opt => {
+            opt.selected = validYears.includes(opt.value);
+        });
     } else {
-        yearSelect.value = '';
+        // Select "All Years" sentinel
+        yearSelect.options[0].selected = true;
     }
 }

@@ -215,7 +215,7 @@ class Config:
         self.query_similarity_threshold = self._get_env_float("QUERY_SIMILARITY_THRESHOLD", default=0.7)
 
         # Web UI Default Filters
-        self.default_conference = self._get_env("DEFAULT_CONFERENCE", default="")
+        self.default_conference = self._get_env("DEFAULT_CONFERENCE", default="ML4PS@NeurIPS")
         self.default_year = self._get_env_int("DEFAULT_YEAR", default=0)
 
         # Logging Configuration

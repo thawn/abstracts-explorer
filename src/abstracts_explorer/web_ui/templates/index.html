@@ -267,14 +267,15 @@
                         <select id="conference-selector"
                             class="px-3 py-2 bg-white/20 text-white rounded-lg border border-white/30 focus:ring-2 focus:ring-white/50 focus:border-transparent backdrop-blur-sm"
                             onchange="handleConferenceChange()">
-                            <option value="">All Conferences</option>
                         </select>
                     </div>
-                    <!-- Year Selector -->
+                    <!-- Year Selector (multi-select: Ctrl/Cmd+click for multiple years) -->
                     <div class="flex items-center space-x-2">
-                        <label for="year-selector" class="text-sm font-medium">Year:</label>
+                        <label for="year-selector" class="text-sm font-medium" title="Ctrl/Cmd+click to select multiple years">Year:</label>
                         <select id="year-selector"
                             class="px-3 py-2 bg-white/20 text-white rounded-lg border border-white/30 focus:ring-2 focus:ring-white/50 focus:border-transparent backdrop-blur-sm"
+                            multiple
+                            size="1"
                             onchange="handleYearChange()">
                             <option value="">All Years</option>
                         </select>

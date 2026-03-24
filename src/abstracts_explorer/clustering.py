@@ -210,7 +210,12 @@ class ClusteringManager:
         self.fuzzy_memberships: Optional[np.ndarray] = None
         self.clusterer: Optional[Any] = None  # Store the clusterer for hierarchy access
 
-    def load_embeddings(self, limit: Optional[int] = None) -> int:
+    def load_embeddings(
+        self,
+        limit: Optional[int] = None,
+        conferences: Optional[List[str]] = None,
+        years: Optional[List[int]] = None,
+    ) -> int:
         """
         Load embeddings from ChromaDB collection.
 
@@ -218,6 +223,10 @@ class ClusteringManager:
         ----------
         limit : int, optional
             Maximum number of embeddings to load. If None, load all.
+        conferences : list of str, optional
+            Filter to only load embeddings for these conferences.
+        years : list of int, optional
+            Filter to only load embeddings for these years.
 
         Returns
         -------
@@ -233,8 +242,27 @@ class ClusteringManager:
             raise ClusteringError("Collection not initialized in embeddings manager")
 
         try:
-            # Get all embeddings from the collection
-            results = self.embeddings_manager.collection.get(limit=limit, include=["embeddings", "metadatas"])
+            # Build where clause for conference/year filtering
+            # NOTE: ChromaDB stores all metadata as strings, so numeric years must
+            # be converted to strings for filtering.
+            filter_conditions: List[Dict[str, Any]] = []
+            if conferences:
+                filter_conditions.append({"conference": {"$in": conferences}})
+            if years:
+                year_strs = [str(y) for y in years]
+                filter_conditions.append({"year": {"$in": year_strs}})
+
+            where_filter: Optional[Dict[str, Any]] = None
+            if len(filter_conditions) > 1:
+                where_filter = {"$and": filter_conditions}
+            elif len(filter_conditions) == 1:
+                where_filter = filter_conditions[0]
+
+            # Get embeddings from the collection (with optional filtering)
+            get_kwargs: Dict[str, Any] = {"limit": limit, "include": ["embeddings", "metadatas"]}
+            if where_filter is not None:
+                get_kwargs["where"] = where_filter
+            results = self.embeddings_manager.collection.get(**get_kwargs)
 
             if not results["ids"] or len(results["ids"]) == 0:
                 raise ClusteringError("No embeddings found in collection")
@@ -1823,6 +1851,8 @@ def compute_clusters_with_cache(
     n_clusters: Optional[int] = None,
     limit: Optional[int] = None,
     force: bool = False,
+    conferences: Optional[List[str]] = None,
+    years: Optional[List[int]] = None,
     **clustering_kwargs,
 ) -> Dict[str, Any]:
     """
@@ -1851,6 +1881,10 @@ def compute_clusters_with_cache(
         Maximum number of embeddings to process
     force : bool, optional
         Force recompute even if cache exists, by default False
+    conferences : list of str, optional
+        Filter to only cluster papers from these conferences.
+    years : list of int, optional
+        Filter to only cluster papers from these years.
     **clustering_kwargs
         Additional clustering parameters (e.g., eps, min_samples for DBSCAN)
 
@@ -1887,6 +1921,13 @@ def compute_clusters_with_cache(
         cache_n_clusters: Optional[int] = n_clusters
         cache_params = clustering_kwargs.copy() if clustering_kwargs else {}
 
+        # Include conference/year filters in the cache key so different
+        # subsets are cached separately.
+        if conferences:
+            cache_params["conferences"] = sorted(conferences)
+        if years:
+            cache_params["years"] = sorted([int(y) for y in years])
+
         # Special handling for agglomerative with distance_threshold
         if clustering_method.lower() == "agglomerative" and "distance_threshold" in cache_params:
             cache_n_clusters = None  # Don't use n_clusters as cache key when using distance_threshold
@@ -1920,7 +1961,7 @@ def compute_clusters_with_cache(
             # We have cached clustering with a different reduction method.
             # Re-apply the requested reduction method on the embeddings.
             cm_cached = ClusteringManager(embeddings_manager)
-            cm_cached.load_embeddings(limit=limit)
+            cm_cached.load_embeddings(limit=limit, conferences=conferences, years=years)
 
             # Restore cluster assignments from the cached results
             if "points" in clustering_cached:
@@ -1964,6 +2005,10 @@ def compute_clusters_with_cache(
             try:
                 save_n_clusters: Optional[int] = n_clusters
                 save_params = clustering_kwargs.copy() if clustering_kwargs else {}
+                if conferences:
+                    save_params["conferences"] = sorted(conferences)
+                if years:
+                    save_params["years"] = sorted([int(y) for y in years])
                 if clustering_method.lower() == "agglomerative" and "distance_threshold" in save_params:
                     save_n_clusters = None
                 elif clustering_method.lower() == "dbscan":
@@ -1991,7 +2036,7 @@ def compute_clusters_with_cache(
 
     # Load embeddings
     logger.info(f"Loading embeddings (limit={limit})...")
-    cm.load_embeddings(limit=limit)
+    cm.load_embeddings(limit=limit, conferences=conferences, years=years)
 
     # Perform clustering on full embeddings first
     logger.info(f"Clustering using {clustering_method} on full embeddings...")
@@ -2071,6 +2116,12 @@ def compute_clusters_with_cache(
         try:
             save_n_clusters = n_clusters
             save_params = clustering_kwargs.copy() if clustering_kwargs else {}
+
+            # Include conference/year filters in cache params
+            if conferences:
+                save_params["conferences"] = sorted(conferences)
+            if years:
+                save_params["years"] = sorted([int(y) for y in years])
 
             # Special handling for agglomerative with distance_threshold
             if clustering_method.lower() == "agglomerative" and "distance_threshold" in save_params:
