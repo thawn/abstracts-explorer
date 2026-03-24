@@ -150,7 +150,7 @@ class TestConfig:
         config = Config(env_path=get_env_test_path())
 
         assert config.data_dir == "data"
-        assert config.chat_model == "alias-fast"
+        assert config.chat_model == "alias-code"
         assert config.embedding_model == "alias-qwen3-8b-embeddings"
         assert config.llm_backend_url == "https://api.helmholtz-blablador.fz-juelich.de"
         assert config.embedding_db == str((Path("data") / "chroma_db").absolute())
