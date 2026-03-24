@@ -37,6 +37,7 @@ dependencies = [
     "llvmlite>=0.40",
     "umap-learn>=0.5.11",
     "scikit-fuzzy>=0.4.2",
+    "argcomplete>=3.1.0",
 ]
 
 [project.optional-dependencies]
