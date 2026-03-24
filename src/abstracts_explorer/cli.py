@@ -850,6 +850,8 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
         - linkage: Agglomerative linkage method
         - n_clusters: Number of clusters (0 = auto-calculate)
         - reduction_method: Dimensionality reduction method for visualization
+        - conference: Single conference to filter by (optional)
+        - years: List of years to filter by (optional)
 
     Returns
     -------
@@ -876,6 +878,10 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     n_clusters_arg: Optional[int] = args.n_clusters if args.n_clusters > 0 else None
     reduction_method = args.reduction_method
 
+    # Build optional conference/year filters
+    conferences: Optional[list] = [args.conference] if getattr(args, "conference", None) else None
+    years: Optional[list] = getattr(args, "years", None) or None
+
     print("Abstracts Explorer - Pre-generate Clustering")
     print("=" * 70)
     print(f"Embeddings:       {config.embedding_db}")
@@ -883,6 +889,10 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     print(f"Clustering:       agglomerative (linkage={linkage})")
     print(f"N-clusters:       {'auto' if n_clusters_arg is None else n_clusters_arg}")
     print(f"Reduction:        {reduction_method} (for initial visualization)")
+    if conferences:
+        print(f"Conference:       {conferences[0]}")
+    if years:
+        print(f"Years:            {', '.join(str(y) for y in years)}")
     print("=" * 70)
 
     try:
@@ -905,6 +915,8 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
                 limit=None,
                 force=args.force,
                 linkage=linkage,
+                conferences=conferences,
+                years=years,
             )
 
         stats = results.get("statistics", {})
@@ -1830,8 +1842,14 @@ command once after create-embeddings to warm the cache so that the first
 web-UI request for clusters is served instantly.
 
 Examples:
-  # Pre-generate with default settings
-  abstracts-explorer pre-generate-clustering
+  # Pre-generate for ML4PS@NeurIPS (all years)
+  abstracts-explorer pre-generate-clustering --conference "ML4PS@NeurIPS"
+
+  # Pre-generate for a specific conference and year
+  abstracts-explorer pre-generate-clustering --conference NeurIPS --years 2024
+
+  # Pre-generate for multiple years
+  abstracts-explorer pre-generate-clustering --conference NeurIPS --years 2023 2024
 
   # Use a specific linkage and force recompute
   abstracts-explorer pre-generate-clustering --linkage complete --force
@@ -1862,6 +1880,20 @@ Examples:
         choices=["pca", "tsne", "umap"],
         default="pca",
         help="Dimensionality reduction method for the initial visualization (default: pca)",
+    )
+    pre_gen_parser.add_argument(
+        "--conference",
+        type=str,
+        default=None,
+        help="Only cluster papers from this conference (default: all conferences)",
+    )
+    pre_gen_parser.add_argument(
+        "--years",
+        type=int,
+        nargs="+",
+        default=None,
+        metavar="YEAR",
+        help="Only cluster papers from these year(s), e.g. --years 2024 or --years 2023 2024 (default: all years)",
     )
     pre_gen_parser.add_argument(
         "--force",

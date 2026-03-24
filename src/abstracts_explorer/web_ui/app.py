@@ -9,9 +9,7 @@ import os
 import sys
 import logging
 import json
-import threading
 from pathlib import Path
-from typing import Any, Dict, Optional
 from flask import Flask, render_template, request, jsonify, g, send_file
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -22,7 +20,7 @@ from abstracts_explorer.rag import RAGChat
 from abstracts_explorer.config import get_config
 from abstracts_explorer.paper_utils import get_paper_with_authors, PaperFormattingError
 from abstracts_explorer.export_utils import export_papers_to_zip
-from abstracts_explorer.clustering import compute_clusters_with_cache, ClusteringError, calculate_default_clusters
+from abstracts_explorer.clustering import compute_clusters_with_cache, ClusteringError
 from abstracts_explorer.plugin import get_available_filters
 
 # Import version
@@ -61,9 +59,6 @@ app.wsgi_app = ProxyFix(  # type: ignore[assignment]
 # Initialize components (lazy loading)
 embeddings_manager = None
 rag_chat = None
-
-# Guard to prevent concurrent background clustering computations
-_background_clustering_lock = threading.Lock()
 
 
 def get_database():
@@ -711,148 +706,6 @@ def get_default_cluster_count():
         return jsonify({"n_clusters": n_clusters, "n_papers": n_papers})
     except Exception as e:
         logger.error(f"Error calculating default cluster count: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/clusters/precalculate", methods=["POST"])
-def precalculate_clusters():
-    """
-    Pre-calculate clusters in the background for caching.
-
-    This endpoint starts a background clustering computation with default settings
-    to populate the cache. It returns immediately without waiting for completion.
-
-    Request Body
-    ------------
-    {
-        "reduction_method": str (optional, default: "pca"),
-        "n_components": int (optional, default: 2),
-        "clustering_method": str (optional, default: "kmeans"),
-        "n_clusters": int (optional, default: None - auto-calculated)
-    }
-
-    Returns
-    -------
-    dict
-        Status message indicating the pre-calculation was started
-    """
-    try:
-        data = request.get_json() or {}
-
-        # Get parameters with defaults
-        reduction_method = data.get("reduction_method", "pca")
-        n_components = data.get("n_components", 2)
-        clustering_method = data.get("clustering_method", "kmeans")
-        n_clusters = data.get("n_clusters")
-        conferences = data.get("conferences") or None  # list[str] or None
-        years = data.get("years") or None  # list[int] or None
-
-        # Get config and embeddings manager (global singleton, safe to share)
-        config = get_config()
-        em = get_embeddings_manager()
-        database = get_database()  # Request-scoped; safe to use for the synchronous cache check
-
-        # Calculate default n_clusters if not provided
-        if n_clusters is None:
-            collection_stats = em.get_collection_stats()
-            n_papers = collection_stats["count"]
-            n_clusters = calculate_default_clusters(n_papers)
-
-        # Build cache params to check (same logic as compute_clusters_with_cache)
-        cache_check_params: Optional[Dict[str, Any]] = None
-        if conferences or years:
-            cache_check_params = {}
-            if conferences:
-                cache_check_params["conferences"] = sorted(conferences)
-            if years:
-                cache_check_params["years"] = sorted([int(y) for y in years])
-
-        # Check if cache already exists
-        current_model = config.embedding_model
-        cached_results = database.get_clustering_cache(
-            embedding_model=current_model,
-            reduction_method=reduction_method,
-            n_components=n_components,
-            clustering_method=clustering_method,
-            n_clusters=n_clusters if clustering_method.lower() != "dbscan" else None,
-            clustering_params=cache_check_params,
-        )
-
-        if cached_results:
-            logger.info("Clustering cache already exists, skipping pre-calculation")
-            return jsonify({"status": "cache_exists", "message": "Clustering cache already exists"})
-
-        # If a background computation is already running, skip (don't stack threads)
-        if not _background_clustering_lock.acquire(blocking=False):
-            logger.info("Background clustering already running, skipping duplicate request")
-            return jsonify(
-                {
-                    "status": "already_running",
-                    "message": "Background clustering is already in progress",
-                    "n_clusters": n_clusters,
-                }
-            )
-
-        # Define background task
-        def background_clustering():
-            bg_database = None
-            try:
-                logger.info(f"Starting background clustering pre-calculation (n_clusters={n_clusters})")
-
-                # Create a fresh database connection for this thread.
-                # The request-scoped g.db will be closed when the HTTP response is sent,
-                # so the background thread must not reuse it.
-                bg_database = DatabaseManager()
-                bg_database.connect()
-                bg_database.create_tables()
-
-                compute_clusters_with_cache(
-                    embeddings_manager=em,
-                    database=bg_database,
-                    embedding_model=current_model,
-                    reduction_method=reduction_method,
-                    n_components=n_components,
-                    clustering_method=clustering_method,
-                    n_clusters=n_clusters,
-                    limit=None,
-                    force=False,
-                    conferences=conferences,
-                    years=years,
-                )
-
-                logger.info("Background clustering pre-calculation completed successfully")
-
-            except Exception as e:
-                logger.error(f"Error in background clustering: {e}", exc_info=True)
-
-            finally:
-                _background_clustering_lock.release()
-                if bg_database is not None:
-                    try:
-                        bg_database.close()
-                    except Exception:
-                        pass
-
-        # Start background thread; release the lock if thread creation fails
-        thread = threading.Thread(target=background_clustering, daemon=True)
-        try:
-            thread.start()
-        except Exception:
-            _background_clustering_lock.release()
-            raise
-
-        logger.info(f"Started background clustering pre-calculation with n_clusters={n_clusters}")
-
-        return jsonify(
-            {
-                "status": "started",
-                "message": "Clustering pre-calculation started in background",
-                "n_clusters": n_clusters,
-            }
-        )
-
-    except Exception as e:
-        logger.error(f"Error starting clustering pre-calculation: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 

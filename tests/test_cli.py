@@ -1298,6 +1298,115 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Unexpected error" in captured.err
 
+    def test_pre_generate_clustering_with_conference(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering with --conference filter."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+        set_test_db(tmp_path / "test.db")
+
+        mock_results = {
+            "points": [],
+            "statistics": {"total_papers": 50, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
+        }
+
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+        ):
+            mock_em = Mock()
+            mock_em_class.return_value = mock_em
+            mock_compute.return_value = mock_results
+
+            with patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "pre-generate-clustering", "--conference", "ML4PS@NeurIPS"],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        call_kwargs = mock_compute.call_args[1]
+        assert call_kwargs["conferences"] == ["ML4PS@NeurIPS"]
+        assert call_kwargs["years"] is None
+        captured = capsys.readouterr()
+        assert "ML4PS@NeurIPS" in captured.out
+
+    def test_pre_generate_clustering_with_years(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering with --years filter (one or more years)."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+        set_test_db(tmp_path / "test.db")
+
+        mock_results = {
+            "points": [],
+            "statistics": {"total_papers": 30, "n_clusters": 2, "n_noise": 0, "cluster_sizes": {}},
+        }
+
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+        ):
+            mock_em = Mock()
+            mock_em_class.return_value = mock_em
+            mock_compute.return_value = mock_results
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "abstracts-explorer",
+                    "pre-generate-clustering",
+                    "--conference",
+                    "NeurIPS",
+                    "--years",
+                    "2023",
+                    "2024",
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        call_kwargs = mock_compute.call_args[1]
+        assert call_kwargs["conferences"] == ["NeurIPS"]
+        assert call_kwargs["years"] == [2023, 2024]
+        captured = capsys.readouterr()
+        assert "2023" in captured.out
+        assert "2024" in captured.out
+
+    def test_pre_generate_clustering_no_filter_passes_none(self, tmp_path, capsys, monkeypatch):
+        """Test that omitting --conference/--years passes None (cluster all)."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+        set_test_db(tmp_path / "test.db")
+
+        mock_results = {
+            "points": [],
+            "statistics": {"total_papers": 100, "n_clusters": 5, "n_noise": 0, "cluster_sizes": {}},
+        }
+
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+        ):
+            mock_em = Mock()
+            mock_em_class.return_value = mock_em
+            mock_compute.return_value = mock_results
+
+            with patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "pre-generate-clustering"],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        call_kwargs = mock_compute.call_args[1]
+        assert call_kwargs["conferences"] is None
+        assert call_kwargs["years"] is None
+
 
 class TestChatCommand:
     """Test cases for the chat command."""

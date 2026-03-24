@@ -1573,47 +1573,6 @@ if (typeof window !== 'undefined') {
 }
 
 /**
- * Pre-calculate clusters in background for caching
- * Called when filters change to warm up the cache
- * @async
- */
-export async function precalculateClusters() {
-    try {
-        // Use current config for pre-calculation
-        const config = {
-            reduction_method: currentClusterConfig.reduction_method,
-            n_components: currentClusterConfig.n_components,
-            clustering_method: currentClusterConfig.clustering_method,
-            n_clusters: currentClusterConfig.n_clusters
-        };
-
-        // Add selected conference and years so the backend only clusters the
-        // currently visible subset (not all conferences/years).
-        const selectedConference = getSelectedConference();
-        const selectedYears = getSelectedYears();
-        if (selectedConference) config.conferences = [selectedConference];
-        if (selectedYears.length > 0) config.years = selectedYears;
-        
-        console.log('Starting background clustering pre-calculation...');
-        
-        const response = await fetch(`${API_BASE}/api/clusters/precalculate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(config)
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            console.log('Background clustering pre-calculation:', data.message);
-        } else {
-            console.warn('Failed to start background clustering pre-calculation');
-        }
-    } catch (error) {
-        console.warn('Error starting background clustering pre-calculation:', error);
-    }
-}
-
-/**
  * Search for papers within distance of a custom query
  * @async
  */
