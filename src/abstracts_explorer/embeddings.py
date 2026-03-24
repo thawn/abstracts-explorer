@@ -59,17 +59,16 @@ class EmbeddingsManager:
         ChromaDB configuration - URL for HTTP service or path for local storage.
     collection_name : str
         ChromaDB collection name.
-    client : chromadb.Client or None
-        ChromaDB client instance.
-    collection : chromadb.Collection or None
-        Active ChromaDB collection.
+    client : chromadb.Client
+        ChromaDB client instance. Connected automatically on first access.
+    collection : chromadb.Collection
+        Active ChromaDB collection. Created automatically on first access
+        (which also connects the client if not yet connected).
 
     Examples
     --------
     >>> em = EmbeddingsManager()
-    >>> em.connect()
-    >>> em.create_collection()
-    >>> em.add_paper(paper_dict)
+    >>> em.add_paper(paper_dict)  # connect() and create_collection() called automatically
     >>> results = em.search_similar("machine learning", n_results=5)
     >>> em.close()
     """
@@ -104,11 +103,61 @@ class EmbeddingsManager:
         self.embedding_db = config.embedding_db
 
         self.collection_name = collection_name or config.collection_name
-        self.client: Optional[Any] = None  # chromadb.Client
-        self.collection: Optional[Any] = None  # chromadb.Collection
+        self._client: Optional[Any] = None  # chromadb.Client
+        self._collection: Optional[Any] = None  # chromadb.Collection
 
         # OpenAI client - lazy loaded on first use to avoid API calls during test collection
         self._openai_client: Optional[OpenAI] = None
+
+    @property
+    def client(self) -> Any:
+        """
+        Get the ChromaDB client, connecting automatically on first access.
+
+        Returns
+        -------
+        chromadb.Client
+            Initialized ChromaDB client instance.
+
+        Raises
+        ------
+        EmbeddingsError
+            If connecting to ChromaDB fails.
+        """
+        if self._client is None:
+            self.connect()
+        assert self._client is not None  # connect() always sets _client or raises EmbeddingsError
+        return self._client
+
+    @client.setter
+    def client(self, value: Any) -> None:
+        self._client = value
+
+    @property
+    def collection(self) -> Any:
+        """
+        Get the ChromaDB collection, creating it automatically on first access.
+
+        Calling this property for the first time also triggers :meth:`connect` if
+        the client has not been initialized yet.
+
+        Returns
+        -------
+        chromadb.Collection
+            Initialized ChromaDB collection.
+
+        Raises
+        ------
+        EmbeddingsError
+            If connecting to ChromaDB or creating the collection fails.
+        """
+        if self._collection is None:
+            self.create_collection()
+        return self._collection
+
+    @collection.setter
+    def collection(self, value: Any) -> None:
+        self._collection = value
 
     @property
     def openai_client(self) -> OpenAI:
@@ -148,7 +197,7 @@ class EmbeddingsManager:
                 host = parsed.hostname or "localhost"
                 port = parsed.port or 8000
 
-                self.client = chromadb.HttpClient(
+                self._client = chromadb.HttpClient(
                     host=host,
                     port=port,
                     settings=Settings(anonymized_telemetry=False),
@@ -158,7 +207,7 @@ class EmbeddingsManager:
                 # Use persistent client for local storage
                 chroma_path = Path(self.embedding_db)
                 chroma_path.mkdir(parents=True, exist_ok=True)
-                self.client = chromadb.PersistentClient(
+                self._client = chromadb.PersistentClient(
                     path=str(chroma_path),
                     settings=Settings(anonymized_telemetry=False),
                 )
@@ -172,9 +221,9 @@ class EmbeddingsManager:
 
         Does nothing if not connected.
         """
-        if self.client:
-            self.client = None
-            self.collection = None
+        if self._client:
+            self._client = None
+            self._collection = None
             logger.debug("ChromaDB connection closed")
 
     def __enter__(self):
@@ -273,9 +322,6 @@ class EmbeddingsManager:
         >>> em.create_collection()
         >>> em.create_collection(reset=True)  # Reset existing collection
         """
-        if not self.client:
-            raise EmbeddingsError("Not connected to ChromaDB")
-
         try:
             if reset:
                 try:
@@ -284,7 +330,7 @@ class EmbeddingsManager:
                 except Exception:
                     pass  # Collection might not exist
 
-            self.collection = self.client.get_or_create_collection(
+            self._collection = self.client.get_or_create_collection(
                 name=self.collection_name,
                 metadata={"description": "NeurIPS paper abstracts and metadata"},
             )
@@ -323,9 +369,6 @@ class EmbeddingsManager:
         >>> em.paper_exists("uid1")
         True
         """
-        if not self.collection:
-            raise EmbeddingsError("Collection not initialized. Call create_collection() first.")
-
         try:
             # Try to get the paper by ID
             result = self.collection.get(ids=[paper_id])
@@ -364,9 +407,6 @@ class EmbeddingsManager:
         >>> em.paper_needs_update({"id": 1, "abstract": "This paper presents..."})
         False
         """
-        if not self.collection:
-            raise EmbeddingsError("Collection not initialized. Call create_collection() first.")
-
         try:
             existing_paper = self.collection.get(ids=[paper["uid"]])
             if not existing_paper or len(existing_paper["ids"]) == 0:
@@ -428,9 +468,6 @@ class EmbeddingsManager:
         >>> em.create_collection()
         >>> em.add_paper(paper_dict)
         """
-        if not self.collection:
-            raise EmbeddingsError("Collection not initialized. Call create_collection() first.")
-
         try:
             embedding_text = self.embedding_text_from_paper(paper)
             # Generate embedding if not provided
@@ -489,9 +526,6 @@ class EmbeddingsManager:
         >>> for i, paper_id in enumerate(results['ids'][0]):
         ...     print(f"{i+1}. Paper {paper_id}: {results['metadatas'][0][i]}")
         """
-        if not self.collection:
-            raise EmbeddingsError("Collection not initialized. Call create_collection() first.")
-
         if not query or not query.strip():
             raise EmbeddingsError("Query cannot be empty")
 
@@ -534,9 +568,6 @@ class EmbeddingsManager:
         >>> stats = em.get_collection_stats()
         >>> print(f"Collection has {stats['count']} papers")
         """
-        if not self.collection:
-            raise EmbeddingsError("Collection not initialized. Call create_collection() first.")
-
         try:
             return {
                 "name": self.collection.name,
@@ -628,9 +659,6 @@ class EmbeddingsManager:
         >>> # Only embed accepted papers
         >>> count = em.embed_from_database(where_clause="decision = 'Accept'")
         """
-        if not self.collection:
-            raise EmbeddingsError("Collection not initialized. Call create_collection() first.")
-
         try:
             # Use DatabaseManager for database operations
             db_manager = DatabaseManager()
@@ -838,9 +866,6 @@ class EmbeddingsManager:
         ... )
         """
         from abstracts_explorer.paper_utils import get_paper_with_authors, PaperFormattingError
-
-        if not self.collection:
-            raise EmbeddingsError("Collection not initialized. Call create_collection() first.")
 
         if not query or not query.strip():
             raise EmbeddingsError("Query cannot be empty")

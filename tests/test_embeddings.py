@@ -20,8 +20,8 @@ class TestEmbeddingsManager:
     def test_init(self, embeddings_manager):
         """Test EmbeddingsManager initialization."""
         assert isinstance(embeddings_manager, EmbeddingsManager)
-        assert embeddings_manager.client is None
-        assert embeddings_manager.collection is None
+        assert embeddings_manager._client is None
+        assert embeddings_manager._collection is None
 
     def test_connect(self, embeddings_manager):
         """Test connecting to ChromaDB."""
@@ -38,14 +38,14 @@ class TestEmbeddingsManager:
         """Test closing ChromaDB connection."""
         embeddings_manager.connect()
         embeddings_manager.close()
-        assert embeddings_manager.client is None
-        assert embeddings_manager.collection is None
+        assert embeddings_manager._client is None
+        assert embeddings_manager._collection is None
 
     def test_context_manager(self, embeddings_manager):
         """Test context manager functionality."""
         with embeddings_manager as em:
-            assert em.client is not None
-        assert embeddings_manager.client is None
+            assert em._client is not None
+        assert embeddings_manager._client is None
 
     def test_test_lm_studio_connection_success(self, embeddings_manager):
         """Test successful LM Studio connection."""
@@ -89,10 +89,13 @@ class TestEmbeddingsManager:
         assert embeddings_manager.collection is not None
         embeddings_manager.close()
 
-    def test_create_collection_not_connected(self, embeddings_manager):
-        """Test creating collection without connection."""
-        with pytest.raises(EmbeddingsError, match="Not connected to ChromaDB"):
-            embeddings_manager.create_collection()
+    def test_create_collection_auto_connects(self, embeddings_manager):
+        """Test that create_collection auto-connects to ChromaDB if not already connected."""
+        assert embeddings_manager._client is None
+        embeddings_manager.create_collection()
+        assert embeddings_manager._client is not None
+        assert embeddings_manager._collection is not None
+        embeddings_manager.close()
 
     def test_create_collection_reset(self, embeddings_manager):
         """Test resetting a collection."""
@@ -136,15 +139,18 @@ class TestEmbeddingsManager:
         assert stats["count"] == 1
         embeddings_manager.close()
 
-    def test_add_paper_collection_not_initialized(self, embeddings_manager):
-        """Test adding paper without collection."""
+    def test_add_paper_auto_initializes(self, embeddings_manager):
+        """Test that add_paper auto-initializes client and collection if needed."""
         paper = {
             "uid": "test_paper_1",
             "title": "Test Paper",
             "abstract": "Test abstract",
         }
-        with pytest.raises(EmbeddingsError, match="Collection not initialized"):
-            embeddings_manager.add_paper(paper)
+        # Should not raise - auto-initializes ChromaDB connection and collection
+        embeddings_manager.add_paper(paper)
+        assert embeddings_manager._client is not None
+        assert embeddings_manager._collection is not None
+        embeddings_manager.close()
 
     def test_add_multiple_papers(self, embeddings_manager, mock_lm_studio):
         """Test adding multiple papers."""
@@ -214,10 +220,14 @@ class TestEmbeddingsManager:
 
         embeddings_manager.close()
 
-    def test_search_similar_collection_not_initialized(self, embeddings_manager):
-        """Test search without collection."""
-        with pytest.raises(EmbeddingsError, match="Collection not initialized"):
-            embeddings_manager.search_similar("test query")
+    def test_search_similar_auto_initializes(self, embeddings_manager, mock_lm_studio):
+        """Test that search_similar auto-initializes client and collection if needed."""
+        # Should not raise - auto-initializes (collection is empty so 0 results)
+        results = embeddings_manager.search_similar("test query", n_results=1)
+        assert embeddings_manager._client is not None
+        assert embeddings_manager._collection is not None
+        assert "ids" in results
+        embeddings_manager.close()
 
     def test_get_collection_stats(self, embeddings_manager, mock_lm_studio):
         """Test getting collection statistics."""
@@ -238,10 +248,15 @@ class TestEmbeddingsManager:
         assert stats["count"] == 1
         embeddings_manager.close()
 
-    def test_get_collection_stats_not_initialized(self, embeddings_manager):
-        """Test getting stats without collection."""
-        with pytest.raises(EmbeddingsError, match="Collection not initialized"):
-            embeddings_manager.get_collection_stats()
+    def test_get_collection_stats_auto_initializes(self, embeddings_manager):
+        """Test that get_collection_stats auto-initializes client and collection if needed."""
+        stats = embeddings_manager.get_collection_stats()
+        assert embeddings_manager._client is not None
+        assert embeddings_manager._collection is not None
+        assert "name" in stats
+        assert "count" in stats
+        assert stats["count"] == 0
+        embeddings_manager.close()
 
     def test_embed_from_database(self, embeddings_manager, test_database, mock_lm_studio):
         """Test embedding papers from database."""
@@ -288,10 +303,14 @@ class TestEmbeddingsManager:
 
         embeddings_manager.close()
 
-    def test_embed_from_database_collection_not_initialized(self, embeddings_manager, test_database):
-        """Test embedding from database without collection."""
-        with pytest.raises(EmbeddingsError, match="Collection not initialized"):
-            embeddings_manager.embed_from_database()
+    def test_embed_from_database_auto_initializes(self, embeddings_manager, test_database):
+        """Test that embed_from_database auto-initializes client and collection if needed."""
+        # Should not raise - auto-initializes ChromaDB connection and collection
+        count = embeddings_manager.embed_from_database()
+        assert embeddings_manager._client is not None
+        assert embeddings_manager._collection is not None
+        assert count == 3
+        embeddings_manager.close()
 
     def test_embed_from_database_with_progress_callback(self, embeddings_manager, test_database, mock_lm_studio):
         """Test embedding papers from database with progress callback."""
@@ -456,10 +475,14 @@ class TestEmbeddingsManager:
 
         embeddings_manager.close()
 
-    def test_paper_exists_collection_not_initialized(self, embeddings_manager):
-        """Test paper_exists raises error when collection not initialized."""
-        with pytest.raises(EmbeddingsError, match="Collection not initialized"):
-            embeddings_manager.paper_exists("test_paper_1")
+    def test_paper_exists_auto_initializes(self, embeddings_manager):
+        """Test that paper_exists auto-initializes client and collection if needed."""
+        # Should not raise - auto-initializes (paper doesn't exist yet)
+        result = embeddings_manager.paper_exists("test_paper_1")
+        assert result is False
+        assert embeddings_manager._client is not None
+        assert embeddings_manager._collection is not None
+        embeddings_manager.close()
 
     def test_embed_from_database_skip_existing(self, embeddings_manager, test_database, mock_lm_studio):
         """Test that embed_from_database skips papers that already exist."""
