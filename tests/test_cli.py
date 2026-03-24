@@ -68,6 +68,18 @@ class TestCLI:
             assert "usage:" in captured.out
             assert "create-embeddings" in captured.out
 
+    def test_argcomplete_autocomplete_called(self):
+        """Test that argcomplete.autocomplete is called during CLI startup."""
+        with patch.object(sys, "argv", ["neurips-abstracts"]):
+            with patch("abstracts_explorer.cli.argcomplete.autocomplete") as mock_autocomplete:
+                main()
+                assert mock_autocomplete.called, "argcomplete.autocomplete should be called in main()"
+                # Verify it received the argument parser as its first argument
+                call_args = mock_autocomplete.call_args
+                import argparse
+
+                assert isinstance(call_args[0][0], argparse.ArgumentParser)
+
     def test_download_command_success(self, tmp_path, capsys):
         """Test download command completes successfully."""
         output_db = tmp_path / "test.db"

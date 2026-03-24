@@ -11,6 +11,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import argcomplete
+
 from tqdm import tqdm
 
 from .config import get_config
@@ -1970,6 +1972,7 @@ Examples:
         help="Skip confirmation prompt",
     )
 
+    argcomplete.autocomplete(parser)
     args = parser.parse_args()
 
     # Setup logging based on verbosity
