@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
+import httpx
 from openai import OpenAI
 import chromadb
 from chromadb.config import Settings
@@ -23,6 +24,40 @@ from .config import get_config
 from .database import DatabaseManager
 
 logger = logging.getLogger(__name__)
+
+
+class RateLimitedTransport(httpx.BaseTransport):
+    """
+    An httpx transport that enforces a maximum requests-per-minute rate.
+
+    Wraps an existing transport and sleeps between requests to stay within the
+    configured rate limit.
+
+    Parameters
+    ----------
+    transport : httpx.BaseTransport
+        The underlying transport to delegate requests to.
+    requests_per_minute : int
+        Maximum number of requests per minute. Must be > 0.
+    """
+
+    def __init__(self, transport: httpx.BaseTransport, requests_per_minute: int) -> None:
+        self._transport = transport
+        self._min_interval: float = 60.0 / requests_per_minute
+        self._last_request_time: float = 0.0
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        """Send *request* after enforcing the minimum inter-request interval."""
+        elapsed = time.monotonic() - self._last_request_time
+        if elapsed < self._min_interval:
+            time.sleep(self._min_interval - elapsed)
+        response = self._transport.handle_request(request)
+        self._last_request_time = time.monotonic()
+        return response
+
+    def close(self) -> None:
+        """Close the underlying transport."""
+        self._transport.close()
 
 
 class EmbeddingsError(Exception):
@@ -121,8 +156,6 @@ class EmbeddingsManager:
         self.requests_per_minute = (
             requests_per_minute if requests_per_minute is not None else config.requests_per_minute
         )
-        # Timestamp of the last API request (monotonic clock)
-        self._last_request_time: float = 0.0
 
     @property
     def client(self) -> Any:
@@ -179,6 +212,10 @@ class EmbeddingsManager:
         """
         Get the OpenAI client, creating it lazily on first access.
 
+        When ``requests_per_minute`` is greater than 0 a :class:`RateLimitedTransport`
+        is wrapped around the default httpx transport and passed as the ``http_client``
+        argument so that every HTTP request is automatically throttled.
+
         This lazy loading prevents API calls during test collection.
 
         Returns
@@ -187,8 +224,14 @@ class EmbeddingsManager:
             Initialized OpenAI client instance.
         """
         if self._openai_client is None:
+            http_client: Optional[httpx.Client] = None
+            if self.requests_per_minute > 0:
+                transport = RateLimitedTransport(httpx.HTTPTransport(), self.requests_per_minute)
+                http_client = httpx.Client(transport=transport)
             self._openai_client = OpenAI(
-                base_url=f"{self.lm_studio_url}/v1", api_key=self.llm_backend_auth_token or "lm-studio-local"
+                base_url=f"{self.lm_studio_url}/v1",
+                api_key=self.llm_backend_auth_token or "lm-studio-local",
+                http_client=http_client,
             )
         return self._openai_client
 
@@ -278,8 +321,8 @@ class EmbeddingsManager:
         """
         Generate embedding for a given text using OpenAI-compatible API.
 
-        Respects the ``requests_per_minute`` rate limit by sleeping between
-        calls when necessary.
+        Rate limiting (if configured via ``requests_per_minute``) is handled
+        transparently by the underlying ``httpx`` transport.
 
         Parameters
         ----------
@@ -306,16 +349,8 @@ class EmbeddingsManager:
         if not text or not text.strip():
             raise EmbeddingsError("Cannot generate embedding for empty text")
 
-        # Apply rate limiting before the API call
-        if self.requests_per_minute > 0:
-            min_interval = 60.0 / self.requests_per_minute
-            elapsed = time.monotonic() - self._last_request_time
-            if elapsed < min_interval:
-                time.sleep(min_interval - elapsed)
-
         try:
             response = self.openai_client.embeddings.create(model=self.model_name, input=text)
-            self._last_request_time = time.monotonic()
 
             if not response.data or len(response.data) == 0:
                 raise EmbeddingsError("No embedding data in API response")
