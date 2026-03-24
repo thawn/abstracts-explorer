@@ -68,6 +68,7 @@ def test_database(tmp_path_factory):
 
     # Create database and add test data
     from abstracts_explorer.plugin import LightweightPaper
+
     set_test_db(db_path)
     db = DatabaseManager()
 
@@ -80,7 +81,7 @@ def test_database(tmp_path_factory):
                 "title": "Attention is All You Need",
                 "authors": ["Ashish Vaswani", "Noam Shazeer"],
                 "abstract": "We propose the Transformer, a model architecture eschewing recurrence and instead "
-                           "relying entirely on an attention mechanism to draw global dependencies between input and output.",
+                "relying entirely on an attention mechanism to draw global dependencies between input and output.",
                 "session": "Oral Session 1",
                 "poster_position": "A1",
                 "keywords": ["attention", "transformer", "neural networks"],
@@ -91,7 +92,7 @@ def test_database(tmp_path_factory):
                 "title": "BERT: Pre-training of Deep Bidirectional Transformers",
                 "authors": ["Jacob Devlin", "Ming-Wei Chang"],
                 "abstract": "We introduce a new language representation model called BERT, which stands for "
-                           "Bidirectional Encoder Representations from Transformers.",
+                "Bidirectional Encoder Representations from Transformers.",
                 "session": "Poster Session A",
                 "poster_position": "P1",
                 "keywords": ["bert", "nlp", "transformers"],
@@ -283,10 +284,14 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     original_paper_db = os.environ.get("PAPER_DB")
     original_embedding_db = os.environ.get("EMBEDDING_DB")
     original_collection_name = os.environ.get("COLLECTION_NAME")
+    original_default_conference = os.environ.get("DEFAULT_CONFERENCE")
 
     os.environ["PAPER_DB"] = str(test_database)
     os.environ["EMBEDDING_DB"] = str(embeddings_path)
     os.environ["COLLECTION_NAME"] = collection_name
+    # Test database only has "NeurIPS" papers; override so the auto-selected
+    # conference matches the test data and search/filter requests return results.
+    os.environ["DEFAULT_CONFERENCE"] = "NeurIPS"
 
     def mock_get_config():
         # Force reload to pick up environment variables with .env.test
@@ -361,6 +366,11 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     app_module.get_database = original_get_database
 
     # Restore original environment variables
+    if original_default_conference is not None:
+        os.environ["DEFAULT_CONFERENCE"] = original_default_conference
+    elif "DEFAULT_CONFERENCE" in os.environ:
+        del os.environ["DEFAULT_CONFERENCE"]
+
     if original_paper_db is not None:
         os.environ["PAPER_DB"] = original_paper_db
     elif "PAPER_DB" in os.environ:
@@ -455,7 +465,7 @@ def _create_chrome_driver():
     -------
     webdriver.Chrome
         Chrome WebDriver instance
-    
+
     Raises
     ------
     Exception
@@ -493,7 +503,7 @@ def _create_firefox_driver():
     -------
     webdriver.Firefox
         Firefox WebDriver instance
-    
+
     Raises
     ------
     Exception
@@ -575,7 +585,9 @@ def browser():
                     try:
                         driver = _create_firefox_driver()
                     except Exception as e:
-                        pytest.skip(f"Failed to create browser drivers: Chrome and Firefox both failed. Last error: {e}")
+                        pytest.skip(
+                            f"Failed to create browser drivers: Chrome and Firefox both failed. Last error: {e}"
+                        )
                 else:
                     pytest.skip("Chrome driver installation failed and Firefox not available")
         elif _check_firefox_available():
@@ -1446,8 +1458,7 @@ class TestDataDonationE2E:
         wait.until(EC.visibility_of_element_located((By.ID, "interesting-tab")))
 
         # Use JavaScript to inject test data and trigger UI update
-        browser.execute_script(
-            """
+        browser.execute_script("""
             const testPriorities = {
                 "test_uid_1": {
                     "priority": 5,
@@ -1463,8 +1474,7 @@ class TestDataDonationE2E:
             if (window.updateControlsVisibility) {
                 window.updateControlsVisibility();
             }
-        """
-        )
+        """)
 
         time.sleep(0.2)
 
@@ -1511,8 +1521,7 @@ class TestDataDonationE2E:
         wait.until(EC.visibility_of_element_located((By.ID, "interesting-tab")))
 
         # Use JavaScript to inject test data and trigger UI update
-        browser.execute_script(
-            """
+        browser.execute_script("""
             const testPriorities = {
                 "test_uid_1": {
                     "priority": 5,
@@ -1528,8 +1537,7 @@ class TestDataDonationE2E:
             if (window.updateControlsVisibility) {
                 window.updateControlsVisibility();
             }
-        """
-        )
+        """)
 
         time.sleep(0.2)
 
@@ -1590,8 +1598,7 @@ class TestDataDonationE2E:
         wait.until(EC.visibility_of_element_located((By.ID, "interesting-tab")))
 
         # Use JavaScript to inject test data and trigger UI update
-        browser.execute_script(
-            """
+        browser.execute_script("""
             const testPriorities = {
                 "test_uid_1": {
                     "priority": 5,
@@ -1607,8 +1614,7 @@ class TestDataDonationE2E:
             if (window.updateControlsVisibility) {
                 window.updateControlsVisibility();
             }
-        """
-        )
+        """)
 
         time.sleep(0.2)
 
@@ -2001,7 +2007,7 @@ class TestClusteringTabE2E:
     def test_cluster_center_colors_match_points(self, web_server, browser):
         """
         Test that cluster centers have the same color as their cluster points.
-        
+
         This test verifies that when cluster centers are displayed as stars,
         they use the same color as the points in their cluster.
 
