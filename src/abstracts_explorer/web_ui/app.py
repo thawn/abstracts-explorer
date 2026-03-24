@@ -9,6 +9,7 @@ import os
 import sys
 import logging
 import json
+import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 from flask import Flask, render_template, request, jsonify, g, send_file
@@ -60,6 +61,9 @@ app.wsgi_app = ProxyFix(  # type: ignore[assignment]
 # Initialize components (lazy loading)
 embeddings_manager = None
 rag_chat = None
+
+# Guard to prevent concurrent background clustering computations
+_background_clustering_lock = threading.Lock()
 
 
 def get_database():
@@ -733,8 +737,6 @@ def precalculate_clusters():
         Status message indicating the pre-calculation was started
     """
     try:
-        import threading
-
         data = request.get_json() or {}
 
         # Get parameters with defaults
@@ -745,10 +747,10 @@ def precalculate_clusters():
         conferences = data.get("conferences") or None  # list[str] or None
         years = data.get("years") or None  # list[int] or None
 
-        # Get config and managers
+        # Get config and embeddings manager (global singleton, safe to share)
         config = get_config()
         em = get_embeddings_manager()
-        database = get_database()
+        database = get_database()  # Request-scoped; safe to use for the synchronous cache check
 
         # Calculate default n_clusters if not provided
         if n_clusters is None:
@@ -780,15 +782,33 @@ def precalculate_clusters():
             logger.info("Clustering cache already exists, skipping pre-calculation")
             return jsonify({"status": "cache_exists", "message": "Clustering cache already exists"})
 
+        # If a background computation is already running, skip (don't stack threads)
+        if not _background_clustering_lock.acquire(blocking=False):
+            logger.info("Background clustering already running, skipping duplicate request")
+            return jsonify(
+                {
+                    "status": "already_running",
+                    "message": "Background clustering is already in progress",
+                    "n_clusters": n_clusters,
+                }
+            )
+
         # Define background task
         def background_clustering():
+            bg_database = None
             try:
                 logger.info(f"Starting background clustering pre-calculation (n_clusters={n_clusters})")
 
-                # Use shared clustering function
+                # Create a fresh database connection for this thread.
+                # The request-scoped g.db will be closed when the HTTP response is sent,
+                # so the background thread must not reuse it.
+                bg_database = DatabaseManager()
+                bg_database.connect()
+                bg_database.create_tables()
+
                 compute_clusters_with_cache(
                     embeddings_manager=em,
-                    database=database,
+                    database=bg_database,
                     embedding_model=current_model,
                     reduction_method=reduction_method,
                     n_components=n_components,
@@ -805,9 +825,21 @@ def precalculate_clusters():
             except Exception as e:
                 logger.error(f"Error in background clustering: {e}", exc_info=True)
 
-        # Start background thread
+            finally:
+                _background_clustering_lock.release()
+                if bg_database is not None:
+                    try:
+                        bg_database.close()
+                    except Exception:
+                        pass
+
+        # Start background thread; release the lock if thread creation fails
         thread = threading.Thread(target=background_clustering, daemon=True)
-        thread.start()
+        try:
+            thread.start()
+        except Exception:
+            _background_clustering_lock.release()
+            raise
 
         logger.info(f"Started background clustering pre-calculation with n_clusters={n_clusters}")
 

@@ -274,6 +274,11 @@ export function handleYearChange() {
         `;
     }
     
+    // Reset cluster data so filters are respected on next cluster load
+    if (window.resetClusters) {
+        window.resetClusters();
+    }
+
     // Pre-calculate clusters in background for the new filter
     if (window.precalculateClusters) {
         window.precalculateClusters();
@@ -311,7 +316,12 @@ export function handleConferenceChange() {
             </div>
         `;
     }
-    
+
+    // Reset cluster data so the new filter is respected on next cluster load
+    if (window.resetClusters) {
+        window.resetClusters();
+    }
+
     // Pre-calculate clusters in background for the new filter
     if (window.precalculateClusters) {
         window.precalculateClusters();

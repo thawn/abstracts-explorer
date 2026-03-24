@@ -1724,7 +1724,10 @@ class TestServerInitialization:
                 patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em,
                 patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db,
                 patch("abstracts_explorer.web_ui.app.get_config") as mock_config,
+                patch("abstracts_explorer.web_ui.app.DatabaseManager"),
                 patch("abstracts_explorer.clustering.ClusteringManager") as MockCM,
+                patch("abstracts_explorer.web_ui.app._background_clustering_lock") as mock_lock,
+                patch("abstracts_explorer.web_ui.app.threading.Thread") as mock_thread_cls,
             ):
 
                 # Setup mocks
@@ -1747,6 +1750,11 @@ class TestServerInitialization:
                 }
                 MockCM.return_value = mock_cm
 
+                # Lock is available; prevent actual thread from starting
+                mock_lock.acquire.return_value = True
+                mock_thread = Mock()
+                mock_thread_cls.return_value = mock_thread
+
                 response = client.post("/api/clusters/precalculate", json={"clustering_method": "kmeans"})
 
                 assert response.status_code == 200
@@ -1755,6 +1763,7 @@ class TestServerInitialization:
                 assert data["status"] == "started"
                 assert "message" in data
                 assert "n_clusters" in data
+                mock_thread.start.assert_called_once()
 
     def test_precalculate_clusters_cache_exists(self):
         """Test precalculate when cache already exists."""
@@ -1799,7 +1808,10 @@ class TestServerInitialization:
                 patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em,
                 patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db,
                 patch("abstracts_explorer.web_ui.app.get_config") as mock_config,
+                patch("abstracts_explorer.web_ui.app.DatabaseManager"),
                 patch("abstracts_explorer.clustering.ClusteringManager") as MockCM,
+                patch("abstracts_explorer.web_ui.app._background_clustering_lock") as mock_lock,
+                patch("abstracts_explorer.web_ui.app.threading.Thread") as mock_thread_cls,
             ):
 
                 mock_em = Mock()
@@ -1816,6 +1828,10 @@ class TestServerInitialization:
                 mock_cm = Mock()
                 mock_cm.get_clustering_results.return_value = {"points": [], "statistics": {"n_clusters": 15}}
                 MockCM.return_value = mock_cm
+
+                mock_lock.acquire.return_value = True
+                mock_thread = Mock()
+                mock_thread_cls.return_value = mock_thread
 
                 response = client.post("/api/clusters/precalculate", json={"n_clusters": 15})
 
@@ -1836,6 +1852,38 @@ class TestServerInitialization:
                 assert response.status_code == 500
                 data = response.get_json()
                 assert "error" in data
+
+    def test_precalculate_clusters_already_running(self):
+        """Test that precalculate returns already_running when lock is held."""
+        from abstracts_explorer.web_ui.app import app
+
+        with app.test_client() as client:
+            with (
+                patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em,
+                patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db,
+                patch("abstracts_explorer.web_ui.app.get_config") as mock_config,
+                patch("abstracts_explorer.web_ui.app._background_clustering_lock") as mock_lock,
+            ):
+                mock_em = Mock()
+                mock_em.get_collection_stats.return_value = {"count": 100}
+                mock_get_em.return_value = mock_em
+
+                mock_db = Mock()
+                mock_db.get_clustering_cache.return_value = None  # No cache
+                mock_get_db.return_value = mock_db
+
+                mock_cfg = Mock()
+                mock_cfg.embedding_model = "test-model"
+                mock_config.return_value = mock_cfg
+
+                # Simulate lock already held
+                mock_lock.acquire.return_value = False
+
+                response = client.post("/api/clusters/precalculate", json={})
+
+                assert response.status_code == 200
+                data = response.get_json()
+                assert data["status"] == "already_running"
 
     def test_search_custom_cluster_success(self):
         """Test successful custom cluster search."""

@@ -78,6 +78,14 @@ export function areClustersLoaded() {
 }
 
 /**
+ * Reset the loaded cluster data so the next tab switch will trigger a reload.
+ * Call this when the conference/year filter changes.
+ */
+export function resetClusters() {
+    clusterData = null;
+}
+
+/**
  * Load and visualize clusters
  * @async
  */
