@@ -59,6 +59,11 @@ class EmbeddingsManager:
         ChromaDB configuration - URL for HTTP service or path for local storage.
     collection_name : str
         ChromaDB collection name.
+    client : chromadb.Client
+        ChromaDB client instance. Connected automatically on first access.
+    collection : chromadb.Collection
+        Active ChromaDB collection. Created automatically on first access
+        (which also connects the client if not yet connected).
 
     Examples
     --------
@@ -317,19 +322,15 @@ class EmbeddingsManager:
         >>> em.create_collection()
         >>> em.create_collection(reset=True)  # Reset existing collection
         """
-        if self._client is None:
-            self.connect()
-        assert self._client is not None  # connect() always sets _client or raises EmbeddingsError
-
         try:
             if reset:
                 try:
-                    self._client.delete_collection(name=self.collection_name)
+                    self.client.delete_collection(name=self.collection_name)
                     logger.info(f"Deleted existing collection: {self.collection_name}")
                 except Exception:
                     pass  # Collection might not exist
 
-            self._collection = self._client.get_or_create_collection(
+            self._collection = self.client.get_or_create_collection(
                 name=self.collection_name,
                 metadata={"description": "NeurIPS paper abstracts and metadata"},
             )
