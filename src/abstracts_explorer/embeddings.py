@@ -10,10 +10,12 @@ embeddings and stores them in ChromaDB for efficient similarity search.
 """
 
 import logging
+import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
+import httpx
 from openai import OpenAI
 import chromadb
 from chromadb.config import Settings
@@ -22,6 +24,40 @@ from .config import get_config
 from .database import DatabaseManager
 
 logger = logging.getLogger(__name__)
+
+
+class RateLimitedTransport(httpx.BaseTransport):
+    """
+    An httpx transport that enforces a maximum requests-per-minute rate.
+
+    Wraps an existing transport and sleeps between requests to stay within the
+    configured rate limit.
+
+    Parameters
+    ----------
+    transport : httpx.BaseTransport
+        The underlying transport to delegate requests to.
+    requests_per_minute : int
+        Maximum number of requests per minute. Must be > 0.
+    """
+
+    def __init__(self, transport: httpx.BaseTransport, requests_per_minute: int) -> None:
+        self._transport = transport
+        self._min_interval: float = 60.0 / requests_per_minute
+        self._last_request_time: float = 0.0
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        """Send *request* after enforcing the minimum inter-request interval."""
+        elapsed = time.monotonic() - self._last_request_time
+        if elapsed < self._min_interval:
+            time.sleep(self._min_interval - elapsed)
+        response = self._transport.handle_request(request)
+        self._last_request_time = time.monotonic()
+        return response
+
+    def close(self) -> None:
+        """Close the underlying transport."""
+        self._transport.close()
 
 
 class EmbeddingsError(Exception):
@@ -48,6 +84,9 @@ class EmbeddingsManager:
         Name of the embedding model, by default "text-embedding-qwen3-embedding-4b"
     collection_name : str, optional
         Name of the ChromaDB collection, by default "papers"
+    requests_per_minute : int, optional
+        Maximum number of API requests per minute. Set to 0 to disable rate limiting.
+        If None, uses the value from config (default: 60).
 
     Attributes
     ----------
@@ -79,6 +118,7 @@ class EmbeddingsManager:
         auth_token: Optional[str] = None,
         model_name: Optional[str] = None,
         collection_name: Optional[str] = None,
+        requests_per_minute: Optional[int] = None,
     ):
         """
         Initialize the EmbeddingsManager.
@@ -93,6 +133,9 @@ class EmbeddingsManager:
             Name of the embedding model. If None, uses config value.
         collection_name : str, optional
             Name of the ChromaDB collection. If None, uses config value.
+        requests_per_minute : int, optional
+            Maximum number of API requests per minute. Set to 0 to disable rate limiting.
+            If None, uses the value from config (default: 60).
         """
         config = get_config()
         self.lm_studio_url = (lm_studio_url or config.llm_backend_url).rstrip("/")
@@ -108,6 +151,11 @@ class EmbeddingsManager:
 
         # OpenAI client - lazy loaded on first use to avoid API calls during test collection
         self._openai_client: Optional[OpenAI] = None
+
+        # Rate limiting: maximum API requests per minute (0 = unlimited)
+        self.requests_per_minute = (
+            requests_per_minute if requests_per_minute is not None else config.requests_per_minute
+        )
 
     @property
     def client(self) -> Any:
@@ -164,6 +212,10 @@ class EmbeddingsManager:
         """
         Get the OpenAI client, creating it lazily on first access.
 
+        When ``requests_per_minute`` is greater than 0 a :class:`RateLimitedTransport`
+        is wrapped around the default httpx transport and passed as the ``http_client``
+        argument so that every HTTP request is automatically throttled.
+
         This lazy loading prevents API calls during test collection.
 
         Returns
@@ -172,8 +224,14 @@ class EmbeddingsManager:
             Initialized OpenAI client instance.
         """
         if self._openai_client is None:
+            http_client: Optional[httpx.Client] = None
+            if self.requests_per_minute > 0:
+                transport = RateLimitedTransport(httpx.HTTPTransport(), self.requests_per_minute)
+                http_client = httpx.Client(transport=transport)
             self._openai_client = OpenAI(
-                base_url=f"{self.lm_studio_url}/v1", api_key=self.llm_backend_auth_token or "lm-studio-local"
+                base_url=f"{self.lm_studio_url}/v1",
+                api_key=self.llm_backend_auth_token or "lm-studio-local",
+                http_client=http_client,
             )
         return self._openai_client
 
@@ -262,6 +320,9 @@ class EmbeddingsManager:
     def generate_embedding(self, text: str) -> List[float]:
         """
         Generate embedding for a given text using OpenAI-compatible API.
+
+        Rate limiting (if configured via ``requests_per_minute``) is handled
+        transparently by the underlying ``httpx`` transport.
 
         Parameters
         ----------

@@ -3,7 +3,7 @@ Tests for the embeddings module.
 """
 
 import pytest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from abstracts_explorer.embeddings import EmbeddingsError, EmbeddingsManager
 from tests.conftest import set_test_db
@@ -665,3 +665,125 @@ def test_search_papers_semantic_with_year_filter(embeddings_manager, tmp_path, m
         assert len(results_both) == 2, f"Expected 2 papers with years=[2024, 2025] filter, got {len(results_both)}"
 
     embeddings_manager.close()
+
+
+class TestRateLimiting:
+    """Tests for rate limiting in EmbeddingsManager."""
+
+    def test_default_requests_per_minute_from_config(self, embeddings_manager):
+        """Test that requests_per_minute is initialized from config (default 60)."""
+        # The fixture does not pass requests_per_minute explicitly, so it uses config default
+        assert isinstance(embeddings_manager.requests_per_minute, int)
+        assert embeddings_manager.requests_per_minute >= 0
+
+    def test_requests_per_minute_explicit(self, tmp_path, monkeypatch):
+        """Test that requests_per_minute can be set explicitly."""
+        from tests.conftest import get_env_test_path
+        from abstracts_explorer.config import get_config
+
+        monkeypatch.setenv("EMBEDDING_DB", str(tmp_path / "chroma"))
+        get_config(reload=True, env_path=get_env_test_path())
+
+        em = EmbeddingsManager(requests_per_minute=120)
+        assert em.requests_per_minute == 120
+
+    def test_requests_per_minute_zero_disables_limiting(self, tmp_path, monkeypatch):
+        """Test that setting requests_per_minute=0 disables rate limiting."""
+        from tests.conftest import get_env_test_path
+        from abstracts_explorer.config import get_config
+
+        monkeypatch.setenv("EMBEDDING_DB", str(tmp_path / "chroma"))
+        get_config(reload=True, env_path=get_env_test_path())
+
+        em = EmbeddingsManager(requests_per_minute=0)
+        assert em.requests_per_minute == 0
+
+    def test_rate_limited_transport_attached_when_rpm_gt_zero(self, tmp_path, monkeypatch):
+        """Test that a RateLimitedTransport http_client is used when requests_per_minute > 0."""
+        from tests.conftest import get_env_test_path
+        from abstracts_explorer.config import get_config
+        from abstracts_explorer.embeddings import RateLimitedTransport
+
+        monkeypatch.setenv("EMBEDDING_DB", str(tmp_path / "chroma"))
+        get_config(reload=True, env_path=get_env_test_path())
+
+        em = EmbeddingsManager(requests_per_minute=30)
+        # Trigger lazy initialization of the OpenAI client
+        client = em.openai_client
+        # The underlying httpx client should use our rate-limited transport
+        assert isinstance(client._client._transport, RateLimitedTransport)
+        assert client._client._transport._min_interval == pytest.approx(2.0)  # 60/30
+
+    def test_no_rate_limited_transport_when_rpm_zero(self, tmp_path, monkeypatch):
+        """Test that no RateLimitedTransport is used when requests_per_minute=0."""
+        from tests.conftest import get_env_test_path
+        from abstracts_explorer.config import get_config
+        from abstracts_explorer.embeddings import RateLimitedTransport
+
+        monkeypatch.setenv("EMBEDDING_DB", str(tmp_path / "chroma"))
+        get_config(reload=True, env_path=get_env_test_path())
+
+        em = EmbeddingsManager(requests_per_minute=0)
+        client = em.openai_client
+        # When rate limiting is disabled, the http_client is not a custom one wrapping RateLimitedTransport
+        # The OpenAI client uses its own default transport
+        assert not isinstance(getattr(getattr(client, "_client", None), "_transport", None), RateLimitedTransport)
+
+    def test_rate_limited_transport_sleeps_between_requests(self):
+        """Test that RateLimitedTransport sleeps the right amount between rapid requests."""
+        import httpx
+        from abstracts_explorer.embeddings import RateLimitedTransport
+
+        mock_inner = Mock()
+        mock_inner.handle_request.return_value = Mock(spec=httpx.Response)
+
+        transport = RateLimitedTransport(mock_inner, requests_per_minute=60)  # 1 s interval
+        transport._last_request_time = 0.0
+
+        sleep_calls = []
+
+        with patch("abstracts_explorer.embeddings.time.sleep", side_effect=lambda d: sleep_calls.append(d)):
+            with patch("abstracts_explorer.embeddings.time.monotonic", return_value=0.3):
+                # elapsed = 0.3 - 0.0 = 0.3 < 1.0 → sleep(0.7)
+                transport.handle_request(Mock(spec=httpx.Request))
+
+        assert len(sleep_calls) == 1
+        assert sleep_calls[0] == pytest.approx(0.7)
+
+    def test_rate_limited_transport_no_sleep_when_enough_time_elapsed(self):
+        """Test that RateLimitedTransport does not sleep when the interval is already met."""
+        import httpx
+        from abstracts_explorer.embeddings import RateLimitedTransport
+
+        mock_inner = Mock()
+        mock_inner.handle_request.return_value = Mock(spec=httpx.Response)
+
+        transport = RateLimitedTransport(mock_inner, requests_per_minute=60)  # 1 s interval
+        transport._last_request_time = 0.0
+
+        sleep_calls = []
+
+        with patch("abstracts_explorer.embeddings.time.sleep", side_effect=lambda d: sleep_calls.append(d)):
+            with patch("abstracts_explorer.embeddings.time.monotonic", return_value=2.0):
+                # elapsed = 2.0 > 1.0 → no sleep
+                transport.handle_request(Mock(spec=httpx.Request))
+
+        assert len(sleep_calls) == 0
+
+    def test_rate_limited_transport_updates_last_request_time(self):
+        """Test that RateLimitedTransport updates _last_request_time after the request."""
+        import httpx
+        from abstracts_explorer.embeddings import RateLimitedTransport
+
+        mock_inner = Mock()
+        mock_inner.handle_request.return_value = Mock(spec=httpx.Response)
+
+        transport = RateLimitedTransport(mock_inner, requests_per_minute=60)
+        transport._last_request_time = 0.0
+
+        monotonic_values = iter([5.0, 5.5])  # check, post-call update
+
+        with patch("abstracts_explorer.embeddings.time.monotonic", side_effect=lambda: next(monotonic_values)):
+            transport.handle_request(Mock(spec=httpx.Request))
+
+        assert transport._last_request_time == 5.5

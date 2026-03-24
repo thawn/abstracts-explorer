@@ -106,6 +106,8 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     print(f"Collection: {args.collection}")
     print(f"Model:    {args.model}")
     print(f"API URL: {args.lm_studio_url}")
+    rate_limit_str = f"{args.requests_per_minute} req/min" if args.requests_per_minute > 0 else "disabled"
+    print(f"Rate limit: {rate_limit_str}")
     print("=" * 70)
 
     # Check paper count
@@ -126,6 +128,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
             lm_studio_url=args.lm_studio_url,
             model_name=args.model,
             collection_name=args.collection,
+            requests_per_minute=args.requests_per_minute,
         )
 
         # Check for model mismatch
@@ -1494,6 +1497,12 @@ Examples:
         type=str,
         default=None,
         help="SQL WHERE clause to filter papers (e.g., \"decision LIKE '%%Accept%%'\")",
+    )
+    embeddings_parser.add_argument(
+        "--requests-per-minute",
+        type=int,
+        default=config.requests_per_minute,
+        help=f"Maximum number of API requests per minute, 0 to disable rate limiting (default: {config.requests_per_minute})",
     )
 
     # Search command
