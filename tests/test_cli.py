@@ -1223,11 +1223,13 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "cached successfully" in captured.out
         mock_compute.assert_called_once()
-        # Verify agglomerative clustering was requested
+        # Verify agglomerative clustering was requested with web-UI-matching defaults
         call_kwargs = mock_compute.call_args[1]
         assert call_kwargs["clustering_method"] == "agglomerative"
         assert call_kwargs["linkage"] == "ward"
-        # n_clusters=None means auto-calculate based on corpus size
+        assert call_kwargs["distance_threshold"] == 150.0  # matches web UI default
+        assert call_kwargs["reduction_method"] == "tsne"  # matches web UI default
+        # n_clusters=None because distance_threshold takes precedence
         assert call_kwargs["n_clusters"] is None
 
     def test_pre_generate_clustering_custom_options(self, tmp_path, capsys, monkeypatch):
@@ -1261,6 +1263,8 @@ class TestCLI:
                     "complete",
                     "--n-clusters",
                     "4",
+                    "--distance-threshold",
+                    "0",  # Disable distance_threshold so n_clusters takes effect
                     "--force",
                 ],
             ):
@@ -1270,6 +1274,7 @@ class TestCLI:
         call_kwargs = mock_compute.call_args[1]
         assert call_kwargs["linkage"] == "complete"
         assert call_kwargs["n_clusters"] == 4
+        assert "distance_threshold" not in call_kwargs  # disabled by --distance-threshold 0
         assert call_kwargs["force"] is True
 
     def test_pre_generate_clustering_error(self, tmp_path, capsys, monkeypatch):

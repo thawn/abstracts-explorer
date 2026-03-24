@@ -848,7 +848,8 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
         Command-line arguments containing:
         - collection: Name of the ChromaDB collection
         - linkage: Agglomerative linkage method
-        - n_clusters: Number of clusters (0 = auto-calculate)
+        - n_clusters: Number of clusters (0 = auto-calculate via distance_threshold)
+        - distance_threshold: Agglomerative distance threshold (overrides n_clusters)
         - reduction_method: Dimensionality reduction method for visualization
         - conference: Single conference to filter by (optional)
         - years: List of years to filter by (optional)
@@ -872,10 +873,18 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
             return 1
 
     linkage = args.linkage
+    # distance_threshold takes precedence over n_clusters.
+    # When distance_threshold is set (the default), n_clusters is ignored.
+    distance_threshold: Optional[float] = getattr(args, "distance_threshold", None)
+    if distance_threshold is not None and distance_threshold <= 0:
+        distance_threshold = None
     # args.n_clusters is 0 when the user wants auto-calculation.
     # We pass None to compute_clusters_with_cache so it calculates
     # the default based on the corpus size.
     n_clusters_arg: Optional[int] = args.n_clusters if args.n_clusters > 0 else None
+    # If a distance_threshold is supplied, n_clusters is irrelevant (same as web UI).
+    if distance_threshold is not None:
+        n_clusters_arg = None
     reduction_method = args.reduction_method
 
     # Build optional conference/year filters
@@ -910,7 +919,10 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     print(f"Embeddings:       {config.embedding_db}")
     print(f"Collection:       {args.collection}")
     print(f"Clustering:       agglomerative (linkage={linkage})")
-    print(f"N-clusters:       {'auto' if n_clusters_arg is None else n_clusters_arg}")
+    if distance_threshold is not None:
+        print(f"Dist. threshold:  {distance_threshold}")
+    else:
+        print(f"N-clusters:       {'auto' if n_clusters_arg is None else n_clusters_arg}")
     print(f"Reduction:        {reduction_method} (for initial visualization)")
     if conferences:
         print(f"Conference:       {conferences[0]}")
@@ -925,6 +937,11 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
         em.connect()
         em.create_collection()
 
+        # Build agglomerative kwargs to match web UI defaults exactly.
+        clustering_kwargs: dict = {"linkage": linkage}
+        if distance_threshold is not None:
+            clustering_kwargs["distance_threshold"] = distance_threshold
+
         with DatabaseManager() as db:
             print("\n🚀 Starting agglomerative clustering pipeline...")
             results = compute_clusters_with_cache(
@@ -937,9 +954,9 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
                 n_clusters=n_clusters_arg,
                 limit=None,
                 force=args.force,
-                linkage=linkage,
                 conferences=conferences,
                 years=years,
+                **clustering_kwargs,
             )
 
         stats = results.get("statistics", {})
@@ -1895,14 +1912,24 @@ Examples:
         "--n-clusters",
         type=int,
         default=0,
-        help="Number of clusters (default: 0 = auto-calculate based on corpus size)",
+        help="Number of clusters (default: 0 = auto-calculate). Ignored when --distance-threshold is set.",
+    )
+    pre_gen_parser.add_argument(
+        "--distance-threshold",
+        type=float,
+        default=150.0,
+        help=(
+            "Agglomerative distance threshold that controls the number of clusters "
+            "(default: 150, matching the web UI default). Set to 0 to disable and "
+            "use --n-clusters instead."
+        ),
     )
     pre_gen_parser.add_argument(
         "--reduction-method",
         type=str,
         choices=["pca", "tsne", "umap"],
-        default="pca",
-        help="Dimensionality reduction method for the initial visualization (default: pca)",
+        default="tsne",
+        help="Dimensionality reduction method for the initial visualization (default: tsne, matching web UI default)",
     )
     pre_gen_parser.add_argument(
         "--conference",
