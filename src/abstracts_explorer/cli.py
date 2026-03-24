@@ -890,6 +890,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
             collection_name=args.collection,
         )
         em.connect()
+        em.create_collection()
 
         with DatabaseManager() as db:
             print("\n🚀 Starting agglomerative clustering pipeline...")

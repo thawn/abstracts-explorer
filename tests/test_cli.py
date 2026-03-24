@@ -1143,6 +1143,53 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Embeddings database not found" in captured.err
 
+    def test_pre_generate_clustering_calls_create_collection(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering calls create_collection() before compute_clusters_with_cache.
+
+        This is a regression test: previously the command called em.connect() but
+        forgot em.create_collection(), causing ``get_collection_stats()`` to raise
+        ``EmbeddingsError: Collection not initialized. Call create_collection() first.``
+        """
+
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+        set_test_db(tmp_path / "test.db")
+
+        call_order = []
+
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+        ):
+            mock_em = Mock()
+
+            def track_connect():
+                call_order.append("connect")
+
+            def track_create_collection(reset=False):
+                call_order.append("create_collection")
+
+            mock_em.connect.side_effect = track_connect
+            mock_em.create_collection.side_effect = track_create_collection
+            mock_em_class.return_value = mock_em
+            mock_compute.return_value = {
+                "points": [],
+                "statistics": {"total_papers": 5, "n_clusters": 2, "n_noise": 0, "cluster_sizes": {}},
+            }
+
+            with patch.object(sys, "argv", ["abstracts-explorer", "pre-generate-clustering"]):
+                exit_code = main()
+
+        assert exit_code == 0
+        # create_collection must be called after connect and before compute_clusters_with_cache
+        assert "connect" in call_order, "em.connect() was not called"
+        assert "create_collection" in call_order, "em.create_collection() was not called (regression)"
+        assert call_order.index("connect") < call_order.index(
+            "create_collection"
+        ), "em.connect() must be called before em.create_collection()"
+        mock_compute.assert_called_once()
+
     def test_pre_generate_clustering_success(self, tmp_path, capsys, monkeypatch):
         """Test pre-generate-clustering command runs successfully."""
         embeddings_path = tmp_path / "chroma_db"
