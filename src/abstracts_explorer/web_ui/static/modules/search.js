@@ -6,7 +6,7 @@
  */
 
 import { API_BASE } from './utils/constants.js';
-import { escapeHtml } from './utils/dom-utils.js';
+import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
 import { showError, renderEmptyState } from './utils/ui-utils.js';
 import { setCurrentSearchTerm } from './state.js';
 import { formatPaperCard } from './paper-card.js';
@@ -24,10 +24,8 @@ export async function searchPapers() {
     const sessions = Array.from(sessionSelect.selectedOptions).map(opt => opt.value);
 
     // Get year and conference from header selectors
-    const yearSelect = document.getElementById('year-selector');
-    const conferenceSelect = document.getElementById('conference-selector');
-    const selectedYear = yearSelect.value;
-    const selectedConference = conferenceSelect.value;
+    const selectedYears = getSelectedYears();
+    const selectedConference = getSelectedConference();
 
     if (!query) {
         showError('Please enter a search query');
@@ -58,8 +56,8 @@ export async function searchPapers() {
         }
 
         // Add year filter if selected
-        if (selectedYear) {
-            requestBody.years = [parseInt(selectedYear)];
+        if (selectedYears.length > 0) {
+            requestBody.years = selectedYears;
         }
 
         // Add conference filter if selected

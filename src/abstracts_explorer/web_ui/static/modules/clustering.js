@@ -8,6 +8,7 @@ import { API_BASE, PLOTLY_COLORS } from './utils/constants.js';
 import { showLoading, showErrorInElement } from './utils/ui-utils.js';
 import { sortClustersBySizeDesc } from './utils/sort-utils.js';
 import { getClusterLabelWithCount } from './utils/cluster-utils.js';
+import { getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
 import { formatPaperCard } from './paper-card.js';
 
 // Cluster state
@@ -77,6 +78,14 @@ export function areClustersLoaded() {
 }
 
 /**
+ * Reset the loaded cluster data so the next tab switch will trigger a reload.
+ * Call this when the conference/year filter changes.
+ */
+export function resetClusters() {
+    clusterData = null;
+}
+
+/**
  * Load and visualize clusters
  * @async
  */
@@ -86,6 +95,13 @@ export async function loadClusters() {
         
         // Initialize default cluster count if not set
         await initDefaultClusterCount();
+
+        // Build request body with current config and active conference/year filters
+        const computeBody = { ...currentClusterConfig };
+        const selectedConference = getSelectedConference();
+        const selectedYears = getSelectedYears();
+        if (selectedConference) computeBody.conferences = [selectedConference];
+        if (selectedYears.length > 0) computeBody.years = selectedYears;
         
         // Try to load cached clusters first
         let response = await fetch(`${API_BASE}/api/clusters/cached`);
@@ -96,7 +112,7 @@ export async function loadClusters() {
             response = await fetch(`${API_BASE}/api/clusters/compute`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(currentClusterConfig)
+                body: JSON.stringify(computeBody)
             });
         }
         
@@ -1454,10 +1470,17 @@ export async function applyClusterSettings() {
     showLoading('cluster-plot', 'Recomputing clusters with new settings...');
     
     try {
+        // Include current conference/year filters in the recompute request
+        const computeBody = { ...currentClusterConfig };
+        const selectedConference = getSelectedConference();
+        const selectedYears = getSelectedYears();
+        if (selectedConference) computeBody.conferences = [selectedConference];
+        if (selectedYears.length > 0) computeBody.years = selectedYears;
+
         const response = await fetch(`${API_BASE}/api/clusters/compute`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(currentClusterConfig)
+            body: JSON.stringify(computeBody)
         });
         
         if (!response.ok) {
@@ -1547,40 +1570,6 @@ if (typeof window !== 'undefined') {
     window.disableHierarchyMode = disableHierarchyMode;
     window.navigateHierarchyUp = navigateHierarchyUp;
     window.navigateHierarchyDown = navigateHierarchyDown;
-}
-
-/**
- * Pre-calculate clusters in background for caching
- * Called when filters change to warm up the cache
- * @async
- */
-export async function precalculateClusters() {
-    try {
-        // Use current config for pre-calculation
-        const config = {
-            reduction_method: currentClusterConfig.reduction_method,
-            n_components: currentClusterConfig.n_components,
-            clustering_method: currentClusterConfig.clustering_method,
-            n_clusters: currentClusterConfig.n_clusters
-        };
-        
-        console.log('Starting background clustering pre-calculation...');
-        
-        const response = await fetch(`${API_BASE}/api/clusters/precalculate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(config)
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            console.log('Background clustering pre-calculation:', data.message);
-        } else {
-            console.warn('Failed to start background clustering pre-calculation');
-        }
-    } catch (error) {
-        console.warn('Error starting background clustering pre-calculation:', error);
-    }
 }
 
 /**

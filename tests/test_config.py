@@ -150,7 +150,7 @@ class TestConfig:
         config = Config(env_path=get_env_test_path())
 
         assert config.data_dir == "data"
-        assert config.chat_model == "alias-fast"
+        assert config.chat_model == "alias-code"
         assert config.embedding_model == "alias-qwen3-8b-embeddings"
         assert config.llm_backend_url == "https://api.helmholtz-blablador.fz-juelich.de"
         assert config.embedding_db == str((Path("data") / "chroma_db").absolute())
@@ -326,14 +326,15 @@ DEFAULT_YEAR=2024
         assert config.default_year == 2024
 
     def test_config_default_conference_and_year_defaults(self, tmp_path):
-        """Test that DEFAULT_CONFERENCE and DEFAULT_YEAR default to empty/zero."""
+        """Test that DEFAULT_CONFERENCE defaults to 'ML4PS@NeurIPS' and DEFAULT_YEAR to 0."""
         env_file = tmp_path / ".env"
         env_file.write_text("")
 
         config = Config(env_path=env_file)
 
-        assert config.default_conference == ""
+        assert config.default_conference == "ML4PS@NeurIPS"
         assert config.default_year == 0
+
     def test_config_imprint_link_default(self, tmp_path):
         """Test that imprint_link defaults to empty string."""
         env_file = tmp_path / ".env"

@@ -1097,9 +1097,8 @@ class TestCLI:
                 clustering_method="kmeans",
                 n_clusters=5,
                 results={
-                    "labels": [0, 1, 2],
-                    "reduced_embeddings": [[1, 2], [3, 4], [5, 6]],
-                    "statistics": {"total_papers": 3, "n_clusters": 3},
+                    "points": [{"id": "p1", "x": 1, "y": 2, "cluster": 0}],
+                    "statistics": {"total_papers": 1, "n_clusters": 1},
                 },
             )
             db.save_clustering_cache(
@@ -1109,9 +1108,8 @@ class TestCLI:
                 clustering_method="kmeans",
                 n_clusters=5,
                 results={
-                    "labels": [0, 1],
-                    "reduced_embeddings": [[1, 2], [3, 4]],
-                    "statistics": {"total_papers": 2, "n_clusters": 2},
+                    "points": [{"id": "p1", "x": 1, "y": 2, "cluster": 0}],
+                    "statistics": {"total_papers": 1, "n_clusters": 1},
                 },
             )
 
@@ -1119,7 +1117,7 @@ class TestCLI:
         with patch.object(
             sys,
             "argv",
-            ["abstracts-explorer", "clear-clustering-cache"],
+            ["abstracts-explorer", "clustering", "clear-cache"],
         ):
             exit_code = main()
 
@@ -1158,9 +1156,8 @@ class TestCLI:
                 clustering_method="kmeans",
                 n_clusters=5,
                 results={
-                    "labels": [0, 1, 2],
-                    "reduced_embeddings": [[1, 2], [3, 4], [5, 6]],
-                    "statistics": {"total_papers": 3, "n_clusters": 3},
+                    "points": [{"id": "p1", "x": 1, "y": 2, "cluster": 0}],
+                    "statistics": {"total_papers": 1, "n_clusters": 1},
                 },
             )
 
@@ -1172,9 +1169,8 @@ class TestCLI:
                 clustering_method="kmeans",
                 n_clusters=5,
                 results={
-                    "labels": [0, 1],
-                    "reduced_embeddings": [[1, 2], [3, 4]],
-                    "statistics": {"total_papers": 2, "n_clusters": 2},
+                    "points": [{"id": "p1", "x": 1, "y": 2, "cluster": 0}],
+                    "statistics": {"total_papers": 1, "n_clusters": 1},
                 },
             )
 
@@ -1182,7 +1178,7 @@ class TestCLI:
         with patch.object(
             sys,
             "argv",
-            ["abstracts-explorer", "clear-clustering-cache", "--embedding-model", "model1"],
+            ["abstracts-explorer", "clustering", "clear-cache", "--embedding-model", "model1"],
         ):
             exit_code = main()
 
@@ -1227,7 +1223,7 @@ class TestCLI:
         with patch.object(
             sys,
             "argv",
-            ["abstracts-explorer", "clear-clustering-cache"],
+            ["abstracts-explorer", "clustering", "clear-cache"],
         ):
             exit_code = main()
 
@@ -1244,7 +1240,7 @@ class TestCLI:
         with patch.object(
             sys,
             "argv",
-            ["abstracts-explorer", "clear-clustering-cache"],
+            ["abstracts-explorer", "clustering", "clear-cache"],
         ):
             exit_code = main()
 
@@ -1252,8 +1248,339 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Error clearing clustering cache" in captured.err
 
+    def test_pre_generate_clustering_missing_embeddings(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering fails when embeddings DB doesn't exist."""
+        patch_get_config_for_test(monkeypatch, tmp_path / "nonexistent")
 
-class TestChatCommand:
+        with patch.object(
+            sys,
+            "argv",
+            ["abstracts-explorer", "clustering", "pre-generate"],
+        ):
+            exit_code = main()
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert "Embeddings database not found" in captured.err
+
+    def test_pre_generate_clustering_calls_create_collection(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering calls create_collection() before compute_clusters_with_cache.
+
+        This is a regression test: previously the command called em.connect() but
+        forgot em.create_collection(), causing ``get_collection_stats()`` to raise
+        ``EmbeddingsError: Collection not initialized. Call create_collection() first.``
+        """
+
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+        set_test_db(tmp_path / "test.db")
+
+        call_order = []
+
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+        ):
+            mock_em = Mock()
+
+            def track_connect():
+                call_order.append("connect")
+
+            def track_create_collection(reset=False):
+                call_order.append("create_collection")
+
+            mock_em.connect.side_effect = track_connect
+            mock_em.create_collection.side_effect = track_create_collection
+            mock_em_class.return_value = mock_em
+            mock_compute.return_value = {
+                "points": [],
+                "statistics": {"total_papers": 5, "n_clusters": 2, "n_noise": 0, "cluster_sizes": {}},
+            }
+
+            with patch.object(sys, "argv", ["abstracts-explorer", "clustering", "pre-generate"]):
+                exit_code = main()
+
+        assert exit_code == 0
+        # create_collection must be called after connect and before compute_clusters_with_cache
+        assert "connect" in call_order, "em.connect() was not called"
+        assert "create_collection" in call_order, "em.create_collection() was not called (regression)"
+        assert call_order.index("connect") < call_order.index(
+            "create_collection"
+        ), "em.connect() must be called before em.create_collection()"
+        mock_compute.assert_called_once()
+
+    def test_pre_generate_clustering_success(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering command runs successfully."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+
+        set_test_db(tmp_path / "test.db")
+
+        mock_results = {
+            "points": [],
+            "statistics": {"total_papers": 10, "n_clusters": 2, "n_noise": 0, "cluster_sizes": {}},
+        }
+
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+        ):
+            mock_em = Mock()
+            mock_em_class.return_value = mock_em
+
+            mock_compute.return_value = mock_results
+
+            with patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "clustering", "pre-generate"],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "cached successfully" in captured.out
+        mock_compute.assert_called_once()
+        # Verify agglomerative clustering was requested with web-UI-matching defaults
+        call_kwargs = mock_compute.call_args[1]
+        assert call_kwargs["clustering_method"] == "agglomerative"
+        assert call_kwargs["linkage"] == "ward"
+        assert call_kwargs["distance_threshold"] == 150.0  # matches web UI default
+        assert call_kwargs["reduction_method"] == "tsne"  # matches web UI default
+        # n_clusters=None because distance_threshold takes precedence
+        assert call_kwargs["n_clusters"] is None
+
+    def test_pre_generate_clustering_custom_options(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering with custom linkage and force flag."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+
+        set_test_db(tmp_path / "test.db")
+
+        mock_results = {
+            "points": [],
+            "statistics": {"total_papers": 5, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
+        }
+
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+        ):
+            mock_em = Mock()
+            mock_em_class.return_value = mock_em
+            mock_compute.return_value = mock_results
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "abstracts-explorer",
+                    "clustering",
+                    "pre-generate",
+                    "--linkage",
+                    "complete",
+                    "--n-clusters",
+                    "4",
+                    "--distance-threshold",
+                    "0",  # Disable distance_threshold so n_clusters takes effect
+                    "--force",
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        call_kwargs = mock_compute.call_args[1]
+        assert call_kwargs["linkage"] == "complete"
+        assert call_kwargs["n_clusters"] == 4
+        assert "distance_threshold" not in call_kwargs  # disabled by --distance-threshold 0
+        assert call_kwargs["force"] is True
+
+    def test_pre_generate_clustering_error(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering handles errors gracefully."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+
+        set_test_db(tmp_path / "test.db")
+
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+        ):
+            mock_em_class.return_value = Mock()
+            mock_compute.side_effect = Exception("Clustering failed")
+
+            with patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "clustering", "pre-generate"],
+            ):
+                exit_code = main()
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert "Unexpected error" in captured.err
+
+    def test_pre_generate_clustering_with_conference(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering with --conference filter."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+        set_test_db(tmp_path / "test.db")
+
+        mock_results = {
+            "points": [],
+            "statistics": {"total_papers": 50, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
+        }
+
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+        ):
+            mock_em = Mock()
+            mock_em_class.return_value = mock_em
+            mock_compute.return_value = mock_results
+
+            with patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "clustering", "pre-generate", "--conference", "ML4PS@NeurIPS"],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        call_kwargs = mock_compute.call_args[1]
+        assert call_kwargs["conferences"] == ["ML4PS@NeurIPS"]
+        assert call_kwargs["years"] is None
+        captured = capsys.readouterr()
+        assert "ML4PS@NeurIPS" in captured.out
+
+    def test_pre_generate_clustering_with_years(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering with --years filter (one or more years)."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+        set_test_db(tmp_path / "test.db")
+
+        mock_results = {
+            "points": [],
+            "statistics": {"total_papers": 30, "n_clusters": 2, "n_noise": 0, "cluster_sizes": {}},
+        }
+
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+        ):
+            mock_em = Mock()
+            mock_em_class.return_value = mock_em
+            mock_compute.return_value = mock_results
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "abstracts-explorer",
+                    "clustering",
+                    "pre-generate",
+                    "--conference",
+                    "NeurIPS",
+                    "--years",
+                    "2023",
+                    "2024",
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        call_kwargs = mock_compute.call_args[1]
+        assert call_kwargs["conferences"] == ["NeurIPS"]
+        assert call_kwargs["years"] == [2023, 2024]
+        captured = capsys.readouterr()
+        assert "2023" in captured.out
+        assert "2024" in captured.out
+
+    def test_pre_generate_clustering_no_filter_passes_none(self, tmp_path, capsys, monkeypatch):
+        """Test that omitting --conference/--years passes None (cluster all)."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+        set_test_db(tmp_path / "test.db")
+
+        mock_results = {
+            "points": [],
+            "statistics": {"total_papers": 100, "n_clusters": 5, "n_noise": 0, "cluster_sizes": {}},
+        }
+
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+        ):
+            mock_em = Mock()
+            mock_em_class.return_value = mock_em
+            mock_compute.return_value = mock_results
+
+            with patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "clustering", "pre-generate"],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        call_kwargs = mock_compute.call_args[1]
+        assert call_kwargs["conferences"] is None
+        assert call_kwargs["years"] is None
+
+    def test_pre_generate_clustering_conference_case_insensitive(self, tmp_path, capsys, monkeypatch):
+        """Test that --conference is resolved case-insensitively from stored names."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+        set_test_db(tmp_path / "test.db")
+
+        mock_results = {
+            "points": [],
+            "statistics": {"total_papers": 50, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
+        }
+
+        # DatabaseManager.get_filter_options returns the canonical spelling
+        mock_filter_opts = {"conferences": ["ML4PS@NeurIPS", "NeurIPS"], "years": [2024], "sessions": []}
+
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
+        ):
+            mock_em = Mock()
+            mock_em_class.return_value = mock_em
+            mock_compute.return_value = mock_results
+
+            # DatabaseManager used as context manager for conference resolution
+            mock_db_instance = Mock()
+            mock_db_instance.get_filter_options.return_value = mock_filter_opts
+            mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
+            mock_db_instance.__exit__ = Mock(return_value=False)
+            mock_db_class.return_value = mock_db_instance
+
+            # User types the conference name in wrong case
+            with patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "clustering", "pre-generate", "--conference", "ml4ps@neurips"],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        call_kwargs = mock_compute.call_args[1]
+        # Should use the canonical spelling, not the user-supplied lower-case version
+        assert call_kwargs["conferences"] == ["ML4PS@NeurIPS"]
+        captured = capsys.readouterr()
+        # Should print a resolution notice
+        assert "ml4ps@neurips" in captured.out.lower()
+
     """Test cases for the chat command."""
 
     def test_chat_embeddings_not_found(self, tmp_path, capsys, monkeypatch):

@@ -10,6 +10,7 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import argcomplete
 
@@ -18,7 +19,7 @@ from tqdm import tqdm
 from .config import get_config
 from .database import DatabaseManager
 from .embeddings import EmbeddingsManager, EmbeddingsError
-from .clustering import perform_clustering, ClusteringError
+from .clustering import perform_clustering, compute_clusters_with_cache, ClusteringError
 from .rag import RAGChat, RAGError
 from .plugins import get_plugin, list_plugins, list_plugin_names
 from .mcp_server import run_mcp_server
@@ -837,6 +838,154 @@ def clear_clustering_cache_command(args: argparse.Namespace) -> int:
         return 1
 
 
+def pre_generate_clustering_command(args: argparse.Namespace) -> int:
+    """
+    Pre-generate default clustering results and hierarchical labels.
+
+    Runs agglomerative clustering with default settings and generates
+    hierarchical labels, persisting both to the database cache.  This
+    command should be run once after ``create-embeddings`` to warm the
+    cache so that the first web-UI request for clusters is fast.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments containing:
+        - collection: Name of the ChromaDB collection
+        - linkage: Agglomerative linkage method
+        - n_clusters: Number of clusters (0 = auto-calculate via distance_threshold)
+        - distance_threshold: Agglomerative distance threshold (overrides n_clusters)
+        - reduction_method: Dimensionality reduction method for visualization
+        - conference: Single conference to filter by (optional)
+        - years: List of years to filter by (optional)
+
+    Returns
+    -------
+    int
+        Exit code (0 for success, non-zero for failure)
+    """
+    config = get_config()
+
+    # Validate embeddings database exists (for local paths only)
+    if not config.embedding_db.startswith("http://") and not config.embedding_db.startswith("https://"):
+        from pathlib import Path
+
+        embeddings_path = Path(config.embedding_db)
+        if not embeddings_path.exists():
+            print(f"❌ Error: Embeddings database not found: {embeddings_path}", file=sys.stderr)
+            print("\nYou can create embeddings using:", file=sys.stderr)
+            print("  abstracts-explorer create-embeddings", file=sys.stderr)
+            return 1
+
+    linkage = args.linkage
+    # distance_threshold takes precedence over n_clusters.
+    # When distance_threshold is set (the default), n_clusters is ignored.
+    distance_threshold: Optional[float] = getattr(args, "distance_threshold", None)
+    if distance_threshold is not None and distance_threshold <= 0:
+        distance_threshold = None
+    # args.n_clusters is 0 when the user wants auto-calculation.
+    # We pass None to compute_clusters_with_cache so it calculates
+    # the default based on the corpus size.
+    n_clusters_arg: Optional[int] = args.n_clusters if args.n_clusters > 0 else None
+    # If a distance_threshold is supplied, n_clusters is irrelevant (same as web UI).
+    if distance_threshold is not None:
+        n_clusters_arg = None
+    reduction_method = args.reduction_method
+
+    # Build optional conference/year filters
+    raw_conference: Optional[str] = getattr(args, "conference", None) or None
+    years: Optional[list] = getattr(args, "years", None) or None
+
+    # Resolve conference name case-insensitively against stored names in the DB.
+    conferences: Optional[list] = None
+    if raw_conference:
+        try:
+            with DatabaseManager() as _db_resolve:
+                opts = _db_resolve.get_filter_options()
+                stored_conferences: list = opts.get("conferences", [])
+            match = next(
+                (c for c in stored_conferences if c.lower() == raw_conference.lower()),
+                None,
+            )
+            if match is None:
+                # No exact case-insensitive match; use the raw value and let
+                # compute_clusters_with_cache surface any "no papers" error.
+                conferences = [raw_conference]
+            else:
+                if match != raw_conference:
+                    print(f"ℹ️  Resolved conference '{raw_conference}' → '{match}'")
+                conferences = [match]
+        except Exception:
+            # Fall back gracefully if the DB isn't available yet.
+            conferences = [raw_conference]
+
+    print("Abstracts Explorer - Pre-generate Clustering")
+    print("=" * 70)
+    print(f"Embeddings:       {config.embedding_db}")
+    print(f"Collection:       {args.collection}")
+    print(f"Clustering:       agglomerative (linkage={linkage})")
+    if distance_threshold is not None:
+        print(f"Dist. threshold:  {distance_threshold}")
+    else:
+        print(f"N-clusters:       {'auto' if n_clusters_arg is None else n_clusters_arg}")
+    print(f"Reduction:        {reduction_method} (for initial visualization)")
+    if conferences:
+        print(f"Conference:       {conferences[0]}")
+    if years:
+        print(f"Years:            {', '.join(str(y) for y in years)}")
+    print("=" * 70)
+
+    try:
+        em = EmbeddingsManager(
+            collection_name=args.collection,
+        )
+        em.connect()
+        em.create_collection()
+
+        # Build agglomerative kwargs to match web UI defaults exactly.
+        clustering_kwargs: dict = {"linkage": linkage}
+        if distance_threshold is not None:
+            clustering_kwargs["distance_threshold"] = distance_threshold
+
+        with DatabaseManager() as db:
+            print("\n🚀 Starting agglomerative clustering pipeline...")
+            results = compute_clusters_with_cache(
+                embeddings_manager=em,
+                database=db,
+                embedding_model=config.embedding_model,
+                reduction_method=reduction_method,
+                n_components=2,
+                clustering_method="agglomerative",
+                n_clusters=n_clusters_arg,
+                limit=None,
+                force=args.force,
+                conferences=conferences,
+                years=years,
+                **clustering_kwargs,
+            )
+
+        stats = results.get("statistics", {})
+        print("\n📊 Clustering Results:")
+        print(
+            f"   Total papers:  {stats.get('total_papers', 'N/A'):,}"
+            if isinstance(stats.get("total_papers"), int)
+            else f"   Total papers:  {stats.get('total_papers', 'N/A')}"
+        )
+        print(f"   Clusters:      {stats.get('n_clusters', 'N/A')}")
+        print("\n✅ Default clustering results and hierarchical labels cached successfully.")
+        return 0
+
+    except ClusteringError as e:
+        print(f"\n❌ Clustering error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"\n❌ Unexpected error: {e}", file=sys.stderr)
+        import traceback
+
+        traceback.print_exc()
+        return 1
+
+
 def mcp_server_command(args: argparse.Namespace) -> int:
     """
     Start the MCP server for cluster analysis.
@@ -1640,9 +1789,39 @@ Examples:
         help="Number of Waitress worker threads (default: 6). Must be >= 1. Ignored when --dev is set.",
     )
 
-    # Cluster embeddings command
-    cluster_parser = subparsers.add_parser(
-        "cluster-embeddings",
+    # -------------------------------------------------------------------------
+    # Clustering command (parent with sub-subcommands)
+    # -------------------------------------------------------------------------
+    clustering_parser = subparsers.add_parser(
+        "clustering",
+        help="Clustering-related commands (run, clear-cache, pre-generate)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+Clustering-related commands.
+
+Sub-commands:
+  run            Cluster embeddings and export results
+  clear-cache    Clear clustering cache from the database
+  pre-generate   Pre-generate default clustering results and hierarchical labels
+
+Examples:
+  # Cluster with default settings
+  abstracts-explorer clustering run
+
+  # Clear the cache
+  abstracts-explorer clustering clear-cache
+
+  # Warm the cache for ML4PS@NeurIPS
+  abstracts-explorer clustering pre-generate --conference "ML4PS@NeurIPS"
+        """,
+    )
+    clustering_subparsers = clustering_parser.add_subparsers(
+        dest="clustering_command", help="Clustering sub-commands"
+    )
+
+    # clustering run
+    cluster_parser = clustering_subparsers.add_parser(
+        "run",
         help="Cluster embeddings for visualization",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Perform dimensionality reduction and clustering on paper embeddings.",
@@ -1656,7 +1835,7 @@ Examples:
     cluster_parser.add_argument(
         "--reduction-method",
         type=str,
-        choices=["pca", "tsne"],
+        choices=["pca", "tsne", "umap"],
         default="pca",
         help="Dimensionality reduction method (default: pca)",
     )
@@ -1704,10 +1883,10 @@ Examples:
         help="Maximum number of embeddings to process (optional)",
     )
 
-    # Clear clustering cache command
-    clear_cache_parser = subparsers.add_parser(
-        "clear-clustering-cache",
-        help="Clear clustering cache from database",
+    # clustering clear-cache
+    clear_cache_parser = clustering_subparsers.add_parser(
+        "clear-cache",
+        help="Clear clustering cache from the database",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="""
 Clear clustering cache from the database.
@@ -1717,10 +1896,10 @@ You can optionally filter by embedding model to clear only specific entries.
 
 Examples:
   # Clear all clustering cache entries
-  abstracts-explorer clear-clustering-cache
-  
+  abstracts-explorer clustering clear-cache
+
   # Clear cache for a specific embedding model
-  abstracts-explorer clear-clustering-cache --embedding-model text-embedding-3-large
+  abstracts-explorer clustering clear-cache --embedding-model text-embedding-3-large
         """,
     )
     clear_cache_parser.add_argument(
@@ -1728,6 +1907,90 @@ Examples:
         type=str,
         default=None,
         help="Only clear cache for this embedding model (optional)",
+    )
+
+    # clustering pre-generate
+    pre_gen_parser = clustering_subparsers.add_parser(
+        "pre-generate",
+        help="Pre-generate default clustering results and hierarchical labels",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+Pre-generate default clustering results and hierarchical labels.
+
+Runs agglomerative clustering with the given settings and persists the
+results (including hierarchical labels) to the database cache.  Run this
+command once after create-embeddings to warm the cache so that the first
+web-UI request for clusters is served instantly.
+
+Examples:
+  # Pre-generate for ML4PS@NeurIPS (all years)
+  abstracts-explorer clustering pre-generate --conference "ML4PS@NeurIPS"
+
+  # Pre-generate for a specific conference and year
+  abstracts-explorer clustering pre-generate --conference NeurIPS --years 2024
+
+  # Pre-generate for multiple years
+  abstracts-explorer clustering pre-generate --conference NeurIPS --years 2023 2024
+
+  # Use a specific linkage and force recompute
+  abstracts-explorer clustering pre-generate --linkage complete --force
+        """,
+    )
+    pre_gen_parser.add_argument(
+        "--collection",
+        type=str,
+        default=config.collection_name,
+        help=f"Name of the ChromaDB collection (default: {config.collection_name})",
+    )
+    pre_gen_parser.add_argument(
+        "--linkage",
+        type=str,
+        choices=["ward", "complete", "average", "single"],
+        default="ward",
+        help="Agglomerative linkage method (default: ward)",
+    )
+    pre_gen_parser.add_argument(
+        "--n-clusters",
+        type=int,
+        default=0,
+        help="Number of clusters (default: 0 = auto-calculate). Ignored when --distance-threshold is set.",
+    )
+    pre_gen_parser.add_argument(
+        "--distance-threshold",
+        type=float,
+        default=150.0,
+        help=(
+            "Agglomerative distance threshold that controls the number of clusters "
+            "(default: 150, matching the web UI default). Set to 0 to disable and "
+            "use --n-clusters instead."
+        ),
+    )
+    pre_gen_parser.add_argument(
+        "--reduction-method",
+        type=str,
+        choices=["pca", "tsne", "umap"],
+        default="tsne",
+        help="Dimensionality reduction method for the initial visualization (default: tsne, matching web UI default)",
+    )
+    pre_gen_parser.add_argument(
+        "--conference",
+        type=str,
+        default=None,
+        help="Only cluster papers from this conference (default: all conferences)",
+    )
+    pre_gen_parser.add_argument(
+        "--years",
+        type=int,
+        nargs="+",
+        default=None,
+        metavar="YEAR",
+        help="Only cluster papers from these year(s), e.g. --years 2024 or --years 2023 2024 (default: all years)",
+    )
+    pre_gen_parser.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Force recompute even if cache already exists",
     )
 
     # MCP Server command
@@ -1992,10 +2255,19 @@ Examples:
         return chat_command(args)
     elif args.command == "web-ui":
         return web_ui_command(args)
-    elif args.command == "cluster-embeddings":
-        return cluster_embeddings_command(args)
-    elif args.command == "clear-clustering-cache":
-        return clear_clustering_cache_command(args)
+    elif args.command == "clustering":
+        if not hasattr(args, "clustering_command") or not args.clustering_command:
+            clustering_parser.print_help()
+            return 1
+        if args.clustering_command == "run":
+            return cluster_embeddings_command(args)
+        elif args.clustering_command == "clear-cache":
+            return clear_clustering_cache_command(args)
+        elif args.clustering_command == "pre-generate":
+            return pre_generate_clustering_command(args)
+        else:
+            clustering_parser.print_help()
+            return 1
     elif args.command == "mcp-server":
         return mcp_server_command(args)
     elif args.command == "eval":

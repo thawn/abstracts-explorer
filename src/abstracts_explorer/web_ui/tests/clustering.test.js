@@ -60,7 +60,6 @@ const {
     exportClusters,
     toggleClusterParams,
     getClusterData,
-    precalculateClusters,
     searchCustomCluster,
     toggleCustomClusterVisibility,
     deleteCustomCluster
@@ -940,33 +939,6 @@ describe('Clustering Module', () => {
             const data = getClusterData();
             expect(data).toBeTruthy();
             expect(data.points).toBeDefined();
-        });
-    });
-
-    describe('precalculateClusters', () => {
-        it('should send precalculation request', async () => {
-            global.fetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({ message: 'Started background clustering' })
-            });
-
-            await precalculateClusters();
-
-            expect(global.fetch).toHaveBeenCalledWith(
-                '/api/clusters/precalculate',
-                expect.objectContaining({
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                })
-            );
-        });
-
-        it('should handle precalculation error gracefully', async () => {
-            global.fetch.mockRejectedValueOnce(new Error('Network error'));
-
-            await precalculateClusters();
-
-            expect(global.console.warn).toHaveBeenCalled();
         });
     });
 

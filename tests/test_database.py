@@ -58,7 +58,7 @@ class TestDatabaseManager:
         """Test DatabaseManager initialization."""
         db_path = tmp_path / "test.db"
         set_test_db(db_path)
-        
+
         db = DatabaseManager()
 
         assert db.database_url == f"sqlite:///{db_path}"
@@ -77,7 +77,7 @@ class TestDatabaseManager:
         """Test that connect creates parent directories."""
         db_path = tmp_path / "subdir" / "another" / "test.db"
         set_test_db(db_path)
-        
+
         db = DatabaseManager()
         db.connect()
 
@@ -131,18 +131,18 @@ class TestDatabaseManager:
     def test_create_tables_idempotent(self, db_manager):
         """Test that create_tables can be called multiple times without error."""
         db_manager.connect()
-        
+
         # Call create_tables multiple times - should not raise errors
         db_manager.create_tables()
         db_manager.create_tables()
         db_manager.create_tables()
-        
+
         # Check tables still exist and work
         cursor = db_manager.connection.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
         tables = [row[0] for row in cursor.fetchall()]
         assert "papers" in tables
-        
+
         db_manager.close()
 
     def test_query_without_connection(self, db_manager):
@@ -407,7 +407,6 @@ class TestAddPapers:
             db_manager.add_papers(papers)
 
 
-
 class TestEmbeddingModelMetadata:
     """Tests for embedding model metadata functionality."""
 
@@ -420,7 +419,7 @@ class TestEmbeddingModelMetadata:
         """Test setting and retrieving embedding model."""
         model_name = "text-embedding-qwen3-embedding-4b"
         connected_db.set_embedding_model(model_name)
-        
+
         retrieved_model = connected_db.get_embedding_model()
         assert retrieved_model == model_name
 
@@ -430,7 +429,7 @@ class TestEmbeddingModelMetadata:
         model1 = "text-embedding-model-v1"
         connected_db.set_embedding_model(model1)
         assert connected_db.get_embedding_model() == model1
-        
+
         # Update to new model
         model2 = "text-embedding-model-v2"
         connected_db.set_embedding_model(model2)
@@ -440,15 +439,15 @@ class TestEmbeddingModelMetadata:
         """Test that embedding model persists across database connections."""
         db_path = tmp_path / "test.db"
         model_name = "persistent-model"
-        
+
         # Set PAPER_DB and reload config
         set_test_db(db_path)
-        
+
         # First connection: set the model
         with DatabaseManager() as db1:
             db1.create_tables()
             db1.set_embedding_model(model_name)
-        
+
         # Second connection: retrieve the model
         with DatabaseManager() as db2:
             retrieved_model = db2.get_embedding_model()
@@ -491,7 +490,7 @@ class TestClusteringCache:
             n_clusters=2,
         )
 
-        # Retrieve cache
+        # Retrieve cache with exact match
         cached = connected_db.get_clustering_cache(
             embedding_model="test-model",
             reduction_method="pca",
@@ -533,6 +532,52 @@ class TestClusteringCache:
             n_clusters=5,
         )
         assert cached is None
+
+    def test_cache_reuse_on_different_reduction_method(self, connected_db):
+        """Test that clustering results are reusable when only reduction_method differs."""
+        results = {
+            "points": [{"id": "p1", "x": 1.0, "y": 2.0, "cluster": 0}],
+            "statistics": {"n_clusters": 2},
+        }
+
+        # Save with pca
+        connected_db.save_clustering_cache(
+            embedding_model="model1",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            results=results,
+            n_clusters=2,
+        )
+
+        # Exact match with pca should work
+        cached = connected_db.get_clustering_cache(
+            embedding_model="model1",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            n_clusters=2,
+        )
+        assert cached is not None
+
+        # Exact match with tsne should miss
+        cached_tsne = connected_db.get_clustering_cache(
+            embedding_model="model1",
+            reduction_method="tsne",
+            n_components=2,
+            clustering_method="kmeans",
+            n_clusters=2,
+        )
+        assert cached_tsne is None
+
+        # Clustering-only match (no reduction_method) should find the pca entry
+        cached_any = connected_db.get_clustering_cache(
+            embedding_model="model1",
+            clustering_method="kmeans",
+            n_clusters=2,
+        )
+        assert cached_any is not None
+        assert cached_any["statistics"]["n_clusters"] == 2
 
     def test_clear_clustering_cache(self, connected_db):
         """Test clearing clustering cache."""
@@ -615,6 +660,54 @@ class TestClusteringCache:
         )
         assert cached2 is not None
 
+    def test_save_and_get_hierarchical_label_cache(self, connected_db):
+        """Test saving and retrieving hierarchical label cache."""
+        labels = {0: "Root", 5: "Sub-cluster A", 6: "Sub-cluster B", 10: "Leaf"}
+
+        connected_db.save_hierarchical_label_cache(
+            embedding_model="test-model",
+            labels=labels,
+            linkage="ward",
+        )
+
+        cached = connected_db.get_hierarchical_label_cache(
+            embedding_model="test-model",
+            linkage="ward",
+        )
+
+        assert cached is not None
+        assert cached == labels
+
+    def test_hierarchical_label_cache_miss_on_different_linkage(self, connected_db):
+        """Test that hierarchical label cache misses when linkage differs."""
+        labels = {0: "Root"}
+        connected_db.save_hierarchical_label_cache(
+            embedding_model="test-model",
+            labels=labels,
+            linkage="ward",
+        )
+
+        cached = connected_db.get_hierarchical_label_cache(
+            embedding_model="test-model",
+            linkage="complete",
+        )
+        assert cached is None
+
+    def test_hierarchical_label_cache_miss_on_different_model(self, connected_db):
+        """Test that hierarchical label cache misses when embedding model differs."""
+        labels = {0: "Root"}
+        connected_db.save_hierarchical_label_cache(
+            embedding_model="model-A",
+            labels=labels,
+            linkage="ward",
+        )
+
+        cached = connected_db.get_hierarchical_label_cache(
+            embedding_model="model-B",
+            linkage="ward",
+        )
+        assert cached is None
+
 
 class TestValidationData:
     """Tests for validation data donation functionality."""
@@ -625,24 +718,24 @@ class TestValidationData:
             "test_uid_1": {"priority": 5, "searchTerm": "machine learning"},
             "test_uid_2": {"priority": 4, "searchTerm": "deep learning"},
         }
-        
+
         count = connected_db.donate_validation_data(paper_priorities)
         assert count == 2
-        
+
         # Verify data was stored
         from abstracts_explorer.db_models import ValidationData
         from sqlalchemy.orm import Session
-        
+
         session = Session(connected_db.engine)
         try:
             entries = session.query(ValidationData).all()
             assert len(entries) == 2
-            
+
             # Check first entry
             entry1 = next(e for e in entries if e.paper_uid == "test_uid_1")
             assert entry1.priority == 5
             assert entry1.search_term == "machine learning"
-            
+
             # Check second entry
             entry2 = next(e for e in entries if e.paper_uid == "test_uid_2")
             assert entry2.priority == 4
@@ -653,18 +746,16 @@ class TestValidationData:
     def test_donate_validation_data_empty(self, connected_db):
         """Test donation with empty data raises ValueError."""
         import pytest
-        
+
         with pytest.raises(ValueError, match="No data provided"):
             connected_db.donate_validation_data({})
 
     def test_donate_validation_data_invalid_format(self, connected_db):
         """Test donation with invalid data format raises ValueError."""
         import pytest
-        
-        paper_priorities = {
-            "test_uid": 5  # Invalid: should be dict, not int
-        }
-        
+
+        paper_priorities = {"test_uid": 5}  # Invalid: should be dict, not int
+
         with pytest.raises(ValueError, match="Invalid data format"):
             connected_db.donate_validation_data(paper_priorities)
 
@@ -672,11 +763,9 @@ class TestValidationData:
         """Test donation without connection raises DatabaseError."""
         import pytest
         from abstracts_explorer.database import DatabaseError
-        
+
         db = DatabaseManager()
         # Don't connect
-        
+
         with pytest.raises(DatabaseError, match="Not connected"):
             db.donate_validation_data({"test": {"priority": 5}})
-
-

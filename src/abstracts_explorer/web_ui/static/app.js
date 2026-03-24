@@ -34,7 +34,7 @@ import {
     applyClusterSettings,
     exportClusters,
     toggleClusterParams,
-    precalculateClusters
+    resetClusters
 } from './modules/clustering.js';
 import {
     loadFilterOptions,
@@ -138,7 +138,7 @@ function attachToWindow() {
     window.applyClusterSettings = applyClusterSettings;
     window.exportClusters = exportClusters;
     window.toggleClusterParams = toggleClusterParams;
-    window.precalculateClusters = precalculateClusters;
+    window.resetClusters = resetClusters;
 
     // Filters module
     window.selectAllFilter = selectAllFilter;

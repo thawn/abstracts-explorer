@@ -5,6 +5,7 @@
  */
 
 import { API_BASE } from './utils/constants.js';
+import { getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
 import { setCurrentTab, getCurrentTab } from './state.js';
 import { getInterestingPapersSortOrder } from './state.js';
 import { areClustersLoaded } from './clustering.js';
@@ -55,13 +56,12 @@ export function switchTab(tab) {
  */
 export async function loadStats() {
     try {
-        const yearSelect = document.getElementById('year-selector');
-        const conferenceSelect = document.getElementById('conference-selector');
-        const selectedYear = yearSelect ? yearSelect.value : '';
-        const selectedConference = conferenceSelect ? conferenceSelect.value : '';
+        const selectedYears = getSelectedYears();
+        const selectedConference = getSelectedConference();
 
         const statsParams = new URLSearchParams();
-        if (selectedYear) statsParams.append('year', selectedYear);
+        // Pass a single year to stats only when exactly one is selected
+        if (selectedYears.length === 1) statsParams.append('year', selectedYears[0]);
         if (selectedConference) statsParams.append('conference', selectedConference);
 
         const response = await fetch(`${API_BASE}/api/stats?${statsParams.toString()}`);
@@ -75,14 +75,18 @@ export async function loadStats() {
         }
 
         let displayText = '';
-        if (data.year && data.conference) {
+        if (selectedYears.length > 1) {
+            // Multiple years selected: show conference + year range
+            const yearRange = selectedYears.join(', ');
+            displayText = selectedConference ? `${selectedConference} (${yearRange})` : yearRange;
+        } else if (data.year && data.conference) {
             displayText = `${data.conference} ${data.year}`;
         } else if (data.year) {
             displayText = `Year ${data.year}`;
         } else if (data.conference) {
             displayText = data.conference;
         } else {
-            displayText = 'All Conferences';
+            displayText = 'All Papers';
         }
 
         document.getElementById('stats').innerHTML = `

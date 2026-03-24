@@ -5,7 +5,7 @@
  */
 
 import { API_BASE } from './utils/constants.js';
-import { escapeHtml } from './utils/dom-utils.js';
+import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
 import { renderEmptyState } from './utils/ui-utils.js';
 import { naturalSortPosterPosition } from './utils/sort-utils.js';
 import {
@@ -168,15 +168,13 @@ export function displayInterestingPapers(papers) {
     const tabsNav = document.getElementById('interesting-session-tabs-nav');
 
     // Get selected year and conference from header
-    const yearSelect = document.getElementById('year-selector');
-    const conferenceSelect = document.getElementById('conference-selector');
-    const selectedYear = yearSelect ? yearSelect.value : '';
-    const selectedConference = conferenceSelect ? conferenceSelect.value : '';
+    const selectedYears = getSelectedYears();
+    const selectedConference = getSelectedConference();
 
     // Filter papers by year and conference
     let filteredPapers = papers;
-    if (selectedYear) {
-        filteredPapers = filteredPapers.filter(paper => String(paper.year) === String(selectedYear));
+    if (selectedYears.length > 0) {
+        filteredPapers = filteredPapers.filter(paper => selectedYears.includes(Number(paper.year)));
     }
     if (selectedConference) {
         filteredPapers = filteredPapers.filter(paper => paper.conference === selectedConference);

@@ -1447,6 +1447,7 @@ class TestServerInitialization:
                     with patch("abstracts_explorer.web_ui.app.get_embeddings_manager"):
                         mock_config.return_value = Mock(embedding_model="test-model")
                         mock_db = Mock()
+                        # Level 1 exact match returns cached results directly
                         mock_db.get_clustering_cache.return_value = cached_results
                         mock_get_db.return_value = mock_db
 
@@ -1557,7 +1558,7 @@ class TestServerInitialization:
                             # Verify cache was NOT queried (limit bypasses cache)
                             mock_db.get_clustering_cache.assert_not_called()
                             # Verify clustering was computed with limit
-                            mock_cm.load_embeddings.assert_called_once_with(limit=100)
+                            mock_cm.load_embeddings.assert_called_once_with(limit=100, conferences=None, years=None)
 
     def test_compute_clusters_saves_to_cache_after_computing(self):
         """Test that compute_clusters saves results to cache after computing."""
@@ -1581,6 +1582,11 @@ class TestServerInitialization:
 
                             # Setup mock clustering manager
                             mock_cm = Mock()
+                            mock_cm.paper_ids = ["test"]
+                            mock_cm.cluster_labels = None
+                            mock_cm.cluster_label_names = None
+                            mock_cm.cluster_keywords = None
+                            mock_cm.cluster_hierarchy = None
                             mock_cm.load_embeddings.return_value = 10
                             mock_cm.cluster.return_value = None
                             mock_cm.reduce_dimensions.return_value = None
@@ -1704,128 +1710,6 @@ class TestServerInitialization:
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_embeddings_manager", side_effect=Exception("Test error")):
                 response = client.get("/api/clusters/default-count")
-
-                assert response.status_code == 500
-                data = response.get_json()
-                assert "error" in data
-
-    def test_precalculate_clusters_starts_background_task(self):
-        """Test that precalculate endpoint starts background clustering."""
-        from abstracts_explorer.web_ui.app import app
-
-        with app.test_client() as client:
-            with (
-                patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em,
-                patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db,
-                patch("abstracts_explorer.web_ui.app.get_config") as mock_config,
-                patch("abstracts_explorer.clustering.ClusteringManager") as MockCM,
-            ):
-
-                # Setup mocks
-                mock_em = Mock()
-                mock_em.get_collection_stats.return_value = {"count": 250}
-                mock_get_em.return_value = mock_em
-
-                mock_db = Mock()
-                mock_db.get_clustering_cache.return_value = None  # No cache exists
-                mock_get_db.return_value = mock_db
-
-                mock_cfg = Mock()
-                mock_cfg.embedding_model = "test-model"
-                mock_config.return_value = mock_cfg
-
-                mock_cm = Mock()
-                mock_cm.get_clustering_results.return_value = {
-                    "points": [],
-                    "statistics": {"n_clusters": 5, "total_papers": 250},
-                }
-                MockCM.return_value = mock_cm
-
-                response = client.post("/api/clusters/precalculate", json={"clustering_method": "kmeans"})
-
-                assert response.status_code == 200
-                data = response.get_json()
-
-                assert data["status"] == "started"
-                assert "message" in data
-                assert "n_clusters" in data
-
-    def test_precalculate_clusters_cache_exists(self):
-        """Test precalculate when cache already exists."""
-        from abstracts_explorer.web_ui.app import app
-
-        with app.test_client() as client:
-            with (
-                patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em,
-                patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db,
-                patch("abstracts_explorer.web_ui.app.get_config") as mock_config,
-            ):
-
-                mock_em = Mock()
-                mock_em.get_collection_stats.return_value = {"count": 250}
-                mock_get_em.return_value = mock_em
-
-                mock_db = Mock()
-                mock_db.get_clustering_cache.return_value = {
-                    "points": [],
-                    "statistics": {"n_clusters": 5},
-                }  # Cache exists
-                mock_get_db.return_value = mock_db
-
-                mock_cfg = Mock()
-                mock_cfg.embedding_model = "test-model"
-                mock_config.return_value = mock_cfg
-
-                response = client.post("/api/clusters/precalculate", json={})
-
-                assert response.status_code == 200
-                data = response.get_json()
-
-                assert data["status"] == "cache_exists"
-                assert "message" in data
-
-    def test_precalculate_clusters_with_custom_n_clusters(self):
-        """Test precalculate with custom n_clusters value."""
-        from abstracts_explorer.web_ui.app import app
-
-        with app.test_client() as client:
-            with (
-                patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em,
-                patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db,
-                patch("abstracts_explorer.web_ui.app.get_config") as mock_config,
-                patch("abstracts_explorer.clustering.ClusteringManager") as MockCM,
-            ):
-
-                mock_em = Mock()
-                mock_get_em.return_value = mock_em
-
-                mock_db = Mock()
-                mock_db.get_clustering_cache.return_value = None
-                mock_get_db.return_value = mock_db
-
-                mock_cfg = Mock()
-                mock_cfg.embedding_model = "test-model"
-                mock_config.return_value = mock_cfg
-
-                mock_cm = Mock()
-                mock_cm.get_clustering_results.return_value = {"points": [], "statistics": {"n_clusters": 15}}
-                MockCM.return_value = mock_cm
-
-                response = client.post("/api/clusters/precalculate", json={"n_clusters": 15})
-
-                assert response.status_code == 200
-                data = response.get_json()
-
-                assert data["status"] == "started"
-                assert data["n_clusters"] == 15
-
-    def test_precalculate_clusters_error_handling(self):
-        """Test error handling in precalculate endpoint."""
-        from abstracts_explorer.web_ui.app import app
-
-        with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.app.get_embeddings_manager", side_effect=Exception("Test error")):
-                response = client.post("/api/clusters/precalculate", json={})
 
                 assert response.status_code == 500
                 data = response.get_json()

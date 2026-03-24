@@ -210,7 +210,12 @@ class ClusteringManager:
         self.fuzzy_memberships: Optional[np.ndarray] = None
         self.clusterer: Optional[Any] = None  # Store the clusterer for hierarchy access
 
-    def load_embeddings(self, limit: Optional[int] = None) -> int:
+    def load_embeddings(
+        self,
+        limit: Optional[int] = None,
+        conferences: Optional[List[str]] = None,
+        years: Optional[List[int]] = None,
+    ) -> int:
         """
         Load embeddings from ChromaDB collection.
 
@@ -218,6 +223,10 @@ class ClusteringManager:
         ----------
         limit : int, optional
             Maximum number of embeddings to load. If None, load all.
+        conferences : list of str, optional
+            Filter to only load embeddings for these conferences.
+        years : list of int, optional
+            Filter to only load embeddings for these years.
 
         Returns
         -------
@@ -233,8 +242,27 @@ class ClusteringManager:
             raise ClusteringError("Collection not initialized in embeddings manager")
 
         try:
-            # Get all embeddings from the collection
-            results = self.embeddings_manager.collection.get(limit=limit, include=["embeddings", "metadatas"])
+            # Build where clause for conference/year filtering
+            # NOTE: ChromaDB stores all metadata as strings, so numeric years must
+            # be converted to strings for filtering.
+            filter_conditions: List[Dict[str, Any]] = []
+            if conferences:
+                filter_conditions.append({"conference": {"$in": conferences}})
+            if years:
+                year_strs = [str(y) for y in years]
+                filter_conditions.append({"year": {"$in": year_strs}})
+
+            where_filter: Optional[Dict[str, Any]] = None
+            if len(filter_conditions) > 1:
+                where_filter = {"$and": filter_conditions}
+            elif len(filter_conditions) == 1:
+                where_filter = filter_conditions[0]
+
+            # Get embeddings from the collection (with optional filtering)
+            get_kwargs: Dict[str, Any] = {"limit": limit, "include": ["embeddings", "metadatas"]}
+            if where_filter is not None:
+                get_kwargs["where"] = where_filter
+            results = self.embeddings_manager.collection.get(**get_kwargs)
 
             if not results["ids"] or len(results["ids"]) == 0:
                 raise ClusteringError("No embeddings found in collection")
@@ -445,8 +473,9 @@ class ClusteringManager:
                 # Handle agglomerative with distance_threshold or n_clusters
                 # Filter out parameters that don't belong to AgglomerativeClustering
                 # (e.g., 'affinity' and 'n_neighbors' are for spectral clustering)
-                agg_kwargs = {k: v for k, v in kwargs.items() 
-                             if k not in ['affinity', 'n_neighbors', 'eps', 'min_samples', 'm']}
+                agg_kwargs = {
+                    k: v for k, v in kwargs.items() if k not in ["affinity", "n_neighbors", "eps", "min_samples", "m"]
+                }
 
                 if distance_threshold is not None:
                     self.clusterer = AgglomerativeClustering(
@@ -901,9 +930,7 @@ class ClusteringManager:
                                 try:
                                     # Convert paper IDs to indices for metadata lookup
                                     sample_indices = [
-                                        paper_id_to_idx[pid]
-                                        for pid in node_info["samples"]
-                                        if pid in paper_id_to_idx
+                                        paper_id_to_idx[pid] for pid in node_info["samples"] if pid in paper_id_to_idx
                                     ]
                                     label = self._generate_parent_label_llm(child_labels, sample_indices)
                                     hierarchical_labels[node_id] = label
@@ -1824,6 +1851,8 @@ def compute_clusters_with_cache(
     n_clusters: Optional[int] = None,
     limit: Optional[int] = None,
     force: bool = False,
+    conferences: Optional[List[str]] = None,
+    years: Optional[List[int]] = None,
     **clustering_kwargs,
 ) -> Dict[str, Any]:
     """
@@ -1852,6 +1881,10 @@ def compute_clusters_with_cache(
         Maximum number of embeddings to process
     force : bool, optional
         Force recompute even if cache exists, by default False
+    conferences : list of str, optional
+        Filter to only cluster papers from these conferences.
+    years : list of int, optional
+        Filter to only cluster papers from these years.
     **clustering_kwargs
         Additional clustering parameters (e.g., eps, min_samples for DBSCAN)
 
@@ -1873,14 +1906,6 @@ def compute_clusters_with_cache(
     ...     n_clusters=5
     ... )
     """
-    # Get embeddings count to calculate default n_clusters if needed
-    collection_stats = embeddings_manager.get_collection_stats()
-    n_papers = collection_stats["count"]
-
-    # Calculate default n_clusters if not provided
-    if n_clusters is None:
-        n_clusters = calculate_default_clusters(n_papers)
-        logger.info(f"Auto-calculated n_clusters={n_clusters} based on {n_papers} papers")
 
     # Check if cache exists and is valid
     if not force and not limit:  # Only use cache if not limiting results
@@ -1888,13 +1913,21 @@ def compute_clusters_with_cache(
         cache_n_clusters: Optional[int] = n_clusters
         cache_params = clustering_kwargs.copy() if clustering_kwargs else {}
 
+        # Include conference/year filters in the cache key so different
+        # subsets are cached separately.
+        if conferences:
+            cache_params["conferences"] = sorted(conferences)
+        if years:
+            cache_params["years"] = sorted([int(y) for y in years])
+
         # Special handling for agglomerative with distance_threshold
         if clustering_method.lower() == "agglomerative" and "distance_threshold" in cache_params:
             cache_n_clusters = None  # Don't use n_clusters as cache key when using distance_threshold
         elif clustering_method.lower() == "dbscan":
             cache_n_clusters = None  # DBSCAN doesn't use n_clusters
 
-        cached_results = database.get_clustering_cache(
+        # Level 1: Try exact match (same clustering params AND same reduction method)
+        exact_cached = database.get_clustering_cache(
             embedding_model=embedding_model,
             reduction_method=reduction_method,
             n_components=n_components,
@@ -1903,9 +1936,89 @@ def compute_clusters_with_cache(
             clustering_params=cache_params if cache_params else None,
         )
 
-        if cached_results:
-            logger.info("Using cached clustering results")
-            return cached_results
+        if exact_cached:
+            logger.info("Using exact cached clustering results (including reduction)")
+            return exact_cached
+
+        # Level 2: Try clustering-only match (same clustering params, any reduction)
+        clustering_cached = database.get_clustering_cache(
+            embedding_model=embedding_model,
+            clustering_method=clustering_method,
+            n_clusters=cache_n_clusters,
+            clustering_params=cache_params if cache_params else None,
+        )
+
+        if clustering_cached:
+            logger.info("Reusing cached clustering results – re-applying reduction for visualization...")
+            # We have cached clustering with a different reduction method.
+            # Re-apply the requested reduction method on the embeddings.
+            cm_cached = ClusteringManager(embeddings_manager)
+            cm_cached.load_embeddings(limit=limit, conferences=conferences, years=years)
+
+            # Restore cluster assignments from the cached results
+            if "points" in clustering_cached:
+                # Reconstruct cluster assignments from points
+                point_id_to_cluster: Dict[str, int] = {}
+                for point in clustering_cached["points"]:
+                    pid = point.get("id") or point.get("paper_id", "")
+                    point_id_to_cluster[pid] = point.get("cluster", -1)
+
+                current_ids = cm_cached.paper_ids or []
+                missing = [pid for pid in current_ids if pid not in point_id_to_cluster]
+                if missing:
+                    logger.warning(
+                        f"{len(missing)} paper(s) are not in the clustering cache "
+                        f"(e.g. '{missing[0]}'). They will be assigned to cluster -1. "
+                        "Run with force=True (or clear the cache) to recompute."
+                    )
+                cm_cached.cluster_labels = np.array([point_id_to_cluster.get(pid, -1) for pid in current_ids])
+
+                # Restore labels and hierarchy from cached results
+                if clustering_cached.get("cluster_labels"):
+                    cm_cached.cluster_label_names = {
+                        int(k): v for k, v in clustering_cached["cluster_labels"].items()
+                    }
+                if clustering_cached.get("cluster_keywords"):
+                    cm_cached.cluster_keywords = {int(k): v for k, v in clustering_cached["cluster_keywords"].items()}
+                if clustering_cached.get("cluster_hierarchy"):
+                    cm_cached.cluster_hierarchy = clustering_cached["cluster_hierarchy"]
+            else:
+                logger.warning("Cached clustering results have unexpected format (no 'points' key). Re-computing.")
+                # Fall through to full recompute below
+                clustering_cached = None
+
+        if clustering_cached:
+
+            # Apply the requested reduction method for visualization
+            cm_cached.reduce_dimensions(method=reduction_method, n_components=n_components)
+            results = cm_cached.get_clustering_results()
+
+            # Save the new result (with new reduction method) to cache
+            try:
+                save_n_clusters: Optional[int] = n_clusters
+                save_params = clustering_kwargs.copy() if clustering_kwargs else {}
+                if conferences:
+                    save_params["conferences"] = sorted(conferences)
+                if years:
+                    save_params["years"] = sorted([int(y) for y in years])
+                if clustering_method.lower() == "agglomerative" and "distance_threshold" in save_params:
+                    save_n_clusters = None
+                elif clustering_method.lower() == "dbscan":
+                    save_n_clusters = None
+
+                database.save_clustering_cache(
+                    embedding_model=embedding_model,
+                    reduction_method=reduction_method,
+                    n_components=n_components,
+                    clustering_method=clustering_method,
+                    results=results,
+                    n_clusters=save_n_clusters,
+                    clustering_params=save_params if save_params else None,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to save clustering cache: {e}")
+
+            return results
 
     # Cache miss or forced recompute - compute clusters
     logger.info("Computing new clustering results...")
@@ -1915,7 +2028,7 @@ def compute_clusters_with_cache(
 
     # Load embeddings
     logger.info(f"Loading embeddings (limit={limit})...")
-    cm.load_embeddings(limit=limit)
+    cm.load_embeddings(limit=limit, conferences=conferences, years=years)
 
     # Perform clustering on full embeddings first
     logger.info(f"Clustering using {clustering_method} on full embeddings...")
@@ -1944,31 +2057,63 @@ def compute_clusters_with_cache(
 
     # Generate hierarchical labels for agglomerative clustering
     if clustering_method.lower() == "agglomerative" and cm.cluster_hierarchy is not None:
-        logger.info("Generating hierarchical labels for agglomerative clustering...")
-        try:
-            # Check if use_llm_labels is specified in kwargs, default to True
-            use_llm = clustering_kwargs.get("use_llm_labels", True)
-            hierarchical_labels = cm.generate_hierarchical_labels(use_llm=use_llm, max_keywords=5)
-            # Update the tree nodes with the generated labels
-            if "tree" in cm.cluster_hierarchy and "nodes" in cm.cluster_hierarchy["tree"]:
-                for node_id, label in hierarchical_labels.items():
-                    node_id_int = int(node_id)
-                    if node_id_int in cm.cluster_hierarchy["tree"]["nodes"]:
-                        cm.cluster_hierarchy["tree"]["nodes"][node_id_int]["label"] = label
-            logger.info(f"Generated labels for {len(hierarchical_labels)} hierarchy nodes (LLM: {use_llm})")
-        except Exception as e:
-            logger.warning(f"Failed to generate hierarchical labels: {e}")
-            # Continue without hierarchical labels
+        # Determine linkage for the hierarchical label cache key
+        linkage_method = clustering_kwargs.get("linkage", "ward")
+        use_llm = clustering_kwargs.get("use_llm_labels", True)
 
-    # Get results
+        # Try to load hierarchical labels from dedicated cache first
+        cached_hier_labels = database.get_hierarchical_label_cache(
+            embedding_model=embedding_model,
+            linkage=linkage_method,
+        )
+
+        if cached_hier_labels:
+            logger.info(f"Using cached hierarchical labels ({len(cached_hier_labels)} nodes)")
+            hierarchical_labels = cached_hier_labels
+        else:
+            logger.info("Generating hierarchical labels for agglomerative clustering...")
+            try:
+                hierarchical_labels = cm.generate_hierarchical_labels(use_llm=use_llm, max_keywords=5)
+                # Persist to dedicated hierarchical label cache
+                if not limit:
+                    try:
+                        database.save_hierarchical_label_cache(
+                            embedding_model=embedding_model,
+                            labels=hierarchical_labels,
+                            linkage=linkage_method,
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to save hierarchical label cache: {e}")
+            except Exception as e:
+                logger.warning(f"Failed to generate hierarchical labels: {e}")
+                hierarchical_labels = {}
+                # Continue without hierarchical labels
+
+        # Apply labels to tree nodes
+        if hierarchical_labels and "tree" in cm.cluster_hierarchy and "nodes" in cm.cluster_hierarchy["tree"]:
+            for node_id, label in hierarchical_labels.items():
+                node_id_int = int(node_id)
+                if node_id_int in cm.cluster_hierarchy["tree"]["nodes"]:
+                    cm.cluster_hierarchy["tree"]["nodes"][node_id_int]["label"] = label
+        logger.info(
+            f"Applied {len(hierarchical_labels)} hierarchical labels "
+            f"(LLM: {use_llm}, cached: {cached_hier_labels is not None})"
+        )
+
+    # Get full results (includes x/y from reduction above)
     results = cm.get_clustering_results()
 
     # Save to cache if no limit was applied
     if not limit:
         try:
-            # Use same logic as cache lookup for consistency
-            save_n_clusters: Optional[int] = n_clusters
+            save_n_clusters = n_clusters
             save_params = clustering_kwargs.copy() if clustering_kwargs else {}
+
+            # Include conference/year filters in cache params
+            if conferences:
+                save_params["conferences"] = sorted(conferences)
+            if years:
+                save_params["years"] = sorted([int(y) for y in years])
 
             # Special handling for agglomerative with distance_threshold
             if clustering_method.lower() == "agglomerative" and "distance_threshold" in save_params:
