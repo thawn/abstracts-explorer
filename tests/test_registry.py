@@ -872,8 +872,6 @@ class TestCLICommands:
 
     def test_registry_upload_no_repository(self, capsys, monkeypatch):
         """Upload fails when no repository is specified."""
-        import argparse
-
         monkeypatch.delenv("REGISTRY_REPOSITORY", raising=False)
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
         get_config(reload=True, env_path=get_env_test_path())
@@ -934,6 +932,7 @@ class TestCLICommands:
             embedding_db=False,
             all=True,
             merge=False,
+            yes=False,
         )
 
         result = registry_download_command(args)

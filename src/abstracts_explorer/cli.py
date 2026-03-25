@@ -1595,6 +1595,7 @@ def registry_download_command(args: argparse.Namespace) -> int:
         - embedding_db: Download embedding database
         - all: Download all databases
         - merge: Merge with existing data
+        - yes: Skip confirmation prompt
 
     Returns
     -------
@@ -1634,7 +1635,7 @@ def registry_download_command(args: argparse.Namespace) -> int:
     print(f"Merge:          {'Yes' if args.merge else 'No (replace)'}")
     print("=" * 70)
 
-    if not args.merge:
+    if not args.merge and not args.yes:
         print("\n⚠️  Warning: This will replace your existing data!")
         try:
             confirm = input("Continue? [y/N]: ").strip().lower()
@@ -2622,6 +2623,12 @@ Examples:
         "--merge",
         action="store_true",
         help="Merge with existing data instead of replacing",
+    )
+    registry_download_parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Skip confirmation prompt when replacing data",
     )
 
     # registry list
