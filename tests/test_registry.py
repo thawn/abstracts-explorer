@@ -1,14 +1,12 @@
 """
 Tests for the registry module.
 
-Tests OCI registry client, data packaging/unpackaging, database export/import,
-and CLI command integration.
+Tests the oras-based registry client, DatabaseManager export/import methods,
+EmbeddingsManager export/import methods, and CLI command integration.
 """
 
 import argparse
-import io
 import json
-import tarfile
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -17,23 +15,9 @@ from abstracts_explorer.config import get_config
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.plugin import LightweightPaper
 from abstracts_explorer.registry import (
-    CONFIG_MEDIA_TYPE,
-    MANIFEST_MEDIA_TYPE,
-    PAPER_DB_MEDIA_TYPE,
     RegistryClient,
     RegistryError,
-    _build_config_metadata,
-    _compute_sha256,
-    _create_json_tar_gz,
-    _find_file_in_extracted,
-    _make_descriptor,
-    export_embeddings_to_json,
-    export_papers_to_sqlite,
-    extract_tar_gz,
-    import_embeddings_from_json,
-    import_papers_from_sqlite,
-    package_directory_as_tar_gz,
-    package_file_as_tar_gz,
+    _build_tag,
 )
 from tests.conftest import get_env_test_path, set_test_db
 
@@ -76,382 +60,53 @@ def _make_sample_papers():
 
 
 def _populate_test_db(db_path):
-    """Create and populate a test database, return the database URL."""
+    """Create and populate a test database, return the DatabaseManager."""
     set_test_db(db_path)
     db = DatabaseManager()
     db.connect()
     db.create_tables()
     db.add_papers(_make_sample_papers())
-    db.close()
-    return f"sqlite:///{db_path}"
+    return db
 
 
 # ---------------------------------------------------------------------------
-# Tests: Utility functions
+# Tests: _build_tag
 # ---------------------------------------------------------------------------
 
 
-class TestUtilityFunctions:
-    """Tests for low-level utility functions."""
+class TestBuildTag:
+    """Tests for the _build_tag helper."""
 
-    def test_compute_sha256(self):
-        """SHA-256 digest is correctly computed."""
-        data = b"hello world"
-        digest = _compute_sha256(data)
-        assert len(digest) == 64
-        assert digest == "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+    def test_simple_tag(self):
+        """Tag is built from conference and year."""
+        assert _build_tag("neurips", 2024) == "neurips-2024"
 
-    def test_make_descriptor(self):
-        """OCI descriptor has correct structure."""
-        data = b"test data"
-        desc = _make_descriptor(data, "application/octet-stream")
-        assert desc["mediaType"] == "application/octet-stream"
-        assert desc["digest"].startswith("sha256:")
-        assert desc["size"] == len(data)
+    def test_case_normalisation(self):
+        """Conference name is lowercased."""
+        assert _build_tag("NeurIPS", 2024) == "neurips-2024"
 
-    def test_make_descriptor_with_annotations(self):
-        """OCI descriptor includes annotations when provided."""
-        data = b"test data"
-        annotations = {"key": "value"}
-        desc = _make_descriptor(data, "application/octet-stream", annotations=annotations)
-        assert desc["annotations"] == {"key": "value"}
+    def test_special_characters(self):
+        """Special characters are replaced with hyphens."""
+        assert _build_tag("ML4PS/workshop", 2025) == "ml4ps-workshop-2025"
 
 
 # ---------------------------------------------------------------------------
-# Tests: Packaging functions
-# ---------------------------------------------------------------------------
-
-
-class TestPackaging:
-    """Tests for tar.gz packaging and extraction."""
-
-    def test_package_file_as_tar_gz(self, tmp_path):
-        """A file is correctly packaged as tar.gz."""
-        test_file = tmp_path / "test.txt"
-        test_file.write_text("hello world")
-
-        data = package_file_as_tar_gz(test_file)
-        assert len(data) > 0
-
-        # Verify it's a valid tar.gz
-        buf = io.BytesIO(data)
-        with tarfile.open(fileobj=buf, mode="r:gz") as tar:
-            names = tar.getnames()
-            assert "test.txt" in names
-
-    def test_package_file_not_found(self, tmp_path):
-        """RegistryError raised for non-existent file."""
-        with pytest.raises(RegistryError, match="File not found"):
-            package_file_as_tar_gz(tmp_path / "nonexistent.txt")
-
-    def test_package_directory_as_tar_gz(self, tmp_path):
-        """A directory is correctly packaged as tar.gz."""
-        test_dir = tmp_path / "test_dir"
-        test_dir.mkdir()
-        (test_dir / "file1.txt").write_text("content1")
-        (test_dir / "file2.txt").write_text("content2")
-
-        data = package_directory_as_tar_gz(test_dir)
-        assert len(data) > 0
-
-        # Verify contents
-        buf = io.BytesIO(data)
-        with tarfile.open(fileobj=buf, mode="r:gz") as tar:
-            names = tar.getnames()
-            assert any("file1.txt" in n for n in names)
-            assert any("file2.txt" in n for n in names)
-
-    def test_package_directory_not_found(self, tmp_path):
-        """RegistryError raised for non-existent directory."""
-        with pytest.raises(RegistryError, match="Directory not found"):
-            package_directory_as_tar_gz(tmp_path / "nonexistent_dir")
-
-    def test_extract_tar_gz(self, tmp_path):
-        """tar.gz archive is correctly extracted."""
-        # Create a tar.gz
-        test_file = tmp_path / "input" / "test.txt"
-        test_file.parent.mkdir()
-        test_file.write_text("hello world")
-        data = package_file_as_tar_gz(test_file)
-
-        # Extract it
-        output_dir = tmp_path / "output"
-        extract_tar_gz(data, output_dir)
-
-        assert output_dir.exists()
-        assert (output_dir / "test.txt").exists()
-        assert (output_dir / "test.txt").read_text() == "hello world"
-
-    def test_extract_tar_gz_path_traversal(self, tmp_path):
-        """RegistryError raised for archives with path traversal."""
-        buf = io.BytesIO()
-        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-            info = tarfile.TarInfo(name="../../../etc/passwd")
-            info.size = 5
-            tar.addfile(info, io.BytesIO(b"evil!"))
-        data = buf.getvalue()
-
-        with pytest.raises(RegistryError, match="Unsafe path"):
-            extract_tar_gz(data, tmp_path / "output")
-
-    def test_create_json_tar_gz(self):
-        """JSON data is correctly packaged as tar.gz."""
-        json_data = json.dumps({"key": "value"}).encode("utf-8")
-        archive = _create_json_tar_gz(json_data, "test.json")
-
-        buf = io.BytesIO(archive)
-        with tarfile.open(fileobj=buf, mode="r:gz") as tar:
-            names = tar.getnames()
-            assert "test.json" in names
-
-            member = tar.getmember("test.json")
-            f = tar.extractfile(member)
-            assert f is not None
-            content = json.loads(f.read())
-            assert content == {"key": "value"}
-
-    def test_find_file_in_extracted_file(self, tmp_path):
-        """Find a file by extension when path is a file."""
-        test_file = tmp_path / "test.db"
-        test_file.write_text("data")
-        assert _find_file_in_extracted(test_file, ".db") == test_file
-
-    def test_find_file_in_extracted_directory(self, tmp_path):
-        """Find a file by extension when path is a directory."""
-        subdir = tmp_path / "subdir"
-        subdir.mkdir()
-        test_file = subdir / "data.json"
-        test_file.write_text("{}")
-        assert _find_file_in_extracted(tmp_path, ".json") == test_file
-
-    def test_find_file_in_extracted_not_found(self, tmp_path):
-        """Return None when no file with extension is found."""
-        assert _find_file_in_extracted(tmp_path, ".xyz") is None
-
-
-# ---------------------------------------------------------------------------
-# Tests: Database export/import
-# ---------------------------------------------------------------------------
-
-
-class TestDatabaseExportImport:
-    """Tests for paper database export and import."""
-
-    def test_export_papers_to_sqlite(self, tmp_path):
-        """Papers are exported to a standalone SQLite file."""
-        db_url = _populate_test_db(tmp_path / "source.db")
-        export_path = tmp_path / "export.db"
-
-        count = export_papers_to_sqlite(db_url, export_path)
-        assert count == 3
-        assert export_path.exists()
-
-    def test_export_papers_with_conference_filter(self, tmp_path):
-        """Only papers from specified conferences are exported."""
-        db_url = _populate_test_db(tmp_path / "source.db")
-        export_path = tmp_path / "export.db"
-
-        count = export_papers_to_sqlite(db_url, export_path, conferences=["neurips"])
-        assert count == 2  # Only neurips papers
-
-    def test_import_papers_replace(self, tmp_path):
-        """Papers are imported, replacing existing data."""
-        # Create source database
-        source_url = _populate_test_db(tmp_path / "source.db")
-        export_path = tmp_path / "export.db"
-        export_papers_to_sqlite(source_url, export_path)
-
-        # Create target database with some data
-        target_path = tmp_path / "target.db"
-        target_url = _populate_test_db(target_path)
-
-        # Import (replace mode)
-        count = import_papers_from_sqlite(export_path, target_url, merge=False)
-        assert count == 3
-
-    def test_import_papers_merge(self, tmp_path):
-        """Papers are merged, skipping duplicates."""
-        # Create source database
-        source_url = _populate_test_db(tmp_path / "source.db")
-        export_path = tmp_path / "export.db"
-        export_papers_to_sqlite(source_url, export_path)
-
-        # Create target database with same data
-        target_path = tmp_path / "target.db"
-        target_url = _populate_test_db(target_path)
-
-        # Import (merge mode) - should skip all duplicates
-        count = import_papers_from_sqlite(export_path, target_url, merge=True)
-        assert count == 0  # All papers already exist
-
-    def test_import_papers_merge_new(self, tmp_path):
-        """New papers are added during merge."""
-        # Create source with neurips papers only
-        source_url = _populate_test_db(tmp_path / "source.db")
-        export_path = tmp_path / "export_neurips.db"
-        export_papers_to_sqlite(source_url, export_path, conferences=["neurips"])
-
-        # Create target with iclr papers only
-        iclr_export = tmp_path / "export_iclr.db"
-        export_papers_to_sqlite(source_url, iclr_export, conferences=["iclr"])
-
-        target_path = tmp_path / "target.db"
-        target_url = f"sqlite:///{target_path}"
-        import_papers_from_sqlite(iclr_export, target_url, merge=False)
-
-        # Merge neurips papers into target (which only has iclr)
-        count = import_papers_from_sqlite(export_path, target_url, merge=True)
-        assert count == 2  # 2 neurips papers added
-
-
-# ---------------------------------------------------------------------------
-# Tests: Embeddings export/import
-# ---------------------------------------------------------------------------
-
-
-class TestEmbeddingsExportImport:
-    """Tests for embeddings export and import."""
-
-    def test_export_embeddings_to_json(self):
-        """Embeddings are exported to a JSON-serializable dict."""
-        mock_collection = MagicMock()
-        mock_collection.get.return_value = {
-            "ids": ["id1", "id2"],
-            "documents": ["doc1", "doc2"],
-            "metadatas": [{"key": "val1"}, {"key": "val2"}],
-            "embeddings": [[0.1, 0.2], [0.3, 0.4]],
-        }
-
-        mock_em = MagicMock()
-        mock_em.collection = mock_collection
-
-        result = export_embeddings_to_json(mock_em)
-        assert result["ids"] == ["id1", "id2"]
-        assert result["documents"] == ["doc1", "doc2"]
-        assert result["embeddings"] == [[0.1, 0.2], [0.3, 0.4]]
-
-        # Verify no conference filter was used
-        mock_collection.get.assert_called_once_with(include=["documents", "embeddings", "metadatas"])
-
-    def test_export_embeddings_with_conference_filter(self):
-        """Conference filter is passed to ChromaDB query."""
-        mock_collection = MagicMock()
-        mock_collection.get.return_value = {
-            "ids": ["id1"],
-            "documents": ["doc1"],
-            "metadatas": [{"conference": "neurips"}],
-            "embeddings": [[0.1, 0.2]],
-        }
-
-        mock_em = MagicMock()
-        mock_em.collection = mock_collection
-
-        export_embeddings_to_json(mock_em, conferences=["neurips"])
-
-        mock_collection.get.assert_called_once_with(
-            include=["documents", "embeddings", "metadatas"],
-            where={"conference": {"$in": ["neurips"]}},
-        )
-
-    def test_import_embeddings_replace(self):
-        """Embeddings are imported, replacing existing collection."""
-        mock_collection = MagicMock()
-        mock_em = MagicMock()
-        mock_em.collection = mock_collection
-
-        data = {
-            "ids": ["id1", "id2"],
-            "documents": ["doc1", "doc2"],
-            "metadatas": [{"key": "val1"}, {"key": "val2"}],
-            "embeddings": [[0.1, 0.2], [0.3, 0.4]],
-        }
-
-        count = import_embeddings_from_json(mock_em, data, merge=False)
-        assert count == 2
-        mock_em.create_collection.assert_called_once_with(reset=True)
-        mock_collection.add.assert_called_once()
-
-    def test_import_embeddings_merge(self):
-        """New embeddings are added during merge, existing ones skipped."""
-        mock_collection = MagicMock()
-        # id1 exists, id2 does not
-        mock_collection.get.side_effect = [
-            {"ids": ["id1"]},  # id1 exists
-            {"ids": []},  # id2 doesn't exist
-        ]
-        mock_em = MagicMock()
-        mock_em.collection = mock_collection
-
-        data = {
-            "ids": ["id1", "id2"],
-            "documents": ["doc1", "doc2"],
-            "metadatas": [{"key": "val1"}, {"key": "val2"}],
-            "embeddings": [[0.1, 0.2], [0.3, 0.4]],
-        }
-
-        count = import_embeddings_from_json(mock_em, data, merge=True, batch_size=100)
-        assert count == 1
-        mock_em.create_collection.assert_not_called()
-
-    def test_import_embeddings_empty(self):
-        """Empty import returns 0."""
-        mock_em = MagicMock()
-        data = {"ids": [], "documents": [], "metadatas": [], "embeddings": []}
-        count = import_embeddings_from_json(mock_em, data, merge=False)
-        assert count == 0
-
-
-# ---------------------------------------------------------------------------
-# Tests: Config metadata
-# ---------------------------------------------------------------------------
-
-
-class TestConfigMetadata:
-    """Tests for config metadata generation."""
-
-    def test_build_config_metadata(self):
-        """Config metadata includes version and timestamps."""
-        with patch("abstracts_explorer._version.__version__", "1.2.3"):
-            metadata = _build_config_metadata()
-
-        assert metadata["version"] == "1.2.3"
-        assert "created_at" in metadata
-        assert metadata["includes"]["paper_db"] is True
-        assert metadata["includes"]["embedding_db"] is True
-
-    def test_build_config_metadata_with_conferences(self):
-        """Config metadata includes conference list when specified."""
-        with patch("abstracts_explorer._version.__version__", "1.0.0"):
-            metadata = _build_config_metadata(conferences=["neurips", "iclr"])
-
-        assert metadata["conferences"] == ["neurips", "iclr"]
-
-    def test_build_config_metadata_partial(self):
-        """Config metadata reflects which databases are included."""
-        with patch("abstracts_explorer._version.__version__", "1.0.0"):
-            metadata = _build_config_metadata(paper_db=True, embedding_db=False)
-
-        assert metadata["includes"]["paper_db"] is True
-        assert metadata["includes"]["embedding_db"] is False
-        assert "embedding_model" not in metadata
-
-
-# ---------------------------------------------------------------------------
-# Tests: RegistryClient
+# Tests: RegistryClient initialisation
 # ---------------------------------------------------------------------------
 
 
 class TestRegistryClient:
-    """Tests for RegistryClient OCI operations."""
+    """Tests for RegistryClient construction."""
 
     def test_init_valid_repository(self):
         """Client initializes correctly with valid repository."""
-        client = RegistryClient("ghcr.io/owner/abstracts-data", token="test-token")
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/owner/abstracts-data", token="test-token")
+
         assert client.registry == "ghcr.io"
         assert client.name == "owner/abstracts-data"
+        assert client.repository == "ghcr.io/owner/abstracts-data"
         assert client.token == "test-token"
-        assert client.base_url == "https://ghcr.io"
-        assert client.api_url == "https://ghcr.io/v2/owner/abstracts-data"
 
     def test_init_invalid_repository(self):
         """RegistryError raised for invalid repository format."""
@@ -466,172 +121,237 @@ class TestRegistryClient:
     def test_init_token_from_env(self, monkeypatch):
         """Token is read from GITHUB_TOKEN environment variable."""
         monkeypatch.setenv("GITHUB_TOKEN", "env-token")
-        client = RegistryClient("ghcr.io/owner/repo")
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/owner/repo")
         assert client.token == "env-token"
-
-    def test_get_bearer_token(self):
-        """Bearer token is obtained from registry auth endpoint."""
-        client = RegistryClient("ghcr.io/owner/repo", token="pat-token")
-
-        mock_response = Mock()
-        mock_response.json.return_value = {"token": "bearer-token-123"}
-        mock_response.raise_for_status = Mock()
-
-        with patch("abstracts_explorer.registry.requests.get", return_value=mock_response) as mock_get:
-            token = client._get_bearer_token("repository:owner/repo:pull")
-
-        assert token == "bearer-token-123"
-        mock_get.assert_called_once()
-        call_kwargs = mock_get.call_args
-        assert call_kwargs[1]["auth"] == ("_token", "pat-token")
-
-    def test_get_bearer_token_cached(self):
-        """Bearer tokens are cached by scope."""
-        client = RegistryClient("ghcr.io/owner/repo", token="pat-token")
-        client._bearer_tokens["repository:owner/repo:pull"] = "cached-token"
-
-        token = client._get_bearer_token("repository:owner/repo:pull")
-        assert token == "cached-token"
-
-    def test_get_bearer_token_failure(self):
-        """RegistryError raised when auth fails."""
-        client = RegistryClient("ghcr.io/owner/repo", token="bad-token")
-
-        import requests as req
-
-        with patch(
-            "abstracts_explorer.registry.requests.get",
-            side_effect=req.exceptions.ConnectionError("connection error"),
-        ):
-            with pytest.raises(RegistryError, match="Authentication failed"):
-                client._get_bearer_token("repository:owner/repo:pull")
-
-    def test_check_blob_exists_true(self):
-        """check_blob_exists returns True for existing blob."""
-        client = RegistryClient("ghcr.io/owner/repo", token="token")
-
-        mock_response = Mock()
-        mock_response.status_code = 200
-
-        with patch.object(client, "_auth_headers", return_value={"Authorization": "Bearer t"}):
-            with patch("abstracts_explorer.registry.requests.head", return_value=mock_response):
-                assert client.check_blob_exists("sha256:abc123") is True
-
-    def test_check_blob_exists_false(self):
-        """check_blob_exists returns False for non-existing blob."""
-        client = RegistryClient("ghcr.io/owner/repo", token="token")
-
-        mock_response = Mock()
-        mock_response.status_code = 404
-
-        with patch.object(client, "_auth_headers", return_value={"Authorization": "Bearer t"}):
-            with patch("abstracts_explorer.registry.requests.head", return_value=mock_response):
-                assert client.check_blob_exists("sha256:abc123") is False
-
-    def test_push_blob(self):
-        """Blob is uploaded via OCI Distribution API."""
-        client = RegistryClient("ghcr.io/owner/repo", token="token")
-
-        post_response = Mock()
-        post_response.raise_for_status = Mock()
-        post_response.headers = {"Location": "/v2/owner/repo/blobs/uploads/uuid123"}
-
-        put_response = Mock()
-        put_response.raise_for_status = Mock()
-
-        with patch.object(client, "_auth_headers", return_value={"Authorization": "Bearer t"}):
-            with patch.object(client, "check_blob_exists", return_value=False):
-                with patch("abstracts_explorer.registry.requests.post", return_value=post_response):
-                    with patch("abstracts_explorer.registry.requests.put", return_value=put_response):
-                        digest = client.push_blob(b"test data")
-
-        assert digest.startswith("sha256:")
-
-    def test_push_blob_already_exists(self):
-        """Existing blob is skipped during push."""
-        client = RegistryClient("ghcr.io/owner/repo", token="token")
-
-        with patch.object(client, "_auth_headers", return_value={"Authorization": "Bearer t"}):
-            with patch.object(client, "check_blob_exists", return_value=True):
-                digest = client.push_blob(b"test data")
-
-        assert digest.startswith("sha256:")
-
-    def test_push_blob_no_location(self):
-        """RegistryError raised when POST doesn't return Location header."""
-        client = RegistryClient("ghcr.io/owner/repo", token="token")
-
-        post_response = Mock()
-        post_response.raise_for_status = Mock()
-        post_response.headers = {}
-
-        with patch.object(client, "_auth_headers", return_value={"Authorization": "Bearer t"}):
-            with patch.object(client, "check_blob_exists", return_value=False):
-                with patch("abstracts_explorer.registry.requests.post", return_value=post_response):
-                    with pytest.raises(RegistryError, match="upload location"):
-                        client.push_blob(b"test data")
-
-    def test_pull_blob(self):
-        """Blob is downloaded from registry."""
-        client = RegistryClient("ghcr.io/owner/repo", token="token")
-
-        mock_response = Mock()
-        mock_response.content = b"blob data"
-        mock_response.raise_for_status = Mock()
-
-        with patch.object(client, "_auth_headers", return_value={"Authorization": "Bearer t"}):
-            with patch("abstracts_explorer.registry.requests.get", return_value=mock_response):
-                data = client.pull_blob("sha256:abc123")
-
-        assert data == b"blob data"
-
-    def test_push_manifest(self):
-        """Manifest is uploaded to registry."""
-        client = RegistryClient("ghcr.io/owner/repo", token="token")
-
-        mock_response = Mock()
-        mock_response.raise_for_status = Mock()
-
-        manifest = {"schemaVersion": 2, "mediaType": MANIFEST_MEDIA_TYPE}
-
-        with patch.object(client, "_auth_headers", return_value={"Authorization": "Bearer t"}):
-            with patch("abstracts_explorer.registry.requests.put", return_value=mock_response):
-                digest = client.push_manifest(manifest, "latest")
-
-        assert digest.startswith("sha256:")
-
-    def test_pull_manifest(self):
-        """Manifest is downloaded from registry."""
-        client = RegistryClient("ghcr.io/owner/repo", token="token")
-
-        expected_manifest = {
-            "schemaVersion": 2,
-            "mediaType": MANIFEST_MEDIA_TYPE,
-            "layers": [],
-        }
-        mock_response = Mock()
-        mock_response.json.return_value = expected_manifest
-        mock_response.raise_for_status = Mock()
-
-        with patch.object(client, "_auth_headers", return_value={"Authorization": "Bearer t"}):
-            with patch("abstracts_explorer.registry.requests.get", return_value=mock_response):
-                manifest = client.pull_manifest("latest")
-
-        assert manifest == expected_manifest
 
     def test_list_tags(self):
         """Tags are listed from registry."""
-        client = RegistryClient("ghcr.io/owner/repo", token="token")
+        with patch("oras.client.OrasClient") as MockOras:
+            mock_oras = MockOras.return_value
+            mock_oras.get_tags.return_value = ["neurips-2024", "iclr-2025"]
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            tags = client.list_tags()
 
-        mock_response = Mock()
-        mock_response.json.return_value = {"tags": ["latest", "v1.0"]}
-        mock_response.raise_for_status = Mock()
+        assert tags == ["neurips-2024", "iclr-2025"]
 
-        with patch.object(client, "_auth_headers", return_value={"Authorization": "Bearer t"}):
-            with patch("abstracts_explorer.registry.requests.get", return_value=mock_response):
-                tags = client.list_tags()
+    def test_list_tags_error(self):
+        """RegistryError raised when listing fails."""
+        with patch("oras.client.OrasClient") as MockOras:
+            mock_oras = MockOras.return_value
+            mock_oras.get_tags.side_effect = Exception("network error")
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
 
-        assert tags == ["latest", "v1.0"]
+            with pytest.raises(RegistryError, match="Failed to list tags"):
+                client.list_tags()
+
+    def test_get_artifact_info(self):
+        """Artifact info includes annotations and layers."""
+        manifest = {
+            "annotations": {
+                "com.abstracts-explorer.version": "1.0.0",
+                "com.abstracts-explorer.conference": "neurips",
+                "com.abstracts-explorer.year": "2024",
+            },
+            "layers": [
+                {
+                    "mediaType": "application/octet-stream",
+                    "size": 1024,
+                    "annotations": {"org.opencontainers.image.title": "papers.db"},
+                },
+            ],
+        }
+
+        with patch("oras.client.OrasClient") as MockOras:
+            mock_oras = MockOras.return_value
+            mock_oras.get_manifest.return_value = manifest
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            info = client.get_artifact_info("neurips-2024")
+
+        assert info["tag"] == "neurips-2024"
+        assert info["annotations"]["com.abstracts-explorer.conference"] == "neurips"
+        assert len(info["layers"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Tests: DatabaseManager export/import
+# ---------------------------------------------------------------------------
+
+
+class TestDatabaseExportImport:
+    """Tests for DatabaseManager.export_papers_to_sqlite and import_papers_from_sqlite."""
+
+    def test_export_papers_to_sqlite(self, tmp_path):
+        """Papers for a specific conference+year are exported."""
+        db = _populate_test_db(tmp_path / "source.db")
+        try:
+            export_path = tmp_path / "export.db"
+            count = db.export_papers_to_sqlite(export_path, "neurips", 2024)
+            assert count == 1  # Only 1 neurips paper for 2024
+            assert export_path.exists()
+        finally:
+            db.close()
+
+    def test_export_papers_different_year(self, tmp_path):
+        """Papers for a different year are exported correctly."""
+        db = _populate_test_db(tmp_path / "source.db")
+        try:
+            export_path = tmp_path / "export.db"
+            count = db.export_papers_to_sqlite(export_path, "neurips", 2025)
+            assert count == 1  # 1 neurips paper for 2025
+        finally:
+            db.close()
+
+    def test_export_no_papers_returns_zero(self, tmp_path):
+        """Export returns 0 when no papers match."""
+        db = _populate_test_db(tmp_path / "source.db")
+        try:
+            export_path = tmp_path / "export.db"
+            count = db.export_papers_to_sqlite(export_path, "icml", 2024)
+            assert count == 0
+        finally:
+            db.close()
+
+    def test_import_replaces_existing(self, tmp_path):
+        """Import replaces existing papers for conference+year."""
+        db = _populate_test_db(tmp_path / "source.db")
+        try:
+            export_path = tmp_path / "export.db"
+            db.export_papers_to_sqlite(export_path, "neurips", 2024)
+
+            # Import into same database (replaces)
+            count = db.import_papers_from_sqlite(export_path, "neurips", 2024)
+            assert count == 1
+
+            # Verify the iclr papers still exist (different conference)
+            # Note: clustering cache/hierarchical labels are cleared on import
+            from abstracts_explorer.db_models import Paper
+
+            total = db._session.query(Paper).count()
+            # neurips 2024 (1 replaced) + iclr 2024 (1) + neurips 2025 (1) = 3
+            assert total == 3
+        finally:
+            db.close()
+
+    def test_import_from_export_roundtrip(self, tmp_path):
+        """Export + import roundtrip preserves data."""
+        # Create source
+        db1 = _populate_test_db(tmp_path / "db1.db")
+        try:
+            export_path = tmp_path / "export.db"
+            db1.export_papers_to_sqlite(export_path, "neurips", 2024)
+        finally:
+            db1.close()
+
+        # Import into fresh database
+        target_path = tmp_path / "target.db"
+        set_test_db(target_path)
+        db2 = DatabaseManager()
+        db2.connect()
+        db2.create_tables()
+        try:
+            count = db2.import_papers_from_sqlite(export_path, "neurips", 2024)
+            assert count == 1
+
+            from abstracts_explorer.db_models import Paper
+
+            papers = db2._session.query(Paper).all()
+            assert len(papers) == 1
+            assert papers[0].conference == "neurips"
+            assert papers[0].year == 2024
+        finally:
+            db2.close()
+
+    def test_export_not_connected(self, tmp_path):
+        """Export raises error when not connected."""
+        set_test_db(tmp_path / "not_connected.db")
+        db = DatabaseManager()
+        with pytest.raises(Exception, match="Not connected"):
+            db.export_papers_to_sqlite(tmp_path / "export.db", "neurips", 2024)
+
+    def test_import_not_connected(self, tmp_path):
+        """Import raises error when not connected."""
+        set_test_db(tmp_path / "not_connected.db")
+        db = DatabaseManager()
+        with pytest.raises(Exception, match="Not connected"):
+            db.import_papers_from_sqlite(tmp_path / "source.db", "neurips", 2024)
+
+
+# ---------------------------------------------------------------------------
+# Tests: EmbeddingsManager export/import
+# ---------------------------------------------------------------------------
+
+
+class TestEmbeddingsExportImport:
+    """Tests for EmbeddingsManager.export_embeddings and import_embeddings."""
+
+    def test_export_embeddings(self):
+        """Embeddings for a conference+year are exported correctly."""
+        mock_collection = MagicMock()
+        mock_collection.get.return_value = {
+            "ids": ["id1", "id2"],
+            "documents": ["doc1", "doc2"],
+            "metadatas": [{"conference": "neurips", "year": "2024"}, {"conference": "neurips", "year": "2024"}],
+            "embeddings": [[0.1, 0.2], [0.3, 0.4]],
+        }
+
+        mock_em = MagicMock()
+        mock_em.collection = mock_collection
+        mock_em.export_embeddings = MagicMock()
+
+        # Test the actual method by calling it on a real-ish object
+        from abstracts_explorer.embeddings import EmbeddingsManager
+
+        em = EmbeddingsManager.__new__(EmbeddingsManager)
+        em._collection = mock_collection
+
+        result = em.export_embeddings("neurips", 2024)
+        assert result["ids"] == ["id1", "id2"]
+        assert result["embeddings"] == [[0.1, 0.2], [0.3, 0.4]]
+
+        # Verify the filter was used
+        call_kwargs = mock_collection.get.call_args[1]
+        assert call_kwargs["where"] == {"$and": [{"conference": "neurips"}, {"year": "2024"}]}
+
+    def test_import_embeddings(self):
+        """Embeddings are imported with replace semantics."""
+        mock_collection = MagicMock()
+        # Existing embeddings to delete
+        mock_collection.get.return_value = {"ids": ["old1"]}
+
+        from abstracts_explorer.embeddings import EmbeddingsManager
+
+        em = EmbeddingsManager.__new__(EmbeddingsManager)
+        em._collection = mock_collection
+
+        data = {
+            "ids": ["id1", "id2"],
+            "documents": ["doc1", "doc2"],
+            "metadatas": [{"conference": "neurips", "year": "2024"}, {"conference": "neurips", "year": "2024"}],
+            "embeddings": [[0.1, 0.2], [0.3, 0.4]],
+        }
+
+        count = em.import_embeddings(data, "neurips", 2024)
+        assert count == 2
+
+        # Verify old embeddings were deleted
+        mock_collection.delete.assert_called_once_with(ids=["old1"])
+        # Verify new embeddings were added
+        mock_collection.add.assert_called_once()
+
+    def test_import_embeddings_empty(self):
+        """Empty import returns 0."""
+        mock_collection = MagicMock()
+        mock_collection.get.return_value = {"ids": []}
+
+        from abstracts_explorer.embeddings import EmbeddingsManager
+
+        em = EmbeddingsManager.__new__(EmbeddingsManager)
+        em._collection = mock_collection
+
+        data = {"ids": [], "documents": [], "metadatas": [], "embeddings": []}
+        count = em.import_embeddings(data, "neurips", 2024)
+        assert count == 0
 
 
 # ---------------------------------------------------------------------------
@@ -642,224 +362,145 @@ class TestRegistryClient:
 class TestUploadDownload:
     """Tests for high-level upload/download orchestration."""
 
-    def test_upload_paper_db_only(self, tmp_path):
-        """Upload with paper_db=True, embedding_db=False."""
+    def test_upload_validates_papers(self, tmp_path):
+        """Upload fails when no papers exist for conference+year."""
         _populate_test_db(tmp_path / "test.db")
 
-        client = RegistryClient("ghcr.io/owner/repo", token="token")
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
 
-        with patch.object(client, "push_blob", return_value="sha256:abc") as mock_push:
-            with patch.object(client, "push_manifest", return_value="sha256:manifest") as mock_manifest:
-                summary = client.upload(
-                    tag="test",
-                    paper_db=True,
-                    embedding_db=False,
-                )
+        with pytest.raises(RegistryError, match="No papers found"):
+            client.upload(conference="icml", year=2024)
 
-        assert len(summary["layers"]) == 1
-        assert summary["layers"][0]["type"] == "paper-db"
-        assert summary["layers"][0]["papers"] == 3
-        assert mock_push.call_count == 2  # paper db blob + config blob
-        mock_manifest.assert_called_once()
+    def test_upload_validates_embeddings(self, tmp_path):
+        """Upload fails when no embeddings exist for conference+year."""
+        _populate_test_db(tmp_path / "test.db")
 
-    def test_upload_embedding_db_only(self):
-        """Upload with paper_db=False, embedding_db=True."""
-        client = RegistryClient("ghcr.io/owner/repo", token="token")
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
 
-        mock_collection = MagicMock()
-        mock_collection.get.return_value = {
+        mock_em = MagicMock()
+        mock_em.export_embeddings.return_value = {"ids": [], "documents": [], "metadatas": [], "embeddings": []}
+
+        with patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em):
+            with pytest.raises(RegistryError, match="No embeddings found"):
+                client.upload(conference="neurips", year=2024)
+
+    def test_upload_success(self, tmp_path):
+        """Upload succeeds with valid data."""
+        _populate_test_db(tmp_path / "test.db")
+
+        with patch("oras.client.OrasClient") as MockOras:
+            mock_oras = MockOras.return_value
+            mock_oras.push.return_value = Mock(status_code=201)
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
+
+        mock_em = MagicMock()
+        mock_em.export_embeddings.return_value = {
             "ids": ["id1"],
             "documents": ["doc1"],
-            "metadatas": [{"key": "val"}],
+            "metadatas": [{"conference": "neurips", "year": "2024"}],
+            "embeddings": [[0.1, 0.2]],
+        }
+
+        with patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em):
+            summary = client.upload(conference="neurips", year=2024)
+
+        assert summary["paper_count"] == 1
+        assert summary["embedding_count"] == 1
+        assert summary["tag"] == "neurips-2024"
+        mock_oras.push.assert_called_once()
+
+    def test_upload_custom_tag(self, tmp_path):
+        """Upload uses custom tag when provided."""
+        _populate_test_db(tmp_path / "test.db")
+
+        with patch("oras.client.OrasClient") as MockOras:
+            mock_oras = MockOras.return_value
+            mock_oras.push.return_value = Mock(status_code=201)
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
+
+        mock_em = MagicMock()
+        mock_em.export_embeddings.return_value = {
+            "ids": ["id1"],
+            "documents": ["doc1"],
+            "metadatas": [{}],
             "embeddings": [[0.1]],
         }
-        mock_em = MagicMock()
-        mock_em.collection = mock_collection
 
-        with patch("abstracts_explorer.registry._create_embeddings_manager", return_value=mock_em):
-            with patch.object(client, "push_blob", return_value="sha256:abc"):
-                with patch.object(client, "push_manifest", return_value="sha256:manifest"):
-                    summary = client.upload(
-                        tag="test",
-                        paper_db=False,
-                        embedding_db=True,
-                    )
+        with patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em):
+            summary = client.upload(conference="neurips", year=2024, tag="custom-tag")
 
-        assert len(summary["layers"]) == 1
-        assert summary["layers"][0]["type"] == "embedding-db"
-        assert summary["layers"][0]["embeddings"] == 1
-
-    def test_upload_with_conference_filter(self, tmp_path):
-        """Upload filters papers by conference."""
-        _populate_test_db(tmp_path / "test.db")
-
-        client = RegistryClient("ghcr.io/owner/repo", token="token")
-
-        with patch.object(client, "push_blob", return_value="sha256:abc"):
-            with patch.object(client, "push_manifest", return_value="sha256:manifest"):
-                summary = client.upload(
-                    tag="neurips-2024",
-                    paper_db=True,
-                    embedding_db=False,
-                    conferences=["neurips"],
-                )
-
-        assert summary["layers"][0]["papers"] == 2  # Only neurips papers
-
-    def test_download_paper_db(self, tmp_path):
-        """Download imports paper database."""
-        # Create a source database and package it
-        source_url = _populate_test_db(tmp_path / "source.db")
-        export_path = tmp_path / "export.db"
-        export_papers_to_sqlite(source_url, export_path)
-        paper_archive = package_file_as_tar_gz(export_path)
-
-        # Set up target database
-        target_path = tmp_path / "target.db"
-        set_test_db(target_path)
-
-        # Build config data
-        config_json = json.dumps({"version": "1.0.0"}).encode("utf-8")
-
-        # Build manifest
-        manifest = {
-            "schemaVersion": 2,
-            "mediaType": MANIFEST_MEDIA_TYPE,
-            "config": _make_descriptor(config_json, CONFIG_MEDIA_TYPE),
-            "layers": [
-                _make_descriptor(
-                    paper_archive,
-                    PAPER_DB_MEDIA_TYPE,
-                    annotations={"org.opencontainers.image.title": "papers.db.tar.gz"},
-                ),
-            ],
-        }
-
-        client = RegistryClient("ghcr.io/owner/repo", token="token")
-
-        # Mock the network calls
-        def mock_pull_blob(digest):
-            if digest == manifest["config"]["digest"]:
-                return config_json
-            return paper_archive
-
-        with patch.object(client, "pull_manifest", return_value=manifest):
-            with patch.object(client, "pull_blob", side_effect=mock_pull_blob):
-                summary = client.download(
-                    tag="latest",
-                    paper_db=True,
-                    embedding_db=False,
-                    merge=False,
-                )
-
-        assert len(summary["layers"]) == 1
-        assert summary["layers"][0]["type"] == "paper-db"
-        assert summary["layers"][0]["papers"] == 3
-
-    def test_download_merge_mode(self, tmp_path):
-        """Download with merge=True preserves existing data."""
-        # Create source database
-        source_url = _populate_test_db(tmp_path / "source.db")
-        export_path = tmp_path / "export_neurips.db"
-        export_papers_to_sqlite(source_url, export_path, conferences=["neurips"])
-        paper_archive = package_file_as_tar_gz(export_path)
-
-        # Set up target database (with iclr papers)
-        target_path = tmp_path / "target.db"
-        iclr_export = tmp_path / "iclr_export.db"
-        export_papers_to_sqlite(source_url, iclr_export, conferences=["iclr"])
-        target_url = f"sqlite:///{target_path}"
-        import_papers_from_sqlite(iclr_export, target_url, merge=False)
-        set_test_db(target_path)
-
-        config_json = json.dumps({"version": "1.0.0"}).encode("utf-8")
-        manifest = {
-            "schemaVersion": 2,
-            "mediaType": MANIFEST_MEDIA_TYPE,
-            "config": _make_descriptor(config_json, CONFIG_MEDIA_TYPE),
-            "layers": [
-                _make_descriptor(paper_archive, PAPER_DB_MEDIA_TYPE),
-            ],
-        }
-
-        client = RegistryClient("ghcr.io/owner/repo", token="token")
-
-        def mock_pull_blob(digest):
-            if digest == manifest["config"]["digest"]:
-                return config_json
-            return paper_archive
-
-        with patch.object(client, "pull_manifest", return_value=manifest):
-            with patch.object(client, "pull_blob", side_effect=mock_pull_blob):
-                summary = client.download(
-                    tag="latest",
-                    paper_db=True,
-                    embedding_db=False,
-                    merge=True,
-                )
-
-        # Should have imported 2 new neurips papers
-        assert summary["layers"][0]["papers"] == 2
+        assert summary["tag"] == "custom-tag"
+        call_kwargs = mock_oras.push.call_args[1]
+        assert "custom-tag" in call_kwargs["target"]
 
     def test_upload_progress_callback(self, tmp_path):
-        """Progress callback is called during upload."""
+        """Progress callback is invoked during upload."""
         _populate_test_db(tmp_path / "test.db")
 
-        client = RegistryClient("ghcr.io/owner/repo", token="token")
-        messages = []
+        with patch("oras.client.OrasClient") as MockOras:
+            mock_oras = MockOras.return_value
+            mock_oras.push.return_value = Mock(status_code=201)
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
 
-        with patch.object(client, "push_blob", return_value="sha256:abc"):
-            with patch.object(client, "push_manifest", return_value="sha256:manifest"):
-                client.upload(
-                    tag="test",
-                    paper_db=True,
-                    embedding_db=False,
-                    progress_callback=messages.append,
-                )
+        mock_em = MagicMock()
+        mock_em.export_embeddings.return_value = {
+            "ids": ["id1"],
+            "documents": ["d"],
+            "metadatas": [{}],
+            "embeddings": [[0.1]],
+        }
+
+        messages = []
+        with patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em):
+            client.upload(
+                conference="neurips",
+                year=2024,
+                progress_callback=messages.append,
+            )
 
         assert len(messages) > 0
         assert any("Exporting" in m for m in messages)
-        assert any("complete" in m.lower() for m in messages)
 
+    def test_download_success(self, tmp_path):
+        """Download imports paper database and embeddings."""
+        set_test_db(tmp_path / "target.db")
 
-# ---------------------------------------------------------------------------
-# Tests: get_artifact_info
-# ---------------------------------------------------------------------------
+        # Create a fake paper db to be pulled
+        source_db_path = tmp_path / "source.db"
+        source_db = _populate_test_db(source_db_path)
+        export_path = tmp_path / "papers.db"
+        source_db.export_papers_to_sqlite(export_path, "neurips", 2024)
+        source_db.close()
 
-
-class TestGetArtifactInfo:
-    """Tests for artifact metadata retrieval."""
-
-    def test_get_artifact_info(self):
-        """Artifact info includes metadata and layer details."""
-        client = RegistryClient("ghcr.io/owner/repo", token="token")
-
-        config_data = {"version": "1.0.0", "conferences": ["neurips"]}
-        config_json = json.dumps(config_data).encode("utf-8")
-
-        manifest = {
-            "schemaVersion": 2,
-            "mediaType": MANIFEST_MEDIA_TYPE,
-            "config": _make_descriptor(config_json, CONFIG_MEDIA_TYPE),
-            "layers": [
-                {
-                    "mediaType": PAPER_DB_MEDIA_TYPE,
-                    "size": 1024,
-                    "annotations": {"com.abstracts-explorer.paper-count": "100"},
-                },
-            ],
-            "annotations": {"com.abstracts-explorer.version": "1.0.0"},
+        # Create fake embeddings file
+        embeddings_data = {
+            "ids": ["id1"],
+            "documents": ["doc1"],
+            "metadatas": [{"conference": "neurips", "year": "2024"}],
+            "embeddings": [[0.1, 0.2]],
         }
+        embeddings_path = tmp_path / "embeddings.json"
+        embeddings_path.write_text(json.dumps(embeddings_data))
 
-        with patch.object(client, "pull_manifest", return_value=manifest):
-            with patch.object(client, "pull_blob", return_value=config_json):
-                info = client.get_artifact_info("latest")
+        with patch("oras.client.OrasClient") as MockOras:
+            mock_oras = MockOras.return_value
+            mock_oras.pull.return_value = [str(export_path), str(embeddings_path)]
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
 
-        assert info["tag"] == "latest"
-        assert info["metadata"]["version"] == "1.0.0"
-        assert info["metadata"]["conferences"] == ["neurips"]
-        assert len(info["layers"]) == 1
-        assert info["layers"][0]["size"] == 1024
+        mock_em = MagicMock()
+        mock_em.import_embeddings.return_value = 1
+
+        # Reset target DB
+        set_test_db(tmp_path / "target.db")
+
+        with patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em):
+            summary = client.download(conference="neurips", year=2024)
+
+        assert summary["paper_count"] == 1
+        assert summary["embedding_count"] == 1
+        mock_em.import_embeddings.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -881,11 +522,9 @@ class TestCLICommands:
         args = argparse.Namespace(
             repository=None,
             token=None,
-            tag="latest",
-            conference=None,
-            paper_db=False,
-            embedding_db=False,
-            all=True,
+            conference="neurips",
+            year=2024,
+            tag=None,
         )
 
         result = registry_upload_command(args)
@@ -904,11 +543,9 @@ class TestCLICommands:
         args = argparse.Namespace(
             repository="ghcr.io/owner/repo",
             token=None,
-            tag="latest",
-            conference=None,
-            paper_db=False,
-            embedding_db=False,
-            all=True,
+            conference="neurips",
+            year=2024,
+            tag=None,
         )
 
         result = registry_upload_command(args)
@@ -927,11 +564,9 @@ class TestCLICommands:
         args = argparse.Namespace(
             repository=None,
             token=None,
-            tag="latest",
-            paper_db=False,
-            embedding_db=False,
-            all=True,
-            merge=False,
+            conference="neurips",
+            year=2024,
+            tag=None,
             yes=False,
         )
 
@@ -961,25 +596,22 @@ class TestCLICommands:
 
     def test_registry_upload_success(self, tmp_path, capsys, monkeypatch):
         """Upload succeeds with valid arguments."""
-        _populate_test_db(tmp_path / "test.db")
-
         from abstracts_explorer.cli import registry_upload_command
 
         args = argparse.Namespace(
             repository="ghcr.io/owner/repo",
             token="test-token",
-            tag="test",
-            conference=None,
-            paper_db=True,
-            embedding_db=False,
-            all=False,
+            conference="neurips",
+            year=2024,
+            tag=None,
         )
 
         with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
             mock_instance = MockClient.return_value
             mock_instance.upload.return_value = {
-                "tag": "test",
-                "layers": [{"type": "paper-db", "papers": 3}],
+                "tag": "neurips-2024",
+                "paper_count": 3,
+                "embedding_count": 3,
             }
 
             result = registry_upload_command(args)
@@ -1000,14 +632,14 @@ class TestCLICommands:
 
         with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
             mock_instance = MockClient.return_value
-            mock_instance.list_tags.return_value = ["latest", "neurips-2024"]
+            mock_instance.list_tags.return_value = ["neurips-2024", "iclr-2025"]
 
             result = registry_list_command(args)
 
         assert result == 0
         captured = capsys.readouterr()
-        assert "latest" in captured.out
         assert "neurips-2024" in captured.out
+        assert "iclr-2025" in captured.out
 
     def test_registry_list_specific_tag(self, capsys, monkeypatch):
         """List command with --tag shows artifact details."""
@@ -1016,27 +648,21 @@ class TestCLICommands:
         args = argparse.Namespace(
             repository="ghcr.io/owner/repo",
             token="test-token",
-            tag="latest",
+            tag="neurips-2024",
         )
 
         with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
             mock_instance = MockClient.return_value
             mock_instance.get_artifact_info.return_value = {
-                "tag": "latest",
-                "metadata": {
-                    "version": "1.0.0",
-                    "created_at": "2024-01-01T00:00:00Z",
-                    "conferences": ["neurips"],
-                    "embedding_model": "test-model",
+                "tag": "neurips-2024",
+                "annotations": {
+                    "com.abstracts-explorer.version": "1.0.0",
+                    "com.abstracts-explorer.conference": "neurips",
+                    "com.abstracts-explorer.year": "2024",
+                    "com.abstracts-explorer.paper-count": "100",
+                    "com.abstracts-explorer.embedding-count": "100",
                 },
-                "layers": [
-                    {
-                        "media_type": PAPER_DB_MEDIA_TYPE,
-                        "size": 1024 * 1024,
-                        "annotations": {"com.abstracts-explorer.paper-count": "100"},
-                    },
-                ],
-                "annotations": {},
+                "layers": [],
             }
 
             result = registry_list_command(args)
@@ -1044,6 +670,7 @@ class TestCLICommands:
         assert result == 0
         captured = capsys.readouterr()
         assert "1.0.0" in captured.out
+        assert "neurips" in captured.out
 
     def test_registry_list_error(self, capsys, monkeypatch):
         """List command handles registry errors gracefully."""
@@ -1069,7 +696,22 @@ class TestCLICommands:
         """Main dispatches to registry upload command."""
         from abstracts_explorer.cli import main
 
-        with patch("sys.argv", ["abstracts-explorer", "registry", "upload", "-r", "ghcr.io/o/r", "-t", "tok"]):
+        with patch(
+            "sys.argv",
+            [
+                "abstracts-explorer",
+                "registry",
+                "upload",
+                "-r",
+                "ghcr.io/o/r",
+                "--token",
+                "tok",
+                "-c",
+                "n",
+                "-y",
+                "24",
+            ],
+        ):
             with patch("abstracts_explorer.cli.registry_upload_command", return_value=0) as mock_cmd:
                 result = main()
 
@@ -1080,7 +722,22 @@ class TestCLICommands:
         """Main dispatches to registry download command."""
         from abstracts_explorer.cli import main
 
-        with patch("sys.argv", ["abstracts-explorer", "registry", "download", "-r", "ghcr.io/o/r", "-t", "tok"]):
+        with patch(
+            "sys.argv",
+            [
+                "abstracts-explorer",
+                "registry",
+                "download",
+                "-r",
+                "ghcr.io/o/r",
+                "--token",
+                "tok",
+                "-c",
+                "n",
+                "-y",
+                "24",
+            ],
+        ):
             with patch("abstracts_explorer.cli.registry_download_command", return_value=0) as mock_cmd:
                 result = main()
 

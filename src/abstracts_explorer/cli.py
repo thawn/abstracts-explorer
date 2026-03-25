@@ -1496,7 +1496,7 @@ def eval_clear_command(args: argparse.Namespace) -> int:
 
 def registry_upload_command(args: argparse.Namespace) -> int:
     """
-    Upload data artifacts to an OCI-compatible container registry.
+    Upload data for a conference and year to an OCI-compatible container registry.
 
     Parameters
     ----------
@@ -1504,11 +1504,9 @@ def registry_upload_command(args: argparse.Namespace) -> int:
         Command-line arguments containing:
         - repository: OCI repository path
         - token: Authentication token
-        - tag: Tag for the upload
-        - conference: List of conferences to include
-        - paper_db: Upload paper database
-        - embedding_db: Upload embedding database
-        - all: Upload all databases
+        - conference: Conference name
+        - year: Conference year
+        - tag: Optional custom tag
 
     Returns
     -------
@@ -1535,39 +1533,28 @@ def registry_upload_command(args: argparse.Namespace) -> int:
         )
         return 1
 
-    # Determine what to upload
-    upload_paper_db = args.paper_db or args.all or (not args.paper_db and not args.embedding_db)
-    upload_embedding_db = args.embedding_db or args.all or (not args.paper_db and not args.embedding_db)
-
-    conferences = args.conference if args.conference else None
-
     print("Abstracts Explorer - Registry Upload")
     print("=" * 70)
     print(f"Repository:     {repository}")
-    print(f"Tag:            {args.tag}")
-    print(f"Paper DB:       {'Yes' if upload_paper_db else 'No'}")
-    print(f"Embedding DB:   {'Yes' if upload_embedding_db else 'No'}")
-    if conferences:
-        print(f"Conferences:    {', '.join(conferences)}")
+    print(f"Conference:     {args.conference}")
+    print(f"Year:           {args.year}")
+    if args.tag:
+        print(f"Tag:            {args.tag}")
     print("=" * 70)
 
     try:
         client = RegistryClient(repository=repository, token=token)
         summary = client.upload(
+            conference=args.conference,
+            year=args.year,
             tag=args.tag,
-            paper_db=upload_paper_db,
-            embedding_db=upload_embedding_db,
-            conferences=conferences,
             progress_callback=lambda msg: print(f"  {msg}"),
         )
 
         print("\n✅ Upload complete!")
-        for layer in summary.get("layers", []):
-            layer_type = layer.get("type", "unknown")
-            if layer_type == "paper-db":
-                print(f"  📄 Paper database: {layer.get('papers', 0)} papers")
-            elif layer_type == "embedding-db":
-                print(f"  🧮 Embedding database: {layer.get('embeddings', 0)} embeddings")
+        print(f"  📄 Papers:     {summary.get('paper_count', 0)}")
+        print(f"  🧮 Embeddings: {summary.get('embedding_count', 0)}")
+        print(f"  🏷️  Tag:        {summary.get('tag', '')}")
 
         return 0
 
@@ -1582,7 +1569,7 @@ def registry_upload_command(args: argparse.Namespace) -> int:
 
 def registry_download_command(args: argparse.Namespace) -> int:
     """
-    Download data artifacts from an OCI-compatible container registry.
+    Download data for a conference and year from an OCI-compatible container registry.
 
     Parameters
     ----------
@@ -1590,11 +1577,9 @@ def registry_download_command(args: argparse.Namespace) -> int:
         Command-line arguments containing:
         - repository: OCI repository path
         - token: Authentication token
-        - tag: Tag to download
-        - paper_db: Download paper database
-        - embedding_db: Download embedding database
-        - all: Download all databases
-        - merge: Merge with existing data
+        - conference: Conference name
+        - year: Conference year
+        - tag: Optional custom tag
         - yes: Skip confirmation prompt
 
     Returns
@@ -1622,21 +1607,17 @@ def registry_download_command(args: argparse.Namespace) -> int:
         )
         return 1
 
-    # Determine what to download
-    dl_paper_db = args.paper_db or args.all or (not args.paper_db and not args.embedding_db)
-    dl_embedding_db = args.embedding_db or args.all or (not args.paper_db and not args.embedding_db)
-
     print("Abstracts Explorer - Registry Download")
     print("=" * 70)
     print(f"Repository:     {repository}")
-    print(f"Tag:            {args.tag}")
-    print(f"Paper DB:       {'Yes' if dl_paper_db else 'No'}")
-    print(f"Embedding DB:   {'Yes' if dl_embedding_db else 'No'}")
-    print(f"Merge:          {'Yes' if args.merge else 'No (replace)'}")
+    print(f"Conference:     {args.conference}")
+    print(f"Year:           {args.year}")
+    if args.tag:
+        print(f"Tag:            {args.tag}")
     print("=" * 70)
 
-    if not args.merge and not args.yes:
-        print("\n⚠️  Warning: This will replace your existing data!")
+    if not args.yes:
+        print(f"\n⚠️  Warning: This will replace existing data for {args.conference}/{args.year}!")
         try:
             confirm = input("Continue? [y/N]: ").strip().lower()
         except (EOFError, KeyboardInterrupt):
@@ -1649,26 +1630,19 @@ def registry_download_command(args: argparse.Namespace) -> int:
     try:
         client = RegistryClient(repository=repository, token=token)
         summary = client.download(
+            conference=args.conference,
+            year=args.year,
             tag=args.tag,
-            paper_db=dl_paper_db,
-            embedding_db=dl_embedding_db,
-            merge=args.merge,
             progress_callback=lambda msg: print(f"  {msg}"),
         )
 
         print("\n✅ Download complete!")
-        for layer in summary.get("layers", []):
-            layer_type = layer.get("type", "unknown")
-            if layer_type == "paper-db":
-                print(f"  📄 Paper database: {layer.get('papers', 0)} papers imported")
-            elif layer_type == "embedding-db":
-                print(f"  🧮 Embedding database: {layer.get('embeddings', 0)} embeddings imported")
+        print(f"  📄 Papers:     {summary.get('paper_count', 0)}")
+        print(f"  🧮 Embeddings: {summary.get('embedding_count', 0)}")
 
         metadata = summary.get("metadata", {})
         if metadata:
             print(f"\n  ℹ️  Artifact version: {metadata.get('version', 'unknown')}")
-            if metadata.get("conferences"):
-                print(f"  ℹ️  Conferences: {', '.join(metadata['conferences'])}")
 
         return 0
 
@@ -1720,26 +1694,24 @@ def registry_list_command(args: argparse.Namespace) -> int:
             print(f"\nArtifact: {repository}:{args.tag}")
             print("=" * 70)
 
-            metadata = info.get("metadata", {})
-            if metadata:
-                print(f"  Version:    {metadata.get('version', 'unknown')}")
-                print(f"  Created:    {metadata.get('created_at', 'unknown')}")
-                if metadata.get("conferences"):
-                    print(f"  Conferences: {', '.join(metadata['conferences'])}")
-                if metadata.get("embedding_model"):
-                    print(f"  Embedding:  {metadata['embedding_model']}")
+            annotations = info.get("annotations", {})
+            if annotations:
+                version = annotations.get("com.abstracts-explorer.version", "unknown")
+                conference = annotations.get("com.abstracts-explorer.conference", "unknown")
+                year = annotations.get("com.abstracts-explorer.year", "unknown")
+                papers = annotations.get("com.abstracts-explorer.paper-count", "?")
+                embeddings = annotations.get("com.abstracts-explorer.embedding-count", "?")
+                print(f"  Version:    {version}")
+                print(f"  Conference: {conference}")
+                print(f"  Year:       {year}")
+                print(f"  📄 Papers:     {papers}")
+                print(f"  🧮 Embeddings: {embeddings}")
 
             for layer in info.get("layers", []):
-                media_type = layer.get("media_type", "")
                 size = layer.get("size", 0)
-                annotations = layer.get("annotations", {})
-
-                if "paper-db" in media_type:
-                    count = annotations.get("com.abstracts-explorer.paper-count", "?")
-                    print(f"  📄 Paper DB: {count} papers ({size / 1024 / 1024:.1f} MB)")
-                elif "embedding-db" in media_type:
-                    count = annotations.get("com.abstracts-explorer.embedding-count", "?")
-                    print(f"  🧮 Embeddings: {count} embeddings ({size / 1024 / 1024:.1f} MB)")
+                title = layer.get("annotations", {}).get("org.opencontainers.image.title", "")
+                if title:
+                    print(f"  📦 {title} ({size / 1024 / 1024:.1f} MB)")
         else:
             # List all tags
             tags = client.list_tags()
@@ -2514,26 +2486,29 @@ Examples:
 Upload and download paper databases, embeddings, and clustering cache
 to/from OCI-compatible container registries like GitHub Container Registry.
 
+Data is always uploaded/downloaded as a complete unit per conference and year
+to prevent inconsistent data between instances.
+
 Sub-commands:
-  upload     Upload databases to registry
-  download   Download databases from registry
+  upload     Upload data for a conference and year to registry
+  download   Download data for a conference and year from registry
   list       List available tags in registry
 
 Examples:
-  # Upload all data to GitHub Container Registry
-  abstracts-explorer registry upload --repository ghcr.io/owner/abstracts-data --token ghp_xxxx
+  # Upload NeurIPS 2024 data to GitHub Container Registry
+  abstracts-explorer registry upload --conference neurips --year 2024 \\
+    --repository ghcr.io/owner/abstracts-data
 
-  # Upload only paper database for a specific conference
-  abstracts-explorer registry upload --repository ghcr.io/owner/abstracts-data --paper-db --conference neurips
-
-  # Download and merge with existing data
-  abstracts-explorer registry download --repository ghcr.io/owner/abstracts-data --merge
+  # Download NeurIPS 2024 data from registry
+  abstracts-explorer registry download --conference neurips --year 2024 \\
+    --repository ghcr.io/owner/abstracts-data
 
   # List available tags
   abstracts-explorer registry list --repository ghcr.io/owner/abstracts-data
 
   # Inspect a specific tag
-  abstracts-explorer registry list --repository ghcr.io/owner/abstracts-data --tag neurips-2024
+  abstracts-explorer registry list --repository ghcr.io/owner/abstracts-data \\
+    --tag neurips-2024
         """,
     )
     registry_subparsers = registry_parser.add_subparsers(dest="registry_command", help="Registry sub-commands")
@@ -2550,7 +2525,6 @@ Examples:
         )
         sub_parser.add_argument(
             "--token",
-            "-t",
             type=str,
             default=None,
             help="Authentication token (e.g., GitHub PAT). Can also be set via GITHUB_TOKEN env var.",
@@ -2559,76 +2533,62 @@ Examples:
     # registry upload
     registry_upload_parser = registry_subparsers.add_parser(
         "upload",
-        help="Upload databases to registry",
+        help="Upload data for a conference and year to registry",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     _add_registry_args(registry_upload_parser)
     registry_upload_parser.add_argument(
-        "--tag",
-        type=str,
-        default="latest",
-        help="Tag for the upload (default: latest)",
-    )
-    registry_upload_parser.add_argument(
         "--conference",
         "-c",
-        action="append",
-        help="Specific conference(s) to include (can be repeated)",
+        type=str,
+        required=True,
+        help="Conference name (e.g., neurips, iclr)",
     )
     registry_upload_parser.add_argument(
-        "--paper-db",
-        action="store_true",
-        help="Upload paper database only",
+        "--year",
+        "-y",
+        type=int,
+        required=True,
+        help="Conference year (e.g., 2024)",
     )
     registry_upload_parser.add_argument(
-        "--embedding-db",
-        action="store_true",
-        help="Upload embedding database only",
-    )
-    registry_upload_parser.add_argument(
-        "--all",
-        action="store_true",
-        help="Upload all databases (default behavior when no specific database is selected)",
+        "--tag",
+        type=str,
+        default=None,
+        help="Custom tag (default: derived from conference and year, e.g. neurips-2024)",
     )
 
     # registry download
     registry_download_parser = registry_subparsers.add_parser(
         "download",
-        help="Download databases from registry",
+        help="Download data for a conference and year from registry",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     _add_registry_args(registry_download_parser)
     registry_download_parser.add_argument(
+        "--conference",
+        "-c",
+        type=str,
+        required=True,
+        help="Conference name (e.g., neurips, iclr)",
+    )
+    registry_download_parser.add_argument(
+        "--year",
+        "-y",
+        type=int,
+        required=True,
+        help="Conference year (e.g., 2024)",
+    )
+    registry_download_parser.add_argument(
         "--tag",
         type=str,
-        default="latest",
-        help="Tag to download (default: latest)",
-    )
-    registry_download_parser.add_argument(
-        "--paper-db",
-        action="store_true",
-        help="Download paper database only",
-    )
-    registry_download_parser.add_argument(
-        "--embedding-db",
-        action="store_true",
-        help="Download embedding database only",
-    )
-    registry_download_parser.add_argument(
-        "--all",
-        action="store_true",
-        help="Download all databases (default behavior when no specific database is selected)",
-    )
-    registry_download_parser.add_argument(
-        "--merge",
-        action="store_true",
-        help="Merge with existing data instead of replacing",
+        default=None,
+        help="Custom tag (default: derived from conference and year, e.g. neurips-2024)",
     )
     registry_download_parser.add_argument(
         "--yes",
-        "-y",
         action="store_true",
-        help="Skip confirmation prompt when replacing data",
+        help="Skip confirmation prompt",
     )
 
     # registry list

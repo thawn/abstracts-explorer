@@ -1013,3 +1013,133 @@ class EmbeddingsManager:
         except Exception as e:
             logger.error(f"Error finding papers within distance: {e}", exc_info=True)
             raise EmbeddingsError(f"Failed to find papers within distance: {str(e)}") from e
+
+    # ------------------------------------------------------------------
+    # Registry export / import helpers
+    # ------------------------------------------------------------------
+
+    def export_embeddings(
+        self,
+        conference: str,
+        year: int,
+    ) -> Dict[str, Any]:
+        """
+        Export embeddings for a given conference and year to a JSON-serializable dict.
+
+        Parameters
+        ----------
+        conference : str
+            Conference name to export.
+        year : int
+            Year to export.
+
+        Returns
+        -------
+        dict
+            Dictionary containing ``ids``, ``documents``, ``metadatas``, and
+            ``embeddings`` lists.
+
+        Raises
+        ------
+        EmbeddingsError
+            If the export fails.
+        """
+        try:
+            results = self.collection.get(
+                include=["documents", "embeddings", "metadatas"],
+                where={
+                    "$and": [
+                        {"conference": conference},
+                        {"year": str(year)},
+                    ]
+                },
+            )
+            return {
+                "ids": results.get("ids", []),
+                "documents": results.get("documents", []),
+                "metadatas": results.get("metadatas", []),
+                "embeddings": results.get("embeddings", []),
+            }
+        except Exception as e:
+            raise EmbeddingsError(f"Failed to export embeddings: {str(e)}") from e
+
+    def import_embeddings(
+        self,
+        data: Dict[str, Any],
+        conference: str,
+        year: int,
+        batch_size: int = 100,
+    ) -> int:
+        """
+        Import embeddings for a given conference and year from a dictionary.
+
+        Existing embeddings for the same conference and year are **deleted**
+        before importing (replace semantics).
+
+        Parameters
+        ----------
+        data : dict
+            Dictionary with ``ids``, ``documents``, ``metadatas``, and
+            ``embeddings`` lists (as returned by :meth:`export_embeddings`).
+        conference : str
+            Conference name being imported.
+        year : int
+            Year being imported.
+        batch_size : int
+            Number of embeddings to add per batch.
+
+        Returns
+        -------
+        int
+            Number of embeddings imported.
+
+        Raises
+        ------
+        EmbeddingsError
+            If the import fails.
+        """
+        try:
+            # Remove existing embeddings for this conference+year
+            try:
+                existing = self.collection.get(
+                    where={
+                        "$and": [
+                            {"conference": conference},
+                            {"year": str(year)},
+                        ]
+                    },
+                )
+                if existing["ids"]:
+                    self.collection.delete(ids=existing["ids"])
+                    logger.info(f"Deleted {len(existing['ids'])} existing embeddings " f"for {conference}/{year}")
+            except Exception:
+                logger.debug("No existing embeddings to delete")
+
+            ids = data.get("ids", [])
+            documents = data.get("documents", [])
+            metadatas = data.get("metadatas", [])
+            embeddings = data.get("embeddings", [])
+
+            if not ids:
+                return 0
+
+            imported = 0
+            for i in range(0, len(ids), batch_size):
+                batch_ids = ids[i : i + batch_size]
+                add_kwargs: Dict[str, Any] = {"ids": batch_ids}
+                if documents:
+                    add_kwargs["documents"] = documents[i : i + batch_size]
+                if metadatas:
+                    add_kwargs["metadatas"] = metadatas[i : i + batch_size]
+                if embeddings:
+                    add_kwargs["embeddings"] = embeddings[i : i + batch_size]
+
+                self.collection.add(**add_kwargs)
+                imported += len(batch_ids)
+
+            return imported
+
+        except EmbeddingsError:
+            raise
+        except Exception as e:
+            raise EmbeddingsError(f"Failed to import embeddings: {str(e)}") from e

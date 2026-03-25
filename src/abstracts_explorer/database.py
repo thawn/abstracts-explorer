@@ -1895,3 +1895,170 @@ class DatabaseManager:
             }
         except Exception as e:
             raise DatabaseError(f"Failed to compute eval run summary: {str(e)}") from e
+
+    # ------------------------------------------------------------------
+    # Registry export / import helpers
+    # ------------------------------------------------------------------
+
+    def export_papers_to_sqlite(
+        self,
+        output_path: "Path",
+        conference: str,
+        year: int,
+    ) -> int:
+        """
+        Export papers for a given conference and year to a standalone SQLite file.
+
+        The exported file also includes any matching clustering cache,
+        hierarchical label cache, and embeddings metadata rows.
+
+        Parameters
+        ----------
+        output_path : Path
+            Destination path for the SQLite file.
+        conference : str
+            Conference name to export.
+        year : int
+            Year to export.
+
+        Returns
+        -------
+        int
+            Number of papers exported.
+
+        Raises
+        ------
+        DatabaseError
+            If the export fails or no papers are found.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            from sqlalchemy import create_engine
+            from sqlalchemy.orm import Session as SASession
+
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            export_engine = create_engine(f"sqlite:///{output_path}")
+            Base.metadata.create_all(export_engine)
+
+            paper_count = 0
+            with SASession(export_engine) as export_session:
+                # Export papers filtered by conference and year
+                query = select(Paper).where(and_(Paper.conference == conference, Paper.year == year))
+                for paper in self._session.execute(query).scalars():
+                    paper_dict = {c.name: getattr(paper, c.name) for c in Paper.__table__.columns}
+                    export_session.add(Paper(**paper_dict))
+                    paper_count += 1
+
+                # Export clustering cache (all entries – they are small)
+                for entry in self._session.execute(select(ClusteringCache)).scalars():
+                    entry_dict = {c.name: getattr(entry, c.name) for c in ClusteringCache.__table__.columns}
+                    export_session.add(ClusteringCache(**entry_dict))
+
+                # Export hierarchical label cache
+                for entry in self._session.execute(select(HierarchicalLabelCache)).scalars():
+                    entry_dict = {c.name: getattr(entry, c.name) for c in HierarchicalLabelCache.__table__.columns}
+                    export_session.add(HierarchicalLabelCache(**entry_dict))
+
+                # Export embeddings metadata
+                for entry in self._session.execute(select(EmbeddingsMetadata)).scalars():
+                    entry_dict = {c.name: getattr(entry, c.name) for c in EmbeddingsMetadata.__table__.columns}
+                    export_session.add(EmbeddingsMetadata(**entry_dict))
+
+                export_session.commit()
+
+            export_engine.dispose()
+            return paper_count
+
+        except DatabaseError:
+            raise
+        except Exception as e:
+            raise DatabaseError(f"Failed to export papers: {str(e)}") from e
+
+    def import_papers_from_sqlite(
+        self,
+        sqlite_path: "Path",
+        conference: str,
+        year: int,
+    ) -> int:
+        """
+        Import papers for a given conference and year from a SQLite file.
+
+        Existing papers, clustering cache, hierarchical labels, and embeddings
+        metadata for the given conference/year are **replaced** (not merged).
+
+        Parameters
+        ----------
+        sqlite_path : Path
+            Path to the source SQLite file.
+        conference : str
+            Conference name being imported.
+        year : int
+            Year being imported.
+
+        Returns
+        -------
+        int
+            Number of papers imported.
+
+        Raises
+        ------
+        DatabaseError
+            If the import fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            from sqlalchemy import create_engine
+            from sqlalchemy.orm import Session as SASession
+
+            source_engine = create_engine(
+                f"sqlite:///{sqlite_path}",
+                connect_args={"check_same_thread": False},
+            )
+
+            paper_count = 0
+            with SASession(source_engine) as source_session:
+                # Delete existing papers for this conference+year
+                self._session.execute(delete(Paper).where(and_(Paper.conference == conference, Paper.year == year)))
+
+                # Delete existing clustering cache & hierarchical labels
+                # (full replacement – they depend on the overall corpus)
+                self._session.execute(delete(ClusteringCache))
+                self._session.execute(delete(HierarchicalLabelCache))
+                self._session.execute(delete(EmbeddingsMetadata))
+                self._session.commit()
+
+                # Import papers
+                for paper in source_session.execute(select(Paper)).scalars():
+                    paper_dict = {c.name: getattr(paper, c.name) for c in Paper.__table__.columns}
+                    self._session.add(Paper(**paper_dict))
+                    paper_count += 1
+
+                # Import clustering cache
+                for entry in source_session.execute(select(ClusteringCache)).scalars():
+                    entry_dict = {c.name: getattr(entry, c.name) for c in ClusteringCache.__table__.columns}
+                    self._session.add(ClusteringCache(**entry_dict))
+
+                # Import hierarchical labels
+                for entry in source_session.execute(select(HierarchicalLabelCache)).scalars():
+                    entry_dict = {c.name: getattr(entry, c.name) for c in HierarchicalLabelCache.__table__.columns}
+                    self._session.add(HierarchicalLabelCache(**entry_dict))
+
+                # Import embeddings metadata
+                for entry in source_session.execute(select(EmbeddingsMetadata)).scalars():
+                    entry_dict = {c.name: getattr(entry, c.name) for c in EmbeddingsMetadata.__table__.columns}
+                    self._session.add(EmbeddingsMetadata(**entry_dict))
+
+                self._session.commit()
+
+            source_engine.dispose()
+            return paper_count
+
+        except DatabaseError:
+            raise
+        except Exception as e:
+            self._session.rollback()
+            raise DatabaseError(f"Failed to import papers: {str(e)}") from e
