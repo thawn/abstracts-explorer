@@ -240,6 +240,12 @@ class Config:
         # Maximum number of API requests per minute (0 = no limit)
         self.requests_per_minute = self._get_env_int("REQUESTS_PER_MINUTE", default=60)
 
+        # Registry Settings
+        # GitHub Personal Access Token for registry operations
+        self.github_token = self._get_env("GITHUB_TOKEN", default="")
+        # OCI repository for data artifacts (e.g., 'ghcr.io/owner/abstracts-data')
+        self.registry_repository = self._get_env("REGISTRY_REPOSITORY", default="")
+
     def _get_env(self, key: str, default: str = "") -> str:
         """
         Get string environment variable.

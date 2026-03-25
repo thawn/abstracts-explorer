@@ -30,6 +30,8 @@ from .evaluation import (
     format_eval_result_detail,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def setup_logging(verbosity: int) -> None:
     """
@@ -1492,6 +1494,273 @@ def eval_clear_command(args: argparse.Namespace) -> int:
         return 1
 
 
+def registry_upload_command(args: argparse.Namespace) -> int:
+    """
+    Upload data artifacts to an OCI-compatible container registry.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments containing:
+        - repository: OCI repository path
+        - token: Authentication token
+        - tag: Tag for the upload
+        - conference: List of conferences to include
+        - paper_db: Upload paper database
+        - embedding_db: Upload embedding database
+        - all: Upload all databases
+
+    Returns
+    -------
+    int
+        Exit code (0 for success, non-zero for failure)
+    """
+    from .registry import RegistryClient, RegistryError
+
+    config = get_config()
+    repository = args.repository or config.registry_repository
+    token = args.token or config.github_token
+
+    if not repository:
+        print(
+            "❌ Repository not specified. Use --repository or set REGISTRY_REPOSITORY env var.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if not token:
+        print(
+            "❌ Authentication token not specified. Use --token or set GITHUB_TOKEN env var.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Determine what to upload
+    upload_paper_db = args.paper_db or args.all or (not args.paper_db and not args.embedding_db)
+    upload_embedding_db = args.embedding_db or args.all or (not args.paper_db and not args.embedding_db)
+
+    conferences = args.conference if args.conference else None
+
+    print("Abstracts Explorer - Registry Upload")
+    print("=" * 70)
+    print(f"Repository:     {repository}")
+    print(f"Tag:            {args.tag}")
+    print(f"Paper DB:       {'Yes' if upload_paper_db else 'No'}")
+    print(f"Embedding DB:   {'Yes' if upload_embedding_db else 'No'}")
+    if conferences:
+        print(f"Conferences:    {', '.join(conferences)}")
+    print("=" * 70)
+
+    try:
+        client = RegistryClient(repository=repository, token=token)
+        summary = client.upload(
+            tag=args.tag,
+            paper_db=upload_paper_db,
+            embedding_db=upload_embedding_db,
+            conferences=conferences,
+            progress_callback=lambda msg: print(f"  {msg}"),
+        )
+
+        print("\n✅ Upload complete!")
+        for layer in summary.get("layers", []):
+            layer_type = layer.get("type", "unknown")
+            if layer_type == "paper-db":
+                print(f"  📄 Paper database: {layer.get('papers', 0)} papers")
+            elif layer_type == "embedding-db":
+                print(f"  🧮 Embedding database: {layer.get('embeddings', 0)} embeddings")
+
+        return 0
+
+    except RegistryError as e:
+        print(f"\n❌ Registry error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"\n❌ Unexpected error: {e}", file=sys.stderr)
+        logger.exception("Upload failed")
+        return 1
+
+
+def registry_download_command(args: argparse.Namespace) -> int:
+    """
+    Download data artifacts from an OCI-compatible container registry.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments containing:
+        - repository: OCI repository path
+        - token: Authentication token
+        - tag: Tag to download
+        - paper_db: Download paper database
+        - embedding_db: Download embedding database
+        - all: Download all databases
+        - merge: Merge with existing data
+
+    Returns
+    -------
+    int
+        Exit code (0 for success, non-zero for failure)
+    """
+    from .registry import RegistryClient, RegistryError
+
+    config = get_config()
+    repository = args.repository or config.registry_repository
+    token = args.token or config.github_token
+
+    if not repository:
+        print(
+            "❌ Repository not specified. Use --repository or set REGISTRY_REPOSITORY env var.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if not token:
+        print(
+            "❌ Authentication token not specified. Use --token or set GITHUB_TOKEN env var.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Determine what to download
+    dl_paper_db = args.paper_db or args.all or (not args.paper_db and not args.embedding_db)
+    dl_embedding_db = args.embedding_db or args.all or (not args.paper_db and not args.embedding_db)
+
+    print("Abstracts Explorer - Registry Download")
+    print("=" * 70)
+    print(f"Repository:     {repository}")
+    print(f"Tag:            {args.tag}")
+    print(f"Paper DB:       {'Yes' if dl_paper_db else 'No'}")
+    print(f"Embedding DB:   {'Yes' if dl_embedding_db else 'No'}")
+    print(f"Merge:          {'Yes' if args.merge else 'No (replace)'}")
+    print("=" * 70)
+
+    if not args.merge:
+        print("\n⚠️  Warning: This will replace your existing data!")
+        try:
+            confirm = input("Continue? [y/N]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\nAborted.")
+            return 1
+        if confirm != "y":
+            print("Aborted.")
+            return 1
+
+    try:
+        client = RegistryClient(repository=repository, token=token)
+        summary = client.download(
+            tag=args.tag,
+            paper_db=dl_paper_db,
+            embedding_db=dl_embedding_db,
+            merge=args.merge,
+            progress_callback=lambda msg: print(f"  {msg}"),
+        )
+
+        print("\n✅ Download complete!")
+        for layer in summary.get("layers", []):
+            layer_type = layer.get("type", "unknown")
+            if layer_type == "paper-db":
+                print(f"  📄 Paper database: {layer.get('papers', 0)} papers imported")
+            elif layer_type == "embedding-db":
+                print(f"  🧮 Embedding database: {layer.get('embeddings', 0)} embeddings imported")
+
+        metadata = summary.get("metadata", {})
+        if metadata:
+            print(f"\n  ℹ️  Artifact version: {metadata.get('version', 'unknown')}")
+            if metadata.get("conferences"):
+                print(f"  ℹ️  Conferences: {', '.join(metadata['conferences'])}")
+
+        return 0
+
+    except RegistryError as e:
+        print(f"\n❌ Registry error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"\n❌ Unexpected error: {e}", file=sys.stderr)
+        logger.exception("Download failed")
+        return 1
+
+
+def registry_list_command(args: argparse.Namespace) -> int:
+    """
+    List available tags and artifact info in the registry.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments containing:
+        - repository: OCI repository path
+        - token: Authentication token
+        - tag: Optional specific tag to inspect
+
+    Returns
+    -------
+    int
+        Exit code (0 for success, non-zero for failure)
+    """
+    from .registry import RegistryClient, RegistryError
+
+    config = get_config()
+    repository = args.repository or config.registry_repository
+    token = args.token or config.github_token
+
+    if not repository:
+        print(
+            "❌ Repository not specified. Use --repository or set REGISTRY_REPOSITORY env var.",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        client = RegistryClient(repository=repository, token=token)
+
+        if args.tag:
+            # Show details for a specific tag
+            info = client.get_artifact_info(args.tag)
+            print(f"\nArtifact: {repository}:{args.tag}")
+            print("=" * 70)
+
+            metadata = info.get("metadata", {})
+            if metadata:
+                print(f"  Version:    {metadata.get('version', 'unknown')}")
+                print(f"  Created:    {metadata.get('created_at', 'unknown')}")
+                if metadata.get("conferences"):
+                    print(f"  Conferences: {', '.join(metadata['conferences'])}")
+                if metadata.get("embedding_model"):
+                    print(f"  Embedding:  {metadata['embedding_model']}")
+
+            for layer in info.get("layers", []):
+                media_type = layer.get("media_type", "")
+                size = layer.get("size", 0)
+                annotations = layer.get("annotations", {})
+
+                if "paper-db" in media_type:
+                    count = annotations.get("com.abstracts-explorer.paper-count", "?")
+                    print(f"  📄 Paper DB: {count} papers ({size / 1024 / 1024:.1f} MB)")
+                elif "embedding-db" in media_type:
+                    count = annotations.get("com.abstracts-explorer.embedding-count", "?")
+                    print(f"  🧮 Embeddings: {count} embeddings ({size / 1024 / 1024:.1f} MB)")
+        else:
+            # List all tags
+            tags = client.list_tags()
+            print(f"\nAvailable tags in {repository}:")
+            print("=" * 70)
+            if tags:
+                for tag in sorted(tags):
+                    print(f"  • {tag}")
+            else:
+                print("  (no tags found)")
+
+        return 0
+
+    except RegistryError as e:
+        print(f"\n❌ Registry error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"\n❌ Unexpected error: {e}", file=sys.stderr)
+        logger.exception("List failed")
+        return 1
+
+
 def main() -> int:
     """
     Main entry point for the CLI.
@@ -2235,6 +2504,140 @@ Examples:
         help="Skip confirmation prompt",
     )
 
+    # Registry command (with sub-subcommands)
+    registry_parser = subparsers.add_parser(
+        "registry",
+        help="Upload/download data to/from OCI-compatible container registries",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+Upload and download paper databases, embeddings, and clustering cache
+to/from OCI-compatible container registries like GitHub Container Registry.
+
+Sub-commands:
+  upload     Upload databases to registry
+  download   Download databases from registry
+  list       List available tags in registry
+
+Examples:
+  # Upload all data to GitHub Container Registry
+  abstracts-explorer registry upload --repository ghcr.io/owner/abstracts-data --token ghp_xxxx
+
+  # Upload only paper database for a specific conference
+  abstracts-explorer registry upload --repository ghcr.io/owner/abstracts-data --paper-db --conference neurips
+
+  # Download and merge with existing data
+  abstracts-explorer registry download --repository ghcr.io/owner/abstracts-data --merge
+
+  # List available tags
+  abstracts-explorer registry list --repository ghcr.io/owner/abstracts-data
+
+  # Inspect a specific tag
+  abstracts-explorer registry list --repository ghcr.io/owner/abstracts-data --tag neurips-2024
+        """,
+    )
+    registry_subparsers = registry_parser.add_subparsers(dest="registry_command", help="Registry sub-commands")
+
+    # Common registry arguments
+    def _add_registry_args(sub_parser: argparse.ArgumentParser) -> None:
+        sub_parser.add_argument(
+            "--repository",
+            "-r",
+            type=str,
+            default=None,
+            help="OCI repository (e.g., ghcr.io/owner/abstracts-data). "
+            "Can also be set via REGISTRY_REPOSITORY env var.",
+        )
+        sub_parser.add_argument(
+            "--token",
+            "-t",
+            type=str,
+            default=None,
+            help="Authentication token (e.g., GitHub PAT). Can also be set via GITHUB_TOKEN env var.",
+        )
+
+    # registry upload
+    registry_upload_parser = registry_subparsers.add_parser(
+        "upload",
+        help="Upload databases to registry",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _add_registry_args(registry_upload_parser)
+    registry_upload_parser.add_argument(
+        "--tag",
+        type=str,
+        default="latest",
+        help="Tag for the upload (default: latest)",
+    )
+    registry_upload_parser.add_argument(
+        "--conference",
+        "-c",
+        action="append",
+        help="Specific conference(s) to include (can be repeated)",
+    )
+    registry_upload_parser.add_argument(
+        "--paper-db",
+        action="store_true",
+        help="Upload paper database only",
+    )
+    registry_upload_parser.add_argument(
+        "--embedding-db",
+        action="store_true",
+        help="Upload embedding database only",
+    )
+    registry_upload_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Upload all databases (default behavior when no specific database is selected)",
+    )
+
+    # registry download
+    registry_download_parser = registry_subparsers.add_parser(
+        "download",
+        help="Download databases from registry",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _add_registry_args(registry_download_parser)
+    registry_download_parser.add_argument(
+        "--tag",
+        type=str,
+        default="latest",
+        help="Tag to download (default: latest)",
+    )
+    registry_download_parser.add_argument(
+        "--paper-db",
+        action="store_true",
+        help="Download paper database only",
+    )
+    registry_download_parser.add_argument(
+        "--embedding-db",
+        action="store_true",
+        help="Download embedding database only",
+    )
+    registry_download_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Download all databases (default behavior when no specific database is selected)",
+    )
+    registry_download_parser.add_argument(
+        "--merge",
+        action="store_true",
+        help="Merge with existing data instead of replacing",
+    )
+
+    # registry list
+    registry_list_parser = registry_subparsers.add_parser(
+        "list",
+        help="List available tags in registry",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _add_registry_args(registry_list_parser)
+    registry_list_parser.add_argument(
+        "--tag",
+        type=str,
+        default=None,
+        help="Inspect a specific tag (shows details instead of listing all tags)",
+    )
+
     argcomplete.autocomplete(parser)
     args = parser.parse_args()
 
@@ -2286,6 +2689,19 @@ Examples:
             return eval_clear_command(args)
         else:
             eval_parser.print_help()
+            return 1
+    elif args.command == "registry":
+        if not hasattr(args, "registry_command") or not args.registry_command:
+            registry_parser.print_help()
+            return 1
+        if args.registry_command == "upload":
+            return registry_upload_command(args)
+        elif args.registry_command == "download":
+            return registry_download_command(args)
+        elif args.registry_command == "list":
+            return registry_list_command(args)
+        else:
+            registry_parser.print_help()
             return 1
     else:
         parser.print_help()
