@@ -81,7 +81,7 @@ class TestBuildTag:
         """Tag is built from conference and year."""
         assert _build_tag("neurips", 2024) == "neurips-2024"
 
-    def test_case_normalisation(self):
+    def test_case_normalization(self):
         """Conference name is lowercased."""
         assert _build_tag("NeurIPS", 2024) == "neurips-2024"
 

@@ -207,9 +207,7 @@ class RegistryClient:
                 paper_count = db.export_papers_to_sqlite(paper_db_path, conference, year)
 
             if paper_count == 0:
-                raise RegistryError(
-                    f"No papers found for {conference}/{year}. " "Download the conference data first."
-                )
+                raise RegistryError(f"No papers found for {conference}/{year}. Download the conference data first.")
             _progress(f"Exported {paper_count} papers")
 
             # --- 2. Export embeddings ---
@@ -222,8 +220,8 @@ class RegistryClient:
 
             if embedding_count == 0:
                 raise RegistryError(
-                    f"No embeddings found for {conference}/{year}. "
-                    "Create embeddings first with 'abstracts-explorer create-embeddings'."
+                    f"No embeddings found for {conference}/{year}."
+                    " Create embeddings first with 'abstracts-explorer create-embeddings'."
                 )
 
             embeddings_path = temp_dir / "embeddings.json"
