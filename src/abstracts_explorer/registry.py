@@ -49,6 +49,8 @@ import oras.defaults
 import oras.oci
 import oras.provider
 
+from ._version import __version__
+
 logger = logging.getLogger(__name__)
 
 # Custom media types for abstracts-explorer artifacts
@@ -388,6 +390,59 @@ class RegistryClient:
     # Public API
     # ------------------------------------------------------------------
 
+    def _push_tag(
+        self,
+        conference: str,
+        years_in_tag: List[int],
+        files: List[str],
+        config_path: Path,
+        tag: str,
+        embedding_model: str,
+        paper_count: int,
+        embedding_count: int,
+        progress: Callable[[str], None],
+    ) -> None:
+        """Push a single OCI tag with the given files.
+
+        Parameters
+        ----------
+        conference : str
+            Conference name stored in manifest annotations.
+        years_in_tag : list of int
+            Years whose data files are included in this tag.
+        files : list of str
+            Absolute paths to the blob files to push.
+        config_path : Path
+            Path to the JSON config blob.
+        tag : str
+            OCI tag string (without repository prefix).
+        embedding_model : str
+            Embedding model name stored in manifest annotations.
+        paper_count : int
+            Total paper count stored in manifest annotations.
+        embedding_count : int
+            Total embedding count stored in manifest annotations.
+        progress : callable
+            Progress message callback.
+        """
+        target = f"{self.repository}:{tag}"
+        manifest_annotations = {
+            "com.abstracts-explorer.version": __version__,
+            "com.abstracts-explorer.conference": conference,
+            "com.abstracts-explorer.years": ",".join(str(y) for y in years_in_tag),
+            "com.abstracts-explorer.paper-count": str(paper_count),
+            "com.abstracts-explorer.embedding-count": str(embedding_count),
+            "com.abstracts-explorer.embedding-model": embedding_model,
+        }
+        self._client.push(
+            target=target,
+            files=files,
+            manifest_config=str(config_path),
+            manifest_annotations=manifest_annotations,
+            disable_path_validation=True,
+        )
+        progress(f"Successfully pushed {target}")
+
     def upload(
         self,
         conference: str,
@@ -402,10 +457,15 @@ class RegistryClient:
         layers and pushes them together.  All three must be present for every
         year; an error is raised if any data is missing.
 
-        When *year* is ``None``, all years available in the local database for
-        the given conference are uploaded.  Each year is stored as its own pair
-        of layers (paper DB + embeddings) so that individual years can be
-        identified inside the manifest.
+        When *year* is not ``None``, a single per-year tag is pushed
+        (e.g. ``neurips-2024_model``).
+
+        When *year* is ``None``, every year available locally is first pushed as
+        its own individual tag (e.g. ``neurips-2024_model``, ``neurips-2025_model``)
+        and then an all-years summary tag (e.g. ``neurips_model``) is pushed
+        containing all years' files as layers.  Because OCI blobs are
+        content-addressed, the registry deduplicates the files — no data is
+        actually stored twice.
 
         Parameters
         ----------
@@ -422,14 +482,14 @@ class RegistryClient:
         Returns
         -------
         dict
-            Upload summary with paper count, embedding count, years, and tag.
+            Upload summary with paper count, embedding count, years, tag, and
+            (when multiple years) ``year_tags`` listing the per-year tags pushed.
 
         Raises
         ------
         RegistryError
             If upload fails or required data is missing.
         """
-        from ._version import __version__
 
         def _progress(msg: str) -> None:
             if progress_callback:
@@ -444,9 +504,6 @@ class RegistryClient:
                 "Create embeddings first with 'abstracts-explorer create-embeddings'."
             )
 
-        if tag is None:
-            tag = _build_tag(conference, year, embedding_model=embedding_model)
-
         # Determine which years to upload
         if year is not None:
             years = [year]
@@ -458,20 +515,55 @@ class RegistryClient:
                 )
             _progress(f"Found years for {conference}: {years}")
 
+        # Build the target tag (for single-year or all-years summary)
+        if tag is None:
+            tag = _build_tag(conference, year, embedding_model=embedding_model)
+
         temp_dir = Path(tempfile.mkdtemp())
         try:
-            files: List[str] = []
+            all_files: List[str] = []
             total_papers = 0
             total_embeddings = 0
+            year_tags: List[str] = []
 
             for yr in years:
                 yr_data = self._export_year(conference, yr, temp_dir, _progress)
-                files.append(str(yr_data["paper_db_path"]))
-                files.append(str(yr_data["embeddings_path"]))
+                yr_files = [str(yr_data["paper_db_path"]), str(yr_data["embeddings_path"])]
+                all_files.extend(yr_files)
                 total_papers += yr_data["paper_count"]
                 total_embeddings += yr_data["embedding_count"]
 
-            # --- Build config metadata ---
+                # When uploading multiple years, push each year as its own tag first
+                if year is None:
+                    yr_tag = _build_tag(conference, yr, embedding_model=embedding_model)
+                    year_tags.append(yr_tag)
+
+                    # Write per-year config
+                    yr_config_data = {
+                        "version": __version__,
+                        "conference": conference,
+                        "years": [yr],
+                        "paper_count": yr_data["paper_count"],
+                        "embedding_count": yr_data["embedding_count"],
+                        "embedding_model": embedding_model,
+                    }
+                    yr_config_path = temp_dir / f"config-{yr}.json"
+                    yr_config_path.write_text(json.dumps(yr_config_data, indent=2))
+
+                    _progress(f"Uploading {yr_tag}...")
+                    self._push_tag(
+                        conference=conference,
+                        years_in_tag=[yr],
+                        files=yr_files,
+                        config_path=yr_config_path,
+                        tag=yr_tag,
+                        embedding_model=embedding_model,
+                        paper_count=yr_data["paper_count"],
+                        embedding_count=yr_data["embedding_count"],
+                        progress=_progress,
+                    )
+
+            # --- Build all-years (or single-year) config metadata ---
             config_data = {
                 "version": __version__,
                 "conference": conference,
@@ -483,36 +575,30 @@ class RegistryClient:
             config_path = temp_dir / "config.json"
             config_path.write_text(json.dumps(config_data, indent=2))
 
-            # --- Push via oras ---
-            _progress("Uploading to registry...")
-            target = f"{self.repository}:{tag}"
-
-            manifest_annotations = {
-                "com.abstracts-explorer.version": __version__,
-                "com.abstracts-explorer.conference": conference,
-                "com.abstracts-explorer.years": ",".join(str(y) for y in years),
-                "com.abstracts-explorer.paper-count": str(total_papers),
-                "com.abstracts-explorer.embedding-count": str(total_embeddings),
-                "com.abstracts-explorer.embedding-model": embedding_model,
-            }
-
-            self._client.push(
-                target=target,
-                files=files,
-                manifest_config=str(config_path),
-                manifest_annotations=manifest_annotations,
-                disable_path_validation=True,
+            # --- Push the final (single-year or all-years summary) tag ---
+            _progress(f"Uploading {tag}...")
+            self._push_tag(
+                conference=conference,
+                years_in_tag=years,
+                files=all_files,
+                config_path=config_path,
+                tag=tag,
+                embedding_model=embedding_model,
+                paper_count=total_papers,
+                embedding_count=total_embeddings,
+                progress=_progress,
             )
 
-            _progress(f"Successfully pushed {target}")
-
-            return {
+            summary: Dict[str, Any] = {
                 "tag": tag,
                 "conference": conference,
                 "years": years,
                 "paper_count": total_papers,
                 "embedding_count": total_embeddings,
             }
+            if year_tags:
+                summary["year_tags"] = year_tags
+            return summary
 
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)

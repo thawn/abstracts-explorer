@@ -709,7 +709,7 @@ class TestUploadDownload:
         assert any("Exporting" in m for m in messages)
 
     def test_upload_conference_only(self, tmp_path):
-        """Upload without year uploads all available years."""
+        """Upload without year uploads each year individually plus an all-years tag."""
         _populate_test_db(tmp_path / "test.db")
 
         with patch("oras.client.OrasClient") as MockOras:
@@ -733,7 +733,14 @@ class TestUploadDownload:
 
         assert summary["tag"] == "neurips_test-model"
         assert sorted(summary["years"]) == [2024, 2025]
-        mock_oras.push.assert_called_once()
+        # push is called once per year (individual tags) + once for the all-years tag
+        assert mock_oras.push.call_count == 3
+        pushed_targets = [call[1]["target"] for call in mock_oras.push.call_args_list]
+        assert "ghcr.io/owner/repo:neurips-2024_test-model" in pushed_targets
+        assert "ghcr.io/owner/repo:neurips-2025_test-model" in pushed_targets
+        assert "ghcr.io/owner/repo:neurips_test-model" in pushed_targets
+        assert "year_tags" in summary
+        assert sorted(summary["year_tags"]) == ["neurips-2024_test-model", "neurips-2025_test-model"]
 
     def test_upload_conference_only_no_data(self, tmp_path):
         """Upload without year fails when no data exists."""
