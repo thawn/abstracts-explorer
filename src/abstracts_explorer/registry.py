@@ -90,10 +90,11 @@ def _sanitize_model_name(model: str) -> str:
 def _build_tag(
     conference: str,
     year: Optional[int] = None,
-    embedding_model: Optional[str] = None,
+    *,
+    embedding_model: str,
 ) -> str:
     """
-    Build an OCI tag from conference name, optional year and optional embedding model.
+    Build an OCI tag from conference name, embedding model and optional year.
 
     Parameters
     ----------
@@ -102,22 +103,21 @@ def _build_tag(
     year : int, optional
         Conference year.  When ``None``, the tag contains only the
         conference name (e.g. ``neurips``).
-    embedding_model : str, optional
-        Embedding model name.  When provided, appended to the tag after
-        a ``_`` separator (e.g. ``neurips-2024_text-embedding-ada-002``).
+    embedding_model : str
+        Embedding model name.  Appended to the tag after a ``_``
+        separator (e.g. ``neurips-2024_text-embedding-ada-002``).
 
     Returns
     -------
     str
-        Tag string (e.g. ``neurips-2024_text-embedding-ada-002`` or ``neurips``).
+        Tag string (e.g. ``neurips-2024_text-embedding-ada-002``).
     """
     safe_name = conference.lower().replace(" ", "-").replace("/", "-").replace("@", "-")
     if year is not None:
         tag = f"{safe_name}-{year}"
     else:
         tag = safe_name
-    if embedding_model:
-        tag = f"{tag}_{_sanitize_model_name(embedding_model)}"
+    tag = f"{tag}_{_sanitize_model_name(embedding_model)}"
     return tag
 
 
@@ -415,7 +415,7 @@ class RegistryClient:
             Conference year (e.g. ``2024``).  When ``None``, all available
             years are uploaded.
         tag : str, optional
-            Custom tag.  If ``None``, derived from conference and year.
+            Custom tag.  If ``None``, derived from embedding model, conference and year.
         progress_callback : callable, optional
             Function called with status messages during upload.
 
@@ -438,6 +438,11 @@ class RegistryClient:
 
         # --- Determine embedding model (needed for auto-tag) ---
         embedding_model = self._get_embedding_model()
+        if not embedding_model:
+            raise RegistryError(
+                "No embedding model found in local database. "
+                "Create embeddings first with 'abstracts-explorer create-embeddings'."
+            )
 
         if tag is None:
             tag = _build_tag(conference, year, embedding_model=embedding_model)
@@ -473,7 +478,7 @@ class RegistryClient:
                 "years": years,
                 "paper_count": total_papers,
                 "embedding_count": total_embeddings,
-                "embedding_model": embedding_model or "",
+                "embedding_model": embedding_model,
             }
             config_path = temp_dir / "config.json"
             config_path.write_text(json.dumps(config_data, indent=2))
@@ -488,7 +493,7 @@ class RegistryClient:
                 "com.abstracts-explorer.years": ",".join(str(y) for y in years),
                 "com.abstracts-explorer.paper-count": str(total_papers),
                 "com.abstracts-explorer.embedding-count": str(total_embeddings),
-                "com.abstracts-explorer.embedding-model": embedding_model or "",
+                "com.abstracts-explorer.embedding-model": embedding_model,
             }
 
             self._client.push(
@@ -536,12 +541,12 @@ class RegistryClient:
             Conference year (e.g. ``2024``).  When ``None``, all years
             in the artifact are imported.
         tag : str, optional
-            Custom tag.  If ``None``, derived from conference, year and
-            embedding model.
+            Custom tag.  If ``None``, derived from embedding model, conference and year.
         embedding_model : str, optional
             Embedding model name used for tag derivation.  When ``None``
             and *tag* is also ``None``, the model is read from the local
-            database metadata (if available).
+            database metadata or the ``EMBEDDING_MODEL`` configuration.
+            A ``RegistryError`` is raised if the model cannot be determined.
         progress_callback : callable, optional
             Function called with status messages during download.
 
@@ -553,11 +558,16 @@ class RegistryClient:
         Raises
         ------
         RegistryError
-            If download fails.
+            If download fails or the embedding model cannot be determined.
         """
         if tag is None:
             if embedding_model is None:
                 embedding_model = self._get_embedding_model()
+            if not embedding_model:
+                raise RegistryError(
+                    "No embedding model specified and none found in local database. "
+                    "Use --embedding-model to specify the model name."
+                )
             tag = _build_tag(conference, year, embedding_model=embedding_model)
 
         def _progress(msg: str) -> None:

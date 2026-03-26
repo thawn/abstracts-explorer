@@ -103,24 +103,24 @@ class TestBuildTag:
     """Tests for the _build_tag helper."""
 
     def test_simple_tag(self):
-        """Tag is built from conference and year."""
-        assert _build_tag("neurips", 2024) == "neurips-2024"
+        """Tag is built from conference, year and embedding model."""
+        assert _build_tag("neurips", 2024, embedding_model="model-a") == "neurips-2024_model-a"
 
     def test_case_normalization(self):
         """Conference name is lowercased."""
-        assert _build_tag("NeurIPS", 2024) == "neurips-2024"
+        assert _build_tag("NeurIPS", 2024, embedding_model="model-a") == "neurips-2024_model-a"
 
     def test_special_characters(self):
         """Special characters are replaced with hyphens."""
-        assert _build_tag("ML4PS/workshop", 2025) == "ml4ps-workshop-2025"
+        assert _build_tag("ML4PS/workshop", 2025, embedding_model="model-a") == "ml4ps-workshop-2025_model-a"
 
     def test_conference_only_tag(self):
-        """Tag without year contains only the conference name."""
-        assert _build_tag("neurips") == "neurips"
+        """Tag without year contains conference and model."""
+        assert _build_tag("neurips", embedding_model="model-a") == "neurips_model-a"
 
     def test_conference_only_tag_normalized(self):
         """Conference-only tag is lowercased and sanitized."""
-        assert _build_tag("ML4PS/workshop") == "ml4ps-workshop"
+        assert _build_tag("ML4PS/workshop", embedding_model="model-a") == "ml4ps-workshop_model-a"
 
     def test_tag_with_embedding_model(self):
         """Embedding model is appended after underscore separator."""
@@ -131,11 +131,6 @@ class TestBuildTag:
     def test_tag_conference_only_with_model(self):
         """Conference-only tag includes the embedding model."""
         assert _build_tag("neurips", embedding_model="text-embedding-ada-002") == "neurips_text-embedding-ada-002"
-
-    def test_tag_with_no_model(self):
-        """Passing None or empty model behaves like no model."""
-        assert _build_tag("neurips", 2024, embedding_model=None) == "neurips-2024"
-        assert _build_tag("neurips", 2024, embedding_model="") == "neurips-2024"
 
 
 # ---------------------------------------------------------------------------
@@ -578,8 +573,9 @@ class TestUploadDownload:
         with patch("oras.client.OrasClient"):
             client = RegistryClient("ghcr.io/owner/repo", token="token")
 
-        with pytest.raises(RegistryError, match="No papers found"):
-            client.upload(conference="icml", year=2024)
+        with patch.object(RegistryClient, "_get_embedding_model", return_value="test-model"):
+            with pytest.raises(RegistryError, match="No papers found"):
+                client.upload(conference="icml", year=2024)
 
     def test_upload_validates_embeddings(self, tmp_path):
         """Upload fails when no embeddings exist for conference+year."""
@@ -591,7 +587,10 @@ class TestUploadDownload:
         mock_em = MagicMock()
         mock_em.export_embeddings.return_value = {"ids": [], "documents": [], "metadatas": [], "embeddings": []}
 
-        with patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em):
+        with (
+            patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em),
+            patch.object(RegistryClient, "_get_embedding_model", return_value="test-model"),
+        ):
             with pytest.raises(RegistryError, match="No embeddings found"):
                 client.upload(conference="neurips", year=2024)
 
@@ -612,12 +611,15 @@ class TestUploadDownload:
             "embeddings": [[0.1, 0.2]],
         }
 
-        with patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em):
+        with (
+            patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em),
+            patch.object(RegistryClient, "_get_embedding_model", return_value="test-model"),
+        ):
             summary = client.upload(conference="neurips", year=2024)
 
         assert summary["paper_count"] == 1
         assert summary["embedding_count"] == 1
-        assert summary["tag"] == "neurips-2024"
+        assert summary["tag"] == "neurips-2024_test-model"
         assert summary["years"] == [2024]
         mock_oras.push.assert_called_once()
 
@@ -638,7 +640,10 @@ class TestUploadDownload:
             "embeddings": [[0.1]],
         }
 
-        with patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em):
+        with (
+            patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em),
+            patch.object(RegistryClient, "_get_embedding_model", return_value="test-model"),
+        ):
             summary = client.upload(conference="neurips", year=2024, tag="custom-tag")
 
         assert summary["tag"] == "custom-tag"
@@ -663,7 +668,10 @@ class TestUploadDownload:
         }
 
         messages = []
-        with patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em):
+        with (
+            patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em),
+            patch.object(RegistryClient, "_get_embedding_model", return_value="test-model"),
+        ):
             client.upload(
                 conference="neurips",
                 year=2024,
@@ -690,10 +698,13 @@ class TestUploadDownload:
             "embeddings": [[0.1]],
         }
 
-        with patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em):
+        with (
+            patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em),
+            patch.object(RegistryClient, "_get_embedding_model", return_value="test-model"),
+        ):
             summary = client.upload(conference="neurips")
 
-        assert summary["tag"] == "neurips"
+        assert summary["tag"] == "neurips_test-model"
         assert sorted(summary["years"]) == [2024, 2025]
         mock_oras.push.assert_called_once()
 
@@ -704,8 +715,20 @@ class TestUploadDownload:
         with patch("oras.client.OrasClient"):
             client = RegistryClient("ghcr.io/owner/repo", token="token")
 
-        with pytest.raises(RegistryError, match="No data found"):
-            client.upload(conference="icml")
+        with patch.object(RegistryClient, "_get_embedding_model", return_value="test-model"):
+            with pytest.raises(RegistryError, match="No data found"):
+                client.upload(conference="icml")
+
+    def test_upload_no_embedding_model(self, tmp_path):
+        """Upload fails when no embedding model is available."""
+        _populate_test_db(tmp_path / "test.db")
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
+
+        with patch.object(RegistryClient, "_get_embedding_model", return_value=None):
+            with pytest.raises(RegistryError, match="No embedding model found"):
+                client.upload(conference="neurips", year=2024)
 
     def test_download_conference_only(self, tmp_path):
         """Download without year imports all years in artifact."""
@@ -745,7 +768,7 @@ class TestUploadDownload:
         set_test_db(tmp_path / "target.db")
 
         with patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em):
-            summary = client.download(conference="neurips")
+            summary = client.download(conference="neurips", embedding_model="test-model")
 
         assert sorted(summary["years"]) == [2024, 2025]
         assert summary["paper_count"] == 2  # 1 per year
@@ -784,7 +807,7 @@ class TestUploadDownload:
         set_test_db(tmp_path / "target.db")
 
         with patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em):
-            summary = client.download(conference="neurips", year=2024)
+            summary = client.download(conference="neurips", year=2024, embedding_model="test-model")
 
         assert summary["paper_count"] == 1
         assert summary["embedding_count"] == 1
@@ -810,7 +833,7 @@ class TestUploadDownload:
         set_test_db(tmp_path / "target.db")
 
         with pytest.raises(RegistryError, match="Incomplete data.*missing.*embeddings"):
-            client.download(conference="neurips", year=2024)
+            client.download(conference="neurips", year=2024, embedding_model="test-model")
 
     def test_import_year_missing_paper_db(self, tmp_path):
         """_import_year raises RegistryError when paper DB file is missing."""
@@ -944,7 +967,10 @@ class TestUploadDownload:
             "embeddings": [[0.1]],
         }
 
-        with patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em):
+        with (
+            patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em),
+            patch.object(RegistryClient, "_get_embedding_model", return_value="test-model"),
+        ):
             summaries = client.upload_all(progress_callback=lambda m: None)
 
         # We have neurips and iclr in our test data
