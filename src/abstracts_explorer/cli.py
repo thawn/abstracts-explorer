@@ -1657,10 +1657,12 @@ def registry_download_command(args: argparse.Namespace) -> int:
                     f"{s.get('embedding_count', 0)} embeddings"
                 )
         else:
+            embedding_model = getattr(args, "embedding_model", None) or config.embedding_model
             summary = client.download(
                 conference=args.conference,
                 year=args.year,
                 tag=args.tag,
+                embedding_model=embedding_model,
                 progress_callback=lambda msg: print(f"  {msg}"),
             )
             print("\n✅ Download complete!")
@@ -2594,7 +2596,7 @@ Examples:
         "--tag",
         type=str,
         default=None,
-        help="Custom tag (default: derived from conference and year, e.g. neurips-2024 or neurips)",
+        help="Custom tag (default: derived from conference, year and embedding model)",
     )
 
     # registry download
@@ -2622,7 +2624,14 @@ Examples:
         "--tag",
         type=str,
         default=None,
-        help="Custom tag (default: derived from conference and year, e.g. neurips-2024 or neurips)",
+        help="Custom tag (default: derived from conference, year and embedding model)",
+    )
+    registry_download_parser.add_argument(
+        "--embedding-model",
+        type=str,
+        default=None,
+        help="Embedding model name for tag derivation. "
+        "If omitted, read from local database metadata or EMBEDDING_MODEL env var.",
     )
     registry_download_parser.add_argument(
         "--yes",

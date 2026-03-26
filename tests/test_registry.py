@@ -18,6 +18,7 @@ from abstracts_explorer.registry import (
     RegistryClient,
     RegistryError,
     _build_tag,
+    _sanitize_model_name,
 )
 from tests.conftest import get_env_test_path, set_test_db
 
@@ -70,8 +71,32 @@ def _populate_test_db(db_path):
 
 
 # ---------------------------------------------------------------------------
-# Tests: _build_tag
+# Tests: _sanitize_model_name and _build_tag
 # ---------------------------------------------------------------------------
+
+
+class TestSanitizeModelName:
+    """Tests for the _sanitize_model_name helper."""
+
+    def test_simple_model(self):
+        """Simple model name passes through."""
+        assert _sanitize_model_name("text-embedding-ada-002") == "text-embedding-ada-002"
+
+    def test_uppercase(self):
+        """Model name is lowercased."""
+        assert _sanitize_model_name("Text-Embedding-ADA-002") == "text-embedding-ada-002"
+
+    def test_special_chars(self):
+        """Non-allowed characters are replaced with hyphens."""
+        assert _sanitize_model_name("model/name:v1") == "model-name-v1"
+
+    def test_collapsed_hyphens(self):
+        """Consecutive hyphens are collapsed."""
+        assert _sanitize_model_name("my--model") == "my-model"
+
+    def test_dots_underscores_preserved(self):
+        """Dots and underscores are kept."""
+        assert _sanitize_model_name("model_v1.2") == "model_v1.2"
 
 
 class TestBuildTag:
@@ -96,6 +121,21 @@ class TestBuildTag:
     def test_conference_only_tag_normalized(self):
         """Conference-only tag is lowercased and sanitized."""
         assert _build_tag("ML4PS/workshop") == "ml4ps-workshop"
+
+    def test_tag_with_embedding_model(self):
+        """Embedding model is appended after underscore separator."""
+        assert _build_tag("neurips", 2024, embedding_model="text-embedding-ada-002") == (
+            "neurips-2024_text-embedding-ada-002"
+        )
+
+    def test_tag_conference_only_with_model(self):
+        """Conference-only tag includes the embedding model."""
+        assert _build_tag("neurips", embedding_model="text-embedding-ada-002") == ("neurips_text-embedding-ada-002")
+
+    def test_tag_with_no_model(self):
+        """Passing None or empty model behaves like no model."""
+        assert _build_tag("neurips", 2024, embedding_model=None) == "neurips-2024"
+        assert _build_tag("neurips", 2024, embedding_model="") == "neurips-2024"
 
 
 # ---------------------------------------------------------------------------
@@ -881,7 +921,7 @@ class TestUploadDownload:
         ):
             summary = client.upload(conference="neurips", year=2024)
 
-        assert summary["tag"] == "neurips-2024"
+        assert summary["tag"] == "neurips-2024_text-embedding-ada-002"
         # Verify embedding model is in the manifest annotations
         push_kwargs = mock_oras.push.call_args[1]
         annotations = push_kwargs.get("manifest_annotations", {})
@@ -955,10 +995,28 @@ class TestUploadDownload:
 
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
-            mock_oras.get_tags.return_value = ["neurips-2024", "iclr-2024"]
-            # Side effect returns files in order of download (sorted tags: iclr-2024, neurips-2024)
+            mock_oras.get_tags.return_value = [
+                "neurips-2024_text-embedding-ada-002",
+                "iclr-2024_text-embedding-ada-002",
+            ]
+            # get_manifest returns annotations for each tag
+            mock_oras.get_manifest.side_effect = [
+                {
+                    "annotations": {
+                        "com.abstracts-explorer.conference": "iclr",
+                        "com.abstracts-explorer.years": "2024",
+                    }
+                },
+                {
+                    "annotations": {
+                        "com.abstracts-explorer.conference": "neurips",
+                        "com.abstracts-explorer.years": "2024",
+                    }
+                },
+            ]
+            # Side effect returns files in order of download (sorted tags: iclr..., neurips...)
             mock_oras.pull.side_effect = [
-                [str(papers_i), str(emb_i)],  # first call: iclr-2025
+                [str(papers_i), str(emb_i)],  # first call: iclr-2024
                 [str(papers_n), str(emb_n)],  # second call: neurips-2024
             ]
             client = RegistryClient("ghcr.io/owner/repo", token="token")

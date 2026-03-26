@@ -62,9 +62,39 @@ class RegistryError(Exception):
     pass
 
 
-def _build_tag(conference: str, year: Optional[int] = None) -> str:
+def _sanitize_model_name(model: str) -> str:
     """
-    Build an OCI tag from conference name and optional year.
+    Sanitize an embedding model name for use as an OCI tag component.
+
+    The name is lowercased and characters not in ``[a-z0-9._-]`` are
+    replaced with ``-``.  OCI tags allow ``[a-zA-Z0-9_.-]``.
+
+    Parameters
+    ----------
+    model : str
+        Embedding model name.
+
+    Returns
+    -------
+    str
+        Tag-safe model name.
+    """
+    import re
+
+    safe = model.lower()
+    safe = re.sub(r"[^a-z0-9._-]", "-", safe)
+    # Collapse consecutive hyphens
+    safe = re.sub(r"-{2,}", "-", safe)
+    return safe.strip("-")
+
+
+def _build_tag(
+    conference: str,
+    year: Optional[int] = None,
+    embedding_model: Optional[str] = None,
+) -> str:
+    """
+    Build an OCI tag from conference name, optional year and optional embedding model.
 
     Parameters
     ----------
@@ -73,16 +103,23 @@ def _build_tag(conference: str, year: Optional[int] = None) -> str:
     year : int, optional
         Conference year.  When ``None``, the tag contains only the
         conference name (e.g. ``neurips``).
+    embedding_model : str, optional
+        Embedding model name.  When provided, appended to the tag after
+        a ``_`` separator (e.g. ``neurips-2024_text-embedding-ada-002``).
 
     Returns
     -------
     str
-        Tag string (e.g. ``neurips-2024`` or ``neurips``).
+        Tag string (e.g. ``neurips-2024_text-embedding-ada-002`` or ``neurips``).
     """
     safe_name = conference.lower().replace(" ", "-").replace("/", "-").replace("@", "-")
     if year is not None:
-        return f"{safe_name}-{year}"
-    return safe_name
+        tag = f"{safe_name}-{year}"
+    else:
+        tag = safe_name
+    if embedding_model:
+        tag = f"{tag}_{_sanitize_model_name(embedding_model)}"
+    return tag
 
 
 class RegistryClient:
@@ -395,13 +432,16 @@ class RegistryClient:
         """
         from ._version import __version__
 
-        if tag is None:
-            tag = _build_tag(conference, year)
-
         def _progress(msg: str) -> None:
             if progress_callback:
                 progress_callback(msg)
             logger.info(msg)
+
+        # --- Determine embedding model (needed for auto-tag) ---
+        embedding_model = self._get_embedding_model()
+
+        if tag is None:
+            tag = _build_tag(conference, year, embedding_model=embedding_model)
 
         # Determine which years to upload
         if year is not None:
@@ -426,9 +466,6 @@ class RegistryClient:
                 files.append(str(yr_data["embeddings_path"]))
                 total_papers += yr_data["paper_count"]
                 total_embeddings += yr_data["embedding_count"]
-
-            # --- Determine embedding model ---
-            embedding_model = self._get_embedding_model()
 
             # --- Build config metadata ---
             config_data = {
@@ -480,6 +517,7 @@ class RegistryClient:
         conference: str,
         year: Optional[int] = None,
         tag: Optional[str] = None,
+        embedding_model: Optional[str] = None,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> Dict[str, Any]:
         """
@@ -499,7 +537,12 @@ class RegistryClient:
             Conference year (e.g. ``2024``).  When ``None``, all years
             in the artifact are imported.
         tag : str, optional
-            Custom tag.  If ``None``, derived from conference and year.
+            Custom tag.  If ``None``, derived from conference, year and
+            embedding model.
+        embedding_model : str, optional
+            Embedding model name used for tag derivation.  When ``None``
+            and *tag* is also ``None``, the model is read from the local
+            database metadata (if available).
         progress_callback : callable, optional
             Function called with status messages during download.
 
@@ -514,7 +557,9 @@ class RegistryClient:
             If download fails.
         """
         if tag is None:
-            tag = _build_tag(conference, year)
+            if embedding_model is None:
+                embedding_model = self._get_embedding_model()
+            tag = _build_tag(conference, year, embedding_model=embedding_model)
 
         def _progress(msg: str) -> None:
             if progress_callback:
@@ -706,14 +751,40 @@ class RegistryClient:
         summaries: List[Dict[str, Any]] = []
         for tag in sorted(tags):
             _progress(f"\n--- Downloading {tag} ---")
-            # Derive conference from tag (tag format: "conference" or "conference-year")
-            parts = tag.rsplit("-", 1)
-            if len(parts) == 2 and parts[1].isdigit():
-                conf = parts[0]
-                yr = int(parts[1])
+            # Read manifest annotations to derive conference/year
+            try:
+                info = self.get_artifact_info(tag)
+                annotations = info.get("annotations", {})
+                conf = annotations.get("com.abstracts-explorer.conference", "")
+                years_str = annotations.get("com.abstracts-explorer.years", "")
+            except RegistryError:
+                conf = ""
+                years_str = ""
+
+            if not conf:
+                # Fallback: derive conference from tag by splitting at underscore
+                # (tag format: "conference[-year]_model" or legacy "conference[-year]")
+                base = tag.split("_", 1)[0]
+                parts = base.rsplit("-", 1)
+                if len(parts) == 2 and parts[1].isdigit():
+                    conf = parts[0]
+                else:
+                    conf = base
+
+            # Determine year from annotations
+            yr: Optional[int] = None
+            if years_str:
+                year_vals = [int(y) for y in years_str.split(",") if y.strip().isdigit()]
+                if len(year_vals) == 1:
+                    yr = year_vals[0]
+                # If multiple years, leave yr=None to download all
             else:
-                conf = tag
-                yr = None
+                # Fallback: derive year from tag
+                base = tag.split("_", 1)[0]
+                parts = base.rsplit("-", 1)
+                if len(parts) == 2 and parts[1].isdigit():
+                    yr = int(parts[1])
+
             summary = self.download(
                 conference=conf,
                 year=yr,
