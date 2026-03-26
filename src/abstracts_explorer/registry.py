@@ -65,6 +65,28 @@ class RegistryError(Exception):
     pass
 
 
+class EmbeddingModelMismatchError(RegistryError):
+    """
+    Raised when the embedding model in the local database does not match the model in the downloaded artifact.
+
+    Attributes
+    ----------
+    local_model : str
+        Embedding model currently stored in the local database.
+    remote_model : str
+        Embedding model used by the downloaded artifact.
+    """
+
+    def __init__(self, local_model: str, remote_model: str) -> None:
+        self.local_model = local_model
+        self.remote_model = remote_model
+        super().__init__(
+            f"Embedding model mismatch: local database uses '{local_model}' "
+            f"but downloaded artifact uses '{remote_model}'. "
+            f"Cannot import data created with a different embedding model."
+        )
+
+
 def _sanitize_model_name(model: str) -> str:
     """
     Sanitize an embedding model name for use as an OCI tag component.
@@ -284,6 +306,35 @@ class RegistryClient:
             db.create_tables()
             return db.get_embedding_model()
 
+    @staticmethod
+    def clear_local_embedding_data() -> None:
+        """
+        Clear all local embedding data — metadata, ChromaDB collection, and clustering cache.
+
+        This is a destructive operation that removes *all* embedding-related data from
+        the local databases so that data with a different embedding model can be imported.
+        Use with care.
+
+        After calling this method, the next download will import fresh data and establish
+        a new embedding model association in the local database.
+        """
+        from .database import DatabaseManager
+        from .db_models import EmbeddingsMetadata, HierarchicalLabelCache
+        from .embeddings import EmbeddingsManager
+        from sqlalchemy import delete as sa_delete
+
+        # 1. Clear EmbeddingsMetadata and clustering/hierarchical caches from SQLite
+        with DatabaseManager() as db:
+            db.create_tables()
+            db._session.execute(sa_delete(EmbeddingsMetadata))  # type: ignore[union-attr]
+            db.clear_clustering_cache()
+            db._session.execute(sa_delete(HierarchicalLabelCache))  # type: ignore[union-attr]
+            db._session.commit()  # type: ignore[union-attr]
+
+        # 2. Reset the ChromaDB collection
+        em = EmbeddingsManager()
+        em.create_collection(reset=True)
+
     def _export_year(
         self,
         conference: str,
@@ -375,9 +426,16 @@ class RegistryClient:
 
         # --- import paper DB first ---
         progress(f"Importing paper database for {conference}/{year}...")
-        with DatabaseManager() as db:
-            db.create_tables()
-            paper_count = db.import_papers_from_sqlite(paper_db_file, conference, year)
+        try:
+            with DatabaseManager() as db:
+                db.create_tables()
+                paper_count = db.import_papers_from_sqlite(paper_db_file, conference, year)
+        except Exception as db_err:
+            from .database import EmbeddingModelConflictError
+
+            if isinstance(db_err, EmbeddingModelConflictError):
+                raise EmbeddingModelMismatchError(db_err.local_model, db_err.remote_model) from db_err
+            raise RegistryError(f"Paper DB import failed for {conference}/{year}: {db_err}") from db_err
         progress(f"  Imported {paper_count} papers")
 
         # --- import embeddings; rollback paper DB on failure ---

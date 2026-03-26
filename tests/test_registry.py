@@ -15,6 +15,7 @@ from abstracts_explorer.config import get_config
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.plugin import LightweightPaper
 from abstracts_explorer.registry import (
+    EmbeddingModelMismatchError,
     RegistryClient,
     RegistryError,
     _build_tag,
@@ -320,9 +321,9 @@ class TestDatabaseExportImport:
             db.import_papers_from_sqlite(tmp_path / "source.db", "neurips", 2024)
 
     def test_import_embedding_model_mismatch(self, tmp_path):
-        """Import raises error when embedding models don't match."""
+        """Import raises EmbeddingModelConflictError when embedding models don't match."""
+        from abstracts_explorer.database import EmbeddingModelConflictError
         from abstracts_explorer.db_models import EmbeddingsMetadata
-        from abstracts_explorer.database import DatabaseError
 
         # Create source database with one embedding model
         db1 = _populate_test_db(tmp_path / "db1.db")
@@ -341,8 +342,10 @@ class TestDatabaseExportImport:
             db2._session.add(EmbeddingsMetadata(embedding_model="model-B"))
             db2._session.commit()
 
-            with pytest.raises(DatabaseError, match="Embedding model mismatch"):
+            with pytest.raises(EmbeddingModelConflictError) as exc_info:
                 db2.import_papers_from_sqlite(export_path, "neurips", 2024)
+            assert exc_info.value.local_model == "model-B"
+            assert exc_info.value.remote_model == "model-A"
         finally:
             db2.close()
 
@@ -1501,3 +1504,161 @@ class TestCLICommands:
 
         assert result == 0
         mock_instance.download_all.assert_called_once()
+
+    def test_embedding_model_mismatch_error_attributes(self):
+        """EmbeddingModelMismatchError carries local_model and remote_model."""
+
+        err = EmbeddingModelMismatchError("model-a", "model-b")
+        assert err.local_model == "model-a"
+        assert err.remote_model == "model-b"
+        assert "model-a" in str(err)
+        assert "model-b" in str(err)
+
+    def test_import_year_raises_mismatch_error(self, tmp_path):
+        """_import_year raises EmbeddingModelMismatchError when embedding models differ."""
+        from abstracts_explorer.database import EmbeddingModelConflictError
+
+        set_test_db(tmp_path / "target.db")
+
+        paper_db_path = tmp_path / "papers-2024.db"
+        paper_db_path.touch()  # Just needs to exist for pre-flight check
+        embeddings_path = tmp_path / "embeddings-2024.json"
+        embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
+
+        with patch(
+            "abstracts_explorer.database.DatabaseManager.import_papers_from_sqlite",
+            side_effect=EmbeddingModelConflictError("model-a", "model-b"),
+        ):
+            with pytest.raises(EmbeddingModelMismatchError) as exc_info:
+                client._import_year("neurips", 2024, paper_db_path, embeddings_path, lambda m: None)
+
+        assert exc_info.value.local_model == "model-a"
+        assert exc_info.value.remote_model == "model-b"
+
+    def test_download_mismatch_with_matching_config_prompts_clear(self, tmp_path, capsys, monkeypatch):
+        """Download offers to clear local data when configured model matches remote model."""
+        from abstracts_explorer.cli import registry_download_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/owner/repo",
+            token="test-token",
+            conference="neurips",
+            year=2024,
+            tag=None,
+            yes=False,
+            embedding_model="model-b",
+        )
+
+        mismatch = EmbeddingModelMismatchError("model-a", "model-b")
+        success_summary = {
+            "tag": "neurips-2024_model-b",
+            "conference": "neurips",
+            "years": [2024],
+            "paper_count": 10,
+            "embedding_count": 10,
+            "metadata": {},
+        }
+
+        # Simulate user confirming the clear
+        monkeypatch.setattr("builtins.input", lambda _: "y")
+
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.download.side_effect = [mismatch, success_summary]
+
+            with patch("abstracts_explorer.registry.RegistryClient.clear_local_embedding_data") as mock_clear:
+                result = registry_download_command(args)
+
+        mock_clear.assert_called_once()
+        assert result == 0
+
+    def test_download_mismatch_with_matching_config_yes_flag(self, tmp_path, capsys):
+        """Download clears local data without prompting when --yes is set."""
+        from abstracts_explorer.cli import registry_download_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/owner/repo",
+            token="test-token",
+            conference="neurips",
+            year=2024,
+            tag=None,
+            yes=True,
+            embedding_model="model-b",
+        )
+
+        mismatch = EmbeddingModelMismatchError("model-a", "model-b")
+        success_summary = {
+            "tag": "neurips-2024_model-b",
+            "conference": "neurips",
+            "years": [2024],
+            "paper_count": 5,
+            "embedding_count": 5,
+            "metadata": {},
+        }
+
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.download.side_effect = [mismatch, success_summary]
+
+            with patch("abstracts_explorer.registry.RegistryClient.clear_local_embedding_data") as mock_clear:
+                result = registry_download_command(args)
+
+        mock_clear.assert_called_once()
+        assert result == 0
+
+    def test_download_mismatch_user_declines_clear(self, tmp_path, capsys, monkeypatch):
+        """Download aborts when user declines to clear local data."""
+        from abstracts_explorer.cli import registry_download_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/owner/repo",
+            token="test-token",
+            conference="neurips",
+            year=2024,
+            tag=None,
+            yes=False,
+            embedding_model="model-b",
+        )
+
+        mismatch = EmbeddingModelMismatchError("model-a", "model-b")
+
+        monkeypatch.setattr("builtins.input", lambda _: "n")
+
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.download.side_effect = mismatch
+
+            with patch("abstracts_explorer.registry.RegistryClient.clear_local_embedding_data") as mock_clear:
+                result = registry_download_command(args)
+
+        mock_clear.assert_not_called()
+        assert result == 1
+
+    def test_download_mismatch_config_does_not_match_remote(self, tmp_path, capsys):
+        """Download shows error when configured model doesn't match remote model."""
+        from abstracts_explorer.cli import registry_download_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/owner/repo",
+            token="test-token",
+            conference="neurips",
+            year=2024,
+            tag=None,
+            yes=True,  # skip initial confirmation
+            embedding_model="model-c",  # different from remote "model-b"
+        )
+
+        mismatch = EmbeddingModelMismatchError("model-a", "model-b")
+
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.download.side_effect = mismatch
+
+            with patch("abstracts_explorer.registry.RegistryClient.clear_local_embedding_data") as mock_clear:
+                result = registry_download_command(args)
+
+        mock_clear.assert_not_called()
+        assert result == 1

@@ -41,6 +41,28 @@ class DatabaseError(Exception):
     pass
 
 
+class EmbeddingModelConflictError(DatabaseError):
+    """
+    Raised when the embedding model in imported data differs from the local database.
+
+    Attributes
+    ----------
+    local_model : str
+        Embedding model currently in the local database.
+    remote_model : str
+        Embedding model in the data being imported.
+    """
+
+    def __init__(self, local_model: str, remote_model: str) -> None:
+        self.local_model = local_model
+        self.remote_model = remote_model
+        super().__init__(
+            f"Embedding model mismatch: local database uses '{local_model}' "
+            f"but imported data uses '{remote_model}'. Cannot import data "
+            f"created with a different embedding model."
+        )
+
+
 class DatabaseManager:
     """
     Manager for SQL database operations using SQLAlchemy.
@@ -2093,11 +2115,8 @@ class DatabaseManager:
                 if imported_meta:
                     existing_meta = self._session.execute(select(EmbeddingsMetadata)).scalars().first()
                     if existing_meta and existing_meta.embedding_model != imported_meta.embedding_model:
-                        raise DatabaseError(
-                            f"Embedding model mismatch: local database uses "
-                            f"'{existing_meta.embedding_model}' but imported data uses "
-                            f"'{imported_meta.embedding_model}'. Cannot import data "
-                            f"created with a different embedding model."
+                        raise EmbeddingModelConflictError(
+                            existing_meta.embedding_model, imported_meta.embedding_model
                         )
 
                 # Delete existing papers for this conference+year
