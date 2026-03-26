@@ -241,6 +241,34 @@ class RegistryClient:
             return sorted(filters.get("conferences", []))
 
     @staticmethod
+    def _resolve_conference_name(conference: str) -> str:
+        """
+        Resolve *conference* to the actual name as stored in the local database.
+
+        Performs a case-insensitive comparison against all conferences currently
+        in the local database.  Returns the stored name if a match is found, or
+        the input string unchanged if no match exists (e.g. when uploading for
+        the first time or using an explicit tag).
+
+        Parameters
+        ----------
+        conference : str
+            Conference name supplied by the caller (may differ in case from the
+            stored name, e.g. ``neurips`` vs. ``NeurIPS``).
+
+        Returns
+        -------
+        str
+            The conference name as it appears in the local database, or the
+            input string if no case-insensitive match is found.
+        """
+        all_conferences = RegistryClient._get_all_conferences()
+        for conf in all_conferences:
+            if conf.lower() == conference.lower():
+                return conf
+        return conference
+
+    @staticmethod
     def _get_embedding_model() -> Optional[str]:
         """
         Return the embedding model stored in the local database.
@@ -495,6 +523,9 @@ class RegistryClient:
             if progress_callback:
                 progress_callback(msg)
             logger.info(msg)
+
+        # Resolve the conference name to the actual stored name (case-insensitive)
+        conference = self._resolve_conference_name(conference)
 
         # --- Determine embedding model (needed for auto-tag) ---
         embedding_model = self._get_embedding_model()

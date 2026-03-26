@@ -753,6 +753,51 @@ class TestUploadDownload:
             with pytest.raises(RegistryError, match="No data found"):
                 client.upload(conference="icml")
 
+    def test_upload_conference_name_case_insensitive_resolution(self, tmp_path):
+        """Upload resolves conference name case-insensitively against DB data."""
+        # Populate DB with mixed-case conference name "NeurIPS"
+        set_test_db(tmp_path / "test.db")
+        db = DatabaseManager()
+        db.connect()
+        db.create_tables()
+        db.add_papers(
+            [
+                LightweightPaper(
+                    title="Paper One",
+                    authors=["Author A"],
+                    abstract="Abstract",
+                    session="Session 1",
+                    poster_position="A1",
+                    year=2024,
+                    conference="NeurIPS",
+                )
+            ]
+        )
+
+        with patch("oras.client.OrasClient") as MockOras:
+            mock_oras = MockOras.return_value
+            mock_oras.push.return_value = Mock(status_code=201)
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
+
+        mock_em = MagicMock()
+        mock_em.export_embeddings.return_value = {
+            "ids": ["id1"],
+            "documents": ["doc1"],
+            "metadatas": [{}],
+            "embeddings": [[0.1]],
+        }
+
+        with (
+            patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em),
+            patch.object(RegistryClient, "_get_embedding_model", return_value="test-model"),
+        ):
+            # User passes lowercase "neurips", DB has "NeurIPS" — should succeed
+            summary = client.upload(conference="neurips")
+
+        assert summary["paper_count"] == 1
+        # Tag is built from the resolved "NeurIPS" name (sanitized)
+        assert "neurips" in summary["tag"]
+
     def test_upload_no_embedding_model(self, tmp_path):
         """Upload fails when no embedding model is available."""
         _populate_test_db(tmp_path / "test.db")
