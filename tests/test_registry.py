@@ -287,6 +287,7 @@ class TestDatabaseExportImport:
     def test_import_embedding_model_mismatch(self, tmp_path):
         """Import raises error when embedding models don't match."""
         from abstracts_explorer.db_models import EmbeddingsMetadata
+        from abstracts_explorer.database import DatabaseError
 
         # Create source database with one embedding model
         db1 = _populate_test_db(tmp_path / "db1.db")
@@ -305,7 +306,7 @@ class TestDatabaseExportImport:
             db2._session.add(EmbeddingsMetadata(embedding_model="model-B"))
             db2._session.commit()
 
-            with pytest.raises(Exception, match="Embedding model mismatch"):
+            with pytest.raises(DatabaseError, match="Embedding model mismatch"):
                 db2.import_papers_from_sqlite(export_path, "neurips", 2024)
         finally:
             db2.close()

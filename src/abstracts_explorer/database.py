@@ -2110,13 +2110,13 @@ class DatabaseManager:
 
                 # Delete only hierarchical label cache entries whose
                 # embedding_model matches one from the imported data
-                imported_models = {
-                    e.embedding_model for e in source_session.execute(select(HierarchicalLabelCache)).scalars()
-                }
-                if imported_models:
+                imported_models_result = (
+                    source_session.execute(select(HierarchicalLabelCache.embedding_model).distinct()).scalars().all()
+                )
+                if imported_models_result:
                     self._session.execute(
                         delete(HierarchicalLabelCache).where(
-                            HierarchicalLabelCache.embedding_model.in_(imported_models)
+                            HierarchicalLabelCache.embedding_model.in_(imported_models_result)
                         )
                     )
 

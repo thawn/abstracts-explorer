@@ -472,10 +472,18 @@ class RegistryClient:
                 p = Path(fpath)
                 name = p.name
                 if name.startswith("papers-") and name.endswith(".db"):
-                    yr = int(name[len("papers-") : -len(".db")])
+                    try:
+                        yr = int(name[len("papers-") : -len(".db")])
+                    except ValueError:
+                        logger.warning(f"Skipping file with invalid year format: {name}")
+                        continue
                     year_files.setdefault(yr, {})["paper_db"] = p
                 elif name.startswith("embeddings-") and name.endswith(".json"):
-                    yr = int(name[len("embeddings-") : -len(".json")])
+                    try:
+                        yr = int(name[len("embeddings-") : -len(".json")])
+                    except ValueError:
+                        logger.warning(f"Skipping file with invalid year format: {name}")
+                        continue
                     year_files.setdefault(yr, {})["embeddings"] = p
                 elif name == "papers.db":
                     # Legacy single-year format
