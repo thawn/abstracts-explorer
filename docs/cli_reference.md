@@ -185,6 +185,97 @@ uv run abstracts-explorer info
 uv run abstracts-explorer info --show-embeddings
 ```
 
+### registry
+
+Commands for sharing paper databases and embeddings via OCI container registries (e.g. GitHub Container Registry).
+
+See the full [Registry documentation](registry.md) for details.
+
+#### registry upload
+
+**Usage:**
+
+```bash
+abstracts-explorer registry upload [OPTIONS]
+```
+
+**Options:**
+
+- `-r, --repository TEXT`: OCI repository URL (e.g. `ghcr.io/owner/abstracts-data`). Falls back to `REGISTRY_REPOSITORY` env var.
+- `--token TEXT`: Authentication token. Falls back to `GITHUB_TOKEN` env var.
+- `-c, --conference TEXT`: Conference to upload (case-insensitive). Use `all` for all conferences.
+- `-y, --year INTEGER`: Year to upload. Omit to upload all available years.
+- `--yes`: Skip confirmation prompts.
+
+**Examples:**
+
+```bash
+# Upload NeurIPS 2024
+abstracts-explorer registry upload -r ghcr.io/owner/data --conference neurips --year 2024
+
+# Upload all NeurIPS years
+abstracts-explorer registry upload -r ghcr.io/owner/data --conference neurips
+
+# Upload all conferences (CI mode)
+abstracts-explorer registry upload -r ghcr.io/owner/data --conference all --yes
+```
+
+#### registry download
+
+**Usage:**
+
+```bash
+abstracts-explorer registry download [OPTIONS]
+```
+
+**Options:**
+
+- `-r, --repository TEXT`: OCI repository URL. Falls back to `REGISTRY_REPOSITORY` env var.
+- `--token TEXT`: Authentication token. Falls back to `GITHUB_TOKEN` env var.
+- `-c, --conference TEXT`: Conference to download (case-insensitive). Use `all` for all conferences.
+- `-y, --year INTEGER`: Year to download. Omit to download all available years.
+- `--embedding-model TEXT`: Embedding model name (used to derive the tag when no local data exists).
+- `--yes`: Skip confirmation prompts (also auto-confirms clear-and-retry on model mismatch).
+
+**Examples:**
+
+```bash
+# Download NeurIPS 2024
+abstracts-explorer registry download -r ghcr.io/owner/data --conference neurips --year 2024
+
+# Download with explicit embedding model (when local DB is empty)
+abstracts-explorer registry download -r ghcr.io/owner/data --conference neurips --year 2024 \
+  --embedding-model text-embedding-qwen3-embedding-4b
+
+# Download all (CI mode)
+abstracts-explorer registry download -r ghcr.io/owner/data --conference all --yes
+```
+
+#### registry list
+
+**Usage:**
+
+```bash
+abstracts-explorer registry list [OPTIONS]
+```
+
+**Options:**
+
+- `-r, --repository TEXT`: OCI repository URL. Falls back to `REGISTRY_REPOSITORY` env var.
+- `--token TEXT`: Authentication token. Falls back to `GITHUB_TOKEN` env var.
+- `--tag TEXT`: Inspect a specific tag and display its metadata.
+
+**Examples:**
+
+```bash
+# List all tags
+abstracts-explorer registry list -r ghcr.io/owner/data
+
+# Inspect a specific tag
+abstracts-explorer registry list -r ghcr.io/owner/data \
+  --tag neurips-2024_text-embedding-qwen3-embedding-4b
+```
+
 ## Environment Variables
 
 All CLI commands respect configuration from environment variables and `.env` files. See the [Configuration](configuration.md) page for details.
