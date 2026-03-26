@@ -1935,15 +1935,13 @@ class DatabaseManager:
             raise DatabaseError("Not connected to database")
 
         try:
-            from sqlalchemy import create_engine
-            from sqlalchemy.orm import Session as SASession
 
             output_path.parent.mkdir(parents=True, exist_ok=True)
             export_engine = create_engine(f"sqlite:///{output_path}")
             Base.metadata.create_all(export_engine)
 
             paper_count = 0
-            with SASession(export_engine) as export_session:
+            with Session(export_engine) as export_session:
                 # Export papers filtered by conference and year
                 query = select(Paper).where(and_(Paper.conference == conference, Paper.year == year))
                 for paper in self._session.execute(query).scalars():
@@ -2011,16 +2009,13 @@ class DatabaseManager:
             raise DatabaseError("Not connected to database")
 
         try:
-            from sqlalchemy import create_engine
-            from sqlalchemy.orm import Session as SASession
-
             source_engine = create_engine(
                 f"sqlite:///{sqlite_path}",
                 connect_args={"check_same_thread": False},
             )
 
             paper_count = 0
-            with SASession(source_engine) as source_session:
+            with Session(source_engine) as source_session:
                 # Delete existing papers for this conference+year
                 self._session.execute(delete(Paper).where(and_(Paper.conference == conference, Paper.year == year)))
 
