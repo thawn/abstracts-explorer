@@ -751,6 +751,285 @@ class TestUploadDownload:
         assert 2024 in summary["years"]
         mock_em.import_embeddings.assert_called_once()
 
+    def test_download_incomplete_data_raises_error(self, tmp_path):
+        """Download raises RegistryError when artifact has paper DB but no embeddings."""
+        set_test_db(tmp_path / "target.db")
+
+        # Create only paper DB, no embeddings file
+        source_db_path = tmp_path / "source.db"
+        source_db = _populate_test_db(source_db_path)
+        papers_2024 = tmp_path / "papers-2024.db"
+        source_db.export_papers_to_sqlite(papers_2024, "neurips", 2024)
+        source_db.close()
+
+        with patch("oras.client.OrasClient") as MockOras:
+            mock_oras = MockOras.return_value
+            mock_oras.pull.return_value = [str(papers_2024)]
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
+
+        set_test_db(tmp_path / "target.db")
+
+        with pytest.raises(RegistryError, match="Incomplete data.*missing.*embeddings"):
+            client.download(conference="neurips", year=2024)
+
+    def test_import_year_missing_paper_db(self, tmp_path):
+        """_import_year raises RegistryError when paper DB file is missing."""
+        set_test_db(tmp_path / "target.db")
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
+
+        embeddings_path = tmp_path / "embeddings-2024.json"
+        embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+
+        with pytest.raises(RegistryError, match="Incomplete data.*missing.*paper DB"):
+            client._import_year("neurips", 2024, tmp_path / "papers-2024.db", embeddings_path, lambda m: None)
+
+    def test_import_year_missing_embeddings(self, tmp_path):
+        """_import_year raises RegistryError when embeddings file is missing."""
+        set_test_db(tmp_path / "target.db")
+
+        source_db = _populate_test_db(tmp_path / "source.db")
+        papers_2024 = tmp_path / "papers-2024.db"
+        source_db.export_papers_to_sqlite(papers_2024, "neurips", 2024)
+        source_db.close()
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
+
+        with pytest.raises(RegistryError, match="Incomplete data.*missing.*embeddings"):
+            client._import_year("neurips", 2024, papers_2024, tmp_path / "embeddings-2024.json", lambda m: None)
+
+    def test_import_year_rollback_on_embedding_failure(self, tmp_path):
+        """Paper DB import is rolled back when embedding import fails."""
+        set_test_db(tmp_path / "target.db")
+
+        # Set up a fresh target database
+        db = DatabaseManager()
+        db.connect()
+        db.create_tables()
+        db.close()
+
+        # Create a valid paper DB export
+        source_db = _populate_test_db(tmp_path / "source.db")
+        papers_2024 = tmp_path / "papers-2024.db"
+        source_db.export_papers_to_sqlite(papers_2024, "neurips", 2024)
+        source_db.close()
+
+        # Create embeddings file with valid JSON but make import fail
+        embeddings_path = tmp_path / "embeddings-2024.json"
+        embeddings_path.write_text(
+            json.dumps(
+                {
+                    "ids": ["id1"],
+                    "documents": ["doc1"],
+                    "metadatas": [{"conference": "neurips", "year": "2024"}],
+                    "embeddings": [[0.1]],
+                }
+            )
+        )
+
+        set_test_db(tmp_path / "target.db")
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
+
+        # Make EmbeddingsManager.import_embeddings raise an error
+        with patch("abstracts_explorer.embeddings.EmbeddingsManager") as MockEM:
+            MockEM.return_value.import_embeddings.side_effect = Exception("ChromaDB failure")
+
+            with pytest.raises(RegistryError, match="Embedding import failed.*rolled back"):
+                client._import_year("neurips", 2024, papers_2024, embeddings_path, lambda m: None)
+
+        # Verify that paper DB was rolled back (no neurips/2024 papers in target)
+        from abstracts_explorer.db_models import Paper
+
+        set_test_db(tmp_path / "target.db")
+        db = DatabaseManager()
+        db.connect()
+        db.create_tables()
+        try:
+            from sqlalchemy import and_, select
+
+            stmt = select(Paper).where(and_(Paper.conference == "neurips", Paper.year == 2024))
+            papers = db._session.execute(stmt).scalars().all()
+            assert len(papers) == 0, "Papers should be rolled back after embedding import failure"
+        finally:
+            db.close()
+
+    def test_upload_includes_embedding_model(self, tmp_path):
+        """Upload manifest includes the embedding model annotation."""
+        _populate_test_db(tmp_path / "test.db")
+
+        with patch("oras.client.OrasClient") as MockOras:
+            mock_oras = MockOras.return_value
+            mock_oras.push.return_value = Mock(status_code=201)
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
+
+        mock_em = MagicMock()
+        mock_em.export_embeddings.return_value = {
+            "ids": ["id1"],
+            "documents": ["doc1"],
+            "metadatas": [{"conference": "neurips", "year": "2024"}],
+            "embeddings": [[0.1, 0.2]],
+        }
+
+        # Mock the embedding model lookup
+        with (
+            patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em),
+            patch.object(RegistryClient, "_get_embedding_model", return_value="text-embedding-ada-002"),
+        ):
+            summary = client.upload(conference="neurips", year=2024)
+
+        assert summary["tag"] == "neurips-2024"
+        # Verify embedding model is in the manifest annotations
+        push_kwargs = mock_oras.push.call_args[1]
+        annotations = push_kwargs.get("manifest_annotations", {})
+        assert annotations.get("com.abstracts-explorer.embedding-model") == "text-embedding-ada-002"
+
+    def test_upload_all_conferences(self, tmp_path):
+        """upload_all uploads data for all conferences."""
+        _populate_test_db(tmp_path / "test.db")
+
+        with patch("oras.client.OrasClient") as MockOras:
+            mock_oras = MockOras.return_value
+            mock_oras.push.return_value = Mock(status_code=201)
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
+
+        mock_em = MagicMock()
+        mock_em.export_embeddings.return_value = {
+            "ids": ["id1"],
+            "documents": ["doc1"],
+            "metadatas": [{}],
+            "embeddings": [[0.1]],
+        }
+
+        with patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em):
+            summaries = client.upload_all(progress_callback=lambda m: None)
+
+        # We have neurips and iclr in our test data
+        conferences = sorted(s["conference"] for s in summaries)
+        assert "iclr" in conferences
+        assert "neurips" in conferences
+
+    def test_upload_all_no_conferences(self, tmp_path):
+        """upload_all raises RegistryError when no conferences exist."""
+        set_test_db(tmp_path / "empty.db")
+        db = DatabaseManager()
+        db.connect()
+        db.create_tables()
+        db.close()
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
+
+        with pytest.raises(RegistryError, match="No conference data found"):
+            client.upload_all()
+
+    def test_download_all_conferences(self, tmp_path):
+        """download_all downloads all tags from registry."""
+        set_test_db(tmp_path / "target.db")
+
+        # Create fake pulled files for each download
+        source_db = _populate_test_db(tmp_path / "source.db")
+
+        # For iclr-2025 tag (alphabetically first)
+        papers_i = tmp_path / "pull_i" / "papers-2025.db"
+        papers_i.parent.mkdir()
+        source_db.export_papers_to_sqlite(papers_i, "iclr", 2024)
+        emb_i = tmp_path / "pull_i" / "embeddings-2025.json"
+        emb_i.write_text(json.dumps({"ids": ["b"], "documents": ["d"], "metadatas": [{}], "embeddings": [[0.2]]}))
+
+        # For neurips-2024 tag
+        papers_n = tmp_path / "pull_n" / "papers-2024.db"
+        papers_n.parent.mkdir()
+        source_db.export_papers_to_sqlite(papers_n, "neurips", 2024)
+        emb_n = tmp_path / "pull_n" / "embeddings-2024.json"
+        emb_n.write_text(json.dumps({"ids": ["a"], "documents": ["d"], "metadatas": [{}], "embeddings": [[0.1]]}))
+        source_db.close()
+
+        mock_em = MagicMock()
+        mock_em.import_embeddings.return_value = 1
+
+        set_test_db(tmp_path / "target.db")
+
+        with patch("oras.client.OrasClient") as MockOras:
+            mock_oras = MockOras.return_value
+            mock_oras.get_tags.return_value = ["neurips-2024", "iclr-2025"]
+            # Side effect returns files in order of download (sorted tags: iclr-2025, neurips-2024)
+            mock_oras.pull.side_effect = [
+                [str(papers_i), str(emb_i)],  # first call: iclr-2025
+                [str(papers_n), str(emb_n)],  # second call: neurips-2024
+            ]
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
+
+            with patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em):
+                summaries = client.download_all(progress_callback=lambda m: None)
+
+        assert len(summaries) == 2
+        assert mock_em.import_embeddings.call_count == 2
+
+    def test_download_all_no_tags(self, tmp_path):
+        """download_all raises RegistryError when no tags exist."""
+        with patch("oras.client.OrasClient") as MockOras:
+            mock_oras = MockOras.return_value
+            mock_oras.get_tags.return_value = []
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
+
+        with pytest.raises(RegistryError, match="No tags found"):
+            client.download_all()
+
+    def test_cli_upload_all_conferences(self, tmp_path, capsys, monkeypatch):
+        """CLI upload with --conference all invokes upload_all."""
+        from abstracts_explorer.cli import registry_upload_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/owner/repo",
+            token="test-token",
+            conference="all",
+            year=None,
+            tag=None,
+        )
+
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.upload_all.return_value = [
+                {"conference": "neurips", "tag": "neurips", "paper_count": 3, "embedding_count": 3, "years": [2024]},
+                {"conference": "iclr", "tag": "iclr", "paper_count": 2, "embedding_count": 2, "years": [2025]},
+            ]
+            result = registry_upload_command(args)
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "Upload complete" in captured.out
+        assert "2 conference(s)" in captured.out
+
+    def test_cli_download_all_conferences(self, tmp_path, capsys, monkeypatch):
+        """CLI download with --conference all invokes download_all."""
+        from abstracts_explorer.cli import registry_download_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/owner/repo",
+            token="test-token",
+            conference="all",
+            year=None,
+            tag=None,
+            yes=True,
+        )
+
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.download_all.return_value = [
+                {"conference": "neurips", "paper_count": 3, "embedding_count": 3},
+                {"conference": "iclr", "paper_count": 2, "embedding_count": 2},
+            ]
+            result = registry_download_command(args)
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "Download complete" in captured.out
+        assert "2 artifact(s)" in captured.out
+
 
 # ---------------------------------------------------------------------------
 # Tests: CLI commands

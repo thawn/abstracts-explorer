@@ -185,6 +185,39 @@ class RegistryClient:
             db.create_tables()
             return db.get_years_for_conference(conference)
 
+    @staticmethod
+    def _get_all_conferences() -> List[str]:
+        """
+        Return distinct conferences available in the local database.
+
+        Returns
+        -------
+        list of str
+            Sorted list of conference names.
+        """
+        from .database import DatabaseManager
+
+        with DatabaseManager() as db:
+            db.create_tables()
+            filters = db.get_filter_options()
+            return sorted(filters.get("conferences", []))
+
+    @staticmethod
+    def _get_embedding_model() -> Optional[str]:
+        """
+        Return the embedding model stored in the local database.
+
+        Returns
+        -------
+        str or None
+            Embedding model name, or ``None`` if not set.
+        """
+        from .database import DatabaseManager
+
+        with DatabaseManager() as db:
+            db.create_tables()
+            return db.get_embedding_model()
+
     def _export_year(
         self,
         conference: str,
@@ -247,36 +280,73 @@ class RegistryClient:
         """
         Import paper DB and embeddings for a single conference+year.
 
+        Both *paper_db_file* and *embeddings_file* must exist.  If either
+        import fails, any already-imported data for this conference+year is
+        rolled back to prevent inconsistency between the paper DB and the
+        embedding DB.
+
         Returns a dict with ``paper_count`` and ``embedding_count``.
+
+        Raises
+        ------
+        RegistryError
+            If either file is missing or an import step fails.
         """
         from .database import DatabaseManager
         from .embeddings import EmbeddingsManager
 
-        result: Dict[str, int] = {}
+        # --- pre-flight: both files must exist ---
+        if not paper_db_file.exists() or not embeddings_file.exists():
+            missing = []
+            if not paper_db_file.exists():
+                missing.append(f"paper DB ({paper_db_file.name})")
+            if not embeddings_file.exists():
+                missing.append(f"embeddings ({embeddings_file.name})")
+            raise RegistryError(
+                f"Incomplete data for {conference}/{year}: missing {', '.join(missing)}. "
+                "Cannot import — both paper DB and embeddings must be present."
+            )
 
-        # --- paper DB ---
-        if paper_db_file.exists():
-            progress(f"Importing paper database for {conference}/{year}...")
-            with DatabaseManager() as db:
-                db.create_tables()
-                paper_count = db.import_papers_from_sqlite(paper_db_file, conference, year)
-            progress(f"  Imported {paper_count} papers")
-            result["paper_count"] = paper_count
-        else:
-            result["paper_count"] = 0
+        # --- import paper DB first ---
+        progress(f"Importing paper database for {conference}/{year}...")
+        with DatabaseManager() as db:
+            db.create_tables()
+            paper_count = db.import_papers_from_sqlite(paper_db_file, conference, year)
+        progress(f"  Imported {paper_count} papers")
 
-        # --- embeddings ---
-        if embeddings_file.exists():
+        # --- import embeddings; rollback paper DB on failure ---
+        try:
             progress(f"Importing embeddings for {conference}/{year}...")
             embeddings_data = json.loads(embeddings_file.read_text())
             em = EmbeddingsManager()
             embedding_count = em.import_embeddings(embeddings_data, conference, year)
             progress(f"  Imported {embedding_count} embeddings")
-            result["embedding_count"] = embedding_count
-        else:
-            result["embedding_count"] = 0
+        except Exception as embed_err:
+            # Roll back paper DB import so both stay consistent
+            progress(f"  Embedding import failed — rolling back paper DB for {conference}/{year}...")
+            try:
+                from sqlalchemy import and_ as sa_and
+                from sqlalchemy import delete as sa_delete
 
-        return result
+                from .db_models import Paper
+
+                with DatabaseManager() as db:
+                    db.create_tables()
+                    db._session.execute(  # type: ignore[union-attr]
+                        sa_delete(Paper).where(sa_and(Paper.conference == conference, Paper.year == year))
+                    )
+                    db._session.commit()  # type: ignore[union-attr]
+            except Exception:
+                logger.warning("Failed to roll back paper DB import", exc_info=True)
+            raise RegistryError(
+                f"Embedding import failed for {conference}/{year}: {embed_err}. "
+                "Paper DB changes have been rolled back."
+            ) from embed_err
+
+        return {
+            "paper_count": paper_count,
+            "embedding_count": embedding_count,
+        }
 
     # ------------------------------------------------------------------
     # Public API
@@ -357,6 +427,9 @@ class RegistryClient:
                 total_papers += yr_data["paper_count"]
                 total_embeddings += yr_data["embedding_count"]
 
+            # --- Determine embedding model ---
+            embedding_model = self._get_embedding_model()
+
             # --- Build config metadata ---
             config_data = {
                 "version": __version__,
@@ -364,6 +437,7 @@ class RegistryClient:
                 "years": years,
                 "paper_count": total_papers,
                 "embedding_count": total_embeddings,
+                "embedding_model": embedding_model or "",
             }
             config_path = temp_dir / "config.json"
             config_path.write_text(json.dumps(config_data, indent=2))
@@ -378,6 +452,7 @@ class RegistryClient:
                 "com.abstracts-explorer.years": ",".join(str(y) for y in years),
                 "com.abstracts-explorer.paper-count": str(total_papers),
                 "com.abstracts-explorer.embedding-count": str(total_embeddings),
+                "com.abstracts-explorer.embedding-model": embedding_model or "",
             }
 
             self._client.push(
@@ -499,19 +574,29 @@ class RegistryClient:
             if year is not None:
                 year_files = {yr: files for yr, files in year_files.items() if yr == year}
 
-            # --- 3. Import each year ---
+            # --- 3. Validate completeness ---
+            for yr in sorted(year_files.keys()):
+                files = year_files[yr]
+                if not files.get("paper_db") or not files.get("embeddings"):
+                    missing = []
+                    if not files.get("paper_db"):
+                        missing.append("paper DB")
+                    if not files.get("embeddings"):
+                        missing.append("embeddings")
+                    raise RegistryError(
+                        f"Incomplete data for {conference}/{yr}: missing {', '.join(missing)}. "
+                        "Cannot import — both paper DB and embeddings must be present."
+                    )
+
+            # --- 4. Import each year ---
             total_papers = 0
             total_embeddings = 0
             imported_years: List[int] = []
 
             for yr in sorted(year_files.keys()):
                 files = year_files[yr]
-                paper_db = files.get("paper_db")
-                embeddings = files.get("embeddings")
-
-                if not paper_db or not embeddings:
-                    _progress(f"Warning: Incomplete data for {conference}/{yr}, skipping")
-                    continue
+                paper_db = files["paper_db"]
+                embeddings = files["embeddings"]
 
                 result = self._import_year(conference, yr, paper_db, embeddings, _progress)
                 total_papers += result["paper_count"]
@@ -537,6 +622,107 @@ class RegistryClient:
             raise RegistryError(f"Failed to download: {e}") from e
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def upload_all(
+        self,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Upload data for **all** conferences available locally.
+
+        Each conference is uploaded as a separate OCI artifact with a
+        conference-only tag (containing all years for that conference).
+
+        Parameters
+        ----------
+        progress_callback : callable, optional
+            Function called with status messages during upload.
+
+        Returns
+        -------
+        list of dict
+            Upload summaries, one per conference.
+
+        Raises
+        ------
+        RegistryError
+            If no conferences are found or any upload fails.
+        """
+        conferences = self._get_all_conferences()
+        if not conferences:
+            raise RegistryError("No conference data found in local database.")
+
+        def _progress(msg: str) -> None:
+            if progress_callback:
+                progress_callback(msg)
+            logger.info(msg)
+
+        _progress(f"Found {len(conferences)} conference(s): {conferences}")
+
+        summaries: List[Dict[str, Any]] = []
+        for conf in conferences:
+            _progress(f"\n--- Uploading {conf} ---")
+            summary = self.upload(conference=conf, progress_callback=progress_callback)
+            summaries.append(summary)
+
+        return summaries
+
+    def download_all(
+        self,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Download data for **all** conference tags in the registry.
+
+        Lists available tags and downloads every conference-level tag
+        (i.e. tags without a year suffix).
+
+        Parameters
+        ----------
+        progress_callback : callable, optional
+            Function called with status messages during download.
+
+        Returns
+        -------
+        list of dict
+            Download summaries, one per conference tag.
+
+        Raises
+        ------
+        RegistryError
+            If no tags are found or any download fails.
+        """
+        tags = self.list_tags()
+        if not tags:
+            raise RegistryError("No tags found in registry.")
+
+        def _progress(msg: str) -> None:
+            if progress_callback:
+                progress_callback(msg)
+            logger.info(msg)
+
+        _progress(f"Found {len(tags)} tag(s) in registry")
+
+        summaries: List[Dict[str, Any]] = []
+        for tag in sorted(tags):
+            _progress(f"\n--- Downloading {tag} ---")
+            # Derive conference from tag (tag format: "conference" or "conference-year")
+            parts = tag.rsplit("-", 1)
+            if len(parts) == 2 and parts[1].isdigit():
+                conf = parts[0]
+                yr = int(parts[1])
+            else:
+                conf = tag
+                yr = None
+            summary = self.download(
+                conference=conf,
+                year=yr,
+                tag=tag,
+                progress_callback=progress_callback,
+            )
+            summaries.append(summary)
+
+        return summaries
 
     def get_artifact_info(self, tag: str) -> Dict[str, Any]:
         """

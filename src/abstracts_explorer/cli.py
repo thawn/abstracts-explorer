@@ -1544,18 +1544,29 @@ def registry_upload_command(args: argparse.Namespace) -> int:
 
     try:
         client = RegistryClient(repository=repository, token=token)
-        summary = client.upload(
-            conference=args.conference,
-            year=args.year,
-            tag=args.tag,
-            progress_callback=lambda msg: print(f"  {msg}"),
-        )
 
-        print("\n✅ Upload complete!")
-        print(f"  📄 Papers:     {summary.get('paper_count', 0)}")
-        print(f"  🧮 Embeddings: {summary.get('embedding_count', 0)}")
-        print(f"  📅 Years:      {summary.get('years', [])}")
-        print(f"  🏷️  Tag:        {summary.get('tag', '')}")
+        if args.conference == "all":
+            summaries = client.upload_all(
+                progress_callback=lambda msg: print(f"  {msg}"),
+            )
+            print(f"\n✅ Upload complete! Uploaded {len(summaries)} conference(s).")
+            for s in summaries:
+                print(
+                    f"  📦 {s.get('conference', '')}: {s.get('paper_count', 0)} papers, "
+                    f"{s.get('embedding_count', 0)} embeddings (tag: {s.get('tag', '')})"
+                )
+        else:
+            summary = client.upload(
+                conference=args.conference,
+                year=args.year,
+                tag=args.tag,
+                progress_callback=lambda msg: print(f"  {msg}"),
+            )
+            print("\n✅ Upload complete!")
+            print(f"  📄 Papers:     {summary.get('paper_count', 0)}")
+            print(f"  🧮 Embeddings: {summary.get('embedding_count', 0)}")
+            print(f"  📅 Years:      {summary.get('years', [])}")
+            print(f"  🏷️  Tag:        {summary.get('tag', '')}")
 
         return 0
 
@@ -1619,7 +1630,10 @@ def registry_download_command(args: argparse.Namespace) -> int:
     print("=" * 70)
 
     if not args.yes:
-        print(f"\n⚠️  Warning: This will replace existing data for {args.conference}/{year_display}!")
+        scope = f"{args.conference}/{year_display}"
+        if args.conference == "all":
+            scope = "all conferences"
+        print(f"\n⚠️  Warning: This will replace existing data for {scope}!")
         try:
             confirm = input("Continue? [y/N]: ").strip().lower()
         except (EOFError, KeyboardInterrupt):
@@ -1631,21 +1645,32 @@ def registry_download_command(args: argparse.Namespace) -> int:
 
     try:
         client = RegistryClient(repository=repository, token=token)
-        summary = client.download(
-            conference=args.conference,
-            year=args.year,
-            tag=args.tag,
-            progress_callback=lambda msg: print(f"  {msg}"),
-        )
 
-        print("\n✅ Download complete!")
-        print(f"  📄 Papers:     {summary.get('paper_count', 0)}")
-        print(f"  🧮 Embeddings: {summary.get('embedding_count', 0)}")
-        print(f"  📅 Years:      {summary.get('years', [])}")
+        if args.conference == "all":
+            summaries = client.download_all(
+                progress_callback=lambda msg: print(f"  {msg}"),
+            )
+            print(f"\n✅ Download complete! Downloaded {len(summaries)} artifact(s).")
+            for s in summaries:
+                print(
+                    f"  📦 {s.get('conference', '')}: {s.get('paper_count', 0)} papers, "
+                    f"{s.get('embedding_count', 0)} embeddings"
+                )
+        else:
+            summary = client.download(
+                conference=args.conference,
+                year=args.year,
+                tag=args.tag,
+                progress_callback=lambda msg: print(f"  {msg}"),
+            )
+            print("\n✅ Download complete!")
+            print(f"  📄 Papers:     {summary.get('paper_count', 0)}")
+            print(f"  🧮 Embeddings: {summary.get('embedding_count', 0)}")
+            print(f"  📅 Years:      {summary.get('years', [])}")
 
-        metadata = summary.get("metadata", {})
-        if metadata:
-            print(f"\n  ℹ️  Artifact version: {metadata.get('version', 'unknown')}")
+            metadata = summary.get("metadata", {})
+            if metadata:
+                print(f"\n  ℹ️  Artifact version: {metadata.get('version', 'unknown')}")
 
         return 0
 
@@ -1704,9 +1729,12 @@ def registry_list_command(args: argparse.Namespace) -> int:
                 years = annotations.get("com.abstracts-explorer.years", "unknown")
                 papers = annotations.get("com.abstracts-explorer.paper-count", "?")
                 embeddings = annotations.get("com.abstracts-explorer.embedding-count", "?")
+                emb_model = annotations.get("com.abstracts-explorer.embedding-model", "")
                 print(f"  Version:    {version}")
                 print(f"  Conference: {conference}")
                 print(f"  Years:      {years}")
+                if emb_model:
+                    print(f"  Model:      {emb_model}")
                 print(f"  📄 Papers:     {papers}")
                 print(f"  🧮 Embeddings: {embeddings}")
 
@@ -2494,6 +2522,8 @@ to prevent inconsistent data between instances.  When --year is omitted,
 all available years for the conference are uploaded/downloaded together
 with each year stored as its own pair of OCI layers.
 
+Use --conference all to upload/download all available conferences at once.
+
 Sub-commands:
   upload     Upload data for a conference (and optionally a year) to registry
   download   Download data for a conference (and optionally a year) from registry
@@ -2551,7 +2581,7 @@ Examples:
         "-c",
         type=str,
         required=True,
-        help="Conference name (e.g., neurips, iclr)",
+        help="Conference name (e.g., neurips, iclr) or 'all' for all conferences",
     )
     registry_upload_parser.add_argument(
         "--year",
@@ -2579,7 +2609,7 @@ Examples:
         "-c",
         type=str,
         required=True,
-        help="Conference name (e.g., neurips, iclr)",
+        help="Conference name (e.g., neurips, iclr) or 'all' for all available tags",
     )
     registry_download_parser.add_argument(
         "--year",
