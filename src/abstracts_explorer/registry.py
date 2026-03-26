@@ -38,6 +38,7 @@ List available tags::
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -79,8 +80,6 @@ def _sanitize_model_name(model: str) -> str:
     str
         Tag-safe model name.
     """
-    import re
-
     safe = model.lower()
     safe = re.sub(r"[^a-z0-9._-]", "-", safe)
     # Collapse consecutive hyphens

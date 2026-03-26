@@ -130,7 +130,7 @@ class TestBuildTag:
 
     def test_tag_conference_only_with_model(self):
         """Conference-only tag includes the embedding model."""
-        assert _build_tag("neurips", embedding_model="text-embedding-ada-002") == ("neurips_text-embedding-ada-002")
+        assert _build_tag("neurips", embedding_model="text-embedding-ada-002") == "neurips_text-embedding-ada-002"
 
     def test_tag_with_no_model(self):
         """Passing None or empty model behaves like no model."""
