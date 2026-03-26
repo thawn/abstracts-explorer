@@ -1518,6 +1518,7 @@ def registry_upload_command(args: argparse.Namespace) -> int:
     config = get_config()
     repository = args.repository or config.registry_repository
     token = args.token or config.github_token
+    args.conference = args.conference.lower()
 
     if not repository:
         print(
@@ -1604,6 +1605,7 @@ def registry_download_command(args: argparse.Namespace) -> int:
     config = get_config()
     repository = args.repository or config.registry_repository
     token = args.token or config.github_token
+    args.conference = args.conference.lower()
 
     if not repository:
         print(

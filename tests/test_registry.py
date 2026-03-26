@@ -1405,3 +1405,47 @@ class TestCLICommands:
             result = main()
 
         assert result == 1
+
+    def test_registry_upload_conference_case_insensitive(self, capsys):
+        """Upload treats conference name as case-insensitive (e.g. 'ALL' == 'all')."""
+        from abstracts_explorer.cli import registry_upload_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/owner/repo",
+            token="test-token",
+            conference="ALL",
+            year=None,
+            tag=None,
+        )
+
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.upload_all.return_value = []
+
+            result = registry_upload_command(args)
+
+        assert result == 0
+        mock_instance.upload_all.assert_called_once()
+
+    def test_registry_download_conference_case_insensitive(self, capsys):
+        """Download treats conference name as case-insensitive (e.g. 'ALL' == 'all')."""
+        from abstracts_explorer.cli import registry_download_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/owner/repo",
+            token="test-token",
+            conference="ALL",
+            year=None,
+            tag=None,
+            yes=True,
+            embedding_model=None,
+        )
+
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.download_all.return_value = []
+
+            result = registry_download_command(args)
+
+        assert result == 0
+        mock_instance.download_all.assert_called_once()
