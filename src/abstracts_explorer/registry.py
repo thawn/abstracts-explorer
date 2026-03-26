@@ -337,7 +337,7 @@ class RegistryClient:
                     )
                     db._session.commit()  # type: ignore[union-attr]
             except Exception:
-                logger.warning("Failed to roll back paper DB import", exc_info=True)
+                logger.warning("Failed to roll back paper DB import after embedding failure", exc_info=True)
             raise RegistryError(
                 f"Embedding import failed for {conference}/{year}: {embed_err}. "
                 "Paper DB changes have been rolled back."

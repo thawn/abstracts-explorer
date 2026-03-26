@@ -933,11 +933,11 @@ class TestUploadDownload:
         # Create fake pulled files for each download
         source_db = _populate_test_db(tmp_path / "source.db")
 
-        # For iclr-2025 tag (alphabetically first)
-        papers_i = tmp_path / "pull_i" / "papers-2025.db"
+        # For iclr-2024 tag (alphabetically first)
+        papers_i = tmp_path / "pull_i" / "papers-2024.db"
         papers_i.parent.mkdir()
         source_db.export_papers_to_sqlite(papers_i, "iclr", 2024)
-        emb_i = tmp_path / "pull_i" / "embeddings-2025.json"
+        emb_i = tmp_path / "pull_i" / "embeddings-2024.json"
         emb_i.write_text(json.dumps({"ids": ["b"], "documents": ["d"], "metadatas": [{}], "embeddings": [[0.2]]}))
 
         # For neurips-2024 tag
@@ -955,8 +955,8 @@ class TestUploadDownload:
 
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
-            mock_oras.get_tags.return_value = ["neurips-2024", "iclr-2025"]
-            # Side effect returns files in order of download (sorted tags: iclr-2025, neurips-2024)
+            mock_oras.get_tags.return_value = ["neurips-2024", "iclr-2024"]
+            # Side effect returns files in order of download (sorted tags: iclr-2024, neurips-2024)
             mock_oras.pull.side_effect = [
                 [str(papers_i), str(emb_i)],  # first call: iclr-2025
                 [str(papers_n), str(emb_n)],  # second call: neurips-2024
