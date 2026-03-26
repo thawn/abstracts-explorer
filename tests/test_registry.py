@@ -517,6 +517,33 @@ class TestEmbeddingsExportImport:
         call_kwargs = mock_collection.get.call_args[1]
         assert call_kwargs["where"] == {"$and": [{"conference": "neurips"}, {"year": "2024"}]}
 
+    def test_export_embeddings_converts_ndarray(self):
+        """Numpy ndarrays in embeddings are converted to plain lists (JSON-serializable)."""
+        import json
+
+        import numpy as np
+
+        mock_collection = MagicMock()
+        mock_collection.get.return_value = {
+            "ids": ["id1"],
+            "documents": ["doc1"],
+            "metadatas": [{"conference": "neurips", "year": "2024"}],
+            "embeddings": [np.array([0.1, 0.2, 0.3])],
+        }
+
+        from abstracts_explorer.embeddings import EmbeddingsManager
+
+        em = EmbeddingsManager.__new__(EmbeddingsManager)
+        em._collection = mock_collection
+
+        result = em.export_embeddings("neurips", 2024)
+
+        # Must be JSON-serializable (no ndarray objects)
+        serialized = json.dumps(result)
+        assert serialized is not None
+        # Values should match
+        assert result["embeddings"] == [[0.1, 0.2, 0.3]]
+
     def test_import_embeddings(self):
         """Embeddings are imported with replace semantics."""
         mock_collection = MagicMock()

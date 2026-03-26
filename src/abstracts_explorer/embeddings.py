@@ -1037,7 +1037,8 @@ class EmbeddingsManager:
         -------
         dict
             Dictionary containing ``ids``, ``documents``, ``metadatas``, and
-            ``embeddings`` lists.
+            ``embeddings`` lists.  Embedding vectors are converted to plain
+            Python lists so the returned dict is always JSON-serializable.
 
         Raises
         ------
@@ -1054,11 +1055,16 @@ class EmbeddingsManager:
                     ]
                 },
             )
+            embeddings = results.get("embeddings", [])
+            # ChromaDB may return embeddings as numpy ndarrays; convert to plain lists
+            # so the dict is always JSON-serializable.
+            if embeddings is not None:
+                embeddings = [e.tolist() if hasattr(e, "tolist") else list(e) for e in embeddings]
             return {
                 "ids": results.get("ids", []),
                 "documents": results.get("documents", []),
                 "metadatas": results.get("metadatas", []),
-                "embeddings": results.get("embeddings", []),
+                "embeddings": embeddings,
             }
         except Exception as e:
             raise EmbeddingsError(f"Failed to export embeddings: {str(e)}") from e
