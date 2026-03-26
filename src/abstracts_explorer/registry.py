@@ -501,6 +501,7 @@ class RegistryClient:
                 files=files,
                 manifest_config=str(config_path),
                 manifest_annotations=manifest_annotations,
+                disable_path_validation=True,
             )
 
             _progress(f"Successfully pushed {target}")

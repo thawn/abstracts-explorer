@@ -976,6 +976,8 @@ class TestUploadDownload:
         push_kwargs = mock_oras.push.call_args[1]
         annotations = push_kwargs.get("manifest_annotations", {})
         assert annotations.get("com.abstracts-explorer.embedding-model") == "text-embedding-ada-002"
+        # disable_path_validation must be True so temp-dir blobs are accepted
+        assert push_kwargs.get("disable_path_validation") is True
 
     def test_upload_all_conferences(self, tmp_path):
         """upload_all uploads data for all conferences."""
