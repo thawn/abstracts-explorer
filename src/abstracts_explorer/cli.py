@@ -1496,7 +1496,7 @@ def eval_clear_command(args: argparse.Namespace) -> int:
 
 def registry_upload_command(args: argparse.Namespace) -> int:
     """
-    Upload data for a conference and year to an OCI-compatible container registry.
+    Upload data for a conference (and optionally a specific year) to an OCI-compatible container registry.
 
     Parameters
     ----------
@@ -1505,7 +1505,7 @@ def registry_upload_command(args: argparse.Namespace) -> int:
         - repository: OCI repository path
         - token: Authentication token
         - conference: Conference name
-        - year: Conference year
+        - year: Conference year (optional; all years if omitted)
         - tag: Optional custom tag
 
     Returns
@@ -1537,7 +1537,7 @@ def registry_upload_command(args: argparse.Namespace) -> int:
     print("=" * 70)
     print(f"Repository:     {repository}")
     print(f"Conference:     {args.conference}")
-    print(f"Year:           {args.year}")
+    print(f"Year:           {args.year if args.year else 'all'}")
     if args.tag:
         print(f"Tag:            {args.tag}")
     print("=" * 70)
@@ -1554,6 +1554,7 @@ def registry_upload_command(args: argparse.Namespace) -> int:
         print("\n✅ Upload complete!")
         print(f"  📄 Papers:     {summary.get('paper_count', 0)}")
         print(f"  🧮 Embeddings: {summary.get('embedding_count', 0)}")
+        print(f"  📅 Years:      {summary.get('years', [])}")
         print(f"  🏷️  Tag:        {summary.get('tag', '')}")
 
         return 0
@@ -1569,7 +1570,7 @@ def registry_upload_command(args: argparse.Namespace) -> int:
 
 def registry_download_command(args: argparse.Namespace) -> int:
     """
-    Download data for a conference and year from an OCI-compatible container registry.
+    Download data for a conference (and optionally a specific year) from an OCI-compatible container registry.
 
     Parameters
     ----------
@@ -1578,7 +1579,7 @@ def registry_download_command(args: argparse.Namespace) -> int:
         - repository: OCI repository path
         - token: Authentication token
         - conference: Conference name
-        - year: Conference year
+        - year: Conference year (optional; all years if omitted)
         - tag: Optional custom tag
         - yes: Skip confirmation prompt
 
@@ -1607,17 +1608,18 @@ def registry_download_command(args: argparse.Namespace) -> int:
         )
         return 1
 
+    year_display = str(args.year) if args.year else "all"
     print("Abstracts Explorer - Registry Download")
     print("=" * 70)
     print(f"Repository:     {repository}")
     print(f"Conference:     {args.conference}")
-    print(f"Year:           {args.year}")
+    print(f"Year:           {year_display}")
     if args.tag:
         print(f"Tag:            {args.tag}")
     print("=" * 70)
 
     if not args.yes:
-        print(f"\n⚠️  Warning: This will replace existing data for {args.conference}/{args.year}!")
+        print(f"\n⚠️  Warning: This will replace existing data for {args.conference}/{year_display}!")
         try:
             confirm = input("Continue? [y/N]: ").strip().lower()
         except (EOFError, KeyboardInterrupt):
@@ -1639,6 +1641,7 @@ def registry_download_command(args: argparse.Namespace) -> int:
         print("\n✅ Download complete!")
         print(f"  📄 Papers:     {summary.get('paper_count', 0)}")
         print(f"  🧮 Embeddings: {summary.get('embedding_count', 0)}")
+        print(f"  📅 Years:      {summary.get('years', [])}")
 
         metadata = summary.get("metadata", {})
         if metadata:
@@ -1698,12 +1701,12 @@ def registry_list_command(args: argparse.Namespace) -> int:
             if annotations:
                 version = annotations.get("com.abstracts-explorer.version", "unknown")
                 conference = annotations.get("com.abstracts-explorer.conference", "unknown")
-                year = annotations.get("com.abstracts-explorer.year", "unknown")
+                years = annotations.get("com.abstracts-explorer.years", "unknown")
                 papers = annotations.get("com.abstracts-explorer.paper-count", "?")
                 embeddings = annotations.get("com.abstracts-explorer.embedding-count", "?")
                 print(f"  Version:    {version}")
                 print(f"  Conference: {conference}")
-                print(f"  Year:       {year}")
+                print(f"  Years:      {years}")
                 print(f"  📄 Papers:     {papers}")
                 print(f"  🧮 Embeddings: {embeddings}")
 
@@ -2487,16 +2490,22 @@ Upload and download paper databases, embeddings, and clustering cache
 to/from OCI-compatible container registries like GitHub Container Registry.
 
 Data is always uploaded/downloaded as a complete unit per conference and year
-to prevent inconsistent data between instances.
+to prevent inconsistent data between instances.  When --year is omitted,
+all available years for the conference are uploaded/downloaded together
+with each year stored as its own pair of OCI layers.
 
 Sub-commands:
-  upload     Upload data for a conference and year to registry
-  download   Download data for a conference and year from registry
+  upload     Upload data for a conference (and optionally a year) to registry
+  download   Download data for a conference (and optionally a year) from registry
   list       List available tags in registry
 
 Examples:
   # Upload NeurIPS 2024 data to GitHub Container Registry
   abstracts-explorer registry upload --conference neurips --year 2024 \\
+    --repository ghcr.io/owner/abstracts-data
+
+  # Upload all NeurIPS years
+  abstracts-explorer registry upload --conference neurips \\
     --repository ghcr.io/owner/abstracts-data
 
   # Download NeurIPS 2024 data from registry
@@ -2533,7 +2542,7 @@ Examples:
     # registry upload
     registry_upload_parser = registry_subparsers.add_parser(
         "upload",
-        help="Upload data for a conference and year to registry",
+        help="Upload data for a conference (and optionally a specific year) to registry",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     _add_registry_args(registry_upload_parser)
@@ -2548,20 +2557,20 @@ Examples:
         "--year",
         "-y",
         type=int,
-        required=True,
-        help="Conference year (e.g., 2024)",
+        default=None,
+        help="Conference year (e.g., 2024). If omitted, all available years are uploaded.",
     )
     registry_upload_parser.add_argument(
         "--tag",
         type=str,
         default=None,
-        help="Custom tag (default: derived from conference and year, e.g. neurips-2024)",
+        help="Custom tag (default: derived from conference and year, e.g. neurips-2024 or neurips)",
     )
 
     # registry download
     registry_download_parser = registry_subparsers.add_parser(
         "download",
-        help="Download data for a conference and year from registry",
+        help="Download data for a conference (and optionally a specific year) from registry",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     _add_registry_args(registry_download_parser)
@@ -2576,14 +2585,14 @@ Examples:
         "--year",
         "-y",
         type=int,
-        required=True,
-        help="Conference year (e.g., 2024)",
+        default=None,
+        help="Conference year (e.g., 2024). If omitted, all years in the artifact are downloaded.",
     )
     registry_download_parser.add_argument(
         "--tag",
         type=str,
         default=None,
-        help="Custom tag (default: derived from conference and year, e.g. neurips-2024)",
+        help="Custom tag (default: derived from conference and year, e.g. neurips-2024 or neurips)",
     )
     registry_download_parser.add_argument(
         "--yes",

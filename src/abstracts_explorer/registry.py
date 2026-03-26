@@ -6,12 +6,13 @@ This module provides functionality to push and pull abstracts-explorer data arti
 such as GitHub Container Registry (ghcr.io).
 
 Artifacts are pushed and pulled using the `oras <https://oras-project.github.io/oras-py/>`_
-Python SDK. Each artifact is tagged by conference and year (e.g. ``neurips-2024``) and
-always contains the paper database, embedding database, and clustering cache together.
+Python SDK. Each artifact is tagged by conference (e.g. ``neurips``) or by conference
+and year (e.g. ``neurips-2024``).  A conference-only tag contains all available years
+with each year stored as its own pair of OCI layers (paper DB + embeddings).
 
 Examples
 --------
-Upload data to GitHub Container Registry::
+Upload data for a specific year::
 
     from abstracts_explorer.registry import RegistryClient
 
@@ -20,6 +21,10 @@ Upload data to GitHub Container Registry::
         token="ghp_xxxx",
     )
     client.upload(conference="neurips", year=2024)
+
+Upload all available years for a conference::
+
+    client.upload(conference="neurips")
 
 Download data from the registry::
 
@@ -57,24 +62,27 @@ class RegistryError(Exception):
     pass
 
 
-def _build_tag(conference: str, year: int) -> str:
+def _build_tag(conference: str, year: Optional[int] = None) -> str:
     """
-    Build an OCI tag from conference name and year.
+    Build an OCI tag from conference name and optional year.
 
     Parameters
     ----------
     conference : str
         Conference name.
-    year : int
-        Conference year.
+    year : int, optional
+        Conference year.  When ``None``, the tag contains only the
+        conference name (e.g. ``neurips``).
 
     Returns
     -------
     str
-        Tag string (e.g. ``neurips-2024``).
+        Tag string (e.g. ``neurips-2024`` or ``neurips``).
     """
     safe_name = conference.lower().replace(" ", "-").replace("/", "-").replace("@", "-")
-    return f"{safe_name}-{year}"
+    if year is not None:
+        return f"{safe_name}-{year}"
+    return safe_name
 
 
 class RegistryClient:
@@ -87,6 +95,9 @@ class RegistryClient:
     The smallest unit of upload/download is a **conference + year** combination.
     Each artifact always contains the paper database, embeddings, and clustering
     cache together to prevent inconsistent data.
+
+    When ``year`` is omitted, all available years for the conference are uploaded
+    or downloaded, with each year stored as its own pair of OCI layers.
 
     Parameters
     ----------
@@ -149,35 +160,163 @@ class RegistryClient:
         except Exception as e:
             raise RegistryError(f"Failed to list tags: {e}") from e
 
-    def upload(
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _get_years_for_conference(conference: str) -> List[int]:
+        """
+        Return the distinct years available in the local database for *conference*.
+
+        Parameters
+        ----------
+        conference : str
+            Conference name.
+
+        Returns
+        -------
+        list of int
+            Sorted list of years.
+        """
+        from .database import DatabaseManager
+
+        with DatabaseManager() as db:
+            db.create_tables()
+            return db.get_years_for_conference(conference)
+
+    def _export_year(
         self,
         conference: str,
         year: int,
+        temp_dir: Path,
+        progress: Callable[[str], None],
+    ) -> Dict[str, Any]:
+        """
+        Export paper DB and embeddings for a single conference+year.
+
+        Returns a dict with ``paper_db_path``, ``embeddings_path``,
+        ``paper_count``, and ``embedding_count``.
+        """
+        from .database import DatabaseManager
+        from .embeddings import EmbeddingsManager
+
+        # --- paper DB ---
+        progress(f"Exporting paper database for {conference}/{year}...")
+        paper_db_path = temp_dir / f"papers-{year}.db"
+        with DatabaseManager() as db:
+            db.create_tables()
+            paper_count = db.export_papers_to_sqlite(paper_db_path, conference, year)
+
+        if paper_count == 0:
+            raise RegistryError(f"No papers found for {conference}/{year}. Download the conference data first.")
+
+        progress(f"  Exported {paper_count} papers")
+
+        # --- embeddings ---
+        progress(f"Exporting embeddings for {conference}/{year}...")
+        em = EmbeddingsManager()
+        embeddings_data = em.export_embeddings(conference, year)
+        embedding_count = len(embeddings_data.get("ids", []))
+
+        if embedding_count == 0:
+            raise RegistryError(
+                f"No embeddings found for {conference}/{year}."
+                " Create embeddings first with 'abstracts-explorer create-embeddings'."
+            )
+
+        embeddings_path = temp_dir / f"embeddings-{year}.json"
+        embeddings_path.write_text(json.dumps(embeddings_data))
+        progress(f"  Exported {embedding_count} embeddings")
+
+        return {
+            "paper_db_path": paper_db_path,
+            "embeddings_path": embeddings_path,
+            "paper_count": paper_count,
+            "embedding_count": embedding_count,
+        }
+
+    def _import_year(
+        self,
+        conference: str,
+        year: int,
+        paper_db_file: Path,
+        embeddings_file: Path,
+        progress: Callable[[str], None],
+    ) -> Dict[str, int]:
+        """
+        Import paper DB and embeddings for a single conference+year.
+
+        Returns a dict with ``paper_count`` and ``embedding_count``.
+        """
+        from .database import DatabaseManager
+        from .embeddings import EmbeddingsManager
+
+        result: Dict[str, int] = {}
+
+        # --- paper DB ---
+        if paper_db_file.exists():
+            progress(f"Importing paper database for {conference}/{year}...")
+            with DatabaseManager() as db:
+                db.create_tables()
+                paper_count = db.import_papers_from_sqlite(paper_db_file, conference, year)
+            progress(f"  Imported {paper_count} papers")
+            result["paper_count"] = paper_count
+        else:
+            result["paper_count"] = 0
+
+        # --- embeddings ---
+        if embeddings_file.exists():
+            progress(f"Importing embeddings for {conference}/{year}...")
+            embeddings_data = json.loads(embeddings_file.read_text())
+            em = EmbeddingsManager()
+            embedding_count = em.import_embeddings(embeddings_data, conference, year)
+            progress(f"  Imported {embedding_count} embeddings")
+            result["embedding_count"] = embedding_count
+        else:
+            result["embedding_count"] = 0
+
+        return result
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def upload(
+        self,
+        conference: str,
+        year: Optional[int] = None,
         tag: Optional[str] = None,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> Dict[str, Any]:
         """
-        Upload data for a conference and year to the registry.
+        Upload data for a conference (and optionally a specific year) to the registry.
 
         Packages the paper database, embeddings, and clustering cache as OCI
-        layers and pushes them together. All three must be present; an error
-        is raised if any data is missing.
+        layers and pushes them together.  All three must be present for every
+        year; an error is raised if any data is missing.
+
+        When *year* is ``None``, all years available in the local database for
+        the given conference are uploaded.  Each year is stored as its own pair
+        of layers (paper DB + embeddings) so that individual years can be
+        identified inside the manifest.
 
         Parameters
         ----------
         conference : str
             Conference name (e.g. ``neurips``).
-        year : int
-            Conference year (e.g. ``2024``).
+        year : int, optional
+            Conference year (e.g. ``2024``).  When ``None``, all available
+            years are uploaded.
         tag : str, optional
-            Custom tag. If ``None``, derived from conference and year.
+            Custom tag.  If ``None``, derived from conference and year.
         progress_callback : callable, optional
             Function called with status messages during upload.
 
         Returns
         -------
         dict
-            Upload summary with paper count, embedding count, and tag.
+            Upload summary with paper count, embedding count, years, and tag.
 
         Raises
         ------
@@ -194,62 +333,51 @@ class RegistryClient:
                 progress_callback(msg)
             logger.info(msg)
 
+        # Determine which years to upload
+        if year is not None:
+            years = [year]
+        else:
+            years = self._get_years_for_conference(conference)
+            if not years:
+                raise RegistryError(
+                    f"No data found for conference '{conference}'. Download the conference data first."
+                )
+            _progress(f"Found years for {conference}: {years}")
+
         temp_dir = Path(tempfile.mkdtemp())
         try:
-            # --- 1. Export paper database ---
-            _progress("Exporting paper database...")
-            paper_db_path = temp_dir / "papers.db"
+            files: List[str] = []
+            total_papers = 0
+            total_embeddings = 0
 
-            from .database import DatabaseManager
+            for yr in years:
+                yr_data = self._export_year(conference, yr, temp_dir, _progress)
+                files.append(str(yr_data["paper_db_path"]))
+                files.append(str(yr_data["embeddings_path"]))
+                total_papers += yr_data["paper_count"]
+                total_embeddings += yr_data["embedding_count"]
 
-            with DatabaseManager() as db:
-                db.create_tables()
-                paper_count = db.export_papers_to_sqlite(paper_db_path, conference, year)
-
-            if paper_count == 0:
-                raise RegistryError(f"No papers found for {conference}/{year}. Download the conference data first.")
-            _progress(f"Exported {paper_count} papers")
-
-            # --- 2. Export embeddings ---
-            _progress("Exporting embeddings...")
-            from .embeddings import EmbeddingsManager
-
-            em = EmbeddingsManager()
-            embeddings_data = em.export_embeddings(conference, year)
-            embedding_count = len(embeddings_data.get("ids", []))
-
-            if embedding_count == 0:
-                raise RegistryError(
-                    f"No embeddings found for {conference}/{year}."
-                    " Create embeddings first with 'abstracts-explorer create-embeddings'."
-                )
-
-            embeddings_path = temp_dir / "embeddings.json"
-            embeddings_path.write_text(json.dumps(embeddings_data))
-            _progress(f"Exported {embedding_count} embeddings")
-
-            # --- 3. Build config metadata ---
+            # --- Build config metadata ---
             config_data = {
                 "version": __version__,
                 "conference": conference,
-                "year": year,
-                "paper_count": paper_count,
-                "embedding_count": embedding_count,
+                "years": years,
+                "paper_count": total_papers,
+                "embedding_count": total_embeddings,
             }
             config_path = temp_dir / "config.json"
             config_path.write_text(json.dumps(config_data, indent=2))
 
-            # --- 4. Push via oras ---
+            # --- Push via oras ---
             _progress("Uploading to registry...")
             target = f"{self.repository}:{tag}"
 
-            files = [str(paper_db_path), str(embeddings_path)]
             manifest_annotations = {
                 "com.abstracts-explorer.version": __version__,
                 "com.abstracts-explorer.conference": conference,
-                "com.abstracts-explorer.year": str(year),
-                "com.abstracts-explorer.paper-count": str(paper_count),
-                "com.abstracts-explorer.embedding-count": str(embedding_count),
+                "com.abstracts-explorer.years": ",".join(str(y) for y in years),
+                "com.abstracts-explorer.paper-count": str(total_papers),
+                "com.abstracts-explorer.embedding-count": str(total_embeddings),
             }
 
             self._client.push(
@@ -264,9 +392,9 @@ class RegistryClient:
             return {
                 "tag": tag,
                 "conference": conference,
-                "year": year,
-                "paper_count": paper_count,
-                "embedding_count": embedding_count,
+                "years": years,
+                "paper_count": total_papers,
+                "embedding_count": total_embeddings,
             }
 
         finally:
@@ -275,24 +403,28 @@ class RegistryClient:
     def download(
         self,
         conference: str,
-        year: int,
+        year: Optional[int] = None,
         tag: Optional[str] = None,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> Dict[str, Any]:
         """
-        Download data for a conference and year from the registry.
+        Download data for a conference (and optionally a specific year) from the registry.
 
         Pulls the paper database, embeddings, and clustering cache and
-        replaces existing local data for the specified conference and year.
+        replaces existing local data for the specified conference and year(s).
+
+        When *year* is ``None``, all years contained in the artifact are
+        downloaded.
 
         Parameters
         ----------
         conference : str
             Conference name (e.g. ``neurips``).
-        year : int
-            Conference year (e.g. ``2024``).
+        year : int, optional
+            Conference year (e.g. ``2024``).  When ``None``, all years
+            in the artifact are imported.
         tag : str, optional
-            Custom tag. If ``None``, derived from conference and year.
+            Custom tag.  If ``None``, derived from conference and year.
         progress_callback : callable, optional
             Function called with status messages during download.
 
@@ -323,64 +455,73 @@ class RegistryClient:
             pulled_files = self._client.pull(target=target, outdir=str(temp_dir))
             _progress(f"Downloaded {len(pulled_files)} files")
 
-            # Locate the expected files
-            paper_db_file = None
-            embeddings_file = None
-            config_file = None
-
-            for fpath in pulled_files:
-                p = Path(fpath)
-                if p.name.endswith(".db"):
-                    paper_db_file = p
-                elif p.name == "embeddings.json":
-                    embeddings_file = p
-                elif p.name == "config.json":
-                    config_file = p
-
             # Read config metadata if available
             metadata: Dict[str, Any] = {}
-            if config_file and config_file.exists():
-                metadata = json.loads(config_file.read_text())
-                _progress(f"Artifact version: {metadata.get('version', 'unknown')}")
+            for fpath in pulled_files:
+                p = Path(fpath)
+                if p.name == "config.json":
+                    metadata = json.loads(p.read_text())
+                    _progress(f"Artifact version: {metadata.get('version', 'unknown')}")
+                    break
 
-            summary: Dict[str, Any] = {
-                "tag": tag,
-                "conference": conference,
-                "year": year,
-                "metadata": metadata,
-            }
+            # --- 2. Group files by year ---
+            # Files are named papers-YYYY.db and embeddings-YYYY.json
+            # (or papers.db / embeddings.json for legacy single-year artifacts)
+            year_files: Dict[int, Dict[str, Path]] = {}
+            for fpath in pulled_files:
+                p = Path(fpath)
+                name = p.name
+                if name.startswith("papers-") and name.endswith(".db"):
+                    yr = int(name[len("papers-") : -len(".db")])
+                    year_files.setdefault(yr, {})["paper_db"] = p
+                elif name.startswith("embeddings-") and name.endswith(".json"):
+                    yr = int(name[len("embeddings-") : -len(".json")])
+                    year_files.setdefault(yr, {})["embeddings"] = p
+                elif name == "papers.db":
+                    # Legacy single-year format
+                    legacy_year = year or metadata.get("year")
+                    if legacy_year:
+                        year_files.setdefault(int(legacy_year), {})["paper_db"] = p
+                elif name == "embeddings.json":
+                    legacy_year = year or metadata.get("year")
+                    if legacy_year:
+                        year_files.setdefault(int(legacy_year), {})["embeddings"] = p
 
-            # --- 2. Import paper database ---
-            if paper_db_file and paper_db_file.exists():
-                _progress("Importing paper database...")
-                from .database import DatabaseManager
+            # If user requested a specific year, filter
+            if year is not None:
+                year_files = {yr: files for yr, files in year_files.items() if yr == year}
 
-                with DatabaseManager() as db:
-                    db.create_tables()
-                    paper_count = db.import_papers_from_sqlite(paper_db_file, conference, year)
-                _progress(f"Imported {paper_count} papers")
-                summary["paper_count"] = paper_count
-            else:
-                _progress("Warning: No paper database found in artifact")
-                summary["paper_count"] = 0
+            # --- 3. Import each year ---
+            total_papers = 0
+            total_embeddings = 0
+            imported_years: List[int] = []
 
-            # --- 3. Import embeddings ---
-            if embeddings_file and embeddings_file.exists():
-                _progress("Importing embeddings...")
-                embeddings_data = json.loads(embeddings_file.read_text())
+            for yr in sorted(year_files.keys()):
+                files = year_files[yr]
+                paper_db = files.get("paper_db")
+                embeddings = files.get("embeddings")
 
-                from .embeddings import EmbeddingsManager
+                if not paper_db or not embeddings:
+                    _progress(f"Warning: Incomplete data for {conference}/{yr}, skipping")
+                    continue
 
-                em = EmbeddingsManager()
-                embedding_count = em.import_embeddings(embeddings_data, conference, year)
-                _progress(f"Imported {embedding_count} embeddings")
-                summary["embedding_count"] = embedding_count
-            else:
-                _progress("Warning: No embeddings file found in artifact")
-                summary["embedding_count"] = 0
+                result = self._import_year(conference, yr, paper_db, embeddings, _progress)
+                total_papers += result["paper_count"]
+                total_embeddings += result["embedding_count"]
+                imported_years.append(yr)
+
+            if not imported_years:
+                _progress("Warning: No data found in artifact to import")
 
             _progress("Download complete!")
-            return summary
+            return {
+                "tag": tag,
+                "conference": conference,
+                "years": imported_years,
+                "paper_count": total_papers,
+                "embedding_count": total_embeddings,
+                "metadata": metadata,
+            }
 
         except RegistryError:
             raise

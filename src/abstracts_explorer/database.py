@@ -882,6 +882,39 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Failed to count authors: {str(e)}") from e
 
+    def get_years_for_conference(self, conference: str) -> List[int]:
+        """
+        Get distinct years available for a specific conference.
+
+        Parameters
+        ----------
+        conference : str
+            Conference name to query.
+
+        Returns
+        -------
+        list of int
+            Sorted list of distinct years for the conference.
+
+        Raises
+        ------
+        DatabaseError
+            If query fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            stmt = (
+                select(Paper.year)
+                .distinct()
+                .where(and_(Paper.conference == conference, Paper.year.isnot(None)))
+                .order_by(Paper.year)
+            )
+            return list(self._session.execute(stmt).scalars().all())
+        except Exception as e:
+            raise DatabaseError(f"Failed to get years for conference: {str(e)}") from e
+
     def get_filter_options(self, year: Optional[int] = None, conference: Optional[str] = None) -> dict:
         """
         Get distinct values for filterable fields (lightweight schema).
@@ -1949,10 +1982,11 @@ class DatabaseManager:
                     export_session.add(Paper(**paper_dict))
                     paper_count += 1
 
-                # Export clustering cache (all entries – they are small)
+                # Export only clustering cache entries matching conference+year
                 for entry in self._session.execute(select(ClusteringCache)).scalars():
-                    entry_dict = {c.name: getattr(entry, c.name) for c in ClusteringCache.__table__.columns}
-                    export_session.add(ClusteringCache(**entry_dict))
+                    if self._clustering_cache_matches_conference_year(entry, conference, year):
+                        entry_dict = {c.name: getattr(entry, c.name) for c in ClusteringCache.__table__.columns}
+                        export_session.add(ClusteringCache(**entry_dict))
 
                 # Export hierarchical label cache
                 for entry in self._session.execute(select(HierarchicalLabelCache)).scalars():
@@ -1974,6 +2008,42 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Failed to export papers: {str(e)}") from e
 
+    @staticmethod
+    def _clustering_cache_matches_conference_year(entry: ClusteringCache, conference: str, year: int) -> bool:
+        """
+        Check whether a ClusteringCache entry is scoped to a specific conference and year.
+
+        An entry matches if its ``clustering_params`` JSON contains a
+        ``conferences`` list that includes *conference* **and** a ``years``
+        list that includes *year*.
+
+        Parameters
+        ----------
+        entry : ClusteringCache
+            The cache entry to check.
+        conference : str
+            Conference name.
+        year : int
+            Conference year.
+
+        Returns
+        -------
+        bool
+            ``True`` if the entry matches the given conference and year.
+        """
+        import json as _json
+
+        if not entry.clustering_params:
+            return False
+        try:
+            params = _json.loads(entry.clustering_params)
+        except (ValueError, TypeError):
+            return False
+
+        conferences = params.get("conferences", [])
+        years = params.get("years", [])
+        return conference in conferences and year in years
+
     def import_papers_from_sqlite(
         self,
         sqlite_path: "Path",
@@ -1983,8 +2053,10 @@ class DatabaseManager:
         """
         Import papers for a given conference and year from a SQLite file.
 
-        Existing papers, clustering cache, hierarchical labels, and embeddings
-        metadata for the given conference/year are **replaced** (not merged).
+        Existing papers for the given conference/year are **replaced** (not
+        merged).  Clustering cache and hierarchical label cache entries that
+        match the conference and year are replaced.  Embeddings metadata is
+        validated for consistency (the embedding model must match).
 
         Parameters
         ----------
@@ -2003,7 +2075,7 @@ class DatabaseManager:
         Raises
         ------
         DatabaseError
-            If the import fails.
+            If the import fails or the embedding model is inconsistent.
         """
         if not self._session:
             raise DatabaseError("Not connected to database")
@@ -2016,14 +2088,38 @@ class DatabaseManager:
 
             paper_count = 0
             with Session(source_engine) as source_session:
+                # --- Validate EmbeddingsMetadata consistency ---
+                imported_meta = source_session.execute(select(EmbeddingsMetadata)).scalars().first()
+                if imported_meta:
+                    existing_meta = self._session.execute(select(EmbeddingsMetadata)).scalars().first()
+                    if existing_meta and existing_meta.embedding_model != imported_meta.embedding_model:
+                        raise DatabaseError(
+                            f"Embedding model mismatch: local database uses "
+                            f"'{existing_meta.embedding_model}' but imported data uses "
+                            f"'{imported_meta.embedding_model}'. Cannot import data "
+                            f"created with a different embedding model."
+                        )
+
                 # Delete existing papers for this conference+year
                 self._session.execute(delete(Paper).where(and_(Paper.conference == conference, Paper.year == year)))
 
-                # Delete existing clustering cache & hierarchical labels
-                # (full replacement – they depend on the overall corpus)
-                self._session.execute(delete(ClusteringCache))
-                self._session.execute(delete(HierarchicalLabelCache))
-                self._session.execute(delete(EmbeddingsMetadata))
+                # Delete only clustering cache entries that match the conference+year
+                for entry in self._session.execute(select(ClusteringCache)).scalars().all():
+                    if self._clustering_cache_matches_conference_year(entry, conference, year):
+                        self._session.delete(entry)
+
+                # Delete only hierarchical label cache entries whose
+                # embedding_model matches one from the imported data
+                imported_models = {
+                    e.embedding_model for e in source_session.execute(select(HierarchicalLabelCache)).scalars()
+                }
+                if imported_models:
+                    self._session.execute(
+                        delete(HierarchicalLabelCache).where(
+                            HierarchicalLabelCache.embedding_model.in_(imported_models)
+                        )
+                    )
+
                 self._session.commit()
 
                 # Import papers
@@ -2032,7 +2128,7 @@ class DatabaseManager:
                     self._session.add(Paper(**paper_dict))
                     paper_count += 1
 
-                # Import clustering cache
+                # Import clustering cache entries
                 for entry in source_session.execute(select(ClusteringCache)).scalars():
                     entry_dict = {c.name: getattr(entry, c.name) for c in ClusteringCache.__table__.columns}
                     self._session.add(ClusteringCache(**entry_dict))
@@ -2042,10 +2138,14 @@ class DatabaseManager:
                     entry_dict = {c.name: getattr(entry, c.name) for c in HierarchicalLabelCache.__table__.columns}
                     self._session.add(HierarchicalLabelCache(**entry_dict))
 
-                # Import embeddings metadata
-                for entry in source_session.execute(select(EmbeddingsMetadata)).scalars():
-                    entry_dict = {c.name: getattr(entry, c.name) for c in EmbeddingsMetadata.__table__.columns}
-                    self._session.add(EmbeddingsMetadata(**entry_dict))
+                # Import embeddings metadata (only if not already present)
+                if imported_meta:
+                    existing_meta = self._session.execute(select(EmbeddingsMetadata)).scalars().first()
+                    if not existing_meta:
+                        meta_dict = {
+                            c.name: getattr(imported_meta, c.name) for c in EmbeddingsMetadata.__table__.columns
+                        }
+                        self._session.add(EmbeddingsMetadata(**meta_dict))
 
                 self._session.commit()
 

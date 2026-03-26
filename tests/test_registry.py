@@ -89,6 +89,14 @@ class TestBuildTag:
         """Special characters are replaced with hyphens."""
         assert _build_tag("ML4PS/workshop", 2025) == "ml4ps-workshop-2025"
 
+    def test_conference_only_tag(self):
+        """Tag without year contains only the conference name."""
+        assert _build_tag("neurips") == "neurips"
+
+    def test_conference_only_tag_normalized(self):
+        """Conference-only tag is lowercased and sanitized."""
+        assert _build_tag("ML4PS/workshop") == "ml4ps-workshop"
+
 
 # ---------------------------------------------------------------------------
 # Tests: RegistryClient initialisation
@@ -276,6 +284,166 @@ class TestDatabaseExportImport:
         with pytest.raises(Exception, match="Not connected"):
             db.import_papers_from_sqlite(tmp_path / "source.db", "neurips", 2024)
 
+    def test_import_embedding_model_mismatch(self, tmp_path):
+        """Import raises error when embedding models don't match."""
+        from abstracts_explorer.db_models import EmbeddingsMetadata
+
+        # Create source database with one embedding model
+        db1 = _populate_test_db(tmp_path / "db1.db")
+        try:
+            db1._session.add(EmbeddingsMetadata(embedding_model="model-A"))
+            db1._session.commit()
+            export_path = tmp_path / "export.db"
+            db1.export_papers_to_sqlite(export_path, "neurips", 2024)
+        finally:
+            db1.close()
+
+        # Create target database with a different embedding model
+        target_path = tmp_path / "target.db"
+        db2 = _populate_test_db(target_path)
+        try:
+            db2._session.add(EmbeddingsMetadata(embedding_model="model-B"))
+            db2._session.commit()
+
+            with pytest.raises(Exception, match="Embedding model mismatch"):
+                db2.import_papers_from_sqlite(export_path, "neurips", 2024)
+        finally:
+            db2.close()
+
+    def test_import_embedding_model_consistent(self, tmp_path):
+        """Import succeeds when embedding models match."""
+        from abstracts_explorer.db_models import EmbeddingsMetadata
+
+        # Create source database
+        db1 = _populate_test_db(tmp_path / "db1.db")
+        try:
+            db1._session.add(EmbeddingsMetadata(embedding_model="model-A"))
+            db1._session.commit()
+            export_path = tmp_path / "export.db"
+            db1.export_papers_to_sqlite(export_path, "neurips", 2024)
+        finally:
+            db1.close()
+
+        # Create target database with same model
+        target_path = tmp_path / "target.db"
+        db2 = _populate_test_db(target_path)
+        try:
+            db2._session.add(EmbeddingsMetadata(embedding_model="model-A"))
+            db2._session.commit()
+
+            count = db2.import_papers_from_sqlite(export_path, "neurips", 2024)
+            assert count == 1
+        finally:
+            db2.close()
+
+    def test_import_embedding_metadata_not_overwritten(self, tmp_path):
+        """Existing embedding metadata is preserved when consistent."""
+        from abstracts_explorer.db_models import EmbeddingsMetadata
+
+        # Create source database
+        db1 = _populate_test_db(tmp_path / "db1.db")
+        try:
+            db1._session.add(EmbeddingsMetadata(embedding_model="model-A"))
+            db1._session.commit()
+            export_path = tmp_path / "export.db"
+            db1.export_papers_to_sqlite(export_path, "neurips", 2024)
+        finally:
+            db1.close()
+
+        # Create target database with same model
+        target_path = tmp_path / "target.db"
+        db2 = _populate_test_db(target_path)
+        try:
+            db2._session.add(EmbeddingsMetadata(embedding_model="model-A"))
+            db2._session.commit()
+
+            db2.import_papers_from_sqlite(export_path, "neurips", 2024)
+
+            # Verify only one metadata row remains (the existing one)
+            meta_count = db2._session.query(EmbeddingsMetadata).count()
+            assert meta_count == 1
+        finally:
+            db2.close()
+
+    def test_import_scoped_clustering_cache_deletion(self, tmp_path):
+        """Only clustering cache entries matching conference+year are deleted on import."""
+        from abstracts_explorer.db_models import ClusteringCache
+
+        db = _populate_test_db(tmp_path / "db.db")
+        try:
+            # Add clustering cache: one for neurips/2024, one for iclr/2024
+            import json as _json
+
+            db._session.add(
+                ClusteringCache(
+                    embedding_model="test-model",
+                    reduction_method="pca",
+                    n_components=2,
+                    clustering_method="kmeans",
+                    n_clusters=5,
+                    clustering_params=_json.dumps({"conferences": ["neurips"], "years": [2024]}),
+                    results_json="{}",
+                )
+            )
+            db._session.add(
+                ClusteringCache(
+                    embedding_model="test-model",
+                    reduction_method="pca",
+                    n_components=2,
+                    clustering_method="kmeans",
+                    n_clusters=5,
+                    clustering_params=_json.dumps({"conferences": ["iclr"], "years": [2024]}),
+                    results_json="{}",
+                )
+            )
+            db._session.commit()
+
+            # Export neurips 2024
+            export_path = tmp_path / "export.db"
+            db.export_papers_to_sqlite(export_path, "neurips", 2024)
+
+            # Import neurips 2024 - only the neurips entry should be deleted
+            db.import_papers_from_sqlite(export_path, "neurips", 2024)
+
+            remaining = db._session.query(ClusteringCache).all()
+            # iclr entry should survive, neurips entry replaced by imported one
+            params_list = [_json.loads(e.clustering_params) for e in remaining if e.clustering_params]
+            iclr_found = any(p.get("conferences") == ["iclr"] for p in params_list)
+            assert iclr_found, "The iclr clustering cache entry should be preserved"
+        finally:
+            db.close()
+
+    def test_import_unscoped_clustering_cache_preserved(self, tmp_path):
+        """Clustering cache entries without conference/year are preserved on import."""
+        from abstracts_explorer.db_models import ClusteringCache
+
+        db = _populate_test_db(tmp_path / "db.db")
+        try:
+            # Add a global (unscoped) clustering cache entry
+            db._session.add(
+                ClusteringCache(
+                    embedding_model="test-model",
+                    reduction_method="pca",
+                    n_components=2,
+                    clustering_method="kmeans",
+                    n_clusters=5,
+                    clustering_params=None,
+                    results_json="{}",
+                )
+            )
+            db._session.commit()
+
+            export_path = tmp_path / "export.db"
+            db.export_papers_to_sqlite(export_path, "neurips", 2024)
+            db.import_papers_from_sqlite(export_path, "neurips", 2024)
+
+            remaining = db._session.query(ClusteringCache).all()
+            # Global entry should survive (no conference/year match)
+            unscoped = [e for e in remaining if e.clustering_params is None]
+            assert len(unscoped) == 1, "Global clustering cache entry should be preserved"
+        finally:
+            db.close()
+
 
 # ---------------------------------------------------------------------------
 # Tests: EmbeddingsManager export/import
@@ -409,6 +577,7 @@ class TestUploadDownload:
         assert summary["paper_count"] == 1
         assert summary["embedding_count"] == 1
         assert summary["tag"] == "neurips-2024"
+        assert summary["years"] == [2024]
         mock_oras.push.assert_called_once()
 
     def test_upload_custom_tag(self, tmp_path):
@@ -463,6 +632,84 @@ class TestUploadDownload:
         assert len(messages) > 0
         assert any("Exporting" in m for m in messages)
 
+    def test_upload_conference_only(self, tmp_path):
+        """Upload without year uploads all available years."""
+        _populate_test_db(tmp_path / "test.db")
+
+        with patch("oras.client.OrasClient") as MockOras:
+            mock_oras = MockOras.return_value
+            mock_oras.push.return_value = Mock(status_code=201)
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
+
+        mock_em = MagicMock()
+        mock_em.export_embeddings.return_value = {
+            "ids": ["id1"],
+            "documents": ["doc1"],
+            "metadatas": [{}],
+            "embeddings": [[0.1]],
+        }
+
+        with patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em):
+            summary = client.upload(conference="neurips")
+
+        assert summary["tag"] == "neurips"
+        assert sorted(summary["years"]) == [2024, 2025]
+        mock_oras.push.assert_called_once()
+
+    def test_upload_conference_only_no_data(self, tmp_path):
+        """Upload without year fails when no data exists."""
+        _populate_test_db(tmp_path / "test.db")
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
+
+        with pytest.raises(RegistryError, match="No data found"):
+            client.upload(conference="icml")
+
+    def test_download_conference_only(self, tmp_path):
+        """Download without year imports all years in artifact."""
+        set_test_db(tmp_path / "target.db")
+
+        # Create fake multi-year pulled files
+        source_db_path = tmp_path / "source.db"
+        source_db = _populate_test_db(source_db_path)
+        papers_2024 = tmp_path / "papers-2024.db"
+        source_db.export_papers_to_sqlite(papers_2024, "neurips", 2024)
+        papers_2025 = tmp_path / "papers-2025.db"
+        source_db.export_papers_to_sqlite(papers_2025, "neurips", 2025)
+        source_db.close()
+
+        embeddings_2024 = tmp_path / "embeddings-2024.json"
+        embeddings_2024.write_text(
+            json.dumps({"ids": ["a"], "documents": ["d"], "metadatas": [{}], "embeddings": [[0.1]]})
+        )
+        embeddings_2025 = tmp_path / "embeddings-2025.json"
+        embeddings_2025.write_text(
+            json.dumps({"ids": ["b"], "documents": ["d"], "metadatas": [{}], "embeddings": [[0.2]]})
+        )
+
+        with patch("oras.client.OrasClient") as MockOras:
+            mock_oras = MockOras.return_value
+            mock_oras.pull.return_value = [
+                str(papers_2024),
+                str(embeddings_2024),
+                str(papers_2025),
+                str(embeddings_2025),
+            ]
+            client = RegistryClient("ghcr.io/owner/repo", token="token")
+
+        mock_em = MagicMock()
+        mock_em.import_embeddings.return_value = 1
+
+        set_test_db(tmp_path / "target.db")
+
+        with patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em):
+            summary = client.download(conference="neurips")
+
+        assert sorted(summary["years"]) == [2024, 2025]
+        assert summary["paper_count"] == 2  # 1 per year
+        assert mock_em.import_embeddings.call_count == 2
+
     def test_download_success(self, tmp_path):
         """Download imports paper database and embeddings."""
         set_test_db(tmp_path / "target.db")
@@ -470,7 +717,7 @@ class TestUploadDownload:
         # Create a fake paper db to be pulled
         source_db_path = tmp_path / "source.db"
         source_db = _populate_test_db(source_db_path)
-        export_path = tmp_path / "papers.db"
+        export_path = tmp_path / "papers-2024.db"
         source_db.export_papers_to_sqlite(export_path, "neurips", 2024)
         source_db.close()
 
@@ -481,7 +728,7 @@ class TestUploadDownload:
             "metadatas": [{"conference": "neurips", "year": "2024"}],
             "embeddings": [[0.1, 0.2]],
         }
-        embeddings_path = tmp_path / "embeddings.json"
+        embeddings_path = tmp_path / "embeddings-2024.json"
         embeddings_path.write_text(json.dumps(embeddings_data))
 
         with patch("oras.client.OrasClient") as MockOras:
@@ -500,6 +747,7 @@ class TestUploadDownload:
 
         assert summary["paper_count"] == 1
         assert summary["embedding_count"] == 1
+        assert 2024 in summary["years"]
         mock_em.import_embeddings.assert_called_once()
 
 
@@ -612,6 +860,7 @@ class TestCLICommands:
                 "tag": "neurips-2024",
                 "paper_count": 3,
                 "embedding_count": 3,
+                "years": [2024],
             }
 
             result = registry_upload_command(args)
@@ -658,7 +907,7 @@ class TestCLICommands:
                 "annotations": {
                     "com.abstracts-explorer.version": "1.0.0",
                     "com.abstracts-explorer.conference": "neurips",
-                    "com.abstracts-explorer.year": "2024",
+                    "com.abstracts-explorer.years": "2024",
                     "com.abstracts-explorer.paper-count": "100",
                     "com.abstracts-explorer.embedding-count": "100",
                 },
