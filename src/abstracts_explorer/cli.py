@@ -2577,21 +2577,21 @@ Sub-commands:
 Examples:
   # Upload NeurIPS 2024 data to GitHub Container Registry
   abstracts-explorer registry upload --conference neurips --year 2024 \\
-    --repository ghcr.io/owner/abstracts-data
+    --repository ghcr.io/thawn/abstracts-data
 
   # Upload all NeurIPS years
   abstracts-explorer registry upload --conference neurips \\
-    --repository ghcr.io/owner/abstracts-data
+    --repository ghcr.io/thawn/abstracts-data
 
   # Download NeurIPS 2024 data from registry
   abstracts-explorer registry download --conference neurips --year 2024 \\
-    --repository ghcr.io/owner/abstracts-data
+    --repository ghcr.io/thawn/abstracts-data
 
   # List available tags
-  abstracts-explorer registry list --repository ghcr.io/owner/abstracts-data
+  abstracts-explorer registry list --repository ghcr.io/thawn/abstracts-data
 
   # Inspect a specific tag
-  abstracts-explorer registry list --repository ghcr.io/owner/abstracts-data \\
+  abstracts-explorer registry list --repository ghcr.io/thawn/abstracts-data \\
     --tag neurips-2024
         """,
     )
@@ -2604,7 +2604,7 @@ Examples:
             "-r",
             type=str,
             default=None,
-            help="OCI repository (e.g., ghcr.io/owner/abstracts-data). "
+            help="OCI repository (e.g., ghcr.io/thawn/abstracts-data). "
             "Can also be set via REGISTRY_REPOSITORY env var.",
         )
         sub_parser.add_argument(

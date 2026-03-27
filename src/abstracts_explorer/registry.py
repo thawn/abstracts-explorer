@@ -17,7 +17,7 @@ Upload data for a specific year::
     from abstracts_explorer.registry import RegistryClient
 
     client = RegistryClient(
-        repository="ghcr.io/owner/abstracts-data",
+        repository="ghcr.io/thawn/abstracts-data",
         token="ghp_xxxx",
     )
     client.upload(conference="neurips", year=2024)
@@ -162,7 +162,7 @@ class RegistryClient:
     Parameters
     ----------
     repository : str
-        Full OCI repository path (e.g., ``ghcr.io/owner/abstracts-data``).
+        Full OCI repository path (e.g., ``ghcr.io/thawn/abstracts-data``).
     token : str, optional
         Authentication token (e.g., GitHub Personal Access Token).
         If not provided, will try the ``GITHUB_TOKEN`` environment variable.
@@ -174,7 +174,7 @@ class RegistryClient:
 
     Examples
     --------
-    >>> client = RegistryClient("ghcr.io/owner/abstracts-data", token="ghp_xxxx")
+    >>> client = RegistryClient("ghcr.io/thawn/abstracts-data", token="ghp_xxxx")
     >>> client.list_tags()
     ['neurips-2024', 'iclr-2025']
     """
@@ -184,7 +184,7 @@ class RegistryClient:
         if len(parts) < 2 or not parts[0] or not parts[1]:
             raise RegistryError(
                 f"Invalid repository format: '{repository}'. "
-                "Expected format: 'registry/owner/name' (e.g., 'ghcr.io/owner/abstracts-data')"
+                "Expected format: 'registry/owner/name' (e.g., 'ghcr.io/thawn/abstracts-data')"
             )
 
         self.registry = parts[0]

@@ -243,7 +243,7 @@ class Config:
         # Registry Settings
         # GitHub Personal Access Token for registry operations
         self.github_token = self._get_env("GITHUB_TOKEN", default="")
-        # OCI repository for data artifacts (e.g., 'ghcr.io/owner/abstracts-data')
+        # OCI repository for data artifacts (e.g., 'ghcr.io/thawn/abstracts-data')
         self.registry_repository = self._get_env("REGISTRY_REPOSITORY", default="")
 
     def _get_env(self, key: str, default: str = "") -> str:

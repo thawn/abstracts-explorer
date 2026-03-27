@@ -9,7 +9,7 @@ This eliminates the need to re-download paper data, regenerate embeddings, and r
 Data is packaged and pushed as [OCI artifacts](https://github.com/opencontainers/image-spec) using the [ORAS](https://oras.land/) protocol. Each artifact tag identifies a conference, year, and embedding model, for example:
 
 ```
-ghcr.io/owner/abstracts-data:neurips-2024_text-embedding-qwen3-embedding-4b
+ghcr.io/thawn/abstracts-data:neurips-2024_text-embedding-qwen3-embedding-4b
 ```
 
 Each uploaded artifact contains:
@@ -28,7 +28,7 @@ You can provide the token in three ways:
 
 ```bash
 GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
-REGISTRY_REPOSITORY=ghcr.io/owner/abstracts-data
+REGISTRY_REPOSITORY=ghcr.io/thawn/abstracts-data
 ```
 
 **2. Environment variable**
@@ -40,7 +40,7 @@ export GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
 **3. CLI flag**
 
 ```bash
-abstracts-explorer registry upload --token $GITHUB_TOKEN -r ghcr.io/owner/abstracts-data ...
+abstracts-explorer registry upload --token $GITHUB_TOKEN -r ghcr.io/thawn/abstracts-data ...
 ```
 
 ## Commands
@@ -59,7 +59,7 @@ abstracts-explorer registry upload [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `-r, --repository TEXT` | OCI repository (e.g. `ghcr.io/owner/abstracts-data`). Falls back to `REGISTRY_REPOSITORY` env var. |
+| `-r, --repository TEXT` | OCI repository (e.g. `ghcr.io/thawn/abstracts-data`). Falls back to `REGISTRY_REPOSITORY` env var. |
 | `--token TEXT` | Registry authentication token. Falls back to `GITHUB_TOKEN` env var. |
 | `-c, --conference TEXT` | Conference name to upload (e.g. `neurips`). Use `all` to upload every conference. Case-insensitive. |
 | `-y, --year INTEGER` | Year to upload. When omitted, all available years are uploaded. |
@@ -76,20 +76,20 @@ abstracts-explorer registry upload [OPTIONS]
 ```bash
 # Upload NeurIPS 2024 (tag derived automatically from embedding model)
 abstracts-explorer registry upload \
-  -r ghcr.io/owner/abstracts-data \
+  -r ghcr.io/thawn/abstracts-data \
   --token $GITHUB_TOKEN \
   --conference neurips \
   --year 2024
 
 # Upload all available NeurIPS years (pushes individual year tags then an all-years tag)
 abstracts-explorer registry upload \
-  -r ghcr.io/owner/abstracts-data \
+  -r ghcr.io/thawn/abstracts-data \
   --token $GITHUB_TOKEN \
   --conference neurips
 
 # Upload all conferences (non-interactive, for CI)
 abstracts-explorer registry upload \
-  -r ghcr.io/owner/abstracts-data \
+  -r ghcr.io/thawn/abstracts-data \
   --token $GITHUB_TOKEN \
   --conference all \
   --yes
@@ -147,14 +147,14 @@ With `--yes`, this clear-and-retry happens automatically without prompting.
 ```bash
 # Download NeurIPS 2024
 abstracts-explorer registry download \
-  -r ghcr.io/owner/abstracts-data \
+  -r ghcr.io/thawn/abstracts-data \
   --token $GITHUB_TOKEN \
   --conference neurips \
   --year 2024
 
 # Download when no local data exists (specify embedding model explicitly)
 abstracts-explorer registry download \
-  -r ghcr.io/owner/abstracts-data \
+  -r ghcr.io/thawn/abstracts-data \
   --token $GITHUB_TOKEN \
   --conference neurips \
   --year 2024 \
@@ -162,7 +162,7 @@ abstracts-explorer registry download \
 
 # Download all available conferences (non-interactive, for CI)
 abstracts-explorer registry download \
-  -r ghcr.io/owner/abstracts-data \
+  -r ghcr.io/thawn/abstracts-data \
   --token $GITHUB_TOKEN \
   --conference all \
   --yes
@@ -190,11 +190,11 @@ abstracts-explorer registry list [OPTIONS]
 
 ```bash
 # List all available tags
-abstracts-explorer registry list -r ghcr.io/owner/abstracts-data
+abstracts-explorer registry list -r ghcr.io/thawn/abstracts-data
 
 # Inspect a specific tag
 abstracts-explorer registry list \
-  -r ghcr.io/owner/abstracts-data \
+  -r ghcr.io/thawn/abstracts-data \
   --tag neurips-2024_text-embedding-qwen3-embedding-4b
 ```
 
@@ -225,7 +225,7 @@ abstracts-explorer cluster-embeddings
 
 # 4. Upload to registry
 abstracts-explorer registry upload \
-  -r ghcr.io/owner/abstracts-data \
+  -r ghcr.io/thawn/abstracts-data \
   --token $GITHUB_TOKEN \
   --conference neurips \
   --year 2025
@@ -236,7 +236,7 @@ abstracts-explorer registry upload \
 ```bash
 # Download and import NeurIPS 2025 (no download/embedding generation needed!)
 abstracts-explorer registry download \
-  -r ghcr.io/owner/abstracts-data \
+  -r ghcr.io/thawn/abstracts-data \
   --token $GITHUB_TOKEN \
   --conference neurips \
   --year 2025

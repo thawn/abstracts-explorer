@@ -145,11 +145,11 @@ class TestRegistryClient:
     def test_init_valid_repository(self):
         """Client initializes correctly with valid repository."""
         with patch("oras.client.OrasClient"):
-            client = RegistryClient("ghcr.io/owner/abstracts-data", token="test-token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="test-token")
 
         assert client.registry == "ghcr.io"
-        assert client.name == "owner/abstracts-data"
-        assert client.repository == "ghcr.io/owner/abstracts-data"
+        assert client.name == "thawn/abstracts-data"
+        assert client.repository == "ghcr.io/thawn/abstracts-data"
         assert client.token == "test-token"
 
     def test_init_invalid_repository(self):

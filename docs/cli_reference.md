@@ -201,7 +201,7 @@ abstracts-explorer registry upload [OPTIONS]
 
 **Options:**
 
-- `-r, --repository TEXT`: OCI repository URL (e.g. `ghcr.io/owner/abstracts-data`). Falls back to `REGISTRY_REPOSITORY` env var.
+- `-r, --repository TEXT`: OCI repository URL (e.g. `ghcr.io/thawn/abstracts-data`). Falls back to `REGISTRY_REPOSITORY` env var.
 - `--token TEXT`: Authentication token. Falls back to `GITHUB_TOKEN` env var.
 - `-c, --conference TEXT`: Conference to upload (case-insensitive). Use `all` for all conferences.
 - `-y, --year INTEGER`: Year to upload. Omit to upload all available years.

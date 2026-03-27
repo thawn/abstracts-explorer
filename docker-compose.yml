@@ -74,7 +74,7 @@ services:
       # Registry settings (optional)
       # Used by: abstracts-explorer registry upload/download
       # GITHUB_TOKEN: PAT with read:packages (download) or write:packages (upload) scope
-      # REGISTRY_REPOSITORY: default OCI repository, e.g. ghcr.io/owner/abstracts-data
+      # REGISTRY_REPOSITORY: default OCI repository, e.g. ghcr.io/thawn/abstracts-data
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - REGISTRY_REPOSITORY=${REGISTRY_REPOSITORY:-}
 

@@ -437,7 +437,7 @@ To pre-populate a fresh container with data from the registry:
 # Download NeurIPS 2025 data into the running container
 podman-compose exec abstracts-explorer \
   abstracts-explorer registry download \
-    -r ghcr.io/owner/abstracts-data \
+    -r ghcr.io/thawn/abstracts-data \
     --conference neurips --year 2025
 
 # Or download all available data (REGISTRY_REPOSITORY must be set in .env)
@@ -468,7 +468,7 @@ You can also run a one-off container to seed data before starting the main stack
 # Seed data, then start the full stack
 docker run --rm \
   --env GITHUB_TOKEN=$GITHUB_TOKEN \
-  --env REGISTRY_REPOSITORY=ghcr.io/owner/abstracts-data \
+  --env REGISTRY_REPOSITORY=ghcr.io/thawn/abstracts-data \
   -v abstracts-data:/app/data \
   ghcr.io/thawn/abstracts-explorer:latest \
   abstracts-explorer registry download --conference all --yes
