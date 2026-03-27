@@ -416,7 +416,7 @@ Add your GitHub Personal Access Token to your `.env` file:
 GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
 
 # Optional: set a default repository so you don't have to pass -r every time
-REGISTRY_REPOSITORY=ghcr.io/owner/abstracts-data
+REGISTRY_REPOSITORY=ghcr.io/thawn/abstracts-data
 ```
 
 The `docker-compose.yml` already passes both variables into the container:
