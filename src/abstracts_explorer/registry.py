@@ -49,7 +49,7 @@ import oras.defaults
 import oras.oci
 import oras.provider
 
-from ._version import __version__
+from abstracts_explorer._version import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -239,7 +239,7 @@ class RegistryClient:
         list of int
             Sorted list of years.
         """
-        from .database import DatabaseManager
+        from abstracts_explorer.database import DatabaseManager
 
         with DatabaseManager() as db:
             db.create_tables()
@@ -255,7 +255,7 @@ class RegistryClient:
         list of str
             Sorted list of conference names.
         """
-        from .database import DatabaseManager
+        from abstracts_explorer.database import DatabaseManager
 
         with DatabaseManager() as db:
             db.create_tables()
@@ -300,7 +300,7 @@ class RegistryClient:
         str or None
             Embedding model name, or ``None`` if not set.
         """
-        from .database import DatabaseManager
+        from abstracts_explorer.database import DatabaseManager
 
         with DatabaseManager() as db:
             db.create_tables()
@@ -318,9 +318,9 @@ class RegistryClient:
         After calling this method, the next download will import fresh data and establish
         a new embedding model association in the local database.
         """
-        from .database import DatabaseManager
-        from .db_models import EmbeddingsMetadata, HierarchicalLabelCache
-        from .embeddings import EmbeddingsManager
+        from abstracts_explorer.database import DatabaseManager
+        from abstracts_explorer.db_models import EmbeddingsMetadata, HierarchicalLabelCache
+        from abstracts_explorer.embeddings import EmbeddingsManager
         from sqlalchemy import delete as sa_delete
 
         # 1. Clear EmbeddingsMetadata and clustering/hierarchical caches from SQLite
@@ -348,8 +348,8 @@ class RegistryClient:
         Returns a dict with ``paper_db_path``, ``embeddings_path``,
         ``paper_count``, and ``embedding_count``.
         """
-        from .database import DatabaseManager
-        from .embeddings import EmbeddingsManager
+        from abstracts_explorer.database import DatabaseManager
+        from abstracts_explorer.embeddings import EmbeddingsManager
 
         # --- paper DB ---
         progress(f"Exporting paper database for {conference}/{year}...")
@@ -409,8 +409,8 @@ class RegistryClient:
         RegistryError
             If either file is missing or an import step fails.
         """
-        from .database import DatabaseManager
-        from .embeddings import EmbeddingsManager
+        from abstracts_explorer.database import DatabaseManager
+        from abstracts_explorer.embeddings import EmbeddingsManager
 
         # --- pre-flight: both files must exist ---
         if not paper_db_file.exists() or not embeddings_file.exists():
@@ -431,7 +431,7 @@ class RegistryClient:
                 db.create_tables()
                 paper_count = db.import_papers_from_sqlite(paper_db_file, conference, year)
         except Exception as db_err:
-            from .database import EmbeddingModelConflictError
+            from abstracts_explorer.database import EmbeddingModelConflictError
 
             if isinstance(db_err, EmbeddingModelConflictError):
                 raise EmbeddingModelMismatchError(db_err.local_model, db_err.remote_model) from db_err
@@ -452,7 +452,7 @@ class RegistryClient:
                 from sqlalchemy import and_ as sa_and
                 from sqlalchemy import delete as sa_delete
 
-                from .db_models import Paper
+                from abstracts_explorer.db_models import Paper
 
                 with DatabaseManager() as db:
                     db.create_tables()

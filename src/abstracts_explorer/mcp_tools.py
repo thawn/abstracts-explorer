@@ -15,7 +15,7 @@ import json
 import logging
 from typing import Callable, Dict, List, Any, Optional
 
-from .mcp_server import (
+from abstracts_explorer.mcp_server import (
     get_cluster_topics,
     get_topic_evolution,
     search_papers,

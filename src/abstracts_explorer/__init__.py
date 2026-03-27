@@ -120,7 +120,7 @@ def _configure_package_logging() -> None:
     This runs before plugin imports to ensure INFO-level plugin registration
     messages are suppressed unless LOG_LEVEL is explicitly configured.
     """
-    from .config import get_config
+    from abstracts_explorer.config import get_config
 
     config = get_config()
     level_name = config.log_level or "WARNING"
@@ -137,13 +137,13 @@ def _configure_package_logging() -> None:
 
 _configure_package_logging()
 
-from .config import Config, get_config  # noqa: E402
-from .database import DatabaseManager  # noqa: E402
-from .embeddings import EmbeddingsManager  # noqa: E402
-from .clustering import ClusteringManager, ClusteringError, perform_clustering  # noqa: E402
-from .rag import RAGChat  # noqa: E402
-from .registry import RegistryClient, RegistryError  # noqa: E402
-from .plugins import (  # noqa: E402
+from abstracts_explorer.config import Config, get_config  # noqa: E402
+from abstracts_explorer.database import DatabaseManager  # noqa: E402
+from abstracts_explorer.embeddings import EmbeddingsManager  # noqa: E402
+from abstracts_explorer.clustering import ClusteringManager, ClusteringError, perform_clustering  # noqa: E402
+from abstracts_explorer.rag import RAGChat  # noqa: E402
+from abstracts_explorer.registry import RegistryClient, RegistryError  # noqa: E402
+from abstracts_explorer.plugins import (  # noqa: E402
     DownloaderPlugin,
     LightweightDownloaderPlugin,
     PluginRegistry,
@@ -154,7 +154,7 @@ from .plugins import (  # noqa: E402
 )
 
 # Import plugins to auto-register them
-from . import plugins  # noqa: E402, F401
+import abstracts_explorer.plugins  # noqa: E402, F401
 
 __version__ = "0.1.0"
 __all__ = [

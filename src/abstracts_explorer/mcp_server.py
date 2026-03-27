@@ -22,10 +22,10 @@ from copy import deepcopy
 
 from mcp.server.fastmcp import FastMCP
 
-from .embeddings import EmbeddingsManager
-from .database import DatabaseManager
-from .clustering import ClusteringManager, perform_clustering
-from .config import get_config
+from abstracts_explorer.embeddings import EmbeddingsManager
+from abstracts_explorer.database import DatabaseManager
+from abstracts_explorer.clustering import ClusteringManager, perform_clustering
+from abstracts_explorer.config import get_config
 
 logger = logging.getLogger(__name__)
 
