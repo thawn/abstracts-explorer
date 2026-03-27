@@ -54,11 +54,7 @@ const {
     navigateHierarchyDown,
     visualizeClusters,
     showClusterPaperDetails,
-    openClusterSettings,
-    closeClusterSettings,
-    applyClusterSettings,
     exportClusters,
-    toggleClusterParams,
     getClusterData,
     searchCustomCluster,
     toggleCustomClusterVisibility,
@@ -105,15 +101,10 @@ describe('Clustering Module', () => {
                 cluster_centers: { 0: { x: 1, y: 1 } }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockClusterData
-                });
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => mockClusterData
+            });
 
             await loadClusters();
             expect(areClustersLoaded()).toBe(true);
@@ -133,37 +124,11 @@ describe('Clustering Module', () => {
             }
         };
 
-        it('should load clusters from cache', async () => {
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockClusterData
-                });
-
-            await loadClusters();
-
-            expect(global.fetch).toHaveBeenCalledWith('/api/clusters/cached');
-            expect(areClustersLoaded()).toBe(true);
-        });
-
-        it('should compute clusters when cache not available', async () => {
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
-                    ok: false,
-                    status: 404
-                })
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockClusterData
-                });
+        it('should load clusters via POST to compute endpoint', async () => {
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => mockClusterData
+            });
 
             await loadClusters();
 
@@ -174,24 +139,36 @@ describe('Clustering Module', () => {
                     headers: { 'Content-Type': 'application/json' }
                 })
             );
+            expect(areClustersLoaded()).toBe(true);
+        });
+
+        it('should include conference and year filters in request', async () => {
+            const yearSelect = document.getElementById('year-selector');
+            yearSelect.value = '2025';
+            const conferenceSelect = document.getElementById('conference-selector');
+            conferenceSelect.innerHTML = '<option value="NeurIPS">NeurIPS</option>';
+            conferenceSelect.value = 'NeurIPS';
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => mockClusterData
+            });
+
+            await loadClusters();
+
+            const requestBody = JSON.parse(global.fetch.mock.calls[0][1].body);
+            expect(requestBody.conferences).toEqual(['NeurIPS']);
+            expect(requestBody.years).toEqual([2025]);
         });
 
         it('should handle error response', async () => {
             const uiUtils = await import('../static/modules/utils/ui-utils.js');
             
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
-                    ok: false,
-                    status: 404
-                })
-                .mockResolvedValueOnce({
-                    ok: false,
-                    status: 500
-                });
+            global.fetch.mockResolvedValueOnce({
+                ok: false,
+                status: 500,
+                json: async () => ({ error: 'Server error' })
+            });
 
             await loadClusters();
 
@@ -201,15 +178,10 @@ describe('Clustering Module', () => {
         it('should handle error in response data', async () => {
             const uiUtils = await import('../static/modules/utils/ui-utils.js');
             
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ error: 'Clustering failed' })
-                });
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ error: 'Clustering failed' })
+            });
 
             await loadClusters();
 
@@ -236,15 +208,10 @@ describe('Clustering Module', () => {
                 }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockHierarchyData
-                });
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => mockHierarchyData
+            });
 
             await loadClusters();
             
@@ -255,15 +222,10 @@ describe('Clustering Module', () => {
         });
 
         it('should visualize clusters after loading', async () => {
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockClusterData
-                });
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => mockClusterData
+            });
 
             await loadClusters();
 
@@ -294,15 +256,10 @@ describe('Clustering Module', () => {
                 cluster_centers: { 0: { x: 1, y: 1 } }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockClusterData
-                });
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => mockClusterData
+            });
 
             await loadClusters();
 
@@ -330,15 +287,10 @@ describe('Clustering Module', () => {
                 }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockClusterData
-                });
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => mockClusterData
+            });
 
             await loadClusters();
 
@@ -357,12 +309,7 @@ describe('Clustering Module', () => {
                 cluster_labels: { 0: 'Cluster 0' }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockClusterData
                 });
@@ -389,12 +336,7 @@ describe('Clustering Module', () => {
                 }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockHierarchyData
                 });
@@ -418,12 +360,7 @@ describe('Clustering Module', () => {
                 }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockHierarchyData
                 });
@@ -442,12 +379,7 @@ describe('Clustering Module', () => {
                 cluster_labels: { 0: 'Cluster 0' }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockClusterData
                 });
@@ -479,12 +411,7 @@ describe('Clustering Module', () => {
         };
 
         it('should not load level when not in hierarchy mode', async () => {
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockHierarchyData
                 });
@@ -498,12 +425,7 @@ describe('Clustering Module', () => {
         it('should load hierarchy level when in hierarchy mode', async () => {
             const uiUtils = await import('../static/modules/utils/ui-utils.js');
             
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockHierarchyData
                 });
@@ -537,12 +459,7 @@ describe('Clustering Module', () => {
                 }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockHierarchyData
                 });
@@ -580,12 +497,7 @@ describe('Clustering Module', () => {
                 }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockHierarchyData
                 });
@@ -677,189 +589,9 @@ describe('Clustering Module', () => {
         });
     });
 
-    describe('openClusterSettings', () => {
-        it('should create settings modal', () => {
-            openClusterSettings();
 
-            const modal = document.getElementById('cluster-settings-modal');
-            expect(modal).toBeTruthy();
-        });
 
-        it('should populate current settings', () => {
-            openClusterSettings();
 
-            const reductionMethod = document.getElementById('cluster-reduction-method');
-            const clusterMethod = document.getElementById('cluster-method');
-            
-            expect(reductionMethod).toBeTruthy();
-            expect(clusterMethod).toBeTruthy();
-        });
-
-        it('should include all clustering methods', () => {
-            openClusterSettings();
-
-            const clusterMethod = document.getElementById('cluster-method');
-            const options = Array.from(clusterMethod.options).map(opt => opt.value);
-            
-            expect(options).toContain('kmeans');
-            expect(options).toContain('dbscan');
-            expect(options).toContain('agglomerative');
-            expect(options).toContain('spectral');
-            expect(options).toContain('fuzzy_cmeans');
-        });
-
-        it('should include all reduction methods', () => {
-            openClusterSettings();
-
-            const reductionMethod = document.getElementById('cluster-reduction-method');
-            const options = Array.from(reductionMethod.options).map(opt => opt.value);
-            
-            expect(options).toContain('pca');
-            expect(options).toContain('tsne');
-            expect(options).toContain('umap');
-        });
-    });
-
-    describe('closeClusterSettings', () => {
-        it('should remove settings modal', () => {
-            openClusterSettings();
-            
-            const modal = document.getElementById('cluster-settings-modal');
-            expect(modal).toBeTruthy();
-            
-            closeClusterSettings();
-            
-            const removedModal = document.getElementById('cluster-settings-modal');
-            expect(removedModal).toBeNull();
-        });
-
-        it('should handle when modal does not exist', () => {
-            closeClusterSettings();
-            
-            const modal = document.getElementById('cluster-settings-modal');
-            expect(modal).toBeNull();
-        });
-    });
-
-    describe('applyClusterSettings', () => {
-        it('should read and apply new settings', async () => {
-            openClusterSettings();
-
-            const reductionMethod = document.getElementById('cluster-reduction-method');
-            const clusterMethod = document.getElementById('cluster-method');
-            const nClusters = document.getElementById('cluster-n-clusters');
-
-            reductionMethod.value = 'pca';
-            clusterMethod.value = 'kmeans';
-            nClusters.value = '10';
-
-            global.fetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({
-                    points: [{ x: 1, y: 1, cluster: 0, id: '1', title: 'Paper 1' }],
-                    cluster_labels: { 0: 'Cluster 0' }
-                })
-            });
-
-            await applyClusterSettings();
-
-            expect(global.fetch).toHaveBeenCalledWith(
-                '/api/clusters/compute',
-                expect.objectContaining({
-                    method: 'POST'
-                })
-            );
-        });
-
-        it('should close modal after applying', async () => {
-            openClusterSettings();
-
-            global.fetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({
-                    points: [{ x: 1, y: 1, cluster: 0, id: '1', title: 'Paper 1' }],
-                    cluster_labels: { 0: 'Cluster 0' }
-                })
-            });
-
-            await applyClusterSettings();
-
-            const modal = document.getElementById('cluster-settings-modal');
-            expect(modal).toBeNull();
-        });
-    });
-
-    describe('toggleClusterParams', () => {
-        beforeEach(() => {
-            openClusterSettings();
-        });
-
-        it('should show kmeans params when kmeans selected', () => {
-            const clusterMethod = document.getElementById('cluster-method');
-            clusterMethod.value = 'kmeans';
-
-            toggleClusterParams();
-
-            const kmeansParams = document.getElementById('kmeans-params');
-            expect(kmeansParams.classList.contains('hidden')).toBe(false);
-        });
-
-        it('should show dbscan params when dbscan selected', () => {
-            const clusterMethod = document.getElementById('cluster-method');
-            clusterMethod.value = 'dbscan';
-
-            toggleClusterParams();
-
-            const dbscanParams = document.getElementById('dbscan-params');
-            expect(dbscanParams.classList.contains('hidden')).toBe(false);
-        });
-
-        it('should show agglomerative params when agglomerative selected', () => {
-            const clusterMethod = document.getElementById('cluster-method');
-            clusterMethod.value = 'agglomerative';
-
-            toggleClusterParams();
-
-            const agglomerativeParams = document.getElementById('agglomerative-params');
-            expect(agglomerativeParams.classList.contains('hidden')).toBe(false);
-        });
-
-        it('should show fuzzy params when fuzzy_cmeans selected', () => {
-            const clusterMethod = document.getElementById('cluster-method');
-            clusterMethod.value = 'fuzzy_cmeans';
-
-            toggleClusterParams();
-
-            const fuzzyParams = document.getElementById('fuzzy-params');
-            expect(fuzzyParams.classList.contains('hidden')).toBe(false);
-        });
-
-        it('should show spectral params when spectral selected', () => {
-            const clusterMethod = document.getElementById('cluster-method');
-            clusterMethod.value = 'spectral';
-
-            toggleClusterParams();
-
-            const spectralParams = document.getElementById('spectral-params');
-            expect(spectralParams.classList.contains('hidden')).toBe(false);
-        });
-
-        it('should hide all params when switching methods', () => {
-            const clusterMethod = document.getElementById('cluster-method');
-            
-            clusterMethod.value = 'kmeans';
-            toggleClusterParams();
-            
-            clusterMethod.value = 'dbscan';
-            toggleClusterParams();
-
-            const kmeansParams = document.getElementById('kmeans-params');
-            const dbscanParams = document.getElementById('dbscan-params');
-            
-            expect(kmeansParams.classList.contains('hidden')).toBe(true);
-            expect(dbscanParams.classList.contains('hidden')).toBe(false);
-        });
-    });
 
     describe('exportClusters', () => {
         it('should trigger download of cluster data', async () => {
@@ -868,12 +600,7 @@ describe('Clustering Module', () => {
                 cluster_labels: { 0: 'Cluster 0' }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockClusterData
                 });
@@ -924,12 +651,7 @@ describe('Clustering Module', () => {
                 cluster_labels: { 0: 'Cluster 0' }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockClusterData
                 });
@@ -970,12 +692,7 @@ describe('Clustering Module', () => {
                 cluster_labels: { 0: 'Cluster 0' }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockClusterData
                 });
@@ -1012,12 +729,7 @@ describe('Clustering Module', () => {
                 cluster_labels: { 0: 'Cluster 0' }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockClusterData
                 });
@@ -1063,12 +775,7 @@ describe('Clustering Module', () => {
                 cluster_labels: { 0: 'Cluster 0' }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockClusterData
                 });
@@ -1093,12 +800,7 @@ describe('Clustering Module', () => {
                 cluster_labels: { 0: 'Cluster 0' }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockClusterData
                 });
@@ -1135,12 +837,7 @@ describe('Clustering Module', () => {
                 cluster_labels: { 0: 'Cluster 0' }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockClusterData
                 });
@@ -1189,12 +886,7 @@ describe('Clustering Module', () => {
                 cluster_labels: { 0: 'Cluster 0' }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockClusterData
                 });
@@ -1242,12 +934,7 @@ describe('Clustering Module', () => {
                 cluster_labels: { 0: 'Cluster 0' }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockClusterData
                 });
@@ -1288,12 +975,7 @@ describe('Clustering Module', () => {
         it('should handle network errors gracefully', async () => {
             const uiUtils = await import('../static/modules/utils/ui-utils.js');
             
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockRejectedValueOnce(new Error('Network error'));
+            global.fetch.mockRejectedValueOnce(new Error('Network error'));
 
             await loadClusters();
 
@@ -1316,52 +998,8 @@ describe('Clustering Module', () => {
             }
         });
 
-        it('should handle missing DOM elements gracefully', () => {
-            // Store original HTML
-            const originalHTML = document.body.innerHTML;
-            
-            // Clear DOM
-            document.body.innerHTML = '';
-
-            openClusterSettings();
-            
-            // Restore DOM for subsequent tests
-            document.body.innerHTML = originalHTML;
-            
-            // Should not throw error
-            expect(true).toBe(true);
-        });
     });
 
-    describe('Default cluster count initialization', () => {
-        it('should fetch default cluster count', async () => {
-            global.fetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({ n_clusters: 8, n_papers: 800 })
-            });
-
-            await loadClusters();
-
-            // The first fetch should be for default cluster count
-            expect(global.fetch.mock.calls[0][0]).toBe('/api/clusters/default-count');
-        });
-
-        it('should use fallback when default count fetch fails', async () => {
-            global.fetch
-                .mockRejectedValueOnce(new Error('Failed to fetch'))
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({
-                        points: [{ x: 1, y: 1, cluster: 0, id: '1', title: 'Paper 1' }],
-                        cluster_labels: { 0: 'Cluster 0' }
-                    })
-                });
-
-            await loadClusters();
-
-            expect(global.console.warn).toHaveBeenCalled();
-        });
-    });
 
     describe('Window global functions', () => {
         it('should expose hierarchy functions to window', () => {
@@ -1397,12 +1035,7 @@ describe('Clustering Module', () => {
                 }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockClusterData
                 });
@@ -1428,12 +1061,7 @@ describe('Clustering Module', () => {
                 }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockClusterData
                 });
@@ -1467,12 +1095,7 @@ describe('Clustering Module', () => {
                 }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockHierarchyData
                 });
@@ -1500,12 +1123,7 @@ describe('Clustering Module', () => {
                 }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockHierarchyData
                 });
@@ -1519,156 +1137,6 @@ describe('Clustering Module', () => {
         });
     });
 
-    describe('Apply cluster settings with different configurations', () => {
-        it('should apply DBSCAN settings', async () => {
-            openClusterSettings();
-
-            const clusterMethod = document.getElementById('cluster-method');
-            const eps = document.getElementById('cluster-eps');
-            const minSamples = document.getElementById('cluster-min-samples');
-
-            clusterMethod.value = 'dbscan';
-            toggleClusterParams();
-            eps.value = '0.8';
-            minSamples.value = '10';
-
-            global.fetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({
-                    points: [{ x: 1, y: 1, cluster: 0, id: '1', title: 'Paper 1' }],
-                    cluster_labels: { 0: 'Cluster 0' }
-                })
-            });
-
-            await applyClusterSettings();
-
-            const requestBody = JSON.parse(global.fetch.mock.calls[0][1].body);
-            expect(requestBody.clustering_method).toBe('dbscan');
-            expect(requestBody.eps).toBe(0.8);
-            expect(requestBody.min_samples).toBe(10);
-        });
-
-        it('should apply fuzzy c-means settings', async () => {
-            openClusterSettings();
-
-            const clusterMethod = document.getElementById('cluster-method');
-            clusterMethod.value = 'fuzzy_cmeans';
-            toggleClusterParams();
-
-            const nClusters = document.getElementById('cluster-n-clusters');
-            const fuzziness = document.getElementById('cluster-fuzziness');
-            nClusters.value = '8';
-            fuzziness.value = '2.5';
-
-            global.fetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({
-                    points: [{ x: 1, y: 1, cluster: 0, id: '1', title: 'Paper 1' }],
-                    cluster_labels: { 0: 'Cluster 0' }
-                })
-            });
-
-            await applyClusterSettings();
-
-            const requestBody = JSON.parse(global.fetch.mock.calls[0][1].body);
-            expect(requestBody.clustering_method).toBe('fuzzy_cmeans');
-            expect(requestBody.m).toBe(2.5);
-        });
-
-        it('should apply spectral clustering settings', async () => {
-            openClusterSettings();
-
-            const clusterMethod = document.getElementById('cluster-method');
-            clusterMethod.value = 'spectral';
-            toggleClusterParams();
-
-            const affinity = document.getElementById('cluster-affinity');
-            affinity.value = 'nearest_neighbors';
-
-            global.fetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({
-                    points: [{ x: 1, y: 1, cluster: 0, id: '1', title: 'Paper 1' }],
-                    cluster_labels: { 0: 'Cluster 0' }
-                })
-            });
-
-            await applyClusterSettings();
-
-            const requestBody = JSON.parse(global.fetch.mock.calls[0][1].body);
-            expect(requestBody.clustering_method).toBe('spectral');
-            expect(requestBody.affinity).toBe('nearest_neighbors');
-        });
-
-        it('should apply agglomerative clustering with distance threshold', async () => {
-            openClusterSettings();
-
-            const clusterMethod = document.getElementById('cluster-method');
-            clusterMethod.value = 'agglomerative';
-            toggleClusterParams();
-
-            const distanceThreshold = document.getElementById('cluster-distance-threshold');
-            const linkage = document.getElementById('cluster-linkage');
-            distanceThreshold.value = '200';
-            linkage.value = 'complete';
-
-            global.fetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({
-                    points: [{ x: 1, y: 1, cluster: 0, id: '1', title: 'Paper 1' }],
-                    cluster_labels: { 0: 'Cluster 0' }
-                })
-            });
-
-            await applyClusterSettings();
-
-            const requestBody = JSON.parse(global.fetch.mock.calls[0][1].body);
-            expect(requestBody.clustering_method).toBe('agglomerative');
-            expect(requestBody.distance_threshold).toBe(200);
-            expect(requestBody.linkage).toBe('complete');
-        });
-
-        it('should apply force recreate flag', async () => {
-            openClusterSettings();
-
-            const forceRecreate = document.getElementById('cluster-force-recreate');
-            forceRecreate.checked = true;
-
-            global.fetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({
-                    points: [{ x: 1, y: 1, cluster: 0, id: '1', title: 'Paper 1' }],
-                    cluster_labels: { 0: 'Cluster 0' }
-                })
-            });
-
-            await applyClusterSettings();
-
-            const requestBody = JSON.parse(global.fetch.mock.calls[0][1].body);
-            // The API uses 'force' not 'force_recreate'
-            expect(requestBody.force).toBe(true);
-        });
-
-        it('should apply limit parameter', async () => {
-            openClusterSettings();
-
-            const limit = document.getElementById('cluster-limit');
-            limit.value = '500';
-
-            global.fetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({
-                    points: [{ x: 1, y: 1, cluster: 0, id: '1', title: 'Paper 1' }],
-                    cluster_labels: { 0: 'Cluster 0' }
-                })
-            });
-
-            await applyClusterSettings();
-
-            const requestBody = JSON.parse(global.fetch.mock.calls[0][1].body);
-            expect(requestBody.limit).toBe(500);
-        });
-    });
 
     describe('Custom cluster visualization edge cases', () => {
         it('should handle multiple custom clusters', async () => {
@@ -1681,12 +1149,7 @@ describe('Clustering Module', () => {
                 cluster_labels: { 0: 'Cluster 0' }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockClusterData
                 });
@@ -1733,12 +1196,7 @@ describe('Clustering Module', () => {
                 cluster_labels: { 0: 'Cluster 0' }
             };
 
-            global.fetch
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ n_clusters: 5 })
-                })
-                .mockResolvedValueOnce({
+            global.fetch.mockResolvedValueOnce({
                     ok: true,
                     json: async () => mockClusterData
                 });

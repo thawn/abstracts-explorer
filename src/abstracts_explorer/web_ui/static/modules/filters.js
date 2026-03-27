@@ -97,9 +97,7 @@ export async function loadFilterOptions() {
                 const defaultYear = String(availableData.default_year);
                 const yearOption = Array.from(yearSelect.options).find(opt => opt.value === defaultYear);
                 if (yearOption) {
-                    // Deselect "All Years" and select the default year
-                    Array.from(yearSelect.options).forEach(o => o.selected = false);
-                    yearOption.selected = true;
+                    yearSelect.value = defaultYear;
                     defaultApplied = true;
                 }
             }
@@ -330,8 +328,8 @@ export function updateYearsForConference() {
     }
 
     const selectedConference = conferenceSelect.value;
-    // Preserve currently selected years (multi-select)
-    const currentYears = getSelectedYears().map(String);
+    // Preserve currently selected year (single-select)
+    const currentYear = yearSelect.value;
 
     yearSelect.innerHTML = '<option value="">All Years</option>';
 
@@ -354,15 +352,12 @@ export function updateYearsForConference() {
         }
     }
 
-    // Restore previous selections that are still available; fall back to "All Years"
+    // Restore previous selection if still available; fall back to "All Years"
     const availableYears = Array.from(yearSelect.options).map(opt => opt.value);
-    const validYears = currentYears.filter(y => availableYears.includes(y));
-    if (validYears.length > 0) {
-        Array.from(yearSelect.options).forEach(opt => {
-            opt.selected = validYears.includes(opt.value);
-        });
+    if (currentYear && availableYears.includes(currentYear)) {
+        yearSelect.value = currentYear;
     } else {
         // Select "All Years" sentinel
-        yearSelect.options[0].selected = true;
+        yearSelect.value = '';
     }
 }

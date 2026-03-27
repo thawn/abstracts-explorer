@@ -14,18 +14,12 @@ import { formatPaperCard } from './paper-card.js';
 // Cluster state
 let clusterData = null;
 let currentClusterConfig = {
-    reduction_method: 'tsne',
+    reduction_method: 'umap',
     n_components: 2,
-    clustering_method: 'agglomerative',  // Default to agglomerative
-    n_clusters: null,  // Empty - rely on distance_threshold
-    eps: 0.5,
-    min_samples: 5,
-    distance_threshold: 150,  // Default distance threshold
+    clustering_method: 'agglomerative',
+    distance_threshold: 150,
     linkage: 'ward',
-    affinity: 'rbf',
-    m: 2.0,
-    limit: null,
-    use_llm_labels: true  // Use LLM for hierarchy labels by default
+    use_llm_labels: true
 };
 // Track selected clusters for multi-select
 let selectedClusters = new Set();
@@ -40,34 +34,6 @@ let currentParentId = null;
 let customQueryClusters = [];  // Array of custom query cluster objects
 let customClusterMode = false;  // Whether custom cluster mode is active
 let customClusterVisibility = {};  // Track visibility of each custom cluster by ID
-
-/**
- * Initialize default cluster count from backend
- * @async
- */
-async function initDefaultClusterCount() {
-    try {
-        const response = await fetch(`${API_BASE}/api/clusters/default-count`);
-        if (response.ok) {
-            const data = await response.json();
-            // Only set n_clusters if not using agglomerative with distance_threshold
-            if (currentClusterConfig.n_clusters === null && 
-                !(currentClusterConfig.clustering_method === 'agglomerative' && 
-                  currentClusterConfig.distance_threshold !== null)) {
-                currentClusterConfig.n_clusters = data.n_clusters;
-                console.log(`Auto-calculated n_clusters=${data.n_clusters} based on ${data.n_papers} papers`);
-            }
-        }
-    } catch (error) {
-        console.warn('Failed to fetch default cluster count, using fallback', error);
-        // Only set fallback n_clusters if not using agglomerative with distance_threshold
-        if (currentClusterConfig.n_clusters === null && 
-            !(currentClusterConfig.clustering_method === 'agglomerative' && 
-              currentClusterConfig.distance_threshold !== null)) {
-            currentClusterConfig.n_clusters = 5;  // Fallback
-        }
-    }
-}
 
 /**
  * Check if clusters are loaded
@@ -92,32 +58,24 @@ export function resetClusters() {
 export async function loadClusters() {
     try {
         showLoading('cluster-plot', 'Loading clusters...');
-        
-        // Initialize default cluster count if not set
-        await initDefaultClusterCount();
 
-        // Build request body with current config and active conference/year filters
-        const computeBody = { ...currentClusterConfig };
+        // Build request body with conference/year filters
+        const computeBody = {};
         const selectedConference = getSelectedConference();
         const selectedYears = getSelectedYears();
         if (selectedConference) computeBody.conferences = [selectedConference];
         if (selectedYears.length > 0) computeBody.years = selectedYears;
         
-        // Try to load cached clusters first
-        let response = await fetch(`${API_BASE}/api/clusters/cached`);
+        // Fetch pre-computed clustering data
+        const response = await fetch(`${API_BASE}/api/clusters/compute`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(computeBody)
+        });
         
         if (!response.ok) {
-            // If no cache, compute on demand
-            console.log('No cached clusters found, computing...');
-            response = await fetch(`${API_BASE}/api/clusters/compute`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(computeBody)
-            });
-        }
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
         }
         
         clusterData = await response.json();
@@ -134,8 +92,7 @@ export async function loadClusters() {
         visualizeClusters();
         
         // Auto-enable hierarchy mode for agglomerative clustering
-        if (currentClusterConfig.clustering_method === 'agglomerative' && 
-            clusterData.cluster_hierarchy && 
+        if (clusterData.cluster_hierarchy && 
             clusterData.cluster_hierarchy.tree) {
             // Small delay to ensure visualization is rendered first
             setTimeout(() => {
@@ -1290,219 +1247,6 @@ export async function showClusterPaperDetails(paperId, basicInfo) {
 }
 
 /**
- * Open cluster settings modal
- */
-export function openClusterSettings() {
-    const modalHTML = `
-        <div id="cluster-settings-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-            <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col">
-                <div class="bg-purple-600 text-white px-6 py-4 flex justify-between items-center rounded-t-lg flex-shrink-0">
-                    <h3 class="text-xl font-semibold">
-                        <i class="fas fa-cog mr-2"></i>Clustering Settings
-                    </h3>
-                    <button onclick="closeClusterSettings()" class="text-white hover:text-gray-200 text-2xl">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
-                <div class="p-6 space-y-4 overflow-y-auto flex-1">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Dimensionality Reduction</label>
-                        <select id="cluster-reduction-method" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
-                            <option value="pca" ${currentClusterConfig.reduction_method === 'pca' ? 'selected' : ''}>PCA</option>
-                            <option value="tsne" ${currentClusterConfig.reduction_method === 'tsne' ? 'selected' : ''}>t-SNE</option>
-                            <option value="umap" ${currentClusterConfig.reduction_method === 'umap' ? 'selected' : ''}>UMAP</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Clustering Method</label>
-                        <select id="cluster-method" class="w-full px-4 py-2 border border-gray-300 rounded-lg" onchange="toggleClusterParams()">
-                            <option value="kmeans" ${currentClusterConfig.clustering_method === 'kmeans' ? 'selected' : ''}>K-Means</option>
-                            <option value="dbscan" ${currentClusterConfig.clustering_method === 'dbscan' ? 'selected' : ''}>DBSCAN</option>
-                            <option value="agglomerative" ${currentClusterConfig.clustering_method === 'agglomerative' ? 'selected' : ''}>Agglomerative</option>
-                            <option value="spectral" ${currentClusterConfig.clustering_method === 'spectral' ? 'selected' : ''}>Spectral</option>
-                            <option value="fuzzy_cmeans" ${currentClusterConfig.clustering_method === 'fuzzy_cmeans' ? 'selected' : ''}>Fuzzy C-Means</option>
-                        </select>
-                    </div>
-                    <div id="kmeans-params" class="${currentClusterConfig.clustering_method === 'kmeans' || currentClusterConfig.clustering_method === 'spectral' || currentClusterConfig.clustering_method === 'fuzzy_cmeans' ? '' : 'hidden'}">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Number of Clusters</label>
-                        <input type="number" id="cluster-n-clusters" value="${currentClusterConfig.n_clusters || ''}" min="2" max="100" 
-                               placeholder="Auto (n_papers / 100)"
-                               class="w-full px-4 py-2 border border-gray-300 rounded-lg">
-                        <p class="text-xs text-gray-500 mt-1">Leave empty for automatic calculation based on paper count</p>
-                    </div>
-                    <div id="agglomerative-params" class="${currentClusterConfig.clustering_method === 'agglomerative' ? '' : 'hidden'}">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Number of Clusters (or Distance Threshold)</label>
-                        <input type="number" id="cluster-n-clusters-agg" value="${currentClusterConfig.n_clusters || ''}" min="2" max="100" 
-                               placeholder="Leave empty to use distance threshold"
-                               class="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Distance Threshold (optional)</label>
-                        <input type="number" id="cluster-distance-threshold" value="${currentClusterConfig.distance_threshold || ''}" step="0.1" min="0.1" 
-                               placeholder="Leave empty to use n_clusters"
-                               class="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Linkage Method</label>
-                        <select id="cluster-linkage" class="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4">
-                            <option value="ward" ${currentClusterConfig.linkage === 'ward' ? 'selected' : ''}>Ward</option>
-                            <option value="complete" ${currentClusterConfig.linkage === 'complete' ? 'selected' : ''}>Complete</option>
-                            <option value="average" ${currentClusterConfig.linkage === 'average' ? 'selected' : ''}>Average</option>
-                            <option value="single" ${currentClusterConfig.linkage === 'single' ? 'selected' : ''}>Single</option>
-                        </select>
-                        <label class="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" id="cluster-use-llm-labels" ${currentClusterConfig.use_llm_labels !== false ? 'checked' : ''} class="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500">
-                            <span class="text-sm font-medium text-gray-700">Use LLM for Hierarchy Labels</span>
-                        </label>
-                        <p class="text-xs text-gray-500 mt-1 ml-6">When enabled, uses LLM to generate meaningful labels for parent clusters. When disabled, uses simple label concatenation.</p>
-                        <p class="text-xs text-gray-500 mt-1">Specify either n_clusters OR distance_threshold (not both)</p>
-                    </div>
-                    <div id="dbscan-params" class="${currentClusterConfig.clustering_method === 'dbscan' ? '' : 'hidden'}">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Epsilon (eps)</label>
-                        <input type="number" id="cluster-eps" value="${currentClusterConfig.eps}" step="0.1" min="0.1" 
-                               class="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Min Samples</label>
-                        <input type="number" id="cluster-min-samples" value="${currentClusterConfig.min_samples}" min="2" 
-                               class="w-full px-4 py-2 border border-gray-300 rounded-lg">
-                    </div>
-                    <div id="fuzzy-params" class="${currentClusterConfig.clustering_method === 'fuzzy_cmeans' ? '' : 'hidden'}">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Fuzziness Parameter (m)</label>
-                        <input type="number" id="cluster-fuzziness" value="${currentClusterConfig.m || 2.0}" step="0.1" min="1.1" max="5.0"
-                               class="w-full px-4 py-2 border border-gray-300 rounded-lg">
-                        <p class="text-xs text-gray-500 mt-1">Higher values create fuzzier clusters (default: 2.0)</p>
-                    </div>
-                    <div id="spectral-params" class="${currentClusterConfig.clustering_method === 'spectral' ? '' : 'hidden'}">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Affinity</label>
-                        <select id="cluster-affinity" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
-                            <option value="rbf" ${currentClusterConfig.affinity === 'rbf' ? 'selected' : ''}>RBF</option>
-                            <option value="nearest_neighbors" ${currentClusterConfig.affinity === 'nearest_neighbors' ? 'selected' : ''}>Nearest Neighbors</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Max Papers (optional)</label>
-                        <input type="number" id="cluster-limit" value="${currentClusterConfig.limit || ''}" placeholder="All papers" 
-                               class="w-full px-4 py-2 border border-gray-300 rounded-lg">
-                        <p class="text-xs text-gray-500 mt-1">Limit number of papers for faster computation</p>
-                    </div>
-                    <div class="border-t border-gray-200 pt-4">
-                        <label class="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" id="cluster-force-recreate" class="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500">
-                            <span class="text-sm font-medium text-gray-700">Force Recreate (Ignore Cache)</span>
-                        </label>
-                        <p class="text-xs text-gray-500 mt-1 ml-6">When enabled, clustering will always be recomputed even if cached results exist</p>
-                    </div>
-                </div>
-                <div class="px-6 py-4 bg-gray-50 flex justify-end gap-3 rounded-b-lg flex-shrink-0">
-                    <button onclick="closeClusterSettings()" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-100">
-                        Cancel
-                    </button>
-                    <button onclick="applyClusterSettings()" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
-                        Apply & Recompute
-                    </button>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    document.body.insertAdjacentHTML('beforeend', modalHTML);
-}
-
-/**
- * Close cluster settings modal
- */
-export function closeClusterSettings() {
-    const modal = document.getElementById('cluster-settings-modal');
-    if (modal) {
-        modal.remove();
-    }
-}
-
-/**
- * Apply cluster settings and recompute
- * @async
- */
-export async function applyClusterSettings() {
-    // Get settings from modal
-    const method = document.getElementById('cluster-method').value;
-    const forceRecreate = document.getElementById('cluster-force-recreate').checked;
-    
-    // Base config
-    currentClusterConfig = {
-        reduction_method: document.getElementById('cluster-reduction-method').value,
-        clustering_method: method,
-        limit: parseInt(document.getElementById('cluster-limit').value) || null,
-        force: forceRecreate
-    };
-    
-    // Method-specific parameters
-    if (method === 'kmeans' || method === 'spectral' || method === 'fuzzy_cmeans') {
-        const nClustersValue = document.getElementById('cluster-n-clusters').value;
-        currentClusterConfig.n_clusters = nClustersValue ? parseInt(nClustersValue) : null;
-    }
-    
-    if (method === 'agglomerative') {
-        const nClustersValue = document.getElementById('cluster-n-clusters-agg').value;
-        const distThresholdValue = document.getElementById('cluster-distance-threshold').value;
-        const useLLMLabels = document.getElementById('cluster-use-llm-labels').checked;
-        
-        if (distThresholdValue) {
-            currentClusterConfig.distance_threshold = parseFloat(distThresholdValue);
-            currentClusterConfig.n_clusters = null;  // Can't specify both
-        } else {
-            currentClusterConfig.n_clusters = nClustersValue ? parseInt(nClustersValue) : null;
-        }
-        
-        currentClusterConfig.linkage = document.getElementById('cluster-linkage').value;
-        currentClusterConfig.use_llm_labels = useLLMLabels;
-    }
-    
-    if (method === 'dbscan') {
-        currentClusterConfig.eps = parseFloat(document.getElementById('cluster-eps').value) || 0.5;
-        currentClusterConfig.min_samples = parseInt(document.getElementById('cluster-min-samples').value) || 5;
-    }
-    
-    if (method === 'fuzzy_cmeans') {
-        currentClusterConfig.m = parseFloat(document.getElementById('cluster-fuzziness').value) || 2.0;
-    }
-    
-    if (method === 'spectral') {
-        currentClusterConfig.affinity = document.getElementById('cluster-affinity').value;
-    }
-    
-    closeClusterSettings();
-    
-    showLoading('cluster-plot', 'Recomputing clusters with new settings...');
-    
-    try {
-        // Include current conference/year filters in the recompute request
-        const computeBody = { ...currentClusterConfig };
-        const selectedConference = getSelectedConference();
-        const selectedYears = getSelectedYears();
-        if (selectedConference) computeBody.conferences = [selectedConference];
-        if (selectedYears.length > 0) computeBody.years = selectedYears;
-
-        const response = await fetch(`${API_BASE}/api/clusters/compute`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(computeBody)
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        clusterData = await response.json();
-        
-        if (clusterData.error) {
-            showErrorInElement('cluster-plot', clusterData.error);
-            return;
-        }
-        
-        visualizeClusters();
-        
-    } catch (error) {
-        console.error('Error recomputing clusters:', error);
-        showErrorInElement('cluster-plot', `Failed to recompute clusters: ${error.message}`);
-    }
-}
-
-/**
  * Export cluster data as JSON
  */
 export function exportClusters() {
@@ -1520,40 +1264,6 @@ export function exportClusters() {
     linkElement.setAttribute('href', dataUri);
     linkElement.setAttribute('download', exportFileDefaultName);
     linkElement.click();
-}
-
-/**
- * Toggle cluster parameter visibility
- */
-export function toggleClusterParams() {
-    const method = document.getElementById('cluster-method').value;
-    const kmeansParams = document.getElementById('kmeans-params');
-    const dbscanParams = document.getElementById('dbscan-params');
-    const agglomerativeParams = document.getElementById('agglomerative-params');
-    const fuzzyParams = document.getElementById('fuzzy-params');
-    const spectralParams = document.getElementById('spectral-params');
-    
-    // Hide all parameter sections first
-    kmeansParams.classList.add('hidden');
-    dbscanParams.classList.add('hidden');
-    agglomerativeParams.classList.add('hidden');
-    fuzzyParams.classList.add('hidden');
-    spectralParams.classList.add('hidden');
-    
-    // Show relevant parameter section
-    if (method === 'kmeans') {
-        kmeansParams.classList.remove('hidden');
-    } else if (method === 'dbscan') {
-        dbscanParams.classList.remove('hidden');
-    } else if (method === 'agglomerative') {
-        agglomerativeParams.classList.remove('hidden');
-    } else if (method === 'fuzzy_cmeans') {
-        kmeansParams.classList.remove('hidden');  // Uses n_clusters
-        fuzzyParams.classList.remove('hidden');
-    } else if (method === 'spectral') {
-        kmeansParams.classList.remove('hidden');  // Uses n_clusters
-        spectralParams.classList.remove('hidden');
-    }
 }
 
 /**

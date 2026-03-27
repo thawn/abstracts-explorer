@@ -29,11 +29,7 @@ import {
 } from './modules/interesting-papers.js';
 import {
     loadClusters,
-    openClusterSettings,
-    closeClusterSettings,
-    applyClusterSettings,
     exportClusters,
-    toggleClusterParams,
     resetClusters
 } from './modules/clustering.js';
 import {
@@ -133,11 +129,7 @@ function attachToWindow() {
 
     // Clustering module
     window.loadClusters = loadClusters;
-    window.openClusterSettings = openClusterSettings;
-    window.closeClusterSettings = closeClusterSettings;
-    window.applyClusterSettings = applyClusterSettings;
     window.exportClusters = exportClusters;
-    window.toggleClusterParams = toggleClusterParams;
     window.resetClusters = resetClusters;
 
     // Filters module

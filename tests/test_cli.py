@@ -1341,19 +1341,18 @@ class TestCLI:
 
         assert exit_code == 0
         captured = capsys.readouterr()
-        assert "cached successfully" in captured.out
+        assert "Pre-generation complete" in captured.out
         mock_compute.assert_called_once()
-        # Verify agglomerative clustering was requested with web-UI-matching defaults
+        # Verify fixed agglomerative/UMAP parameters
         call_kwargs = mock_compute.call_args[1]
         assert call_kwargs["clustering_method"] == "agglomerative"
         assert call_kwargs["linkage"] == "ward"
-        assert call_kwargs["distance_threshold"] == 150.0  # matches web UI default
-        assert call_kwargs["reduction_method"] == "tsne"  # matches web UI default
-        # n_clusters=None because distance_threshold takes precedence
+        assert call_kwargs["distance_threshold"] == 150.0
+        assert call_kwargs["reduction_method"] == "umap"
         assert call_kwargs["n_clusters"] is None
 
-    def test_pre_generate_clustering_custom_options(self, tmp_path, capsys, monkeypatch):
-        """Test pre-generate-clustering with custom linkage and force flag."""
+    def test_pre_generate_clustering_with_force_flag(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering with --force flag."""
         embeddings_path = tmp_path / "chroma_db"
         embeddings_path.mkdir()
         patch_get_config_for_test(monkeypatch, embeddings_path)
@@ -1380,12 +1379,6 @@ class TestCLI:
                     "abstracts-explorer",
                     "clustering",
                     "pre-generate",
-                    "--linkage",
-                    "complete",
-                    "--n-clusters",
-                    "4",
-                    "--distance-threshold",
-                    "0",  # Disable distance_threshold so n_clusters takes effect
                     "--force",
                 ],
             ):
@@ -1393,9 +1386,6 @@ class TestCLI:
 
         assert exit_code == 0
         call_kwargs = mock_compute.call_args[1]
-        assert call_kwargs["linkage"] == "complete"
-        assert call_kwargs["n_clusters"] == 4
-        assert "distance_threshold" not in call_kwargs  # disabled by --distance-threshold 0
         assert call_kwargs["force"] is True
 
     def test_pre_generate_clustering_error(self, tmp_path, capsys, monkeypatch):
@@ -1422,7 +1412,7 @@ class TestCLI:
 
         assert exit_code == 1
         captured = capsys.readouterr()
-        assert "Unexpected error" in captured.err
+        assert "0 succeeded, 1 failed" in captured.out
 
     def test_pre_generate_clustering_with_conference(self, tmp_path, capsys, monkeypatch):
         """Test pre-generate-clustering with --conference filter."""
@@ -1458,8 +1448,8 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "ML4PS@NeurIPS" in captured.out
 
-    def test_pre_generate_clustering_with_years(self, tmp_path, capsys, monkeypatch):
-        """Test pre-generate-clustering with --years filter (one or more years)."""
+    def test_pre_generate_clustering_with_year(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering with --year filter (single year)."""
         embeddings_path = tmp_path / "chroma_db"
         embeddings_path.mkdir()
         patch_get_config_for_test(monkeypatch, embeddings_path)
@@ -1487,8 +1477,7 @@ class TestCLI:
                     "pre-generate",
                     "--conference",
                     "NeurIPS",
-                    "--years",
-                    "2023",
+                    "--year",
                     "2024",
                 ],
             ):
@@ -1497,13 +1486,12 @@ class TestCLI:
         assert exit_code == 0
         call_kwargs = mock_compute.call_args[1]
         assert call_kwargs["conferences"] == ["NeurIPS"]
-        assert call_kwargs["years"] == [2023, 2024]
+        assert call_kwargs["years"] == [2024]
         captured = capsys.readouterr()
-        assert "2023" in captured.out
         assert "2024" in captured.out
 
     def test_pre_generate_clustering_no_filter_passes_none(self, tmp_path, capsys, monkeypatch):
-        """Test that omitting --conference/--years passes None (cluster all)."""
+        """Test that omitting --conference/--year passes None (cluster all)."""
         embeddings_path = tmp_path / "chroma_db"
         embeddings_path.mkdir()
         patch_get_config_for_test(monkeypatch, embeddings_path)
