@@ -12,6 +12,7 @@ Welcome to the documentation for Abstracts Explorer! This package provides tools
 - **MCP server** for LLM-based cluster analysis and topic exploration
 - **RAG (Retrieval-Augmented Generation)** chat interface for querying papers
 - **Web interface** for browsing and searching papers
+- **Registry support** for sharing paper databases and embeddings between instances via OCI registries (e.g. ghcr.io)
 - **Command-line interface** for easy interaction
 - **Configuration system** with .env file support
 
@@ -68,6 +69,7 @@ docker
 configuration
 usage
 plugins
+registry
 cli_reference
 mcp_server
 ```

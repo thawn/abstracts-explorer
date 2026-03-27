@@ -71,6 +71,13 @@ services:
       # Set log level: DEBUG, INFO, WARNING (default), ERROR, CRITICAL
       - LOG_LEVEL=WARNING
 
+      # Registry settings (optional)
+      # Used by: abstracts-explorer registry upload/download
+      # GITHUB_TOKEN: PAT with read:packages (download) or write:packages (upload) scope
+      # REGISTRY_REPOSITORY: default OCI repository, e.g. ghcr.io/thawn/abstracts-data
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - REGISTRY_REPOSITORY=${REGISTRY_REPOSITORY:-}
+
       # Reverse-proxy hop counts for werkzeug ProxyFix.
       # 1 = trust one proxy layer (default, matches the nginx service above).
       # Set to 0 to disable, or increase for additional proxy layers.

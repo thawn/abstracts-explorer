@@ -38,6 +38,7 @@ dependencies = [
     "umap-learn>=0.5.11",
     "scikit-fuzzy>=0.4.2",
     "argcomplete>=3.1.0",
+    "oras>=0.2.42",
 ]
 
 [project.optional-dependencies]

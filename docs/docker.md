@@ -343,6 +343,8 @@ volumes:
 | `CHAT_MODEL` | Chat model name | `gemma-3-4b-it-qat` |
 | `EMBEDDING_MODEL` | Embedding model name | `text-embedding-qwen3-embedding-4b` |
 | `COLLECTION_NAME` | ChromaDB collection | `papers` |
+| `GITHUB_TOKEN` | PAT for registry upload/download | *(empty)* |
+| `REGISTRY_REPOSITORY` | Default OCI repository for registry commands | *(empty)* |
 
 **Note:** The setup uses PostgreSQL and ChromaDB by default. For local development with SQLite, set `PAPER_DB=abstracts.db` instead of the PostgreSQL URL. For local ChromaDB, set `EMBEDDING_DB=chroma_db` instead of the HTTP URL.
 
@@ -399,6 +401,80 @@ The Docker Compose setup includes four services that work together:
 - **Credentials:** Set in `docker-compose.yml` (change for production!)
 
 **Security Note:** Database ports (5432, 8000) and the application port (5000) are **not exposed** to the host system. Only the nginx ports (80, 443) are accessible from outside the container network. All inter-service communication happens via Docker's internal network.
+
+## Sharing Data via Registry
+
+The `registry` commands let you exchange pre-built paper databases and embeddings between instances without re-downloading or re-computing them. See the [Registry documentation](registry.md) for the full feature description.
+
+### Setting Up Registry Credentials
+
+Add your GitHub Personal Access Token to your `.env` file:
+
+```bash
+# .env
+# Required for registry upload/download
+GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+
+# Optional: set a default repository so you don't have to pass -r every time
+REGISTRY_REPOSITORY=ghcr.io/thawn/abstracts-data
+```
+
+The `docker-compose.yml` already passes both variables into the container:
+
+```yaml
+environment:
+  - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+  - REGISTRY_REPOSITORY=${REGISTRY_REPOSITORY:-}
+```
+
+The `${VAR:-}` syntax means the variable is optional — if it is not set in your `.env` file, the container simply starts without it and you can still pass `--token` and `-r` on the command line.
+
+### Download Data from the Registry
+
+To pre-populate a fresh container with data from the registry:
+
+```bash
+# Download NeurIPS 2025 data into the running container
+podman-compose exec abstracts-explorer \
+  abstracts-explorer registry download \
+    -r ghcr.io/thawn/abstracts-data \
+    --conference neurips --year 2025
+
+# Or download all available data (REGISTRY_REPOSITORY must be set in .env)
+podman-compose exec abstracts-explorer \
+  abstracts-explorer registry download --conference all --yes
+```
+
+### Upload Data to the Registry
+
+After generating embeddings and clustering cache, push the data so other instances can use it:
+
+```bash
+# Upload NeurIPS 2025 (GITHUB_TOKEN must be set in .env)
+podman-compose exec abstracts-explorer \
+  abstracts-explorer registry upload \
+    --conference neurips --year 2025
+
+# Upload all conferences at once
+podman-compose exec abstracts-explorer \
+  abstracts-explorer registry upload --conference all --yes
+```
+
+### One-Shot Data Seeding
+
+You can also run a one-off container to seed data before starting the main stack:
+
+```bash
+# Seed data, then start the full stack
+docker run --rm \
+  --env GITHUB_TOKEN=$GITHUB_TOKEN \
+  --env REGISTRY_REPOSITORY=ghcr.io/thawn/abstracts-data \
+  -v abstracts-data:/app/data \
+  ghcr.io/thawn/abstracts-explorer:latest \
+  abstracts-explorer registry download --conference all --yes
+
+docker compose up -d
+```
 
 ## Common Commands
 

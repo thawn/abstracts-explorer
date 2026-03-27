@@ -73,6 +73,21 @@ The configuration automatically detects the type based on the format:
 - **COLLECTION_NAME**: ChromaDB collection name (default: `papers`)
 - **MAX_CONTEXT_PAPERS**: Number of papers to include in RAG context (default: `5`)
 
+### Registry Settings
+
+These settings are used by the `abstracts-explorer registry` commands for sharing data via OCI-compatible container registries (e.g. GitHub Container Registry).
+
+- **GITHUB_TOKEN**: Personal Access Token for authenticating with the container registry. Requires `read:packages` scope for downloads and `write:packages` scope for uploads.
+- **REGISTRY_REPOSITORY**: Default OCI repository for registry operations (e.g. `ghcr.io/thawn/abstracts-data`). Can be overridden per command with `-r`.
+
+```bash
+# .env file — registry settings
+GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+REGISTRY_REPOSITORY=ghcr.io/thawn/abstracts-data
+```
+
+See [Registry documentation](registry.md) for complete usage instructions.
+
 ## Example Configurations
 
 ### Local Development (SQLite)

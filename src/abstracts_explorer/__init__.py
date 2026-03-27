@@ -142,6 +142,7 @@ from .database import DatabaseManager  # noqa: E402
 from .embeddings import EmbeddingsManager  # noqa: E402
 from .clustering import ClusteringManager, ClusteringError, perform_clustering  # noqa: E402
 from .rag import RAGChat  # noqa: E402
+from .registry import RegistryClient, RegistryError  # noqa: E402
 from .plugins import (  # noqa: E402
     DownloaderPlugin,
     LightweightDownloaderPlugin,
@@ -165,6 +166,8 @@ __all__ = [
     "ClusteringError",
     "perform_clustering",
     "RAGChat",
+    "RegistryClient",
+    "RegistryError",
     "DownloaderPlugin",
     "LightweightDownloaderPlugin",
     "PluginRegistry",
