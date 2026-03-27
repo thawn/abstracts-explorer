@@ -326,7 +326,7 @@ class TestImportYearIntegration:
         embeddings.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
 
         with patch("oras.client.OrasClient"):
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         with pytest.raises(RegistryError, match="paper DB"):
             client._import_year("neurips", 2024, paper_db, embeddings, lambda m: None)
@@ -340,7 +340,7 @@ class TestImportYearIntegration:
         embeddings = tmp_path / "embeddings-2024.json"  # does NOT exist
 
         with patch("oras.client.OrasClient"):
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         with pytest.raises(RegistryError, match="embeddings"):
             client._import_year("neurips", 2024, paper_db, embeddings, lambda m: None)
@@ -355,7 +355,7 @@ class TestImportYearIntegration:
         embeddings.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
 
         with patch("oras.client.OrasClient"):
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         with patch(
             "abstracts_explorer.database.DatabaseManager.import_papers_from_sqlite",
@@ -391,7 +391,7 @@ class TestImportYearIntegration:
         embeddings.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
 
         with patch("oras.client.OrasClient"):
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         # Make the embedding import fail
         with patch(
@@ -460,7 +460,7 @@ class TestUploadValidation:
             # No papers and no embedding model → embedding model error raised first
 
         with patch("oras.client.OrasClient"):
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         with pytest.raises(RegistryError, match="No embedding model"):
             client.upload(conference="neurips", year=2024)
@@ -473,7 +473,7 @@ class TestUploadValidation:
             db.set_embedding_model("model-a")  # model exists but no papers
 
         with patch("oras.client.OrasClient"):
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         # Without a year, upload looks for years → finds none → raises RegistryError
         with pytest.raises(RegistryError, match="No data found"):
@@ -488,7 +488,7 @@ class TestUploadValidation:
             # No embedding model set
 
         with patch("oras.client.OrasClient"):
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         with pytest.raises(RegistryError, match="embedding model"):
             client.upload(conference="neurips", year=2024)
@@ -504,7 +504,7 @@ class TestUploadValidation:
             db.set_embedding_model("model-a")
 
         with patch("oras.client.OrasClient"):
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         # EmbeddingsManager.export_embeddings returns empty → should error
         with patch(
@@ -566,7 +566,7 @@ class TestDownloadModelMismatchRecovery:
         embeddings.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
 
         with patch("oras.client.OrasClient"):
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         # Mock the oras client pull to return our fake files
         client._client.pull = MagicMock(return_value=[str(paper_db), str(embeddings)])
@@ -667,7 +667,7 @@ class TestCLIRegistryDispatch:
         set_test_db(tmp_path / "test.db")
 
         args = argparse.Namespace(
-            repository="ghcr.io/owner/repo",
+            repository="ghcr.io/thawn/abstracts-data",
             token="test-token",
             conference="neurips",
             year=2024,
@@ -703,7 +703,7 @@ class TestCLIRegistryDispatch:
         from abstracts_explorer.cli import registry_upload_command
 
         args = argparse.Namespace(
-            repository="ghcr.io/owner/repo",
+            repository="ghcr.io/thawn/abstracts-data",
             token="test-token",
             conference="all",
             year=None,
@@ -729,7 +729,7 @@ class TestCLIRegistryDispatch:
         set_test_db(tmp_path / "test.db")
 
         args = argparse.Namespace(
-            repository="ghcr.io/owner/repo",
+            repository="ghcr.io/thawn/abstracts-data",
             token="test-token",
             conference="neurips",
             year=2024,
@@ -761,7 +761,7 @@ class TestCLIRegistryDispatch:
         from abstracts_explorer.cli import registry_download_command
 
         args = argparse.Namespace(
-            repository="ghcr.io/owner/repo",
+            repository="ghcr.io/thawn/abstracts-data",
             token="test-token",
             conference="all",
             year=None,
@@ -786,7 +786,7 @@ class TestCLIRegistryDispatch:
         from abstracts_explorer.cli import registry_upload_command
 
         args = argparse.Namespace(
-            repository="ghcr.io/owner/repo",
+            repository="ghcr.io/thawn/abstracts-data",
             token="test-token",
             conference="ALL",  # uppercase
             year=None,
@@ -820,7 +820,7 @@ class TestCLIRegistryDispatch:
         }
 
         args = argparse.Namespace(
-            repository="ghcr.io/owner/repo",
+            repository="ghcr.io/thawn/abstracts-data",
             token="test-token",
             conference="neurips",
             year=2024,

@@ -166,7 +166,7 @@ class TestRegistryClient:
         """Token is read from GITHUB_TOKEN environment variable."""
         monkeypatch.setenv("GITHUB_TOKEN", "env-token")
         with patch("oras.client.OrasClient"):
-            client = RegistryClient("ghcr.io/owner/repo")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data")
         assert client.token == "env-token"
 
     def test_list_tags(self):
@@ -174,7 +174,7 @@ class TestRegistryClient:
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
             mock_oras.get_tags.return_value = ["neurips-2024", "iclr-2025"]
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
             tags = client.list_tags()
 
         assert tags == ["neurips-2024", "iclr-2025"]
@@ -184,7 +184,7 @@ class TestRegistryClient:
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
             mock_oras.get_tags.side_effect = Exception("network error")
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
             with pytest.raises(RegistryError, match="Failed to list tags"):
                 client.list_tags()
@@ -209,7 +209,7 @@ class TestRegistryClient:
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
             mock_oras.get_manifest.return_value = manifest
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
             info = client.get_artifact_info("neurips-2024")
 
         assert info["tag"] == "neurips-2024"
@@ -601,7 +601,7 @@ class TestUploadDownload:
         _populate_test_db(tmp_path / "test.db")
 
         with patch("oras.client.OrasClient"):
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         with patch.object(RegistryClient, "_get_embedding_model", return_value="test-model"):
             with pytest.raises(RegistryError, match="No papers found"):
@@ -612,7 +612,7 @@ class TestUploadDownload:
         _populate_test_db(tmp_path / "test.db")
 
         with patch("oras.client.OrasClient"):
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         mock_em = MagicMock()
         mock_em.export_embeddings.return_value = {"ids": [], "documents": [], "metadatas": [], "embeddings": []}
@@ -631,7 +631,7 @@ class TestUploadDownload:
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
             mock_oras.push.return_value = Mock(status_code=201)
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         mock_em = MagicMock()
         mock_em.export_embeddings.return_value = {
@@ -660,7 +660,7 @@ class TestUploadDownload:
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
             mock_oras.push.return_value = Mock(status_code=201)
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         mock_em = MagicMock()
         mock_em.export_embeddings.return_value = {
@@ -687,7 +687,7 @@ class TestUploadDownload:
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
             mock_oras.push.return_value = Mock(status_code=201)
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         mock_em = MagicMock()
         mock_em.export_embeddings.return_value = {
@@ -718,7 +718,7 @@ class TestUploadDownload:
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
             mock_oras.push.return_value = Mock(status_code=201)
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         mock_em = MagicMock()
         mock_em.export_embeddings.return_value = {
@@ -739,9 +739,9 @@ class TestUploadDownload:
         # push is called once per year (individual tags) + once for the all-years tag
         assert mock_oras.push.call_count == 3
         pushed_targets = [call[1]["target"] for call in mock_oras.push.call_args_list]
-        assert "ghcr.io/owner/repo:neurips-2024_test-model" in pushed_targets
-        assert "ghcr.io/owner/repo:neurips-2025_test-model" in pushed_targets
-        assert "ghcr.io/owner/repo:neurips_test-model" in pushed_targets
+        assert "ghcr.io/thawn/abstracts-data:neurips-2024_test-model" in pushed_targets
+        assert "ghcr.io/thawn/abstracts-data:neurips-2025_test-model" in pushed_targets
+        assert "ghcr.io/thawn/abstracts-data:neurips_test-model" in pushed_targets
         assert "year_tags" in summary
         assert sorted(summary["year_tags"]) == ["neurips-2024_test-model", "neurips-2025_test-model"]
 
@@ -750,7 +750,7 @@ class TestUploadDownload:
         _populate_test_db(tmp_path / "test.db")
 
         with patch("oras.client.OrasClient"):
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         with patch.object(RegistryClient, "_get_embedding_model", return_value="test-model"):
             with pytest.raises(RegistryError, match="No data found"):
@@ -780,7 +780,7 @@ class TestUploadDownload:
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
             mock_oras.push.return_value = Mock(status_code=201)
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         mock_em = MagicMock()
         mock_em.export_embeddings.return_value = {
@@ -806,7 +806,7 @@ class TestUploadDownload:
         _populate_test_db(tmp_path / "test.db")
 
         with patch("oras.client.OrasClient"):
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         with patch.object(RegistryClient, "_get_embedding_model", return_value=None):
             with pytest.raises(RegistryError, match="No embedding model found"):
@@ -842,7 +842,7 @@ class TestUploadDownload:
                 str(papers_2025),
                 str(embeddings_2025),
             ]
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         mock_em = MagicMock()
         mock_em.import_embeddings.return_value = 1
@@ -880,7 +880,7 @@ class TestUploadDownload:
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
             mock_oras.pull.return_value = [str(export_path), str(embeddings_path)]
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         mock_em = MagicMock()
         mock_em.import_embeddings.return_value = 1
@@ -910,7 +910,7 @@ class TestUploadDownload:
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
             mock_oras.pull.return_value = [str(papers_2024)]
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         set_test_db(tmp_path / "target.db")
 
@@ -922,7 +922,7 @@ class TestUploadDownload:
         set_test_db(tmp_path / "target.db")
 
         with patch("oras.client.OrasClient"):
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         embeddings_path = tmp_path / "embeddings-2024.json"
         embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
@@ -940,7 +940,7 @@ class TestUploadDownload:
         source_db.close()
 
         with patch("oras.client.OrasClient"):
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         with pytest.raises(RegistryError, match="Incomplete data.*missing.*embeddings"):
             client._import_year("neurips", 2024, papers_2024, tmp_path / "embeddings-2024.json", lambda m: None)
@@ -977,7 +977,7 @@ class TestUploadDownload:
         set_test_db(tmp_path / "target.db")
 
         with patch("oras.client.OrasClient"):
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         # Make EmbeddingsManager.import_embeddings raise an error
         with patch("abstracts_explorer.embeddings.EmbeddingsManager") as MockEM:
@@ -1009,7 +1009,7 @@ class TestUploadDownload:
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
             mock_oras.push.return_value = Mock(status_code=201)
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         mock_em = MagicMock()
         mock_em.export_embeddings.return_value = {
@@ -1041,7 +1041,7 @@ class TestUploadDownload:
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
             mock_oras.push.return_value = Mock(status_code=201)
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         mock_em = MagicMock()
         mock_em.export_embeddings.return_value = {
@@ -1071,7 +1071,7 @@ class TestUploadDownload:
         db.close()
 
         with patch("oras.client.OrasClient"):
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         with pytest.raises(RegistryError, match="No conference data found"):
             client.upload_all()
@@ -1129,7 +1129,7 @@ class TestUploadDownload:
                 [str(papers_i), str(emb_i)],  # first call: iclr-2024
                 [str(papers_n), str(emb_n)],  # second call: neurips-2024
             ]
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
             with patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em):
                 summaries = client.download_all(progress_callback=lambda m: None)
@@ -1142,7 +1142,7 @@ class TestUploadDownload:
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
             mock_oras.get_tags.return_value = []
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         with pytest.raises(RegistryError, match="No tags found"):
             client.download_all()
@@ -1152,7 +1152,7 @@ class TestUploadDownload:
         from abstracts_explorer.cli import registry_upload_command
 
         args = argparse.Namespace(
-            repository="ghcr.io/owner/repo",
+            repository="ghcr.io/thawn/abstracts-data",
             token="test-token",
             conference="all",
             year=None,
@@ -1177,7 +1177,7 @@ class TestUploadDownload:
         from abstracts_explorer.cli import registry_download_command
 
         args = argparse.Namespace(
-            repository="ghcr.io/owner/repo",
+            repository="ghcr.io/thawn/abstracts-data",
             token="test-token",
             conference="all",
             year=None,
@@ -1231,13 +1231,13 @@ class TestCLICommands:
     def test_registry_upload_no_token(self, capsys, monkeypatch):
         """Upload fails when no token is specified."""
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
-        monkeypatch.setenv("REGISTRY_REPOSITORY", "ghcr.io/owner/repo")
+        monkeypatch.setenv("REGISTRY_REPOSITORY", "ghcr.io/thawn/abstracts-data")
         get_config(reload=True, env_path=get_env_test_path())
 
         from abstracts_explorer.cli import registry_upload_command
 
         args = argparse.Namespace(
-            repository="ghcr.io/owner/repo",
+            repository="ghcr.io/thawn/abstracts-data",
             token=None,
             conference="neurips",
             year=2024,
@@ -1295,7 +1295,7 @@ class TestCLICommands:
         from abstracts_explorer.cli import registry_upload_command
 
         args = argparse.Namespace(
-            repository="ghcr.io/owner/repo",
+            repository="ghcr.io/thawn/abstracts-data",
             token="test-token",
             conference="neurips",
             year=2024,
@@ -1322,7 +1322,7 @@ class TestCLICommands:
         from abstracts_explorer.cli import registry_list_command
 
         args = argparse.Namespace(
-            repository="ghcr.io/owner/repo",
+            repository="ghcr.io/thawn/abstracts-data",
             token="test-token",
             tag=None,
         )
@@ -1343,7 +1343,7 @@ class TestCLICommands:
         from abstracts_explorer.cli import registry_list_command
 
         args = argparse.Namespace(
-            repository="ghcr.io/owner/repo",
+            repository="ghcr.io/thawn/abstracts-data",
             token="test-token",
             tag="neurips-2024",
         )
@@ -1374,7 +1374,7 @@ class TestCLICommands:
         from abstracts_explorer.cli import registry_list_command
 
         args = argparse.Namespace(
-            repository="ghcr.io/owner/repo",
+            repository="ghcr.io/thawn/abstracts-data",
             token="test-token",
             tag=None,
         )
@@ -1466,7 +1466,7 @@ class TestCLICommands:
         from abstracts_explorer.cli import registry_upload_command
 
         args = argparse.Namespace(
-            repository="ghcr.io/owner/repo",
+            repository="ghcr.io/thawn/abstracts-data",
             token="test-token",
             conference="ALL",
             year=None,
@@ -1487,7 +1487,7 @@ class TestCLICommands:
         from abstracts_explorer.cli import registry_download_command
 
         args = argparse.Namespace(
-            repository="ghcr.io/owner/repo",
+            repository="ghcr.io/thawn/abstracts-data",
             token="test-token",
             conference="ALL",
             year=None,
@@ -1526,7 +1526,7 @@ class TestCLICommands:
         embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
 
         with patch("oras.client.OrasClient"):
-            client = RegistryClient("ghcr.io/owner/repo", token="token")
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         with patch(
             "abstracts_explorer.database.DatabaseManager.import_papers_from_sqlite",
@@ -1543,7 +1543,7 @@ class TestCLICommands:
         from abstracts_explorer.cli import registry_download_command
 
         args = argparse.Namespace(
-            repository="ghcr.io/owner/repo",
+            repository="ghcr.io/thawn/abstracts-data",
             token="test-token",
             conference="neurips",
             year=2024,
@@ -1580,7 +1580,7 @@ class TestCLICommands:
         from abstracts_explorer.cli import registry_download_command
 
         args = argparse.Namespace(
-            repository="ghcr.io/owner/repo",
+            repository="ghcr.io/thawn/abstracts-data",
             token="test-token",
             conference="neurips",
             year=2024,
@@ -1614,7 +1614,7 @@ class TestCLICommands:
         from abstracts_explorer.cli import registry_download_command
 
         args = argparse.Namespace(
-            repository="ghcr.io/owner/repo",
+            repository="ghcr.io/thawn/abstracts-data",
             token="test-token",
             conference="neurips",
             year=2024,
@@ -1642,7 +1642,7 @@ class TestCLICommands:
         from abstracts_explorer.cli import registry_download_command
 
         args = argparse.Namespace(
-            repository="ghcr.io/owner/repo",
+            repository="ghcr.io/thawn/abstracts-data",
             token="test-token",
             conference="neurips",
             year=2024,

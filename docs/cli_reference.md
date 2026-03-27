@@ -211,13 +211,13 @@ abstracts-explorer registry upload [OPTIONS]
 
 ```bash
 # Upload NeurIPS 2024
-abstracts-explorer registry upload -r ghcr.io/owner/data --conference neurips --year 2024
+abstracts-explorer registry upload -r ghcr.io/thawn/abstracts-data --conference neurips --year 2024
 
 # Upload all NeurIPS years
-abstracts-explorer registry upload -r ghcr.io/owner/data --conference neurips
+abstracts-explorer registry upload -r ghcr.io/thawn/abstracts-data --conference neurips
 
 # Upload all conferences (CI mode)
-abstracts-explorer registry upload -r ghcr.io/owner/data --conference all --yes
+abstracts-explorer registry upload -r ghcr.io/thawn/abstracts-data --conference all --yes
 ```
 
 #### registry download
@@ -241,14 +241,14 @@ abstracts-explorer registry download [OPTIONS]
 
 ```bash
 # Download NeurIPS 2024
-abstracts-explorer registry download -r ghcr.io/owner/data --conference neurips --year 2024
+abstracts-explorer registry download -r ghcr.io/thawn/abstracts-data --conference neurips --year 2024
 
 # Download with explicit embedding model (when local DB is empty)
-abstracts-explorer registry download -r ghcr.io/owner/data --conference neurips --year 2024 \
+abstracts-explorer registry download -r ghcr.io/thawn/abstracts-data --conference neurips --year 2024 \
   --embedding-model text-embedding-qwen3-embedding-4b
 
 # Download all (CI mode)
-abstracts-explorer registry download -r ghcr.io/owner/data --conference all --yes
+abstracts-explorer registry download -r ghcr.io/thawn/abstracts-data --conference all --yes
 ```
 
 #### registry list
@@ -269,10 +269,10 @@ abstracts-explorer registry list [OPTIONS]
 
 ```bash
 # List all tags
-abstracts-explorer registry list -r ghcr.io/owner/data
+abstracts-explorer registry list -r ghcr.io/thawn/abstracts-data
 
 # Inspect a specific tag
-abstracts-explorer registry list -r ghcr.io/owner/data \
+abstracts-explorer registry list -r ghcr.io/thawn/abstracts-data \
   --tag neurips-2024_text-embedding-qwen3-embedding-4b
 ```
 
