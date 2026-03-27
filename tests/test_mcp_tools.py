@@ -222,13 +222,10 @@ def test_mcp_tools_schema_parameters():
     """Test that tool schemas have correct parameter definitions."""
     schema = get_mcp_tools_schema()
 
-    # Check get_cluster_topics parameters
+    # Check get_cluster_topics parameters (simplified - no clustering config)
     cluster_topics = next(t for t in schema if t["function"]["name"] == "get_cluster_topics")
     params = cluster_topics["function"]["parameters"]["properties"]
-    assert "n_clusters" in params
-    assert params["n_clusters"]["type"] == "integer"
-    assert "clustering_method" in params
-    assert params["clustering_method"]["type"] == "string"
+    assert "collection_name" in params
 
     # Check get_topic_evolution parameters
     topic_evolution = next(t for t in schema if t["function"]["name"] == "get_topic_evolution")
@@ -242,6 +239,12 @@ def test_mcp_tools_schema_parameters():
     assert "topic_keywords" in params["properties"]
     assert "years" in params["properties"]
     assert "topic_keywords" in params["required"]
+
+    # Check get_cluster_visualization parameters (simplified)
+    viz = next(t for t in schema if t["function"]["name"] == "get_cluster_visualization")
+    params = viz["function"]["parameters"]["properties"]
+    assert "output_path" in params
+    assert "collection_name" in params
 
 
 def test_get_mcp_tools_schema_with_conferences_enum():

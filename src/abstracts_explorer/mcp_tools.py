@@ -244,17 +244,6 @@ MCP_TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "n_clusters": {"type": "integer", "description": "Number of clusters to create (default: 8)"},
-                    "reduction_method": {
-                        "type": "string",
-                        "enum": ["pca", "tsne"],
-                        "description": "Dimensionality reduction method (default: 'pca')",
-                    },
-                    "clustering_method": {
-                        "type": "string",
-                        "enum": ["kmeans", "dbscan", "agglomerative"],
-                        "description": "Clustering algorithm (default: 'kmeans')",
-                    },
                     "collection_name": {
                         "type": "string",
                         "description": "Name of ChromaDB collection (optional, uses config default)",
@@ -335,22 +324,6 @@ MCP_TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "n_clusters": {"type": "integer", "description": "Number of clusters (default: 8)"},
-                    "reduction_method": {
-                        "type": "string",
-                        "enum": ["pca", "tsne"],
-                        "description": "Reduction method (default: 'tsne')",
-                    },
-                    "clustering_method": {
-                        "type": "string",
-                        "enum": ["kmeans", "dbscan", "agglomerative"],
-                        "description": "Clustering method (default: 'kmeans')",
-                    },
-                    "n_components": {
-                        "type": "integer",
-                        "enum": [2, 3],
-                        "description": "Number of dimensions: 2 or 3 (default: 2)",
-                    },
                     "output_path": {"type": "string", "description": "Path to save visualization JSON (optional)"},
                     "collection_name": {"type": "string", "description": "Name of ChromaDB collection (optional)"},
                 },

@@ -158,6 +158,7 @@ def web_server(test_database, tmp_path_factory):
 
         # Add embeddings for test papers
         from abstracts_explorer.database import DatabaseManager
+
         set_test_db(str(test_database))
         db = DatabaseManager()
         db.connect()
@@ -170,6 +171,7 @@ def web_server(test_database, tmp_path_factory):
 
         # Inject the pre-created embeddings manager directly
         import abstracts_explorer.web_ui.app as app_module
+
         app_module.embeddings_manager = em
         app_module.rag_chat = None
 
@@ -559,9 +561,11 @@ class TestWebUIIntegration:
             assert data["count"] <= 3
 
             # Semantic search MUST return results - if it returns 0, it's a bug
-            assert data["count"] > 0, "Semantic search must return at least 1 result. If this fails, check that embeddings are created and the collection is not empty."
+            assert (
+                data["count"] > 0
+            ), "Semantic search must return at least 1 result. If this fails, check that embeddings are created and the collection is not empty."
             assert len(data["papers"]) > 0, "Semantic search must return at least 1 paper"
-            
+
             # Check that results have similarity scores
             for paper in data["papers"]:
                 assert "uid" in paper
@@ -618,7 +622,7 @@ class TestWebUIIntegration:
             assert "papers" in semantic_results
             assert "use_embeddings" in semantic_results
             assert semantic_results["use_embeddings"] is True
-            
+
             # Semantic search MUST return results
             assert len(semantic_results["papers"]) > 0, "Semantic search must return at least 1 result"
 
@@ -740,7 +744,7 @@ class TestWebUISemanticSearchWithResults:
 class TestWebUIChatEndpointFull:
     """
     Test chat endpoint with full functionality.
-    
+
     These integration tests require LM Studio to verify end-to-end chat functionality.
     For unit testing without LM Studio, see:
     - TestWebUIErrorHandlingPaths.test_chat_with_empty_message
@@ -752,7 +756,7 @@ class TestWebUIChatEndpointFull:
     def test_chat_with_valid_message_and_response(self, web_server):
         """
         Test chat endpoint returns valid response.
-        
+
         This integration test verifies the complete chat workflow with real API.
         For unit testing without LM Studio, see tests in test_rag.py.
         """
@@ -786,7 +790,7 @@ class TestWebUIChatEndpointFull:
     def test_chat_with_reset_flag(self, web_server):
         """
         Test chat endpoint with reset flag.
-        
+
         This integration test verifies conversation reset with real API.
         For unit testing without LM Studio, see TestRAGChatConversation.test_reset_conversation in test_rag.py.
         """
@@ -826,7 +830,7 @@ class TestWebUIChatEndpointFull:
     def test_chat_with_custom_n_papers(self, web_server):
         """
         Test chat endpoint with custom n_papers parameter.
-        
+
         This integration test verifies custom paper count with real API.
         For unit testing without LM Studio, see TestRAGChatQuery.test_query_with_n_results in test_rag.py.
         """
@@ -1024,10 +1028,7 @@ class TestWebUIErrorHandlingPaths:
         host, port, base_url = web_server
 
         # Test the custom cluster search with a query
-        search_data = {
-            "query": "machine learning",
-            "distance": 150.0
-        }
+        search_data = {"query": "machine learning", "distance": 150.0}
 
         response = requests.post(f"{base_url}/api/clusters/search", json=search_data, timeout=30)
 

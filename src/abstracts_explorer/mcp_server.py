@@ -175,27 +175,22 @@ def analyze_cluster_topics(
 
 @mcp.tool()
 def get_cluster_topics(
-    n_clusters: int = 8,
-    reduction_method: str = "pca",
-    clustering_method: str = "kmeans",
     collection_name: Optional[str] = None,
+    **kwargs,
 ) -> str:
     """
     Get the most frequently mentioned topics from clustered embeddings.
 
-    This tool clusters paper embeddings and analyzes the topics in each cluster
-    based on keywords, sessions, and paper titles.
+    This tool clusters paper embeddings using agglomerative clustering
+    with UMAP dimensionality reduction and analyzes the topics in each
+    cluster based on keywords, sessions, and paper titles.
 
     Parameters
     ----------
-    n_clusters : int, optional
-        Number of clusters to create (default: 8)
-    reduction_method : str, optional
-        Dimensionality reduction method: 'pca' or 'tsne' (default: 'pca')
-    clustering_method : str, optional
-        Clustering method: 'kmeans', 'dbscan', or 'agglomerative' (default: 'kmeans')
     collection_name : str, optional
         Name of ChromaDB collection (uses config default if not provided)
+    **kwargs
+        Ignored (for backwards compatibility with old tool schemas)
 
     Returns
     -------
@@ -213,19 +208,21 @@ def get_cluster_topics(
         logger.info("Loading embeddings...")
         cm.load_embeddings()
 
-        # Perform clustering on full embeddings
-        logger.info(f"Clustering using {clustering_method}...")
+        # Perform clustering with fixed parameters
+        logger.info("Clustering using agglomerative...")
         cm.cluster(
-            method=clustering_method,
-            n_clusters=n_clusters,
+            method="agglomerative",
+            n_clusters=None,
             random_state=42,
             use_reduced=False,
+            distance_threshold=150.0,
+            linkage="ward",
         )
 
-        # Reduce dimensions for visualization (needed for some methods)
-        logger.info(f"Reducing dimensions using {reduction_method}...")
+        # Reduce dimensions for visualization
+        logger.info("Reducing dimensions using umap...")
         cm.reduce_dimensions(
-            method=reduction_method,
+            method="umap",
             n_components=2,
             random_state=42,
         )
@@ -725,33 +722,24 @@ def analyze_topic_relevance(
 
 @mcp.tool()
 def get_cluster_visualization(
-    n_clusters: int = 8,
-    reduction_method: str = "tsne",
-    clustering_method: str = "kmeans",
-    n_components: int = 2,
     output_path: Optional[str] = None,
     collection_name: Optional[str] = None,
+    **kwargs,
 ) -> str:
     """
     Generate visualization data for clustered embeddings.
 
-    This tool performs clustering and dimensionality reduction on paper
-    embeddings and returns data suitable for visualization.
+    This tool performs agglomerative clustering with UMAP dimensionality
+    reduction on paper embeddings and returns data suitable for visualization.
 
     Parameters
     ----------
-    n_clusters : int, optional
-        Number of clusters (default: 8)
-    reduction_method : str, optional
-        Reduction method: 'pca' or 'tsne' (default: 'tsne')
-    clustering_method : str, optional
-        Clustering method: 'kmeans', 'dbscan', or 'agglomerative' (default: 'kmeans')
-    n_components : int, optional
-        Number of dimensions for visualization: 2 or 3 (default: 2)
     output_path : str, optional
         Path to save visualization JSON file (optional)
     collection_name : str, optional
         Name of ChromaDB collection
+    **kwargs
+        Ignored (for backwards compatibility with old tool schemas)
 
     Returns
     -------
@@ -762,21 +750,23 @@ def get_cluster_visualization(
         config = get_config()
         collection_name = collection_name or config.collection_name
 
-        # Perform clustering
+        # Perform clustering with fixed parameters
         logger.info("Performing clustering for visualization...")
         results = perform_clustering(
             collection_name=collection_name,
-            reduction_method=reduction_method,
-            n_components=n_components,
-            clustering_method=clustering_method,
-            n_clusters=n_clusters,
+            reduction_method="umap",
+            n_components=2,
+            clustering_method="agglomerative",
+            n_clusters=None,
             output_path=output_path,
             random_state=42,
+            distance_threshold=150.0,
+            linkage="ward",
         )
 
         # Format result
         result = {
-            "n_dimensions": n_components,
+            "n_dimensions": 2,
             "n_points": len(results["points"]),
             "statistics": results["statistics"],
             "points": results["points"][:1000],  # Limit for MCP response size
