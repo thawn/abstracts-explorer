@@ -37,12 +37,12 @@ from abstracts_explorer.plugin import (
 )
 
 # Import actual plugin implementations
-from .chi_downloader import CHIDownloaderPlugin
-from .iclr_downloader import ICLRDownloaderPlugin
-from .icml_downloader import ICMLDownloaderPlugin
-from .ieeevis_downloader import IEEEVISDownloaderPlugin
-from .ml4ps_downloader import ML4PSDownloaderPlugin
-from .neurips_downloader import NeurIPSDownloaderPlugin
+from abstracts_explorer.plugins.chi_downloader import CHIDownloaderPlugin
+from abstracts_explorer.plugins.iclr_downloader import ICLRDownloaderPlugin
+from abstracts_explorer.plugins.icml_downloader import ICMLDownloaderPlugin
+from abstracts_explorer.plugins.ieeevis_downloader import IEEEVISDownloaderPlugin
+from abstracts_explorer.plugins.ml4ps_downloader import ML4PSDownloaderPlugin
+from abstracts_explorer.plugins.neurips_downloader import NeurIPSDownloaderPlugin
 
 __all__ = [
     # Plugin base classes

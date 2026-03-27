@@ -68,8 +68,8 @@ try:
 except ImportError:
     HAS_FUZZY = False
 
-from .embeddings import EmbeddingsManager
-from .database import DatabaseManager
+from abstracts_explorer.embeddings import EmbeddingsManager
+from abstracts_explorer.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -962,7 +962,7 @@ class ClusteringManager:
         str
             Generated parent label
         """
-        from .config import get_config
+        from abstracts_explorer.config import get_config
 
         config = get_config()
 
@@ -1119,7 +1119,7 @@ Only respond with the label, nothing else. Do not add formatting."""
         str
             Generated label
         """
-        from .config import get_config
+        from abstracts_explorer.config import get_config
 
         config = get_config()
 
@@ -1415,7 +1415,7 @@ Only respond with the label, nothing else. Do not add formatting."""
                 raise AttributeError("OpenAI client not available in embeddings manager")
 
             # Use the embeddings manager's OpenAI client
-            from .config import get_config
+            from abstracts_explorer.config import get_config
 
             config = get_config()
 

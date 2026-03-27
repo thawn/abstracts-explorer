@@ -16,14 +16,14 @@ import argcomplete
 
 from tqdm import tqdm
 
-from .config import get_config
-from .database import DatabaseManager
-from .embeddings import EmbeddingsManager, EmbeddingsError
-from .clustering import perform_clustering, compute_clusters_with_cache, ClusteringError
-from .rag import RAGChat, RAGError
-from .plugins import get_plugin, list_plugins, list_plugin_names
-from .mcp_server import run_mcp_server
-from .evaluation import (
+from abstracts_explorer.config import get_config
+from abstracts_explorer.database import DatabaseManager
+from abstracts_explorer.embeddings import EmbeddingsManager, EmbeddingsError
+from abstracts_explorer.clustering import perform_clustering, compute_clusters_with_cache, ClusteringError
+from abstracts_explorer.rag import RAGChat, RAGError
+from abstracts_explorer.plugins import get_plugin, list_plugins, list_plugin_names
+from abstracts_explorer.mcp_server import run_mcp_server
+from abstracts_explorer.evaluation import (
     EvaluationError,
     Evaluator,
     format_eval_summary,
@@ -1513,7 +1513,7 @@ def registry_upload_command(args: argparse.Namespace) -> int:
     int
         Exit code (0 for success, non-zero for failure)
     """
-    from .registry import RegistryClient, RegistryError
+    from abstracts_explorer.registry import RegistryClient, RegistryError
 
     config = get_config()
     repository = args.repository or config.registry_repository
@@ -1600,7 +1600,12 @@ def registry_download_command(args: argparse.Namespace) -> int:
     int
         Exit code (0 for success, non-zero for failure)
     """
-    from .registry import EmbeddingModelMismatchError, RegistryClient, RegistryError, _sanitize_model_name
+    from abstracts_explorer.registry import (
+        EmbeddingModelMismatchError,
+        RegistryClient,
+        RegistryError,
+        _sanitize_model_name,
+    )
 
     config = get_config()
     repository = args.repository or config.registry_repository
@@ -1745,7 +1750,7 @@ def registry_list_command(args: argparse.Namespace) -> int:
     int
         Exit code (0 for success, non-zero for failure)
     """
-    from .registry import RegistryClient, RegistryError
+    from abstracts_explorer.registry import RegistryClient, RegistryError
 
     config = get_config()
     repository = args.repository or config.registry_repository

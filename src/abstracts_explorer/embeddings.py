@@ -20,8 +20,8 @@ from openai import OpenAI
 import chromadb
 from chromadb.config import Settings
 
-from .config import get_config
-from .database import DatabaseManager
+from abstracts_explorer.config import get_config
+from abstracts_explorer.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -825,7 +825,7 @@ class EmbeddingsManager:
         ...     years=[2024, 2025]
         ... )
         """
-        from .paper_utils import format_search_results, PaperFormattingError
+        from abstracts_explorer.paper_utils import format_search_results, PaperFormattingError
 
         # Build metadata filter for embeddings search
         # NOTE: All metadata is stored as strings in ChromaDB (see add_paper method, line 445)

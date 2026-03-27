@@ -14,11 +14,11 @@ from typing import List, Dict, Optional, Any
 import httpx
 from openai import OpenAI
 
-from .config import get_config
-from .database import DatabaseError
-from .embeddings import RateLimitedTransport
-from .paper_utils import PaperFormattingError
-from .mcp_tools import execute_mcp_tool, format_tool_result_for_llm, get_mcp_tools_schema
+from abstracts_explorer.config import get_config
+from abstracts_explorer.database import DatabaseError
+from abstracts_explorer.embeddings import RateLimitedTransport
+from abstracts_explorer.paper_utils import PaperFormattingError
+from abstracts_explorer.mcp_tools import execute_mcp_tool, format_tool_result_for_llm, get_mcp_tools_schema
 
 logger = logging.getLogger(__name__)
 

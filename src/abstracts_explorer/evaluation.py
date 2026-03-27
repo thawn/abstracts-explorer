@@ -21,10 +21,10 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from .config import get_config
-from .database import DatabaseManager
-from .embeddings import EmbeddingsManager
-from .mcp_tools import execute_mcp_tool, format_tool_result_for_llm
+from abstracts_explorer.config import get_config
+from abstracts_explorer.database import DatabaseManager
+from abstracts_explorer.embeddings import EmbeddingsManager
+from abstracts_explorer.mcp_tools import execute_mcp_tool, format_tool_result_for_llm
 
 logger = logging.getLogger(__name__)
 
@@ -737,7 +737,7 @@ class Evaluator:
         EvaluationError
             If evaluation fails.
         """
-        from .rag import RAGChat
+        from abstracts_explorer.rag import RAGChat
 
         pairs = self.db.get_eval_qa_pairs(verified_only=verified_only, limit=limit)
         if not pairs:
