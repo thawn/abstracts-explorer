@@ -1600,7 +1600,12 @@ def registry_download_command(args: argparse.Namespace) -> int:
     int
         Exit code (0 for success, non-zero for failure)
     """
-    from abstracts_explorer.registry import EmbeddingModelMismatchError, RegistryClient, RegistryError, _sanitize_model_name
+    from abstracts_explorer.registry import (
+        EmbeddingModelMismatchError,
+        RegistryClient,
+        RegistryError,
+        _sanitize_model_name,
+    )
 
     config = get_config()
     repository = args.repository or config.registry_repository
