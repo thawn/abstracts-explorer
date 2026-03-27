@@ -975,51 +975,18 @@ class TestWebUIErrorHandlingPaths:
             assert "error" in data
 
     def test_clusters_compute_endpoint(self, web_server):
-        """Test that clusters compute endpoint works correctly."""
+        """Test that clusters compute endpoint returns 404 when no pre-computed data exists."""
         host, port, base_url = web_server
 
-        # Request cluster computation with default parameters
-        cluster_data = {
-            "reduction_method": "pca",
-            "n_components": 2,
-            "clustering_method": "kmeans",
-            "n_clusters": 3,
-        }
+        # Request pre-computed clustering data (no clustering config needed)
+        response = requests.post(f"{base_url}/api/clusters/compute", json={}, timeout=30)
 
-        response = requests.post(f"{base_url}/api/clusters/compute", json=cluster_data, timeout=30)
-
-        # Should return 200 OK
-        assert response.status_code == 200
+        # Should return 404 since no pre-computed data exists
+        assert response.status_code == 404
 
         data = response.json()
         assert isinstance(data, dict)
-
-        # Should have points, statistics, and n_dimensions
-        assert "points" in data
-        assert "statistics" in data
-        assert "n_dimensions" in data
-
-        # Verify statistics structure
-        stats = data["statistics"]
-        assert "n_clusters" in stats
-        assert "total_papers" in stats
-        assert "cluster_sizes" in stats
-
-        # Verify we got the expected number of clusters (or fewer if not enough data)
-        assert stats["n_clusters"] > 0
-        assert stats["n_clusters"] <= 3
-
-        # Verify points structure
-        points = data["points"]
-        assert isinstance(points, list)
-        assert len(points) > 0
-
-        # Each point should have required fields
-        for point in points:
-            assert "id" in point
-            assert "x" in point
-            assert "y" in point
-            assert "cluster" in point
+        assert "error" in data
 
     def test_clusters_cached_endpoint_not_found(self, web_server):
         """Test that cached clusters endpoint returns 404 when no cache exists."""
@@ -1033,29 +1000,24 @@ class TestWebUIErrorHandlingPaths:
         data = response.json()
         assert "error" in data
 
-    def test_clusters_compute_with_umap(self, web_server):
-        """Test that clusters compute endpoint works with UMAP reduction method."""
+    def test_clusters_compute_with_conference_year_filter(self, web_server):
+        """Test that clusters compute endpoint accepts conference/year filters."""
         host, port, base_url = web_server
 
-        # Request cluster computation with UMAP
+        # Request with conference/year filter - no pre-computed data so expect 404
         cluster_data = {
-            "reduction_method": "umap",
-            "n_components": 2,
-            "clustering_method": "kmeans",
-            "n_clusters": 3,
+            "conferences": ["NeurIPS"],
+            "years": [2024],
         }
 
         response = requests.post(f"{base_url}/api/clusters/compute", json=cluster_data, timeout=30)
 
-        # With only 3 test samples, UMAP will fail with a proper error message
-        # UMAP requires at least n_components + 1 samples
-        # This is expected behavior for small datasets
-        assert response.status_code == 500
+        # Should return 404 since no pre-computed data exists for this combo
+        assert response.status_code == 404
 
         data = response.json()
         assert isinstance(data, dict)
         assert "error" in data
-        assert "UMAP requires at least" in data["error"]
 
     def test_custom_cluster_search_with_embeddings(self, web_server):
         """Test custom cluster search endpoint with real embeddings."""
