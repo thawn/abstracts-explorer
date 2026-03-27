@@ -204,6 +204,51 @@ class TestRAGChatInit:
         with pytest.raises(RAGError, match="database is required"):
             RAGChat(mock_embeddings_manager, None)
 
+    def test_init_requests_per_minute_from_config(self, mock_embeddings_manager, mock_database):
+        """Test that requests_per_minute is loaded from config."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        assert isinstance(chat.requests_per_minute, int)
+        assert chat.requests_per_minute >= 0
+
+
+class TestRAGChatRateLimiting:
+    """Tests for rate limiting in RAGChat."""
+
+    def test_rate_limited_transport_attached_when_rpm_gt_zero(
+        self, mock_embeddings_manager, mock_database, monkeypatch
+    ):
+        """Test that a RateLimitedTransport http_client is used when requests_per_minute > 0."""
+        from tests.conftest import get_env_test_path
+        from abstracts_explorer.config import get_config
+        from abstracts_explorer.embeddings import RateLimitedTransport
+
+        get_config(reload=True, env_path=get_env_test_path())
+        monkeypatch.setenv("REQUESTS_PER_MINUTE", "30")
+        get_config(reload=True, env_path=get_env_test_path())
+
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        assert chat.requests_per_minute == 30
+
+        client = chat.openai_client
+        assert isinstance(client._client._transport, RateLimitedTransport)
+        assert client._client._transport._min_interval == pytest.approx(2.0)  # 60/30
+
+    def test_no_rate_limited_transport_when_rpm_zero(self, mock_embeddings_manager, mock_database, monkeypatch):
+        """Test that no RateLimitedTransport is used when requests_per_minute=0."""
+        from tests.conftest import get_env_test_path
+        from abstracts_explorer.config import get_config
+        from abstracts_explorer.embeddings import RateLimitedTransport
+
+        monkeypatch.setenv("REQUESTS_PER_MINUTE", "0")
+        get_config(reload=True, env_path=get_env_test_path())
+
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        assert chat.requests_per_minute == 0
+
+        client = chat.openai_client
+        transport = getattr(getattr(client, "_client", None), "_transport", None)
+        assert not isinstance(transport, RateLimitedTransport)
+
 
 class TestRAGChatQuery:
     """Test RAGChat query method."""

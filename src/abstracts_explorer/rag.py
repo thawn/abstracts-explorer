@@ -11,10 +11,12 @@ import re
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 
+import httpx
 from openai import OpenAI
 
 from .config import get_config
 from .database import DatabaseError
+from .embeddings import RateLimitedTransport
 from .paper_utils import PaperFormattingError
 from .mcp_tools import execute_mcp_tool, format_tool_result_for_llm, get_mcp_tools_schema
 
@@ -241,22 +243,37 @@ class RAGChat:
         # OpenAI client - lazy loaded on first use to avoid API calls during test collection
         self._openai_client: Optional[OpenAI] = None
         self._llm_backend_auth_token = config.llm_backend_auth_token
+        self.requests_per_minute = config.requests_per_minute
 
     @property
     def openai_client(self) -> OpenAI:
         """
         Get the OpenAI client, creating it lazily on first access.
 
-        This lazy loading prevents API calls during test collection.
+        When ``requests_per_minute`` is greater than 0, a :class:`RateLimitedTransport`
+        is wrapped around the default httpx transport so that every HTTP request is
+        automatically throttled.
 
         Returns
         -------
         OpenAI
             Initialized OpenAI client instance.
+
+        Notes
+        -----
+        Rate limiting is controlled by the ``requests_per_minute`` attribute, which is
+        read from the ``REQUESTS_PER_MINUTE`` configuration setting (default: 60).
+        Setting it to 0 disables rate limiting entirely.
         """
         if self._openai_client is None:
+            http_client: Optional[httpx.Client] = None
+            if self.requests_per_minute > 0:
+                transport = RateLimitedTransport(httpx.HTTPTransport(), self.requests_per_minute)
+                http_client = httpx.Client(transport=transport)
             self._openai_client = OpenAI(
-                base_url=f"{self.lm_studio_url}/v1", api_key=self._llm_backend_auth_token or "lm-studio-local"
+                base_url=f"{self.lm_studio_url}/v1",
+                api_key=self._llm_backend_auth_token or "lm-studio-local",
+                http_client=http_client,
             )
         return self._openai_client
 
