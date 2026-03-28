@@ -1278,9 +1278,15 @@ class TestCLI:
 
         call_order = []
 
+        def mock_get_filter_options(conference=None):
+            if conference is None:
+                return {"conferences": ["NeurIPS"], "years": [], "sessions": []}
+            return {"conferences": [], "years": [], "sessions": []}
+
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
         ):
             mock_em = Mock()
 
@@ -1298,6 +1304,12 @@ class TestCLI:
                 "statistics": {"total_papers": 5, "n_clusters": 2, "n_noise": 0, "cluster_sizes": {}},
             }
 
+            mock_db_instance = Mock()
+            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
+            mock_db_instance.__exit__ = Mock(return_value=False)
+            mock_db_class.return_value = mock_db_instance
+
             with patch.object(sys, "argv", ["abstracts-explorer", "clustering", "pre-generate"]):
                 exit_code = main()
 
@@ -1311,7 +1323,7 @@ class TestCLI:
         mock_compute.assert_called_once()
 
     def test_pre_generate_clustering_success(self, tmp_path, capsys, monkeypatch):
-        """Test pre-generate-clustering command runs successfully."""
+        """Test pre-generate-clustering without args generates all conference/year combos."""
         embeddings_path = tmp_path / "chroma_db"
         embeddings_path.mkdir()
         patch_get_config_for_test(monkeypatch, embeddings_path)
@@ -1323,14 +1335,26 @@ class TestCLI:
             "statistics": {"total_papers": 10, "n_clusters": 2, "n_noise": 0, "cluster_sizes": {}},
         }
 
+        # DB returns one conference with two years
+        def mock_get_filter_options(conference=None):
+            if conference is None:
+                return {"conferences": ["NeurIPS"], "years": [], "sessions": []}
+            return {"conferences": [], "years": [2023, 2024], "sessions": []}
+
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
-
             mock_compute.return_value = mock_results
+
+            mock_db_instance = Mock()
+            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
+            mock_db_instance.__exit__ = Mock(return_value=False)
+            mock_db_class.return_value = mock_db_instance
 
             with patch.object(
                 sys,
@@ -1342,14 +1366,47 @@ class TestCLI:
         assert exit_code == 0
         captured = capsys.readouterr()
         assert "Pre-generation complete" in captured.out
-        mock_compute.assert_called_once()
-        # Verify fixed agglomerative/UMAP parameters
-        call_kwargs = mock_compute.call_args[1]
-        assert call_kwargs["clustering_method"] == "agglomerative"
-        assert call_kwargs["linkage"] == "ward"
-        assert call_kwargs["distance_threshold"] == 150.0
-        assert call_kwargs["reduction_method"] == "umap"
-        assert call_kwargs["n_clusters"] is None
+        # 3 combos: NeurIPS (all years) + NeurIPS 2023 + NeurIPS 2024
+        assert mock_compute.call_count == 3
+        # Verify fixed agglomerative/UMAP parameters on all calls
+        for call in mock_compute.call_args_list:
+            kw = call[1]
+            assert kw["clustering_method"] == "agglomerative"
+            assert kw["linkage"] == "ward"
+            assert kw["distance_threshold"] == 150.0
+            assert kw["reduction_method"] == "umap"
+            assert kw["n_clusters"] is None
+
+    def test_pre_generate_clustering_no_conferences_in_db(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering without args fails gracefully when DB is empty."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+
+        set_test_db(tmp_path / "test.db")
+
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
+        ):
+            mock_em_class.return_value = Mock()
+
+            mock_db_instance = Mock()
+            mock_db_instance.get_filter_options.return_value = {"conferences": [], "years": [], "sessions": []}
+            mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
+            mock_db_instance.__exit__ = Mock(return_value=False)
+            mock_db_class.return_value = mock_db_instance
+
+            with patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "clustering", "pre-generate"],
+            ):
+                exit_code = main()
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert "No conferences found" in captured.err
 
     def test_pre_generate_clustering_with_force_flag(self, tmp_path, capsys, monkeypatch):
         """Test pre-generate-clustering with --force flag."""
@@ -1364,13 +1421,25 @@ class TestCLI:
             "statistics": {"total_papers": 5, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
         }
 
+        def mock_get_filter_options(conference=None):
+            if conference is None:
+                return {"conferences": ["NeurIPS"], "years": [], "sessions": []}
+            return {"conferences": [], "years": [], "sessions": []}
+
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
             mock_compute.return_value = mock_results
+
+            mock_db_instance = Mock()
+            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
+            mock_db_instance.__exit__ = Mock(return_value=False)
+            mock_db_class.return_value = mock_db_instance
 
             with patch.object(
                 sys,
@@ -1396,12 +1465,24 @@ class TestCLI:
 
         set_test_db(tmp_path / "test.db")
 
+        def mock_get_filter_options(conference=None):
+            if conference is None:
+                return {"conferences": ["NeurIPS"], "years": [], "sessions": []}
+            return {"conferences": [], "years": [], "sessions": []}
+
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
         ):
             mock_em_class.return_value = Mock()
             mock_compute.side_effect = Exception("Clustering failed")
+
+            mock_db_instance = Mock()
+            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
+            mock_db_instance.__exit__ = Mock(return_value=False)
+            mock_db_class.return_value = mock_db_instance
 
             with patch.object(
                 sys,
@@ -1415,7 +1496,7 @@ class TestCLI:
         assert "0 succeeded, 1 failed" in captured.out
 
     def test_pre_generate_clustering_with_conference(self, tmp_path, capsys, monkeypatch):
-        """Test pre-generate-clustering with --conference filter."""
+        """Test --conference generates all-years combo and each individual year."""
         embeddings_path = tmp_path / "chroma_db"
         embeddings_path.mkdir()
         patch_get_config_for_test(monkeypatch, embeddings_path)
@@ -1426,13 +1507,26 @@ class TestCLI:
             "statistics": {"total_papers": 50, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
         }
 
+        def mock_get_filter_options(conference=None):
+            if conference is None:
+                return {"conferences": ["ML4PS@NeurIPS"], "years": [], "sessions": []}
+            # years for ML4PS@NeurIPS
+            return {"conferences": [], "years": [2023, 2024], "sessions": []}
+
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
             mock_compute.return_value = mock_results
+
+            mock_db_instance = Mock()
+            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
+            mock_db_instance.__exit__ = Mock(return_value=False)
+            mock_db_class.return_value = mock_db_instance
 
             with patch.object(
                 sys,
@@ -1442,14 +1536,17 @@ class TestCLI:
                 exit_code = main()
 
         assert exit_code == 0
-        call_kwargs = mock_compute.call_args[1]
-        assert call_kwargs["conferences"] == ["ML4PS@NeurIPS"]
-        assert call_kwargs["years"] is None
+        # 3 combos: all years + 2023 + 2024
+        assert mock_compute.call_count == 3
+        all_calls = [(c[1]["conferences"], c[1]["years"]) for c in mock_compute.call_args_list]
+        assert (["ML4PS@NeurIPS"], None) in all_calls
+        assert (["ML4PS@NeurIPS"], [2023]) in all_calls
+        assert (["ML4PS@NeurIPS"], [2024]) in all_calls
         captured = capsys.readouterr()
         assert "ML4PS@NeurIPS" in captured.out
 
     def test_pre_generate_clustering_with_year(self, tmp_path, capsys, monkeypatch):
-        """Test pre-generate-clustering with --year filter (single year)."""
+        """Test pre-generate-clustering with --conference and --year (single combo)."""
         embeddings_path = tmp_path / "chroma_db"
         embeddings_path.mkdir()
         patch_get_config_for_test(monkeypatch, embeddings_path)
@@ -1484,43 +1581,13 @@ class TestCLI:
                 exit_code = main()
 
         assert exit_code == 0
+        # Only one combo when both --conference and --year are specified
+        assert mock_compute.call_count == 1
         call_kwargs = mock_compute.call_args[1]
         assert call_kwargs["conferences"] == ["NeurIPS"]
         assert call_kwargs["years"] == [2024]
         captured = capsys.readouterr()
         assert "2024" in captured.out
-
-    def test_pre_generate_clustering_no_filter_passes_none(self, tmp_path, capsys, monkeypatch):
-        """Test that omitting --conference/--year passes None (cluster all)."""
-        embeddings_path = tmp_path / "chroma_db"
-        embeddings_path.mkdir()
-        patch_get_config_for_test(monkeypatch, embeddings_path)
-        set_test_db(tmp_path / "test.db")
-
-        mock_results = {
-            "points": [],
-            "statistics": {"total_papers": 100, "n_clusters": 5, "n_noise": 0, "cluster_sizes": {}},
-        }
-
-        with (
-            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
-            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
-        ):
-            mock_em = Mock()
-            mock_em_class.return_value = mock_em
-            mock_compute.return_value = mock_results
-
-            with patch.object(
-                sys,
-                "argv",
-                ["abstracts-explorer", "clustering", "pre-generate"],
-            ):
-                exit_code = main()
-
-        assert exit_code == 0
-        call_kwargs = mock_compute.call_args[1]
-        assert call_kwargs["conferences"] is None
-        assert call_kwargs["years"] is None
 
     def test_pre_generate_clustering_conference_case_insensitive(self, tmp_path, capsys, monkeypatch):
         """Test that --conference is resolved case-insensitively from stored names."""
@@ -1535,7 +1602,11 @@ class TestCLI:
         }
 
         # DatabaseManager.get_filter_options returns the canonical spelling
-        mock_filter_opts = {"conferences": ["ML4PS@NeurIPS", "NeurIPS"], "years": [2024], "sessions": []}
+        def mock_get_filter_options(conference=None):
+            if conference is None:
+                return {"conferences": ["ML4PS@NeurIPS", "NeurIPS"], "years": [2024], "sessions": []}
+            # years for any conference
+            return {"conferences": [], "years": [2024], "sessions": []}
 
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
@@ -1548,16 +1619,24 @@ class TestCLI:
 
             # DatabaseManager used as context manager for conference resolution
             mock_db_instance = Mock()
-            mock_db_instance.get_filter_options.return_value = mock_filter_opts
+            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
 
-            # User types the conference name in wrong case
+            # User types the conference name in wrong case, with --year to get single combo
             with patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "clustering", "pre-generate", "--conference", "ml4ps@neurips"],
+                [
+                    "abstracts-explorer",
+                    "clustering",
+                    "pre-generate",
+                    "--conference",
+                    "ml4ps@neurips",
+                    "--year",
+                    "2024",
+                ],
             ):
                 exit_code = main()
 

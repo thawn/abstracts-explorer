@@ -833,8 +833,15 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     and UMAP dimensionality reduction.  Results are persisted to the database
     cache so that the web UI can serve them instantly.
 
-    When ``--all`` is specified, generates clustering for every conference in the
-    database combined with each individual year and with all years.
+    Without ``--conference`` or ``--year``, generates clustering for every
+    conference in the database combined with each individual year and with
+    all years.
+
+    With ``--conference`` only, generates for that conference with all years
+    combined AND each individual year.
+
+    With both ``--conference`` and ``--year``, generates for that specific
+    conference + year only.
 
     Parameters
     ----------
@@ -843,7 +850,6 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
         - collection: Name of the ChromaDB collection
         - conference: Single conference to filter by (optional)
         - year: Single year to filter by (optional)
-        - all: Generate for all conference+year combos
         - force: Force recompute even if cache exists
 
     Returns
@@ -864,15 +870,9 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
             print("  abstracts-explorer create-embeddings", file=sys.stderr)
             return 1
 
-    generate_all: bool = getattr(args, "all", False)
-
     # Build optional conference/year filters
     raw_conference: Optional[str] = getattr(args, "conference", None) or None
     year_arg: Optional[int] = getattr(args, "year", None)
-
-    if generate_all and (raw_conference or year_arg):
-        print("❌ Error: --all cannot be combined with --conference or --year", file=sys.stderr)
-        return 1
 
     # Resolve conference name case-insensitively and discover available combos.
     try:
@@ -882,9 +882,10 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     except Exception:
         stored_conferences = []
 
-    if generate_all:
-        # Build list of all (conference, year|None) combinations
-        combos: list = []
+    combos: list = []
+
+    if raw_conference is None and year_arg is None:
+        # No filters: generate all conference × year combinations
         for conf in stored_conferences:
             conf_opts = None
             try:
@@ -893,7 +894,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
             except Exception:
                 pass
             conf_years = conf_opts.get("years", []) if conf_opts else []
-            # conference + all years
+            # conference + all years combined
             combos.append((conf, None))
             # conference + each individual year
             for y in conf_years:
@@ -901,24 +902,43 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
         if not combos:
             print("❌ No conferences found in the database.", file=sys.stderr)
             return 1
+    elif raw_conference is not None and year_arg is None:
+        # Conference specified, no year: generate for that conference with all years
+        # and each individual year
+        match = next(
+            (c for c in stored_conferences if c.lower() == raw_conference.lower()),
+            None,
+        )
+        resolved = match if match is not None else raw_conference
+        if match is not None and match != raw_conference:
+            print(f"ℹ️  Resolved conference '{raw_conference}' → '{resolved}'")
+        # Get years for this conference
+        conf_years_for_single: list = []
+        try:
+            with DatabaseManager() as _db_conf_years:
+                conf_opts = _db_conf_years.get_filter_options(conference=resolved)
+                conf_years_for_single = conf_opts.get("years", [])
+        except Exception:
+            pass
+        # conference + all years combined
+        combos.append((resolved, None))
+        # conference + each individual year
+        for y in conf_years_for_single:
+            combos.append((resolved, y))
     else:
-        # Single combo mode
-        conferences: Optional[list] = None
-        years: Optional[list] = None
-        if raw_conference:
+        # Both conference and year specified: single combo
+        if raw_conference is not None:
             match = next(
                 (c for c in stored_conferences if c.lower() == raw_conference.lower()),
                 None,
             )
-            if match is None:
-                conferences = [raw_conference]
-            else:
-                if match != raw_conference:
-                    print(f"ℹ️  Resolved conference '{raw_conference}' → '{match}'")
-                conferences = [match]
-        if year_arg is not None:
-            years = [year_arg]
-        combos = [(conferences[0] if conferences else None, years[0] if years else None)]
+            resolved = match if match is not None else raw_conference
+            if match is not None and match != raw_conference:
+                print(f"ℹ️  Resolved conference '{raw_conference}' → '{resolved}'")
+            combos.append((resolved, year_arg))
+        else:
+            # year only, no conference
+            combos.append((None, year_arg))
 
     print("Abstracts Explorer - Pre-generate Clustering")
     print("=" * 70)
@@ -926,8 +946,8 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     print(f"Collection:       {args.collection}")
     print("Clustering:       agglomerative (linkage=ward, distance_threshold=150)")
     print("Reduction:        umap")
-    if generate_all:
-        print(f"Mode:             all combinations ({len(combos)} total)")
+    if len(combos) > 1:
+        print(f"Combinations:     {len(combos)} total")
     else:
         conf_name, yr = combos[0]
         if conf_name:
@@ -2150,8 +2170,8 @@ Examples:
   # Clear the cache
   abstracts-explorer clustering clear-cache
 
-  # Pre-generate for all conference/year combinations
-  abstracts-explorer clustering pre-generate --all
+  # Pre-generate for all conference/year combinations (default)
+  abstracts-explorer clustering pre-generate
 
   # Pre-generate for a specific conference
   abstracts-explorer clustering pre-generate --conference NeurIPS
@@ -2224,21 +2244,27 @@ Pre-generate clustering results using agglomerative clustering
 reduction.  Results are persisted to the database cache so that
 the web UI serves them instantly.
 
-Use --all to generate clustering for every conference in the database
-combined with each individual year and with all years.
+Without any arguments, generates clustering for every conference in
+the database combined with each individual year and with all years.
+
+With --conference only, generates for that conference with all years
+combined AND each individual year.
+
+With --conference and --year, generates for that specific conference
+and year only.
 
 Examples:
-  # Pre-generate for all conference/year combinations
-  abstracts-explorer clustering pre-generate --all
+  # Pre-generate for all conference/year combinations (default)
+  abstracts-explorer clustering pre-generate
 
-  # Pre-generate for a specific conference (all years)
+  # Pre-generate for a specific conference (all years + each year)
   abstracts-explorer clustering pre-generate --conference NeurIPS
 
   # Pre-generate for a specific conference and year
   abstracts-explorer clustering pre-generate --conference NeurIPS --year 2024
 
   # Force recompute
-  abstracts-explorer clustering pre-generate --all --force
+  abstracts-explorer clustering pre-generate --force
         """,
     )
     pre_gen_parser.add_argument(
@@ -2257,13 +2283,7 @@ Examples:
         "--year",
         type=int,
         default=None,
-        help="Only cluster papers from this year, e.g. --year 2024 (default: all years)",
-    )
-    pre_gen_parser.add_argument(
-        "--all",
-        action="store_true",
-        default=False,
-        help="Generate clustering for all conference+year combinations in the database",
+        help="Only cluster papers from this year, e.g. --year 2024 (requires --conference; default: all years)",
     )
     pre_gen_parser.add_argument(
         "--force",
