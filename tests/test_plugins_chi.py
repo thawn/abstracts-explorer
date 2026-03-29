@@ -506,10 +506,6 @@ class TestCHIPluginAutoDetect:
         with pytest.raises(ValueError, match="CHI_2024_program.json"):
             chi_plugin.download(year=2024)
 
-    def test_requires_manual_input_is_false(self, chi_plugin):
-        """CHI plugin should not require manual input (auto-detect is available)."""
-        assert chi_plugin.requires_manual_input is False
-
 
 # ---------------------------------------------------------------------------
 # DOI URL normalisation

@@ -631,7 +631,7 @@ def download_command(args: argparse.Namespace) -> int:
         return 0
 
     output_path = Path(args.output)
-    plugin_name = getattr(args, "plugin", None)
+    plugin_name = getattr(args, "conference", None)
 
     # Determine which plugins to use
     if plugin_name:
@@ -644,13 +644,8 @@ def download_command(args: argparse.Namespace) -> int:
             return 1
         plugins_to_download = [plugin]
     else:
-        # No plugin specified: download all auto-downloadable plugins
-        plugins_to_download = [p for p in get_all_plugins() if not p.requires_manual_input]
-        skipped = [p for p in get_all_plugins() if p.requires_manual_input]
-        if skipped:
-            skipped_names = ", ".join(p.plugin_name for p in skipped)
-            print(f"ℹ️  Skipping plugins that require manual input: {skipped_names}")
-            print("   Use --conference <name> to download them individually.\n")
+        # No plugin specified: download all plugins
+        plugins_to_download = list(get_all_plugins())
 
     total_papers = 0
     errors = []
@@ -2017,10 +2012,9 @@ Examples:
     )
     download_parser.add_argument(
         "--conference",
-        "--plugin",
         type=str,
         default=None,
-        dest="plugin",
+        dest="conference",
         help="Conference plugin to use (default: all conferences). Use --list-plugins to see available plugins",
     )
     download_parser.add_argument(

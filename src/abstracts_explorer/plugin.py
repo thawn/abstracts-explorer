@@ -31,7 +31,6 @@ class DownloaderPlugin(ABC):
     plugin_name: str = "base"
     plugin_description: str = "Base downloader plugin"
     supported_years: List[int] = []
-    requires_manual_input: bool = False
 
     @abstractmethod
     def download(

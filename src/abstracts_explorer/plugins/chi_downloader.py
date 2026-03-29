@@ -61,7 +61,6 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
     plugin_description = "CHI (ACM CHI) conference data loaded from the SIGCHI program JSON"
     supported_years = [2023, 2024, 2025]
     conference_name = "CHI"
-    requires_manual_input = False
 
     #: Mapping from the raw ``award`` field values used in the SIGCHI JSON
     #: to human-readable strings stored in :class:`LightweightPaper`.

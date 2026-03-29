@@ -220,14 +220,13 @@ class TestCLI:
         assert db_path.exists()
 
     def test_download_all_conferences(self, tmp_path, capsys):
-        """Test download command without --conference downloads all auto-downloadable plugins."""
+        """Test download command without --conference downloads all plugins."""
         output_db = tmp_path / "test.db"
         set_test_db(output_db)
 
         mock_plugin_a = Mock()
         mock_plugin_a.plugin_name = "plugina"
         mock_plugin_a.plugin_description = "Plugin A"
-        mock_plugin_a.requires_manual_input = False
         mock_plugin_a.supported_years = [2024, 2025]
         mock_plugin_a.download.return_value = [
             LightweightPaper(
@@ -244,7 +243,6 @@ class TestCLI:
         mock_plugin_b = Mock()
         mock_plugin_b.plugin_name = "pluginb"
         mock_plugin_b.plugin_description = "Plugin B"
-        mock_plugin_b.requires_manual_input = False
         mock_plugin_b.supported_years = [2025]
         mock_plugin_b.download.return_value = [
             LightweightPaper(
@@ -258,14 +256,8 @@ class TestCLI:
             ),
         ]
 
-        mock_manual = Mock()
-        mock_manual.plugin_name = "manual"
-        mock_manual.plugin_description = "Manual Plugin"
-        mock_manual.requires_manual_input = True
-        mock_manual.supported_years = [2025]
-
         with patch(
-            "abstracts_explorer.cli.get_all_plugins", return_value=[mock_plugin_a, mock_plugin_b, mock_manual]
+            "abstracts_explorer.cli.get_all_plugins", return_value=[mock_plugin_a, mock_plugin_b]
         ):
             with patch.object(
                 sys,
@@ -276,17 +268,13 @@ class TestCLI:
 
         assert exit_code == 0
         captured = capsys.readouterr()
-        # Should skip manual plugin
-        assert "Skipping plugins that require manual input: manual" in captured.out
-        # Should download from both auto plugins
+        # Should download from both plugins
         assert "plugina" in captured.out
         assert "pluginb" in captured.out
         # Plugin A should be called for both 2024 and 2025
         assert mock_plugin_a.download.call_count == 2
         # Plugin B should be called once for 2025
         assert mock_plugin_b.download.call_count == 1
-        # Manual plugin should never be called
-        assert mock_manual.download.call_count == 0
         assert "Total papers downloaded:" in captured.out
 
     def test_download_conference_all_years(self, tmp_path, capsys):
@@ -356,7 +344,7 @@ class TestCLI:
                 [
                     "abstracts-explorer",
                     "download",
-                    "--plugin",
+                    "--conference",
                     "neurips",
                     "--year",
                     "2025",
