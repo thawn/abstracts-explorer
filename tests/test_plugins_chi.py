@@ -376,7 +376,7 @@ class TestCHIPluginErrors:
     """Tests for error-handling behaviour."""
 
     def test_download_raises_without_input_path(self, chi_plugin):
-        """ValueError must be raised when no input_path is given on a fresh run."""
+        """ValueError must be raised when no input_path is given and no auto-detect file exists."""
         with pytest.raises(ValueError, match="programs.sigchi.org"):
             chi_plugin.download(year=2024)
 
@@ -469,6 +469,46 @@ class TestCHIPluginCaching:
         titles = [p.title for p in papers]
         assert "Old Cached Paper" not in titles
         assert "Test Paper One" in titles
+
+
+# ---------------------------------------------------------------------------
+# Auto-detection of data/CHI_{year}_program.json
+# ---------------------------------------------------------------------------
+
+
+class TestCHIPluginAutoDetect:
+    """Tests for automatic detection of CHI JSON files in the data/ directory."""
+
+    def test_auto_detect_chi_json(self, chi_plugin, tmp_path, monkeypatch):
+        """download() auto-detects data/CHI_{year}_program.json when no input_path is given."""
+        # Create the expected auto-detect path
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        chi_json = data_dir / "CHI_2024_program.json"
+        chi_json.write_text(json.dumps(CHI_JSON_TEMPLATE), encoding="utf-8")
+
+        # Run from tmp_path so data/ is found
+        monkeypatch.chdir(tmp_path)
+
+        papers = chi_plugin.download(year=2024)
+        assert isinstance(papers, list)
+        assert len(papers) == 3
+        assert all(p.year == 2024 for p in papers)
+        assert all(p.conference == "CHI" for p in papers)
+        titles = {p.title for p in papers}
+        assert "Test Paper One" in titles
+        assert "Test Best Paper" in titles
+
+    def test_auto_detect_falls_back_to_error(self, chi_plugin, tmp_path, monkeypatch):
+        """download() raises ValueError when auto-detect file does not exist."""
+        monkeypatch.chdir(tmp_path)
+
+        with pytest.raises(ValueError, match="CHI_2024_program.json"):
+            chi_plugin.download(year=2024)
+
+    def test_requires_manual_input_is_false(self, chi_plugin):
+        """CHI plugin should not require manual input (auto-detect is available)."""
+        assert chi_plugin.requires_manual_input is False
 
 
 # ---------------------------------------------------------------------------

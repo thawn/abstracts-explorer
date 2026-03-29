@@ -7,9 +7,10 @@ Computing Systems) conference.
 
 Data source: ``programs.sigchi.org/chi/<year>``
 
-Users must download the conference JSON manually from the SIGCHI conference
-program PWA by clicking the **"Get conference data JSON"** button, then
-provide the downloaded file via the ``input_path`` parameter.
+The plugin first looks for a pre-downloaded JSON file at
+``data/CHI_{year}_program.json``.  If the file is not found, it instructs
+the user to download it manually from the SIGCHI conference program PWA
+by clicking the **"Get conference data JSON"** button.
 """
 
 import json
@@ -60,7 +61,7 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
     plugin_description = "CHI (ACM CHI) conference data loaded from the SIGCHI program JSON"
     supported_years = [2023, 2024, 2025]
     conference_name = "CHI"
-    requires_manual_input = True
+    requires_manual_input = False
 
     #: Mapping from the raw ``award`` field values used in the SIGCHI JSON
     #: to human-readable strings stored in :class:`LightweightPaper`.
@@ -82,6 +83,9 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
         """
         Load and convert CHI conference data from a SIGCHI program JSON file.
 
+        When ``input_path`` is not provided, the plugin looks for a file at
+        ``data/CHI_{year}_program.json`` before requesting manual interaction.
+
         Parameters
         ----------
         year : int, optional
@@ -94,8 +98,8 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
         force_download : bool
             Re-parse the CHI JSON even when a cached ``output_path`` exists.
         input_path : str, optional
-            **Required** on a fresh run.  Path to the CHI program JSON
-            downloaded from the SIGCHI PWA.
+            Path to the CHI program JSON downloaded from the SIGCHI PWA.
+            If omitted, ``data/CHI_{year}_program.json`` is tried automatically.
         **kwargs : Any
             Ignored; accepted for interface compatibility.
 
@@ -108,8 +112,7 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
         ------
         ValueError
             If the year is not supported, or the JSON year does not match
-            the requested year, or ``input_path`` is not provided for a
-            fresh run.
+            the requested year, or no input file is found.
         FileNotFoundError
             If ``input_path`` does not point to an existing file.
         RuntimeError
@@ -128,13 +131,20 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
 
         # Require the CHI program JSON for a fresh parse
         if not input_path:
+            # Auto-detect well-known file location
             example_year = year if year is not None else max(self.supported_years)
-            raise ValueError(
-                "CHI conference data must be downloaded manually from the SIGCHI program PWA.\n"
-                f"  1. Go to https://programs.sigchi.org/chi/{example_year}\n"
-                "  2. Scroll to the very bottom of the page and click 'Get conference data JSON'\n"
-                "  3. Pass the downloaded file with --input-file <path>"
-            )
+            default_path = Path("data") / f"CHI_{example_year}_program.json"
+            if default_path.exists():
+                logger.info("Auto-detected CHI program JSON: %s", default_path)
+                input_path = str(default_path)
+            else:
+                raise ValueError(
+                    "CHI conference data must be downloaded manually from the SIGCHI program PWA.\n"
+                    f"  1. Go to https://programs.sigchi.org/chi/{example_year}\n"
+                    "  2. Scroll to the very bottom of the page and click 'Get conference data JSON'\n"
+                    f"  3. Save the file as {default_path}\n"
+                    "     or pass it with --input-file <path>"
+                )
 
         if not Path(input_path).exists():
             raise FileNotFoundError(f"CHI program JSON not found: {input_path}")
