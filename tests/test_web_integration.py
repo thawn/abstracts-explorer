@@ -158,6 +158,7 @@ def web_server(test_database, tmp_path_factory):
 
         # Add embeddings for test papers
         from abstracts_explorer.database import DatabaseManager
+
         set_test_db(str(test_database))
         db = DatabaseManager()
         db.connect()
@@ -170,6 +171,7 @@ def web_server(test_database, tmp_path_factory):
 
         # Inject the pre-created embeddings manager directly
         import abstracts_explorer.web_ui.app as app_module
+
         app_module.embeddings_manager = em
         app_module.rag_chat = None
 
@@ -559,9 +561,11 @@ class TestWebUIIntegration:
             assert data["count"] <= 3
 
             # Semantic search MUST return results - if it returns 0, it's a bug
-            assert data["count"] > 0, "Semantic search must return at least 1 result. If this fails, check that embeddings are created and the collection is not empty."
+            assert (
+                data["count"] > 0
+            ), "Semantic search must return at least 1 result. If this fails, check that embeddings are created and the collection is not empty."
             assert len(data["papers"]) > 0, "Semantic search must return at least 1 paper"
-            
+
             # Check that results have similarity scores
             for paper in data["papers"]:
                 assert "uid" in paper
@@ -618,7 +622,7 @@ class TestWebUIIntegration:
             assert "papers" in semantic_results
             assert "use_embeddings" in semantic_results
             assert semantic_results["use_embeddings"] is True
-            
+
             # Semantic search MUST return results
             assert len(semantic_results["papers"]) > 0, "Semantic search must return at least 1 result"
 
@@ -740,7 +744,7 @@ class TestWebUISemanticSearchWithResults:
 class TestWebUIChatEndpointFull:
     """
     Test chat endpoint with full functionality.
-    
+
     These integration tests require LM Studio to verify end-to-end chat functionality.
     For unit testing without LM Studio, see:
     - TestWebUIErrorHandlingPaths.test_chat_with_empty_message
@@ -752,7 +756,7 @@ class TestWebUIChatEndpointFull:
     def test_chat_with_valid_message_and_response(self, web_server):
         """
         Test chat endpoint returns valid response.
-        
+
         This integration test verifies the complete chat workflow with real API.
         For unit testing without LM Studio, see tests in test_rag.py.
         """
@@ -786,7 +790,7 @@ class TestWebUIChatEndpointFull:
     def test_chat_with_reset_flag(self, web_server):
         """
         Test chat endpoint with reset flag.
-        
+
         This integration test verifies conversation reset with real API.
         For unit testing without LM Studio, see TestRAGChatConversation.test_reset_conversation in test_rag.py.
         """
@@ -826,7 +830,7 @@ class TestWebUIChatEndpointFull:
     def test_chat_with_custom_n_papers(self, web_server):
         """
         Test chat endpoint with custom n_papers parameter.
-        
+
         This integration test verifies custom paper count with real API.
         For unit testing without LM Studio, see TestRAGChatQuery.test_query_with_n_results in test_rag.py.
         """
@@ -975,51 +979,18 @@ class TestWebUIErrorHandlingPaths:
             assert "error" in data
 
     def test_clusters_compute_endpoint(self, web_server):
-        """Test that clusters compute endpoint works correctly."""
+        """Test that clusters compute endpoint returns 404 when no pre-computed data exists."""
         host, port, base_url = web_server
 
-        # Request cluster computation with default parameters
-        cluster_data = {
-            "reduction_method": "pca",
-            "n_components": 2,
-            "clustering_method": "kmeans",
-            "n_clusters": 3,
-        }
+        # Request pre-computed clustering data (no clustering config needed)
+        response = requests.post(f"{base_url}/api/clusters/compute", json={}, timeout=30)
 
-        response = requests.post(f"{base_url}/api/clusters/compute", json=cluster_data, timeout=30)
-
-        # Should return 200 OK
-        assert response.status_code == 200
+        # Should return 404 since no pre-computed data exists
+        assert response.status_code == 404
 
         data = response.json()
         assert isinstance(data, dict)
-
-        # Should have points, statistics, and n_dimensions
-        assert "points" in data
-        assert "statistics" in data
-        assert "n_dimensions" in data
-
-        # Verify statistics structure
-        stats = data["statistics"]
-        assert "n_clusters" in stats
-        assert "total_papers" in stats
-        assert "cluster_sizes" in stats
-
-        # Verify we got the expected number of clusters (or fewer if not enough data)
-        assert stats["n_clusters"] > 0
-        assert stats["n_clusters"] <= 3
-
-        # Verify points structure
-        points = data["points"]
-        assert isinstance(points, list)
-        assert len(points) > 0
-
-        # Each point should have required fields
-        for point in points:
-            assert "id" in point
-            assert "x" in point
-            assert "y" in point
-            assert "cluster" in point
+        assert "error" in data
 
     def test_clusters_cached_endpoint_not_found(self, web_server):
         """Test that cached clusters endpoint returns 404 when no cache exists."""
@@ -1033,39 +1004,31 @@ class TestWebUIErrorHandlingPaths:
         data = response.json()
         assert "error" in data
 
-    def test_clusters_compute_with_umap(self, web_server):
-        """Test that clusters compute endpoint works with UMAP reduction method."""
+    def test_clusters_compute_with_conference_year_filter(self, web_server):
+        """Test that clusters compute endpoint accepts conference/year filters."""
         host, port, base_url = web_server
 
-        # Request cluster computation with UMAP
+        # Request with conference/year filter - no pre-computed data so expect 404
         cluster_data = {
-            "reduction_method": "umap",
-            "n_components": 2,
-            "clustering_method": "kmeans",
-            "n_clusters": 3,
+            "conferences": ["NeurIPS"],
+            "years": [2024],
         }
 
         response = requests.post(f"{base_url}/api/clusters/compute", json=cluster_data, timeout=30)
 
-        # With only 3 test samples, UMAP will fail with a proper error message
-        # UMAP requires at least n_components + 1 samples
-        # This is expected behavior for small datasets
-        assert response.status_code == 500
+        # Should return 404 since no pre-computed data exists for this combo
+        assert response.status_code == 404
 
         data = response.json()
         assert isinstance(data, dict)
         assert "error" in data
-        assert "UMAP requires at least" in data["error"]
 
     def test_custom_cluster_search_with_embeddings(self, web_server):
         """Test custom cluster search endpoint with real embeddings."""
         host, port, base_url = web_server
 
         # Test the custom cluster search with a query
-        search_data = {
-            "query": "machine learning",
-            "distance": 150.0
-        }
+        search_data = {"query": "machine learning", "distance": 150.0}
 
         response = requests.post(f"{base_url}/api/clusters/search", json=search_data, timeout=30)
 

@@ -26,15 +26,14 @@ export function getSelectedConference() {
 }
 
 /**
- * Get the currently selected years from the header multi-select.
+ * Get the currently selected year from the header dropdown.
  * "All Years" (value="") is treated as no filter (returns empty array).
- * @returns {number[]} Array of selected years, or [] for all years
+ * @returns {number[]} Array with one selected year, or [] for all years
  */
 export function getSelectedYears() {
     const yearSelect = document.getElementById('year-selector');
     if (!yearSelect) return [];
-    const selected = Array.from(yearSelect.selectedOptions)
-        .map(o => o.value)
-        .filter(v => v !== '');  // exclude "All Years" sentinel
-    return selected.map(Number);
+    const value = yearSelect.value;
+    if (!value) return [];  // "All Years" sentinel
+    return [Number(value)];
 }

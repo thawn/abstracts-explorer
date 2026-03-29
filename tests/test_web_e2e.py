@@ -1834,38 +1834,6 @@ class TestClusteringTabE2E:
         # Verify it's an input element
         assert search_input.tag_name == "input", "Search should be an input element"
 
-    def test_clustering_settings_button(self, web_server, browser):
-        """
-        Test that the clustering settings button exists and can be clicked.
-
-        Parameters
-        ----------
-        web_server : tuple
-            Web server fixture
-        browser : webdriver.Chrome
-            Selenium WebDriver instance
-        """
-        base_url, _ = web_server
-        browser.get(base_url)
-
-        # Navigate to clustering tab
-        wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
-        clustering_tab.click()
-        time.sleep(0.2)
-
-        # Find settings button (look for button with openClusterSettings onclick)
-        settings_buttons = browser.find_elements(By.TAG_NAME, "button")
-        settings_button = None
-        for btn in settings_buttons:
-            onclick = btn.get_attribute("onclick") or ""
-            if "openClusterSettings" in onclick:
-                settings_button = btn
-                break
-
-        assert settings_button is not None, "Settings button should exist"
-        assert settings_button.is_displayed(), "Settings button should be visible"
-
     def test_clustering_paper_details_panel(self, web_server, browser):
         """
         Test that the selected paper details panel exists.

@@ -20,7 +20,7 @@ from abstracts_explorer.rag import RAGChat
 from abstracts_explorer.config import get_config
 from abstracts_explorer.paper_utils import get_paper_with_authors, PaperFormattingError
 from abstracts_explorer.export_utils import export_papers_to_zip
-from abstracts_explorer.clustering import compute_clusters_with_cache, ClusteringError
+
 from abstracts_explorer.plugin import get_available_filters
 
 # Import version
@@ -533,27 +533,18 @@ def reset_chat():
 @app.route("/api/clusters/compute", methods=["POST"])
 def compute_clusters():
     """
-    Compute clusters on demand with specified parameters.
+    Return pre-computed clustering results from the database cache.
 
-    Checks cache first, computes only if needed. Invalidates cache if
-    embedding model has changed.
+    Clustering always uses agglomerative clustering with
+    distance_threshold=150, linkage=ward, and UMAP dimensionality
+    reduction.  Results must be pre-generated via the CLI
+    ``clustering pre-generate`` command.
 
     Request Body
     ------------
     {
-        "reduction_method": str (optional, default: "pca"),
-        "n_components": int (optional, default: 2),
-        "clustering_method": str (optional, default: "kmeans"),
-        "n_clusters": int (optional, default: None - auto-calculated),
-        "eps": float (optional, default: 0.5, for DBSCAN),
-        "min_samples": int (optional, default: 5, for DBSCAN),
-        "distance_threshold": float (optional, for agglomerative),
-        "linkage": str (optional, for agglomerative, default: "ward"),
-        "affinity": str (optional, for agglomerative/spectral),
-        "m": float (optional, for fuzzy c-means, default: 2.0),
-        "n_neighbors": int (optional, for spectral with nearest_neighbors affinity),
-        "limit": int (optional, max embeddings to process),
-        "force": bool (optional, default: False, force recompute)
+        "conferences": list[str] (optional, filter by conferences),
+        "years": list[int] (optional, filter by years)
     }
 
     Returns
@@ -564,74 +555,48 @@ def compute_clusters():
     try:
         data = request.get_json() or {}
 
-        # Get parameters
-        reduction_method = data.get("reduction_method", "pca")
-        n_components = data.get("n_components", 2)
-        clustering_method = data.get("clustering_method", "kmeans")
-        n_clusters = data.get("n_clusters")  # None means auto-calculate
-        limit = data.get("limit")
-        force = data.get("force", False)
         conferences = data.get("conferences") or None  # list[str] or None
         years = data.get("years") or None  # list[int] or None
 
         # Get config and database
         config = get_config()
         database = get_database()
-        em = get_embeddings_manager()
 
         # Get current embedding model
         current_model = config.embedding_model
 
-        # Build clustering kwargs for different methods
-        clustering_kwargs = {}
-        method_lower = clustering_method.lower()
+        # Fixed clustering parameters
+        clustering_params = {"linkage": "ward", "distance_threshold": 150.0}
+        if conferences:
+            clustering_params["conferences"] = sorted(conferences)
+        if years:
+            clustering_params["years"] = sorted([int(y) for y in years])
 
-        if method_lower == "dbscan":
-            clustering_kwargs["eps"] = data.get("eps", 0.5)
-            clustering_kwargs["min_samples"] = data.get("min_samples", 5)
-        elif method_lower == "agglomerative":
-            if "distance_threshold" in data:
-                clustering_kwargs["distance_threshold"] = data.get("distance_threshold")
-            if "linkage" in data:
-                clustering_kwargs["linkage"] = data.get("linkage")
-            if "affinity" in data:
-                clustering_kwargs["affinity"] = data.get("affinity")
-        elif method_lower in ["fuzzy_cmeans", "fuzzy-cmeans"]:
-            if "m" in data:
-                clustering_kwargs["m"] = data.get("m", 2.0)
-            if "maxiter" in data:
-                clustering_kwargs["maxiter"] = data.get("maxiter")
-            if "error" in data:
-                clustering_kwargs["error"] = data.get("error")
-        elif method_lower == "spectral":
-            if "affinity" in data:
-                clustering_kwargs["affinity"] = data.get("affinity")
-            if "n_neighbors" in data:
-                clustering_kwargs["n_neighbors"] = data.get("n_neighbors")
-
-        # Use shared clustering function
-        results = compute_clusters_with_cache(
-            embeddings_manager=em,
-            database=database,
+        # Look up pre-computed results from the cache
+        cached = database.get_clustering_cache(
             embedding_model=current_model,
-            reduction_method=reduction_method,
-            n_components=n_components,
-            clustering_method=clustering_method,
-            n_clusters=n_clusters,
-            limit=limit,
-            force=force,
-            conferences=conferences,
-            years=years,
-            **clustering_kwargs,
+            reduction_method="umap",
+            n_components=2,
+            clustering_method="agglomerative",
+            n_clusters=None,
+            clustering_params=clustering_params if clustering_params else None,
         )
 
-        return jsonify(results)
+        if cached:
+            return jsonify(cached)
 
-    except ClusteringError as e:
-        logger.error(f"Clustering error: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+        return (
+            jsonify(
+                {
+                    "error": "No pre-computed clustering data available for this conference/year combination. "
+                    "Run 'abstracts-explorer clustering pre-generate' to generate clustering data.",
+                }
+            ),
+            404,
+        )
+
     except Exception as e:
-        logger.error(f"Error computing clusters: {e}", exc_info=True)
+        logger.error(f"Error retrieving clusters: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 

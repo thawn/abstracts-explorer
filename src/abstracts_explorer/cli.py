@@ -691,17 +691,14 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
     """
     Cluster embeddings and optionally export results.
 
+    Uses agglomerative clustering with ward linkage, distance threshold 150,
+    and UMAP dimensionality reduction.
+
     Parameters
     ----------
     args : argparse.Namespace
         Command-line arguments containing:
         - collection: Name of the ChromaDB collection
-        - reduction_method: Dimensionality reduction method
-        - n_components: Number of components for reduction
-        - clustering_method: Clustering algorithm to use
-        - n_clusters: Number of clusters (for kmeans/agglomerative)
-        - eps: DBSCAN eps parameter
-        - min_samples: DBSCAN min_samples parameter
         - output: Path to export JSON results
         - limit: Maximum number of embeddings to process
 
@@ -725,38 +722,26 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
     print("=" * 70)
     print(f"Embeddings:  {config.embedding_db}")
     print(f"Collection:  {args.collection}")
-    print(f"Reduction:   {args.reduction_method} (n_components={args.n_components})")
-    print(f"Clustering:  {args.clustering_method}", end="")
-
-    if args.clustering_method.lower() == "kmeans" or args.clustering_method.lower() == "agglomerative":
-        print(f" (n_clusters={args.n_clusters})")
-    elif args.clustering_method.lower() == "dbscan":
-        print(f" (eps={args.eps}, min_samples={args.min_samples})")
-    else:
-        print()
+    print("Reduction:   umap (n_components=2)")
+    print("Clustering:  agglomerative (linkage=ward, distance_threshold=150)")
 
     if args.limit:
         print(f"Limit:       {args.limit} papers")
     print("=" * 70)
 
     try:
-        # Prepare kwargs for clustering
-        kwargs = {}
-        if args.clustering_method.lower() == "dbscan":
-            kwargs["eps"] = args.eps
-            kwargs["min_samples"] = args.min_samples
-
-        # Perform clustering
+        # Perform clustering with fixed parameters
         print("\n🚀 Starting clustering pipeline...")
         results = perform_clustering(
             collection_name=args.collection,
-            reduction_method=args.reduction_method,
-            n_components=args.n_components,
-            clustering_method=args.clustering_method,
-            n_clusters=args.n_clusters,
+            reduction_method="umap",
+            n_components=2,
+            clustering_method="agglomerative",
+            n_clusters=None,
             output_path=args.output,
             limit=args.limit,
-            **kwargs,
+            distance_threshold=150.0,
+            linkage="ward",
         )
 
         # Display statistics
@@ -842,24 +827,30 @@ def clear_clustering_cache_command(args: argparse.Namespace) -> int:
 
 def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     """
-    Pre-generate default clustering results and hierarchical labels.
+    Pre-generate clustering results for one or all conference/year combinations.
 
-    Runs agglomerative clustering with default settings and generates
-    hierarchical labels, persisting both to the database cache.  This
-    command should be run once after ``create-embeddings`` to warm the
-    cache so that the first web-UI request for clusters is fast.
+    Uses agglomerative clustering with ward linkage, distance threshold 150,
+    and UMAP dimensionality reduction.  Results are persisted to the database
+    cache so that the web UI can serve them instantly.
+
+    Without ``--conference`` or ``--year``, generates clustering for every
+    conference in the database combined with each individual year and with
+    all years.
+
+    With ``--conference`` only, generates for that conference with all years
+    combined AND each individual year.
+
+    With both ``--conference`` and ``--year``, generates for that specific
+    conference + year only.
 
     Parameters
     ----------
     args : argparse.Namespace
         Command-line arguments containing:
         - collection: Name of the ChromaDB collection
-        - linkage: Agglomerative linkage method
-        - n_clusters: Number of clusters (0 = auto-calculate via distance_threshold)
-        - distance_threshold: Agglomerative distance threshold (overrides n_clusters)
-        - reduction_method: Dimensionality reduction method for visualization
         - conference: Single conference to filter by (optional)
-        - years: List of years to filter by (optional)
+        - year: Single year to filter by (optional)
+        - force: Force recompute even if cache exists
 
     Returns
     -------
@@ -879,62 +870,90 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
             print("  abstracts-explorer create-embeddings", file=sys.stderr)
             return 1
 
-    linkage = args.linkage
-    # distance_threshold takes precedence over n_clusters.
-    # When distance_threshold is set (the default), n_clusters is ignored.
-    distance_threshold: Optional[float] = getattr(args, "distance_threshold", None)
-    if distance_threshold is not None and distance_threshold <= 0:
-        distance_threshold = None
-    # args.n_clusters is 0 when the user wants auto-calculation.
-    # We pass None to compute_clusters_with_cache so it calculates
-    # the default based on the corpus size.
-    n_clusters_arg: Optional[int] = args.n_clusters if args.n_clusters > 0 else None
-    # If a distance_threshold is supplied, n_clusters is irrelevant (same as web UI).
-    if distance_threshold is not None:
-        n_clusters_arg = None
-    reduction_method = args.reduction_method
-
     # Build optional conference/year filters
     raw_conference: Optional[str] = getattr(args, "conference", None) or None
-    years: Optional[list] = getattr(args, "years", None) or None
+    year_arg: Optional[int] = getattr(args, "year", None)
 
-    # Resolve conference name case-insensitively against stored names in the DB.
-    conferences: Optional[list] = None
-    if raw_conference:
+    # Resolve conference name case-insensitively and discover available combos.
+    try:
+        with DatabaseManager() as _db_resolve:
+            opts = _db_resolve.get_filter_options()
+            stored_conferences: list = opts.get("conferences", [])
+    except Exception:
+        stored_conferences = []
+
+    combos: list = []
+
+    if raw_conference is None and year_arg is None:
+        # No filters: generate all conference × year combinations
+        for conf in stored_conferences:
+            conf_opts = None
+            try:
+                with DatabaseManager() as _db_years:
+                    conf_opts = _db_years.get_filter_options(conference=conf)
+            except Exception:
+                pass
+            conf_years = conf_opts.get("years", []) if conf_opts else []
+            # conference + all years combined
+            combos.append((conf, None))
+            # conference + each individual year
+            for y in conf_years:
+                combos.append((conf, y))
+        if not combos:
+            print("❌ No conferences found in the database.", file=sys.stderr)
+            return 1
+    elif raw_conference is not None and year_arg is None:
+        # Conference specified, no year: generate for that conference with all years
+        # and each individual year
+        match = next(
+            (c for c in stored_conferences if c.lower() == raw_conference.lower()),
+            None,
+        )
+        resolved = match if match is not None else raw_conference
+        if match is not None and match != raw_conference:
+            print(f"ℹ️  Resolved conference '{raw_conference}' → '{resolved}'")
+        # Get years for this conference
+        conf_years_for_single: list = []
         try:
-            with DatabaseManager() as _db_resolve:
-                opts = _db_resolve.get_filter_options()
-                stored_conferences: list = opts.get("conferences", [])
+            with DatabaseManager() as _db_conf_years:
+                conf_opts = _db_conf_years.get_filter_options(conference=resolved)
+                conf_years_for_single = conf_opts.get("years", [])
+        except Exception:
+            pass
+        # conference + all years combined
+        combos.append((resolved, None))
+        # conference + each individual year
+        for y in conf_years_for_single:
+            combos.append((resolved, y))
+    else:
+        # Both conference and year specified: single combo
+        if raw_conference is not None:
             match = next(
                 (c for c in stored_conferences if c.lower() == raw_conference.lower()),
                 None,
             )
-            if match is None:
-                # No exact case-insensitive match; use the raw value and let
-                # compute_clusters_with_cache surface any "no papers" error.
-                conferences = [raw_conference]
-            else:
-                if match != raw_conference:
-                    print(f"ℹ️  Resolved conference '{raw_conference}' → '{match}'")
-                conferences = [match]
-        except Exception:
-            # Fall back gracefully if the DB isn't available yet.
-            conferences = [raw_conference]
+            resolved = match if match is not None else raw_conference
+            if match is not None and match != raw_conference:
+                print(f"ℹ️  Resolved conference '{raw_conference}' → '{resolved}'")
+            combos.append((resolved, year_arg))
+        else:
+            # year only, no conference
+            combos.append((None, year_arg))
 
     print("Abstracts Explorer - Pre-generate Clustering")
     print("=" * 70)
     print(f"Embeddings:       {config.embedding_db}")
     print(f"Collection:       {args.collection}")
-    print(f"Clustering:       agglomerative (linkage={linkage})")
-    if distance_threshold is not None:
-        print(f"Dist. threshold:  {distance_threshold}")
+    print("Clustering:       agglomerative (linkage=ward, distance_threshold=150)")
+    print("Reduction:        umap")
+    if len(combos) > 1:
+        print(f"Combinations:     {len(combos)} total")
     else:
-        print(f"N-clusters:       {'auto' if n_clusters_arg is None else n_clusters_arg}")
-    print(f"Reduction:        {reduction_method} (for initial visualization)")
-    if conferences:
-        print(f"Conference:       {conferences[0]}")
-    if years:
-        print(f"Years:            {', '.join(str(y) for y in years)}")
+        conf_name, yr = combos[0]
+        if conf_name:
+            print(f"Conference:       {conf_name}")
+        if yr is not None:
+            print(f"Year:             {yr}")
     print("=" * 70)
 
     try:
@@ -944,38 +963,52 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
         em.connect()
         em.create_collection()
 
-        # Build agglomerative kwargs to match web UI defaults exactly.
-        clustering_kwargs: dict = {"linkage": linkage}
-        if distance_threshold is not None:
-            clustering_kwargs["distance_threshold"] = distance_threshold
+        success_count = 0
+        fail_count = 0
 
-        with DatabaseManager() as db:
-            print("\n🚀 Starting agglomerative clustering pipeline...")
-            results = compute_clusters_with_cache(
-                embeddings_manager=em,
-                database=db,
-                embedding_model=config.embedding_model,
-                reduction_method=reduction_method,
-                n_components=2,
-                clustering_method="agglomerative",
-                n_clusters=n_clusters_arg,
-                limit=None,
-                force=args.force,
-                conferences=conferences,
-                years=years,
-                **clustering_kwargs,
-            )
+        for conf_name, yr in combos:
+            c_conferences = [conf_name] if conf_name else None
+            c_years = [yr] if yr is not None else None
 
-        stats = results.get("statistics", {})
-        print("\n📊 Clustering Results:")
-        print(
-            f"   Total papers:  {stats.get('total_papers', 'N/A'):,}"
-            if isinstance(stats.get("total_papers"), int)
-            else f"   Total papers:  {stats.get('total_papers', 'N/A')}"
-        )
-        print(f"   Clusters:      {stats.get('n_clusters', 'N/A')}")
-        print("\n✅ Default clustering results and hierarchical labels cached successfully.")
-        return 0
+            label = f"{conf_name or 'all'}"
+            if yr is not None:
+                label += f" {yr}"
+            else:
+                label += " (all years)"
+
+            print(f"\n🚀 Clustering {label}...")
+
+            try:
+                with DatabaseManager() as db:
+                    results = compute_clusters_with_cache(
+                        embeddings_manager=em,
+                        database=db,
+                        embedding_model=config.embedding_model,
+                        reduction_method="umap",
+                        n_components=2,
+                        clustering_method="agglomerative",
+                        n_clusters=None,
+                        limit=None,
+                        force=args.force,
+                        conferences=c_conferences,
+                        years=c_years,
+                        linkage="ward",
+                        distance_threshold=150.0,
+                    )
+
+                stats = results.get("statistics", {})
+                n_papers = stats.get("total_papers", "N/A")
+                n_clusters = stats.get("n_clusters", "N/A")
+                n_papers_str = f"{n_papers:,}" if isinstance(n_papers, int) else str(n_papers)
+                print(f"   ✅ {label}: {n_papers_str} papers → {n_clusters} clusters")
+                success_count += 1
+            except Exception as e:
+                print(f"   ❌ {label}: {e}")
+                fail_count += 1
+
+        print(f"\n{'=' * 70}")
+        print(f"✅ Pre-generation complete: {success_count} succeeded, {fail_count} failed")
+        return 0 if fail_count == 0 else 1
 
     except ClusteringError as e:
         print(f"\n❌ Clustering error: {e}", file=sys.stderr)
@@ -2122,10 +2155,13 @@ Examples:
         description="""
 Clustering-related commands.
 
+Uses agglomerative clustering (ward linkage, distance threshold 150)
+with UMAP dimensionality reduction.
+
 Sub-commands:
   run            Cluster embeddings and export results
   clear-cache    Clear clustering cache from the database
-  pre-generate   Pre-generate default clustering results and hierarchical labels
+  pre-generate   Pre-generate clustering results for the web UI
 
 Examples:
   # Cluster with default settings
@@ -2134,8 +2170,11 @@ Examples:
   # Clear the cache
   abstracts-explorer clustering clear-cache
 
-  # Warm the cache for ML4PS@NeurIPS
-  abstracts-explorer clustering pre-generate --conference "ML4PS@NeurIPS"
+  # Pre-generate for all conference/year combinations (default)
+  abstracts-explorer clustering pre-generate
+
+  # Pre-generate for a specific conference
+  abstracts-explorer clustering pre-generate --conference NeurIPS
         """,
     )
     clustering_subparsers = clustering_parser.add_subparsers(
@@ -2147,51 +2186,13 @@ Examples:
         "run",
         help="Cluster embeddings for visualization",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="Perform dimensionality reduction and clustering on paper embeddings.",
+        description="Perform agglomerative clustering with UMAP dimensionality reduction on paper embeddings.",
     )
     cluster_parser.add_argument(
         "--collection",
         type=str,
         default=config.collection_name,
         help=f"Name of the ChromaDB collection (default: {config.collection_name})",
-    )
-    cluster_parser.add_argument(
-        "--reduction-method",
-        type=str,
-        choices=["pca", "tsne", "umap"],
-        default="pca",
-        help="Dimensionality reduction method (default: pca)",
-    )
-    cluster_parser.add_argument(
-        "--n-components",
-        type=int,
-        default=2,
-        help="Number of components for dimensionality reduction (default: 2)",
-    )
-    cluster_parser.add_argument(
-        "--clustering-method",
-        type=str,
-        choices=["kmeans", "dbscan", "agglomerative"],
-        default="kmeans",
-        help="Clustering algorithm (default: kmeans)",
-    )
-    cluster_parser.add_argument(
-        "--n-clusters",
-        type=int,
-        default=5,
-        help="Number of clusters for kmeans/agglomerative (default: 5)",
-    )
-    cluster_parser.add_argument(
-        "--eps",
-        type=float,
-        default=0.5,
-        help="DBSCAN epsilon parameter (default: 0.5)",
-    )
-    cluster_parser.add_argument(
-        "--min-samples",
-        type=int,
-        default=5,
-        help="DBSCAN min_samples parameter (default: 5)",
     )
     cluster_parser.add_argument(
         "--output",
@@ -2235,28 +2236,35 @@ Examples:
     # clustering pre-generate
     pre_gen_parser = clustering_subparsers.add_parser(
         "pre-generate",
-        help="Pre-generate default clustering results and hierarchical labels",
+        help="Pre-generate clustering results for the web UI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="""
-Pre-generate default clustering results and hierarchical labels.
+Pre-generate clustering results using agglomerative clustering
+(ward linkage, distance threshold 150) with UMAP dimensionality
+reduction.  Results are persisted to the database cache so that
+the web UI serves them instantly.
 
-Runs agglomerative clustering with the given settings and persists the
-results (including hierarchical labels) to the database cache.  Run this
-command once after create-embeddings to warm the cache so that the first
-web-UI request for clusters is served instantly.
+Without any arguments, generates clustering for every conference in
+the database combined with each individual year and with all years.
+
+With --conference only, generates for that conference with all years
+combined AND each individual year.
+
+With --conference and --year, generates for that specific conference
+and year only.
 
 Examples:
-  # Pre-generate for ML4PS@NeurIPS (all years)
-  abstracts-explorer clustering pre-generate --conference "ML4PS@NeurIPS"
+  # Pre-generate for all conference/year combinations (default)
+  abstracts-explorer clustering pre-generate
+
+  # Pre-generate for a specific conference (all years + each year)
+  abstracts-explorer clustering pre-generate --conference NeurIPS
 
   # Pre-generate for a specific conference and year
-  abstracts-explorer clustering pre-generate --conference NeurIPS --years 2024
+  abstracts-explorer clustering pre-generate --conference NeurIPS --year 2024
 
-  # Pre-generate for multiple years
-  abstracts-explorer clustering pre-generate --conference NeurIPS --years 2023 2024
-
-  # Use a specific linkage and force recompute
-  abstracts-explorer clustering pre-generate --linkage complete --force
+  # Force recompute
+  abstracts-explorer clustering pre-generate --force
         """,
     )
     pre_gen_parser.add_argument(
@@ -2266,48 +2274,16 @@ Examples:
         help=f"Name of the ChromaDB collection (default: {config.collection_name})",
     )
     pre_gen_parser.add_argument(
-        "--linkage",
-        type=str,
-        choices=["ward", "complete", "average", "single"],
-        default="ward",
-        help="Agglomerative linkage method (default: ward)",
-    )
-    pre_gen_parser.add_argument(
-        "--n-clusters",
-        type=int,
-        default=0,
-        help="Number of clusters (default: 0 = auto-calculate). Ignored when --distance-threshold is set.",
-    )
-    pre_gen_parser.add_argument(
-        "--distance-threshold",
-        type=float,
-        default=150.0,
-        help=(
-            "Agglomerative distance threshold that controls the number of clusters "
-            "(default: 150, matching the web UI default). Set to 0 to disable and "
-            "use --n-clusters instead."
-        ),
-    )
-    pre_gen_parser.add_argument(
-        "--reduction-method",
-        type=str,
-        choices=["pca", "tsne", "umap"],
-        default="tsne",
-        help="Dimensionality reduction method for the initial visualization (default: tsne, matching web UI default)",
-    )
-    pre_gen_parser.add_argument(
         "--conference",
         type=str,
         default=None,
         help="Only cluster papers from this conference (default: all conferences)",
     )
     pre_gen_parser.add_argument(
-        "--years",
+        "--year",
         type=int,
-        nargs="+",
         default=None,
-        metavar="YEAR",
-        help="Only cluster papers from these year(s), e.g. --years 2024 or --years 2023 2024 (default: all years)",
+        help="Only cluster papers from this year, e.g. --year 2024 (requires --conference; default: all years)",
     )
     pre_gen_parser.add_argument(
         "--force",

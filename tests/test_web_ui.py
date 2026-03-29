@@ -1444,224 +1444,78 @@ class TestServerInitialization:
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
-                    with patch("abstracts_explorer.web_ui.app.get_embeddings_manager"):
-                        mock_config.return_value = Mock(embedding_model="test-model")
-                        mock_db = Mock()
-                        # Level 1 exact match returns cached results directly
-                        mock_db.get_clustering_cache.return_value = cached_results
-                        mock_get_db.return_value = mock_db
+                    mock_config.return_value = Mock(embedding_model="test-model")
+                    mock_db = Mock()
+                    mock_db.get_clustering_cache.return_value = cached_results
+                    mock_get_db.return_value = mock_db
 
-                        response = client.post(
-                            "/api/clusters/compute",
-                            json={
-                                "reduction_method": "pca",
-                                "n_components": 2,
-                                "clustering_method": "kmeans",
-                                "n_clusters": 5,
-                            },
-                        )
+                    response = client.post(
+                        "/api/clusters/compute",
+                        json={},
+                    )
 
-                        assert response.status_code == 200
-                        data = response.get_json()
-                        assert data == cached_results
-                        # Verify cache was queried
-                        mock_db.get_clustering_cache.assert_called_once()
+                    assert response.status_code == 200
+                    data = response.get_json()
+                    assert data == cached_results
+                    # Verify cache was queried with fixed parameters
+                    mock_db.get_clustering_cache.assert_called_once()
+                    call_kwargs = mock_db.get_clustering_cache.call_args[1]
+                    assert call_kwargs["clustering_method"] == "agglomerative"
+                    assert call_kwargs["reduction_method"] == "umap"
+                    assert call_kwargs["n_components"] == 2
+                    assert call_kwargs["n_clusters"] is None
 
-    def test_compute_clusters_bypasses_cache_with_force_flag(self, tmp_path):
-        """Test that compute_clusters bypasses cache when force=True."""
+    def test_compute_clusters_returns_404_when_no_cache(self, tmp_path):
+        """Test that compute_clusters returns 404 when no cached data is available."""
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
-                    with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
-                        with patch("abstracts_explorer.clustering.ClusteringManager") as mock_cm_class:
-                            mock_config.return_value = Mock(embedding_model="test-model")
-                            mock_db = Mock()
-                            mock_db.get_clustering_cache.return_value = {"cached": "data"}
-                            mock_get_db.return_value = mock_db
+                    mock_config.return_value = Mock(embedding_model="test-model")
+                    mock_db = Mock()
+                    mock_db.get_clustering_cache.return_value = None
+                    mock_get_db.return_value = mock_db
 
-                            # Setup mock clustering manager
-                            mock_cm = Mock()
-                            mock_cm.load_embeddings.return_value = 10
-                            mock_cm.cluster.return_value = None
-                            mock_cm.reduce_dimensions.return_value = None
-                            mock_cm.get_clustering_results.return_value = {
-                                "points": [],
-                                "statistics": {},
-                                "cluster_centers": {},
-                            }
-                            mock_cm_class.return_value = mock_cm
+                    response = client.post(
+                        "/api/clusters/compute",
+                        json={},
+                    )
 
-                            mock_em = Mock()
-                            mock_em.get_collection_stats.return_value = {"count": 500}
-                            mock_get_em.return_value = mock_em
+                    assert response.status_code == 404
+                    data = response.get_json()
+                    assert "error" in data
+                    assert "pre-computed" in data["error"].lower() or "pre-generate" in data["error"].lower()
 
-                            response = client.post(
-                                "/api/clusters/compute",
-                                json={
-                                    "reduction_method": "pca",
-                                    "n_components": 2,
-                                    "clustering_method": "kmeans",
-                                    "n_clusters": 5,
-                                    "force": True,
-                                },
-                            )
-
-                            assert response.status_code == 200
-                            # Verify cache was NOT queried (force flag bypasses cache)
-                            mock_db.get_clustering_cache.assert_not_called()
-                            # Verify clustering was computed
-                            mock_cm.load_embeddings.assert_called_once()
-
-    def test_compute_clusters_bypasses_cache_with_limit(self):
-        """Test that compute_clusters bypasses cache when limit is specified."""
+    def test_compute_clusters_includes_conference_year_in_cache_params(self):
+        """Test that compute_clusters passes conference/year filters to cache lookup."""
         from abstracts_explorer.web_ui.app import app
 
-        with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
-                with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
-                    with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
-                        with patch("abstracts_explorer.clustering.ClusteringManager") as mock_cm_class:
-                            mock_config.return_value = Mock(embedding_model="test-model")
-                            mock_db = Mock()
-                            mock_get_db.return_value = mock_db
-
-                            # Setup mock clustering manager
-                            mock_cm = Mock()
-                            mock_cm.load_embeddings.return_value = 5
-                            mock_cm.cluster.return_value = None
-                            mock_cm.reduce_dimensions.return_value = None
-                            mock_cm.get_clustering_results.return_value = {
-                                "points": [],
-                                "statistics": {},
-                                "cluster_centers": {},
-                            }
-                            mock_cm_class.return_value = mock_cm
-
-                            mock_em = Mock()
-                            mock_em.get_collection_stats.return_value = {"count": 500}
-                            mock_get_em.return_value = mock_em
-
-                            response = client.post(
-                                "/api/clusters/compute",
-                                json={
-                                    "reduction_method": "pca",
-                                    "n_components": 2,
-                                    "clustering_method": "kmeans",
-                                    "n_clusters": 5,
-                                    "limit": 100,
-                                },
-                            )
-
-                            assert response.status_code == 200
-                            # Verify cache was NOT queried (limit bypasses cache)
-                            mock_db.get_clustering_cache.assert_not_called()
-                            # Verify clustering was computed with limit
-                            mock_cm.load_embeddings.assert_called_once_with(limit=100, conferences=None, years=None)
-
-    def test_compute_clusters_saves_to_cache_after_computing(self):
-        """Test that compute_clusters saves results to cache after computing."""
-        from abstracts_explorer.web_ui.app import app
-
-        computed_results = {
-            "points": [{"id": "test", "x": 1.0, "y": 2.0, "cluster": 0}],
-            "statistics": {"n_clusters": 1, "total_papers": 1},
-            "cluster_centers": {0: {"x": 1.0, "y": 2.0}},
+        cached_results = {
+            "points": [],
+            "statistics": {"n_clusters": 0, "total_papers": 0},
         }
 
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
-                    with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
-                        with patch("abstracts_explorer.clustering.ClusteringManager") as mock_cm_class:
-                            mock_config.return_value = Mock(embedding_model="test-model")
-                            mock_db = Mock()
-                            mock_db.get_clustering_cache.return_value = None  # Cache miss
-                            mock_get_db.return_value = mock_db
+                    mock_config.return_value = Mock(embedding_model="test-model")
+                    mock_db = Mock()
+                    mock_db.get_clustering_cache.return_value = cached_results
+                    mock_get_db.return_value = mock_db
 
-                            # Setup mock clustering manager
-                            mock_cm = Mock()
-                            mock_cm.paper_ids = ["test"]
-                            mock_cm.cluster_labels = None
-                            mock_cm.cluster_label_names = None
-                            mock_cm.cluster_keywords = None
-                            mock_cm.cluster_hierarchy = None
-                            mock_cm.load_embeddings.return_value = 10
-                            mock_cm.cluster.return_value = None
-                            mock_cm.reduce_dimensions.return_value = None
-                            mock_cm.extract_cluster_keywords.return_value = None
-                            mock_cm.generate_cluster_labels.return_value = None
-                            mock_cm.get_clustering_results.return_value = computed_results
-                            mock_cm_class.return_value = mock_cm
+                    response = client.post(
+                        "/api/clusters/compute",
+                        json={
+                            "conferences": ["NeurIPS"],
+                            "years": [2024],
+                        },
+                    )
 
-                            mock_em = Mock()
-                            mock_em.get_collection_stats.return_value = {"count": 500}
-                            mock_get_em.return_value = mock_em
-
-                            response = client.post(
-                                "/api/clusters/compute",
-                                json={
-                                    "reduction_method": "pca",
-                                    "n_components": 2,
-                                    "clustering_method": "kmeans",
-                                    "n_clusters": 5,
-                                },
-                            )
-
-                            assert response.status_code == 200
-                            # Verify cache was saved
-                            mock_db.save_clustering_cache.assert_called_once()
-                            call_args = mock_db.save_clustering_cache.call_args
-                            assert call_args[1]["embedding_model"] == "test-model"
-                            assert call_args[1]["reduction_method"] == "pca"
-                            assert call_args[1]["results"] == computed_results
-
-    def test_compute_clusters_handles_cache_save_failure_gracefully(self):
-        """Test that compute_clusters continues even if cache save fails."""
-        from abstracts_explorer.web_ui.app import app
-
-        computed_results = {"points": [], "statistics": {}, "cluster_centers": {}}
-
-        with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
-                with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
-                    with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
-                        with patch("abstracts_explorer.clustering.ClusteringManager") as mock_cm_class:
-                            mock_config.return_value = Mock(embedding_model="test-model")
-                            mock_db = Mock()
-                            mock_db.get_clustering_cache.return_value = None
-                            mock_db.save_clustering_cache.side_effect = Exception("Cache save failed")
-                            mock_get_db.return_value = mock_db
-
-                            # Setup mock clustering manager
-                            mock_cm = Mock()
-                            mock_cm.load_embeddings.return_value = 10
-                            mock_cm.cluster.return_value = None
-                            mock_cm.reduce_dimensions.return_value = None
-                            mock_cm.extract_cluster_keywords.return_value = None
-                            mock_cm.generate_cluster_labels.return_value = None
-                            mock_cm.get_clustering_results.return_value = computed_results
-                            mock_cm_class.return_value = mock_cm
-
-                            mock_em = Mock()
-                            mock_em.get_collection_stats.return_value = {"count": 500}
-                            mock_get_em.return_value = mock_em
-
-                            response = client.post(
-                                "/api/clusters/compute",
-                                json={
-                                    "reduction_method": "pca",
-                                    "n_components": 2,
-                                    "clustering_method": "kmeans",
-                                    "n_clusters": 5,
-                                },
-                            )
-
-                            # Should still return success despite cache save failure
-                            assert response.status_code == 200
-                            data = response.get_json()
-                            assert data == computed_results
+                    assert response.status_code == 200
+                    call_kwargs = mock_db.get_clustering_cache.call_args[1]
+                    assert call_kwargs["clustering_params"]["conferences"] == ["NeurIPS"]
+                    assert call_kwargs["clustering_params"]["years"] == [2024]
 
     def test_get_default_cluster_count(self):
         """Test getting default cluster count based on embeddings."""
