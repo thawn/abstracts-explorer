@@ -4,7 +4,7 @@ Tests for plugin.py module.
 This module tests all plugin-related functionality including:
 - Plugin helper functions (sanitize_author_names, convert_to_lightweight_schema)
 - Plugin data models (LightweightPaper, validation)
-- Plugin base classes and interfaces  
+- Plugin base classes and interfaces
 - Year/conference field handling
 """
 
@@ -29,10 +29,10 @@ from abstracts_explorer.plugins.neurips_downloader import NeurIPSDownloaderPlugi
 from abstracts_explorer.plugins.icml_downloader import ICMLDownloaderPlugin
 from abstracts_explorer.plugins.ml4ps_downloader import ML4PSDownloaderPlugin
 
-
 # ============================================================
 # Tests from test_plugin_helpers.py
 # ============================================================
+
 
 class TestSanitizeAuthorNames:
     """Tests for sanitize_author_names helper function."""
@@ -590,6 +590,7 @@ class TestIntegration:
 # Tests from test_plugin_year_conference.py
 # ============================================================
 
+
 class TestConferencePluginYearFields:
     """Test that NeurIPS plugin sets year and conference fields."""
 
@@ -957,6 +958,7 @@ class TestDatabaseYearConferenceIntegration:
 # Tests from test_plugins_models.py
 # ============================================================
 
+
 class TestLightweightPaper:
     """Tests for LightweightPaper model."""
 
@@ -1242,6 +1244,7 @@ class TestModelIntegration:
 # ============================================================
 # Tests from test_pydantic_validation.py
 # ============================================================
+
 
 class TestPydanticValidation:
     """Tests for Pydantic data validation."""
