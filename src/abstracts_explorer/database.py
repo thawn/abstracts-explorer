@@ -394,12 +394,19 @@ class DatabaseManager:
             raise DatabaseError("Not connected to database")
 
         inserted_count = 0
+        skipped_count = 0
 
         for paper in papers:
-            result = self.add_paper(paper)
-            if result is not None:
-                inserted_count += 1
+            try:
+                result = self.add_paper(paper)
+                if result is not None:
+                    inserted_count += 1
+            except DatabaseError as e:
+                skipped_count += 1
+                logger.warning(f"Skipping paper '{paper.title}': {e}")
 
+        if skipped_count:
+            logger.warning(f"Skipped {skipped_count} paper(s) due to import errors")
         logger.debug(f"Successfully inserted {inserted_count} of {len(papers)} papers")
         return inserted_count
 

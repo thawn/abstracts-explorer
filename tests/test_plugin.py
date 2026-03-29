@@ -4,7 +4,7 @@ Tests for plugin.py module.
 This module tests all plugin-related functionality including:
 - Plugin helper functions (sanitize_author_names, convert_to_lightweight_schema)
 - Plugin data models (LightweightPaper, validation)
-- Plugin base classes and interfaces  
+- Plugin base classes and interfaces
 - Year/conference field handling
 """
 
@@ -29,10 +29,10 @@ from abstracts_explorer.plugins.neurips_downloader import NeurIPSDownloaderPlugi
 from abstracts_explorer.plugins.icml_downloader import ICMLDownloaderPlugin
 from abstracts_explorer.plugins.ml4ps_downloader import ML4PSDownloaderPlugin
 
-
 # ============================================================
 # Tests from test_plugin_helpers.py
 # ============================================================
+
 
 class TestSanitizeAuthorNames:
     """Tests for sanitize_author_names helper function."""
@@ -590,6 +590,7 @@ class TestIntegration:
 # Tests from test_plugin_year_conference.py
 # ============================================================
 
+
 class TestConferencePluginYearFields:
     """Test that NeurIPS plugin sets year and conference fields."""
 
@@ -957,6 +958,7 @@ class TestDatabaseYearConferenceIntegration:
 # Tests from test_plugins_models.py
 # ============================================================
 
+
 class TestLightweightPaper:
     """Tests for LightweightPaper model."""
 
@@ -1028,6 +1030,45 @@ class TestLightweightPaper:
                 year=2025,
                 conference="NeurIPS",
             )
+
+    def test_authors_with_empty_strings_filtered(self):
+        """Empty strings in the authors list are silently removed (real-world ICLR/ICML data)."""
+        paper = LightweightPaper(
+            title="Test Paper",
+            authors=["Jane Smith", "", "John Doe"],
+            abstract="Abstract",
+            session="Session",
+            poster_position="A1",
+            year=2025,
+            conference="NeurIPS",
+        )
+        assert paper.authors == ["Jane Smith", "John Doe"]
+
+    def test_authors_all_empty_strings_raises_error(self):
+        """When all author entries are empty strings the paper is rejected."""
+        with pytest.raises(ValidationError, match="Authors list cannot be empty"):
+            LightweightPaper(
+                title="Test Paper",
+                authors=["", "  "],  # All blank – must still fail
+                abstract="Abstract",
+                session="Session",
+                poster_position="A1",
+                year=2025,
+                conference="NeurIPS",
+            )
+
+    def test_authors_whitespace_only_entry_filtered(self):
+        """Whitespace-only author entries are treated like empty strings and filtered out."""
+        paper = LightweightPaper(
+            title="Test Paper",
+            authors=["Alice", "   ", "Bob"],
+            abstract="Abstract",
+            session="Session",
+            poster_position="A1",
+            year=2025,
+            conference="NeurIPS",
+        )
+        assert paper.authors == ["Alice", "Bob"]
 
     def test_empty_session_raises_error(self):
         """Test that empty session raises validation error."""
@@ -1204,6 +1245,7 @@ class TestModelIntegration:
 # Tests from test_pydantic_validation.py
 # ============================================================
 
+
 class TestPydanticValidation:
     """Tests for Pydantic data validation."""
 
@@ -1259,20 +1301,30 @@ class TestPydanticValidation:
             ]
 
     def test_invalid_author_data(self, connected_db):
-        """Test that invalid author data is handled gracefully."""
-        # First author empty - will raise ValidationError
-        with pytest.raises(Exception):  # Pydantic will raise validation error
-            [
-                LightweightPaper(
-                    title="Valid Paper",
-                    authors=["", "Jane Smith"],  # First author empty - invalid
-                    abstract="Test abstract",
-                    session="Test Session",
-                    poster_position="A1",
-                    year=2025,
-                    conference="NeurIPS",
-                )
-            ]
+        """Test that a list with only empty/blank author entries raises a validation error."""
+        with pytest.raises(Exception):  # Pydantic raises validation error
+            LightweightPaper(
+                title="Valid Paper",
+                authors=["", "  "],  # All blank – should still fail
+                abstract="Test abstract",
+                session="Test Session",
+                poster_position="A1",
+                year=2025,
+                conference="NeurIPS",
+            )
+
+    def test_author_with_empty_string_is_filtered(self, connected_db):
+        """Empty strings mixed with valid names are filtered, not rejected."""
+        paper = LightweightPaper(
+            title="Valid Paper",
+            authors=["", "Jane Smith"],  # One blank entry, one valid
+            abstract="Test abstract",
+            session="Test Session",
+            poster_position="A1",
+            year=2025,
+            conference="NeurIPS",
+        )
+        assert paper.authors == ["Jane Smith"]
 
     def test_valid_data_passes_validation(self, connected_db):
         """Test that valid data passes validation."""

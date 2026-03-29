@@ -24,6 +24,7 @@ from abstracts_explorer.plugin import (
     PluginRegistry,
     register_plugin,
     get_plugin,
+    get_all_plugins,
     list_plugins,
     list_plugin_names,
     # Conversion utilities
@@ -52,6 +53,7 @@ __all__ = [
     "PluginRegistry",
     "register_plugin",
     "get_plugin",
+    "get_all_plugins",
     "list_plugins",
     "list_plugin_names",
     # Conversion utilities

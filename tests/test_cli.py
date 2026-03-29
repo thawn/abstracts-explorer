@@ -119,7 +119,16 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["neurips-abstracts", "download", "--year", "2025", "--output", str(output_db)],
+                [
+                    "neurips-abstracts",
+                    "download",
+                    "--conference",
+                    "neurips",
+                    "--year",
+                    "2025",
+                    "--output",
+                    str(output_db),
+                ],
             ):
                 exit_code = main()
 
@@ -140,6 +149,7 @@ class TestCLI:
         mock_plugin = Mock()
         mock_plugin.plugin_name = "neurips"
         mock_plugin.plugin_description = "NeurIPS Test Plugin"
+        mock_plugin.supported_years = [2025]
         mock_plugin.download.side_effect = Exception("Network error")
 
         with patch("abstracts_explorer.cli.get_plugin") as mock_get_plugin:
@@ -148,13 +158,13 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["neurips-abstracts", "download", "--output", str(output_db)],
+                ["neurips-abstracts", "download", "--conference", "neurips", "--output", str(output_db)],
             ):
                 exit_code = main()
 
         assert exit_code == 1
         captured = capsys.readouterr()
-        assert "Error:" in captured.err
+        assert "Error downloading neurips" in captured.err
 
     def test_download_command_with_database_url(self, tmp_path, capsys):
         """Test download command uses PAPER_DB when set."""
@@ -188,7 +198,16 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["neurips-abstracts", "download", "--year", "2025", "--output", "ignored_path.db"],
+                [
+                    "neurips-abstracts",
+                    "download",
+                    "--conference",
+                    "neurips",
+                    "--year",
+                    "2025",
+                    "--output",
+                    "ignored_path.db",
+                ],
             ):
                 exit_code = main()
 
@@ -199,6 +218,183 @@ class TestCLI:
         assert "Database updated:" in captured.out
         # Verify database was created
         assert db_path.exists()
+
+    def test_download_all_conferences(self, tmp_path, capsys):
+        """Test download command without --conference downloads all plugins."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        mock_plugin_a = Mock()
+        mock_plugin_a.plugin_name = "plugina"
+        mock_plugin_a.plugin_description = "Plugin A"
+        mock_plugin_a.supported_years = [2024, 2025]
+        mock_plugin_a.download.return_value = [
+            LightweightPaper(
+                title="Paper A",
+                abstract="Abstract A",
+                authors=["Author A"],
+                session="S1",
+                poster_position="P1",
+                year=2024,
+                conference="A",
+            ),
+        ]
+
+        mock_plugin_b = Mock()
+        mock_plugin_b.plugin_name = "pluginb"
+        mock_plugin_b.plugin_description = "Plugin B"
+        mock_plugin_b.supported_years = [2025]
+        mock_plugin_b.download.return_value = [
+            LightweightPaper(
+                title="Paper B",
+                abstract="Abstract B",
+                authors=["Author B"],
+                session="S2",
+                poster_position="P2",
+                year=2025,
+                conference="B",
+            ),
+        ]
+
+        with patch("abstracts_explorer.cli.get_all_plugins", return_value=[mock_plugin_a, mock_plugin_b]):
+            with patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "download", "--output", str(output_db)],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        # Should download from both plugins
+        assert "plugina" in captured.out
+        assert "pluginb" in captured.out
+        # Plugin A should be called for both 2024 and 2025
+        assert mock_plugin_a.download.call_count == 2
+        # Plugin B should be called once for 2025
+        assert mock_plugin_b.download.call_count == 1
+        assert "Total papers downloaded:" in captured.out
+
+    def test_download_conference_all_years(self, tmp_path, capsys):
+        """Test download with --conference but no --year downloads all supported years."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        mock_plugin = Mock()
+        mock_plugin.plugin_name = "neurips"
+        mock_plugin.plugin_description = "NeurIPS Test Plugin"
+        mock_plugin.supported_years = [2023, 2024, 2025]
+        mock_plugin.download.return_value = [
+            LightweightPaper(
+                title="Paper 1",
+                abstract="Abstract 1",
+                authors=["Author 1"],
+                session="S1",
+                poster_position="P1",
+                year=2025,
+                conference="NeurIPS",
+            ),
+        ]
+
+        with patch("abstracts_explorer.cli.get_plugin") as mock_get_plugin:
+            mock_get_plugin.return_value = mock_plugin
+
+            with patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "download", "--conference", "neurips", "--output", str(output_db)],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        # Should download for all 3 years
+        assert mock_plugin.download.call_count == 3
+        captured = capsys.readouterr()
+        assert "2023, 2024, 2025" in captured.out
+
+    def test_download_conference_with_year(self, tmp_path, capsys):
+        """Test that --conference with --year downloads a specific conference/year."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        mock_plugin = Mock()
+        mock_plugin.plugin_name = "neurips"
+        mock_plugin.plugin_description = "NeurIPS Test Plugin"
+        mock_plugin.supported_years = [2025]
+        mock_plugin.download.return_value = [
+            LightweightPaper(
+                title="Paper 1",
+                abstract="Abstract 1",
+                authors=["Author 1"],
+                session="S1",
+                poster_position="P1",
+                year=2025,
+                conference="NeurIPS",
+            ),
+        ]
+
+        with patch("abstracts_explorer.cli.get_plugin") as mock_get_plugin:
+            mock_get_plugin.return_value = mock_plugin
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "abstracts-explorer",
+                    "download",
+                    "--conference",
+                    "neurips",
+                    "--year",
+                    "2025",
+                    "--output",
+                    str(output_db),
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        mock_get_plugin.assert_called_once_with("neurips")
+
+    def test_download_partial_failure(self, tmp_path, capsys):
+        """Test that download continues after a single year fails."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        mock_plugin = Mock()
+        mock_plugin.plugin_name = "neurips"
+        mock_plugin.plugin_description = "NeurIPS Test Plugin"
+        mock_plugin.supported_years = [2024, 2025]
+
+        papers_2025 = [
+            LightweightPaper(
+                title="Paper 1",
+                abstract="Abstract 1",
+                authors=["Author 1"],
+                session="S1",
+                poster_position="P1",
+                year=2025,
+                conference="NeurIPS",
+            ),
+        ]
+        # First call (2024) fails, second call (2025) succeeds
+        mock_plugin.download.side_effect = [Exception("Network error"), papers_2025]
+
+        with patch("abstracts_explorer.cli.get_plugin") as mock_get_plugin:
+            mock_get_plugin.return_value = mock_plugin
+
+            with patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "download", "--conference", "neurips", "--output", str(output_db)],
+            ):
+                exit_code = main()
+
+        # Should return 1 because there was at least one error
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        # But the 2025 download should have succeeded
+        assert "Downloaded 1 papers" in captured.out
+        assert "error(s) occurred" in captured.err
 
     def test_create_embeddings_db_not_found(self, tmp_path, capsys):
         """Test create-embeddings with non-existent database."""
