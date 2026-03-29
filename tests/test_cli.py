@@ -164,7 +164,7 @@ class TestCLI:
 
         assert exit_code == 1
         captured = capsys.readouterr()
-        assert "Error" in captured.err
+        assert "Error downloading neurips" in captured.err
 
     def test_download_command_with_database_url(self, tmp_path, capsys):
         """Test download command uses PAPER_DB when set."""

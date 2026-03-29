@@ -440,7 +440,12 @@ def get_all_plugins() -> List[DownloaderPlugin]:
     list of DownloaderPlugin
         List of all registered plugin instances
     """
-    return [p for name in _registry.list_plugin_names() if (p := _registry.get(name)) is not None]
+    plugins = []
+    for name in _registry.list_plugin_names():
+        plugin = _registry.get(name)
+        if plugin is not None:
+            plugins.append(plugin)
+    return plugins
 
 
 def get_available_filters() -> Dict[str, Any]:

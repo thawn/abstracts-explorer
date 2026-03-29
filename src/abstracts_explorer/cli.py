@@ -10,7 +10,7 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import argcomplete
 
@@ -574,7 +574,7 @@ def _download_single(
     Exception
         If the download fails
     """
-    kwargs: dict = {}
+    kwargs: Dict[str, Any] = {}
 
     if plugin.plugin_name == "ml4ps":
         kwargs["max_workers"] = getattr(args, "max_workers", 20)
