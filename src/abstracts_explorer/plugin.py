@@ -31,6 +31,7 @@ class DownloaderPlugin(ABC):
     plugin_name: str = "base"
     plugin_description: str = "Base downloader plugin"
     supported_years: List[int] = []
+    requires_manual_input: bool = False
 
     @abstractmethod
     def download(
@@ -430,13 +431,25 @@ def list_plugin_names() -> List[str]:
     return _registry.list_plugin_names()
 
 
+def get_all_plugins() -> List[DownloaderPlugin]:
+    """
+    Get all registered plugin instances.
+
+    Returns
+    -------
+    list of DownloaderPlugin
+        List of all registered plugin instances
+    """
+    return [p for name in _registry.list_plugin_names() if (p := _registry.get(name)) is not None]
+
+
 def get_available_filters() -> Dict[str, Any]:
     """
     Get available conferences and years from registered plugins.
-    
+
     Returns a mapping of conferences to their supported years based on
     the registered downloader plugins.
-    
+
     Returns
     -------
     dict
@@ -444,7 +457,7 @@ def get_available_filters() -> Dict[str, Any]:
         - conferences: list of conference names
         - years: list of all unique years across all plugins
         - conference_years: dict mapping conference names to their supported years
-        
+
     Examples
     --------
     >>> filters = get_available_filters()
@@ -454,34 +467,30 @@ def get_available_filters() -> Dict[str, Any]:
     """
     # Get all registered plugins
     plugins = list_plugins()
-    
+
     # Build mapping of conferences to years
     conference_years: Dict[str, List[int]] = {}
     all_years: set = set()
-    
+
     for plugin_info in plugins:
         conference_name = plugin_info.get("conference_name")
         supported_years = plugin_info.get("supported_years", [])
-        
+
         if conference_name and supported_years:
             if conference_name not in conference_years:
                 conference_years[conference_name] = []
             conference_years[conference_name].extend(supported_years)
             all_years.update(supported_years)
-    
+
     # Sort years and deduplicate
     all_years_sorted = sorted(list(all_years), reverse=True)
     conferences = sorted(conference_years.keys())
-    
+
     # Sort years for each conference
     for conf in conference_years:
         conference_years[conf] = sorted(conference_years[conf], reverse=True)
-    
-    return {
-        "conferences": conferences,
-        "years": all_years_sorted,
-        "conference_years": conference_years
-    }
+
+    return {"conferences": conferences, "years": all_years_sorted, "conference_years": conference_years}
 
 
 """

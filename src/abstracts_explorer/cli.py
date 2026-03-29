@@ -10,7 +10,7 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import argcomplete
 
@@ -21,7 +21,14 @@ from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager, EmbeddingsError
 from abstracts_explorer.clustering import perform_clustering, compute_clusters_with_cache, ClusteringError
 from abstracts_explorer.rag import RAGChat, RAGError
-from abstracts_explorer.plugins import get_plugin, list_plugins, list_plugin_names
+from abstracts_explorer.plugins import (
+    DownloaderPlugin,
+    LightweightPaper,
+    get_plugin,
+    get_all_plugins,
+    list_plugins,
+    list_plugin_names,
+)
 from abstracts_explorer.mcp_server import run_mcp_server
 from abstracts_explorer.evaluation import (
     EvaluationError,
@@ -534,17 +541,68 @@ def chat_command(args: argparse.Namespace) -> int:
         return 1
 
 
+def _download_single(
+    plugin: DownloaderPlugin,
+    year: int,
+    output_path: Path,
+    force: bool,
+    args: argparse.Namespace,
+) -> List[LightweightPaper]:
+    """
+    Download papers for a single plugin and year.
+
+    Parameters
+    ----------
+    plugin : DownloaderPlugin
+        The plugin instance to use for downloading
+    year : int
+        Conference year to download
+    output_path : Path
+        Base output path for intermediate JSON files
+    force : bool
+        Whether to force re-download
+    args : argparse.Namespace
+        Original CLI arguments (for plugin-specific options)
+
+    Returns
+    -------
+    list of LightweightPaper
+        Downloaded papers
+
+    Raises
+    ------
+    Exception
+        If the download fails
+    """
+    kwargs: dict = {}
+
+    if plugin.plugin_name == "ml4ps":
+        kwargs["max_workers"] = getattr(args, "max_workers", 20)
+
+    if plugin.plugin_name == "chi":
+        input_file = getattr(args, "input_file", None)
+        if input_file:
+            kwargs["input_path"] = input_file
+
+    json_path = output_path.parent / f"{plugin.plugin_name}_{year}.json"
+    return plugin.download(year=year, output_path=str(json_path), force_download=force, **kwargs)
+
+
 def download_command(args: argparse.Namespace) -> int:
     """
-    Download NeurIPS data and create database.
+    Download conference data and create database.
+
+    Without additional arguments, downloads all available conferences
+    for all supported years. Plugins that require manual input
+    (e.g. CHI) are skipped unless explicitly requested.
 
     Parameters
     ----------
     args : argparse.Namespace
         Command-line arguments containing:
-        - plugin: Name of the downloader plugin to use
-        - year: Year of NeurIPS conference
-        - output: Path for the database file
+        - plugin: Name of the downloader plugin to use (None for all)
+        - year: Year of conference (None for all supported years)
+        - output: Path for intermediate JSON files
         - force: Whether to force re-download
         - list_plugins: Whether to list available plugins
 
@@ -573,57 +631,80 @@ def download_command(args: argparse.Namespace) -> int:
         return 0
 
     output_path = Path(args.output)
-    plugin_name = getattr(args, "plugin", "neurips")
+    plugin_name = getattr(args, "plugin", None)
 
-    # Get the plugin
-    plugin = get_plugin(plugin_name)
-    if not plugin:
-        print(f"❌ Error: Plugin '{plugin_name}' not found", file=sys.stderr)
-        print(f"\nAvailable plugins: {', '.join(list_plugin_names())}", file=sys.stderr)
-        print("\nUse --list-plugins to see details", file=sys.stderr)
+    # Determine which plugins to use
+    if plugin_name:
+        # Specific plugin requested
+        plugin = get_plugin(plugin_name)
+        if not plugin:
+            print(f"❌ Error: Plugin '{plugin_name}' not found", file=sys.stderr)
+            print(f"\nAvailable plugins: {', '.join(list_plugin_names())}", file=sys.stderr)
+            print("\nUse --list-plugins to see details", file=sys.stderr)
+            return 1
+        plugins_to_download = [plugin]
+    else:
+        # No plugin specified: download all auto-downloadable plugins
+        plugins_to_download = [p for p in get_all_plugins() if not p.requires_manual_input]
+        skipped = [p for p in get_all_plugins() if p.requires_manual_input]
+        if skipped:
+            skipped_names = ", ".join(p.plugin_name for p in skipped)
+            print(f"ℹ️  Skipping plugins that require manual input: {skipped_names}")
+            print("   Use --conference <name> to download them individually.\n")
+
+    total_papers = 0
+    errors = []
+
+    for plugin in plugins_to_download:
+        # Determine years to download
+        year = getattr(args, "year", None)
+        if year is not None:
+            years = [year]
+        else:
+            years = sorted(plugin.supported_years) if plugin.supported_years else []
+
+        if not years:
+            print(f"⚠️  No supported years for {plugin.plugin_name}, skipping.")
+            continue
+
+        print(f"Using plugin: {plugin.plugin_description}")
+        print(f"Downloading {plugin.plugin_name} for year(s): {', '.join(map(str, years))}...")
+        print("=" * 70)
+
+        for yr in years:
+            try:
+                papers = _download_single(plugin, yr, output_path, args.force, args)
+                print(f"✅ Downloaded {len(papers):,} papers for {plugin.plugin_name} {yr}")
+
+                with DatabaseManager() as db:
+                    db.create_tables()
+                    count = db.add_papers(papers)
+                    print(f"✅ Loaded {count:,} papers into database")
+
+                total_papers += len(papers)
+
+            except Exception as e:
+                msg = f"{plugin.plugin_name} {yr}: {e}"
+                errors.append(msg)
+                print(f"❌ Error downloading {plugin.plugin_name} {yr}: {e}", file=sys.stderr)
+                import traceback
+
+                if args.verbose > 0:
+                    traceback.print_exc()
+
+        print()
+
+    config = get_config()
+    print(f"💾 Database updated: {config.database_url}")
+    print(f"📊 Total papers downloaded: {total_papers:,}")
+
+    if errors:
+        print(f"\n⚠️  {len(errors)} error(s) occurred:", file=sys.stderr)
+        for err in errors:
+            print(f"   - {err}", file=sys.stderr)
         return 1
 
-    print(f"Using plugin: {plugin.plugin_description}")
-    print(f"Downloading {plugin.plugin_name}...")
-    print("=" * 70)
-
-    try:
-        # Prepare kwargs for plugin
-        kwargs = {}
-
-        # Add plugin-specific options
-        if plugin_name == "ml4ps":
-            kwargs["max_workers"] = getattr(args, "max_workers", 20)
-
-        if plugin_name == "chi":
-            input_file = getattr(args, "input_file", None)
-            if input_file:
-                kwargs["input_path"] = input_file
-
-        # Download data using plugin
-        json_path = output_path.parent / f"{plugin_name}_{args.year}.json"
-        papers = plugin.download(year=args.year, output_path=str(json_path), force_download=args.force, **kwargs)
-
-        print(f"✅ Downloaded {len(papers):,} papers")
-
-        # Create database using config
-        print("\n📊 Creating database using configuration")
-        with DatabaseManager() as db:
-            db.create_tables()
-            count = db.add_papers(papers)
-            print(f"✅ Loaded {count:,} papers into database")
-
-        config = get_config()
-        print(f"\n💾 Database updated: {config.database_url}")
-        return 0
-
-    except Exception as e:
-        print(f"\n❌ Error: {e}", file=sys.stderr)
-        import traceback
-
-        if args.verbose > 0:
-            traceback.print_exc()
-        return 1
+    return 0
 
 
 def web_ui_command(args: argparse.Namespace) -> int:
@@ -1901,41 +1982,52 @@ Examples:
     # Download command
     download_parser = subparsers.add_parser(
         "download",
-        help="Download NeurIPS data and create database",
+        help="Download conference data and create database",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="""
 Download papers from various sources using plugins.
 
+Without arguments, downloads ALL conferences for ALL available years
+(plugins that require manual input are skipped).
+
 Available plugins:
-  neurips  - Official NeurIPS conference data (2013-2025)
+  neurips  - Official NeurIPS conference data (2020-2025)
+  iclr     - Official ICLR conference data (2020-2025)
+  icml     - Official ICML conference data (2020-2025)
+  ieeevis  - Official IEEE VIS conference data (2025)
   ml4ps    - ML4PS (Machine Learning for Physical Sciences) workshop (2025)
   chi      - ACM CHI conference data (2023-2025, requires manual JSON download)
 
 Examples:
-  # Download NeurIPS 2025 papers
-  neurips-abstracts download --plugin neurips --year 2025
+  # Download ALL conference data for ALL available years
+  abstracts-explorer download
 
-  # Download ML4PS 2025 workshop papers with abstracts
-  neurips-abstracts download --plugin ml4ps --year 2025
+  # Download all years for a specific conference
+  abstracts-explorer download --conference neurips
+
+  # Download a specific conference and year
+  abstracts-explorer download --conference neurips --year 2025
 
   # Load CHI 2024 papers from a pre-downloaded JSON
-  abstracts-explorer download --plugin chi --year 2024 --input-file chi_2024_program.json
+  abstracts-explorer download --conference chi --year 2024 --input-file chi_2024_program.json
 
   # List available plugins
-  neurips-abstracts download --list-plugins
+  abstracts-explorer download --list-plugins
         """,
     )
     download_parser.add_argument(
+        "--conference",
         "--plugin",
         type=str,
-        default="neurips",
-        help="Downloader plugin to use (default: neurips). Use --list-plugins to see available plugins",
+        default=None,
+        dest="plugin",
+        help="Conference plugin to use (default: all conferences). Use --list-plugins to see available plugins",
     )
     download_parser.add_argument(
         "--year",
         type=int,
-        default=2025,
-        help="Year of conference/workshop (default: 2025)",
+        default=None,
+        help="Year of conference/workshop (default: all available years)",
     )
     download_parser.add_argument(
         "--output",
