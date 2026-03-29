@@ -256,9 +256,7 @@ class TestCLI:
             ),
         ]
 
-        with patch(
-            "abstracts_explorer.cli.get_all_plugins", return_value=[mock_plugin_a, mock_plugin_b]
-        ):
+        with patch("abstracts_explorer.cli.get_all_plugins", return_value=[mock_plugin_a, mock_plugin_b]):
             with patch.object(
                 sys,
                 "argv",
@@ -314,8 +312,8 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "2023, 2024, 2025" in captured.out
 
-    def test_download_plugin_alias(self, tmp_path, capsys):
-        """Test that --plugin works as an alias for --conference."""
+    def test_download_conference_with_year(self, tmp_path, capsys):
+        """Test that --conference with --year downloads a specific conference/year."""
         output_db = tmp_path / "test.db"
         set_test_db(output_db)
 

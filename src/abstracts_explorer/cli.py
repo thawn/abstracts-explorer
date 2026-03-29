@@ -593,14 +593,13 @@ def download_command(args: argparse.Namespace) -> int:
     Download conference data and create database.
 
     Without additional arguments, downloads all available conferences
-    for all supported years. Plugins that require manual input
-    (e.g. CHI) are skipped unless explicitly requested.
+    for all supported years.
 
     Parameters
     ----------
     args : argparse.Namespace
         Command-line arguments containing:
-        - plugin: Name of the downloader plugin to use (None for all)
+        - conference: Name of the downloader plugin to use (None for all)
         - year: Year of conference (None for all supported years)
         - output: Path for intermediate JSON files
         - force: Whether to force re-download
