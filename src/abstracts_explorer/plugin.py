@@ -587,16 +587,22 @@ class LightweightPaper(BaseModel):
     @field_validator("authors")
     @classmethod
     def validate_authors(cls, v: List[str]) -> List[str]:
-        """Ensure authors list is not empty and properly formatted."""
-        if not v or len(v) == 0:
+        """Ensure authors list is not empty and properly formatted.
+
+        Empty or whitespace-only author entries are silently filtered out so
+        that a single malformed entry does not cause the entire paper to be
+        rejected.  A ``ValueError`` is still raised when the list is empty
+        after filtering, or when any remaining entry contains a semicolon.
+        """
+        # Filter out empty/whitespace-only names rather than rejecting the paper
+        filtered = [author for author in v if author.strip()]
+        if not filtered:
             raise ValueError("Authors list cannot be empty")
-        for author in v:
-            if not author.strip():
-                raise ValueError("Author names cannot be empty")
+        for author in filtered:
             # no semicolons allowed in author names
             if ";" in author:
                 raise ValueError("Author names cannot contain semicolons")
-        return v
+        return filtered
 
     @field_validator("session")
     @classmethod
