@@ -406,6 +406,52 @@ class TestAddPapers:
         with pytest.raises(DatabaseError, match="Not connected to database"):
             db_manager.add_papers(papers)
 
+    def test_add_papers_skips_erroneous_abstract_and_continues(self, connected_db, mocker):
+        """Test that an import error on one abstract doesn't abort the rest."""
+        good_paper = LightweightPaper(
+            title="Good Paper",
+            authors=["Author"],
+            abstract="Good abstract",
+            session="Session",
+            poster_position="P1",
+            year=2025,
+            conference="NeurIPS",
+        )
+        bad_paper = LightweightPaper(
+            title="Bad Paper",
+            authors=["Author"],
+            abstract="Bad abstract",
+            session="Session",
+            poster_position="P2",
+            year=2025,
+            conference="NeurIPS",
+        )
+        another_good_paper = LightweightPaper(
+            title="Another Good Paper",
+            authors=["Author"],
+            abstract="Another good abstract",
+            session="Session",
+            poster_position="P3",
+            year=2025,
+            conference="NeurIPS",
+        )
+
+        original_add_paper = connected_db.add_paper
+
+        def add_paper_side_effect(paper):
+            if paper.title == "Bad Paper":
+                raise DatabaseError("Simulated import error")
+            return original_add_paper(paper)
+
+        mocker.patch.object(connected_db, "add_paper", side_effect=add_paper_side_effect)
+
+        count = connected_db.add_papers([good_paper, bad_paper, another_good_paper])
+
+        # Two good papers inserted, bad one skipped
+        assert count == 2
+        total_count = connected_db.get_paper_count()
+        assert total_count == 2
+
 
 class TestEmbeddingModelMetadata:
     """Tests for embedding model metadata functionality."""
