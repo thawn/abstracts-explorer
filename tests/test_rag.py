@@ -1258,7 +1258,9 @@ class TestRAGChatMCPTools:
                             {
                                 "topic": "transformers",
                                 "papers_found": 1,
-                                "papers": [{"id": "1", "title": "Transformer Paper", "abstract": "About transformers"}],
+                                "papers": [
+                                    {"id": "1", "title": "Transformer Paper", "abstract": "About transformers"}
+                                ],
                             }
                         ),
                     ]
