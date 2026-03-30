@@ -245,7 +245,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
                 total_count = db.get_paper_count()
 
         # Create progress bar
-        with tqdm(total=total_count, desc="Embedding papers", unit="papers") as pbar:
+        with tqdm(total=total_count, desc="Embedding abstracts", unit="papers") as pbar:
 
             def update_progress(current: int, total: int) -> None:
                 pbar.n = current
@@ -258,7 +258,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
                 force_recreate=args.force,
             )
 
-        print(f"✅ Successfully generated embeddings for {embedded_count:,} papers")
+        print(f"✅ Successfully generated embeddings for {embedded_count:,} abstracts")
 
         # Show collection stats
         stats = em.get_collection_stats()
@@ -269,7 +269,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         em.close()
 
         print(f"\n💾 Vector database saved to: {config.embedding_db}")
-        print("\nYou can now use the 'search' command or the search_similar() method to find relevant papers!")
+        print("\nYou can now use the 'search' command or the search_similar() method to find relevant abstracts!")
 
         return 0
 
