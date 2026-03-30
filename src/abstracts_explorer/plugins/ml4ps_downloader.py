@@ -36,17 +36,56 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
 
     plugin_name = "ml4ps"
     plugin_description = "ML4PS (Machine Learning for Physical Sciences) workshop downloader"
-    supported_years = [2025]  # Currently only 2025 is implemented
+    supported_years = list(range(2019, 2026))
     conference_name = "ML4PS@Neurips"
 
-    BASE_URL = "https://ml4physicalsciences.github.io/2025/"
-    NEURIPS_VIRTUAL_BASE = "https://neurips.cc/virtual/2025/loc/san-diego/poster/"
+    # NeurIPS virtual page base URL for fetching abstracts (years >= 2022 only)
+    _NEURIPS_VIRTUAL_BASES = {
+        2025: "https://neurips.cc/virtual/2025/loc/san-diego/poster/",
+    }
 
     def __init__(self):
         """Initialize the ML4PS downloader plugin."""
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
         self.stats_lock = Lock()
+        self._current_year: int = max(self.supported_years)
+
+    def _get_base_url(self, year: int) -> str:
+        """
+        Get the ML4PS workshop page URL for a given year.
+
+        Parameters
+        ----------
+        year : int
+            Workshop year
+
+        Returns
+        -------
+        str
+            URL of the workshop page
+        """
+        return f"https://ml4physicalsciences.github.io/{year}/"
+
+    def _get_neurips_virtual_base(self, year: int) -> Optional[str]:
+        """
+        Get the NeurIPS virtual conference base URL for a given year.
+
+        Abstract fetching from NeurIPS virtual pages is only available for years >= 2022.
+
+        Parameters
+        ----------
+        year : int
+            Workshop year
+
+        Returns
+        -------
+        str or None
+            Base URL for NeurIPS virtual poster pages, or None if not available
+        """
+        if year < 2022:
+            return None
+        return self._NEURIPS_VIRTUAL_BASES.get(year, f"https://neurips.cc/virtual/{year}/poster/")
 
     def download(
         self,
@@ -77,10 +116,13 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
             List of validated paper objects ready for database insertion
         """
         if year is None:
-            year = 2025
+            year = max(self.supported_years)
 
         # Validate year
         self.validate_year(year)
+
+        # Store year for use by internal methods
+        self._current_year = year
 
         # Check if file already exists and should be loaded
         if output_path and not force_download:
@@ -151,7 +193,7 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
                     "type": "int",
                     "required": True,
                     "description": "Workshop year to download",
-                    "default": 2025,
+                    "default": max(self.supported_years),
                 },
                 "output_path": {"type": "str", "required": False, "description": "Path to save the downloaded data"},
                 "force_download": {
@@ -188,7 +230,8 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
 
     def _clean_text(self, text: str) -> str:
         """Clean text by removing extra whitespace and unwanted characters."""
-        text = re.sub(r"\[\s*paper\s*\]", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\[\s*paper\s*(?:pdf)?\s*\]", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\[\s*pdf\s*\]", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\[\s*poster\s*\]", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\[\s*video\s*\]", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\[\s*\]", "", text)
@@ -205,7 +248,11 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
 
     def _fetch_abstract_and_openreview(self, paper_id: str) -> tuple[Optional[str], Optional[str]]:
         """Fetch abstract and OpenReview URL from NeurIPS virtual conference page."""
-        url = f"{self.NEURIPS_VIRTUAL_BASE}{paper_id}"
+        virtual_base = self._get_neurips_virtual_base(self._current_year)
+        if not virtual_base:
+            return None, None
+
+        url = f"{virtual_base}{paper_id}"
         soup = self._fetch_page(url)
 
         if not soup:
@@ -251,6 +298,8 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
         if len(cells) < 2:
             return None
 
+        base_url = self._get_base_url(self._current_year)
+
         try:
             # Extract paper ID
             paper_id = cells[0].get_text(strip=True)
@@ -270,15 +319,15 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
                 href = link.get("href", "")
                 link_text = link.get_text(strip=True).lower()
 
-                if link_text == "paper":
-                    paper_url = urljoin(self.BASE_URL, href)
-                elif link_text == "poster":
-                    poster_url = urljoin(self.BASE_URL, href)
-                elif link_text == "video":
-                    video_url = urljoin(self.BASE_URL, href)
+                if link_text in ("paper", "paper pdf", "pdf", "[paper]", "[paper pdf]", "[pdf]"):
+                    paper_url = urljoin(base_url, href)
+                elif link_text in ("poster", "[poster]"):
+                    poster_url = urljoin(base_url, href)
+                elif link_text in ("video", "[video]"):
+                    video_url = urljoin(base_url, href)
 
-            # Extract title from <strong> tag
-            strong_tag = content.find("strong")
+            # Extract title from <strong> or <b> tag
+            strong_tag = content.find(["strong", "b"])
             if strong_tag:
                 title = strong_tag.get_text(strip=True)
             else:
@@ -364,9 +413,10 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
 
     def _scrape_papers(self) -> List[Dict]:
         """Scrape all papers from the workshop page."""
-        logger.info("Scraping ML4PS 2025 workshop papers...")
+        base_url = self._get_base_url(self._current_year)
+        logger.info(f"Scraping ML4PS {self._current_year} workshop papers...")
 
-        soup = self._fetch_page(self.BASE_URL)
+        soup = self._fetch_page(base_url)
         if not soup:
             return []
 
@@ -470,6 +520,7 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
         - keywords: list
         """
         lightweight_papers = []
+        year = self._current_year
 
         for paper in papers:
             # Extract author names from authors_str
@@ -477,9 +528,9 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
             authors = [name.strip() for name in authors_str.split(",") if name.strip()]
 
             # Determine session based on event type
-            session = "ML4PhysicalSciences 2025 Workshop"
+            session = f"ML4PhysicalSciences {year} Workshop"
             if paper.get("eventtype") == "Spotlight":
-                session = "ML4PhysicalSciences 2025 Workshop - Spotlight"
+                session = f"ML4PhysicalSciences {year} Workshop - Spotlight"
 
             # Extract award from awards list if present
             awards_list = paper.get("awards", [])
@@ -489,7 +540,7 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
                 # Required fields
                 "title": paper["title"],
                 "authors": authors,
-                "abstract": paper.get("abstract", ""),
+                "abstract": paper.get("abstract") or "",
                 "session": session,
                 "poster_position": str(paper["id"]),  # Use paper ID as position
                 # Optional fields
@@ -498,12 +549,12 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
                 "poster_image_url": paper.get("poster_url"),
                 "url": paper.get("openreview_url") or paper.get("paper_url"),
                 "award": award_str,
-                "year": 2025,
+                "year": year,
                 "conference": self.conference_name,  # Use plugin's conference_name for consistency
             }
 
-            # Remove None values from optional fields
-            lightweight_paper = {k: v for k, v in lightweight_paper.items() if v is not None and v != ""}
+            # Remove None values from optional fields (keep empty strings for required fields)
+            lightweight_paper = {k: v for k, v in lightweight_paper.items() if v is not None}
 
             lightweight_papers.append(lightweight_paper)
 
