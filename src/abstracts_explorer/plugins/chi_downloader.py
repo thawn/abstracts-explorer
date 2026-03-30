@@ -59,7 +59,7 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
 
     plugin_name = "chi"
     plugin_description = "CHI (ACM CHI) conference data loaded from the SIGCHI program JSON"
-    _start_year = 2023
+    _start_year = 2018
     conference_name = "CHI"
 
     def get_url(self, year: int) -> str:
