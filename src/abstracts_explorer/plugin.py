@@ -14,8 +14,10 @@ The framework consists of:
 
 import logging
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+import requests
 from pydantic import BaseModel, field_validator
 
 
@@ -25,12 +27,94 @@ class DownloaderPlugin(ABC):
 
     Each plugin must implement the download method and provide metadata
     about its capabilities.
+
+    Subclasses should set ``_start_year`` and override ``get_url(year)``
+    to get automatic ``supported_years`` computation with a current-year
+    availability check.
     """
 
     # Plugin metadata (should be overridden in subclasses)
     plugin_name: str = "base"
     plugin_description: str = "Base downloader plugin"
-    supported_years: List[int] = []
+    _start_year: int = 0
+
+    @property
+    def supported_years(self) -> List[int]:
+        """
+        Dynamically computed supported years.
+
+        Builds the range ``[_start_year, current_year)`` and appends the
+        current year when its data URL is already accessible (checked via
+        a HEAD request to ``get_url(current_year)``).
+
+        Returns
+        -------
+        list of int
+            Supported conference years.
+        """
+        if not hasattr(self, "_supported_years_cache"):
+            if self._start_year > 0:
+                current_year = datetime.now().year
+                years = list(range(self._start_year, current_year))
+                if self._check_current_year_available(current_year):
+                    years.append(current_year)
+                self._supported_years_cache: List[int] = years
+            else:
+                self._supported_years_cache = []
+        return self._supported_years_cache
+
+    @supported_years.setter
+    def supported_years(self, value: List[int]) -> None:
+        self._supported_years_cache = value
+
+    def get_url(self, year: int) -> str:
+        """
+        Get the data URL for a specific year.
+
+        Override in subclasses to enable automatic current-year availability
+        checking in :pyattr:`supported_years`.
+
+        Parameters
+        ----------
+        year : int
+            Conference year
+
+        Returns
+        -------
+        str
+            URL used for downloading or probing availability.
+
+        Raises
+        ------
+        NotImplementedError
+            When the subclass does not provide an implementation.
+        """
+        raise NotImplementedError("Subclasses must implement get_url()")
+
+    def _check_current_year_available(self, current_year: int) -> bool:
+        """
+        Check whether the data URL for *current_year* is already reachable.
+
+        Sends a HEAD request to ``get_url(current_year)`` with a 3-second
+        timeout.  Returns ``False`` when ``get_url`` is not implemented or
+        the request fails.
+
+        Parameters
+        ----------
+        current_year : int
+            Year to probe.
+
+        Returns
+        -------
+        bool
+            ``True`` when the URL responds with HTTP 200.
+        """
+        try:
+            url = self.get_url(current_year)
+            response = requests.head(url, timeout=3, allow_redirects=True)
+            return response.status_code == 200
+        except (requests.RequestException, NotImplementedError):
+            return False
 
     @abstractmethod
     def download(
@@ -125,10 +209,6 @@ class LightweightDownloaderPlugin(DownloaderPlugin):
     # Plugin metadata (should be overridden in subclasses)
     plugin_name: str = "lightweight_base"
     plugin_description: str = "Lightweight base downloader plugin"
-    supported_years: List[int] = []
-
-    # No need to redefine download() and get_metadata() - inherited from DownloaderPlugin
-    # No need to redefine validate_year() - inherited from DownloaderPlugin
 
 
 """

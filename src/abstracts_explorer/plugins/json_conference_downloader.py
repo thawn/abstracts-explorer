@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Optional
 from pathlib import Path
 import logging
 import json
-from datetime import datetime
 import requests
 
 from abstracts_explorer.plugin import DownloaderPlugin, convert_to_lightweight_schema, LightweightPaper
@@ -32,58 +31,7 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
 
     plugin_name = "json_conference_base"
     plugin_description = "Base class for JSON conference downloaders"
-    _start_year: int = 0
     conference_name = "Conference"
-
-    @property
-    def supported_years(self) -> List[int]:
-        """
-        Dynamically computed supported years.
-
-        Builds the range ``[_start_year, current_year)`` and appends the
-        current year when its data URL is already accessible.
-
-        Returns
-        -------
-        list of int
-            Supported conference years.
-        """
-        if not hasattr(self, "_supported_years_cache"):
-            if self._start_year > 0:
-                current_year = datetime.now().year
-                years = list(range(self._start_year, current_year))
-                if self._check_current_year_available(current_year):
-                    years.append(current_year)
-                self._supported_years_cache: List[int] = years
-            else:
-                self._supported_years_cache = []
-        return self._supported_years_cache
-
-    @supported_years.setter
-    def supported_years(self, value: List[int]) -> None:
-        self._supported_years_cache = value
-
-    def _check_current_year_available(self, current_year: int) -> bool:
-        """
-        Check whether the data URL for *current_year* is already reachable.
-
-        Parameters
-        ----------
-        current_year : int
-            Year to probe.
-
-        Returns
-        -------
-        bool
-            ``True`` when a HEAD request to ``get_url(current_year)``
-            returns HTTP 200.
-        """
-        try:
-            url = self.get_url(current_year)
-            response = requests.head(url, timeout=3, allow_redirects=True)
-            return response.status_code == 200
-        except requests.RequestException:
-            return False
 
     def __init__(self, timeout: int = 30, verify_ssl: bool = True):
         """
@@ -98,24 +46,6 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
         """
         self.timeout = timeout
         self.verify_ssl = verify_ssl
-
-    def get_url(self, year: int) -> str:
-        """
-        Get the download URL for a specific year.
-
-        This method must be overridden by subclasses.
-
-        Parameters
-        ----------
-        year : int
-            Conference year
-
-        Returns
-        -------
-        str
-            URL to download JSON data from
-        """
-        raise NotImplementedError("Subclasses must implement get_url()")
 
     def download(
         self,

@@ -9,7 +9,6 @@ Uses the lightweight plugin API for simplified implementation.
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 import logging
-from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 import json
@@ -43,51 +42,21 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
     BASE_URL = "https://ml4physicalsciences.github.io/2025/"
     NEURIPS_VIRTUAL_BASE = "https://neurips.cc/virtual/2025/loc/san-diego/poster/"
 
-    @property
-    def supported_years(self) -> List[int]:
+    def get_url(self, year: int) -> str:
         """
-        Dynamically computed supported years.
-
-        Builds the range ``[_start_year, current_year)`` and appends the
-        current year when its workshop website is already accessible.
-
-        Returns
-        -------
-        list of int
-            Supported workshop years.
-        """
-        if not hasattr(self, "_supported_years_cache"):
-            current_year = datetime.now().year
-            years = list(range(self._start_year, current_year))
-            if self._check_current_year_available(current_year):
-                years.append(current_year)
-            self._supported_years_cache: List[int] = years
-        return self._supported_years_cache
-
-    @supported_years.setter
-    def supported_years(self, value: List[int]) -> None:
-        self._supported_years_cache = value
-
-    def _check_current_year_available(self, current_year: int) -> bool:
-        """
-        Check whether the ML4PS website for *current_year* is reachable.
+        Get the ML4PS workshop website URL for a specific year.
 
         Parameters
         ----------
-        current_year : int
-            Year to probe.
+        year : int
+            Workshop year
 
         Returns
         -------
-        bool
-            ``True`` when a HEAD request to the workshop page returns HTTP 200.
+        str
+            URL to the ML4PS workshop page for the given year.
         """
-        try:
-            url = f"https://ml4physicalsciences.github.io/{current_year}/"
-            response = requests.head(url, timeout=3, allow_redirects=True)
-            return response.status_code == 200
-        except requests.RequestException:
-            return False
+        return f"https://ml4physicalsciences.github.io/{year}/"
 
     def __init__(self):
         """Initialize the ML4PS downloader plugin."""

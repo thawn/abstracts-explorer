@@ -15,8 +15,6 @@ by clicking the **"Get conference data JSON"** button.
 
 import json
 import logging
-import requests
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -64,52 +62,21 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
     _start_year = 2023
     conference_name = "CHI"
 
-    @property
-    def supported_years(self) -> List[int]:
+    def get_url(self, year: int) -> str:
         """
-        Dynamically computed supported years.
-
-        Builds the range ``[_start_year, current_year)`` and appends the
-        current year when the SIGCHI program page is already accessible.
-
-        Returns
-        -------
-        list of int
-            Supported conference years.
-        """
-        if not hasattr(self, "_supported_years_cache"):
-            current_year = datetime.now().year
-            years = list(range(self._start_year, current_year))
-            if self._check_current_year_available(current_year):
-                years.append(current_year)
-            self._supported_years_cache: List[int] = years
-        return self._supported_years_cache
-
-    @supported_years.setter
-    def supported_years(self, value: List[int]) -> None:
-        self._supported_years_cache = value
-
-    def _check_current_year_available(self, current_year: int) -> bool:
-        """
-        Check whether the SIGCHI program page for *current_year* exists.
+        Get the SIGCHI program page URL for a specific year.
 
         Parameters
         ----------
-        current_year : int
-            Year to probe.
+        year : int
+            Conference year
 
         Returns
         -------
-        bool
-            ``True`` when a HEAD request to the SIGCHI program page
-            returns HTTP 200.
+        str
+            URL to the SIGCHI program page for the given year.
         """
-        try:
-            url = f"https://programs.sigchi.org/chi/{current_year}"
-            response = requests.head(url, timeout=3, allow_redirects=True)
-            return response.status_code == 200
-        except requests.RequestException:
-            return False
+        return f"https://programs.sigchi.org/chi/{year}"
 
     #: Mapping from the raw ``award`` field values used in the SIGCHI JSON
     #: to human-readable strings stored in :class:`LightweightPaper`.
