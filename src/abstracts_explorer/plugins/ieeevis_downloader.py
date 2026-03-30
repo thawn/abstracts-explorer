@@ -7,6 +7,7 @@ Plugin for downloading papers from the official IEEE VIS conference.
 
 import json
 import logging
+from datetime import datetime
 import requests
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -38,7 +39,7 @@ class IEEEVISDownloaderPlugin(JSONConferenceDownloaderPlugin):
 
     plugin_name = "ieeevis"
     plugin_description = "Official IEEE VIS conference data downloader"
-    supported_years = [2025]
+    supported_years = list(range(2025, datetime.now().year))
     conference_name = "IEEE VIS"
 
     def get_url(self, year: int) -> str:

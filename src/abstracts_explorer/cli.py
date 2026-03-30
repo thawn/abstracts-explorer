@@ -29,6 +29,7 @@ from abstracts_explorer.plugins import (
     list_plugins,
     list_plugin_names,
 )
+from abstracts_explorer.plugin import get_available_filters
 from abstracts_explorer.mcp_server import run_mcp_server
 from abstracts_explorer.evaluation import (
     EvaluationError,
@@ -1005,6 +1006,12 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
 
     combos: list = []
 
+    # Get plugin-supported years for each conference
+    plugin_filters = get_available_filters()
+    plugin_conf_years = plugin_filters.get("conference_years", {})
+    # Build case-insensitive lookup for plugin supported years
+    plugin_years_map = {k.lower(): set(v) for k, v in plugin_conf_years.items()}
+
     if raw_conference is None and year_arg is None:
         # No filters: generate all conference × year combinations
         for conf in stored_conferences:
@@ -1015,6 +1022,10 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
             except Exception:
                 pass
             conf_years = conf_opts.get("years", []) if conf_opts else []
+            # Filter years to only those supported by the plugin
+            plugin_years = plugin_years_map.get(conf.lower())
+            if plugin_years is not None:
+                conf_years = [y for y in conf_years if y in plugin_years]
             # conference + all years combined
             combos.append((conf, None))
             # conference + each individual year
@@ -1041,6 +1052,10 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
                 conf_years_for_single = conf_opts.get("years", [])
         except Exception:
             pass
+        # Filter years to only those supported by the plugin
+        plugin_years = plugin_years_map.get(resolved.lower())
+        if plugin_years is not None:
+            conf_years_for_single = [y for y in conf_years_for_single if y in plugin_years]
         # conference + all years combined
         combos.append((resolved, None))
         # conference + each individual year

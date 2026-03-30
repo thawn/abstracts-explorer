@@ -15,6 +15,7 @@ by clicking the **"Get conference data JSON"** button.
 
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -59,7 +60,7 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
 
     plugin_name = "chi"
     plugin_description = "CHI (ACM CHI) conference data loaded from the SIGCHI program JSON"
-    supported_years = [2023, 2024, 2025]
+    supported_years = list(range(2023, datetime.now().year))
     conference_name = "CHI"
 
     #: Mapping from the raw ``award`` field values used in the SIGCHI JSON

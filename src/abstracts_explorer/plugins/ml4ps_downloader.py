@@ -9,6 +9,7 @@ Uses the lightweight plugin API for simplified implementation.
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 import logging
+from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 import json
@@ -36,7 +37,7 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
 
     plugin_name = "ml4ps"
     plugin_description = "ML4PS (Machine Learning for Physical Sciences) workshop downloader"
-    supported_years = [2025]  # Currently only 2025 is implemented
+    supported_years = list(range(2025, datetime.now().year))
     conference_name = "ML4PS@Neurips"
 
     BASE_URL = "https://ml4physicalsciences.github.io/2025/"
