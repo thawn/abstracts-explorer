@@ -18,6 +18,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from abstracts_explorer.config import get_config
 from abstracts_explorer.plugin import (
     LightweightDownloaderPlugin,
     LightweightPaper,
@@ -149,7 +150,7 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
         if not input_path:
             # Auto-detect well-known file location
             example_year = year if year is not None else max(self.supported_years)
-            default_path = Path("data") / f"CHI_{example_year}_program.json"
+            default_path = self._get_default_input_path(example_year)
             if default_path.exists():
                 logger.info("Auto-detected CHI program JSON: %s", default_path)
                 input_path = str(default_path)
@@ -175,6 +176,23 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _get_default_input_path(self, year: int) -> Path:
+        """
+        Get the default expected path for the CHI program JSON file.
+
+        Parameters
+        ----------
+        year : int
+            Conference year
+
+        Returns
+        -------
+        Path
+            Expected path to the CHI program JSON file for the given year.
+        """
+        config = get_config()
+        return Path(config.data_dir) / f"CHI_{year}_program.json"
 
     def _load_lightweight_papers(self, path: str) -> List[LightweightPaper]:
         """

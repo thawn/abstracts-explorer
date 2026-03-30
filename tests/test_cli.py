@@ -573,7 +573,7 @@ class TestCLI:
 
         assert exit_code == 0
         captured = capsys.readouterr()
-        assert "Successfully generated embeddings for 2 papers" in captured.out
+        assert "Successfully generated embeddings for 2 abstracts" in captured.out
         assert "Vector database saved to" in captured.out
 
     def test_create_embeddings_with_where_clause(self, tmp_path, capsys, monkeypatch):
@@ -637,8 +637,8 @@ class TestCLI:
 
         assert exit_code == 0
         captured = capsys.readouterr()
-        assert "Filter will process 1 papers" in captured.out
-        assert "Successfully generated embeddings for 1 papers" in captured.out
+        assert "Filter will process 1 abstracts" in captured.out
+        assert "Successfully generated embeddings for 1 abstracts" in captured.out
 
     def test_create_embeddings_force_flag(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with --force flag."""
@@ -962,7 +962,7 @@ class TestCLI:
         assert exit_code == 0
         captured = capsys.readouterr()
         assert "Conference: NeurIPS" in captured.out
-        assert "Filter will process 1 papers" in captured.out
+        assert "Filter will process 1 abstracts" in captured.out
 
         # Verify the WHERE clause was passed to embed_from_database
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
@@ -1025,7 +1025,7 @@ class TestCLI:
         assert exit_code == 0
         captured = capsys.readouterr()
         assert "Year:       2024" in captured.out
-        assert "Filter will process 1 papers" in captured.out
+        assert "Filter will process 1 abstracts" in captured.out
 
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
         assert "year = 2024" in call_kwargs["where_clause"]
@@ -1099,7 +1099,7 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Conference: NeurIPS" in captured.out
         assert "Year:       2024" in captured.out
-        assert "Filter will process 1 papers" in captured.out
+        assert "Filter will process 1 abstracts" in captured.out
 
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
         where = call_kwargs["where_clause"]
@@ -1165,7 +1165,7 @@ class TestCLI:
 
         assert exit_code == 0
         captured = capsys.readouterr()
-        assert "Filter will process 1 papers" in captured.out
+        assert "Filter will process 1 abstracts" in captured.out
 
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
         where = call_kwargs["where_clause"]

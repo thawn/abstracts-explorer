@@ -178,7 +178,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
             # Count papers matching filter
             filtered = db.query(f"SELECT COUNT(*) as count FROM papers WHERE {where_clause}")
             filtered_count = filtered[0]["count"] if filtered else 0
-            print(f"📊 Filter will process {filtered_count:,} papers")
+            print(f"📊 Filter will process {filtered_count:,} abstracts")
 
     # Initialize embeddings manager
     try:
