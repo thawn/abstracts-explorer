@@ -22,7 +22,7 @@ class NeurIPSDownloaderPlugin(JSONConferenceDownloaderPlugin):
 
     plugin_name = "neurips"
     plugin_description = "Official NeurIPS conference data downloader"
-    supported_years = list(range(2020, 2026))  # NeurIPS years available
+    _start_year = 2020
     conference_name = "NeurIPS"
 
     def get_url(self, year: int) -> str:

@@ -22,7 +22,7 @@ class ICLRDownloaderPlugin(JSONConferenceDownloaderPlugin):
 
     plugin_name = "iclr"
     plugin_description = "Official ICLR conference data downloader"
-    supported_years = [2020, 2021, 2022, 2023, 2024, 2025]
+    _start_year = 2020
     conference_name = "ICLR"
 
     def get_url(self, year: int) -> str:

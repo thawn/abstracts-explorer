@@ -573,7 +573,7 @@ class TestCLI:
 
         assert exit_code == 0
         captured = capsys.readouterr()
-        assert "Successfully generated embeddings for 2 papers" in captured.out
+        assert "Successfully generated embeddings for 2 abstracts" in captured.out
         assert "Vector database saved to" in captured.out
 
     def test_create_embeddings_with_where_clause(self, tmp_path, capsys, monkeypatch):
@@ -637,8 +637,8 @@ class TestCLI:
 
         assert exit_code == 0
         captured = capsys.readouterr()
-        assert "Filter will process 1 papers" in captured.out
-        assert "Successfully generated embeddings for 1 papers" in captured.out
+        assert "Filter will process 1 abstracts" in captured.out
+        assert "Successfully generated embeddings for 1 abstracts" in captured.out
 
     def test_create_embeddings_force_flag(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with --force flag."""
@@ -962,7 +962,7 @@ class TestCLI:
         assert exit_code == 0
         captured = capsys.readouterr()
         assert "Conference: NeurIPS" in captured.out
-        assert "Filter will process 1 papers" in captured.out
+        assert "Filter will process 1 abstracts" in captured.out
 
         # Verify the WHERE clause was passed to embed_from_database
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
@@ -1025,7 +1025,7 @@ class TestCLI:
         assert exit_code == 0
         captured = capsys.readouterr()
         assert "Year:       2024" in captured.out
-        assert "Filter will process 1 papers" in captured.out
+        assert "Filter will process 1 abstracts" in captured.out
 
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
         assert "year = 2024" in call_kwargs["where_clause"]
@@ -1099,7 +1099,7 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Conference: NeurIPS" in captured.out
         assert "Year:       2024" in captured.out
-        assert "Filter will process 1 papers" in captured.out
+        assert "Filter will process 1 abstracts" in captured.out
 
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
         where = call_kwargs["where_clause"]
@@ -1165,7 +1165,7 @@ class TestCLI:
 
         assert exit_code == 0
         captured = capsys.readouterr()
-        assert "Filter will process 1 papers" in captured.out
+        assert "Filter will process 1 abstracts" in captured.out
 
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
         where = call_kwargs["where_clause"]
@@ -2094,6 +2094,14 @@ class TestCLI:
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
+            patch(
+                "abstracts_explorer.cli.get_available_filters",
+                return_value={
+                    "conferences": ["ML4PS@NeurIPS"],
+                    "years": [2023, 2024],
+                    "conference_years": {"ML4PS@NeurIPS": [2023, 2024]},
+                },
+            ),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -2121,6 +2129,65 @@ class TestCLI:
         assert (["ML4PS@NeurIPS"], [2024]) in all_calls
         captured = capsys.readouterr()
         assert "ML4PS@NeurIPS" in captured.out
+
+    def test_pre_generate_clustering_filters_unsupported_years(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering filters out years not in plugin supported_years."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+        set_test_db(tmp_path / "test.db")
+
+        mock_results = {
+            "points": [],
+            "statistics": {"total_papers": 50, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
+        }
+
+        # DB has years 2022-2025, but plugin only supports 2024-2025
+        def mock_get_filter_options(conference=None):
+            if conference is None:
+                return {"conferences": ["TestConf"], "years": [], "sessions": []}
+            return {"conferences": [], "years": [2022, 2023, 2024, 2025], "sessions": []}
+
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
+            patch(
+                "abstracts_explorer.cli.get_available_filters",
+                return_value={
+                    "conferences": ["TestConf"],
+                    "years": [2024, 2025],
+                    "conference_years": {"TestConf": [2024, 2025]},
+                },
+            ),
+        ):
+            mock_em = Mock()
+            mock_em_class.return_value = mock_em
+            mock_compute.return_value = mock_results
+
+            mock_db_instance = Mock()
+            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
+            mock_db_instance.__exit__ = Mock(return_value=False)
+            mock_db_class.return_value = mock_db_instance
+
+            with patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "clustering", "pre-generate"],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        # 3 combos: all years + 2024 + 2025 (2022 and 2023 filtered out)
+        assert mock_compute.call_count == 3
+        all_calls = [(c[1]["conferences"], c[1]["years"]) for c in mock_compute.call_args_list]
+        assert (["TestConf"], None) in all_calls
+        assert (["TestConf"], [2024]) in all_calls
+        assert (["TestConf"], [2025]) in all_calls
+        # Unsupported years should NOT be in the calls
+        assert (["TestConf"], [2022]) not in all_calls
+        assert (["TestConf"], [2023]) not in all_calls
 
     def test_pre_generate_clustering_with_year(self, tmp_path, capsys, monkeypatch):
         """Test pre-generate-clustering with --conference and --year (single combo)."""

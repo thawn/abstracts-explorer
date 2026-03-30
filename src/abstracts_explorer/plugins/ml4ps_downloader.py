@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from pathlib import Path
 import logging
 import requests
+from requests.adapters import HTTPAdapter
 from bs4 import BeautifulSoup
 import json
 import re
@@ -21,6 +22,8 @@ from threading import Lock
 from abstracts_explorer.plugin import (
     LightweightDownloaderPlugin,
     LightweightPaper,
+    sanitize_author_names,
+    validate_lightweight_papers,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,7 +39,7 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
 
     plugin_name = "ml4ps"
     plugin_description = "ML4PS (Machine Learning for Physical Sciences) workshop downloader"
-    supported_years = list(range(2019, 2026))
+    _start_year = 2019
     conference_name = "ML4PS@Neurips"
 
     # NeurIPS virtual page base URL for fetching abstracts (years >= 2022 only)
@@ -44,10 +47,31 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
         2025: "https://neurips.cc/virtual/2025/loc/san-diego/poster/",
     }
 
+    def get_url(self, year: int) -> str:
+        """
+        Get the ML4PS workshop website URL for a specific year.
+
+        Parameters
+        ----------
+        year : int
+            Workshop year
+
+        Returns
+        -------
+        str
+            URL to the ML4PS workshop page for the given year.
+        """
+        return f"https://ml4physicalsciences.github.io/{year}/"
+
     def __init__(self):
         """Initialize the ML4PS downloader plugin."""
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+        # Match pool_maxsize to the maximum number of concurrent workers used in
+        # _fetch_abstracts_for_papers to avoid urllib3 "Connection pool is full" warnings.
+        adapter = HTTPAdapter(pool_maxsize=20)
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
         self.stats_lock = Lock()
         self._current_year: int = max(self.supported_years)
 
@@ -132,7 +156,7 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
                 try:
                     with open(output_file, "r", encoding="utf-8") as f:
                         papers_data = json.load(f)
-                    papers = [LightweightPaper(**paper) for paper in papers_data]
+                    papers = validate_lightweight_papers(papers_data)
                     logger.info(f"Successfully loaded {len(papers)} papers from local file")
                     return papers
                 except (json.JSONDecodeError, IOError, Exception) as e:
@@ -157,8 +181,8 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
         # Convert to lightweight format
         lightweight_papers_data = self._convert_to_lightweight_format(papers_raw)
 
-        # Convert to LightweightPaper objects
-        papers = [LightweightPaper(**paper) for paper in lightweight_papers_data]
+        # Convert to LightweightPaper objects (skip papers that fail validation)
+        papers = validate_lightweight_papers(lightweight_papers_data)
 
         # Save to file if path provided
         if output_path:
@@ -526,6 +550,7 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
             # Extract author names from authors_str
             authors_str = paper.get("authors_str", "")
             authors = [name.strip() for name in authors_str.split(",") if name.strip()]
+            authors = sanitize_author_names(authors)
 
             # Determine session based on event type
             session = f"ML4PhysicalSciences {year} Workshop"

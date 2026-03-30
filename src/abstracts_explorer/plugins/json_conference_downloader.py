@@ -12,7 +12,12 @@ import logging
 import json
 import requests
 
-from abstracts_explorer.plugin import DownloaderPlugin, convert_to_lightweight_schema, LightweightPaper
+from abstracts_explorer.plugin import (
+    DownloaderPlugin,
+    convert_to_lightweight_schema,
+    LightweightPaper,
+    validate_lightweight_papers,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +29,13 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
     Subclasses need to override:
     - plugin_name: Name of the plugin
     - plugin_description: Description of the plugin
-    - supported_years: List of supported years
+    - _start_year: First supported year (used to compute supported_years dynamically)
     - conference_name: Full conference name (e.g., "NeurIPS", "ICLR")
     - get_url(year): Method to construct the URL for a specific year
     """
 
     plugin_name = "json_conference_base"
     plugin_description = "Base class for JSON conference downloaders"
-    supported_years = []
     conference_name = "Conference"
 
     def __init__(self, timeout: int = 30, verify_ssl: bool = True):
@@ -47,24 +51,6 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
         """
         self.timeout = timeout
         self.verify_ssl = verify_ssl
-
-    def get_url(self, year: int) -> str:
-        """
-        Get the download URL for a specific year.
-
-        This method must be overridden by subclasses.
-
-        Parameters
-        ----------
-        year : int
-            Conference year
-
-        Returns
-        -------
-        str
-            URL to download JSON data from
-        """
-        raise NotImplementedError("Subclasses must implement get_url()")
 
     def download(
         self,
@@ -117,7 +103,7 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
                 try:
                     with open(output_file, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                    papers = [LightweightPaper(**paper) for paper in data]
+                    papers = validate_lightweight_papers(data)
                     logger.info(f"Successfully loaded {len(papers)} papers from local file")
                     return papers
                 except (json.JSONDecodeError, IOError, Exception) as e:
@@ -151,8 +137,8 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
             # Convert to lightweight schema (returns list of dicts)
             papers_data = convert_to_lightweight_schema(data["results"])
 
-        # Convert to LightweightPaper objects
-        papers = [LightweightPaper(**paper) for paper in papers_data]
+        # Convert to LightweightPaper objects (skip papers that fail validation)
+        papers = validate_lightweight_papers(papers_data)
 
         # Save to file if path provided
         if output_path:

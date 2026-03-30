@@ -18,11 +18,13 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from abstracts_explorer.config import get_config
 from abstracts_explorer.plugin import (
     LightweightDownloaderPlugin,
     LightweightPaper,
     validate_lightweight_papers,
 )
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +61,24 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
 
     plugin_name = "chi"
     plugin_description = "CHI (ACM CHI) conference data loaded from the SIGCHI program JSON"
-    supported_years = [2023, 2024, 2025]
+    _start_year = 2018
     conference_name = "CHI"
+
+    def get_url(self, year: int) -> str:
+        """
+        Get the SIGCHI program page URL for a specific year.
+
+        Parameters
+        ----------
+        year : int
+            Conference year
+
+        Returns
+        -------
+        str
+            URL to the SIGCHI program page for the given year.
+        """
+        return f"https://programs.sigchi.org/chi/{year}"
 
     #: Mapping from the raw ``award`` field values used in the SIGCHI JSON
     #: to human-readable strings stored in :class:`LightweightPaper`.
@@ -132,7 +150,7 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
         if not input_path:
             # Auto-detect well-known file location
             example_year = year if year is not None else max(self.supported_years)
-            default_path = Path("data") / f"CHI_{example_year}_program.json"
+            default_path = self._get_default_input_path(example_year)
             if default_path.exists():
                 logger.info("Auto-detected CHI program JSON: %s", default_path)
                 input_path = str(default_path)
@@ -159,6 +177,23 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _get_default_input_path(self, year: int) -> Path:
+        """
+        Get the default expected path for the CHI program JSON file.
+
+        Parameters
+        ----------
+        year : int
+            Conference year
+
+        Returns
+        -------
+        Path
+            Expected path to the CHI program JSON file for the given year.
+        """
+        config = get_config()
+        return Path(config.data_dir) / f"CHI_{year}_program.json"
+
     def _load_lightweight_papers(self, path: str) -> List[LightweightPaper]:
         """
         Load previously-converted lightweight papers from a JSON file.
@@ -176,7 +211,7 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
             data = json.load(fh)
         if not isinstance(data, list):
             raise ValueError(f"Expected a list of papers in {path}, got {type(data).__name__}")
-        return [LightweightPaper(**item) for item in data]
+        return validate_lightweight_papers(data)
 
     def _save_lightweight_papers(self, papers: List[LightweightPaper], path: str) -> None:
         """
@@ -339,20 +374,24 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
         content_type_name = content_types_by_id.get(content_type_id, "") if content_type_id is not None else ""
         keywords: Optional[List[str]] = [content_type_name] if content_type_name else None
 
-        return LightweightPaper(
-            title=title,
-            abstract=abstract,
-            authors=authors,
-            session=session_name,
-            poster_position=str(item.get("id", "")),
-            year=year,
-            conference="CHI",
-            original_id=item.get("id"),
-            url=url,
-            paper_pdf_url=url,
-            award=award,
-            keywords=keywords,
-        )
+        try:
+            return LightweightPaper(
+                title=title,
+                abstract=abstract,
+                authors=authors,
+                session=session_name,
+                poster_position=str(item.get("id", "")),
+                year=year,
+                conference="CHI",
+                original_id=item.get("id"),
+                url=url,
+                paper_pdf_url=url,
+                award=award,
+                keywords=keywords,
+            )
+        except ValidationError as exc:
+            logger.warning("Skipping paper '%s': validation failed: %s", title, exc)
+            return None
 
     def get_metadata(self) -> Dict[str, Any]:
         """

@@ -195,10 +195,10 @@ class TestML4PSPluginProperties:
         assert ml4ps_plugin.plugin_name == "ml4ps"
 
     def test_plugin_supported_years(self, ml4ps_plugin):
-        """Test supported years."""
-        assert ml4ps_plugin.supported_years == list(range(2019, 2026))
+        """Test supported years include expected range starting from 2019."""
         assert 2019 in ml4ps_plugin.supported_years
         assert 2025 in ml4ps_plugin.supported_years
+        assert all(y >= 2019 for y in ml4ps_plugin.supported_years)
 
     def test_plugin_base_url(self, ml4ps_plugin):
         """Test base URL construction for different years."""
@@ -426,6 +426,25 @@ class TestML4PSLightweightConversion:
         # Abstract should be empty string, not removed
         assert "abstract" in lightweight[0]
         assert lightweight[0]["abstract"] == ""
+
+    def test_convert_filters_semicolons_from_authors(self, ml4ps_plugin):
+        """Test that semicolons are filtered out of author names during conversion."""
+        papers = [
+            {
+                "id": 1,
+                "title": "Test Paper",
+                "authors_str": "John Doe; Jane Smith, Bob Johnson",
+                "abstract": "Test abstract.",
+                "paper_url": "https://example.com/paper.pdf",
+                "awards": [],
+                "eventtype": "Poster",
+            }
+        ]
+        lightweight = ml4ps_plugin._convert_to_lightweight_format(papers)
+
+        # Semicolons in author names should be replaced with spaces
+        for author in lightweight[0]["authors"]:
+            assert ";" not in author
 
 
 # ============================================================================

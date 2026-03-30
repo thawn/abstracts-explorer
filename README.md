@@ -6,14 +6,14 @@ A package to download conference data and search it with LLM-based semantic sear
 
 - 📥 Download conference data from various sources (NeurIPS, ICLR, ICML, ML4PS)
 - 💾 Store data in SQL database (SQLite or PostgreSQL) with efficient indexing
-- 🔍 Search papers by keywords, track, and other attributes
+- 🔍 Search abstracts by keywords, track, and other attributes
 - 🤖 Generate text embeddings for semantic search
-- 🔎 Find similar papers using AI-powered semantic similarity
-- 💬 Interactive RAG chat to ask questions about papers
-- 🎨 **NEW: Cluster and visualize paper embeddings with interactive plots**
-- 🌐 Web interface for browsing and searching papers
-- 🔌 **NEW: MCP server for LLM-based cluster analysis**
-- 🗄️ **NEW: Multi-database backend support (SQLite and PostgreSQL)**
+- 🔎 Find similar abstracts using AI-powered semantic similarity
+- 💬 Interactive RAG chat to ask questions about abstracts and conferences
+- 🎨 Cluster and visualize abstract embeddings with interactive plots
+- 🌐 Web interface for browsing and searching abstracts
+- 🔌 MCP server for LLM-based cluster analysis
+- 🗄️ Multi-database backend support (SQLite and PostgreSQL)
 - ⚙️ Environment-based configuration with `.env` file support
 
 ## Installation
@@ -120,7 +120,7 @@ PAPER_DB=postgresql://user:password@localhost/abstracts
 ### Download Conference Data
 
 ```bash
-# Download NeurIPS 2025 papers
+# Download NeurIPS 2025 abstracts
 abstracts-explorer download --year 2025
 ```
 
@@ -166,7 +166,7 @@ abstracts-explorer cluster-embeddings \
 # Start MCP server for LLM-based cluster analysis
 abstracts-explorer mcp-server
 
-# The MCP server provides tools to analyze clustered papers:
+# The MCP server provides tools to analyze clustered abstracts, such as:
 # - Get most frequently mentioned topics
 # - Analyze topic evolution over years
 # - Find recent developments in topics
@@ -188,11 +188,11 @@ abstracts-explorer web-ui
 
 ## Web Interface
 
-The web UI provides an intuitive interface for browsing and searching papers:
+The web UI provides an intuitive interface for browsing and searching abstracts with powerful features:
 
 - 🔍 **Search**: Keyword and AI-powered semantic search  
 - 💬 **Chat**: Interactive RAG chat with query rewriting
-- ⭐ **Ratings**: Save and organize interesting papers
+- ⭐ **Ratings**: Save and organize interesting abstracts
 - 📊 **Filters**: Filter by track, decision, event type, and more
 - 🎨 **Clusters**: Interactive visualization of paper embeddings (NEW!)
 
@@ -202,29 +202,29 @@ abstracts-explorer web-ui
 ```
 
 ![Web UI Screenshot](docs/images/screenshot.png)
-*The web interface provides an intuitive way to search and explore conference papers*
+*The web interface provides an intuitive way to search and explore conference abstracts*
 
 ## Python API Examples
 
-### Download and Search Papers
+### Download and Search Abstracts
 
 ```python
 from abstracts_explorer.plugins import get_plugin
 from abstracts_explorer import DatabaseManager
 
-# Download papers
+# Download abstracts using the NeurIPS plugin
 neurips_plugin = get_plugin('neurips')
-papers_data = neurips_plugin.download(year=2025)
+abstracts_data = neurips_plugin.download(year=2025)
 
 # Load into database and search
 with DatabaseManager() as db:
     db.create_tables()
-    db.add_papers(papers_data)
+    db.add_papers(abstracts_data)
     
-    # Search papers
-    papers = db.search_papers(keyword="deep learning", limit=5)
-    for paper in papers:
-        print(f"{paper['title']} by {paper['authors']}")
+    # Search abstracts
+    abstracts = db.search_papers(keyword="deep learning", limit=5)
+    for abstract in abstracts:
+        print(f"{abstract['title']} by {abstract['authors']}")
 ```
 
 ### Semantic Search with Embeddings
@@ -236,7 +236,7 @@ with EmbeddingsManager() as em:
     em.create_collection()
     em.embed_from_database()
     
-    # Find similar papers
+    # Find similar abstracts using semantic search
     results = em.search_similar(
         "transformers for natural language processing",
         n_results=5

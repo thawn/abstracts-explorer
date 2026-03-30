@@ -1213,6 +1213,69 @@ class TestValidationHelpers:
         assert all(p.year == 2025 for p in validated)
         assert all(p.conference == "NeurIPS" for p in validated)
 
+    def test_validate_lightweight_papers_skips_invalid(self):
+        """Test that validate_lightweight_papers skips invalid papers with a warning."""
+        papers = [
+            {
+                "title": "Valid Paper",
+                "authors": ["Alice"],
+                "abstract": "Abstract",
+                "session": "Session",
+                "poster_position": "A1",
+                "year": 2025,
+                "conference": "NeurIPS",
+            },
+            {
+                # Missing title — should be skipped
+                "title": "",
+                "authors": ["Bob"],
+                "abstract": "Abstract",
+                "session": "Session",
+                "poster_position": "A2",
+                "year": 2025,
+                "conference": "NeurIPS",
+            },
+            {
+                "title": "Another Valid Paper",
+                "authors": ["Charlie"],
+                "abstract": "Abstract",
+                "session": "Session",
+                "poster_position": "A3",
+                "year": 2025,
+                "conference": "NeurIPS",
+            },
+        ]
+        validated = validate_lightweight_papers(papers)
+        assert len(validated) == 2
+        assert validated[0].title == "Valid Paper"
+        assert validated[1].title == "Another Valid Paper"
+
+    def test_validate_lightweight_papers_skips_semicolon_authors(self):
+        """Test that papers with semicolons in author names are skipped."""
+        papers = [
+            {
+                "title": "Good Paper",
+                "authors": ["Alice Smith"],
+                "abstract": "Abstract",
+                "session": "Session",
+                "poster_position": "A1",
+                "year": 2025,
+                "conference": "NeurIPS",
+            },
+            {
+                "title": "Bad Authors Paper",
+                "authors": ["Alice; Smith"],
+                "abstract": "Abstract",
+                "session": "Session",
+                "poster_position": "A2",
+                "year": 2025,
+                "conference": "NeurIPS",
+            },
+        ]
+        validated = validate_lightweight_papers(papers)
+        assert len(validated) == 1
+        assert validated[0].title == "Good Paper"
+
 
 # ============================================================================
 # Integration Tests
