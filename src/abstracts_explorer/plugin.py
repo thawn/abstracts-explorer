@@ -20,6 +20,8 @@ from typing import Any, Dict, List, Optional
 import requests
 from pydantic import BaseModel, field_validator
 
+logger = logging.getLogger(__name__)
+
 
 class DownloaderPlugin(ABC):
     """
@@ -72,7 +74,7 @@ class DownloaderPlugin(ABC):
         Get the data URL for a specific year.
 
         Override in subclasses to enable automatic current-year availability
-        checking in :pyattr:`supported_years`.
+        checking in :attr:`supported_years`.
 
         Parameters
         ----------
@@ -114,6 +116,11 @@ class DownloaderPlugin(ABC):
             response = requests.head(url, timeout=3, allow_redirects=True)
             return response.status_code == 200
         except (requests.RequestException, NotImplementedError):
+            logger.debug(
+                "%s: current-year availability check failed for year %d",
+                self.plugin_name,
+                current_year,
+            )
             return False
 
     @abstractmethod
