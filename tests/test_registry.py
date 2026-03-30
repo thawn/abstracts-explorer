@@ -375,6 +375,32 @@ class TestDatabaseExportImport:
         finally:
             db2.close()
 
+    def test_import_embedding_model_alias_prefix_ignored(self, tmp_path):
+        """Import succeeds when models differ only by alias- prefix."""
+        from abstracts_explorer.db_models import EmbeddingsMetadata
+
+        # Create source database with alias-prefixed model
+        db1 = _populate_test_db(tmp_path / "db1.db")
+        try:
+            db1._session.add(EmbeddingsMetadata(embedding_model="alias-qwen3-embeddings-8b"))
+            db1._session.commit()
+            export_path = tmp_path / "export.db"
+            db1.export_papers_to_sqlite(export_path, "neurips", 2024)
+        finally:
+            db1.close()
+
+        # Create target database with model without alias- prefix
+        target_path = tmp_path / "target.db"
+        db2 = _populate_test_db(target_path)
+        try:
+            db2._session.add(EmbeddingsMetadata(embedding_model="qwen3-embeddings-8b"))
+            db2._session.commit()
+
+            count = db2.import_papers_from_sqlite(export_path, "neurips", 2024)
+            assert count == 1
+        finally:
+            db2.close()
+
     def test_import_embedding_metadata_not_overwritten(self, tmp_path):
         """Existing embedding metadata is preserved when consistent."""
         from abstracts_explorer.db_models import EmbeddingsMetadata

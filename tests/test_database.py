@@ -10,7 +10,7 @@ using the new schema with integer IDs and proper author relationships.
 import pytest
 import sqlite3
 
-from abstracts_explorer.database import DatabaseManager, DatabaseError
+from abstracts_explorer.database import DatabaseManager, DatabaseError, normalize_model_name
 from abstracts_explorer.plugin import LightweightPaper
 from tests.conftest import set_test_db
 
@@ -49,6 +49,35 @@ def sample_paper_minimal():
         year=2024,
         conference="ICLR",
     )
+
+
+class TestNormalizeModelName:
+    """Tests for normalize_model_name function."""
+
+    def test_no_alias_prefix(self):
+        """Model names without alias- prefix are unchanged."""
+        assert normalize_model_name("qwen3-embeddings-8b") == "qwen3-embeddings-8b"
+
+    def test_strips_alias_prefix(self):
+        """Model names with alias- prefix have it stripped."""
+        assert normalize_model_name("alias-qwen3-embeddings-8b") == "qwen3-embeddings-8b"
+
+    def test_alias_prefix_case_insensitive(self):
+        """The alias- prefix is stripped regardless of case."""
+        assert normalize_model_name("Alias-qwen3-embeddings-8b") == "qwen3-embeddings-8b"
+        assert normalize_model_name("ALIAS-qwen3-embeddings-8b") == "qwen3-embeddings-8b"
+
+    def test_only_leading_alias_stripped(self):
+        """Only a leading alias- prefix is stripped, not occurrences elsewhere."""
+        assert normalize_model_name("model-alias-name") == "model-alias-name"
+
+    def test_empty_after_strip(self):
+        """Edge case: model name that is exactly 'alias-' results in empty string."""
+        assert normalize_model_name("alias-") == ""
+
+    def test_plain_alias_word(self):
+        """The word 'alias' without the hyphen is not stripped."""
+        assert normalize_model_name("aliasmodel") == "aliasmodel"
 
 
 class TestDatabaseManager:
