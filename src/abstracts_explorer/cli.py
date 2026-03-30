@@ -554,7 +554,8 @@ def chat_command(args: argparse.Namespace) -> int:
                 if args.show_sources and result["papers"]:
                     print("📚 Source papers:")
                     for i, paper in enumerate(result["papers"], 1):
-                        print(f"  {i}. {paper['title']} (similarity: {paper['similarity']:.3f})")
+                        score = paper.get("relevance_score", paper.get("similarity", 0))
+                        print(f"  {i}. {paper.get('title', 'Unknown')} (relevance: {score:.3f})")
                     print()
 
             except KeyboardInterrupt:
