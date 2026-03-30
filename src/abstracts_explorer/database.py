@@ -8,6 +8,7 @@ Supports both SQLite and PostgreSQL backends via SQLAlchemy.
 
 import hashlib
 import logging
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -61,6 +62,27 @@ class EmbeddingModelConflictError(DatabaseError):
             f"but imported data uses '{remote_model}'. Cannot import data "
             f"created with a different embedding model."
         )
+
+
+def normalize_model_name(name: str) -> str:
+    """
+    Normalize an embedding model name for comparison.
+
+    Strips a leading ``alias-`` prefix (case-insensitive) so that, e.g.,
+    ``alias-qwen3-embeddings-8b`` is considered identical to
+    ``qwen3-embeddings-8b``.
+
+    Parameters
+    ----------
+    name : str
+        Embedding model name.
+
+    Returns
+    -------
+    str
+        Normalized model name.
+    """
+    return re.sub(r"^alias-", "", name, flags=re.IGNORECASE)
 
 
 class DatabaseManager:
@@ -2121,7 +2143,9 @@ class DatabaseManager:
                 imported_meta = source_session.execute(select(EmbeddingsMetadata)).scalars().first()
                 if imported_meta:
                     existing_meta = self._session.execute(select(EmbeddingsMetadata)).scalars().first()
-                    if existing_meta and existing_meta.embedding_model != imported_meta.embedding_model:
+                    if existing_meta and normalize_model_name(existing_meta.embedding_model) != normalize_model_name(
+                        imported_meta.embedding_model
+                    ):
                         raise EmbeddingModelConflictError(
                             existing_meta.embedding_model, imported_meta.embedding_model
                         )

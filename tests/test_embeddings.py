@@ -573,6 +573,32 @@ def test_check_model_compatibility_mismatched_models(embeddings_manager, tmp_pat
     assert current == embeddings_manager.model_name
 
 
+def test_check_model_compatibility_alias_prefix_ignored(embeddings_manager, tmp_path):
+    """Test that alias- prefix is ignored when checking model compatibility."""
+    from abstracts_explorer.database import DatabaseManager, normalize_model_name
+
+    db_path = tmp_path / "test.db"
+    # Store the model name without alias- prefix; embeddings_manager may use one with it
+    base_model = normalize_model_name(embeddings_manager.model_name)
+    # Ensure stored name differs from current name only by alias- prefix
+    if embeddings_manager.model_name.lower().startswith("alias-"):
+        stored_model = base_model  # strip alias-
+    else:
+        stored_model = f"alias-{base_model}"  # add alias-
+    assert stored_model != embeddings_manager.model_name  # names differ textually
+
+    set_test_db(db_path)
+    with DatabaseManager() as db:
+        db.create_tables()
+        db.set_embedding_model(stored_model)
+
+    compatible, stored, current = embeddings_manager.check_model_compatibility()
+
+    assert compatible is True
+    assert stored == stored_model
+    assert current == embeddings_manager.model_name
+
+
 def test_embed_from_database_stores_model(embeddings_manager, test_database):
     """Test that embed_from_database stores the embedding model in the database."""
     from abstracts_explorer.database import DatabaseManager

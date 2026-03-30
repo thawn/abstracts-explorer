@@ -21,7 +21,7 @@ import chromadb
 from chromadb.config import Settings
 
 from abstracts_explorer.config import get_config
-from abstracts_explorer.database import DatabaseManager
+from abstracts_explorer.database import DatabaseManager, normalize_model_name
 
 logger = logging.getLogger(__name__)
 
@@ -674,7 +674,7 @@ class EmbeddingsManager:
                 return True, None, self.model_name
 
             # Check if models match
-            compatible = stored_model == self.model_name
+            compatible = normalize_model_name(stored_model) == normalize_model_name(self.model_name)
             return compatible, stored_model, self.model_name
 
         except Exception as e:
