@@ -1205,6 +1205,90 @@ class TestRAGChatMCPTools:
                 assert result["metadata"]["n_papers"] == 3
                 assert len(result["papers"]) == 3
 
+    def test_query_routing_multiple_native_tool_calls(self, mock_embeddings_manager, mock_database):
+        """Test that the LLM can return multiple native tool calls which are all executed."""
+        with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
+            with patch("abstracts_explorer.rag.execute_mcp_tool") as mock_execute:
+                with patch("abstracts_explorer.rag.format_tool_result_for_llm") as mock_format:
+                    mock_client = Mock()
+                    mock_openai_class.return_value = mock_client
+
+                    # Mock routing response with multiple native tool calls
+                    mock_route_response = Mock()
+                    mock_route_choice = Mock()
+                    mock_route_message = Mock()
+                    mock_route_message.content = None
+
+                    # Create two native tool calls
+                    mock_tc1 = Mock()
+                    mock_tc1_func = Mock()
+                    mock_tc1_func.name = "get_cluster_topics"
+                    mock_tc1_func.arguments = '{"n_clusters": 8}'
+                    mock_tc1.function = mock_tc1_func
+
+                    mock_tc2 = Mock()
+                    mock_tc2_func = Mock()
+                    mock_tc2_func.name = "search_papers"
+                    mock_tc2_func.arguments = '{"topic_keywords": "transformers", "n_results": 5}'
+                    mock_tc2.function = mock_tc2_func
+
+                    mock_route_message.tool_calls = [mock_tc1, mock_tc2]
+                    mock_route_choice.message = mock_route_message
+                    mock_route_response.choices = [mock_route_choice]
+
+                    # Mock final response generation
+                    mock_final_response = Mock()
+                    mock_final_choice = Mock()
+                    mock_final_message = Mock()
+                    mock_final_message.content = (
+                        "The main topics include transformers. Here are some relevant papers."
+                    )
+                    mock_final_choice.message = mock_final_message
+                    mock_final_response.choices = [mock_final_choice]
+
+                    mock_client.chat.completions.create.side_effect = [
+                        mock_route_response,
+                        mock_final_response,
+                    ]
+
+                    # Mock tool execution for both tools
+                    mock_execute.side_effect = [
+                        json.dumps({"clusters": 8, "topics": ["transformers", "diffusion"]}),
+                        json.dumps(
+                            {
+                                "topic": "transformers",
+                                "papers_found": 1,
+                                "papers": [
+                                    {"id": "1", "title": "Transformer Paper", "abstract": "About transformers"}
+                                ],
+                            }
+                        ),
+                    ]
+                    mock_format.side_effect = [
+                        "Main topics: transformers, diffusion",
+                        "Found papers about transformers",
+                    ]
+
+                    chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
+                    result = chat.query("What are the main topics and show me papers about transformers?")
+
+                    # Verify both tools were executed
+                    assert mock_execute.call_count == 2
+                    assert mock_execute.call_args_list[0][0] == ("get_cluster_topics", {"n_clusters": 8})
+                    assert mock_execute.call_args_list[1][0] == (
+                        "search_papers",
+                        {"topic_keywords": "transformers", "n_results": 5},
+                    )
+
+                    # Verify metadata reflects multiple tools
+                    assert result["metadata"]["used_tools"] is True
+                    assert len(result["metadata"]["tools_executed"]) == 2
+                    assert "get_cluster_topics" in result["metadata"]["tools_executed"]
+                    assert "search_papers" in result["metadata"]["tools_executed"]
+
+                    # Verify papers from search_papers are returned
+                    assert result["metadata"]["n_papers"] == 1
+
 
 class TestRAGChatMCPToolsE2E:
     """E2E tests for RAG chat with MCP tools - both mocked and real LLM."""
