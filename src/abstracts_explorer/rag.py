@@ -306,11 +306,12 @@ class RAGChat:
 
     def _analyze_and_route_query(self, user_query: str, n_results: int = 5) -> Dict[str, Any]:
         """
-        Analyze user query and determine which MCP tool to use.
+        Analyze user query and determine which MCP tool(s) to use.
 
         This method uses an LLM with native OpenAI tool calling to analyze the user's question
-        and decide which MCP tool should handle it.  Native tool calling is used when
-        ``enable_mcp_tools`` is ``True``; for models that do not support the ``tools``
+        and decide which MCP tool(s) should handle it.  The LLM may select multiple tools when
+        the question requires combining different types of information.  Native tool calling is
+        used when ``enable_mcp_tools`` is ``True``; for models that do not support the ``tools``
         parameter, a JSON-in-content fallback is also attempted before defaulting to
         ``search_papers``.
 
@@ -336,16 +337,20 @@ class RAGChat:
         >>> result = chat._analyze_and_route_query("What are the main topics?", n_results=10)
         >>> print("Tools to execute:", result['tool_calls'])
         """
-        # Build system prompt that decides which tool to use
+        # Build system prompt that decides which tool(s) to use
         if self.enable_mcp_tools:
             system_prompt = (
                 "You are a query routing assistant. Use the provided tools to answer the user's question.\n\n"
-                "Choose the most appropriate tool based on the question:\n"
+                "Choose one or more appropriate tools based on the question. "
+                "You may call multiple tools when the question requires combining different types of information.\n\n"
+                "Available tools:\n"
                 f"- search_papers: specific questions about a topic, papers about something (use n_results={n_results})\n"
                 "- get_cluster_topics: hot topics, main research areas, overview of covered topics\n"
                 "- analyze_topic_relevance: how many papers about a topic, topic importance/popularity at a conference\n"
                 "- get_topic_evolution: trends over time, how a topic evolved, year-over-year changes\n"
                 "- get_cluster_visualization: visual/graphical cluster view, plot papers grouped by topic\n\n"
+                "For example, to answer 'What are the trending topics and find me papers about them', "
+                "call both get_cluster_topics and search_papers.\n\n"
                 "For follow-up questions, incorporate context from the previous conversation."
             )
         else:
@@ -373,7 +378,7 @@ class RAGChat:
             "model": self.model,
             "messages": messages,
             "temperature": 0.3,  # Lower temperature for consistent decisions
-            "max_tokens": 300,  # Allow for tool calls
+            "max_tokens": 500,  # Allow for multiple tool calls
             "timeout": 30,  # Shorter timeout for quick analysis
         }
 
