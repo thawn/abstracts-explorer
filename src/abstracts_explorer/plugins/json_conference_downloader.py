@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from pathlib import Path
 import logging
 import json
+from datetime import datetime
 import requests
 
 from abstracts_explorer.plugin import DownloaderPlugin, convert_to_lightweight_schema, LightweightPaper
@@ -24,15 +25,65 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
     Subclasses need to override:
     - plugin_name: Name of the plugin
     - plugin_description: Description of the plugin
-    - supported_years: List of supported years
+    - _start_year: First supported year (used to compute supported_years dynamically)
     - conference_name: Full conference name (e.g., "NeurIPS", "ICLR")
     - get_url(year): Method to construct the URL for a specific year
     """
 
     plugin_name = "json_conference_base"
     plugin_description = "Base class for JSON conference downloaders"
-    supported_years = []
+    _start_year: int = 0
     conference_name = "Conference"
+
+    @property
+    def supported_years(self) -> List[int]:
+        """
+        Dynamically computed supported years.
+
+        Builds the range ``[_start_year, current_year)`` and appends the
+        current year when its data URL is already accessible.
+
+        Returns
+        -------
+        list of int
+            Supported conference years.
+        """
+        if not hasattr(self, "_supported_years_cache"):
+            if self._start_year > 0:
+                current_year = datetime.now().year
+                years = list(range(self._start_year, current_year))
+                if self._check_current_year_available(current_year):
+                    years.append(current_year)
+                self._supported_years_cache: List[int] = years
+            else:
+                self._supported_years_cache = []
+        return self._supported_years_cache
+
+    @supported_years.setter
+    def supported_years(self, value: List[int]) -> None:
+        self._supported_years_cache = value
+
+    def _check_current_year_available(self, current_year: int) -> bool:
+        """
+        Check whether the data URL for *current_year* is already reachable.
+
+        Parameters
+        ----------
+        current_year : int
+            Year to probe.
+
+        Returns
+        -------
+        bool
+            ``True`` when a HEAD request to ``get_url(current_year)``
+            returns HTTP 200.
+        """
+        try:
+            url = self.get_url(current_year)
+            response = requests.head(url, timeout=3, allow_redirects=True)
+            return response.status_code == 200
+        except Exception:
+            return False
 
     def __init__(self, timeout: int = 30, verify_ssl: bool = True):
         """

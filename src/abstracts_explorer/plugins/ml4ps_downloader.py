@@ -37,11 +37,57 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
 
     plugin_name = "ml4ps"
     plugin_description = "ML4PS (Machine Learning for Physical Sciences) workshop downloader"
-    supported_years = list(range(2025, datetime.now().year))
+    _start_year = 2025
     conference_name = "ML4PS@Neurips"
 
     BASE_URL = "https://ml4physicalsciences.github.io/2025/"
     NEURIPS_VIRTUAL_BASE = "https://neurips.cc/virtual/2025/loc/san-diego/poster/"
+
+    @property
+    def supported_years(self) -> List[int]:
+        """
+        Dynamically computed supported years.
+
+        Builds the range ``[_start_year, current_year)`` and appends the
+        current year when its workshop website is already accessible.
+
+        Returns
+        -------
+        list of int
+            Supported workshop years.
+        """
+        if not hasattr(self, "_supported_years_cache"):
+            current_year = datetime.now().year
+            years = list(range(self._start_year, current_year))
+            if self._check_current_year_available(current_year):
+                years.append(current_year)
+            self._supported_years_cache: List[int] = years
+        return self._supported_years_cache
+
+    @supported_years.setter
+    def supported_years(self, value: List[int]) -> None:
+        self._supported_years_cache = value
+
+    def _check_current_year_available(self, current_year: int) -> bool:
+        """
+        Check whether the ML4PS website for *current_year* is reachable.
+
+        Parameters
+        ----------
+        current_year : int
+            Year to probe.
+
+        Returns
+        -------
+        bool
+            ``True`` when a HEAD request to the workshop page returns HTTP 200.
+        """
+        try:
+            url = f"https://ml4physicalsciences.github.io/{current_year}/"
+            response = requests.head(url, timeout=3, allow_redirects=True)
+            return response.status_code == 200
+        except Exception:
+            return False
 
     def __init__(self):
         """Initialize the ML4PS downloader plugin."""

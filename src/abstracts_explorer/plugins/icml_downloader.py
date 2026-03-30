@@ -6,7 +6,6 @@ Plugin for downloading papers from the official ICML conference data.
 """
 
 import logging
-from datetime import datetime
 
 from abstracts_explorer.plugins.json_conference_downloader import JSONConferenceDownloaderPlugin
 
@@ -23,7 +22,7 @@ class ICMLDownloaderPlugin(JSONConferenceDownloaderPlugin):
 
     plugin_name = "icml"
     plugin_description = "Official ICML conference data downloader"
-    supported_years = list(range(2020, datetime.now().year))
+    _start_year = 2020
     conference_name = "ICML"
 
     def get_url(self, year: int) -> str:

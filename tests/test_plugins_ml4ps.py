@@ -23,9 +23,7 @@ from abstracts_explorer.plugins import (
 def _check_ml4ps_website_available() -> bool:
     """Return True if the ML4PS website is reachable."""
     try:
-        response = requests.head(
-            "https://ml4physicalsciences.github.io/2025/", timeout=5
-        )
+        response = requests.head("https://ml4physicalsciences.github.io/2025/", timeout=5)
         return response.status_code < 400
     except (requests.RequestException, OSError):
         return False
@@ -194,8 +192,9 @@ class TestML4PSPluginProperties:
         assert ml4ps_plugin.plugin_name == "ml4ps"
 
     def test_plugin_supported_years(self, ml4ps_plugin):
-        """Test supported years."""
-        assert ml4ps_plugin.supported_years == [2025]
+        """Test supported years include 2025 and respect dynamic range."""
+        assert 2025 in ml4ps_plugin.supported_years
+        assert all(y >= 2025 for y in ml4ps_plugin.supported_years)
 
     def test_plugin_base_url(self, ml4ps_plugin):
         """Test base URL configuration."""
