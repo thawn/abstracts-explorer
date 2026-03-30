@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from pathlib import Path
 import logging
 import requests
+from requests.adapters import HTTPAdapter
 from bs4 import BeautifulSoup
 import json
 import re
@@ -66,6 +67,11 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
         """Initialize the ML4PS downloader plugin."""
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+        # Match pool_maxsize to the maximum number of concurrent workers used in
+        # _fetch_abstracts_for_papers to avoid urllib3 "Connection pool is full" warnings.
+        adapter = HTTPAdapter(pool_maxsize=20)
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
         self.stats_lock = Lock()
         self._current_year: int = max(self.supported_years)
 
