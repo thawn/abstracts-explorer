@@ -90,9 +90,44 @@ def setup_logging(verbosity: int) -> None:
     logging.getLogger("abstracts_explorer").setLevel(logging.NOTSET)
 
 
+def _build_embeddings_where_clause(args: argparse.Namespace) -> Optional[str]:
+    """
+    Build a SQL WHERE clause from --conference, --year, and --where arguments.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments that may contain conference, year, and where attributes.
+
+    Returns
+    -------
+    str or None
+        Combined WHERE clause string, or None if no filters specified.
+    """
+    conditions = []
+    conference = getattr(args, "conference", None)
+    year = getattr(args, "year", None)
+    where = getattr(args, "where", None)
+
+    if conference:
+        # Escape single quotes to prevent SQL injection
+        safe_conf = conference.replace("'", "''")
+        conditions.append(f"conference = '{safe_conf}'")
+    if year is not None:
+        conditions.append(f"year = {int(year)}")
+    if where:
+        conditions.append(f"({where})")
+
+    return " AND ".join(conditions) if conditions else None
+
+
 def create_embeddings_command(args: argparse.Namespace) -> int:
     """
     Create embeddings database for abstracts.
+
+    Without additional arguments, embeds all conference data for all
+    available years.  With ``--conference`` and/or ``--year``, only the
+    matching papers are embedded.
 
     Parameters
     ----------
@@ -102,7 +137,9 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         - lm_studio_url: URL for OpenAI-compatible API
         - model: Name of the embedding model
         - force: Whether to reset existing collection
-        - where: SQL WHERE clause to filter papers
+        - conference: Conference name to filter by (optional)
+        - year: Year to filter by (optional)
+        - where: SQL WHERE clause to filter papers (optional)
 
     Returns
     -------
@@ -110,6 +147,9 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         Exit code (0 for success, non-zero for failure)
     """
     config = get_config()
+
+    # Build combined WHERE clause from --conference, --year, and --where
+    where_clause = _build_embeddings_where_clause(args)
 
     print("Abstracts Explorer - Embeddings Generator")
     print("=" * 70)
@@ -120,6 +160,12 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     print(f"API URL: {args.lm_studio_url}")
     rate_limit_str = f"{args.requests_per_minute} req/min" if args.requests_per_minute > 0 else "disabled"
     print(f"Rate limit: {rate_limit_str}")
+    conference = getattr(args, "conference", None)
+    year = getattr(args, "year", None)
+    if conference:
+        print(f"Conference: {conference}")
+    if year is not None:
+        print(f"Year:       {year}")
     print("=" * 70)
 
     # Check paper count
@@ -127,9 +173,9 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         total_papers = db.get_paper_count()
         print(f"\n📊 Found {total_papers:,} papers in database")
 
-        if args.where:
+        if where_clause:
             # Count papers matching filter
-            filtered = db.query(f"SELECT COUNT(*) as count FROM papers WHERE {args.where}")
+            filtered = db.query(f"SELECT COUNT(*) as count FROM papers WHERE {where_clause}")
             filtered_count = filtered[0]["count"] if filtered else 0
             print(f"📊 Filter will process {filtered_count:,} papers")
 
@@ -191,8 +237,8 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
 
         # Determine total count for progress bar
         with DatabaseManager() as db:
-            if args.where:
-                count_result = db.query(f"SELECT COUNT(*) as count FROM papers WHERE {args.where}")
+            if where_clause:
+                count_result = db.query(f"SELECT COUNT(*) as count FROM papers WHERE {where_clause}")
                 total_count = count_result[0]["count"] if count_result else 0
             else:
                 total_count = db.get_paper_count()
@@ -206,7 +252,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
                 pbar.refresh()
 
             embedded_count = em.embed_from_database(
-                where_clause=args.where,
+                where_clause=where_clause,
                 progress_callback=update_progress,
                 force_recreate=args.force,
             )
@@ -2060,6 +2106,42 @@ Examples:
         "create-embeddings",
         help="Generate embeddings for abstracts",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+Generate embeddings for paper abstracts using an OpenAI-compatible API.
+
+Without additional arguments, embeds all conference data for all
+available years.
+
+With --conference and/or --year, only the matching papers are embedded.
+
+Examples:
+  # Embed all papers (default)
+  abstracts-explorer create-embeddings
+
+  # Embed only NeurIPS papers
+  abstracts-explorer create-embeddings --conference NeurIPS
+
+  # Embed only NeurIPS 2024 papers
+  abstracts-explorer create-embeddings --conference NeurIPS --year 2024
+
+  # Embed only papers from 2025 (all conferences)
+  abstracts-explorer create-embeddings --year 2025
+
+  # Combine with --where for additional filtering
+  abstracts-explorer create-embeddings --conference NeurIPS --where "award IS NOT NULL"
+        """,
+    )
+    embeddings_parser.add_argument(
+        "--conference",
+        type=str,
+        default=None,
+        help="Only embed papers from this conference (default: all conferences)",
+    )
+    embeddings_parser.add_argument(
+        "--year",
+        type=int,
+        default=None,
+        help="Only embed papers from this year (default: all years)",
     )
     embeddings_parser.add_argument(
         "--collection",

@@ -7,6 +7,7 @@ including the download and create-embeddings commands.
 
 import sys
 import logging
+import argparse
 import contextlib
 from unittest.mock import Mock, patch
 import pytest
@@ -14,6 +15,7 @@ from abstracts_explorer.cli import (
     main,
     search_command,
     setup_logging,
+    _build_embeddings_where_clause,
 )
 from abstracts_explorer.plugin import LightweightPaper
 from tests.conftest import set_test_db
@@ -42,6 +44,60 @@ def patch_get_config_for_test(monkeypatch, embeddings_path):
 
     # Patch get_config in the cli module
     monkeypatch.setattr("abstracts_explorer.cli.get_config", get_config_with_reload)
+
+
+class TestBuildEmbeddingsWhereClause:
+    """Test cases for _build_embeddings_where_clause helper."""
+
+    def test_no_filters(self):
+        """No filters returns None."""
+        args = argparse.Namespace(conference=None, year=None, where=None)
+        assert _build_embeddings_where_clause(args) is None
+
+    def test_conference_only(self):
+        """Conference filter produces correct WHERE clause."""
+        args = argparse.Namespace(conference="NeurIPS", year=None, where=None)
+        assert _build_embeddings_where_clause(args) == "conference = 'NeurIPS'"
+
+    def test_year_only(self):
+        """Year filter produces correct WHERE clause."""
+        args = argparse.Namespace(conference=None, year=2024, where=None)
+        assert _build_embeddings_where_clause(args) == "year = 2024"
+
+    def test_conference_and_year(self):
+        """Both conference and year produce combined WHERE clause."""
+        args = argparse.Namespace(conference="ICLR", year=2025, where=None)
+        result = _build_embeddings_where_clause(args)
+        assert "conference = 'ICLR'" in result
+        assert "year = 2025" in result
+        assert " AND " in result
+
+    def test_where_only(self):
+        """Raw --where produces parenthesised clause."""
+        args = argparse.Namespace(conference=None, year=None, where="award IS NOT NULL")
+        assert _build_embeddings_where_clause(args) == "(award IS NOT NULL)"
+
+    def test_conference_and_where(self):
+        """Conference + --where are combined with AND."""
+        args = argparse.Namespace(conference="NeurIPS", year=None, where="award IS NOT NULL")
+        result = _build_embeddings_where_clause(args)
+        assert "conference = 'NeurIPS'" in result
+        assert "(award IS NOT NULL)" in result
+        assert " AND " in result
+
+    def test_all_filters(self):
+        """All three filters are combined with AND."""
+        args = argparse.Namespace(conference="NeurIPS", year=2024, where="award IS NOT NULL")
+        result = _build_embeddings_where_clause(args)
+        assert "conference = 'NeurIPS'" in result
+        assert "year = 2024" in result
+        assert "(award IS NOT NULL)" in result
+
+    def test_conference_with_quote(self):
+        """Single quotes in conference name are escaped."""
+        args = argparse.Namespace(conference="O'Reilly", year=None, where=None)
+        result = _build_embeddings_where_clause(args)
+        assert "conference = 'O''Reilly'" in result
 
 
 class TestCLI:
@@ -848,6 +904,331 @@ class TestCLI:
         assert exit_code == 1
         captured = capsys.readouterr()
         assert "Embeddings error:" in captured.err
+
+    def test_create_embeddings_with_conference(self, tmp_path, capsys, monkeypatch):
+        """Test create-embeddings with --conference flag filters to one conference."""
+        from abstracts_explorer import DatabaseManager
+
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
+        with DatabaseManager() as db:
+            db.create_tables()
+            papers = [
+                LightweightPaper(
+                    title="NeurIPS Paper",
+                    abstract="Abstract 1",
+                    authors=["Author"],
+                    session="S1",
+                    poster_position="P1",
+                    year=2025,
+                    conference="NeurIPS",
+                ),
+                LightweightPaper(
+                    title="ICLR Paper",
+                    abstract="Abstract 2",
+                    authors=["Author"],
+                    session="S2",
+                    poster_position="P2",
+                    year=2025,
+                    conference="ICLR",
+                ),
+            ]
+            db.add_papers(papers)
+
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+            mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
+            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.embed_from_database.return_value = 1
+            mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
+            mock_em.__enter__ = Mock(return_value=mock_em)
+            mock_em.__exit__ = Mock(return_value=False)
+            MockEM.return_value = mock_em
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "neurips-abstracts",
+                    "create-embeddings",
+                    "--conference",
+                    "NeurIPS",
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Conference: NeurIPS" in captured.out
+        assert "Filter will process 1 papers" in captured.out
+
+        # Verify the WHERE clause was passed to embed_from_database
+        call_kwargs = mock_em.embed_from_database.call_args.kwargs
+        assert "conference = 'NeurIPS'" in call_kwargs["where_clause"]
+
+    def test_create_embeddings_with_year(self, tmp_path, capsys, monkeypatch):
+        """Test create-embeddings with --year flag filters to one year."""
+        from abstracts_explorer import DatabaseManager
+
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
+        with DatabaseManager() as db:
+            db.create_tables()
+            papers = [
+                LightweightPaper(
+                    title="Paper 2024",
+                    abstract="Abstract 1",
+                    authors=["Author"],
+                    session="S1",
+                    poster_position="P1",
+                    year=2024,
+                    conference="NeurIPS",
+                ),
+                LightweightPaper(
+                    title="Paper 2025",
+                    abstract="Abstract 2",
+                    authors=["Author"],
+                    session="S2",
+                    poster_position="P2",
+                    year=2025,
+                    conference="NeurIPS",
+                ),
+            ]
+            db.add_papers(papers)
+
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+            mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
+            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.embed_from_database.return_value = 1
+            mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
+            mock_em.__enter__ = Mock(return_value=mock_em)
+            mock_em.__exit__ = Mock(return_value=False)
+            MockEM.return_value = mock_em
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "neurips-abstracts",
+                    "create-embeddings",
+                    "--year",
+                    "2024",
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Year:       2024" in captured.out
+        assert "Filter will process 1 papers" in captured.out
+
+        call_kwargs = mock_em.embed_from_database.call_args.kwargs
+        assert "year = 2024" in call_kwargs["where_clause"]
+
+    def test_create_embeddings_with_conference_and_year(self, tmp_path, capsys, monkeypatch):
+        """Test create-embeddings with both --conference and --year flags."""
+        from abstracts_explorer import DatabaseManager
+
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
+        with DatabaseManager() as db:
+            db.create_tables()
+            papers = [
+                LightweightPaper(
+                    title="NeurIPS 2024",
+                    abstract="Abstract 1",
+                    authors=["Author"],
+                    session="S1",
+                    poster_position="P1",
+                    year=2024,
+                    conference="NeurIPS",
+                ),
+                LightweightPaper(
+                    title="NeurIPS 2025",
+                    abstract="Abstract 2",
+                    authors=["Author"],
+                    session="S2",
+                    poster_position="P2",
+                    year=2025,
+                    conference="NeurIPS",
+                ),
+                LightweightPaper(
+                    title="ICLR 2024",
+                    abstract="Abstract 3",
+                    authors=["Author"],
+                    session="S3",
+                    poster_position="P3",
+                    year=2024,
+                    conference="ICLR",
+                ),
+            ]
+            db.add_papers(papers)
+
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+            mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
+            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.embed_from_database.return_value = 1
+            mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
+            mock_em.__enter__ = Mock(return_value=mock_em)
+            mock_em.__exit__ = Mock(return_value=False)
+            MockEM.return_value = mock_em
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "neurips-abstracts",
+                    "create-embeddings",
+                    "--conference",
+                    "NeurIPS",
+                    "--year",
+                    "2024",
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Conference: NeurIPS" in captured.out
+        assert "Year:       2024" in captured.out
+        assert "Filter will process 1 papers" in captured.out
+
+        call_kwargs = mock_em.embed_from_database.call_args.kwargs
+        where = call_kwargs["where_clause"]
+        assert "conference = 'NeurIPS'" in where
+        assert "year = 2024" in where
+
+    def test_create_embeddings_conference_with_where(self, tmp_path, capsys, monkeypatch):
+        """Test create-embeddings combining --conference with --where clause."""
+        from abstracts_explorer import DatabaseManager
+
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
+        with DatabaseManager() as db:
+            db.create_tables()
+            papers = [
+                LightweightPaper(
+                    title="Award Paper",
+                    abstract="Abstract 1",
+                    authors=["Author"],
+                    session="S1",
+                    poster_position="P1",
+                    year=2025,
+                    conference="NeurIPS",
+                    award="Best Paper",
+                ),
+                LightweightPaper(
+                    title="Regular Paper",
+                    abstract="Abstract 2",
+                    authors=["Author"],
+                    session="S2",
+                    poster_position="P2",
+                    year=2025,
+                    conference="NeurIPS",
+                ),
+            ]
+            db.add_papers(papers)
+
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+            mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
+            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.embed_from_database.return_value = 1
+            mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
+            mock_em.__enter__ = Mock(return_value=mock_em)
+            mock_em.__exit__ = Mock(return_value=False)
+            MockEM.return_value = mock_em
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "neurips-abstracts",
+                    "create-embeddings",
+                    "--conference",
+                    "NeurIPS",
+                    "--where",
+                    "award IS NOT NULL",
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Filter will process 1 papers" in captured.out
+
+        call_kwargs = mock_em.embed_from_database.call_args.kwargs
+        where = call_kwargs["where_clause"]
+        assert "conference = 'NeurIPS'" in where
+        assert "(award IS NOT NULL)" in where
+
+    def test_create_embeddings_default_embeds_all(self, tmp_path, capsys, monkeypatch):
+        """Test create-embeddings without arguments embeds all papers."""
+        from abstracts_explorer import DatabaseManager
+
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
+        with DatabaseManager() as db:
+            db.create_tables()
+            papers = [
+                LightweightPaper(
+                    title="NeurIPS Paper",
+                    abstract="Abstract 1",
+                    authors=["Author"],
+                    session="S1",
+                    poster_position="P1",
+                    year=2024,
+                    conference="NeurIPS",
+                ),
+                LightweightPaper(
+                    title="ICLR Paper",
+                    abstract="Abstract 2",
+                    authors=["Author"],
+                    session="S2",
+                    poster_position="P2",
+                    year=2025,
+                    conference="ICLR",
+                ),
+            ]
+            db.add_papers(papers)
+
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+            mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
+            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.embed_from_database.return_value = 2
+            mock_em.get_collection_stats.return_value = {"name": "test", "count": 2}
+            mock_em.__enter__ = Mock(return_value=mock_em)
+            mock_em.__exit__ = Mock(return_value=False)
+            MockEM.return_value = mock_em
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "neurips-abstracts",
+                    "create-embeddings",
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+
+        # Verify no WHERE clause was passed (embeds all papers)
+        call_kwargs = mock_em.embed_from_database.call_args.kwargs
+        assert call_kwargs["where_clause"] is None
 
     def test_search_embeddings_not_found(self, tmp_path, capsys, monkeypatch):
         """Test search command with non-existent embeddings database."""
