@@ -6,7 +6,7 @@ This module provides functionality to cluster and visualize paper embeddings
 using dimensionality reduction and clustering algorithms from scikit-learn.
 
 Features:
-- Dimensionality reduction using PCA, t-SNE, and UMAP
+- Dimensionality reduction using PCA and t-SNE
 - Clustering using K-Means, DBSCAN, Agglomerative, Fuzzy C-Means, and Spectral clustering
 - **NEW: Automatic cluster labeling using TF-IDF and LLM-based methods**
 - **NEW: Keyword extraction for each cluster**
@@ -124,7 +124,7 @@ class ClusteringManager:
 
     This class handles:
     - Loading embeddings from ChromaDB
-    - Dimensionality reduction (PCA, t-SNE, UMAP)
+    - Dimensionality reduction (PCA, t-SNE)
     - Clustering (K-Means, DBSCAN, Agglomerative, Fuzzy C-Means, Spectral)
     - **Automatic cluster labeling using TF-IDF and LLM**
     - **Keyword extraction for clusters**
@@ -286,7 +286,7 @@ class ClusteringManager:
         Parameters
         ----------
         method : str, optional
-            Dimensionality reduction method: 'pca', 'tsne', or 'umap', by default 'pca'
+            Dimensionality reduction method: 'pca' or 'tsne', by default 'pca'
         n_components : int, optional
             Number of components to reduce to, by default 2
         random_state : int, optional
@@ -334,36 +334,8 @@ class ClusteringManager:
                     **kwargs,
                 )
                 logger.info(f"Applying t-SNE to reduce to {n_components} dimensions (perplexity={perplexity})")
-            elif method.lower() == "umap":
-                from umap import UMAP  # lazy import to reduce initial load time
-
-                # UMAP parameters
-                # UMAP requires a sufficient number of samples for spectral initialization
-                # Practical minimum is around max(n_components + 1, 4) for reliable operation
-                min_samples_required = max(n_components + 1, 4)
-                if len(self.embeddings) < min_samples_required:
-                    raise ClusteringError(
-                        f"UMAP requires at least {min_samples_required} samples for {n_components} components, "
-                        f"but only {len(self.embeddings)} samples available. Try PCA or t-SNE instead."
-                    )
-                n_neighbors = kwargs.pop("n_neighbors", min(15, len(self.embeddings) - 1))
-                # Ensure n_neighbors is at least 2 and less than n_samples
-                n_neighbors = max(2, min(n_neighbors, len(self.embeddings) - 1))
-                min_dist = kwargs.pop("min_dist", 0.1)
-                metric = kwargs.pop("metric", "cosine")
-                reducer = UMAP(
-                    n_components=n_components,
-                    random_state=random_state,
-                    n_neighbors=n_neighbors,
-                    min_dist=min_dist,
-                    metric=metric,
-                    **kwargs,
-                )
-                logger.info(
-                    f"Applying UMAP to reduce to {n_components} dimensions (n_neighbors={n_neighbors}, min_dist={min_dist})"
-                )
             else:
-                raise ClusteringError(f"Unknown reduction method: {method}. Use 'pca', 'tsne', or 'umap'.")
+                raise ClusteringError(f"Unknown reduction method: {method}. Use 'pca' or 'tsne'.")
 
             self.reduced_embeddings = reducer.fit_transform(scaled_embeddings)
             logger.info(f"Reduced embeddings shape: {self.reduced_embeddings.shape}")
@@ -1746,7 +1718,7 @@ def perform_clustering(
     collection_name : str, optional
         Name of the ChromaDB collection, by default "papers"
     reduction_method : str, optional
-        Dimensionality reduction method ('pca', 'tsne', or 'umap') for visualization, by default 'pca'
+        Dimensionality reduction method ('pca' or 'tsne') for visualization, by default 'pca'
     n_components : int, optional
         Number of components for dimensionality reduction, by default 2
     clustering_method : str, optional

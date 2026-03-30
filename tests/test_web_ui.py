@@ -1461,7 +1461,7 @@ class TestServerInitialization:
                     mock_db.get_clustering_cache.assert_called_once()
                     call_kwargs = mock_db.get_clustering_cache.call_args[1]
                     assert call_kwargs["clustering_method"] == "agglomerative"
-                    assert call_kwargs["reduction_method"] == "umap"
+                    assert call_kwargs["reduction_method"] == "tsne"
                     assert call_kwargs["n_components"] == 2
                     assert call_kwargs["n_clusters"] is None
 

@@ -814,7 +814,7 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
     Cluster embeddings and optionally export results.
 
     Uses agglomerative clustering with ward linkage, distance threshold 150,
-    and UMAP dimensionality reduction.
+    and t-SNE dimensionality reduction.
 
     Parameters
     ----------
@@ -844,7 +844,7 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
     print("=" * 70)
     print(f"Embeddings:  {config.embedding_db}")
     print(f"Collection:  {args.collection}")
-    print("Reduction:   umap (n_components=2)")
+    print("Reduction:   tsne (n_components=2)")
     print("Clustering:  agglomerative (linkage=ward, distance_threshold=150)")
 
     if args.limit:
@@ -856,7 +856,7 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
         print("\n🚀 Starting clustering pipeline...")
         results = perform_clustering(
             collection_name=args.collection,
-            reduction_method="umap",
+            reduction_method="tsne",
             n_components=2,
             clustering_method="agglomerative",
             n_clusters=None,
@@ -952,7 +952,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     Pre-generate clustering results for one or all conference/year combinations.
 
     Uses agglomerative clustering with ward linkage, distance threshold 150,
-    and UMAP dimensionality reduction.  Results are persisted to the database
+    and t-SNE dimensionality reduction.  Results are persisted to the database
     cache so that the web UI can serve them instantly.
 
     Without ``--conference`` or ``--year``, generates clustering for every
@@ -1081,7 +1081,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     print(f"Embeddings:       {config.embedding_db}")
     print(f"Collection:       {args.collection}")
     print("Clustering:       agglomerative (linkage=ward, distance_threshold=150)")
-    print("Reduction:        umap")
+    print("Reduction:        tsne")
     if len(combos) > 1:
         print(f"Combinations:     {len(combos)} total")
     else:
@@ -1120,7 +1120,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
                         embeddings_manager=em,
                         database=db,
                         embedding_model=config.embedding_model,
-                        reduction_method="umap",
+                        reduction_method="tsne",
                         n_components=2,
                         clustering_method="agglomerative",
                         n_clusters=None,
@@ -2338,7 +2338,7 @@ Examples:
 Clustering-related commands.
 
 Uses agglomerative clustering (ward linkage, distance threshold 150)
-with UMAP dimensionality reduction.
+with t-SNE dimensionality reduction.
 
 Sub-commands:
   run            Cluster embeddings and export results
@@ -2368,7 +2368,7 @@ Examples:
         "run",
         help="Cluster embeddings for visualization",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="Perform agglomerative clustering with UMAP dimensionality reduction on paper embeddings.",
+        description="Perform agglomerative clustering with t-SNE dimensionality reduction on paper embeddings.",
     )
     cluster_parser.add_argument(
         "--collection",
@@ -2422,7 +2422,7 @@ Examples:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="""
 Pre-generate clustering results using agglomerative clustering
-(ward linkage, distance threshold 150) with UMAP dimensionality
+(ward linkage, distance threshold 150) with t-SNE dimensionality
 reduction.  Results are persisted to the database cache so that
 the web UI serves them instantly.
 

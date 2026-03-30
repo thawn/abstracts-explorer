@@ -536,7 +536,7 @@ def compute_clusters():
     Return pre-computed clustering results from the database cache.
 
     Clustering always uses agglomerative clustering with
-    distance_threshold=150, linkage=ward, and UMAP dimensionality
+    distance_threshold=150, linkage=ward, and t-SNE dimensionality
     reduction.  Results must be pre-generated via the CLI
     ``clustering pre-generate`` command.
 
@@ -575,7 +575,7 @@ def compute_clusters():
         # Look up pre-computed results from the cache
         cached = database.get_clustering_cache(
             embedding_model=current_model,
-            reduction_method="umap",
+            reduction_method="tsne",
             n_components=2,
             clustering_method="agglomerative",
             n_clusters=None,
