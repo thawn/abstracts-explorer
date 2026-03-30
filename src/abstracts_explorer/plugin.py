@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import requests
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ValidationError, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -819,6 +819,9 @@ def validate_lightweight_papers(papers: List[Dict[str, Any]]) -> List[Lightweigh
     """
     Validate a list of papers against the lightweight schema.
 
+    Papers that fail validation are logged as warnings and skipped
+    rather than aborting the entire import.
+
     Parameters
     ----------
     papers : list
@@ -827,14 +830,18 @@ def validate_lightweight_papers(papers: List[Dict[str, Any]]) -> List[Lightweigh
     Returns
     -------
     list of LightweightPaper
-        List of validated paper models
-
-    Raises
-    ------
-    ValidationError
-        If any paper data is invalid
+        List of validated paper models (papers that failed validation are excluded)
     """
-    return [validate_lightweight_paper(paper) for paper in papers]
+    validated: List[LightweightPaper] = []
+    for paper in papers:
+        try:
+            validated.append(validate_lightweight_paper(paper))
+        except ValidationError as exc:
+            title = paper.get("title", "<unknown>")
+            logger.warning("Skipping paper '%s': validation failed: %s", title, exc)
+    if len(validated) < len(papers):
+        logger.warning("Skipped %d of %d papers due to validation errors", len(papers) - len(validated), len(papers))
+    return validated
 
 
 # Export public API

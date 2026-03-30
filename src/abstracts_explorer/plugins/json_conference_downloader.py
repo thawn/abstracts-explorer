@@ -12,7 +12,12 @@ import logging
 import json
 import requests
 
-from abstracts_explorer.plugin import DownloaderPlugin, convert_to_lightweight_schema, LightweightPaper
+from abstracts_explorer.plugin import (
+    DownloaderPlugin,
+    convert_to_lightweight_schema,
+    LightweightPaper,
+    validate_lightweight_papers,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +103,7 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
                 try:
                     with open(output_file, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                    papers = [LightweightPaper(**paper) for paper in data]
+                    papers = validate_lightweight_papers(data)
                     logger.info(f"Successfully loaded {len(papers)} papers from local file")
                     return papers
                 except (json.JSONDecodeError, IOError, Exception) as e:
@@ -132,8 +137,8 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
             # Convert to lightweight schema (returns list of dicts)
             papers_data = convert_to_lightweight_schema(data["results"])
 
-        # Convert to LightweightPaper objects
-        papers = [LightweightPaper(**paper) for paper in papers_data]
+        # Convert to LightweightPaper objects (skip papers that fail validation)
+        papers = validate_lightweight_papers(papers_data)
 
         # Save to file if path provided
         if output_path:

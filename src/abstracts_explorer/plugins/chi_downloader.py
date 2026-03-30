@@ -192,7 +192,7 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
             data = json.load(fh)
         if not isinstance(data, list):
             raise ValueError(f"Expected a list of papers in {path}, got {type(data).__name__}")
-        return [LightweightPaper(**item) for item in data]
+        return validate_lightweight_papers(data)
 
     def _save_lightweight_papers(self, papers: List[LightweightPaper], path: str) -> None:
         """
@@ -355,20 +355,24 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
         content_type_name = content_types_by_id.get(content_type_id, "") if content_type_id is not None else ""
         keywords: Optional[List[str]] = [content_type_name] if content_type_name else None
 
-        return LightweightPaper(
-            title=title,
-            abstract=abstract,
-            authors=authors,
-            session=session_name,
-            poster_position=str(item.get("id", "")),
-            year=year,
-            conference="CHI",
-            original_id=item.get("id"),
-            url=url,
-            paper_pdf_url=url,
-            award=award,
-            keywords=keywords,
-        )
+        try:
+            return LightweightPaper(
+                title=title,
+                abstract=abstract,
+                authors=authors,
+                session=session_name,
+                poster_position=str(item.get("id", "")),
+                year=year,
+                conference="CHI",
+                original_id=item.get("id"),
+                url=url,
+                paper_pdf_url=url,
+                award=award,
+                keywords=keywords,
+            )
+        except Exception as exc:
+            logger.warning("Skipping paper '%s': validation failed: %s", title, exc)
+            return None
 
     def get_metadata(self) -> Dict[str, Any]:
         """

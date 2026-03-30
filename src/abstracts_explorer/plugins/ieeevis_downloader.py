@@ -11,7 +11,7 @@ import requests
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from abstracts_explorer.plugin import sanitize_author_names, LightweightPaper
+from abstracts_explorer.plugin import sanitize_author_names, LightweightPaper, validate_lightweight_papers
 from abstracts_explorer.plugins.json_conference_downloader import JSONConferenceDownloaderPlugin
 
 logger = logging.getLogger(__name__)
@@ -129,7 +129,11 @@ class IEEEVISDownloaderPlugin(JSONConferenceDownloaderPlugin):
         if item.get("time_stamp"):
             paper_dict["starttime"] = item["time_stamp"]
 
-        return LightweightPaper(**paper_dict)
+        try:
+            return LightweightPaper(**paper_dict)
+        except Exception as exc:
+            logger.warning("Skipping paper '%s': validation failed: %s", title, exc)
+            return None
 
     def download(
         self,
@@ -180,7 +184,7 @@ class IEEEVISDownloaderPlugin(JSONConferenceDownloaderPlugin):
                 try:
                     with open(output_file, "r", encoding="utf-8") as f:
                         cached_data = json.load(f)
-                    cached_papers = [LightweightPaper(**p) for p in cached_data]
+                    cached_papers = validate_lightweight_papers(cached_data)
                     logger.info(f"Successfully loaded {len(cached_papers)} papers from local file")
                     return cached_papers
                 except (json.JSONDecodeError, IOError, Exception) as e:

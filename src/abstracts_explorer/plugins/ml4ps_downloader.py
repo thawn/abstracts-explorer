@@ -21,6 +21,8 @@ from threading import Lock
 from abstracts_explorer.plugin import (
     LightweightDownloaderPlugin,
     LightweightPaper,
+    sanitize_author_names,
+    validate_lightweight_papers,
 )
 
 logger = logging.getLogger(__name__)
@@ -148,7 +150,7 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
                 try:
                     with open(output_file, "r", encoding="utf-8") as f:
                         papers_data = json.load(f)
-                    papers = [LightweightPaper(**paper) for paper in papers_data]
+                    papers = validate_lightweight_papers(papers_data)
                     logger.info(f"Successfully loaded {len(papers)} papers from local file")
                     return papers
                 except (json.JSONDecodeError, IOError, Exception) as e:
@@ -173,8 +175,8 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
         # Convert to lightweight format
         lightweight_papers_data = self._convert_to_lightweight_format(papers_raw)
 
-        # Convert to LightweightPaper objects
-        papers = [LightweightPaper(**paper) for paper in lightweight_papers_data]
+        # Convert to LightweightPaper objects (skip papers that fail validation)
+        papers = validate_lightweight_papers(lightweight_papers_data)
 
         # Save to file if path provided
         if output_path:
@@ -542,6 +544,7 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
             # Extract author names from authors_str
             authors_str = paper.get("authors_str", "")
             authors = [name.strip() for name in authors_str.split(",") if name.strip()]
+            authors = sanitize_author_names(authors)
 
             # Determine session based on event type
             session = f"ML4PhysicalSciences {year} Workshop"
