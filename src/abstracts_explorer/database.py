@@ -2143,7 +2143,9 @@ class DatabaseManager:
                 imported_meta = source_session.execute(select(EmbeddingsMetadata)).scalars().first()
                 if imported_meta:
                     existing_meta = self._session.execute(select(EmbeddingsMetadata)).scalars().first()
-                    if existing_meta and normalize_model_name(existing_meta.embedding_model) != normalize_model_name(imported_meta.embedding_model):
+                    if existing_meta and normalize_model_name(existing_meta.embedding_model) != normalize_model_name(
+                        imported_meta.embedding_model
+                    ):
                         raise EmbeddingModelConflictError(
                             existing_meta.embedding_model, imported_meta.embedding_model
                         )
