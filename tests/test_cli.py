@@ -2034,6 +2034,115 @@ class TestCLI:
         call_kwargs = mock_compute.call_args[1]
         assert call_kwargs["force"] is True
 
+    def test_pre_generate_clustering_requests_per_minute(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering with --requests-per-minute flag."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+
+        set_test_db(tmp_path / "test.db")
+
+        mock_results = {
+            "points": [],
+            "statistics": {"total_papers": 5, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
+        }
+
+        def mock_get_filter_options(conference=None):
+            if conference is None:
+                return {"conferences": ["NeurIPS"], "years": [], "sessions": []}
+            return {"conferences": [], "years": [], "sessions": []}
+
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
+        ):
+            mock_em = Mock()
+            mock_em_class.return_value = mock_em
+            mock_compute.return_value = mock_results
+
+            mock_db_instance = Mock()
+            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
+            mock_db_instance.__exit__ = Mock(return_value=False)
+            mock_db_class.return_value = mock_db_instance
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "abstracts-explorer",
+                    "clustering",
+                    "pre-generate",
+                    "--requests-per-minute",
+                    "30",
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "30 req/min" in captured.out
+
+        # Verify EmbeddingsManager was initialized with requests_per_minute=30
+        mock_em_class.assert_called_once()
+        call_kwargs = mock_em_class.call_args.kwargs
+        assert call_kwargs["requests_per_minute"] == 30
+
+    def test_pre_generate_clustering_requests_per_minute_zero(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering with --requests-per-minute 0 disables rate limiting."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+
+        set_test_db(tmp_path / "test.db")
+
+        mock_results = {
+            "points": [],
+            "statistics": {"total_papers": 5, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
+        }
+
+        def mock_get_filter_options(conference=None):
+            if conference is None:
+                return {"conferences": ["NeurIPS"], "years": [], "sessions": []}
+            return {"conferences": [], "years": [], "sessions": []}
+
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
+        ):
+            mock_em = Mock()
+            mock_em_class.return_value = mock_em
+            mock_compute.return_value = mock_results
+
+            mock_db_instance = Mock()
+            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
+            mock_db_instance.__exit__ = Mock(return_value=False)
+            mock_db_class.return_value = mock_db_instance
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "abstracts-explorer",
+                    "clustering",
+                    "pre-generate",
+                    "--requests-per-minute",
+                    "0",
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "disabled" in captured.out
+
+        mock_em_class.assert_called_once()
+        call_kwargs = mock_em_class.call_args.kwargs
+        assert call_kwargs["requests_per_minute"] == 0
+
     def test_pre_generate_clustering_error(self, tmp_path, capsys, monkeypatch):
         """Test pre-generate-clustering handles errors gracefully."""
         embeddings_path = tmp_path / "chroma_db"
