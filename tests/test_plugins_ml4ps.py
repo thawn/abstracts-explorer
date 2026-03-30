@@ -23,9 +23,7 @@ from abstracts_explorer.plugins import (
 def _check_ml4ps_website_available() -> bool:
     """Return True if the ML4PS website is reachable."""
     try:
-        response = requests.head(
-            "https://ml4physicalsciences.github.io/2025/", timeout=5
-        )
+        response = requests.head("https://ml4physicalsciences.github.io/2025/", timeout=5)
         return response.status_code < 400
     except (requests.RequestException, OSError):
         return False
@@ -39,7 +37,10 @@ def _check_ml4ps_website_available() -> bool:
 @pytest.fixture
 def ml4ps_plugin():
     """Create an ML4PS plugin instance."""
-    return ML4PSDownloaderPlugin()
+    plugin = ML4PSDownloaderPlugin()
+    yield plugin
+    # Reset _current_year after each test to prevent test pollution
+    plugin._current_year = max(plugin.supported_years)
 
 
 @pytest.fixture
@@ -407,8 +408,6 @@ class TestML4PSLightweightConversion:
         assert lightweight[0]["session"] == "ML4PhysicalSciences 2022 Workshop"
         assert lightweight[0]["year"] == 2022
 
-        ml4ps_plugin._current_year = max(ml4ps_plugin.supported_years)
-
     def test_convert_paper_with_no_abstract(self, ml4ps_plugin):
         """Test conversion with paper having no abstract (e.g., early years)."""
         papers = [
@@ -732,7 +731,6 @@ class TestML4PSPaperRowExtraction:
 
         assert paper is not None
         assert paper["title"] == "Test Paper With Bold Tag"
-        ml4ps_plugin._current_year = max(ml4ps_plugin.supported_years)
 
     def test_extract_paper_row_pdf_link_text(self, ml4ps_plugin):
         """Test row with [pdf] link text (2019-2020 format)."""
@@ -753,7 +751,6 @@ class TestML4PSPaperRowExtraction:
 
         assert paper is not None
         assert paper["paper_url"] == "https://ml4physicalsciences.github.io/2019/files/NeurIPS_ML4PS_2019_1.pdf"
-        ml4ps_plugin._current_year = max(ml4ps_plugin.supported_years)
 
     def test_extract_paper_row_paper_pdf_link_text(self, ml4ps_plugin):
         """Test row with [paper pdf] link text (2021 format)."""
@@ -775,8 +772,9 @@ class TestML4PSPaperRowExtraction:
 
         assert paper is not None
         assert paper["paper_url"] == "https://ml4physicalsciences.github.io/2021/files/NeurIPS_ML4PS_2021_1.pdf"
-        assert paper["poster_url"] == "https://ml4physicalsciences.github.io/2021/files/NeurIPS_ML4PS_2021_1_poster.png"
-        ml4ps_plugin._current_year = max(ml4ps_plugin.supported_years)
+        assert (
+            paper["poster_url"] == "https://ml4physicalsciences.github.io/2021/files/NeurIPS_ML4PS_2021_1_poster.png"
+        )
 
 
 # ============================================================================
@@ -1194,7 +1192,6 @@ class TestML4PSAbstractFetching:
 
         assert abstract is None
         assert openreview_url is None
-        ml4ps_plugin._current_year = max(ml4ps_plugin.supported_years)
 
     def test_fetch_abstract_2021_returns_none(self, ml4ps_plugin):
         """Test that abstract fetching returns None for 2021 (no NeurIPS virtual pages)."""
@@ -1203,7 +1200,6 @@ class TestML4PSAbstractFetching:
 
         assert abstract is None
         assert openreview_url is None
-        ml4ps_plugin._current_year = max(ml4ps_plugin.supported_years)
 
 
 # ============================================================================

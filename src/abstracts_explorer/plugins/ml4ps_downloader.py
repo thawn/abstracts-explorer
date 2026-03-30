@@ -358,7 +358,7 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
                             text = sibling.strip()
                             if text:
                                 authors_parts.append(text)
-                        elif sibling.name not in ['a', 'br']:  # Skip links and nested br tags
+                        elif sibling.name not in ["a", "br"]:  # Skip links and nested br tags
                             text = sibling.get_text(strip=True)
                             if text:
                                 authors_parts.append(text)
