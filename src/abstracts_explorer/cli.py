@@ -1082,6 +1082,10 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     print(f"Collection:       {args.collection}")
     print("Clustering:       agglomerative (linkage=ward, distance_threshold=150)")
     print("Reduction:        tsne")
+    rate_limit_str = (
+        f"{args.requests_per_minute} req/min" if args.requests_per_minute > 0 else "disabled"
+    )
+    print(f"Rate limit:       {rate_limit_str}")
     if len(combos) > 1:
         print(f"Combinations:     {len(combos)} total")
     else:
@@ -1095,6 +1099,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     try:
         em = EmbeddingsManager(
             collection_name=args.collection,
+            requests_per_minute=args.requests_per_minute,
         )
         em.connect()
         em.create_collection()
@@ -2472,6 +2477,12 @@ Examples:
         action="store_true",
         default=False,
         help="Force recompute even if cache already exists",
+    )
+    pre_gen_parser.add_argument(
+        "--requests-per-minute",
+        type=int,
+        default=config.requests_per_minute,
+        help=f"Maximum number of API requests per minute, 0 to disable rate limiting (default: {config.requests_per_minute})",
     )
 
     # MCP Server command
