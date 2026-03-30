@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from abstracts_explorer.plugin import sanitize_author_names, LightweightPaper, validate_lightweight_papers
+from pydantic import ValidationError
 from abstracts_explorer.plugins.json_conference_downloader import JSONConferenceDownloaderPlugin
 
 logger = logging.getLogger(__name__)
@@ -131,7 +132,7 @@ class IEEEVISDownloaderPlugin(JSONConferenceDownloaderPlugin):
 
         try:
             return LightweightPaper(**paper_dict)
-        except Exception as exc:
+        except ValidationError as exc:
             logger.warning("Skipping paper '%s': validation failed: %s", title, exc)
             return None
 

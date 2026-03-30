@@ -23,6 +23,7 @@ from abstracts_explorer.plugin import (
     LightweightPaper,
     validate_lightweight_papers,
 )
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -370,7 +371,7 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
                 award=award,
                 keywords=keywords,
             )
-        except Exception as exc:
+        except ValidationError as exc:
             logger.warning("Skipping paper '%s': validation failed: %s", title, exc)
             return None
 
