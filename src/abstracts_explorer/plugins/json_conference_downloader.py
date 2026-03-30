@@ -82,7 +82,7 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
             url = self.get_url(current_year)
             response = requests.head(url, timeout=3, allow_redirects=True)
             return response.status_code == 200
-        except Exception:
+        except requests.RequestException:
             return False
 
     def __init__(self, timeout: int = 30, verify_ssl: bool = True):

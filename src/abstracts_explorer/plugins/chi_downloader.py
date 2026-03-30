@@ -108,7 +108,7 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
             url = f"https://programs.sigchi.org/chi/{current_year}"
             response = requests.head(url, timeout=3, allow_redirects=True)
             return response.status_code == 200
-        except Exception:
+        except requests.RequestException:
             return False
 
     #: Mapping from the raw ``award`` field values used in the SIGCHI JSON

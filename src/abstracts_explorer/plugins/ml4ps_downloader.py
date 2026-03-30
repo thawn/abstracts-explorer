@@ -86,7 +86,7 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
             url = f"https://ml4physicalsciences.github.io/{current_year}/"
             response = requests.head(url, timeout=3, allow_redirects=True)
             return response.status_code == 200
-        except Exception:
+        except requests.RequestException:
             return False
 
     def __init__(self):
