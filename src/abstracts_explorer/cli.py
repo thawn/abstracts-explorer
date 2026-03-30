@@ -1082,9 +1082,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     print(f"Collection:       {args.collection}")
     print("Clustering:       agglomerative (linkage=ward, distance_threshold=150)")
     print("Reduction:        tsne")
-    rate_limit_str = (
-        f"{args.requests_per_minute} req/min" if args.requests_per_minute > 0 else "disabled"
-    )
+    rate_limit_str = f"{args.requests_per_minute} req/min" if args.requests_per_minute > 0 else "disabled"
     print(f"Rate limit:       {rate_limit_str}")
     if len(combos) > 1:
         print(f"Combinations:     {len(combos)} total")
