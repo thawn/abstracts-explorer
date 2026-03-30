@@ -14,7 +14,7 @@ import { formatPaperCard } from './paper-card.js';
 // Cluster state
 let clusterData = null;
 let currentClusterConfig = {
-    reduction_method: 'umap',
+    reduction_method: 'tsne',
     n_components: 2,
     clustering_method: 'agglomerative',
     distance_threshold: 150,

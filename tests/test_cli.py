@@ -1945,13 +1945,13 @@ class TestCLI:
         assert "Pre-generation complete" in captured.out
         # 3 combos: NeurIPS (all years) + NeurIPS 2023 + NeurIPS 2024
         assert mock_compute.call_count == 3
-        # Verify fixed agglomerative/UMAP parameters on all calls
+        # Verify fixed agglomerative/t-SNE parameters on all calls
         for call in mock_compute.call_args_list:
             kw = call[1]
             assert kw["clustering_method"] == "agglomerative"
             assert kw["linkage"] == "ward"
             assert kw["distance_threshold"] == 150.0
-            assert kw["reduction_method"] == "umap"
+            assert kw["reduction_method"] == "tsne"
             assert kw["n_clusters"] is None
 
     def test_pre_generate_clustering_no_conferences_in_db(self, tmp_path, capsys, monkeypatch):

@@ -250,7 +250,7 @@ from abstracts_explorer.clustering import perform_clustering
 
 # Perform complete clustering pipeline
 results = perform_clustering(
-    reduction_method="tsne",      # or "pca", "umap"
+    reduction_method="tsne",      # or "pca"
     n_components=2,
     clustering_method="kmeans",    # or "dbscan", "agglomerative", "spectral", "fuzzy_cmeans"
     n_clusters=8,

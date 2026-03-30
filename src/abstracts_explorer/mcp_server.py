@@ -182,7 +182,7 @@ def get_cluster_topics(
     Get the most frequently mentioned topics from clustered embeddings.
 
     This tool clusters paper embeddings using agglomerative clustering
-    with UMAP dimensionality reduction and analyzes the topics in each
+    with t-SNE dimensionality reduction and analyzes the topics in each
     cluster based on keywords, sessions, and paper titles.
 
     Parameters
@@ -220,9 +220,9 @@ def get_cluster_topics(
         )
 
         # Reduce dimensions for visualization
-        logger.info("Reducing dimensions using umap...")
+        logger.info("Reducing dimensions using tsne...")
         cm.reduce_dimensions(
-            method="umap",
+            method="tsne",
             n_components=2,
             random_state=42,
         )
@@ -729,7 +729,7 @@ def get_cluster_visualization(
     """
     Generate visualization data for clustered embeddings.
 
-    This tool performs agglomerative clustering with UMAP dimensionality
+    This tool performs agglomerative clustering with t-SNE dimensionality
     reduction on paper embeddings and returns data suitable for visualization.
 
     Parameters
@@ -754,7 +754,7 @@ def get_cluster_visualization(
         logger.info("Performing clustering for visualization...")
         results = perform_clustering(
             collection_name=collection_name,
-            reduction_method="umap",
+            reduction_method="tsne",
             n_components=2,
             clustering_method="agglomerative",
             n_clusters=None,
