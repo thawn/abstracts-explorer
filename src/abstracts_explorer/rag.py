@@ -6,6 +6,7 @@ The agent uses tools from the MCP server to search papers, analyze topics, and
 understand trends, then generates contextual responses.
 """
 
+from datetime import datetime
 import json
 import logging
 from dataclasses import dataclass, field
@@ -389,6 +390,7 @@ class RAGChat:
 
         # Build instructions
         instructions = (
+            f"Todays date is {datetime.now().strftime('%Y-%m-%d')}."
             "You are an AI assistant helping researchers analyze conference data. "
             "Use the available tools to search for papers, analyze topics, and understand trends. "
             "Present the information in a clear, easy-to-understand format. "
