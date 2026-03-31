@@ -1117,9 +1117,9 @@ class TestPaperCardDisplayFields:
 
             # authors: must be a list; a string would make formatPaperCard throw TypeError
             assert "authors" in paper, "Paper card requires 'authors'"
-            assert isinstance(paper["authors"], list), (
-                f"authors must be a list for paper card display; got {type(paper['authors'])}"
-            )
+            assert isinstance(
+                paper["authors"], list
+            ), f"authors must be a list for paper card display; got {type(paper['authors'])}"
 
             # conference: shown as indigo badge on card
             assert "conference" in paper, "Paper card requires 'conference' for conference badge"
@@ -1146,9 +1146,9 @@ class TestPaperCardDisplayFields:
                 assert "uid" in paper, "Paper card requires 'uid'"
                 assert "title" in paper, "Paper card requires 'title'"
                 assert "authors" in paper, "Paper card requires 'authors'"
-                assert isinstance(paper["authors"], list), (
-                    f"authors must be a list for paper card display; got {type(paper['authors'])}"
-                )
+                assert isinstance(
+                    paper["authors"], list
+                ), f"authors must be a list for paper card display; got {type(paper['authors'])}"
                 assert "conference" in paper, "Paper card requires 'conference' for conference badge"
 
     def test_paper_detail_endpoint_card_fields(self, web_server):
@@ -1174,9 +1174,9 @@ class TestPaperCardDisplayFields:
 
         # authors must be a list for the modal to join them correctly
         assert "authors" in paper, "Paper details modal requires 'authors'"
-        assert isinstance(paper["authors"], list), (
-            f"authors must be a list for paper details modal; got {type(paper['authors'])}"
-        )
+        assert isinstance(
+            paper["authors"], list
+        ), f"authors must be a list for paper details modal; got {type(paper['authors'])}"
 
         # conference shown as indigo badge in modal header
         assert "conference" in paper, "Paper details modal requires 'conference' for conference badge"
@@ -1201,9 +1201,7 @@ class TestPaperCardDisplayFields:
 
         paper = response.json()
         # All test papers are from NeurIPS conference
-        assert paper["conference"] == "NeurIPS", (
-            f"Expected conference 'NeurIPS', got '{paper['conference']}'"
-        )
+        assert paper["conference"] == "NeurIPS", f"Expected conference 'NeurIPS', got '{paper['conference']}'"
 
     def test_paper_detail_authors_is_list_of_strings(self, web_server):
         """
@@ -1257,9 +1255,9 @@ class TestPaperCardDisplayFields:
         assert "uid" in paper, "Batch endpoint must return 'uid' for paper cards"
         assert "title" in paper, "Batch endpoint must return 'title' for paper cards"
         assert "authors" in paper, "Batch endpoint must return 'authors' for paper cards"
-        assert isinstance(paper["authors"], list), (
-            f"authors must be a list for paper cards; got {type(paper['authors'])}"
-        )
+        assert isinstance(
+            paper["authors"], list
+        ), f"authors must be a list for paper cards; got {type(paper['authors'])}"
         assert "conference" in paper, "Batch endpoint must return 'conference' for conference badge"
 
     def test_keyword_search_authors_are_not_semicolon_strings(self, web_server):
@@ -1281,14 +1279,14 @@ class TestPaperCardDisplayFields:
 
         for paper in data["papers"]:
             authors = paper.get("authors", [])
-            assert isinstance(authors, list), (
-                f"Paper '{paper.get('title')}' has authors as {type(authors).__name__} instead of list: {authors!r}"
-            )
+            assert isinstance(
+                authors, list
+            ), f"Paper '{paper.get('title')}' has authors as {type(authors).__name__} instead of list: {authors!r}"
             # Ensure no author string contains unprocessed semicolons from DB
             for author in authors:
-                assert ";" not in author, (
-                    f"Author '{author}' still contains semicolon; authors were not split correctly"
-                )
+                assert (
+                    ";" not in author
+                ), f"Author '{author}' still contains semicolon; authors were not split correctly"
 
 
 if __name__ == "__main__":

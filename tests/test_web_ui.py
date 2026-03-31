@@ -1887,7 +1887,6 @@ class TestValidationDataModel:
         assert "5" in repr_str
 
 
-
 # ============================================================
 # Paper card display field tests
 # ============================================================
@@ -1970,9 +1969,9 @@ class TestPaperCardDisplayFieldsUnit:
         assert len(data["papers"]) > 0
 
         for paper in data["papers"]:
-            assert "conference" in paper, (
-                f"Paper '{paper.get('title')}' missing 'conference' field needed for paper card badge"
-            )
+            assert (
+                "conference" in paper
+            ), f"Paper '{paper.get('title')}' missing 'conference' field needed for paper card badge"
             assert paper["conference"] == "NeurIPS"
 
     def test_keyword_search_authors_is_list(self, app_client):
@@ -2027,9 +2026,7 @@ class TestPaperCardDisplayFieldsUnit:
 
         for paper in data["papers"]:
             for author in paper.get("authors", []):
-                assert ";" not in author, (
-                    f"Author '{author}' contains semicolons; authors were not split correctly"
-                )
+                assert ";" not in author, f"Author '{author}' contains semicolons; authors were not split correctly"
 
     def test_paper_detail_includes_conference_field(self, app_client):
         """
@@ -2090,9 +2087,7 @@ class TestPaperCardDisplayFieldsUnit:
         paper = response.get_json()
 
         authors = paper.get("authors")
-        assert isinstance(authors, list), (
-            f"Paper detail modal requires authors as list, got {type(authors).__name__}"
-        )
+        assert isinstance(authors, list), f"Paper detail modal requires authors as list, got {type(authors).__name__}"
         assert authors == ["First Author", "Second Author", "Third Author"]
 
     def test_batch_endpoint_includes_conference_field(self, app_client):
@@ -2145,7 +2140,6 @@ class TestPaperCardDisplayFieldsUnit:
 
         for paper in data["papers"]:
             assert "conference" in paper, "Batch endpoint must return 'conference' for paper card badge"
-            assert isinstance(paper.get("authors"), list), (
-                f"Batch endpoint must return authors as list, got {type(paper.get('authors')).__name__}"
-            )
-
+            assert isinstance(
+                paper.get("authors"), list
+            ), f"Batch endpoint must return authors as list, got {type(paper.get('authors')).__name__}"

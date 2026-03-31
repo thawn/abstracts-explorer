@@ -770,12 +770,16 @@ class TestSearchPapersPaperCardFields:
         mock_em_class.return_value = mock_em
         mock_em.search_similar.return_value = {
             "ids": [["abc123"]],
-            "metadatas": [[{
-                "title": "Test Paper",
-                "year": 2024,
-                "conference": "NeurIPS",
-                "authors": "Alice Smith; Bob Jones; Carol White",
-            }]],
+            "metadatas": [
+                [
+                    {
+                        "title": "Test Paper",
+                        "year": 2024,
+                        "conference": "NeurIPS",
+                        "authors": "Alice Smith; Bob Jones; Carol White",
+                    }
+                ]
+            ],
             "documents": [["Test abstract"]],
             "distances": [[0.1]],
         }
@@ -790,9 +794,9 @@ class TestSearchPapersPaperCardFields:
         paper = result["papers"][0]
         # authors must be a list for formatPaperCard() to work
         assert "authors" in paper, "Paper card requires 'authors' field"
-        assert isinstance(paper["authors"], list), (
-            "authors must be a list for paper card display; string would show as 'Unknown'"
-        )
+        assert isinstance(
+            paper["authors"], list
+        ), "authors must be a list for paper card display; string would show as 'Unknown'"
         assert paper["authors"] == ["Alice Smith", "Bob Jones", "Carol White"]
 
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
@@ -841,13 +845,17 @@ class TestSearchPapersPaperCardFields:
         mock_em_class.return_value = mock_em
         mock_em.search_similar.return_value = {
             "ids": [["p1"]],
-            "metadatas": [[{
-                "title": "Conference Paper",
-                "year": 2025,
-                "conference": "NeurIPS",
-                "session": "Oral",
-                "authors": "Author A",
-            }]],
+            "metadatas": [
+                [
+                    {
+                        "title": "Conference Paper",
+                        "year": 2025,
+                        "conference": "NeurIPS",
+                        "session": "Oral",
+                        "authors": "Author A",
+                    }
+                ]
+            ],
             "documents": [["Abstract"]],
             "distances": [[0.05]],
         }
@@ -881,13 +889,17 @@ class TestSearchPapersPaperCardFields:
         mock_em_class.return_value = mock_em
         mock_em.search_similar.return_value = {
             "ids": [["p42"]],
-            "metadatas": [[{
-                "title": "Full Paper",
-                "year": 2024,
-                "conference": "ICML",
-                "session": "Best Paper Session",
-                "authors": "First Author; Second Author",
-            }]],
+            "metadatas": [
+                [
+                    {
+                        "title": "Full Paper",
+                        "year": 2024,
+                        "conference": "ICML",
+                        "session": "Best Paper Session",
+                        "authors": "First Author; Second Author",
+                    }
+                ]
+            ],
             "documents": [["This is the abstract text."]],
             "distances": [[0.15]],
         }
