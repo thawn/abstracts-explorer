@@ -60,7 +60,6 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
-from threadpoolctl import threadpool_limits
 
 try:
     import skfuzzy as fuzz
@@ -338,13 +337,7 @@ class ClusteringManager:
             else:
                 raise ClusteringError(f"Unknown reduction method: {method}. Use 'pca' or 'tsne'.")
 
-            # Limit BLAS/OpenMP thread pools to 1 during fit_transform to
-            # prevent segfaults when running in a multi-threaded environment
-            # (e.g. a threaded Flask server).  OpenBLAS and OpenMP can
-            # otherwise spawn worker threads that conflict with other
-            # concurrent requests.
-            with threadpool_limits(limits=1):
-                self.reduced_embeddings = reducer.fit_transform(scaled_embeddings)
+            self.reduced_embeddings = reducer.fit_transform(scaled_embeddings)
             logger.info(f"Reduced embeddings shape: {self.reduced_embeddings.shape}")
 
             return self.reduced_embeddings

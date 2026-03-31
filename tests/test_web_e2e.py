@@ -24,6 +24,7 @@ from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.firefox import GeckoDriverManager
 from webdriver_manager.core.os_manager import ChromeType
+from unittest.mock import Mock
 from abstracts_explorer.database import DatabaseManager
 from tests.helpers import find_free_port
 from tests.conftest import set_test_db
@@ -306,7 +307,26 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     # CRITICAL: Set this BEFORE starting the server to avoid race conditions
     # This prevents get_embeddings_manager() from creating a new instance
     app_module.embeddings_manager = em
-    app_module.rag_chat = None
+
+    # Inject a mock RAGChat so that /api/chat responds instantly.
+    # A real RAGChat would call the LLM backend (potentially triggering slow
+    # clustering / t-SNE), and a long-running request in the threaded werkzeug
+    # server can leak across test boundaries, causing hangs or segfaults.
+    mock_rag = Mock()
+    mock_rag.query.return_value = {
+        "response": "This is a mock response for E2E testing.",
+        "papers": [],
+        "metadata": {
+            "n_papers": 0,
+            "model": "mock",
+            "rewritten_query": None,
+            "used_tools": False,
+            "tools_executed": [],
+            "retrieved_new_papers": False,
+        },
+    }
+    mock_rag.reset_conversation.return_value = None
+    app_module.rag_chat = mock_rag
 
     # Mock get_database to not check file existence
     # Each Flask request thread will create its own database connection
