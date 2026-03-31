@@ -6,7 +6,6 @@ to reduce code duplication and ensure consistency.
 """
 
 import socket
-import requests
 import pytest
 from abstracts_explorer.config import get_config
 from abstracts_explorer.embeddings import EmbeddingsManager
@@ -147,7 +146,11 @@ def check_lm_studio_available():
         finally:
             em.close()
 
-    except (requests.exceptions.RequestException, requests.exceptions.Timeout):
+    except Exception:
+        # Catch broadly: the openai client uses httpx internally, so
+        # network errors surface as httpx/openai exceptions rather than
+        # requests exceptions.  Any failure here means the API is not
+        # usable for tests.
         _lm_studio_available_cache = False
         return False
 
