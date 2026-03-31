@@ -67,7 +67,9 @@ def test_execute_mcp_tool_cluster_topics():
 def test_execute_mcp_tool_topic_evolution():
     """Test executing get_topic_evolution tool."""
     with patch("abstracts_explorer.mcp_tools.get_topic_evolution") as mock_tool:
-        mock_result = json.dumps({"topic": "transformers", "conference_data": {"NeurIPS": {"year_counts": {"2023": 10}}}})
+        mock_result = json.dumps(
+            {"topic": "transformers", "conference_data": {"NeurIPS": {"year_counts": {"2023": 10}}}}
+        )
         mock_tool.return_value = mock_result
 
         result = execute_mcp_tool(
