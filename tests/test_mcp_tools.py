@@ -903,9 +903,7 @@ class TestExecuteMCPToolE2E:
             }
         ]
 
-        with (
-            patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),
-        ):
+        with (patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),):
             result = execute_mcp_tool("get_paper_details", {"title": "Test Paper", "conference": "NeurIPS"})
 
         data = json.loads(result)
@@ -943,9 +941,7 @@ class TestExecuteMCPToolE2E:
             }
         ]
 
-        with (
-            patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),
-        ):
+        with (patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),):
             result = execute_mcp_tool("get_paper_details", {"paper_id": "abc123"})
 
         data = json.loads(result)

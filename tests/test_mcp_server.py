@@ -832,9 +832,7 @@ class TestGetPaperDetails:
         with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
             get_paper_details(title="Paper", conference="ICLR", year=2024, limit=3)
 
-        mock_db.search_papers.assert_called_once_with(
-            keyword="Paper", conference="ICLR", year=2024, limit=3
-        )
+        mock_db.search_papers.assert_called_once_with(keyword="Paper", conference="ICLR", year=2024, limit=3)
 
     def test_limit_parameter(self):
         """limit parameter controls how many results are requested from DB."""
@@ -846,9 +844,7 @@ class TestGetPaperDetails:
         with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
             get_paper_details(title="Paper", limit=10)
 
-        mock_db.search_papers.assert_called_once_with(
-            keyword="Paper", conference=None, year=None, limit=10
-        )
+        mock_db.search_papers.assert_called_once_with(keyword="Paper", conference=None, year=None, limit=10)
 
     def test_no_papers_found(self):
         """No matching papers returns papers_found=0 and empty list."""
