@@ -5,6 +5,16 @@ This module contains common fixtures used across multiple test files to reduce
 code duplication and ensure consistency in test setup.
 """
 
+import os
+
+# Prevent OpenBLAS/OpenMP from spawning worker threads in tests.
+# Must be set before numpy is imported (which happens transitively via
+# EmbeddingsManager -> chromadb).  Multi-threaded BLAS/OpenMP inside a
+# threaded Flask server can cause SIGSEGV during E2E tests.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
 import pytest
 from pathlib import Path
 from unittest.mock import Mock
