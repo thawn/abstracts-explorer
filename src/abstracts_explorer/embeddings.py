@@ -1026,7 +1026,7 @@ class EmbeddingsManager:
             results = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=n_results_query,
-                include=["distances", "metadatas"],
+                include=["distances"],
                 where=where_clause,
             )
 
@@ -1116,10 +1116,14 @@ class EmbeddingsManager:
             # so the dict is always JSON-serializable.
             if embeddings is not None:
                 embeddings = [e.tolist() if hasattr(e, "tolist") else list(e) for e in embeddings]
+            # Parse metadata through ChromaDBPaperMetadata model to convert
+            # string values back to their proper types (e.g. year → int).
+            raw_metadatas = results.get("metadatas", [])
+            parsed_metadatas = [self.parse_chromadb_metadata(m) for m in raw_metadatas]
             return {
                 "ids": results.get("ids", []),
                 "documents": results.get("documents", []),
-                "metadatas": results.get("metadatas", []),
+                "metadatas": parsed_metadatas,
                 "embeddings": embeddings,
             }
         except Exception as e:
