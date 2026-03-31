@@ -81,19 +81,22 @@ export async function sendChatMessage() {
         }
 
         // Extract response text and papers from the response object
-        let responseText, papers, metadata;
+        let responseText, papers, metadata, visualizations;
         if (typeof data.response === 'object' && data.response !== null) {
             responseText = data.response.response || JSON.stringify(data.response);
             papers = data.response.papers || [];
             metadata = data.response.metadata || {};
+            visualizations = data.response.visualizations || [];
         } else if (typeof data.response === 'string') {
             responseText = data.response;
             papers = [];
             metadata = {};
+            visualizations = [];
         } else {
             responseText = JSON.stringify(data.response);
             papers = [];
             metadata = {};
+            visualizations = [];
         }
 
         // Update currentSearchTerm to use the rewritten query if available
@@ -102,6 +105,11 @@ export async function sendChatMessage() {
         }
 
         addChatMessage(responseText, 'assistant');
+
+        // Display visualizations from MCP tool results
+        if (visualizations.length > 0) {
+            renderChatVisualizations(visualizations);
+        }
 
         // Display relevant papers with metadata (including rewritten query)
         displayChatPapers(papers, metadata);
@@ -241,5 +249,128 @@ export async function resetChat() {
         );
     } catch (error) {
         console.error('Error resetting chat:', error);
+    }
+}
+
+/**
+ * Render visualizations returned by MCP tools in the chat area.
+ * @param {Array} visualizations - Array of visualization descriptor objects
+ */
+export function renderChatVisualizations(visualizations) {
+    const messagesDiv = document.getElementById('chat-messages');
+
+    for (let i = 0; i < visualizations.length; i++) {
+        const viz = visualizations[i];
+        const wrapper = document.createElement('div');
+        wrapper.className = 'chat-message';
+
+        const plotId = `chat-plot-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`;
+
+        wrapper.innerHTML = `
+            <div class="flex items-start gap-3 justify-start">
+                <div class="flex-shrink-0 w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white">
+                    <i class="fas fa-chart-bar text-sm"></i>
+                </div>
+                <div class="bg-white rounded-lg p-4 shadow-sm w-full max-w-2xl">
+                    <div id="${plotId}" style="width:100%;height:400px;"></div>
+                </div>
+            </div>
+        `;
+
+        messagesDiv.appendChild(wrapper);
+
+        if (viz.type === 'topic_evolution') {
+            _renderTopicEvolutionChart(plotId, viz);
+        } else if (viz.type === 'cluster_visualization') {
+            _renderClusterVisualizationChart(plotId, viz);
+        }
+    }
+
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+/**
+ * Render a topic evolution bar chart using Plotly.
+ * @param {string} plotId - DOM element id for the plot container
+ * @param {Object} viz - Visualization data with year_counts, topic, conference
+ */
+function _renderTopicEvolutionChart(plotId, viz) {
+    const yearCounts = viz.year_counts || {};
+    const years = Object.keys(yearCounts).sort();
+    const counts = years.map(y => yearCounts[y]);
+
+    const trace = {
+        x: years,
+        y: counts,
+        type: 'bar',
+        marker: { color: '#7c3aed' }
+    };
+
+    const layout = {
+        title: `Topic Evolution: ${viz.topic || ''}` + (viz.conference ? ` (${viz.conference})` : ''),
+        xaxis: { title: 'Year', type: 'category' },
+        yaxis: { title: 'Number of Papers', dtick: 1 },
+        margin: { t: 40, b: 50, l: 50, r: 20 },
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)'
+    };
+
+    /* global Plotly */
+    if (typeof Plotly !== 'undefined') {
+        Plotly.newPlot(plotId, [trace], layout, { responsive: true, displayModeBar: false });
+    }
+}
+
+/**
+ * Render a cluster visualization scatter plot using Plotly.
+ * @param {string} plotId - DOM element id for the plot container
+ * @param {Object} viz - Visualization data with points and statistics
+ */
+function _renderClusterVisualizationChart(plotId, viz) {
+    const points = viz.points || [];
+    if (points.length === 0) return;
+
+    // Group points by cluster
+    const clusters = {};
+    for (const p of points) {
+        let cid = 0;
+        if (p.cluster !== undefined) {
+            cid = p.cluster;
+        } else if (p.cluster_id !== undefined) {
+            cid = p.cluster_id;
+        }
+        if (!clusters[cid]) clusters[cid] = { x: [], y: [], text: [] };
+        clusters[cid].x.push(p.x);
+        clusters[cid].y.push(p.y);
+        clusters[cid].text.push(p.title || '');
+    }
+
+    const traces = Object.keys(clusters).map(cid => ({
+        x: clusters[cid].x,
+        y: clusters[cid].y,
+        text: clusters[cid].text,
+        mode: 'markers',
+        type: 'scatter',
+        name: `Cluster ${cid}`,
+        marker: { size: 4, opacity: 0.7 },
+        hovertemplate: `%{text}<extra>Cluster ${cid}</extra>`
+    }));
+
+    const stats = viz.statistics || {};
+    const title = `Cluster Visualization (${stats.total_papers || points.length} papers, ${stats.n_clusters || Object.keys(clusters).length} clusters)`;
+
+    const layout = {
+        title: title,
+        xaxis: { title: '', zeroline: false, showticklabels: false },
+        yaxis: { title: '', zeroline: false, showticklabels: false },
+        margin: { t: 40, b: 20, l: 20, r: 20 },
+        showlegend: false,
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        hovermode: 'closest'
+    };
+
+    if (typeof Plotly !== 'undefined') {
+        Plotly.newPlot(plotId, traces, layout, { responsive: true, displayModeBar: false });
     }
 }

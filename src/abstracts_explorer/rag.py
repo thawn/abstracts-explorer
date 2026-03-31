@@ -6,6 +6,7 @@ The agent uses tools from the MCP server to search papers, analyze topics, and
 understand trends, then generates contextual responses.
 """
 
+from datetime import datetime
 import json
 import logging
 from dataclasses import dataclass, field
@@ -392,6 +393,7 @@ class RAGChat:
             "You are an AI assistant helping researchers analyze conference data. "
             "Use the available tools to search for papers, analyze topics, and understand trends. "
             "Present the information in a clear, easy-to-understand format. "
+            f"Today's date is {datetime.now().strftime('%Y-%m-%d')}. "
             "When referencing specific papers, cite them using local links: "
             "<a href='#paper-1'>Paper-1</a>, <a href='#paper-2'>Paper-2</a>, etc."
         )
@@ -439,6 +441,7 @@ class RAGChat:
             Dictionary containing:
             - response: str - Generated response
             - papers: list - Retrieved papers used as context
+            - visualizations: list - Visualization data from tools
             - metadata: dict - Additional metadata
 
         Raises
@@ -491,12 +494,16 @@ class RAGChat:
             # Extract papers from tool results
             papers = self._extract_papers(deps.tool_results)
 
+            # Extract visualization data from tool results
+            visualizations = self._extract_visualizations(deps.tool_results)
+
             # Determine which tools were executed
             tools_executed = [tr["name"] for tr in deps.tool_results]
 
             return {
                 "response": result.output,
                 "papers": papers,
+                "visualizations": visualizations,
                 "metadata": {
                     "n_papers": len(papers),
                     "model": self.model,
@@ -647,3 +654,62 @@ class RAGChat:
                 except json.JSONDecodeError:
                     logger.warning(f"Failed to parse papers from {tr['name']} result")
         return papers
+
+    @staticmethod
+    def _extract_visualizations(tool_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Extract visualization data from tool results.
+
+        Converts raw MCP tool output from ``get_topic_evolution`` and
+        ``get_cluster_visualization`` into lightweight chart descriptors
+        that the frontend can render with Plotly.
+
+        Parameters
+        ----------
+        tool_results : list of dict
+            Tool results with 'name' and 'raw_result' keys.
+
+        Returns
+        -------
+        list of dict
+            Visualization descriptors.  Each dict contains a ``type`` key
+            (``"topic_evolution"`` or ``"cluster_visualization"``) and the
+            data needed to draw the chart.
+        """
+        visualizations: List[Dict[str, Any]] = []
+        for tr in tool_results:
+            try:
+                data = json.loads(tr["raw_result"])
+            except (json.JSONDecodeError, TypeError, KeyError):
+                continue
+
+            if not isinstance(data, dict):
+                continue
+
+            if "error" in data:
+                continue
+
+            if tr["name"] == "get_topic_evolution":
+                year_counts = data.get("year_counts", {})
+                if year_counts:
+                    visualizations.append(
+                        {
+                            "type": "topic_evolution",
+                            "topic": data.get("topic", ""),
+                            "conference": data.get("conference", ""),
+                            "year_counts": year_counts,
+                        }
+                    )
+
+            elif tr["name"] == "get_cluster_visualization":
+                points = data.get("points", [])
+                if points:
+                    visualizations.append(
+                        {
+                            "type": "cluster_visualization",
+                            "points": points,
+                            "statistics": data.get("statistics", {}),
+                        }
+                    )
+
+        return visualizations
