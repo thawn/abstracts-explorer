@@ -310,7 +310,7 @@ MCP_TOOLS_SCHEMA = [
             "name": "get_topic_evolution",
             "description": (
                 "Analyze how specific topics have evolved over the years. "
-                "Use this tool when the user asks about: trends over time, historical development, "
+                "Use this tool when the user asks about: trends over time, historical development, how a topic has developed,"
                 "how a topic has changed, or evolution of research areas. A conference must be specified."
             ),
             "parameters": {
