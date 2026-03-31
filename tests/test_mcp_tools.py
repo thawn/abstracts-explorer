@@ -643,8 +643,6 @@ class TestExecuteMCPToolE2E:
 
         mock_cm = Mock()
         mock_cm.load_embeddings.return_value = 10
-        mock_cm.cluster.return_value = np.array([0, 0, 1, 1, 0])
-        mock_cm.reduce_dimensions.return_value = np.zeros((5, 2))
         mock_cm.get_cluster_statistics.return_value = {
             "n_clusters": 2,
             "n_noise": 0,
@@ -663,7 +661,27 @@ class TestExecuteMCPToolE2E:
         mock_cm.embeddings_manager = Mock()
         mock_db = Mock()
 
-        with patch("abstracts_explorer.mcp_server.load_clustering_data", return_value=(mock_cm, mock_db)):
+        # Mock compute_clusters_with_cache to return cached points
+        mock_cached_results = {
+            "points": [
+                {"id": "p1", "cluster": 0, "x": 0.0, "y": 0.0},
+                {"id": "p2", "cluster": 0, "x": 0.1, "y": 0.1},
+                {"id": "p3", "cluster": 1, "x": 1.0, "y": 1.0},
+                {"id": "p4", "cluster": 1, "x": 1.1, "y": 1.1},
+                {"id": "p5", "cluster": 0, "x": 0.2, "y": 0.2},
+            ],
+            "statistics": {
+                "n_clusters": 2,
+                "n_noise": 0,
+                "cluster_sizes": {0: 3, 1: 2},
+                "total_papers": 5,
+            },
+        }
+
+        with (
+            patch("abstracts_explorer.mcp_server.load_clustering_data", return_value=(mock_cm, mock_db)),
+            patch("abstracts_explorer.mcp_server.compute_clusters_with_cache", return_value=mock_cached_results),
+        ):
             result = execute_mcp_tool("get_cluster_topics", {"n_clusters": 2})
 
         data = json.loads(result)
