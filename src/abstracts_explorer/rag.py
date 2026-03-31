@@ -27,7 +27,7 @@ from abstracts_explorer.mcp_server import (
     analyze_topic_relevance as mcp_analyze_topic_relevance,
     get_cluster_visualization as mcp_get_cluster_visualization,
 )
-from abstracts_explorer.mcp_tools import format_tool_result_for_llm
+from abstracts_explorer.mcp_tools import format_tool_result_for_llm, _abbreviate_result
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +110,9 @@ def _tool_search_papers(
     elif ctx.deps.conferences:
         kwargs["conference"] = ctx.deps.conferences[0]
 
+    logger.info("Tool call: search_papers(%s)", kwargs)
     raw = mcp_search_papers(**kwargs)
+    logger.info("Tool result: search_papers → %s", _abbreviate_result(raw))
     ctx.deps.tool_results.append({"name": "search_papers", "raw_result": raw})
     return format_tool_result_for_llm("search_papers", raw)
 
@@ -145,7 +147,9 @@ def _tool_get_cluster_topics(
 
     years = ctx.deps.years if ctx.deps.years else None
 
+    logger.info("Tool call: get_cluster_topics(conferences=%s, years=%s)", conferences, years)
     raw = mcp_get_cluster_topics(conferences=conferences, years=years)
+    logger.info("Tool result: get_cluster_topics → %s", _abbreviate_result(raw))
     ctx.deps.tool_results.append({"name": "get_cluster_topics", "raw_result": raw})
     return format_tool_result_for_llm("get_cluster_topics", raw)
 
@@ -192,7 +196,9 @@ def _tool_get_topic_evolution(
     if end_year is not None:
         kwargs["end_year"] = end_year
 
+    logger.info("Tool call: get_topic_evolution(%s)", kwargs)
     raw = mcp_get_topic_evolution(**kwargs)
+    logger.info("Tool result: get_topic_evolution → %s", _abbreviate_result(raw))
     ctx.deps.tool_results.append({"name": "get_topic_evolution", "raw_result": raw})
     return format_tool_result_for_llm("get_topic_evolution", raw)
 
@@ -238,7 +244,9 @@ def _tool_analyze_topic_relevance(
     if years is not None:
         kwargs["years"] = years
 
+    logger.info("Tool call: analyze_topic_relevance(%s)", kwargs)
     raw = mcp_analyze_topic_relevance(**kwargs)
+    logger.info("Tool result: analyze_topic_relevance → %s", _abbreviate_result(raw))
     ctx.deps.tool_results.append({"name": "analyze_topic_relevance", "raw_result": raw})
     return format_tool_result_for_llm("analyze_topic_relevance", raw)
 
@@ -273,7 +281,9 @@ def _tool_get_cluster_visualization(
 
     years = ctx.deps.years if ctx.deps.years else None
 
+    logger.info("Tool call: get_cluster_visualization(conferences=%s, years=%s)", conferences, years)
     raw = mcp_get_cluster_visualization(conferences=conferences, years=years)
+    logger.info("Tool result: get_cluster_visualization → %s", _abbreviate_result(raw))
     ctx.deps.tool_results.append({"name": "get_cluster_visualization", "raw_result": raw})
     return format_tool_result_for_llm("get_cluster_visualization", raw)
 
