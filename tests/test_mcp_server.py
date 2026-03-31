@@ -798,5 +798,175 @@ class TestMCPServerIntegration:
         # Note: We can't easily test tool registration without running the server
 
 
+class TestGetPaperDetails:
+    """Tests for the get_paper_details MCP tool."""
+
+    def _make_paper_row(self, **overrides):
+        """Return a minimal paper dict suitable for mock DB results."""
+        defaults = {
+            "uid": "abc123",
+            "original_id": "neurips2023/abc",
+            "title": "A Test Paper",
+            "authors": "Smith, John; Doe, Jane",
+            "abstract": "This paper describes a test.",
+            "session": "Poster Session 1",
+            "poster_position": "P01",
+            "paper_pdf_url": "https://example.com/paper.pdf",
+            "poster_image_url": None,
+            "url": "https://example.com/paper",
+            "room_name": "Hall A",
+            "keywords": "deep learning, transformers",
+            "starttime": "09:00",
+            "endtime": "11:00",
+            "award": None,
+            "year": 2023,
+            "conference": "NeurIPS",
+            "created_at": "2024-01-01T00:00:00",
+        }
+        defaults.update(overrides)
+        return defaults
+
+    def test_no_arguments_returns_error(self):
+        """get_paper_details returns an error when no title or paper_id given."""
+        from abstracts_explorer.mcp_server import get_paper_details
+
+        result = json.loads(get_paper_details())
+        assert "error" in result
+        assert "title" in result["error"] or "paper_id" in result["error"]
+
+    def test_lookup_by_title(self):
+        """get_paper_details searches by title keyword and returns matching papers."""
+        from abstracts_explorer.mcp_server import get_paper_details
+
+        mock_db = Mock()
+        mock_db.search_papers.return_value = [self._make_paper_row()]
+
+        with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
+            result = json.loads(get_paper_details(title="Test Paper"))
+
+        assert "error" not in result
+        assert result["papers_found"] == 1
+        paper = result["papers"][0]
+        assert paper["title"] == "A Test Paper"
+        # Authors should be parsed as a list
+        assert paper["authors"] == ["Smith, John", "Doe, Jane"]
+        assert paper["paper_pdf_url"] == "https://example.com/paper.pdf"
+        assert paper["keywords"] == "deep learning, transformers"
+        mock_db.search_papers.assert_called_once_with(keyword="Test Paper", conference=None, year=None, limit=5)
+
+    def test_lookup_by_paper_id(self):
+        """get_paper_details performs exact UID lookup when paper_id is provided."""
+        from abstracts_explorer.mcp_server import get_paper_details
+
+        mock_db = Mock()
+        mock_db.query.return_value = [self._make_paper_row(award="Best Paper")]
+
+        with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
+            result = json.loads(get_paper_details(paper_id="abc123"))
+
+        assert "error" not in result
+        assert result["papers_found"] == 1
+        paper = result["papers"][0]
+        assert paper["uid"] == "abc123"
+        assert paper["award"] == "Best Paper"
+        assert paper["authors"] == ["Smith, John", "Doe, Jane"]
+        # query should use both uid and original_id columns
+        call_args = mock_db.query.call_args
+        assert "uid" in call_args[0][0]
+        assert "original_id" in call_args[0][0]
+        assert ("abc123", "abc123") == call_args[0][1]
+
+    def test_lookup_by_id_falls_back_to_title(self):
+        """When paper_id lookup finds nothing, falls back to title search."""
+        from abstracts_explorer.mcp_server import get_paper_details
+
+        mock_db = Mock()
+        mock_db.query.return_value = []  # ID not found
+        mock_db.search_papers.return_value = [self._make_paper_row()]
+
+        with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
+            result = json.loads(get_paper_details(paper_id="notfound", title="Test Paper"))
+
+        assert "error" not in result
+        assert result["papers_found"] == 1
+        mock_db.query.assert_called_once()
+        mock_db.search_papers.assert_called_once()
+
+    def test_authors_with_no_semicolon(self):
+        """Single author (no semicolon) is returned as one-element list."""
+        from abstracts_explorer.mcp_server import get_paper_details
+
+        mock_db = Mock()
+        mock_db.search_papers.return_value = [self._make_paper_row(authors="Solo Author")]
+
+        with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
+            result = json.loads(get_paper_details(title="Paper"))
+
+        assert result["papers"][0]["authors"] == ["Solo Author"]
+
+    def test_empty_authors_returns_empty_list(self):
+        """None or empty authors field is returned as empty list."""
+        from abstracts_explorer.mcp_server import get_paper_details
+
+        mock_db = Mock()
+        mock_db.search_papers.return_value = [self._make_paper_row(authors=None)]
+
+        with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
+            result = json.loads(get_paper_details(title="Paper"))
+
+        assert result["papers"][0]["authors"] == []
+
+    def test_conference_and_year_filters_passed_to_search(self):
+        """conference and year parameters are forwarded to search_papers."""
+        from abstracts_explorer.mcp_server import get_paper_details
+
+        mock_db = Mock()
+        mock_db.search_papers.return_value = []
+
+        with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
+            get_paper_details(title="Paper", conference="ICLR", year=2024, limit=3)
+
+        mock_db.search_papers.assert_called_once_with(keyword="Paper", conference="ICLR", year=2024, limit=3)
+
+    def test_limit_parameter(self):
+        """limit parameter controls how many results are requested from DB."""
+        from abstracts_explorer.mcp_server import get_paper_details
+
+        mock_db = Mock()
+        mock_db.search_papers.return_value = []
+
+        with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
+            get_paper_details(title="Paper", limit=10)
+
+        mock_db.search_papers.assert_called_once_with(keyword="Paper", conference=None, year=None, limit=10)
+
+    def test_no_papers_found(self):
+        """No matching papers returns papers_found=0 and empty list."""
+        from abstracts_explorer.mcp_server import get_paper_details
+
+        mock_db = Mock()
+        mock_db.search_papers.return_value = []
+
+        with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
+            result = json.loads(get_paper_details(title="Nonexistent Paper"))
+
+        assert "error" not in result
+        assert result["papers_found"] == 0
+        assert result["papers"] == []
+
+    def test_exception_returns_error_json(self):
+        """Database exception returns error JSON without raising."""
+        from abstracts_explorer.mcp_server import get_paper_details
+
+        mock_db = Mock()
+        mock_db.search_papers.side_effect = Exception("DB connection failed")
+
+        with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
+            result = json.loads(get_paper_details(title="Paper"))
+
+        assert "error" in result
+        assert "DB connection failed" in result["error"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
