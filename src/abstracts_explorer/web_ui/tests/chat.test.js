@@ -7,8 +7,9 @@ import { jest } from '@jest/globals';
 // Mock dependencies
 global.fetch = jest.fn();
 global.marked = { parse: jest.fn((text) => text), use: jest.fn() };
+global.Plotly = { newPlot: jest.fn() };
 
-import { sendChatMessage, displayChatPapers, addChatMessage, resetChat } from '../static/modules/chat.js';
+import { sendChatMessage, displayChatPapers, addChatMessage, resetChat, renderChatVisualizations } from '../static/modules/chat.js';
 import * as State from '../static/modules/state.js';
 
 describe('Chat Module', () => {
@@ -228,6 +229,154 @@ describe('Chat Module', () => {
 
             const messages = document.getElementById('chat-messages');
             expect(messages.innerHTML).toContain('Conversation reset');
+        });
+    });
+
+    describe('renderChatVisualizations', () => {
+        beforeEach(() => {
+            global.Plotly = { newPlot: jest.fn() };
+        });
+
+        it('should render topic evolution chart', () => {
+            const visualizations = [{
+                type: 'topic_evolution',
+                topic: 'transformers',
+                conference: 'NeurIPS',
+                year_counts: { '2022': 5, '2023': 10, '2024': 15 }
+            }];
+
+            renderChatVisualizations(visualizations);
+
+            expect(global.Plotly.newPlot).toHaveBeenCalledTimes(1);
+            const [plotId, traces, layout] = global.Plotly.newPlot.mock.calls[0];
+            expect(plotId).toMatch(/^chat-plot-/);
+            expect(traces).toHaveLength(1);
+            expect(traces[0].x).toEqual(['2022', '2023', '2024']);
+            expect(traces[0].y).toEqual([5, 10, 15]);
+            expect(traces[0].type).toBe('bar');
+            expect(layout.title).toContain('transformers');
+            expect(layout.title).toContain('NeurIPS');
+        });
+
+        it('should render cluster visualization chart', () => {
+            const visualizations = [{
+                type: 'cluster_visualization',
+                points: [
+                    { x: 1.0, y: 2.0, cluster: 0, title: 'Paper A' },
+                    { x: 3.0, y: 4.0, cluster: 1, title: 'Paper B' },
+                    { x: 1.5, y: 2.5, cluster: 0, title: 'Paper C' }
+                ],
+                statistics: { n_clusters: 2, total_papers: 3 }
+            }];
+
+            renderChatVisualizations(visualizations);
+
+            expect(global.Plotly.newPlot).toHaveBeenCalledTimes(1);
+            const [plotId, traces, layout] = global.Plotly.newPlot.mock.calls[0];
+            expect(plotId).toMatch(/^chat-plot-/);
+            // Two clusters should produce two traces
+            expect(traces).toHaveLength(2);
+            expect(layout.title).toContain('3 papers');
+            expect(layout.title).toContain('2 clusters');
+        });
+
+        it('should render multiple visualizations', () => {
+            const visualizations = [
+                { type: 'topic_evolution', topic: 'rl', conference: 'ICML', year_counts: { '2023': 3 } },
+                { type: 'cluster_visualization', points: [{ x: 0, y: 0, cluster: 0 }], statistics: {} }
+            ];
+
+            renderChatVisualizations(visualizations);
+
+            expect(global.Plotly.newPlot).toHaveBeenCalledTimes(2);
+        });
+
+        it('should add chart message elements to chat', () => {
+            const visualizations = [{
+                type: 'topic_evolution',
+                topic: 'gnn',
+                conference: 'NeurIPS',
+                year_counts: { '2023': 2 }
+            }];
+
+            renderChatVisualizations(visualizations);
+
+            const messages = document.getElementById('chat-messages');
+            expect(messages.querySelectorAll('.chat-message').length).toBe(1);
+            expect(messages.innerHTML).toContain('fa-chart-bar');
+        });
+
+        it('should skip cluster chart when points array is empty', () => {
+            const visualizations = [{
+                type: 'cluster_visualization',
+                points: [],
+                statistics: {}
+            }];
+
+            renderChatVisualizations(visualizations);
+
+            // Plotly should not be called for empty points
+            expect(global.Plotly.newPlot).not.toHaveBeenCalled();
+        });
+
+        it('should handle cluster_id key in points', () => {
+            const visualizations = [{
+                type: 'cluster_visualization',
+                points: [
+                    { x: 1.0, y: 2.0, cluster_id: 5, title: 'Paper X' }
+                ],
+                statistics: { n_clusters: 1, total_papers: 1 }
+            }];
+
+            renderChatVisualizations(visualizations);
+
+            expect(global.Plotly.newPlot).toHaveBeenCalledTimes(1);
+            const traces = global.Plotly.newPlot.mock.calls[0][1];
+            expect(traces).toHaveLength(1);
+            expect(traces[0].name).toBe('Cluster 5');
+        });
+    });
+
+    describe('sendChatMessage with visualizations', () => {
+        it('should render visualizations from response', async () => {
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    response: {
+                        response: 'Topic evolution analysis',
+                        papers: [],
+                        metadata: {},
+                        visualizations: [{
+                            type: 'topic_evolution',
+                            topic: 'attention',
+                            conference: 'NeurIPS',
+                            year_counts: { '2023': 5 }
+                        }]
+                    }
+                })
+            });
+
+            await sendChatMessage();
+
+            expect(global.Plotly.newPlot).toHaveBeenCalledTimes(1);
+        });
+
+        it('should not call Plotly when no visualizations', async () => {
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    response: {
+                        response: 'Just text',
+                        papers: [],
+                        metadata: {},
+                        visualizations: []
+                    }
+                })
+            });
+
+            await sendChatMessage();
+
+            expect(global.Plotly.newPlot).not.toHaveBeenCalled();
         });
     });
 });

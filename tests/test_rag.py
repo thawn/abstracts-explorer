@@ -291,6 +291,7 @@ class TestRAGChatQuery:
 
         assert "response" in result
         assert "papers" in result
+        assert "visualizations" in result
         assert "metadata" in result
         assert isinstance(result["response"], str)
         assert len(result["response"]) > 0
@@ -700,7 +701,157 @@ class TestRAGChatPaperExtraction:
         assert len(papers) == 0
 
 
-# Integration tests that require actual LM Studio
+class TestRAGChatVisualizationExtraction:
+    """Test visualization extraction from tool results."""
+
+    def test_extract_topic_evolution_visualization(self):
+        """Test extracting topic evolution chart data."""
+        tool_results = [
+            {
+                "name": "get_topic_evolution",
+                "raw_result": json.dumps(
+                    {
+                        "topic": "transformers",
+                        "conference": "NeurIPS",
+                        "total_papers": 30,
+                        "year_counts": {"2022": 5, "2023": 10, "2024": 15},
+                    }
+                ),
+            }
+        ]
+
+        visualizations = RAGChat._extract_visualizations(tool_results)
+        assert len(visualizations) == 1
+        viz = visualizations[0]
+        assert viz["type"] == "topic_evolution"
+        assert viz["topic"] == "transformers"
+        assert viz["conference"] == "NeurIPS"
+        assert viz["year_counts"] == {"2022": 5, "2023": 10, "2024": 15}
+
+    def test_extract_cluster_visualization(self):
+        """Test extracting cluster visualization scatter data."""
+        tool_results = [
+            {
+                "name": "get_cluster_visualization",
+                "raw_result": json.dumps(
+                    {
+                        "n_dimensions": 2,
+                        "n_points": 3,
+                        "statistics": {"n_clusters": 2, "total_papers": 3},
+                        "points": [
+                            {"x": 1.0, "y": 2.0, "cluster": 0, "title": "Paper A"},
+                            {"x": 3.0, "y": 4.0, "cluster": 1, "title": "Paper B"},
+                            {"x": 1.5, "y": 2.5, "cluster": 0, "title": "Paper C"},
+                        ],
+                    }
+                ),
+            }
+        ]
+
+        visualizations = RAGChat._extract_visualizations(tool_results)
+        assert len(visualizations) == 1
+        viz = visualizations[0]
+        assert viz["type"] == "cluster_visualization"
+        assert len(viz["points"]) == 3
+        assert viz["statistics"]["n_clusters"] == 2
+
+    def test_extract_visualizations_skips_errors(self):
+        """Test that tool results with errors are skipped."""
+        tool_results = [
+            {
+                "name": "get_topic_evolution",
+                "raw_result": json.dumps({"error": "No conference specified"}),
+            }
+        ]
+
+        visualizations = RAGChat._extract_visualizations(tool_results)
+        assert len(visualizations) == 0
+
+    def test_extract_visualizations_skips_invalid_json(self):
+        """Test that invalid JSON is handled gracefully."""
+        tool_results = [
+            {
+                "name": "get_topic_evolution",
+                "raw_result": "not valid json",
+            }
+        ]
+
+        visualizations = RAGChat._extract_visualizations(tool_results)
+        assert len(visualizations) == 0
+
+    def test_extract_visualizations_skips_empty_data(self):
+        """Test that results with empty data are skipped."""
+        tool_results = [
+            {
+                "name": "get_topic_evolution",
+                "raw_result": json.dumps(
+                    {
+                        "topic": "nothing",
+                        "conference": "NeurIPS",
+                        "year_counts": {},
+                    }
+                ),
+            },
+            {
+                "name": "get_cluster_visualization",
+                "raw_result": json.dumps(
+                    {
+                        "n_dimensions": 2,
+                        "points": [],
+                        "statistics": {},
+                    }
+                ),
+            },
+        ]
+
+        visualizations = RAGChat._extract_visualizations(tool_results)
+        assert len(visualizations) == 0
+
+    def test_extract_visualizations_ignores_non_viz_tools(self):
+        """Test that non-visualization tools are ignored."""
+        tool_results = [
+            {
+                "name": "search_papers",
+                "raw_result": json.dumps({"papers": [{"title": "Paper"}]}),
+            },
+            {
+                "name": "get_cluster_topics",
+                "raw_result": json.dumps({"clusters": []}),
+            },
+        ]
+
+        visualizations = RAGChat._extract_visualizations(tool_results)
+        assert len(visualizations) == 0
+
+    def test_extract_multiple_visualizations(self):
+        """Test extracting multiple visualizations from different tools."""
+        tool_results = [
+            {
+                "name": "get_topic_evolution",
+                "raw_result": json.dumps(
+                    {
+                        "topic": "attention",
+                        "conference": "ICLR",
+                        "year_counts": {"2023": 8},
+                    }
+                ),
+            },
+            {
+                "name": "get_cluster_visualization",
+                "raw_result": json.dumps(
+                    {
+                        "n_dimensions": 2,
+                        "points": [{"x": 1, "y": 2, "cluster": 0}],
+                        "statistics": {"n_clusters": 1, "total_papers": 1},
+                    }
+                ),
+            },
+        ]
+
+        visualizations = RAGChat._extract_visualizations(tool_results)
+        assert len(visualizations) == 2
+        assert visualizations[0]["type"] == "topic_evolution"
+        assert visualizations[1]["type"] == "cluster_visualization"
 class TestRAGChatIntegration:
     """
     Integration tests requiring a running LM Studio instance.
