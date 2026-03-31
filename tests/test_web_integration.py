@@ -1064,5 +1064,232 @@ class TestWebUIErrorHandlingPaths:
                 assert data["papers"][i]["distance"] <= data["papers"][i + 1]["distance"]
 
 
+class TestPaperCardDisplayFields:
+    """
+    Integration tests verifying paper cards display correctly everywhere.
+
+    These tests ensure that every API endpoint which returns paper data
+    includes the fields required for correct paper card rendering:
+    - uid: required for star ratings and the paper details modal
+    - title: the paper title
+    - authors: list of author names (NOT a semicolon-separated string)
+    - conference: shown as an indigo badge on every card
+    - abstract: shown in the card body
+    """
+
+    def _get_any_paper_uid(self, base_url: str) -> str | None:
+        """Helper to get a paper UID via keyword search."""
+        response = requests.post(
+            f"{base_url}/api/search",
+            json={"query": "attention", "use_embeddings": False, "limit": 1},
+            timeout=5,
+        )
+        if response.status_code == 200:
+            papers = response.json().get("papers", [])
+            if papers:
+                return papers[0].get("uid")
+        return None
+
+    def test_keyword_search_paper_card_fields(self, web_server):
+        """
+        Verify keyword search returns all fields needed for paper card display.
+
+        The paper card (formatPaperCard in paper-card.js) requires: uid, title,
+        authors (as a list), conference, and abstract.
+        """
+        host, port, base_url = web_server
+
+        response = requests.post(
+            f"{base_url}/api/search",
+            json={"query": "transformer", "use_embeddings": False, "limit": 5},
+            timeout=5,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "papers" in data
+
+        for paper in data["papers"]:
+            # uid: required for star ratings and the detail modal onclick handler
+            assert "uid" in paper, "Paper card requires 'uid' for star ratings and detail modal"
+
+            # title: displayed as the card heading
+            assert "title" in paper, "Paper card requires 'title'"
+
+            # authors: must be a list; a string would make formatPaperCard throw TypeError
+            assert "authors" in paper, "Paper card requires 'authors'"
+            assert isinstance(paper["authors"], list), (
+                f"authors must be a list for paper card display; got {type(paper['authors'])}"
+            )
+
+            # conference: shown as indigo badge on card
+            assert "conference" in paper, "Paper card requires 'conference' for conference badge"
+
+    def test_semantic_search_paper_card_fields(self, web_server):
+        """
+        Verify semantic search returns all fields needed for paper card display.
+
+        Semantic search results additionally include a similarity score.
+        """
+        host, port, base_url = web_server
+
+        response = requests.post(
+            f"{base_url}/api/search",
+            json={"query": "deep learning", "use_embeddings": True, "limit": 3},
+            timeout=10,
+        )
+        # Semantic search may fail if embeddings backend unavailable; accept graceful failure
+        assert response.status_code in [200, 500]
+
+        if response.status_code == 200:
+            data = response.json()
+            for paper in data["papers"]:
+                assert "uid" in paper, "Paper card requires 'uid'"
+                assert "title" in paper, "Paper card requires 'title'"
+                assert "authors" in paper, "Paper card requires 'authors'"
+                assert isinstance(paper["authors"], list), (
+                    f"authors must be a list for paper card display; got {type(paper['authors'])}"
+                )
+                assert "conference" in paper, "Paper card requires 'conference' for conference badge"
+
+    def test_paper_detail_endpoint_card_fields(self, web_server):
+        """
+        Verify the paper detail endpoint returns all fields needed for the paper details modal.
+
+        The showPaperDetails() function renders a modal with conference, authors, abstract, etc.
+        """
+        host, port, base_url = web_server
+
+        paper_uid = self._get_any_paper_uid(base_url)
+        if paper_uid is None:
+            pytest.skip("No papers available in test database")
+
+        response = requests.get(f"{base_url}/api/paper/{paper_uid}", timeout=5)
+        assert response.status_code == 200
+
+        paper = response.json()
+
+        # Fields required by the paper details modal (showPaperDetails)
+        assert "uid" in paper, "Paper details modal requires 'uid'"
+        assert "title" in paper, "Paper details modal requires 'title'"
+
+        # authors must be a list for the modal to join them correctly
+        assert "authors" in paper, "Paper details modal requires 'authors'"
+        assert isinstance(paper["authors"], list), (
+            f"authors must be a list for paper details modal; got {type(paper['authors'])}"
+        )
+
+        # conference shown as indigo badge in modal header
+        assert "conference" in paper, "Paper details modal requires 'conference' for conference badge"
+
+        # abstract shown in modal body
+        assert "abstract" in paper, "Paper details modal requires 'abstract'"
+
+    def test_paper_detail_conference_has_correct_value(self, web_server):
+        """
+        Verify the conference field in paper details has a non-empty string value.
+
+        The conference badge is only rendered when paper.conference is truthy.
+        """
+        host, port, base_url = web_server
+
+        paper_uid = self._get_any_paper_uid(base_url)
+        if paper_uid is None:
+            pytest.skip("No papers available in test database")
+
+        response = requests.get(f"{base_url}/api/paper/{paper_uid}", timeout=5)
+        assert response.status_code == 200
+
+        paper = response.json()
+        # All test papers are from NeurIPS conference
+        assert paper["conference"] == "NeurIPS", (
+            f"Expected conference 'NeurIPS', got '{paper['conference']}'"
+        )
+
+    def test_paper_detail_authors_is_list_of_strings(self, web_server):
+        """
+        Verify authors field is a list of strings (not a semicolon-separated string).
+
+        The paper card renders authors with paper.authors.join(', '). If authors is a
+        string, it throws a TypeError and the card fails to render.
+        """
+        host, port, base_url = web_server
+
+        paper_uid = self._get_any_paper_uid(base_url)
+        if paper_uid is None:
+            pytest.skip("No papers available in test database")
+
+        response = requests.get(f"{base_url}/api/paper/{paper_uid}", timeout=5)
+        assert response.status_code == 200
+
+        paper = response.json()
+        authors = paper["authors"]
+
+        assert isinstance(authors, list), f"authors must be a list, got {type(authors)}: {authors!r}"
+        for author in authors:
+            assert isinstance(author, str), f"Each author must be a string, got {type(author)}: {author!r}"
+            # Authors should be trimmed of whitespace
+            assert author == author.strip(), f"Author '{author}' has leading/trailing whitespace"
+
+    def test_batch_papers_endpoint_card_fields(self, web_server):
+        """
+        Verify the batch papers endpoint returns all fields needed for paper card display.
+
+        The /api/papers/batch endpoint is used by the interesting papers tab and the
+        conference/year filter count update.
+        """
+        host, port, base_url = web_server
+
+        paper_uid = self._get_any_paper_uid(base_url)
+        if paper_uid is None:
+            pytest.skip("No papers available in test database")
+
+        response = requests.post(
+            f"{base_url}/api/papers/batch",
+            json={"paper_ids": [paper_uid]},
+            timeout=5,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "papers" in data
+        assert len(data["papers"]) > 0
+
+        paper = data["papers"][0]
+        assert "uid" in paper, "Batch endpoint must return 'uid' for paper cards"
+        assert "title" in paper, "Batch endpoint must return 'title' for paper cards"
+        assert "authors" in paper, "Batch endpoint must return 'authors' for paper cards"
+        assert isinstance(paper["authors"], list), (
+            f"authors must be a list for paper cards; got {type(paper['authors'])}"
+        )
+        assert "conference" in paper, "Batch endpoint must return 'conference' for conference badge"
+
+    def test_keyword_search_authors_are_not_semicolon_strings(self, web_server):
+        """
+        Verify that keyword search results never return authors as a raw semicolon-separated string.
+
+        Returning a semicolon-separated string instead of a list would cause formatPaperCard
+        to throw TypeError: 'authors must be an array'.
+        """
+        host, port, base_url = web_server
+
+        response = requests.post(
+            f"{base_url}/api/search",
+            json={"query": "attention", "use_embeddings": False, "limit": 10},
+            timeout=5,
+        )
+        assert response.status_code == 200
+        data = response.json()
+
+        for paper in data["papers"]:
+            authors = paper.get("authors", [])
+            assert isinstance(authors, list), (
+                f"Paper '{paper.get('title')}' has authors as {type(authors).__name__} instead of list: {authors!r}"
+            )
+            # Ensure no author string contains unprocessed semicolons from DB
+            for author in authors:
+                assert ";" not in author, (
+                    f"Author '{author}' still contains semicolon; authors were not split correctly"
+                )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])

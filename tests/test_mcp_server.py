@@ -704,5 +704,211 @@ class TestMCPServerIntegration:
         # Note: We can't easily test tool registration without running the server
 
 
+class TestSearchPapersPaperCardFields:
+    """
+    Tests that verify search_papers returns the correct fields for paper card display.
+
+    These integration tests ensure that the data returned by search_papers()
+    contains all fields needed to correctly render paper cards in the web UI,
+    including the fix for missing 'uid' and 'authors' fields.
+    """
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_search_papers_returns_uid_not_id(self, mock_config, mock_db_class, mock_em_class):
+        """
+        Test that search_papers returns 'uid' field instead of 'id'.
+
+        Paper cards use paper.uid for star ratings and the detail modal.
+        Returning 'id' instead would break these features.
+        """
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config.return_value = mock_config_obj
+
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+        mock_em.search_similar.return_value = {
+            "ids": [["abc123"]],
+            "metadatas": [[{"title": "Test Paper", "year": 2024, "conference": "NeurIPS", "authors": "Alice; Bob"}]],
+            "documents": [["Test abstract"]],
+            "distances": [[0.1]],
+        }
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+
+        from abstracts_explorer.mcp_server import search_papers
+
+        result_str = search_papers(topic_keywords="test")
+        result = json.loads(result_str)
+
+        assert "papers" in result
+        assert len(result["papers"]) == 1
+
+        paper = result["papers"][0]
+        # Must have 'uid' field (not 'id') for paper card star ratings and detail modal
+        assert "uid" in paper, "Paper card requires 'uid' field for star ratings and detail modal"
+        assert paper["uid"] == "abc123"
+        assert "id" not in paper, "Should use 'uid' not 'id' - 'id' would break paper cards"
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_search_papers_returns_authors_as_list(self, mock_config, mock_db_class, mock_em_class):
+        """
+        Test that search_papers returns authors as a list, not a string.
+
+        The paper card's formatPaperCard() expects paper.authors to be an array.
+        Without this, authors would always show as 'Unknown' in chat sidebar.
+        """
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config.return_value = mock_config_obj
+
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+        mock_em.search_similar.return_value = {
+            "ids": [["abc123"]],
+            "metadatas": [[{
+                "title": "Test Paper",
+                "year": 2024,
+                "conference": "NeurIPS",
+                "authors": "Alice Smith; Bob Jones; Carol White",
+            }]],
+            "documents": [["Test abstract"]],
+            "distances": [[0.1]],
+        }
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+
+        from abstracts_explorer.mcp_server import search_papers
+
+        result_str = search_papers(topic_keywords="test")
+        result = json.loads(result_str)
+
+        paper = result["papers"][0]
+        # authors must be a list for formatPaperCard() to work
+        assert "authors" in paper, "Paper card requires 'authors' field"
+        assert isinstance(paper["authors"], list), (
+            "authors must be a list for paper card display; string would show as 'Unknown'"
+        )
+        assert paper["authors"] == ["Alice Smith", "Bob Jones", "Carol White"]
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_search_papers_authors_empty_when_missing(self, mock_config, mock_db_class, mock_em_class):
+        """Test that missing authors metadata results in an empty list, not 'Unknown'."""
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config.return_value = mock_config_obj
+
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+        mock_em.search_similar.return_value = {
+            "ids": [["xyz789"]],
+            "metadatas": [[{"title": "No Authors Paper", "year": 2024, "conference": "ICLR"}]],
+            "documents": [["Abstract text"]],
+            "distances": [[0.2]],
+        }
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+
+        from abstracts_explorer.mcp_server import search_papers
+
+        result_str = search_papers(topic_keywords="test")
+        result = json.loads(result_str)
+
+        paper = result["papers"][0]
+        assert isinstance(paper["authors"], list)
+        assert paper["authors"] == []
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_search_papers_returns_conference_field(self, mock_config, mock_db_class, mock_em_class):
+        """
+        Test that search_papers returns the conference field.
+
+        The paper card displays a conference badge if paper.conference is set.
+        """
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config.return_value = mock_config_obj
+
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+        mock_em.search_similar.return_value = {
+            "ids": [["p1"]],
+            "metadatas": [[{
+                "title": "Conference Paper",
+                "year": 2025,
+                "conference": "NeurIPS",
+                "session": "Oral",
+                "authors": "Author A",
+            }]],
+            "documents": [["Abstract"]],
+            "distances": [[0.05]],
+        }
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+
+        from abstracts_explorer.mcp_server import search_papers
+
+        result_str = search_papers(topic_keywords="machine learning")
+        result = json.loads(result_str)
+
+        paper = result["papers"][0]
+        # conference field is needed for the conference badge in paper cards
+        assert "conference" in paper, "Paper card requires 'conference' field for conference badge"
+        assert paper["conference"] == "NeurIPS"
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_search_papers_all_card_fields_present(self, mock_config, mock_db_class, mock_em_class):
+        """
+        Test that search_papers returns all fields required for a complete paper card.
+
+        Paper cards need: uid, title, authors (list), conference, session, abstract.
+        """
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config.return_value = mock_config_obj
+
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+        mock_em.search_similar.return_value = {
+            "ids": [["p42"]],
+            "metadatas": [[{
+                "title": "Full Paper",
+                "year": 2024,
+                "conference": "ICML",
+                "session": "Best Paper Session",
+                "authors": "First Author; Second Author",
+            }]],
+            "documents": [["This is the abstract text."]],
+            "distances": [[0.15]],
+        }
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+
+        from abstracts_explorer.mcp_server import search_papers
+
+        result_str = search_papers(topic_keywords="learning")
+        result = json.loads(result_str)
+
+        paper = result["papers"][0]
+        # All fields required by paper card
+        assert paper["uid"] == "p42"
+        assert paper["title"] == "Full Paper"
+        assert paper["authors"] == ["First Author", "Second Author"]
+        assert paper["conference"] == "ICML"
+        assert paper["session"] == "Best Paper Session"
+        assert paper["abstract"] == "This is the abstract text."
+        assert "relevance_score" in paper
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
