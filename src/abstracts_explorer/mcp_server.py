@@ -613,8 +613,7 @@ def search_papers(
             return json.dumps(
                 {
                     "error": (
-                        "A conference must be specified for paper search. "
-                        "Please provide conference parameter."
+                        "A conference must be specified for paper search. " "Please provide conference parameter."
                     )
                 },
                 indent=2,
