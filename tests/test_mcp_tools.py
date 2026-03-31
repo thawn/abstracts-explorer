@@ -13,6 +13,7 @@ from abstracts_explorer.mcp_tools import (
     get_mcp_tools_schema,
     execute_mcp_tool,
     format_tool_result_for_llm,
+    _abbreviate_result,
     _format_cluster_topics_result,
     _format_topic_evolution_result,
     _format_search_papers_result,
@@ -1283,3 +1284,70 @@ def test_get_mcp_tools_schema_paper_details_year_enum():
     schema = get_mcp_tools_schema(years=years)
     pd_tool = next(t for t in schema if t["function"]["name"] == "get_paper_details")
     assert pd_tool["function"]["parameters"]["properties"]["year"]["enum"] == years
+
+
+# ---------------------------------------------------------------------------
+# _abbreviate_result tests
+# ---------------------------------------------------------------------------
+
+
+class TestAbbreviateResult:
+    """Tests for the _abbreviate_result helper function."""
+
+    def test_short_text_unchanged(self):
+        """Short text is returned unchanged."""
+        assert _abbreviate_result("short") == "short"
+
+    def test_exact_max_length_unchanged(self):
+        """Text exactly at max_length is returned unchanged."""
+        text = "a" * 200
+        assert _abbreviate_result(text) == text
+
+    def test_long_text_truncated(self):
+        """Text exceeding max_length is truncated with ellipsis."""
+        text = "a" * 300
+        result = _abbreviate_result(text)
+        assert len(result) == 201  # 200 chars + '…'
+        assert result.endswith("…")
+
+    def test_custom_max_length(self):
+        """Custom max_length is respected."""
+        text = "a" * 50
+        result = _abbreviate_result(text, max_length=10)
+        assert len(result) == 11  # 10 chars + '…'
+
+    def test_empty_string(self):
+        """Empty string is returned unchanged."""
+        assert _abbreviate_result("") == ""
+
+
+# ---------------------------------------------------------------------------
+# Logging tests for execute_mcp_tool
+# ---------------------------------------------------------------------------
+
+
+class TestExecuteMCPToolLogging:
+    """Tests that execute_mcp_tool logs tool calls and return values."""
+
+    def test_logs_tool_call_and_result(self, caplog):
+        """execute_mcp_tool logs both the call and the return value."""
+        mock_result = json.dumps({"clusters": []})
+        with patch("abstracts_explorer.mcp_tools.get_cluster_topics", return_value=mock_result):
+            with caplog.at_level("INFO", logger="abstracts_explorer.mcp_tools"):
+                execute_mcp_tool("get_cluster_topics", {"n_clusters": 5})
+
+        assert "Executing MCP tool: get_cluster_topics" in caplog.text
+        assert "MCP tool get_cluster_topics returned:" in caplog.text
+
+    def test_logs_abbreviated_long_result(self, caplog):
+        """Long return values are abbreviated in the log."""
+        mock_result = json.dumps({"papers": [{"title": f"Paper {i}"} for i in range(100)]})
+        with patch("abstracts_explorer.mcp_tools.search_papers", return_value=mock_result):
+            with caplog.at_level("INFO", logger="abstracts_explorer.mcp_tools"):
+                execute_mcp_tool("search_papers", {"topic_keywords": "test"})
+
+        # The result log should contain the abbreviated marker
+        log_lines = [r.message for r in caplog.records if "returned:" in r.message]
+        assert len(log_lines) == 1
+        # Long result should be truncated
+        assert len(log_lines[0]) < len(mock_result) + 100
