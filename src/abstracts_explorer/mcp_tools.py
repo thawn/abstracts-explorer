@@ -33,6 +33,27 @@ class MCPToolsError(Exception):
     pass
 
 
+def _abbreviate_result(text: str, max_length: int = 200) -> str:
+    """
+    Abbreviate a result string for logging.
+
+    Parameters
+    ----------
+    text : str
+        The text to abbreviate.
+    max_length : int
+        Maximum number of characters to keep (default: 200).
+
+    Returns
+    -------
+    str
+        The original text if short enough, otherwise truncated with '…'.
+    """
+    if len(text) <= max_length:
+        return text
+    return text[:max_length] + "…"
+
+
 def _normalize_search_papers_args(arguments: Dict[str, Any]) -> Dict[str, Any]:
     """
     Normalise argument shapes produced by LLMs for the ``search_papers`` tool.
@@ -110,16 +131,6 @@ def _normalize_get_topic_evolution_args(arguments: Dict[str, Any]) -> Dict[str, 
     # Normalize topic_keywords: list → space-joined string
     if "topic_keywords" in args and isinstance(args["topic_keywords"], list):
         args["topic_keywords"] = " ".join(str(k) for k in args["topic_keywords"])
-
-    # Normalize conference (singular) → conferences (list)
-    if "conference" in args and "conferences" not in args:
-        conf_val = args.pop("conference")
-        if isinstance(conf_val, str):
-            args["conferences"] = [conf_val]
-        elif isinstance(conf_val, list):
-            args["conferences"] = conf_val
-    elif "conference" in args:
-        args.pop("conference")  # 'conferences' already present; drop duplicate
 
     # Normalize start_year / end_year: list → first element int
     for key in ("start_year", "end_year"):
@@ -479,35 +490,38 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
     MCPToolsError
         If tool execution fails or tool is unknown
     """
-    logger.info(f"Executing MCP tool: {tool_name} with arguments: {arguments}")
+    logger.info("Executing MCP tool: %s with arguments: %s", tool_name, arguments)
 
     try:
         if tool_name == "analyze_topic_relevance":
             args = _filter_unknown_kwargs(analyze_topic_relevance, _normalize_analyze_topic_relevance_args(arguments))
-            return analyze_topic_relevance(**args)
+            result = analyze_topic_relevance(**args)
         elif tool_name == "get_cluster_topics":
             args = _filter_unknown_kwargs(get_cluster_topics, arguments)
-            return get_cluster_topics(**args)
+            result = get_cluster_topics(**args)
         elif tool_name == "get_topic_evolution":
             args = _filter_unknown_kwargs(get_topic_evolution, _normalize_get_topic_evolution_args(arguments))
-            return get_topic_evolution(**args)
+            result = get_topic_evolution(**args)
         elif tool_name == "search_papers":
             # Normalize argument names/types — LLMs may send 'query', 'year', or list values
             args = _normalize_search_papers_args(arguments)
             if "query" in args and "topic_keywords" not in args:
                 args["topic_keywords"] = args.pop("query")
             args = _filter_unknown_kwargs(search_papers, args)
-            return search_papers(**args)
+            result = search_papers(**args)
         elif tool_name == "get_cluster_visualization":
             args = _filter_unknown_kwargs(get_cluster_visualization, arguments)
-            return get_cluster_visualization(**args)
+            result = get_cluster_visualization(**args)
         elif tool_name == "get_paper_details":
             args = _filter_unknown_kwargs(get_paper_details, _normalize_get_paper_details_args(arguments))
-            return get_paper_details(**args)
+            result = get_paper_details(**args)
         else:
             # Return error JSON for unknown tools
             error_result = {"error": f"Unknown MCP tool: {tool_name}"}
-            return json.dumps(error_result, indent=2)
+            result = json.dumps(error_result, indent=2)
+
+        logger.info("MCP tool %s returned: %s", tool_name, _abbreviate_result(result))
+        return result
 
     except Exception as e:
         logger.error(f"MCP tool execution failed: {str(e)}")

@@ -1103,3 +1103,78 @@ class TestRAGChatIntegration:
 
         em.close()
         db.close()
+
+
+class TestRAGToolLogging:
+    """Test that RAG tool wrappers log tool calls and results."""
+
+    def test_search_papers_logs_call_and_result(self, caplog, mock_search_papers):
+        """_tool_search_papers logs the call arguments and abbreviated result."""
+        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        ctx.deps.conferences = ["NeurIPS"]
+
+        with caplog.at_level("INFO", logger="abstracts_explorer.rag"):
+            _tool_search_papers(ctx, topic_keywords="transformers", n_results=5)
+
+        assert "Tool call: search_papers" in caplog.text
+        assert "Tool result: search_papers" in caplog.text
+
+    def test_get_cluster_topics_logs_call_and_result(self, caplog, mock_cluster_topics):
+        """_tool_get_cluster_topics logs the call arguments and abbreviated result."""
+        from abstracts_explorer.rag import _tool_get_cluster_topics, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        ctx.deps.conferences = ["NeurIPS"]
+
+        with caplog.at_level("INFO", logger="abstracts_explorer.rag"):
+            _tool_get_cluster_topics(ctx, conference="NeurIPS")
+
+        assert "Tool call: get_cluster_topics" in caplog.text
+        assert "Tool result: get_cluster_topics" in caplog.text
+
+    def test_get_topic_evolution_logs_call_and_result(self, caplog, mock_topic_evolution):
+        """_tool_get_topic_evolution logs the call arguments and abbreviated result."""
+        from abstracts_explorer.rag import _tool_get_topic_evolution, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+
+        with caplog.at_level("INFO", logger="abstracts_explorer.rag"):
+            _tool_get_topic_evolution(ctx, topic_keywords="attention", conferences=["NeurIPS"])
+
+        assert "Tool call: get_topic_evolution" in caplog.text
+        assert "Tool result: get_topic_evolution" in caplog.text
+
+    def test_analyze_topic_relevance_logs_call_and_result(self, caplog, mock_analyze_topic):
+        """_tool_analyze_topic_relevance logs the call arguments and abbreviated result."""
+        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+
+        with caplog.at_level("INFO", logger="abstracts_explorer.rag"):
+            _tool_analyze_topic_relevance(ctx, topic="diffusion models", conference="NeurIPS")
+
+        assert "Tool call: analyze_topic_relevance" in caplog.text
+        assert "Tool result: analyze_topic_relevance" in caplog.text
+
+    def test_get_cluster_visualization_logs_call_and_result(self, caplog):
+        """_tool_get_cluster_visualization logs the call arguments and abbreviated result."""
+        from abstracts_explorer.rag import _tool_get_cluster_visualization, RAGDeps
+
+        with patch("abstracts_explorer.rag.mcp_get_cluster_visualization") as mock_viz:
+            mock_viz.return_value = json.dumps({"points": [], "n_points": 0})
+
+            ctx = Mock()
+            ctx.deps = RAGDeps()
+            ctx.deps.conferences = ["ICLR"]
+
+            with caplog.at_level("INFO", logger="abstracts_explorer.rag"):
+                _tool_get_cluster_visualization(ctx, conference="ICLR")
+
+        assert "Tool call: get_cluster_visualization" in caplog.text
+        assert "Tool result: get_cluster_visualization" in caplog.text
