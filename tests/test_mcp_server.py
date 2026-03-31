@@ -431,9 +431,9 @@ class TestMCPTools:
             "ids": [["p1", "p2", "p3"]],
             "metadatas": [
                 [
-                    {"title": "Paper 1", "year": 2023, "session": "ML"},
-                    {"title": "Paper 2", "year": 2023, "session": "DL"},
-                    {"title": "Paper 3", "year": 2024, "session": "ML"},
+                    {"title": "Paper 1", "year": "2023", "session": "ML"},
+                    {"title": "Paper 2", "year": "2023", "session": "DL"},
+                    {"title": "Paper 3", "year": "2024", "session": "ML"},
                 ]
             ],
             "distances": [[0.1, 0.2, 0.3]],
@@ -464,6 +464,60 @@ class TestMCPTools:
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
     @patch("abstracts_explorer.mcp_server.DatabaseManager")
     @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_topic_evolution_with_year_range(self, mock_config, mock_db_class, mock_em_class):
+        """Test get_topic_evolution with start_year and end_year filters.
+
+        ChromaDB stores year as string, so this tests that string years
+        are correctly converted to int for comparison with integer year range params.
+        """
+        # Setup config mock
+        mock_config_obj = Mock()
+        mock_config_obj.embedding_db_path = "chroma_db"
+        mock_config_obj.collection_name = "papers"
+        mock_config_obj.paper_db_path = "abstracts.db"
+        mock_config.return_value = mock_config_obj
+
+        # Setup embeddings manager mock with string years (as ChromaDB returns)
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+        mock_em.search_similar.return_value = {
+            "ids": [["p1", "p2", "p3", "p4"]],
+            "metadatas": [
+                [
+                    {"title": "Paper 1", "year": "2022", "session": "ML"},
+                    {"title": "Paper 2", "year": "2023", "session": "DL"},
+                    {"title": "Paper 3", "year": "2024", "session": "ML"},
+                    {"title": "Paper 4", "year": "2025", "session": "NLP"},
+                ]
+            ],
+            "distances": [[0.1, 0.2, 0.3, 0.4]],
+        }
+
+        # Setup database mock
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+
+        from abstracts_explorer.mcp_server import get_topic_evolution
+
+        result_str = get_topic_evolution(
+            topic_keywords="transformers",
+            conference="NeurIPS",
+            start_year=2023,
+            end_year=2024,
+        )
+        result = json.loads(result_str)
+
+        # Only papers from 2023 and 2024 should be included
+        assert result["year_counts"]["2023"] == 1
+        assert result["year_counts"]["2024"] == 1
+        assert "2022" not in result["year_counts"]
+        assert "2025" not in result["year_counts"]
+        assert result["year_range"]["start"] == 2023
+        assert result["year_range"]["end"] == 2024
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
     def test_get_topic_evolution_with_where_clause(self, mock_config, mock_db_class, mock_em_class):
         """Test get_topic_evolution tool with custom WHERE clause."""
         # Setup config mock
@@ -480,8 +534,8 @@ class TestMCPTools:
             "ids": [["p1", "p2"]],
             "metadatas": [
                 [
-                    {"title": "Paper 1", "year": 2024, "session": "Oral Session 1"},
-                    {"title": "Paper 2", "year": 2024, "session": "Oral Session 1"},
+                    {"title": "Paper 1", "year": "2024", "session": "Oral Session 1"},
+                    {"title": "Paper 2", "year": "2024", "session": "Oral Session 1"},
                 ]
             ],
             "distances": [[0.1, 0.2]],
@@ -531,7 +585,7 @@ class TestMCPTools:
         mock_em_class.return_value = mock_em
         mock_em.search_similar.return_value = {
             "ids": [["p1"]],
-            "metadatas": [[{"title": "Paper 1", "year": 2024, "session": "Oral"}]],
+            "metadatas": [[{"title": "Paper 1", "year": "2024", "session": "Oral"}]],
             "distances": [[0.1]],
         }
 
