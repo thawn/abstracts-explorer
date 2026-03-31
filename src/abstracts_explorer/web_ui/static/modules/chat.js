@@ -259,11 +259,12 @@ export async function resetChat() {
 export function renderChatVisualizations(visualizations) {
     const messagesDiv = document.getElementById('chat-messages');
 
-    for (const viz of visualizations) {
+    for (let i = 0; i < visualizations.length; i++) {
+        const viz = visualizations[i];
         const wrapper = document.createElement('div');
         wrapper.className = 'chat-message';
 
-        const plotId = `chat-plot-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const plotId = `chat-plot-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`;
 
         wrapper.innerHTML = `
             <div class="flex items-start gap-3 justify-start">
@@ -332,7 +333,12 @@ function _renderClusterVisualizationChart(plotId, viz) {
     // Group points by cluster
     const clusters = {};
     for (const p of points) {
-        const cid = p.cluster !== undefined ? p.cluster : (p.cluster_id !== undefined ? p.cluster_id : 0);
+        let cid = 0;
+        if (p.cluster !== undefined) {
+            cid = p.cluster;
+        } else if (p.cluster_id !== undefined) {
+            cid = p.cluster_id;
+        }
         if (!clusters[cid]) clusters[cid] = { x: [], y: [], text: [] };
         clusters[cid].x.push(p.x);
         clusters[cid].y.push(p.y);
@@ -347,7 +353,7 @@ function _renderClusterVisualizationChart(plotId, viz) {
         type: 'scatter',
         name: `Cluster ${cid}`,
         marker: { size: 4, opacity: 0.7 },
-        hovertemplate: '%{text}<extra>Cluster ' + cid + '</extra>'
+        hovertemplate: `%{text}<extra>Cluster ${cid}</extra>`
     }));
 
     const stats = viz.statistics || {};

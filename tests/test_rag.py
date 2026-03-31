@@ -852,6 +852,8 @@ class TestRAGChatVisualizationExtraction:
         assert len(visualizations) == 2
         assert visualizations[0]["type"] == "topic_evolution"
         assert visualizations[1]["type"] == "cluster_visualization"
+
+
 class TestRAGChatIntegration:
     """
     Integration tests requiring a running LM Studio instance.
