@@ -506,6 +506,33 @@ class TestEmbeddingsManager:
 
         embeddings_manager.close()
 
+    def test_paper_needs_update_returns_true_on_error(self, embeddings_manager, mock_lm_studio):
+        """Test that paper_needs_update returns True when an error occurs.
+
+        When paper_needs_update encounters an exception it should return True
+        (assume update needed) rather than False, so the paper is re-embedded
+        instead of silently skipped.
+        """
+        from unittest.mock import patch
+
+        embeddings_manager.connect()
+        embeddings_manager.create_collection()
+
+        paper = {
+            "uid": "test_paper_err",
+            "title": "Test Paper",
+            "abstract": "Test abstract",
+        }
+
+        # Simulate an exception during the collection.get() call
+        with patch.object(embeddings_manager.collection, "get", side_effect=RuntimeError("db error")):
+            result = embeddings_manager.paper_needs_update(paper)
+
+        # Should return True so the paper is embedded rather than skipped
+        assert result is True
+
+        embeddings_manager.close()
+
 
 def test_check_model_compatibility_no_database(embeddings_manager, tmp_path):
     """Test checking model compatibility when database does not exist."""

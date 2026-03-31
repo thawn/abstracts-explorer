@@ -489,7 +489,7 @@ class EmbeddingsManager:
 
         except Exception as e:
             logger.warning(f"Error checking if paper {paper['uid']} needs update: {str(e)}")
-            return False
+            return True
 
     @staticmethod
     def embedding_text_from_paper(paper: dict) -> str:

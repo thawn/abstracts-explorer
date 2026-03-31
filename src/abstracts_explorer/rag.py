@@ -393,7 +393,7 @@ class RAGChat:
             "You are an AI assistant helping researchers analyze conference data. "
             "Use the available tools to search for papers, analyze topics, and understand trends. "
             "Present the information in a clear, easy-to-understand format. "
-            f"Todays date is {datetime.now().strftime('%Y-%m-%d')}."
+            f"Today's date is {datetime.now().strftime('%Y-%m-%d')}. "
             "When referencing specific papers, cite them using local links: "
             "<a href='#paper-1'>Paper-1</a>, <a href='#paper-2'>Paper-2</a>, etc."
         )
@@ -680,7 +680,10 @@ class RAGChat:
         for tr in tool_results:
             try:
                 data = json.loads(tr["raw_result"])
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, TypeError, KeyError):
+                continue
+
+            if not isinstance(data, dict):
                 continue
 
             if "error" in data:

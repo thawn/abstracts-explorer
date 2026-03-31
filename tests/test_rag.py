@@ -779,6 +779,26 @@ class TestRAGChatVisualizationExtraction:
         visualizations = RAGChat._extract_visualizations(tool_results)
         assert len(visualizations) == 0
 
+    def test_extract_visualizations_skips_non_dict_json(self):
+        """Test that non-dict JSON values (list, string, null) are skipped."""
+        tool_results = [
+            {
+                "name": "get_topic_evolution",
+                "raw_result": json.dumps(["a", "list"]),
+            },
+            {
+                "name": "get_cluster_visualization",
+                "raw_result": json.dumps("just a string"),
+            },
+            {
+                "name": "get_topic_evolution",
+                "raw_result": json.dumps(None),
+            },
+        ]
+
+        visualizations = RAGChat._extract_visualizations(tool_results)
+        assert len(visualizations) == 0
+
     def test_extract_visualizations_skips_empty_data(self):
         """Test that results with empty data are skipped."""
         tool_results = [
