@@ -24,7 +24,7 @@ from mcp.server.fastmcp import FastMCP
 
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.database import DatabaseManager
-from abstracts_explorer.clustering import ClusteringManager, perform_clustering
+from abstracts_explorer.clustering import ClusteringManager, compute_clusters_with_cache
 from abstracts_explorer.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -204,28 +204,34 @@ def get_cluster_topics(
         # Load clustering data
         cm, db = load_clustering_data(collection_name)
 
-        # Load embeddings
-        logger.info("Loading embeddings...")
-        cm.load_embeddings()
-
-        # Perform clustering with fixed parameters
-        logger.info("Clustering using agglomerative...")
-        cm.cluster(
-            method="agglomerative",
+        # Use compute_clusters_with_cache to avoid redundant t-SNE/clustering
+        # when pre-generated results exist in the database.
+        cached_results = compute_clusters_with_cache(
+            embeddings_manager=cm.embeddings_manager,
+            database=db,
+            embedding_model=config.embedding_model,
+            reduction_method="tsne",
+            n_components=2,
+            clustering_method="agglomerative",
             n_clusters=None,
-            random_state=42,
-            use_reduced=False,
             distance_threshold=150.0,
             linkage="ward",
         )
 
-        # Reduce dimensions for visualization
-        logger.info("Reducing dimensions using tsne...")
-        cm.reduce_dimensions(
-            method="tsne",
-            n_components=2,
-            random_state=42,
-        )
+        # Reconstruct ClusteringManager state from the cached/computed results
+        # so that analyze_cluster_topics can inspect per-cluster metadata.
+        cm.load_embeddings()
+
+        if "points" in cached_results:
+            import numpy as np
+
+            point_id_to_cluster: Dict[str, int] = {}
+            for point in cached_results["points"]:
+                pid = point.get("id") or point.get("paper_id", "")
+                point_id_to_cluster[pid] = point.get("cluster", -1)
+
+            current_ids = cm.paper_ids or []
+            cm.cluster_labels = np.array([point_id_to_cluster.get(pid, -1) for pid in current_ids])
 
         # Get cluster statistics
         stats = cm.get_cluster_statistics()
@@ -750,19 +756,31 @@ def get_cluster_visualization(
         config = get_config()
         collection_name = collection_name or config.collection_name
 
-        # Perform clustering with fixed parameters
-        logger.info("Performing clustering for visualization...")
-        results = perform_clustering(
-            collection_name=collection_name,
+        # Use compute_clusters_with_cache to avoid redundant t-SNE/clustering
+        # when pre-generated results exist in the database.
+        logger.info("Performing clustering for visualization (with cache)...")
+        cm, db = load_clustering_data(collection_name)
+
+        results = compute_clusters_with_cache(
+            embeddings_manager=cm.embeddings_manager,
+            database=db,
+            embedding_model=config.embedding_model,
             reduction_method="tsne",
             n_components=2,
             clustering_method="agglomerative",
             n_clusters=None,
-            output_path=output_path,
-            random_state=42,
             distance_threshold=150.0,
             linkage="ward",
         )
+
+        # Export if requested
+        if output_path:
+            import pathlib
+
+            pathlib.Path(output_path).write_text(json.dumps(results, indent=2))
+
+        cm.embeddings_manager.close()
+        db.close()
 
         # Format result
         result = {

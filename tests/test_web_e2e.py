@@ -11,7 +11,6 @@ import threading
 import sys
 import os
 from pathlib import Path
-from unittest.mock import Mock
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -236,6 +235,72 @@ def test_embeddings(test_database, tmp_path_factory):
     # Cleanup happens automatically
 
 
+def _prepopulate_clustering_cache(test_database, em, collection_name):
+    """
+    Pre-populate the database with cached clustering results.
+
+    This mirrors the production workflow where ``abstracts-explorer clustering
+    pre-generate`` is run before the web UI is used.  With cached results
+    present, MCP tools (``get_cluster_topics``, ``get_cluster_visualization``)
+    return instantly instead of running t-SNE from scratch.
+
+    Parameters
+    ----------
+    test_database : Path
+        Path to the test SQLite database.
+    em : EmbeddingsManager
+        Embeddings manager with test embeddings loaded.
+    collection_name : str
+        Name of the ChromaDB collection.
+    """
+    from abstracts_explorer.clustering import ClusteringManager
+    from abstracts_explorer.config import get_config
+
+    config = get_config()
+
+    set_test_db(str(test_database))
+    db = DatabaseManager()
+    db.connect()
+    db.create_tables()
+
+    cm = ClusteringManager(em, db)
+    cm.load_embeddings()
+
+    # Cluster on full embeddings (this is fast with only 3 test papers)
+    cm.cluster(
+        method="agglomerative",
+        n_clusters=None,
+        use_reduced=False,
+        distance_threshold=150.0,
+        linkage="ward",
+    )
+
+    # Use PCA instead of t-SNE for the cached reduction – PCA is
+    # deterministic and thread-safe.
+    cm.reduce_dimensions(method="pca", n_components=2)
+
+    try:
+        cm.extract_cluster_keywords(n_keywords=5)
+        cm.generate_cluster_labels(use_llm=False, max_keywords=3)
+    except Exception:
+        pass  # Labels are optional
+
+    results = cm.get_clustering_results()
+
+    # Save under the t-SNE cache key so that compute_clusters_with_cache()
+    # finds it when MCP tools ask for tsne reduction.
+    db.save_clustering_cache(
+        embedding_model=config.embedding_model,
+        reduction_method="tsne",
+        n_components=2,
+        clustering_method="agglomerative",
+        results=results,
+        n_clusters=None,
+        clustering_params={"linkage": "ward", "distance_threshold": 150.0},
+    )
+    db.close()
+
+
 @pytest.fixture(scope="module")
 def web_server(test_database, test_embeddings, tmp_path_factory):
     """
@@ -307,26 +372,13 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     # CRITICAL: Set this BEFORE starting the server to avoid race conditions
     # This prevents get_embeddings_manager() from creating a new instance
     app_module.embeddings_manager = em
+    app_module.rag_chat = None
 
-    # Inject a mock RAGChat so that /api/chat responds instantly.
-    # A real RAGChat would call the LLM backend (potentially triggering slow
-    # clustering / t-SNE), and a long-running request in the threaded werkzeug
-    # server can leak across test boundaries, causing hangs or segfaults.
-    mock_rag = Mock()
-    mock_rag.query.return_value = {
-        "response": "This is a mock response for E2E testing.",
-        "papers": [],
-        "metadata": {
-            "n_papers": 0,
-            "model": "mock",
-            "rewritten_query": None,
-            "used_tools": False,
-            "tools_executed": [],
-            "retrieved_new_papers": False,
-        },
-    }
-    mock_rag.reset_conversation.return_value = None
-    app_module.rag_chat = mock_rag
+    # Pre-populate the database with cached clustering results so that MCP
+    # tools (get_cluster_topics, get_cluster_visualization) return instantly
+    # without running t-SNE.  This mirrors the production workflow where
+    # clustering is pre-generated via the CLI.
+    _prepopulate_clustering_cache(test_database, em, collection_name)
 
     # Mock get_database to not check file existence
     # Each Flask request thread will create its own database connection
