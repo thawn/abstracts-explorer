@@ -50,10 +50,11 @@ def get_env_test_path() -> Path:
 def monkeypatch_session():
     """
     Session-scoped monkeypatch fixture for module-level fixtures.
-    
+
     This allows module-scoped fixtures to use monkeypatch functionality.
     """
     from _pytest.monkeypatch import MonkeyPatch
+
     m = MonkeyPatch()
     yield m
     m.undo()
@@ -131,14 +132,14 @@ def set_test_embedding_db(embedding_db_path):
 def test_config():
     """
     Ensure tests use predictable configuration from .env.test.
-    
+
     This fixture loads configuration directly from .env.test to provide
     consistent defaults for all tests, preventing tests from being affected
     by the user's custom .env file.
-    
+
     The fixture runs automatically for all tests (autouse=True) at session scope.
     Individual tests can override specific environment variables as needed.
-    
+
     Note: End-to-end tests that require a working LM Studio connection should
     not use .env.test and will need to reload config without env_path.
     """
@@ -187,7 +188,7 @@ def db_manager(tmp_path, monkeypatch):
     """
     db_path = tmp_path / "test.db"
     set_test_db(db_path)
-    
+
     return DatabaseManager()
 
 
@@ -295,16 +296,16 @@ def test_database(tmp_path, monkeypatch):
     """
     from abstracts_explorer.database import DatabaseManager
     from abstracts_explorer.plugin import LightweightPaper
-    
+
     db_path = tmp_path / "test.db"
-    
+
     # Set PAPER_DB to point to our test database
     set_test_db(db_path)
-    
+
     # Use DatabaseManager to create the database with proper schema
     with DatabaseManager() as db:
         db.create_tables()
-        
+
         # Create sample papers using LightweightPaper model
         papers = [
             LightweightPaper(
@@ -344,11 +345,11 @@ def test_database(tmp_path, monkeypatch):
                 conference="NeurIPS",
             ),
         ]
-        
+
         # Add papers to database
         for paper in papers:
             db.add_paper(paper)
-    
+
     return db_path
 
 
@@ -372,18 +373,18 @@ def mock_lm_studio():
         # Create mock OpenAI client instance
         mock_client = Mock()
         mock_openai_class.return_value = mock_client
-        
+
         # Mock models.list() for connection test
         mock_models = Mock()
         mock_client.models.list.return_value = mock_models
-        
+
         # Mock embeddings.create() for embedding generation
         mock_embedding_response = Mock()
         mock_embedding_data = Mock()
         mock_embedding_data.embedding = [0.1] * 4096
         mock_embedding_response.data = [mock_embedding_data]
         mock_client.embeddings.create.return_value = mock_embedding_response
-        
+
         yield mock_client
 
 
@@ -407,16 +408,18 @@ def mock_rag_openai():
         # Create mock OpenAI client instance
         mock_client = Mock()
         mock_openai_class.return_value = mock_client
-        
+
         # Mock chat.completions.create() for chat generation
         mock_chat_response = Mock()
         mock_choice = Mock()
         mock_message = Mock()
-        mock_message.content = "Based on Paper 1 and Paper 2, attention mechanisms allow models to focus on relevant parts of the input."
+        mock_message.content = (
+            "Based on Paper 1 and Paper 2, attention mechanisms allow models to focus on relevant parts of the input."
+        )
         mock_choice.message = mock_message
         mock_chat_response.choices = [mock_choice]
         mock_client.chat.completions.create.return_value = mock_chat_response
-        
+
         yield mock_client
 
 
@@ -452,6 +455,7 @@ def embeddings_manager(tmp_path, monkeypatch):
     # Force config reload to pick up the environment variable
     # Use .env.test for consistent test configuration
     from abstracts_explorer.config import get_config
+
     _ = get_config(reload=True, env_path=get_env_test_path())  # Force reload but don't need the result
 
     # Create the manager
