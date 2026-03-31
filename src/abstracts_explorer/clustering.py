@@ -337,7 +337,14 @@ class ClusteringManager:
             else:
                 raise ClusteringError(f"Unknown reduction method: {method}. Use 'pca' or 'tsne'.")
 
-            self.reduced_embeddings = reducer.fit_transform(scaled_embeddings)
+            # Limit BLAS thread pool to 1 during fit_transform to prevent
+            # segfaults when running in a multi-threaded environment (e.g. a
+            # threaded Flask server).  OpenBLAS can otherwise spawn worker
+            # threads that conflict with other concurrent requests.
+            from threadpoolctl import threadpool_limits
+
+            with threadpool_limits(limits=1, user_api="blas"):
+                self.reduced_embeddings = reducer.fit_transform(scaled_embeddings)
             logger.info(f"Reduced embeddings shape: {self.reduced_embeddings.shape}")
 
             return self.reduced_embeddings
