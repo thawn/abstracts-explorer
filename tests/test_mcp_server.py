@@ -455,20 +455,28 @@ class TestMCPTools:
         mock_db = Mock()
         mock_db_class.return_value = mock_db
         mock_db.get_years_for_conference.return_value = [2023, 2024]
+        mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 100}
 
         # Import and call the tool
         from abstracts_explorer.mcp_server import get_topic_evolution
 
-        result_str = get_topic_evolution(topic_keywords="transformers", conference="NeurIPS")
+        result_str = get_topic_evolution(topic_keywords="transformers", conferences=["NeurIPS"])
         result = json.loads(result_str)
 
-        # Verify result
+        # Verify result structure
         assert result["topic"] == "transformers"
+        assert result["conferences"] == ["NeurIPS"]
         assert result["total_papers"] == 3
-        assert result["year_counts"]["2023"] == 2  # Keys are strings after JSON conversion
-        assert result["year_counts"]["2024"] == 1
-        assert "2023" in result["papers_by_year"]
-        assert "2024" in result["papers_by_year"]
+
+        # Per-conference data
+        assert "NeurIPS" in result["conference_data"]
+        cdata = result["conference_data"]["NeurIPS"]
+        assert cdata["year_counts"]["2023"] == 2  # Keys are strings after JSON
+        assert cdata["year_counts"]["2024"] == 1
+        assert cdata["year_relative"]["2023"] == 2.0  # 2/100 * 100
+        assert cdata["year_relative"]["2024"] == 1.0  # 1/100 * 100
+        assert "2023" in cdata["papers_by_year"]
+        assert "2024" in cdata["papers_by_year"]
 
         # Verify cleanup
         mock_em.close.assert_called_once()
@@ -504,22 +512,24 @@ class TestMCPTools:
         mock_db = Mock()
         mock_db_class.return_value = mock_db
         mock_db.get_years_for_conference.return_value = [2022, 2023, 2024, 2025]
+        mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 50}
 
         from abstracts_explorer.mcp_server import get_topic_evolution
 
         result_str = get_topic_evolution(
             topic_keywords="transformers",
-            conference="NeurIPS",
+            conferences=["NeurIPS"],
             start_year=2023,
             end_year=2024,
         )
         result = json.loads(result_str)
 
         # Only papers from 2023 and 2024 should be included
-        assert result["year_counts"]["2023"] == 1
-        assert result["year_counts"]["2024"] == 1
-        assert "2022" not in result["year_counts"]
-        assert "2025" not in result["year_counts"]
+        cdata = result["conference_data"]["NeurIPS"]
+        assert cdata["year_counts"]["2023"] == 1
+        assert cdata["year_counts"]["2024"] == 1
+        assert "2022" not in cdata["year_counts"]
+        assert "2025" not in cdata["year_counts"]
         assert result["year_range"]["start"] == 2023
         assert result["year_range"]["end"] == 2024
 
@@ -554,12 +564,13 @@ class TestMCPTools:
         mock_db = Mock()
         mock_db_class.return_value = mock_db
         mock_db.get_years_for_conference.return_value = [2024]
+        mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 200}
 
         from abstracts_explorer.mcp_server import get_topic_evolution
 
         result_str = get_topic_evolution(
             topic_keywords="transformers",
-            conference="NeurIPS",
+            conferences=["NeurIPS"],
             distance_threshold=0.8,
         )
         result = json.loads(result_str)
@@ -580,6 +591,72 @@ class TestMCPTools:
         # Verify cleanup
         mock_em.close.assert_called_once()
         mock_db.close.assert_called_once()
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_topic_evolution_multiple_conferences(self, mock_config, mock_db_class, mock_em_class):
+        """Test get_topic_evolution with multiple conferences."""
+        # Setup config mock
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config.return_value = mock_config_obj
+
+        # Setup embeddings manager mock
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+
+        def _find_papers(database, query, distance_threshold, conferences=None, years=None):
+            conf = conferences[0] if conferences else None
+            year = years[0] if years else None
+            if conf == "NeurIPS" and year == 2023:
+                return {"count": 5, "papers": [], "total_considered": 100}
+            elif conf == "NeurIPS" and year == 2024:
+                return {"count": 10, "papers": [], "total_considered": 100}
+            elif conf == "ICLR" and year == 2023:
+                return {"count": 3, "papers": [], "total_considered": 80}
+            elif conf == "ICLR" and year == 2024:
+                return {"count": 8, "papers": [], "total_considered": 80}
+            return {"count": 0, "papers": [], "total_considered": 0}
+
+        mock_em.find_papers_within_distance.side_effect = _find_papers
+
+        # Setup database mock
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+        mock_db.get_years_for_conference.return_value = [2023, 2024]
+
+        def _get_stats(year, conference):
+            if conference == "NeurIPS":
+                return {"total_papers": 200}
+            return {"total_papers": 150}
+
+        mock_db.get_stats.side_effect = _get_stats
+
+        from abstracts_explorer.mcp_server import get_topic_evolution
+
+        result_str = get_topic_evolution(
+            topic_keywords="transformers",
+            conferences=["NeurIPS", "ICLR"],
+        )
+        result = json.loads(result_str)
+
+        assert result["conferences"] == ["NeurIPS", "ICLR"]
+        assert result["total_papers"] == 26  # 5+10+3+8
+
+        # Verify per-conference data
+        assert "NeurIPS" in result["conference_data"]
+        assert "ICLR" in result["conference_data"]
+
+        neurips = result["conference_data"]["NeurIPS"]
+        assert neurips["year_counts"]["2023"] == 5
+        assert neurips["year_counts"]["2024"] == 10
+        assert neurips["year_relative"]["2023"] == 2.5  # 5/200*100
+
+        iclr = result["conference_data"]["ICLR"]
+        assert iclr["year_counts"]["2023"] == 3
+        assert iclr["year_counts"]["2024"] == 8
+        assert iclr["year_relative"]["2023"] == 2.0  # 3/150*100
 
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
     @patch("abstracts_explorer.mcp_server.DatabaseManager")

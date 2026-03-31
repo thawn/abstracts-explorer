@@ -111,9 +111,15 @@ def _normalize_get_topic_evolution_args(arguments: Dict[str, Any]) -> Dict[str, 
     if "topic_keywords" in args and isinstance(args["topic_keywords"], list):
         args["topic_keywords"] = " ".join(str(k) for k in args["topic_keywords"])
 
-    # Normalize conference: list → first element string
-    if "conference" in args and isinstance(args["conference"], list):
-        args["conference"] = args["conference"][0] if args["conference"] else None
+    # Normalize conference (singular) → conferences (list)
+    if "conference" in args and "conferences" not in args:
+        conf_val = args.pop("conference")
+        if isinstance(conf_val, str):
+            args["conferences"] = [conf_val]
+        elif isinstance(conf_val, list):
+            args["conferences"] = conf_val
+    elif "conference" in args:
+        args.pop("conference")  # 'conferences' already present; drop duplicate
 
     # Normalize start_year / end_year: list → first element int
     for key in ("start_year", "end_year"):
@@ -311,7 +317,8 @@ MCP_TOOLS_SCHEMA = [
             "description": (
                 "Analyze how specific topics have evolved over the years. "
                 "Use this tool when the user asks about: trends over time, historical development, how a topic has developed,"
-                "how a topic has changed, or evolution of research areas. A conference must be specified."
+                "how a topic has changed, or evolution of research areas. At least one conference must be specified. "
+                "Multiple conferences can be compared in the same analysis."
             ),
             "parameters": {
                 "type": "object",
@@ -320,9 +327,10 @@ MCP_TOOLS_SCHEMA = [
                         "type": "string",
                         "description": "Keywords describing the topic (e.g., 'transformers attention', 'reinforcement learning')",
                     },
-                    "conference": {
-                        "type": "string",
-                        "description": "Conference name to analyze (e.g., 'NeurIPS', 'ICLR'). Required.",
+                    "conferences": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Conference names to analyze (e.g., ['NeurIPS', 'ICLR']). Required.",
                     },
                     "start_year": {"type": "integer", "description": "Start year for analysis (inclusive)"},
                     "end_year": {"type": "integer", "description": "End year for analysis (inclusive)"},
@@ -335,7 +343,7 @@ MCP_TOOLS_SCHEMA = [
                     },
                     "collection_name": {"type": "string", "description": "Name of ChromaDB collection (optional)"},
                 },
-                "required": ["topic_keywords", "conference"],
+                "required": ["topic_keywords", "conferences"],
             },
         },
     },
@@ -687,14 +695,21 @@ def _format_topic_evolution_result(data: Dict[str, Any]) -> str:
     """Format topic evolution result for LLM."""
     lines = [f"Topic Evolution Analysis for '{data.get('topic', 'unknown')}':\n"]
 
-    year_counts = data.get("year_counts", {})
-    if year_counts:
-        lines.append("Papers per year:")
-        for year, count in sorted(year_counts.items()):
-            lines.append(f"  {year}: {count} papers")
+    conference_data = data.get("conference_data", {})
+    if conference_data:
+        for conference, cdata in conference_data.items():
+            lines.append(f"Conference: {conference}")
+            year_counts = cdata.get("year_counts", {})
+            year_relative = cdata.get("year_relative", {})
+            if year_counts:
+                lines.append("  Papers per year:")
+                for year, count in sorted(year_counts.items()):
+                    rel = year_relative.get(year, year_relative.get(str(year), 0))
+                    lines.append(f"    {year}: {count} papers ({rel}%)")
+            lines.append("")
 
     total = data.get("total_papers", 0)
-    lines.append(f"\nTotal papers found: {total}")
+    lines.append(f"Total papers found: {total}")
 
     return "\n".join(lines)
 
