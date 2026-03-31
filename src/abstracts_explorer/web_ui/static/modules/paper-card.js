@@ -66,6 +66,9 @@ export function formatPaperCard(paper, options = {}) {
 
     // Build metadata badges
     let metadata = '';
+    if (paper.conference) {
+        metadata += `<span class="px-2 py-1 bg-indigo-100 text-indigo-700 text-xs rounded-full mr-${compact ? '1' : '2'}"><i class="fas fa-university mr-1"></i>${escapeHtml(paper.conference)}</span>`;
+    }
     if (paper.session) {
         metadata += `<span class="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full mr-${compact ? '1' : '2'}"><i class="fas fa-calendar-alt mr-1"></i>${escapeHtml(paper.session)}</span>`;
     }
@@ -185,6 +188,11 @@ export async function showPaperDetails(paperId) {
                 </div>
                 
                 <div class="mb-4 flex flex-wrap gap-2">
+                    ${paper.conference ? `
+                        <span class="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm">
+                            <i class="fas fa-university mr-1"></i>${escapeHtml(paper.conference)}
+                        </span>
+                    ` : ''}
                     ${paper.session ? `
                         <span class="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">
                             <i class="fas fa-calendar-alt mr-1"></i>${escapeHtml(paper.session)}
