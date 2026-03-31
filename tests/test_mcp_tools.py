@@ -625,7 +625,7 @@ class TestExecuteMCPToolE2E:
             patch("abstracts_explorer.mcp_server.get_config") as mock_cfg,
         ):
             mock_cfg.return_value = Mock(collection_name="papers")
-            result = execute_mcp_tool("search_papers", {"topic_keywords": "deep learning", "n_results": 2})
+            result = execute_mcp_tool("search_papers", {"topic_keywords": "deep learning", "conference": "NeurIPS", "n_results": 2})
 
         data = json.loads(result)
         assert "error" not in data
@@ -716,7 +716,7 @@ class TestExecuteMCPToolE2E:
             patch("abstracts_explorer.mcp_server.get_config") as mock_cfg,
         ):
             mock_cfg.return_value = Mock(collection_name="papers")
-            result = execute_mcp_tool("get_topic_evolution", {"topic_keywords": "transformers"})
+            result = execute_mcp_tool("get_topic_evolution", {"topic_keywords": "transformers", "conference": "NeurIPS"})
 
         data = json.loads(result)
         assert "error" not in data
@@ -771,7 +771,7 @@ class TestExecuteMCPToolE2E:
             mock_cfg.return_value = Mock(collection_name="papers")
             result = execute_mcp_tool(
                 "analyze_topic_relevance",
-                {"topic": "deep learning", "distance_threshold": 1.1},
+                {"topic": "deep learning", "distance_threshold": 1.1, "conferences": ["NeurIPS"]},
             )
 
         data = json.loads(result)

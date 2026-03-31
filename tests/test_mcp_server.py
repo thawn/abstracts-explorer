@@ -446,7 +446,7 @@ class TestMCPTools:
         # Import and call the tool
         from abstracts_explorer.mcp_server import get_topic_evolution
 
-        result_str = get_topic_evolution(topic_keywords="transformers")
+        result_str = get_topic_evolution(topic_keywords="transformers", conference="NeurIPS")
         result = json.loads(result_str)
 
         # Verify result
@@ -495,17 +495,20 @@ class TestMCPTools:
         from abstracts_explorer.mcp_server import get_topic_evolution
 
         where_clause = {"session": {"$in": ["Oral Session 1"]}}
-        result_str = get_topic_evolution(topic_keywords="transformers", where=where_clause)
+        result_str = get_topic_evolution(topic_keywords="transformers", conference="NeurIPS", where=where_clause)
         result = json.loads(result_str)
 
         # Verify result
         assert result["topic"] == "transformers"
         assert result["total_papers"] == 2
 
-        # Verify search_similar was called with WHERE clause
+        # Verify search_similar was called with merged WHERE clause (session + conference)
         mock_em.search_similar.assert_called_once()
         call_args = mock_em.search_similar.call_args
-        assert call_args[1]["where"] == where_clause
+        where_arg = call_args[1]["where"]
+        assert "$and" in where_arg
+        assert {"session": {"$in": ["Oral Session 1"]}} in where_arg["$and"]
+        assert {"conference": "NeurIPS"} in where_arg["$and"]
 
         # Verify cleanup
         mock_em.close.assert_called_once()
@@ -596,17 +599,20 @@ class TestMCPTools:
         from abstracts_explorer.mcp_server import search_papers
 
         where_clause = {"session": "Oral"}
-        result_str = search_papers(topic_keywords="llm", where=where_clause, years=[current_year, current_year - 1])
+        result_str = search_papers(topic_keywords="llm", conference="NeurIPS", where=where_clause, years=[current_year, current_year - 1])
         result = json.loads(result_str)
 
         # Verify result
         assert result["topic"] == "llm"
         assert result["papers_found"] >= 1
 
-        # Verify search_similar was called with WHERE clause
+        # Verify search_similar was called with merged WHERE clause (session + conference)
         mock_em.search_similar.assert_called_once()
         call_args = mock_em.search_similar.call_args
-        assert call_args[1]["where"] == where_clause
+        where_arg = call_args[1]["where"]
+        assert "$and" in where_arg
+        assert {"session": "Oral"} in where_arg["$and"]
+        assert {"conference": "NeurIPS"} in where_arg["$and"]
 
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
     @patch("abstracts_explorer.mcp_server.DatabaseManager")
@@ -644,7 +650,7 @@ class TestMCPTools:
         where_clause = {
             "$and": [{"year": {"$gte": 2024}}, {"session": {"$in": ["Oral Session 1", "Spotlight Session"]}}]
         }
-        result_str = search_papers(topic_keywords="deep learning", where=where_clause)
+        result_str = search_papers(topic_keywords="deep learning", conference="NeurIPS", where=where_clause)
 
         # Verify result is valid JSON
         result = json.loads(result_str)
@@ -655,10 +661,11 @@ class TestMCPTools:
         call_args = mock_em.search_similar.call_args
         where_arg = call_args[1]["where"]
 
-        # Should preserve the complex $and structure
+        # Should preserve the complex $and structure and add conference
         assert "$and" in where_arg
         assert {"year": {"$gte": 2024}} in where_arg["$and"]
         assert {"session": {"$in": ["Oral Session 1", "Spotlight Session"]}} in where_arg["$and"]
+        assert {"conference": "NeurIPS"} in where_arg["$and"]
 
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
     @patch("abstracts_explorer.mcp_server.DatabaseManager")
@@ -682,7 +689,7 @@ class TestMCPTools:
         from abstracts_explorer.mcp_server import get_topic_evolution
 
         result_str = get_topic_evolution(
-            topic_keywords="transformers", where="invalid string"  # Invalid: should be dict or None
+            topic_keywords="transformers", conference="NeurIPS", where="invalid string"  # Invalid: should be dict or None
         )
         result = json.loads(result_str)
 

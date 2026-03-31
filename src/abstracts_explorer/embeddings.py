@@ -966,11 +966,16 @@ class EmbeddingsManager:
                 else:
                     where_clause = {"$and": filters}
 
-            # Query all papers and get distances
-            # Using collection.query() which returns papers sorted by distance
+            # Query papers and get distances.
+            # Cap n_results to avoid ChromaDB / SQLite "too many SQL variables"
+            # errors that occur when the collection is large (SQLite has a
+            # default limit of 999 bound parameters).
+            _MAX_QUERY_RESULTS = 5000
+            n_results_query = min(total_count, _MAX_QUERY_RESULTS)
+
             results = self.collection.query(
                 query_embeddings=[query_embedding],
-                n_results=total_count,  # Get all papers
+                n_results=n_results_query,
                 include=["distances", "metadatas"],
                 where=where_clause,
             )

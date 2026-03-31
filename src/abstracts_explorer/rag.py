@@ -82,6 +82,9 @@ def _tool_search_papers(
     Use this tool to find papers related to a research topic. Returns
     matching papers with titles, abstracts, and relevance scores.
 
+    A conference must be specified. If not provided by the user, the
+    currently selected conference from the web UI is used automatically.
+
     Parameters
     ----------
     ctx : RunContext[RAGDeps]
@@ -94,12 +97,17 @@ def _tool_search_papers(
         Filter by publication years (e.g. [2024, 2025]).
     conference : str, optional
         Filter by conference name (e.g. "NeurIPS", "ICLR").
+        When omitted, the default conference from the current session is used.
     """
     kwargs: Dict[str, Any] = {"topic_keywords": topic_keywords, "n_results": n_results}
     if years is not None:
         kwargs["years"] = years
-    if conference is not None:
+
+    # Determine conference: explicit param > deps default
+    if conference:
         kwargs["conference"] = conference
+    elif ctx.deps.conferences:
+        kwargs["conference"] = ctx.deps.conferences[0]
 
     raw = mcp_search_papers(**kwargs)
     ctx.deps.tool_results.append({"name": "search_papers", "raw_result": raw})
@@ -153,6 +161,9 @@ def _tool_get_topic_evolution(
     Use this tool to understand trends and year-over-year changes
     in a research topic. Returns paper counts by year and sample papers.
 
+    A conference must be specified. If not provided by the user, the
+    currently selected conference from the web UI is used automatically.
+
     Parameters
     ----------
     ctx : RunContext[RAGDeps]
@@ -161,14 +172,20 @@ def _tool_get_topic_evolution(
         Keywords describing the topic to analyze (e.g. "transformers attention").
     conference : str, optional
         Filter by conference name (e.g. "NeurIPS", "ICLR").
+        When omitted, the default conference from the current session is used.
     start_year : int, optional
         Start year for analysis (inclusive).
     end_year : int, optional
         End year for analysis (inclusive).
     """
     kwargs: Dict[str, Any] = {"topic_keywords": topic_keywords}
-    if conference is not None:
+
+    # Determine conference: explicit param > deps default
+    if conference:
         kwargs["conference"] = conference
+    elif ctx.deps.conferences:
+        kwargs["conference"] = ctx.deps.conferences[0]
+
     if start_year is not None:
         kwargs["start_year"] = start_year
     if end_year is not None:
@@ -183,7 +200,7 @@ def _tool_analyze_topic_relevance(
     ctx: RunContext[RAGDeps],
     topic: str,
     distance_threshold: float = 1.1,
-    conferences: Optional[List[str]] = None,
+    conference: Optional[str] = None,
     years: Optional[List[int]] = None,
 ) -> str:
     """Analyze the relevance or popularity of a topic at a conference.
@@ -191,6 +208,9 @@ def _tool_analyze_topic_relevance(
     Use this tool to count how many papers are semantically similar to a
     topic, measuring how prevalent or important a research topic is.
     Returns relevance score, paper counts, and conference/year breakdowns.
+
+    A conference must be specified. If not provided by the user, the
+    currently selected conference from the web UI is used automatically.
 
     Parameters
     ----------
@@ -200,14 +220,20 @@ def _tool_analyze_topic_relevance(
         The topic or research question to analyze.
     distance_threshold : float
         Maximum distance to consider papers relevant (default: 1.1).
-    conferences : list of str, optional
-        Filter results to specific conferences.
+    conference : str, optional
+        Conference name to analyze (e.g. "NeurIPS", "ICLR").
+        When omitted, the default conference from the current session is used.
     years : list of int, optional
         Filter results to specific years.
     """
     kwargs: Dict[str, Any] = {"topic": topic, "distance_threshold": distance_threshold}
-    if conferences is not None:
-        kwargs["conferences"] = conferences
+
+    # Determine conferences: explicit param > deps default
+    if conference:
+        kwargs["conferences"] = [conference]
+    elif ctx.deps.conferences:
+        kwargs["conferences"] = ctx.deps.conferences
+
     if years is not None:
         kwargs["years"] = years
 

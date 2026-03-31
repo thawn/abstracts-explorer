@@ -435,13 +435,15 @@ def get_topic_evolution(
 
     This tool searches for papers related to specific topic keywords and
     analyzes their distribution and trends over time.
+    A conference must be specified.
 
     Parameters
     ----------
     topic_keywords : str
         Keywords describing the topic to analyze (e.g., "transformers attention")
     conference : str, optional
-        Filter by conference name (e.g., "neurips", "iclr")
+        Conference name to filter by (e.g., "NeurIPS", "ICLR").
+        Required – returns an error when not provided.
     start_year : int, optional
         Start year for analysis (inclusive)
     end_year : int, optional
@@ -464,6 +466,16 @@ def get_topic_evolution(
         JSON string containing topic evolution analysis
     """
     try:
+        if not conference:
+            return json.dumps(
+                {
+                    "error": (
+                        "A conference must be specified for topic evolution analysis. "
+                        "Please provide conference parameter."
+                    )
+                },
+                indent=2,
+            )
         config = get_config()
         collection_name = collection_name or config.collection_name
 
@@ -566,7 +578,7 @@ def search_papers(
     Search for papers on a specific topic.
 
     This tool searches for the most relevant papers about a topic, optionally
-    filtered by specific years.
+    filtered by specific years.  A conference must be specified.
 
     Parameters
     ----------
@@ -577,7 +589,8 @@ def search_papers(
     n_results : int, optional
         Number of papers to return (default: 10)
     conference : str, optional
-        Filter by conference name
+        Conference name to filter by (e.g., "NeurIPS", "ICLR").
+        Required – returns an error when not provided.
     where : dict, optional
         Custom ChromaDB WHERE clause for filtering results by metadata.
         Supports ChromaDB query operators like $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin.
@@ -596,6 +609,16 @@ def search_papers(
         JSON string containing search results
     """
     try:
+        if not conference:
+            return json.dumps(
+                {
+                    "error": (
+                        "A conference must be specified for paper search. "
+                        "Please provide conference parameter."
+                    )
+                },
+                indent=2,
+            )
         config = get_config()
         collection_name = collection_name or config.collection_name
 
@@ -692,6 +715,7 @@ def analyze_topic_relevance(
     This tool measures topic relevance by finding papers semantically similar to the topic
     within a specified Euclidean distance threshold. It's useful for identifying how prevalent
     or relevant a research topic is at a conference.
+    A conference must be specified.
 
     Parameters
     ----------
@@ -702,7 +726,8 @@ def analyze_topic_relevance(
         Maximum Euclidean distance in embedding space to consider papers relevant (default: 1.1).
         Lower values mean stricter matching. Typical range: 0.5-2.0 for normalized embeddings.
     conferences : list of str, optional
-        Filter results to specific conferences (e.g., ["NeurIPS", "ICLR"])
+        Conference names to filter by (e.g., ["NeurIPS", "ICLR"]).
+        Required – returns an error when not provided.
     years : list of int, optional
         Filter results to specific years (e.g., [2024, 2025])
     collection_name : str, optional
@@ -731,6 +756,17 @@ def analyze_topic_relevance(
     Interpretation: Low relevance - emerging or niche topic
     """
     try:
+        if not conferences:
+            return json.dumps(
+                {
+                    "error": (
+                        "A conference must be specified for topic relevance analysis. "
+                        "Please provide conferences parameter."
+                    )
+                },
+                indent=2,
+            )
+
         config = get_config()
         collection_name = collection_name or config.collection_name
 
