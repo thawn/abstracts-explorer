@@ -976,7 +976,7 @@ class EmbeddingsManager:
             # Query papers and get distances.
             # Cap n_results to avoid ChromaDB / SQLite "too many SQL variables"
             # errors that occur when the collection is large (SQLite has a
-            # default limit of 999 bound parameters).
+            # default limit of 32,766 bound parameters).
             n_results_query = min(total_count, _MAX_QUERY_RESULTS)
 
             results = self.collection.query(
