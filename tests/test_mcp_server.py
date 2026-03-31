@@ -579,12 +579,13 @@ class TestMCPTools:
         from datetime import datetime
 
         current_year = datetime.now().year
+        # ChromaDB stores all metadata values as strings, so year is a string
         mock_em.search_similar.return_value = {
             "ids": [["p1", "p2"]],
             "metadatas": [
                 [
-                    {"title": "Paper 1", "year": current_year, "conference": "NeurIPS", "session": "Oral"},
-                    {"title": "Paper 2", "year": current_year - 1, "conference": "NeurIPS", "session": "Oral"},
+                    {"title": "Paper 1", "year": str(current_year), "conference": "NeurIPS", "session": "Oral"},
+                    {"title": "Paper 2", "year": str(current_year - 1), "conference": "NeurIPS", "session": "Oral"},
                 ]
             ],
             "documents": [["Abstract 1", "Abstract 2"]],
@@ -635,9 +636,10 @@ class TestMCPTools:
         from datetime import datetime
 
         current_year = datetime.now().year
+        # ChromaDB stores all metadata values as strings, so year is a string
         mock_em.search_similar.return_value = {
             "ids": [["p1"]],
-            "metadatas": [[{"title": "Paper 1", "year": current_year, "conference": "NeurIPS"}]],
+            "metadatas": [[{"title": "Paper 1", "year": str(current_year), "conference": "NeurIPS"}]],
             "documents": [["Abstract 1"]],
             "distances": [[0.1]],
         }
@@ -1014,6 +1016,136 @@ class TestSearchPapersPaperCardFields:
         assert paper["session"] == "Best Paper Session"
         assert paper["abstract"] == "This is the abstract text."
         assert "relevance_score" in paper
+
+
+class TestSearchPapersYearFilter:
+    """Tests for year-based filtering in search_papers.
+
+    ChromaDB stores all metadata values as strings.  Before the bug-fix the
+    year comparison ``year in years`` always failed because ``"2024" != 2024``,
+    so no papers were ever returned when a year filter was applied.
+    """
+
+    def _make_mock_setup(self, mock_config, mock_db_class, mock_em_class, metadatas, ids=None):
+        """Helper to wire up standard mock objects."""
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config.return_value = mock_config_obj
+
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+        if ids is None:
+            ids = [f"p{i+1}" for i in range(len(metadatas))]
+        mock_em.search_similar.return_value = {
+            "ids": [ids],
+            "metadatas": [metadatas],
+            "documents": [["Abstract"] * len(metadatas)],
+            "distances": [[0.1] * len(metadatas)],
+        }
+
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+        return mock_em
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_year_filter_with_string_year_in_metadata(self, mock_config, mock_db_class, mock_em_class):
+        """search_papers returns papers when ChromaDB returns year as a string.
+
+        This is a regression test for the bug where ``year in years`` always
+        evaluated to False because ChromaDB stores metadata values as strings
+        but the ``years`` parameter is a list of ints.
+        """
+        # ChromaDB always stores year as a string (str(v) conversion)
+        self._make_mock_setup(
+            mock_config,
+            mock_db_class,
+            mock_em_class,
+            metadatas=[
+                {"title": "Paper 2024", "year": "2024", "conference": "NeurIPS"},
+                {"title": "Paper 2023", "year": "2023", "conference": "NeurIPS"},
+            ],
+        )
+
+        from abstracts_explorer.mcp_server import search_papers
+
+        result = json.loads(search_papers(topic_keywords="deep learning", conference="NeurIPS", years=[2024]))
+
+        # Before the fix this would be 0 because "2024" != 2024
+        assert result["papers_found"] == 1
+        assert result["papers"][0]["title"] == "Paper 2024"
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_year_filter_excludes_other_years(self, mock_config, mock_db_class, mock_em_class):
+        """search_papers excludes papers whose year does not match the filter."""
+        self._make_mock_setup(
+            mock_config,
+            mock_db_class,
+            mock_em_class,
+            metadatas=[
+                {"title": "Old Paper", "year": "2020", "conference": "NeurIPS"},
+                {"title": "New Paper", "year": "2024", "conference": "NeurIPS"},
+            ],
+        )
+
+        from abstracts_explorer.mcp_server import search_papers
+
+        result = json.loads(search_papers(topic_keywords="transformers", conference="NeurIPS", years=[2024]))
+
+        assert result["papers_found"] == 1
+        assert result["papers"][0]["title"] == "New Paper"
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_year_filter_multiple_years(self, mock_config, mock_db_class, mock_em_class):
+        """search_papers returns papers matching any of the specified years."""
+        self._make_mock_setup(
+            mock_config,
+            mock_db_class,
+            mock_em_class,
+            metadatas=[
+                {"title": "Paper 2022", "year": "2022", "conference": "NeurIPS"},
+                {"title": "Paper 2023", "year": "2023", "conference": "NeurIPS"},
+                {"title": "Paper 2024", "year": "2024", "conference": "NeurIPS"},
+            ],
+        )
+
+        from abstracts_explorer.mcp_server import search_papers
+
+        result = json.loads(
+            search_papers(topic_keywords="neural networks", conference="NeurIPS", years=[2023, 2024])
+        )
+
+        assert result["papers_found"] == 2
+        titles = {p["title"] for p in result["papers"]}
+        assert "Paper 2023" in titles
+        assert "Paper 2024" in titles
+        assert "Paper 2022" not in titles
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_no_year_filter_returns_all_papers(self, mock_config, mock_db_class, mock_em_class):
+        """search_papers without a year filter returns all papers regardless of year."""
+        self._make_mock_setup(
+            mock_config,
+            mock_db_class,
+            mock_em_class,
+            metadatas=[
+                {"title": "Paper A", "year": "2022", "conference": "NeurIPS"},
+                {"title": "Paper B", "year": "2024", "conference": "NeurIPS"},
+            ],
+        )
+
+        from abstracts_explorer.mcp_server import search_papers
+
+        result = json.loads(search_papers(topic_keywords="attention", conference="NeurIPS"))
+
+        assert result["papers_found"] == 2
 
 
 class TestGetPaperDetails:

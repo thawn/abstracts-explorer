@@ -660,8 +660,16 @@ def search_papers(
                 metadata = results["metadatas"][0][idx]
                 year = metadata.get("year")
 
+                # ChromaDB stores all metadata values as strings; convert to int for comparison
+                year_int = None
+                if year:
+                    try:
+                        year_int = int(year)
+                    except (ValueError, TypeError):
+                        year_int = None
+
                 # Filter by years list if provided
-                if years is None or (year and year in years):
+                if years is None or (year_int is not None and year_int in years):
                     # Parse authors from semicolon-separated string stored in ChromaDB metadata
                     authors_raw = metadata.get("authors", "")
                     authors = [a.strip() for a in authors_raw.split(";") if a.strip()] if authors_raw else []
