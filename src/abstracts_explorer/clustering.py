@@ -60,6 +60,7 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
+from threadpoolctl import threadpool_limits
 
 try:
     import skfuzzy as fuzz
@@ -341,8 +342,6 @@ class ClusteringManager:
             # segfaults when running in a multi-threaded environment (e.g. a
             # threaded Flask server).  OpenBLAS can otherwise spawn worker
             # threads that conflict with other concurrent requests.
-            from threadpoolctl import threadpool_limits
-
             with threadpool_limits(limits=1, user_api="blas"):
                 self.reduced_embeddings = reducer.fit_transform(scaled_embeddings)
             logger.info(f"Reduced embeddings shape: {self.reduced_embeddings.shape}")
