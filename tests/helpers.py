@@ -6,8 +6,11 @@ to reduce code duplication and ensure consistency.
 """
 
 import socket
-import requests
 import pytest
+
+import httpx
+import openai
+
 from abstracts_explorer.config import get_config
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.database import DatabaseManager
@@ -27,7 +30,7 @@ def reset_lm_studio_availability_cache():
 def create_test_db_with_paper(db_path, paper_data):
     """
     Create a test database with a single paper.
-    
+
     Parameters
     ----------
     db_path : Path or str
@@ -35,21 +38,21 @@ def create_test_db_with_paper(db_path, paper_data):
     paper_data : dict
         Dictionary containing paper data with keys: uid, title, abstract, authors,
         session, poster_position, keywords, year, conference
-        
+
     Returns
     -------
     DatabaseManager
         Connected database manager instance. Caller is responsible for closing it.
-        
+
     Notes
     -----
     This helper reduces duplication in integration tests that need to manually
     create databases with specific paper data. Default values are provided for
     optional fields if not specified.
-    
+
     This function temporarily sets the PAPER_DB environment variable to configure
     the DatabaseManager with the specified path.
-    
+
     Examples
     --------
     >>> db = create_test_db_with_paper(
@@ -70,20 +73,20 @@ def create_test_db_with_paper(db_path, paper_data):
     """
     from abstracts_explorer.plugin import LightweightPaper
     from tests.conftest import set_test_db
-    
+
     # Set environment variable and reload config
     set_test_db(db_path)
-    
+
     db = DatabaseManager()
     db.connect()
     db.create_tables()
-    
+
     # Create LightweightPaper from paper_data
     # Convert authors if needed
     authors = paper_data.get("authors", [])
     if isinstance(authors, str):
         authors = [authors]
-    
+
     paper = LightweightPaper(
         original_id=paper_data.get("uid"),
         title=paper_data["title"],
@@ -95,9 +98,9 @@ def create_test_db_with_paper(db_path, paper_data):
         year=paper_data.get("year", 2025),
         conference=paper_data.get("conference", "TestConf"),
     )
-    
+
     db.add_paper(paper)
-    
+
     return db
 
 
@@ -119,7 +122,7 @@ def check_lm_studio_available():
 
     Used to skip tests that require a running OpenAI-compatible API backend
     (such as LM Studio or blablador).
-    
+
     The result is cached to avoid multiple API calls during test collection.
     """
     global _lm_studio_available_cache
@@ -147,7 +150,10 @@ def check_lm_studio_available():
         finally:
             em.close()
 
-    except (requests.exceptions.RequestException, requests.exceptions.Timeout):
+    except (httpx.HTTPError, openai.OpenAIError, OSError, ConnectionError):
+        # Catch network and API errors: the openai client uses httpx
+        # internally, so network errors surface as httpx/openai exceptions
+        # rather than requests exceptions.
         _lm_studio_available_cache = False
         return False
 
