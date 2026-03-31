@@ -271,9 +271,7 @@ class ClusteringManager:
             self.embeddings = np.array(results["embeddings"])
             # Parse metadata through ChromaDBPaperMetadata model to convert
             # string values back to their proper types (e.g. year → int).
-            self.metadatas = [
-                EmbeddingsManager.parse_chromadb_metadata(m) for m in results["metadatas"]
-            ]
+            self.metadatas = [EmbeddingsManager.parse_chromadb_metadata(m) for m in results["metadatas"]]
 
             logger.info(f"Loaded {len(self.paper_ids)} embeddings with dimension {self.embeddings.shape[1]}")
             return len(self.paper_ids)
