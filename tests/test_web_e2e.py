@@ -235,6 +235,75 @@ def test_embeddings(test_database, tmp_path_factory):
     # Cleanup happens automatically
 
 
+def _prepopulate_clustering_cache(test_database, em, collection_name):
+    """
+    Pre-populate the database with cached clustering results.
+
+    This mirrors the production workflow where ``abstracts-explorer cluster
+    pre-generate`` is run before the web UI is used.  With cached results
+    present, MCP tools (``get_cluster_topics``, ``get_cluster_visualization``)
+    return instantly instead of running t-SNE from scratch.
+
+    Parameters
+    ----------
+    test_database : Path
+        Path to the test SQLite database.
+    em : EmbeddingsManager
+        Embeddings manager with test embeddings loaded.
+    collection_name : str
+        Name of the ChromaDB collection.
+    """
+    from abstracts_explorer.clustering import ClusteringManager
+    from abstracts_explorer.config import get_config
+
+    config = get_config()
+
+    set_test_db(str(test_database))
+    db = DatabaseManager()
+    db.connect()
+    db.create_tables()
+
+    cm = ClusteringManager(em, db)
+    cm.load_embeddings()
+
+    # Cluster on full embeddings (this is fast with only 3 test papers)
+    cm.cluster(
+        method="agglomerative",
+        n_clusters=None,
+        use_reduced=False,
+        distance_threshold=150.0,
+        linkage="ward",
+    )
+
+    # Use PCA for the reduction step (deterministic, thread-safe, and fast).
+    # The results are stored under the "tsne" cache key so that
+    # compute_clusters_with_cache() finds an exact cache hit when MCP tools
+    # request t-SNE reduction.  The x/y coordinates differ from a real t-SNE
+    # but are sufficient for testing the cache-lookup and topic-analysis paths.
+    cm.reduce_dimensions(method="pca", n_components=2)
+
+    try:
+        cm.extract_cluster_keywords(n_keywords=5)
+        cm.generate_cluster_labels(use_llm=False, max_keywords=3)
+    except Exception:
+        pass  # Labels are optional
+
+    results = cm.get_clustering_results()
+
+    # Save under the t-SNE cache key so that compute_clusters_with_cache()
+    # finds it when MCP tools ask for tsne reduction.
+    db.save_clustering_cache(
+        embedding_model=config.embedding_model,
+        reduction_method="tsne",
+        n_components=2,
+        clustering_method="agglomerative",
+        results=results,
+        n_clusters=None,
+        clustering_params={"linkage": "ward", "distance_threshold": 150.0},
+    )
+    db.close()
+
+
 @pytest.fixture(scope="module")
 def web_server(test_database, test_embeddings, tmp_path_factory):
     """
@@ -307,6 +376,12 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     # This prevents get_embeddings_manager() from creating a new instance
     app_module.embeddings_manager = em
     app_module.rag_chat = None
+
+    # Pre-populate the database with cached clustering results so that MCP
+    # tools (get_cluster_topics, get_cluster_visualization) return instantly
+    # without running t-SNE.  This mirrors the production workflow where
+    # clustering is pre-generated via the CLI.
+    _prepopulate_clustering_cache(test_database, em, collection_name)
 
     # Mock get_database to not check file existence
     # Each Flask request thread will create its own database connection

@@ -41,10 +41,10 @@ class TestMergeWhereClauseWithConference:
         """Test that deep copy prevents mutations to nested structures."""
         where = {"$and": [{"year": 2024}, {"session": "Oral"}]}
         result = merge_where_clause_with_conference(where, "NeurIPS")
-        
+
         # Modify result
         result["$and"].append({"modified": True})
-        
+
         # Original should be unchanged
         assert len(where["$and"]) == 2
         assert {"modified": True} not in where["$and"]
@@ -82,12 +82,7 @@ class TestMergeWhereClauseWithConference:
 
     def test_conference_in_deeply_nested_structure(self):
         """Test conference detection in deeply nested structure."""
-        where = {
-            "$or": [
-                {"$and": [{"conference": "ICML"}, {"year": 2024}]},
-                {"session": "Oral"}
-            ]
-        }
+        where = {"$or": [{"$and": [{"conference": "ICML"}, {"year": 2024}]}, {"session": "Oral"}]}
         result = merge_where_clause_with_conference(where, "NeurIPS")
         # Should detect conference in nested structure
         assert result == where
@@ -157,8 +152,10 @@ class TestLoadClusteringData:
         mock_em = Mock()
         mock_em_class.return_value = mock_em
 
-        with patch("abstracts_explorer.mcp_server.DatabaseManager") as mock_db_class, \
-             patch("abstracts_explorer.mcp_server.ClusteringManager") as mock_cm_class:
+        with (
+            patch("abstracts_explorer.mcp_server.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.mcp_server.ClusteringManager") as mock_cm_class,
+        ):
             mock_db = Mock()
             mock_db_class.return_value = mock_db
             mock_cm = Mock()
@@ -217,7 +214,7 @@ class TestAnalyzeClusterTopics:
         assert result["paper_count"] == 3
         assert len(result["sample_titles"]) == 3
         assert result["sample_titles"][0] == "Paper 1"
-        
+
         # Check keywords
         keyword_dict = {k["keyword"]: k["count"] for k in result["keywords"]}
         assert keyword_dict["ml"] == 2  # appears in papers 0 and 3
@@ -296,18 +293,35 @@ class TestMCPTools:
     """Tests for MCP tool functions."""
 
     @patch("abstracts_explorer.mcp_server.load_clustering_data")
+    @patch("abstracts_explorer.mcp_server.compute_clusters_with_cache")
     @patch("abstracts_explorer.mcp_server.analyze_cluster_topics")
-    def test_get_cluster_topics(self, mock_analyze, mock_load):
+    def test_get_cluster_topics(self, mock_analyze, mock_compute, mock_load):
         """Test get_cluster_topics tool."""
         # Setup mocks
         mock_cm = Mock()
         mock_cm.embeddings_manager = Mock()
+        mock_cm.paper_ids = ["p1", "p2", "p3", "p4"]
         mock_db = Mock()
         mock_load.return_value = (mock_cm, mock_db)
 
         mock_cm.load_embeddings.return_value = 100
-        mock_cm.cluster.return_value = np.array([0, 0, 1, 1])
-        mock_cm.reduce_dimensions.return_value = np.array([[0, 0], [1, 1], [2, 2], [3, 3]])
+
+        # compute_clusters_with_cache returns cached results
+        mock_compute.return_value = {
+            "points": [
+                {"id": "p1", "cluster": 0, "x": 0.0, "y": 0.0},
+                {"id": "p2", "cluster": 0, "x": 1.0, "y": 1.0},
+                {"id": "p3", "cluster": 1, "x": 2.0, "y": 2.0},
+                {"id": "p4", "cluster": 1, "x": 3.0, "y": 3.0},
+            ],
+            "statistics": {
+                "n_clusters": 2,
+                "n_noise": 0,
+                "cluster_sizes": {0: 2, 1: 2},
+                "total_papers": 4,
+            },
+        }
+
         mock_cm.get_cluster_statistics.return_value = {
             "n_clusters": 2,
             "n_noise": 0,
@@ -369,11 +383,13 @@ class TestMCPTools:
         mock_em_class.return_value = mock_em
         mock_em.search_similar.return_value = {
             "ids": [["p1", "p2", "p3"]],
-            "metadatas": [[
-                {"title": "Paper 1", "year": 2023, "session": "ML"},
-                {"title": "Paper 2", "year": 2023, "session": "DL"},
-                {"title": "Paper 3", "year": 2024, "session": "ML"},
-            ]],
+            "metadatas": [
+                [
+                    {"title": "Paper 1", "year": 2023, "session": "ML"},
+                    {"title": "Paper 2", "year": 2023, "session": "DL"},
+                    {"title": "Paper 3", "year": 2024, "session": "ML"},
+                ]
+            ],
             "distances": [[0.1, 0.2, 0.3]],
         }
 
@@ -416,10 +432,12 @@ class TestMCPTools:
         mock_em_class.return_value = mock_em
         mock_em.search_similar.return_value = {
             "ids": [["p1", "p2"]],
-            "metadatas": [[
-                {"title": "Paper 1", "year": 2024, "session": "Oral Session 1"},
-                {"title": "Paper 2", "year": 2024, "session": "Oral Session 1"},
-            ]],
+            "metadatas": [
+                [
+                    {"title": "Paper 1", "year": 2024, "session": "Oral Session 1"},
+                    {"title": "Paper 2", "year": 2024, "session": "Oral Session 1"},
+                ]
+            ],
             "distances": [[0.1, 0.2]],
         }
 
@@ -431,10 +449,7 @@ class TestMCPTools:
         from abstracts_explorer.mcp_server import get_topic_evolution
 
         where_clause = {"session": {"$in": ["Oral Session 1"]}}
-        result_str = get_topic_evolution(
-            topic_keywords="transformers",
-            where=where_clause
-        )
+        result_str = get_topic_evolution(topic_keywords="transformers", where=where_clause)
         result = json.loads(result_str)
 
         # Verify result
@@ -479,11 +494,7 @@ class TestMCPTools:
         from abstracts_explorer.mcp_server import get_topic_evolution
 
         where_clause = {"year": {"$gte": 2024}}
-        result_str = get_topic_evolution(
-            topic_keywords="transformers",
-            conference="NeurIPS",
-            where=where_clause
-        )
+        result_str = get_topic_evolution(topic_keywords="transformers", conference="NeurIPS", where=where_clause)
 
         # Verify result is valid JSON
         result = json.loads(result_str)
@@ -517,13 +528,16 @@ class TestMCPTools:
 
         # Mock search results with recent papers
         from datetime import datetime
+
         current_year = datetime.now().year
         mock_em.search_similar.return_value = {
             "ids": [["p1", "p2"]],
-            "metadatas": [[
-                {"title": "Paper 1", "year": current_year, "conference": "NeurIPS", "session": "Oral"},
-                {"title": "Paper 2", "year": current_year - 1, "conference": "NeurIPS", "session": "Oral"},
-            ]],
+            "metadatas": [
+                [
+                    {"title": "Paper 1", "year": current_year, "conference": "NeurIPS", "session": "Oral"},
+                    {"title": "Paper 2", "year": current_year - 1, "conference": "NeurIPS", "session": "Oral"},
+                ]
+            ],
             "documents": [["Abstract 1", "Abstract 2"]],
             "distances": [[0.1, 0.2]],
         }
@@ -565,6 +579,7 @@ class TestMCPTools:
         mock_em_class.return_value = mock_em
 
         from datetime import datetime
+
         current_year = datetime.now().year
         mock_em.search_similar.return_value = {
             "ids": [["p1"]],
@@ -581,10 +596,7 @@ class TestMCPTools:
         from abstracts_explorer.mcp_server import search_papers
 
         where_clause = {
-            "$and": [
-                {"year": {"$gte": 2024}},
-                {"session": {"$in": ["Oral Session 1", "Spotlight Session"]}}
-            ]
+            "$and": [{"year": {"$gte": 2024}}, {"session": {"$in": ["Oral Session 1", "Spotlight Session"]}}]
         }
         result_str = search_papers(topic_keywords="deep learning", where=where_clause)
 
@@ -624,8 +636,7 @@ class TestMCPTools:
         from abstracts_explorer.mcp_server import get_topic_evolution
 
         result_str = get_topic_evolution(
-            topic_keywords="transformers",
-            where="invalid string"  # Invalid: should be dict or None
+            topic_keywords="transformers", where="invalid string"  # Invalid: should be dict or None
         )
         result = json.loads(result_str)
 
@@ -633,19 +644,27 @@ class TestMCPTools:
         assert "error" in result
         assert "Invalid WHERE clause" in result["error"]
 
-    @patch("abstracts_explorer.mcp_server.perform_clustering")
+    @patch("abstracts_explorer.mcp_server.load_clustering_data")
+    @patch("abstracts_explorer.mcp_server.compute_clusters_with_cache")
     @patch("abstracts_explorer.mcp_server.get_config")
-    def test_get_cluster_visualization(self, mock_config, mock_perform):
+    def test_get_cluster_visualization(self, mock_config, mock_compute, mock_load):
         """Test get_cluster_visualization tool."""
         # Setup config mock
         mock_config_obj = Mock()
         mock_config_obj.embedding_db_path = "chroma_db"
         mock_config_obj.collection_name = "papers"
         mock_config_obj.paper_db_path = "abstracts.db"
+        mock_config_obj.embedding_model = "test-model"
         mock_config.return_value = mock_config_obj
 
+        # Setup load_clustering_data mock
+        mock_cm = Mock()
+        mock_cm.embeddings_manager = Mock()
+        mock_db = Mock()
+        mock_load.return_value = (mock_cm, mock_db)
+
         # Setup clustering mock
-        mock_perform.return_value = {
+        mock_compute.return_value = {
             "points": [
                 {"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0, "title": "Paper 1"},
                 {"id": "p2", "x": 1.0, "y": 1.0, "cluster": 1, "title": "Paper 2"},
