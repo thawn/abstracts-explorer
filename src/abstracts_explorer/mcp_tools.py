@@ -21,6 +21,7 @@ from abstracts_explorer.mcp_server import (
     search_papers,
     get_cluster_visualization,
     analyze_topic_relevance,
+    get_paper_details,
 )
 
 logger = logging.getLogger(__name__)
@@ -149,6 +150,45 @@ def _normalize_analyze_topic_relevance_args(arguments: Dict[str, Any]) -> Dict[s
             args["conferences"] = [conf_val]
         elif isinstance(conf_val, list):
             args["conferences"] = conf_val
+
+    return args
+
+
+def _normalize_get_paper_details_args(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalise argument shapes produced by LLMs for the ``get_paper_details`` tool.
+
+    Normalizations applied:
+    * ``year`` as a list → first element int
+    * ``year`` as a string → int
+    * ``conference`` as a list → first element string
+
+    Parameters
+    ----------
+    arguments : dict
+        Raw arguments dict from the LLM.
+
+    Returns
+    -------
+    dict
+        A new dict with normalized argument values.
+    """
+    args = dict(arguments)
+
+    # Normalize year: list → first element
+    if "year" in args and isinstance(args["year"], list):
+        args["year"] = args["year"][0] if args["year"] else None
+
+    # Normalize year: string → int
+    if "year" in args and isinstance(args["year"], str):
+        try:
+            args["year"] = int(args["year"])
+        except (ValueError, TypeError):
+            args["year"] = None
+
+    # Normalize conference: list → first element string
+    if "conference" in args and isinstance(args["conference"], list):
+        args["conference"] = args["conference"][0] if args["conference"] else None
 
     return args
 
@@ -331,6 +371,45 @@ MCP_TOOLS_SCHEMA = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_paper_details",
+            "description": (
+                "Get detailed information about papers from the database, including authors, "
+                "URLs, PDF links, session information, keywords, and awards. "
+                "Use this tool when the user asks about: who wrote a paper, paper authors, "
+                "where to find a paper, PDF or poster links, session or room details, "
+                "paper awards, or any other metadata about a specific paper."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Title or partial title to search for (case-insensitive)",
+                    },
+                    "paper_id": {
+                        "type": "string",
+                        "description": "Unique paper identifier (uid or original conference/OpenReview ID)",
+                    },
+                    "conference": {
+                        "type": "string",
+                        "description": "Filter by conference name (e.g., 'NeurIPS', 'ICLR')",
+                    },
+                    "year": {
+                        "type": "integer",
+                        "description": "Filter by publication year",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of papers to return when searching by title (default: 5)",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
 ]
 
 
@@ -383,6 +462,9 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
         elif tool_name == "get_cluster_visualization":
             args = _filter_unknown_kwargs(get_cluster_visualization, arguments)
             return get_cluster_visualization(**args)
+        elif tool_name == "get_paper_details":
+            args = _filter_unknown_kwargs(get_paper_details, _normalize_get_paper_details_args(arguments))
+            return get_paper_details(**args)
         else:
             # Return error JSON for unknown tools
             error_result = {"error": f"Unknown MCP tool: {tool_name}"}
@@ -449,7 +531,7 @@ def get_mcp_tools_schema(
                     items["enum"] = years
 
             # Single integer year fields
-            for key in ("start_year", "end_year"):
+            for key in ("year", "start_year", "end_year"):
                 if key in props and props[key].get("type") == "integer":
                     props[key]["enum"] = years
 
@@ -493,6 +575,8 @@ def format_tool_result_for_llm(tool_name: str, result: str) -> str:
             return _format_search_papers_result(result_data)
         elif tool_name == "get_cluster_visualization":
             return _format_visualization_result(result_data)
+        elif tool_name == "get_paper_details":
+            return _format_paper_details_result(result_data)
         else:
             # Return raw result for unknown tools
             return result
@@ -620,5 +704,54 @@ def _format_visualization_result(data: Dict[str, Any]) -> str:
 
     if data.get("visualization_saved"):
         lines.append(f"Saved to: {data.get('output_path')}")
+
+    return "\n".join(lines)
+
+
+def _format_paper_details_result(data: Dict[str, Any]) -> str:
+    """Format paper details result for LLM."""
+    papers = data.get("papers", [])
+    lines = [f"Paper Details ({len(papers)} found):\n"]
+
+    if not papers:
+        lines.append("No papers found matching the given criteria.")
+        return "\n".join(lines)
+
+    for i, paper in enumerate(papers, 1):
+        title = paper.get("title", "Unknown")
+        year = paper.get("year", "")
+        conference = paper.get("conference", "")
+        lines.append(f"\n{i}. {title} ({conference} {year})")
+
+        authors = paper.get("authors") or []
+        if authors:
+            lines.append(f"   Authors: {', '.join(authors)}")
+
+        url = paper.get("url") or ""
+        if url:
+            lines.append(f"   URL: {url}")
+
+        pdf = paper.get("paper_pdf_url") or ""
+        if pdf:
+            lines.append(f"   PDF: {pdf}")
+
+        session = paper.get("session") or ""
+        room = paper.get("room_name") or ""
+        if session or room:
+            location = f"{session}" + (f" ({room})" if room else "")
+            lines.append(f"   Session: {location}")
+
+        keywords = paper.get("keywords") or ""
+        if keywords:
+            lines.append(f"   Keywords: {keywords}")
+
+        award = paper.get("award") or ""
+        if award:
+            lines.append(f"   Award: {award}")
+
+        abstract = paper.get("abstract") or ""
+        if abstract:
+            snippet = abstract[:200] + "..." if len(abstract) > 200 else abstract
+            lines.append(f"   Abstract: {snippet}")
 
     return "\n".join(lines)

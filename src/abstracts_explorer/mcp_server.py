@@ -605,6 +605,103 @@ def search_papers(
 
 
 @mcp.tool()
+def get_paper_details(
+    title: Optional[str] = None,
+    paper_id: Optional[str] = None,
+    conference: Optional[str] = None,
+    year: Optional[int] = None,
+    limit: int = 5,
+) -> str:
+    """
+    Get detailed information about papers from the database.
+
+    Returns full paper metadata including authors, URLs, PDF links, session info,
+    keywords, awards, and other details stored in the database.
+
+    At least one of *title* or *paper_id* must be provided.
+
+    Parameters
+    ----------
+    title : str, optional
+        Title or partial title to search for (case-insensitive).
+    paper_id : str, optional
+        Unique paper identifier (uid or original conference/OpenReview ID).
+        When provided, performs an exact lookup and ignores *title*.
+    conference : str, optional
+        Filter results by conference name (e.g., "NeurIPS", "ICLR").
+        Only applied when searching by *title*.
+    year : int, optional
+        Filter results by publication year.
+        Only applied when searching by *title*.
+    limit : int, optional
+        Maximum number of papers to return when searching by title (default: 5).
+
+    Returns
+    -------
+    str
+        JSON string with fields:
+
+        - ``papers_found`` – number of papers returned
+        - ``papers`` – list of paper dicts, each containing:
+          title, authors (list), abstract, url, paper_pdf_url,
+          poster_image_url, session, room_name, starttime, endtime,
+          poster_position, keywords, award, year, conference, original_id
+    """
+    if not title and not paper_id:
+        return json.dumps(
+            {"error": "Provide at least one of 'title' or 'paper_id' to look up a paper."},
+            indent=2,
+        )
+
+    try:
+        db = DatabaseManager()
+        db.connect()
+
+        raw_papers: List[Dict[str, Any]] = []
+
+        if paper_id:
+            # Exact lookup by uid or original_id (returns at most one paper)
+            rows = db.query(
+                "SELECT * FROM papers WHERE uid = ? OR original_id = ? LIMIT 1",
+                (paper_id, paper_id),
+            )
+            raw_papers = rows
+
+        if not raw_papers and title:
+            # Keyword search on title with optional conference/year filters
+            raw_papers = db.search_papers(
+                keyword=title,
+                conference=conference,
+                year=year,
+                limit=limit,
+            )
+
+        # Format each paper: parse authors into a list and serialize timestamps
+        result_papers = []
+        for paper in raw_papers:
+            p = dict(paper)
+            # Parse semicolon-separated authors into a list
+            authors_raw = p.get("authors") or ""
+            p["authors"] = [a.strip() for a in authors_raw.split(";") if a.strip()]
+            # Ensure created_at is JSON-serializable
+            if "created_at" in p and p["created_at"] is not None:
+                p["created_at"] = str(p["created_at"])
+            result_papers.append(p)
+
+        result = {
+            "papers_found": len(result_papers),
+            "papers": result_papers,
+        }
+
+        db.close()
+        return json.dumps(result, indent=2, default=str)
+
+    except Exception as e:
+        logger.error(f"Failed to get paper details: {str(e)}")
+        return json.dumps({"error": str(e)}, indent=2)
+
+
+@mcp.tool()
 def analyze_topic_relevance(
     topic: str,
     distance_threshold: float = 1.1,

@@ -17,9 +17,11 @@ from abstracts_explorer.mcp_tools import (
     _format_topic_evolution_result,
     _format_search_papers_result,
     _format_visualization_result,
+    _format_paper_details_result,
     _normalize_search_papers_args,
     _normalize_get_topic_evolution_args,
     _normalize_analyze_topic_relevance_args,
+    _normalize_get_paper_details_args,
     _filter_unknown_kwargs,
 )
 
@@ -30,7 +32,7 @@ def test_get_mcp_tools_schema():
 
     # Should return a list of tool definitions
     assert isinstance(schema, list)
-    assert len(schema) == 5  # 5 MCP tools (including analyze_topic_relevance)
+    assert len(schema) == 6  # 6 MCP tools (including get_paper_details)
 
     # Check structure of first tool
     tool = schema[0]
@@ -47,6 +49,7 @@ def test_get_mcp_tools_schema():
     assert "get_topic_evolution" in tool_names
     assert "search_papers" in tool_names
     assert "get_cluster_visualization" in tool_names
+    assert "get_paper_details" in tool_names
 
 
 def test_execute_mcp_tool_cluster_topics():
@@ -836,3 +839,444 @@ class TestExecuteMCPToolE2E:
         data = json.loads(result)
         assert "error" in data
         assert "Unknown MCP tool" in data["error"]
+
+    # ------------------------------------------------------------------
+    # get_paper_details
+    # ------------------------------------------------------------------
+
+    def test_get_paper_details_by_title(self):
+        """get_paper_details searches by title and returns paper list."""
+        mock_result = json.dumps(
+            {
+                "papers_found": 1,
+                "papers": [
+                    {
+                        "uid": "abc123",
+                        "title": "Attention Is All You Need",
+                        "authors": ["Vaswani, Ashish", "Shazeer, Noam"],
+                        "year": 2017,
+                        "conference": "NeurIPS",
+                        "url": "https://example.com/paper",
+                        "paper_pdf_url": "https://example.com/paper.pdf",
+                    }
+                ],
+            }
+        )
+        with patch("abstracts_explorer.mcp_tools.get_paper_details", return_value=mock_result) as mock_fn:
+            result = execute_mcp_tool("get_paper_details", {"title": "Attention Is All You Need"})
+
+        assert json.loads(result)["papers_found"] == 1
+        mock_fn.assert_called_once_with(title="Attention Is All You Need")
+
+    def test_get_paper_details_by_id(self):
+        """get_paper_details looks up by paper_id when provided."""
+        mock_result = json.dumps({"papers_found": 1, "papers": [{"uid": "abc123", "title": "A Paper"}]})
+        with patch("abstracts_explorer.mcp_tools.get_paper_details", return_value=mock_result) as mock_fn:
+            result = execute_mcp_tool("get_paper_details", {"paper_id": "abc123"})
+
+        mock_fn.assert_called_once_with(paper_id="abc123")
+        assert json.loads(result)["papers_found"] == 1
+
+    def test_get_paper_details_real_execution_by_title(self):
+        """get_paper_details executes end-to-end with mocked DatabaseManager."""
+        mock_db = Mock()
+        mock_db.search_papers.return_value = [
+            {
+                "uid": "abc123",
+                "original_id": "neurips2023/abc",
+                "title": "A Test Paper",
+                "authors": "Smith, John; Doe, Jane",
+                "abstract": "This is the abstract.",
+                "session": "Poster Session 1",
+                "poster_position": "P01",
+                "paper_pdf_url": "https://example.com/paper.pdf",
+                "poster_image_url": None,
+                "url": "https://example.com/paper",
+                "room_name": "Hall A",
+                "keywords": "deep learning, transformers",
+                "starttime": "09:00",
+                "endtime": "11:00",
+                "award": None,
+                "year": 2023,
+                "conference": "NeurIPS",
+                "created_at": "2024-01-01",
+            }
+        ]
+
+        with (
+            patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),
+        ):
+            result = execute_mcp_tool("get_paper_details", {"title": "Test Paper", "conference": "NeurIPS"})
+
+        data = json.loads(result)
+        assert "error" not in data
+        assert data["papers_found"] == 1
+        paper = data["papers"][0]
+        assert paper["title"] == "A Test Paper"
+        assert paper["authors"] == ["Smith, John", "Doe, Jane"]
+        assert paper["paper_pdf_url"] == "https://example.com/paper.pdf"
+        assert paper["keywords"] == "deep learning, transformers"
+
+    def test_get_paper_details_real_execution_by_id(self):
+        """get_paper_details executes exact UID lookup end-to-end."""
+        mock_db = Mock()
+        mock_db.query.return_value = [
+            {
+                "uid": "abc123",
+                "original_id": "neurips2023/abc",
+                "title": "Exact Paper",
+                "authors": "Smith, John",
+                "abstract": "Abstract here.",
+                "session": "Oral",
+                "poster_position": None,
+                "paper_pdf_url": "https://example.com/pdf",
+                "poster_image_url": None,
+                "url": "https://example.com",
+                "room_name": "Room 1",
+                "keywords": "ml",
+                "starttime": None,
+                "endtime": None,
+                "award": "Best Paper",
+                "year": 2023,
+                "conference": "NeurIPS",
+                "created_at": "2024-01-01",
+            }
+        ]
+
+        with (
+            patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),
+        ):
+            result = execute_mcp_tool("get_paper_details", {"paper_id": "abc123"})
+
+        data = json.loads(result)
+        assert "error" not in data
+        assert data["papers_found"] == 1
+        paper = data["papers"][0]
+        assert paper["uid"] == "abc123"
+        assert paper["award"] == "Best Paper"
+        assert paper["authors"] == ["Smith, John"]
+
+    def test_get_paper_details_no_args_returns_error(self):
+        """get_paper_details returns error JSON when neither title nor paper_id is given."""
+        result = execute_mcp_tool("get_paper_details", {})
+        data = json.loads(result)
+        assert "error" in data
+        assert "title" in data["error"] or "paper_id" in data["error"]
+
+    def test_get_paper_details_year_normalized_from_string(self):
+        """get_paper_details normalizes year from string to int."""
+        mock_result = json.dumps({"papers_found": 0, "papers": []})
+        with patch("abstracts_explorer.mcp_tools.get_paper_details", return_value=mock_result) as mock_fn:
+            execute_mcp_tool("get_paper_details", {"title": "Paper", "year": "2023"})
+
+        kwargs = mock_fn.call_args[1]
+        assert kwargs["year"] == 2023
+        assert isinstance(kwargs["year"], int)
+
+    def test_get_paper_details_year_normalized_from_list(self):
+        """get_paper_details normalizes year from list to int (first element)."""
+        mock_result = json.dumps({"papers_found": 0, "papers": []})
+        with patch("abstracts_explorer.mcp_tools.get_paper_details", return_value=mock_result) as mock_fn:
+            execute_mcp_tool("get_paper_details", {"title": "Paper", "year": [2023, 2024]})
+
+        kwargs = mock_fn.call_args[1]
+        assert kwargs["year"] == 2023
+
+
+# ---------------------------------------------------------------------------
+# _normalize_get_paper_details_args unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeGetPaperDetailsArgs:
+    """Tests for _normalize_get_paper_details_args()."""
+
+    def test_year_as_int_unchanged(self):
+        """year as int passes through unchanged."""
+        args = {"title": "Paper", "year": 2023}
+        result = _normalize_get_paper_details_args(args)
+        assert result["year"] == 2023
+        assert isinstance(result["year"], int)
+
+    def test_year_as_string_converted_to_int(self):
+        """year as string is converted to int."""
+        result = _normalize_get_paper_details_args({"title": "Paper", "year": "2023"})
+        assert result["year"] == 2023
+
+    def test_year_as_list_uses_first_element(self):
+        """year as list uses first element."""
+        result = _normalize_get_paper_details_args({"title": "Paper", "year": [2023, 2024]})
+        assert result["year"] == 2023
+
+    def test_year_as_empty_list_becomes_none(self):
+        """year as empty list becomes None."""
+        result = _normalize_get_paper_details_args({"title": "Paper", "year": []})
+        assert result["year"] is None
+
+    def test_year_as_invalid_string_becomes_none(self):
+        """year as non-numeric string becomes None."""
+        result = _normalize_get_paper_details_args({"title": "Paper", "year": "not-a-year"})
+        assert result["year"] is None
+
+    def test_conference_as_list_uses_first_element(self):
+        """conference as list uses first element."""
+        result = _normalize_get_paper_details_args({"title": "Paper", "conference": ["NeurIPS", "ICLR"]})
+        assert result["conference"] == "NeurIPS"
+
+    def test_conference_as_empty_list_becomes_none(self):
+        """conference as empty list becomes None."""
+        result = _normalize_get_paper_details_args({"title": "Paper", "conference": []})
+        assert result["conference"] is None
+
+    def test_valid_args_unchanged(self):
+        """Already-valid args pass through unchanged."""
+        args = {"title": "My Paper", "year": 2024, "conference": "ICLR", "limit": 3}
+        result = _normalize_get_paper_details_args(args)
+        assert result == args
+
+
+# ---------------------------------------------------------------------------
+# _format_paper_details_result unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestFormatPaperDetailsResult:
+    """Tests for _format_paper_details_result()."""
+
+    def test_no_papers(self):
+        """Empty papers list shows appropriate message."""
+        data = {"papers_found": 0, "papers": []}
+        result = _format_paper_details_result(data)
+        assert "Paper Details" in result
+        assert "No papers found" in result
+
+    def test_single_paper_basic_fields(self):
+        """Single paper shows title, year, conference, and authors."""
+        data = {
+            "papers_found": 1,
+            "papers": [
+                {
+                    "title": "Attention Is All You Need",
+                    "year": 2017,
+                    "conference": "NeurIPS",
+                    "authors": ["Vaswani, Ashish", "Shazeer, Noam"],
+                    "url": "",
+                    "paper_pdf_url": "",
+                    "session": "",
+                    "room_name": "",
+                    "keywords": "",
+                    "award": "",
+                    "abstract": "We propose a new model architecture.",
+                }
+            ],
+        }
+        result = _format_paper_details_result(data)
+        assert "Attention Is All You Need" in result
+        assert "2017" in result
+        assert "NeurIPS" in result
+        assert "Vaswani, Ashish" in result
+        assert "Shazeer, Noam" in result
+        assert "We propose" in result
+
+    def test_paper_with_url_and_pdf(self):
+        """URL and PDF fields are shown when present."""
+        data = {
+            "papers_found": 1,
+            "papers": [
+                {
+                    "title": "My Paper",
+                    "year": 2024,
+                    "conference": "ICLR",
+                    "authors": ["Author One"],
+                    "url": "https://example.com/paper",
+                    "paper_pdf_url": "https://example.com/paper.pdf",
+                    "session": "",
+                    "room_name": "",
+                    "keywords": "",
+                    "award": "",
+                    "abstract": "",
+                }
+            ],
+        }
+        result = _format_paper_details_result(data)
+        assert "https://example.com/paper" in result
+        assert "https://example.com/paper.pdf" in result
+
+    def test_paper_with_session_and_room(self):
+        """Session and room information are formatted together."""
+        data = {
+            "papers_found": 1,
+            "papers": [
+                {
+                    "title": "Paper",
+                    "year": 2024,
+                    "conference": "NeurIPS",
+                    "authors": [],
+                    "url": "",
+                    "paper_pdf_url": "",
+                    "session": "Poster Session 1",
+                    "room_name": "Hall B",
+                    "keywords": "",
+                    "award": "",
+                    "abstract": "",
+                }
+            ],
+        }
+        result = _format_paper_details_result(data)
+        assert "Poster Session 1" in result
+        assert "Hall B" in result
+
+    def test_paper_with_award(self):
+        """Award field is shown when present."""
+        data = {
+            "papers_found": 1,
+            "papers": [
+                {
+                    "title": "Award-Winning Paper",
+                    "year": 2024,
+                    "conference": "NeurIPS",
+                    "authors": ["Winner"],
+                    "url": "",
+                    "paper_pdf_url": "",
+                    "session": "",
+                    "room_name": "",
+                    "keywords": "",
+                    "award": "Outstanding Paper Award",
+                    "abstract": "",
+                }
+            ],
+        }
+        result = _format_paper_details_result(data)
+        assert "Outstanding Paper Award" in result
+
+    def test_long_abstract_is_truncated(self):
+        """Abstract longer than 200 characters is truncated."""
+        long_abstract = "A" * 300
+        data = {
+            "papers_found": 1,
+            "papers": [
+                {
+                    "title": "Paper",
+                    "year": 2024,
+                    "conference": "NeurIPS",
+                    "authors": [],
+                    "url": "",
+                    "paper_pdf_url": "",
+                    "session": "",
+                    "room_name": "",
+                    "keywords": "",
+                    "award": "",
+                    "abstract": long_abstract,
+                }
+            ],
+        }
+        result = _format_paper_details_result(data)
+        assert "..." in result
+        # Should not contain the full abstract
+        assert long_abstract not in result
+
+    def test_multiple_papers(self):
+        """Multiple papers are all listed with numbering."""
+        data = {
+            "papers_found": 2,
+            "papers": [
+                {
+                    "title": "First Paper",
+                    "year": 2023,
+                    "conference": "NeurIPS",
+                    "authors": ["Author A"],
+                    "url": "",
+                    "paper_pdf_url": "",
+                    "session": "",
+                    "room_name": "",
+                    "keywords": "",
+                    "award": "",
+                    "abstract": "",
+                },
+                {
+                    "title": "Second Paper",
+                    "year": 2024,
+                    "conference": "ICLR",
+                    "authors": ["Author B"],
+                    "url": "",
+                    "paper_pdf_url": "",
+                    "session": "",
+                    "room_name": "",
+                    "keywords": "",
+                    "award": "",
+                    "abstract": "",
+                },
+            ],
+        }
+        result = _format_paper_details_result(data)
+        assert "1. First Paper" in result
+        assert "2. Second Paper" in result
+
+
+# ---------------------------------------------------------------------------
+# format_tool_result_for_llm – get_paper_details
+# ---------------------------------------------------------------------------
+
+
+def test_format_tool_result_for_llm_paper_details():
+    """format_tool_result_for_llm dispatches to _format_paper_details_result."""
+    data = {
+        "papers_found": 1,
+        "papers": [
+            {
+                "title": "My Paper",
+                "year": 2024,
+                "conference": "NeurIPS",
+                "authors": ["Alice"],
+                "url": "",
+                "paper_pdf_url": "https://example.com/pdf",
+                "session": "",
+                "room_name": "",
+                "keywords": "ml",
+                "award": "",
+                "abstract": "Some abstract text.",
+            }
+        ],
+    }
+    result = format_tool_result_for_llm("get_paper_details", json.dumps(data))
+    assert "Paper Details" in result
+    assert "My Paper" in result
+    assert "Alice" in result
+
+
+# ---------------------------------------------------------------------------
+# get_mcp_tools_schema – get_paper_details entries
+# ---------------------------------------------------------------------------
+
+
+def test_get_mcp_tools_schema_paper_details_parameters():
+    """get_paper_details schema has expected parameter definitions."""
+    schema = get_mcp_tools_schema()
+    pd_tool = next(t for t in schema if t["function"]["name"] == "get_paper_details")
+    props = pd_tool["function"]["parameters"]["properties"]
+
+    assert "title" in props
+    assert props["title"]["type"] == "string"
+    assert "paper_id" in props
+    assert props["paper_id"]["type"] == "string"
+    assert "conference" in props
+    assert props["conference"]["type"] == "string"
+    assert "year" in props
+    assert props["year"]["type"] == "integer"
+    assert "limit" in props
+
+
+def test_get_mcp_tools_schema_paper_details_conference_enum():
+    """Conference enum is injected into get_paper_details conference field."""
+    conferences = ["NeurIPS", "ICLR"]
+    schema = get_mcp_tools_schema(conferences=conferences)
+    pd_tool = next(t for t in schema if t["function"]["name"] == "get_paper_details")
+    assert pd_tool["function"]["parameters"]["properties"]["conference"]["enum"] == conferences
+
+
+def test_get_mcp_tools_schema_paper_details_year_enum():
+    """Year enum is injected into get_paper_details year field."""
+    years = [2023, 2024, 2025]
+    schema = get_mcp_tools_schema(years=years)
+    pd_tool = next(t for t in schema if t["function"]["name"] == "get_paper_details")
+    assert pd_tool["function"]["parameters"]["properties"]["year"]["enum"] == years
