@@ -768,11 +768,11 @@ class TestRAGChatIntegration:
         # Query
         result = chat.query("What is attention mechanism?")
 
-        # Verify response
+        # Verify response structure
         assert "response" in result
         assert len(result["response"]) > 0
-        assert "papers" in result
-        assert "metadata" in result
+        assert isinstance(result["papers"], list)
+        assert isinstance(result["metadata"], dict)
 
         em.close()
         db.close()
