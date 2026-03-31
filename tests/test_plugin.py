@@ -1471,4 +1471,3 @@ class TestPydanticValidation:
                     conference="NeurIPS",
                 )
             ]
-

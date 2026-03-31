@@ -880,7 +880,9 @@ class TestSearchPapersPaperCardFields:
         mock_em_class.return_value = mock_em
         mock_em.search_similar.return_value = {
             "ids": [["abc123"]],
-            "metadatas": [[{"title": "Test Paper", "year": 2024, "conference": "NeurIPS", "authors": ["Alice", "Bob"]}]],
+            "metadatas": [
+                [{"title": "Test Paper", "year": 2024, "conference": "NeurIPS", "authors": ["Alice", "Bob"]}]
+            ],
             "documents": [["Test abstract"]],
             "distances": [[0.1]],
         }
