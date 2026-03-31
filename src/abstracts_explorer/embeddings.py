@@ -513,6 +513,50 @@ class EmbeddingsManager:
             raise ValueError(f"Cannot create embedding text for paper {paper['uid']}: no abstract and no title")
         return embedding_text
 
+    @staticmethod
+    def parse_chromadb_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Parse a raw ChromaDB metadata dict through the LightweightPaper model.
+
+        ChromaDB stores all values as strings (see :meth:`add_paper`).  This
+        method converts a raw metadata dict into one with properly typed values
+        by running it through :func:`prepare_chroma_db_paper_data` and then
+        validating via :class:`LightweightPaper`.
+
+        Parameters
+        ----------
+        metadata : dict
+            Raw metadata dictionary from ChromaDB.
+
+        Returns
+        -------
+        dict
+            Metadata dictionary with values converted to their canonical types.
+            Authors will be a ``list[str]`` and keywords a ``list[str]``.
+
+        Examples
+        --------
+        >>> raw = {"title": "My Paper", "year": "2024", "original_id": "42",
+        ...        "authors": "Alice;Bob", "abstract": "An abstract",
+        ...        "session": "ML", "poster_position": "1",
+        ...        "conference": "NeurIPS"}
+        >>> parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
+        >>> parsed["year"]
+        2024
+        >>> parsed["authors"]
+        ['Alice', 'Bob']
+
+        See Also
+        --------
+        LightweightPaper : Pydantic model used for validation.
+        prepare_chroma_db_paper_data : Converts ChromaDB string fields to
+            proper types before validation.
+        """
+        from abstracts_explorer.plugin import prepare_chroma_db_paper_data, LightweightPaper
+
+        prepared = prepare_chroma_db_paper_data(metadata.copy())
+        return LightweightPaper(**prepared).model_dump(exclude_none=True)
+
     def add_paper(self, paper: dict) -> None:
         """
         Add a paper to the vector database.
@@ -607,7 +651,15 @@ class EmbeddingsManager:
             )
 
             logger.info(f"Found {len(results['ids'][0])} similar papers")
-            return dict(results)  # type: ignore[arg-type]
+
+            # Parse metadata through LightweightPaper model to convert
+            # string values back to their proper types (e.g. year → int).
+            parsed = dict(results)  # type: ignore[arg-type]
+            if parsed.get("metadatas"):
+                parsed["metadatas"] = [
+                    [self.parse_chromadb_metadata(m) for m in batch] for batch in parsed["metadatas"]
+                ]
+            return parsed
 
         except Exception as e:
             raise EmbeddingsError(f"Failed to search: {str(e)}") from e
@@ -982,7 +1034,7 @@ class EmbeddingsManager:
             results = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=n_results_query,
-                include=["distances", "metadatas"],
+                include=["distances"],
                 where=where_clause,
             )
 
@@ -1072,10 +1124,14 @@ class EmbeddingsManager:
             # so the dict is always JSON-serializable.
             if embeddings is not None:
                 embeddings = [e.tolist() if hasattr(e, "tolist") else list(e) for e in embeddings]
+            # Parse metadata through LightweightPaper model to convert
+            # string values back to their proper types (e.g. year → int).
+            raw_metadatas = results.get("metadatas", [])
+            parsed_metadatas = [self.parse_chromadb_metadata(m) for m in raw_metadatas]
             return {
                 "ids": results.get("ids", []),
                 "documents": results.get("documents", []),
-                "metadatas": results.get("metadatas", []),
+                "metadatas": parsed_metadatas,
                 "embeddings": embeddings,
             }
         except Exception as e:

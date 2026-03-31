@@ -315,9 +315,11 @@ def mock_collection_with_data(mocker):
         {
             "title": f"Paper {i}",
             "abstract": abstracts[i],
+            "authors": f"Author A{i};Author B{i}",
             "year": "2025",
             "conference": "TestConf",
             "session": "Session A",
+            "poster_position": str(i),
         }
         for i in range(10)
     ]

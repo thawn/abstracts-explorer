@@ -491,6 +491,8 @@ def mock_embeddings_manager():
     mock_em = Mock(spec=EmbeddingsManager)
 
     # Mock successful search results with STRING UIDs (lightweight schema)
+    # Metadata is already parsed (search_similar returns LightweightPaper-parsed metadata):
+    # authors as list, keywords as list, year as int
     mock_em.search_similar.return_value = {
         "ids": [["1", "2", "3"]],  # Use string UIDs (lightweight schema)
         "distances": [[0.1, 0.2, 0.3]],
@@ -498,24 +500,24 @@ def mock_embeddings_manager():
             [
                 {
                     "title": "Attention Is All You Need",
-                    "authors": "Vaswani et al.",
+                    "authors": ["Vaswani et al."],
                     "topic": "Deep Learning",
                     "decision": "Accept (oral)",
-                    "keywords": "transformers, attention",
+                    "keywords": ["transformers", "attention"],
                 },
                 {
                     "title": "BERT: Pre-training of Deep Bidirectional Transformers",
-                    "authors": "Devlin et al.",
+                    "authors": ["Devlin et al."],
                     "topic": "Natural Language Processing",
                     "decision": "Accept (poster)",
-                    "keywords": "language models, pretraining",
+                    "keywords": ["language models", "pretraining"],
                 },
                 {
                     "title": "GPT-3: Language Models are Few-Shot Learners",
-                    "authors": "Brown et al.",
+                    "authors": ["Brown et al."],
                     "topic": "Language Models",
                     "decision": "Accept (oral)",
-                    "keywords": "large language models, in-context learning",
+                    "keywords": ["large language models", "in-context learning"],
                 },
             ]
         ],

@@ -197,12 +197,12 @@ class TestAnalyzeClusterTopics:
         cm.cluster_labels = np.array([0, 0, 1, 0, 1, 2])
         cm.paper_ids = ["p1", "p2", "p3", "p4", "p5", "p6"]
         cm.metadatas = [
-            {"title": "Paper 1", "keywords": "ml, ai", "session": "ML Track", "year": 2023},
-            {"title": "Paper 2", "keywords": "dl, nn", "session": "ML Track", "year": 2023},
-            {"title": "Paper 3", "keywords": "nlp, transformers", "session": "NLP Track", "year": 2024},
-            {"title": "Paper 4", "keywords": "ml, dl", "session": "ML Track", "year": 2024},
-            {"title": "Paper 5", "keywords": "nlp, bert", "session": "NLP Track", "year": 2024},
-            {"title": "Paper 6", "keywords": "cv, vision", "session": "CV Track", "year": 2025},
+            {"title": "Paper 1", "keywords": ["ml", "ai"], "session": "ML Track", "year": 2023},
+            {"title": "Paper 2", "keywords": ["dl", "nn"], "session": "ML Track", "year": 2023},
+            {"title": "Paper 3", "keywords": ["nlp", "transformers"], "session": "NLP Track", "year": 2024},
+            {"title": "Paper 4", "keywords": ["ml", "dl"], "session": "ML Track", "year": 2024},
+            {"title": "Paper 5", "keywords": ["nlp", "bert"], "session": "NLP Track", "year": 2024},
+            {"title": "Paper 6", "keywords": ["cv", "vision"], "session": "CV Track", "year": 2025},
         ]
 
         db = Mock(spec=DatabaseManager)
@@ -234,10 +234,10 @@ class TestAnalyzeClusterTopics:
         cm.cluster_labels = np.array([0, 0, 1, 1])
         cm.paper_ids = ["p1", "p2", "p3", "p4"]
         cm.metadatas = [
-            {"title": "Paper 1", "keywords": "ml", "session": "ML", "year": 2023},
-            {"title": "Paper 2", "keywords": "dl", "session": "DL", "year": 2023},
-            {"title": "Paper 3", "keywords": "nlp", "session": "NLP", "year": 2024},
-            {"title": "Paper 4", "keywords": "cv", "session": "CV", "year": 2024},
+            {"title": "Paper 1", "keywords": ["ml"], "session": "ML", "year": 2023},
+            {"title": "Paper 2", "keywords": ["dl"], "session": "DL", "year": 2023},
+            {"title": "Paper 3", "keywords": ["nlp"], "session": "NLP", "year": 2024},
+            {"title": "Paper 4", "keywords": ["cv"], "session": "CV", "year": 2024},
         ]
 
         db = Mock(spec=DatabaseManager)
@@ -273,7 +273,7 @@ class TestAnalyzeClusterTopics:
         cm.paper_ids = ["p1", "p2"]
         cm.metadatas = [
             {"title": "Paper 1"},  # Missing keywords, session, year
-            {"title": "Paper 2", "keywords": "ml", "year": 2023},  # Missing session
+            {"title": "Paper 2", "keywords": ["ml"], "year": 2023},  # Missing session
         ]
 
         db = Mock(spec=DatabaseManager)
@@ -460,6 +460,61 @@ class TestMCPTools:
         # Verify cleanup
         mock_em.close.assert_called_once()
         mock_db.close.assert_called_once()
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_topic_evolution_with_year_range(self, mock_config, mock_db_class, mock_em_class):
+        """Test get_topic_evolution with start_year and end_year filters.
+
+        Metadata from search_similar has year as int (parsed by
+        EmbeddingsManager.parse_chromadb_metadata), so year range
+        filtering works with integer comparisons.
+        """
+        # Setup config mock
+        mock_config_obj = Mock()
+        mock_config_obj.embedding_db_path = "chroma_db"
+        mock_config_obj.collection_name = "papers"
+        mock_config_obj.paper_db_path = "abstracts.db"
+        mock_config.return_value = mock_config_obj
+
+        # Setup embeddings manager mock with string years (as ChromaDB returns)
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+        mock_em.search_similar.return_value = {
+            "ids": [["p1", "p2", "p3", "p4"]],
+            "metadatas": [
+                [
+                    {"title": "Paper 1", "year": 2022, "session": "ML"},
+                    {"title": "Paper 2", "year": 2023, "session": "DL"},
+                    {"title": "Paper 3", "year": 2024, "session": "ML"},
+                    {"title": "Paper 4", "year": 2025, "session": "NLP"},
+                ]
+            ],
+            "distances": [[0.1, 0.2, 0.3, 0.4]],
+        }
+
+        # Setup database mock
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+
+        from abstracts_explorer.mcp_server import get_topic_evolution
+
+        result_str = get_topic_evolution(
+            topic_keywords="transformers",
+            conference="NeurIPS",
+            start_year=2023,
+            end_year=2024,
+        )
+        result = json.loads(result_str)
+
+        # Only papers from 2023 and 2024 should be included
+        assert result["year_counts"]["2023"] == 1
+        assert result["year_counts"]["2024"] == 1
+        assert "2022" not in result["year_counts"]
+        assert "2025" not in result["year_counts"]
+        assert result["year_range"]["start"] == 2023
+        assert result["year_range"]["end"] == 2024
 
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
     @patch("abstracts_explorer.mcp_server.DatabaseManager")
@@ -825,7 +880,9 @@ class TestSearchPapersPaperCardFields:
         mock_em_class.return_value = mock_em
         mock_em.search_similar.return_value = {
             "ids": [["abc123"]],
-            "metadatas": [[{"title": "Test Paper", "year": 2024, "conference": "NeurIPS", "authors": "Alice; Bob"}]],
+            "metadatas": [
+                [{"title": "Test Paper", "year": 2024, "conference": "NeurIPS", "authors": ["Alice", "Bob"]}]
+            ],
             "documents": [["Test abstract"]],
             "distances": [[0.1]],
         }
@@ -870,7 +927,7 @@ class TestSearchPapersPaperCardFields:
                         "title": "Test Paper",
                         "year": 2024,
                         "conference": "NeurIPS",
-                        "authors": "Alice Smith; Bob Jones; Carol White",
+                        "authors": ["Alice Smith", "Bob Jones", "Carol White"],
                     }
                 ]
             ],
@@ -946,7 +1003,7 @@ class TestSearchPapersPaperCardFields:
                         "year": 2025,
                         "conference": "NeurIPS",
                         "session": "Oral",
-                        "authors": "Author A",
+                        "authors": ["Author A"],
                     }
                 ]
             ],
@@ -990,7 +1047,7 @@ class TestSearchPapersPaperCardFields:
                         "year": 2024,
                         "conference": "ICML",
                         "session": "Best Paper Session",
-                        "authors": "First Author; Second Author",
+                        "authors": ["First Author", "Second Author"],
                     }
                 ]
             ],

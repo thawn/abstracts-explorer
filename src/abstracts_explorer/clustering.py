@@ -269,7 +269,9 @@ class ClusteringManager:
 
             self.paper_ids = results["ids"]
             self.embeddings = np.array(results["embeddings"])
-            self.metadatas = results["metadatas"]
+            # Parse metadata through LightweightPaper model to convert
+            # string values back to their proper types (e.g. year → int).
+            self.metadatas = [EmbeddingsManager.parse_chromadb_metadata(m) for m in results["metadatas"]]
 
             logger.info(f"Loaded {len(self.paper_ids)} embeddings with dimension {self.embeddings.shape[1]}")
             return len(self.paper_ids)
