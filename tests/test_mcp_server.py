@@ -293,10 +293,16 @@ class TestMCPTools:
     """Tests for MCP tool functions."""
 
     @patch("abstracts_explorer.mcp_server.load_clustering_data")
-    @patch("abstracts_explorer.mcp_server.compute_clusters_with_cache")
     @patch("abstracts_explorer.mcp_server.analyze_cluster_topics")
-    def test_get_cluster_topics(self, mock_analyze, mock_compute, mock_load):
-        """Test get_cluster_topics tool."""
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_cluster_topics(self, mock_config, mock_analyze, mock_load):
+        """Test get_cluster_topics tool with cached results."""
+        # Setup config mock
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config_obj.embedding_model = "test-model"
+        mock_config.return_value = mock_config_obj
+
         # Setup mocks
         mock_cm = Mock()
         mock_cm.embeddings_manager = Mock()
@@ -306,8 +312,8 @@ class TestMCPTools:
 
         mock_cm.load_embeddings.return_value = 100
 
-        # compute_clusters_with_cache returns cached results
-        mock_compute.return_value = {
+        # db.get_clustering_cache returns cached results
+        mock_db.get_clustering_cache.return_value = {
             "points": [
                 {"id": "p1", "cluster": 0, "x": 0.0, "y": 0.0},
                 {"id": "p2", "cluster": 0, "x": 1.0, "y": 1.0},
@@ -351,7 +357,7 @@ class TestMCPTools:
         # Import and call the tool
         from abstracts_explorer.mcp_server import get_cluster_topics
 
-        result_str = get_cluster_topics(n_clusters=2)
+        result_str = get_cluster_topics(conferences=["NeurIPS"])
         result = json.loads(result_str)
 
         # Verify result
@@ -361,10 +367,50 @@ class TestMCPTools:
         assert len(result["clusters"]) == 2
         assert result["clusters"][0]["cluster_id"] == 0
         assert result["clusters"][1]["cluster_id"] == 1
+        assert result["conference"] == "NeurIPS"
+
+        # Verify cache was queried with correct params
+        mock_db.get_clustering_cache.assert_called_once()
 
         # Verify cleanup
         mock_cm.embeddings_manager.close.assert_called_once()
         mock_db.close.assert_called_once()
+
+    @patch("abstracts_explorer.mcp_server.load_clustering_data")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_cluster_topics_no_conference(self, mock_config, mock_load):
+        """Test get_cluster_topics returns error when no conference is specified."""
+        from abstracts_explorer.mcp_server import get_cluster_topics
+
+        result_str = get_cluster_topics()
+        result = json.loads(result_str)
+
+        assert "error" in result
+        assert "conference must be specified" in result["error"]
+
+    @patch("abstracts_explorer.mcp_server.load_clustering_data")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_cluster_topics_no_cache(self, mock_config, mock_load):
+        """Test get_cluster_topics returns error when no cached results exist."""
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config_obj.embedding_model = "test-model"
+        mock_config.return_value = mock_config_obj
+
+        mock_cm = Mock()
+        mock_cm.embeddings_manager = Mock()
+        mock_db = Mock()
+        mock_load.return_value = (mock_cm, mock_db)
+        mock_db.get_clustering_cache.return_value = None
+
+        from abstracts_explorer.mcp_server import get_cluster_topics
+
+        result_str = get_cluster_topics(conferences=["NeurIPS"])
+        result = json.loads(result_str)
+
+        assert "error" in result
+        assert "No pre-computed clustering data" in result["error"]
+        assert "NeurIPS" in result["error"]
 
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
     @patch("abstracts_explorer.mcp_server.DatabaseManager")
@@ -400,7 +446,7 @@ class TestMCPTools:
         # Import and call the tool
         from abstracts_explorer.mcp_server import get_topic_evolution
 
-        result_str = get_topic_evolution(topic_keywords="transformers")
+        result_str = get_topic_evolution(topic_keywords="transformers", conference="NeurIPS")
         result = json.loads(result_str)
 
         # Verify result
@@ -449,17 +495,20 @@ class TestMCPTools:
         from abstracts_explorer.mcp_server import get_topic_evolution
 
         where_clause = {"session": {"$in": ["Oral Session 1"]}}
-        result_str = get_topic_evolution(topic_keywords="transformers", where=where_clause)
+        result_str = get_topic_evolution(topic_keywords="transformers", conference="NeurIPS", where=where_clause)
         result = json.loads(result_str)
 
         # Verify result
         assert result["topic"] == "transformers"
         assert result["total_papers"] == 2
 
-        # Verify search_similar was called with WHERE clause
+        # Verify search_similar was called with merged WHERE clause (session + conference)
         mock_em.search_similar.assert_called_once()
         call_args = mock_em.search_similar.call_args
-        assert call_args[1]["where"] == where_clause
+        where_arg = call_args[1]["where"]
+        assert "$and" in where_arg
+        assert {"session": {"$in": ["Oral Session 1"]}} in where_arg["$and"]
+        assert {"conference": "NeurIPS"} in where_arg["$and"]
 
         # Verify cleanup
         mock_em.close.assert_called_once()
@@ -550,17 +599,22 @@ class TestMCPTools:
         from abstracts_explorer.mcp_server import search_papers
 
         where_clause = {"session": "Oral"}
-        result_str = search_papers(topic_keywords="llm", where=where_clause, years=[current_year, current_year - 1])
+        result_str = search_papers(
+            topic_keywords="llm", conference="NeurIPS", where=where_clause, years=[current_year, current_year - 1]
+        )
         result = json.loads(result_str)
 
         # Verify result
         assert result["topic"] == "llm"
         assert result["papers_found"] >= 1
 
-        # Verify search_similar was called with WHERE clause
+        # Verify search_similar was called with merged WHERE clause (session + conference)
         mock_em.search_similar.assert_called_once()
         call_args = mock_em.search_similar.call_args
-        assert call_args[1]["where"] == where_clause
+        where_arg = call_args[1]["where"]
+        assert "$and" in where_arg
+        assert {"session": "Oral"} in where_arg["$and"]
+        assert {"conference": "NeurIPS"} in where_arg["$and"]
 
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
     @patch("abstracts_explorer.mcp_server.DatabaseManager")
@@ -598,7 +652,7 @@ class TestMCPTools:
         where_clause = {
             "$and": [{"year": {"$gte": 2024}}, {"session": {"$in": ["Oral Session 1", "Spotlight Session"]}}]
         }
-        result_str = search_papers(topic_keywords="deep learning", where=where_clause)
+        result_str = search_papers(topic_keywords="deep learning", conference="NeurIPS", where=where_clause)
 
         # Verify result is valid JSON
         result = json.loads(result_str)
@@ -609,10 +663,11 @@ class TestMCPTools:
         call_args = mock_em.search_similar.call_args
         where_arg = call_args[1]["where"]
 
-        # Should preserve the complex $and structure
+        # Should preserve the complex $and structure and add conference
         assert "$and" in where_arg
         assert {"year": {"$gte": 2024}} in where_arg["$and"]
         assert {"session": {"$in": ["Oral Session 1", "Spotlight Session"]}} in where_arg["$and"]
+        assert {"conference": "NeurIPS"} in where_arg["$and"]
 
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
     @patch("abstracts_explorer.mcp_server.DatabaseManager")
@@ -636,7 +691,9 @@ class TestMCPTools:
         from abstracts_explorer.mcp_server import get_topic_evolution
 
         result_str = get_topic_evolution(
-            topic_keywords="transformers", where="invalid string"  # Invalid: should be dict or None
+            topic_keywords="transformers",
+            conference="NeurIPS",
+            where="invalid string",  # Invalid: should be dict or None
         )
         result = json.loads(result_str)
 
@@ -645,10 +702,9 @@ class TestMCPTools:
         assert "Invalid WHERE clause" in result["error"]
 
     @patch("abstracts_explorer.mcp_server.load_clustering_data")
-    @patch("abstracts_explorer.mcp_server.compute_clusters_with_cache")
     @patch("abstracts_explorer.mcp_server.get_config")
-    def test_get_cluster_visualization(self, mock_config, mock_compute, mock_load):
-        """Test get_cluster_visualization tool."""
+    def test_get_cluster_visualization(self, mock_config, mock_load):
+        """Test get_cluster_visualization tool with cached results."""
         # Setup config mock
         mock_config_obj = Mock()
         mock_config_obj.embedding_db_path = "chroma_db"
@@ -663,8 +719,8 @@ class TestMCPTools:
         mock_db = Mock()
         mock_load.return_value = (mock_cm, mock_db)
 
-        # Setup clustering mock
-        mock_compute.return_value = {
+        # db.get_clustering_cache returns cached results
+        mock_db.get_clustering_cache.return_value = {
             "points": [
                 {"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0, "title": "Paper 1"},
                 {"id": "p2", "x": 1.0, "y": 1.0, "cluster": 1, "title": "Paper 2"},
@@ -681,7 +737,7 @@ class TestMCPTools:
         # Import and call the tool
         from abstracts_explorer.mcp_server import get_cluster_visualization
 
-        result_str = get_cluster_visualization(n_clusters=2)
+        result_str = get_cluster_visualization(conferences=["NeurIPS"])
         result = json.loads(result_str)
 
         # Verify result
@@ -690,6 +746,44 @@ class TestMCPTools:
         assert "statistics" in result
         assert result["statistics"]["n_clusters"] == 2
         assert len(result["points"]) == 2
+
+        # Verify cache was queried
+        mock_db.get_clustering_cache.assert_called_once()
+
+    @patch("abstracts_explorer.mcp_server.load_clustering_data")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_cluster_visualization_no_conference(self, mock_config, mock_load):
+        """Test get_cluster_visualization returns error when no conference is specified."""
+        from abstracts_explorer.mcp_server import get_cluster_visualization
+
+        result_str = get_cluster_visualization()
+        result = json.loads(result_str)
+
+        assert "error" in result
+        assert "conference must be specified" in result["error"]
+
+    @patch("abstracts_explorer.mcp_server.load_clustering_data")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_cluster_visualization_no_cache(self, mock_config, mock_load):
+        """Test get_cluster_visualization returns error when no cache."""
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config_obj.embedding_model = "test-model"
+        mock_config.return_value = mock_config_obj
+
+        mock_cm = Mock()
+        mock_cm.embeddings_manager = Mock()
+        mock_db = Mock()
+        mock_load.return_value = (mock_cm, mock_db)
+        mock_db.get_clustering_cache.return_value = None
+
+        from abstracts_explorer.mcp_server import get_cluster_visualization
+
+        result_str = get_cluster_visualization(conferences=["NeurIPS"])
+        result = json.loads(result_str)
+
+        assert "error" in result
+        assert "No pre-computed clustering data" in result["error"]
 
 
 class TestMCPServerIntegration:
@@ -740,7 +834,7 @@ class TestSearchPapersPaperCardFields:
 
         from abstracts_explorer.mcp_server import search_papers
 
-        result_str = search_papers(topic_keywords="test")
+        result_str = search_papers(topic_keywords="test", conference="NeurIPS")
         result = json.loads(result_str)
 
         assert "papers" in result
@@ -788,7 +882,7 @@ class TestSearchPapersPaperCardFields:
 
         from abstracts_explorer.mcp_server import search_papers
 
-        result_str = search_papers(topic_keywords="test")
+        result_str = search_papers(topic_keywords="test", conference="NeurIPS")
         result = json.loads(result_str)
 
         paper = result["papers"][0]
@@ -821,7 +915,7 @@ class TestSearchPapersPaperCardFields:
 
         from abstracts_explorer.mcp_server import search_papers
 
-        result_str = search_papers(topic_keywords="test")
+        result_str = search_papers(topic_keywords="test", conference="ICLR")
         result = json.loads(result_str)
 
         paper = result["papers"][0]
@@ -864,7 +958,7 @@ class TestSearchPapersPaperCardFields:
 
         from abstracts_explorer.mcp_server import search_papers
 
-        result_str = search_papers(topic_keywords="machine learning")
+        result_str = search_papers(topic_keywords="machine learning", conference="NeurIPS")
         result = json.loads(result_str)
 
         paper = result["papers"][0]
@@ -908,7 +1002,7 @@ class TestSearchPapersPaperCardFields:
 
         from abstracts_explorer.mcp_server import search_papers
 
-        result_str = search_papers(topic_keywords="learning")
+        result_str = search_papers(topic_keywords="learning", conference="ICML")
         result = json.loads(result_str)
 
         paper = result["papers"][0]
@@ -920,6 +1014,176 @@ class TestSearchPapersPaperCardFields:
         assert paper["session"] == "Best Paper Session"
         assert paper["abstract"] == "This is the abstract text."
         assert "relevance_score" in paper
+
+
+class TestGetPaperDetails:
+    """Tests for the get_paper_details MCP tool."""
+
+    def _make_paper_row(self, **overrides):
+        """Return a minimal paper dict suitable for mock DB results."""
+        defaults = {
+            "uid": "abc123",
+            "original_id": "neurips2023/abc",
+            "title": "A Test Paper",
+            "authors": "Smith, John; Doe, Jane",
+            "abstract": "This paper describes a test.",
+            "session": "Poster Session 1",
+            "poster_position": "P01",
+            "paper_pdf_url": "https://example.com/paper.pdf",
+            "poster_image_url": None,
+            "url": "https://example.com/paper",
+            "room_name": "Hall A",
+            "keywords": "deep learning, transformers",
+            "starttime": "09:00",
+            "endtime": "11:00",
+            "award": None,
+            "year": 2023,
+            "conference": "NeurIPS",
+            "created_at": "2024-01-01T00:00:00",
+        }
+        defaults.update(overrides)
+        return defaults
+
+    def test_no_arguments_returns_error(self):
+        """get_paper_details returns an error when no title or paper_id given."""
+        from abstracts_explorer.mcp_server import get_paper_details
+
+        result = json.loads(get_paper_details())
+        assert "error" in result
+        assert "title" in result["error"] or "paper_id" in result["error"]
+
+    def test_lookup_by_title(self):
+        """get_paper_details searches by title keyword and returns matching papers."""
+        from abstracts_explorer.mcp_server import get_paper_details
+
+        mock_db = Mock()
+        mock_db.search_papers.return_value = [self._make_paper_row()]
+
+        with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
+            result = json.loads(get_paper_details(title="Test Paper"))
+
+        assert "error" not in result
+        assert result["papers_found"] == 1
+        paper = result["papers"][0]
+        assert paper["title"] == "A Test Paper"
+        # Authors should be parsed as a list
+        assert paper["authors"] == ["Smith, John", "Doe, Jane"]
+        assert paper["paper_pdf_url"] == "https://example.com/paper.pdf"
+        assert paper["keywords"] == "deep learning, transformers"
+        mock_db.search_papers.assert_called_once_with(keyword="Test Paper", conference=None, year=None, limit=5)
+
+    def test_lookup_by_paper_id(self):
+        """get_paper_details performs exact UID lookup when paper_id is provided."""
+        from abstracts_explorer.mcp_server import get_paper_details
+
+        mock_db = Mock()
+        mock_db.query.return_value = [self._make_paper_row(award="Best Paper")]
+
+        with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
+            result = json.loads(get_paper_details(paper_id="abc123"))
+
+        assert "error" not in result
+        assert result["papers_found"] == 1
+        paper = result["papers"][0]
+        assert paper["uid"] == "abc123"
+        assert paper["award"] == "Best Paper"
+        assert paper["authors"] == ["Smith, John", "Doe, Jane"]
+        # query should use both uid and original_id columns
+        call_args = mock_db.query.call_args
+        assert "uid" in call_args[0][0]
+        assert "original_id" in call_args[0][0]
+        assert ("abc123", "abc123") == call_args[0][1]
+
+    def test_lookup_by_id_falls_back_to_title(self):
+        """When paper_id lookup finds nothing, falls back to title search."""
+        from abstracts_explorer.mcp_server import get_paper_details
+
+        mock_db = Mock()
+        mock_db.query.return_value = []  # ID not found
+        mock_db.search_papers.return_value = [self._make_paper_row()]
+
+        with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
+            result = json.loads(get_paper_details(paper_id="notfound", title="Test Paper"))
+
+        assert "error" not in result
+        assert result["papers_found"] == 1
+        mock_db.query.assert_called_once()
+        mock_db.search_papers.assert_called_once()
+
+    def test_authors_with_no_semicolon(self):
+        """Single author (no semicolon) is returned as one-element list."""
+        from abstracts_explorer.mcp_server import get_paper_details
+
+        mock_db = Mock()
+        mock_db.search_papers.return_value = [self._make_paper_row(authors="Solo Author")]
+
+        with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
+            result = json.loads(get_paper_details(title="Paper"))
+
+        assert result["papers"][0]["authors"] == ["Solo Author"]
+
+    def test_empty_authors_returns_empty_list(self):
+        """None or empty authors field is returned as empty list."""
+        from abstracts_explorer.mcp_server import get_paper_details
+
+        mock_db = Mock()
+        mock_db.search_papers.return_value = [self._make_paper_row(authors=None)]
+
+        with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
+            result = json.loads(get_paper_details(title="Paper"))
+
+        assert result["papers"][0]["authors"] == []
+
+    def test_conference_and_year_filters_passed_to_search(self):
+        """conference and year parameters are forwarded to search_papers."""
+        from abstracts_explorer.mcp_server import get_paper_details
+
+        mock_db = Mock()
+        mock_db.search_papers.return_value = []
+
+        with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
+            get_paper_details(title="Paper", conference="ICLR", year=2024, limit=3)
+
+        mock_db.search_papers.assert_called_once_with(keyword="Paper", conference="ICLR", year=2024, limit=3)
+
+    def test_limit_parameter(self):
+        """limit parameter controls how many results are requested from DB."""
+        from abstracts_explorer.mcp_server import get_paper_details
+
+        mock_db = Mock()
+        mock_db.search_papers.return_value = []
+
+        with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
+            get_paper_details(title="Paper", limit=10)
+
+        mock_db.search_papers.assert_called_once_with(keyword="Paper", conference=None, year=None, limit=10)
+
+    def test_no_papers_found(self):
+        """No matching papers returns papers_found=0 and empty list."""
+        from abstracts_explorer.mcp_server import get_paper_details
+
+        mock_db = Mock()
+        mock_db.search_papers.return_value = []
+
+        with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
+            result = json.loads(get_paper_details(title="Nonexistent Paper"))
+
+        assert "error" not in result
+        assert result["papers_found"] == 0
+        assert result["papers"] == []
+
+    def test_exception_returns_error_json(self):
+        """Database exception returns error JSON without raising."""
+        from abstracts_explorer.mcp_server import get_paper_details
+
+        mock_db = Mock()
+        mock_db.search_papers.side_effect = Exception("DB connection failed")
+
+        with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
+            result = json.loads(get_paper_details(title="Paper"))
+
+        assert "error" in result
+        assert "DB connection failed" in result["error"]
 
 
 if __name__ == "__main__":

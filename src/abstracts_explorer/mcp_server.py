@@ -24,7 +24,7 @@ from mcp.server.fastmcp import FastMCP
 
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.database import DatabaseManager
-from abstracts_explorer.clustering import ClusteringManager, compute_clusters_with_cache
+from abstracts_explorer.clustering import ClusteringManager
 from abstracts_explorer.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -200,75 +200,149 @@ def analyze_cluster_topics(
     }
 
 
-@mcp.tool()
-def get_cluster_topics(
+def _get_cluster_topics_for_single_conference(
+    conference: str,
+    years: Optional[List[int]] = None,
     collection_name: Optional[str] = None,
-    **kwargs,
-) -> str:
+) -> Dict[str, Any]:
     """
-    Get the most frequently mentioned topics from clustered embeddings.
+    Retrieve cached cluster topics for a single conference.
 
-    This tool clusters paper embeddings using agglomerative clustering
-    with t-SNE dimensionality reduction and analyzes the topics in each
-    cluster based on keywords, sessions, and paper titles.
+    Looks up pre-computed clustering results from the database cache and
+    analyzes topics per cluster.  Returns an error dict when no cached
+    results exist for the requested conference/year combination.
 
     Parameters
     ----------
+    conference : str
+        Conference name (e.g. "NeurIPS", "ICLR").
+    years : list of int, optional
+        Filter by publication years.
     collection_name : str, optional
-        Name of ChromaDB collection (uses config default if not provided)
-    **kwargs
-        Ignored (for backwards compatibility with old tool schemas)
+        Name of ChromaDB collection (uses config default if not provided).
 
     Returns
     -------
-    str
-        JSON string containing cluster topics analysis
+    dict
+        Cluster topics result dict with ``"statistics"`` and ``"clusters"``
+        keys, or an ``"error"`` key if no cache is available.
     """
+    config = get_config()
+    collection_name = collection_name or config.collection_name
+
+    cm, db = load_clustering_data(collection_name)
+
     try:
-        config = get_config()
-        collection_name = collection_name or config.collection_name
+        # Build cache lookup params (must mirror pre-generate CLI)
+        clustering_params: Dict[str, Any] = {
+            "linkage": "ward",
+            "distance_threshold": 150.0,
+            "conferences": sorted([conference]),
+        }
+        if years:
+            clustering_params["years"] = sorted([int(y) for y in years])
 
-        # Load clustering data
-        cm, db = load_clustering_data(collection_name)
-
-        # Use compute_clusters_with_cache to avoid redundant t-SNE/clustering
-        # when pre-generated results exist in the database.
-        cached_results = compute_clusters_with_cache(
-            embeddings_manager=cm.embeddings_manager,
-            database=db,
+        cached = db.get_clustering_cache(
             embedding_model=config.embedding_model,
             reduction_method="tsne",
             n_components=2,
             clustering_method="agglomerative",
             n_clusters=None,
-            distance_threshold=150.0,
-            linkage="ward",
+            clustering_params=clustering_params,
         )
 
-        # Reconstruct ClusteringManager state from the cached/computed results
-        # so that analyze_cluster_topics can inspect per-cluster metadata.
-        cm.load_embeddings()
-        _apply_cached_cluster_labels(cm, cached_results)
+        if not cached:
+            return {
+                "error": (
+                    f"No pre-computed clustering data available for conference "
+                    f"'{conference}'"
+                    + (f" years={years}" if years else "")
+                    + ". Run 'abstracts-explorer clustering pre-generate' first."
+                ),
+            }
 
-        # Get cluster statistics
+        # Reconstruct ClusteringManager state from cached results
+        cm.load_embeddings(conferences=[conference], years=years)
+        _apply_cached_cluster_labels(cm, cached)
+
         stats = cm.get_cluster_statistics()
 
-        # Analyze topics for each cluster
         cluster_topics = []
         for cluster_id in range(stats["n_clusters"]):
             topics = analyze_cluster_topics(cm, db, cluster_id)
             cluster_topics.append(topics)
 
-        result = {
+        return {
+            "conference": conference,
             "statistics": stats,
             "clusters": cluster_topics,
         }
-
-        # Clean up
+    finally:
         cm.embeddings_manager.close()
         db.close()
 
-        return json.dumps(result, indent=2)
+
+@mcp.tool()
+def get_cluster_topics(
+    conferences: Optional[List[str]] = None,
+    years: Optional[List[int]] = None,
+    collection_name: Optional[str] = None,
+    **kwargs,
+) -> str:
+    """
+    Get the most frequently mentioned topics from pre-computed clustered embeddings.
+
+    This tool retrieves cached clustering results (pre-generated via CLI)
+    and analyzes the topics in each cluster based on keywords, sessions,
+    and paper titles.  A conference must be specified.
+
+    When multiple conferences are provided, each conference is looked up
+    individually and results are combined.
+
+    Parameters
+    ----------
+    conferences : list of str, optional
+        Conference names to retrieve clusters for (e.g. ["NeurIPS"]).
+        Required – returns an error when not provided.
+    years : list of int, optional
+        Filter by publication years.
+    collection_name : str, optional
+        Name of ChromaDB collection (uses config default if not provided).
+    **kwargs
+        Ignored (for backwards compatibility with old tool schemas).
+
+    Returns
+    -------
+    str
+        JSON string containing cluster topics analysis.
+    """
+    try:
+        if not conferences:
+            return json.dumps(
+                {
+                    "error": (
+                        "A conference must be specified for cluster topic analysis. "
+                        "Please provide conferences parameter."
+                    )
+                },
+                indent=2,
+            )
+
+        all_results: List[Dict[str, Any]] = []
+        for conf in conferences:
+            result = _get_cluster_topics_for_single_conference(
+                conference=conf,
+                years=years,
+                collection_name=collection_name,
+            )
+            all_results.append(result)
+
+        # If only one conference, return its result directly
+        if len(all_results) == 1:
+            return json.dumps(all_results[0], indent=2)
+
+        # Multiple conferences – combine
+        return json.dumps({"conference_results": all_results}, indent=2)
 
     except Exception as e:
         logger.error(f"Failed to get cluster topics: {str(e)}")
@@ -361,13 +435,15 @@ def get_topic_evolution(
 
     This tool searches for papers related to specific topic keywords and
     analyzes their distribution and trends over time.
+    A conference must be specified.
 
     Parameters
     ----------
     topic_keywords : str
         Keywords describing the topic to analyze (e.g., "transformers attention")
     conference : str, optional
-        Filter by conference name (e.g., "neurips", "iclr")
+        Conference name to filter by (e.g., "NeurIPS", "ICLR").
+        Required – returns an error when not provided.
     start_year : int, optional
         Start year for analysis (inclusive)
     end_year : int, optional
@@ -390,6 +466,16 @@ def get_topic_evolution(
         JSON string containing topic evolution analysis
     """
     try:
+        if not conference:
+            return json.dumps(
+                {
+                    "error": (
+                        "A conference must be specified for topic evolution analysis. "
+                        "Please provide conference parameter."
+                    )
+                },
+                indent=2,
+            )
         config = get_config()
         collection_name = collection_name or config.collection_name
 
@@ -492,7 +578,7 @@ def search_papers(
     Search for papers on a specific topic.
 
     This tool searches for the most relevant papers about a topic, optionally
-    filtered by specific years.
+    filtered by specific years.  A conference must be specified.
 
     Parameters
     ----------
@@ -503,7 +589,8 @@ def search_papers(
     n_results : int, optional
         Number of papers to return (default: 10)
     conference : str, optional
-        Filter by conference name
+        Conference name to filter by (e.g., "NeurIPS", "ICLR").
+        Required – returns an error when not provided.
     where : dict, optional
         Custom ChromaDB WHERE clause for filtering results by metadata.
         Supports ChromaDB query operators like $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin.
@@ -522,6 +609,15 @@ def search_papers(
         JSON string containing search results
     """
     try:
+        if not conference:
+            return json.dumps(
+                {
+                    "error": (
+                        "A conference must be specified for paper search. " "Please provide conference parameter."
+                    )
+                },
+                indent=2,
+            )
         config = get_config()
         collection_name = collection_name or config.collection_name
 
@@ -609,6 +705,103 @@ def search_papers(
 
 
 @mcp.tool()
+def get_paper_details(
+    title: Optional[str] = None,
+    paper_id: Optional[str] = None,
+    conference: Optional[str] = None,
+    year: Optional[int] = None,
+    limit: int = 5,
+) -> str:
+    """
+    Get detailed information about papers from the database.
+
+    Returns full paper metadata including authors, URLs, PDF links, session info,
+    keywords, awards, and other details stored in the database.
+
+    At least one of *title* or *paper_id* must be provided.
+
+    Parameters
+    ----------
+    title : str, optional
+        Title or partial title to search for (case-insensitive).
+    paper_id : str, optional
+        Unique paper identifier (uid or original conference/OpenReview ID).
+        When provided, performs an exact lookup and ignores *title*.
+    conference : str, optional
+        Filter results by conference name (e.g., "NeurIPS", "ICLR").
+        Only applied when searching by *title*.
+    year : int, optional
+        Filter results by publication year.
+        Only applied when searching by *title*.
+    limit : int, optional
+        Maximum number of papers to return when searching by title (default: 5).
+
+    Returns
+    -------
+    str
+        JSON string with fields:
+
+        - ``papers_found`` – number of papers returned
+        - ``papers`` – list of paper dicts, each containing:
+          title, authors (list), abstract, url, paper_pdf_url,
+          poster_image_url, session, room_name, starttime, endtime,
+          poster_position, keywords, award, year, conference, original_id
+    """
+    if not title and not paper_id:
+        return json.dumps(
+            {"error": "Provide at least one of 'title' or 'paper_id' to look up a paper."},
+            indent=2,
+        )
+
+    try:
+        db = DatabaseManager()
+        db.connect()
+
+        raw_papers: List[Dict[str, Any]] = []
+
+        if paper_id:
+            # Exact lookup by uid or original_id (returns at most one paper)
+            rows = db.query(
+                "SELECT * FROM papers WHERE uid = ? OR original_id = ? LIMIT 1",
+                (paper_id, paper_id),
+            )
+            raw_papers = rows
+
+        if not raw_papers and title:
+            # Keyword search on title with optional conference/year filters
+            raw_papers = db.search_papers(
+                keyword=title,
+                conference=conference,
+                year=year,
+                limit=limit,
+            )
+
+        # Format each paper: parse authors into a list and serialize timestamps
+        result_papers = []
+        for paper in raw_papers:
+            p = dict(paper)
+            # Parse semicolon-separated authors into a list
+            authors_raw = p.get("authors") or ""
+            p["authors"] = [a.strip() for a in authors_raw.split(";") if a.strip()]
+            # Ensure created_at is JSON-serializable
+            if "created_at" in p and p["created_at"] is not None:
+                p["created_at"] = str(p["created_at"])
+            result_papers.append(p)
+
+        result = {
+            "papers_found": len(result_papers),
+            "papers": result_papers,
+        }
+
+        db.close()
+        return json.dumps(result, indent=2, default=str)
+
+    except Exception as e:
+        logger.error(f"Failed to get paper details: {str(e)}")
+        return json.dumps({"error": str(e)}, indent=2)
+
+
+@mcp.tool()
 def analyze_topic_relevance(
     topic: str,
     distance_threshold: float = 1.1,
@@ -622,6 +815,7 @@ def analyze_topic_relevance(
     This tool measures topic relevance by finding papers semantically similar to the topic
     within a specified Euclidean distance threshold. It's useful for identifying how prevalent
     or relevant a research topic is at a conference.
+    A conference must be specified.
 
     Parameters
     ----------
@@ -632,7 +826,8 @@ def analyze_topic_relevance(
         Maximum Euclidean distance in embedding space to consider papers relevant (default: 1.1).
         Lower values mean stricter matching. Typical range: 0.5-2.0 for normalized embeddings.
     conferences : list of str, optional
-        Filter results to specific conferences (e.g., ["NeurIPS", "ICLR"])
+        Conference names to filter by (e.g., ["NeurIPS", "ICLR"]).
+        Required – returns an error when not provided.
     years : list of int, optional
         Filter results to specific years (e.g., [2024, 2025])
     collection_name : str, optional
@@ -645,10 +840,11 @@ def analyze_topic_relevance(
         - topic: The topic analyzed
         - distance_threshold: Distance threshold applied
         - total_papers: Number of papers found within distance
+        - total_considered: Total number of filtered papers considered
         - conferences: Conferences represented (with counts)
         - years: Years represented (with counts)
         - sample_papers: Sample of closest papers with titles and distances
-        - relevance_score: Normalized relevance score (0-100 scale)
+        - relevance_score: Percentage of filtered papers within distance (0-100)
 
     Examples
     --------
@@ -661,6 +857,17 @@ def analyze_topic_relevance(
     Interpretation: Low relevance - emerging or niche topic
     """
     try:
+        if not conferences:
+            return json.dumps(
+                {
+                    "error": (
+                        "A conference must be specified for topic relevance analysis. "
+                        "Please provide conferences parameter."
+                    )
+                },
+                indent=2,
+            )
+
         config = get_config()
         collection_name = collection_name or config.collection_name
 
@@ -694,6 +901,7 @@ def analyze_topic_relevance(
         # Analyze results
         papers = result_data["papers"]
         total_papers = len(papers)
+        total_considered = result_data.get("total_considered", total_papers)
 
         # Count by conference
         conference_counts: Counter[str] = Counter()
@@ -705,8 +913,11 @@ def analyze_topic_relevance(
                 year_counts[paper["year"]] += 1
 
         # Calculate relevance score (0-100 scale)
-        # Based on number of papers found - adjust scale as needed
-        relevance_score = min(100, (total_papers / 10) * 100) if total_papers > 0 else 0
+        # Ratio of papers within distance threshold to total filtered papers
+        if total_considered > 0:
+            relevance_score = (total_papers / total_considered) * 100
+        else:
+            relevance_score = 0
 
         # Get sample papers (top 5 closest)
         sample_papers = []
@@ -729,6 +940,7 @@ def analyze_topic_relevance(
                 "years": years,
             },
             "total_papers": total_papers,
+            "total_considered": total_considered,
             "relevance_score": round(relevance_score, 1),
             "conferences": dict(sorted(conference_counts.items(), key=lambda x: (-x[1], x[0]))),
             "years": dict(sorted(year_counts.items(), key=lambda x: x[0])),
@@ -749,70 +961,123 @@ def analyze_topic_relevance(
 
 @mcp.tool()
 def get_cluster_visualization(
+    conferences: Optional[List[str]] = None,
+    years: Optional[List[int]] = None,
     output_path: Optional[str] = None,
     collection_name: Optional[str] = None,
     **kwargs,
 ) -> str:
     """
-    Generate visualization data for clustered embeddings.
+    Retrieve pre-computed visualization data for clustered embeddings.
 
-    This tool performs agglomerative clustering with t-SNE dimensionality
-    reduction on paper embeddings and returns data suitable for visualization.
+    This tool looks up cached clustering results (pre-generated via CLI)
+    and returns data suitable for visualization.  A conference must be
+    specified.
+
+    When multiple conferences are provided, each conference is looked up
+    individually and results are combined.
 
     Parameters
     ----------
+    conferences : list of str, optional
+        Conference names to retrieve clusters for (e.g. ["NeurIPS"]).
+        Required – returns an error when not provided.
+    years : list of int, optional
+        Filter by publication years.
     output_path : str, optional
-        Path to save visualization JSON file (optional)
+        Path to save visualization JSON file (optional).
     collection_name : str, optional
-        Name of ChromaDB collection
+        Name of ChromaDB collection.
     **kwargs
-        Ignored (for backwards compatibility with old tool schemas)
+        Ignored (for backwards compatibility with old tool schemas).
 
     Returns
     -------
     str
-        JSON string containing visualization data with points, clusters, and statistics
+        JSON string containing visualization data with points, clusters, and statistics.
     """
     try:
+        if not conferences:
+            return json.dumps(
+                {
+                    "error": (
+                        "A conference must be specified for cluster visualization. "
+                        "Please provide conferences parameter."
+                    )
+                },
+                indent=2,
+            )
+
         config = get_config()
         collection_name = collection_name or config.collection_name
 
-        # Use compute_clusters_with_cache to avoid redundant t-SNE/clustering
-        # when pre-generated results exist in the database.
-        logger.info("Performing clustering for visualization (with cache)...")
-        cm, db = load_clustering_data(collection_name)
+        all_points: List[Dict[str, Any]] = []
+        combined_stats: Dict[str, Any] = {}
 
-        results = compute_clusters_with_cache(
-            embeddings_manager=cm.embeddings_manager,
-            database=db,
-            embedding_model=config.embedding_model,
-            reduction_method="tsne",
-            n_components=2,
-            clustering_method="agglomerative",
-            n_clusters=None,
-            distance_threshold=150.0,
-            linkage="ward",
-        )
+        for conf in conferences:
+            clustering_params: Dict[str, Any] = {
+                "linkage": "ward",
+                "distance_threshold": 150.0,
+                "conferences": sorted([conf]),
+            }
+            if years:
+                clustering_params["years"] = sorted([int(y) for y in years])
+
+            cm, db = load_clustering_data(collection_name)
+            try:
+                cached = db.get_clustering_cache(
+                    embedding_model=config.embedding_model,
+                    reduction_method="tsne",
+                    n_components=2,
+                    clustering_method="agglomerative",
+                    n_clusters=None,
+                    clustering_params=clustering_params,
+                )
+            finally:
+                cm.embeddings_manager.close()
+                db.close()
+
+            if not cached:
+                return json.dumps(
+                    {
+                        "error": (
+                            f"No pre-computed clustering data available for conference "
+                            f"'{conf}'"
+                            + (f" years={years}" if years else "")
+                            + ". Run 'abstracts-explorer clustering pre-generate' first."
+                        ),
+                    },
+                    indent=2,
+                )
+
+            all_points.extend(cached.get("points", []))
+            if not combined_stats:
+                combined_stats = cached.get("statistics", {})
+            else:
+                # Merge stats across conferences
+                combined_stats["n_clusters"] = combined_stats.get("n_clusters", 0) + cached.get("statistics", {}).get(
+                    "n_clusters", 0
+                )
+                combined_stats["total_papers"] = combined_stats.get("total_papers", 0) + cached.get(
+                    "statistics", {}
+                ).get("total_papers", 0)
 
         # Export if requested
         if output_path:
             import pathlib
 
             try:
-                pathlib.Path(output_path).write_text(json.dumps(results, indent=2))
+                export_data = {"points": all_points, "statistics": combined_stats}
+                pathlib.Path(output_path).write_text(json.dumps(export_data, indent=2))
             except OSError as exc:
                 logger.warning(f"Failed to write visualization to {output_path}: {exc}")
-                output_path = None  # Don't claim the file was saved
+                output_path = None
 
-        cm.embeddings_manager.close()
-        db.close()
-
-        # Format result
         result = {
             "n_dimensions": 2,
-            "n_points": len(results["points"]),
-            "statistics": results["statistics"],
-            "points": results["points"][:1000],  # Limit for MCP response size
+            "n_points": len(all_points),
+            "statistics": combined_stats,
+            "points": all_points[:1000],  # Limit for MCP response size
             "visualization_saved": output_path is not None,
             "output_path": output_path if output_path else None,
         }

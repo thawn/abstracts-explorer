@@ -66,6 +66,11 @@ class EmbeddingsError(Exception):
     pass
 
 
+# Maximum number of results to request from ChromaDB in a single query.
+# Prevents "too many SQL variables" errors in the underlying SQLite backend.
+_MAX_QUERY_RESULTS = 32766  # this is the maximum for sqlite 3.32 and above
+
+
 class EmbeddingsManager:
     """
     Manager for generating and storing text embeddings.
@@ -902,7 +907,9 @@ class EmbeddingsManager:
             - query_embedding: list[float] - The generated embedding for the query
             - distance: float - The distance threshold used
             - papers: list[dict] - Papers within the distance radius with their distances
-            - count: int - Number of papers found
+            - count: int - Number of papers found within the distance threshold
+            - total_considered: int - Total number of papers matching the
+              conference/year filters (before distance filtering)
 
         Raises
         ------
@@ -966,11 +973,15 @@ class EmbeddingsManager:
                 else:
                     where_clause = {"$and": filters}
 
-            # Query all papers and get distances
-            # Using collection.query() which returns papers sorted by distance
+            # Query papers and get distances.
+            # Cap n_results to avoid ChromaDB / SQLite "too many SQL variables"
+            # errors that occur when the collection is large (SQLite has a
+            # default limit of 32,766 bound parameters).
+            n_results_query = min(total_count, _MAX_QUERY_RESULTS)
+
             results = self.collection.query(
                 query_embeddings=[query_embedding],
-                n_results=total_count,  # Get all papers
+                n_results=n_results_query,
                 include=["distances", "metadatas"],
                 where=where_clause,
             )
@@ -1005,6 +1016,7 @@ class EmbeddingsManager:
                 "distance": distance_threshold,
                 "papers": matching_papers,
                 "count": len(matching_papers),
+                "total_considered": len(paper_ids),
             }
 
         except EmbeddingsError:
