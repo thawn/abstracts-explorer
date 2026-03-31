@@ -500,7 +500,13 @@ def chat():
             metadata_filter = filter_conditions[0]
 
         # Get response with filters
-        response = rag.query(message, n_results=n_papers, metadata_filter=metadata_filter)
+        response = rag.query(
+            message,
+            n_results=n_papers,
+            metadata_filter=metadata_filter,
+            conferences=conferences if conferences else None,
+            years=[int(y) for y in years] if years else None,
+        )
 
         return jsonify(
             {

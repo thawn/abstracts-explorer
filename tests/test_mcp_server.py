@@ -293,10 +293,16 @@ class TestMCPTools:
     """Tests for MCP tool functions."""
 
     @patch("abstracts_explorer.mcp_server.load_clustering_data")
-    @patch("abstracts_explorer.mcp_server.compute_clusters_with_cache")
     @patch("abstracts_explorer.mcp_server.analyze_cluster_topics")
-    def test_get_cluster_topics(self, mock_analyze, mock_compute, mock_load):
-        """Test get_cluster_topics tool."""
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_cluster_topics(self, mock_config, mock_analyze, mock_load):
+        """Test get_cluster_topics tool with cached results."""
+        # Setup config mock
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config_obj.embedding_model = "test-model"
+        mock_config.return_value = mock_config_obj
+
         # Setup mocks
         mock_cm = Mock()
         mock_cm.embeddings_manager = Mock()
@@ -306,8 +312,8 @@ class TestMCPTools:
 
         mock_cm.load_embeddings.return_value = 100
 
-        # compute_clusters_with_cache returns cached results
-        mock_compute.return_value = {
+        # db.get_clustering_cache returns cached results
+        mock_db.get_clustering_cache.return_value = {
             "points": [
                 {"id": "p1", "cluster": 0, "x": 0.0, "y": 0.0},
                 {"id": "p2", "cluster": 0, "x": 1.0, "y": 1.0},
@@ -351,7 +357,7 @@ class TestMCPTools:
         # Import and call the tool
         from abstracts_explorer.mcp_server import get_cluster_topics
 
-        result_str = get_cluster_topics(n_clusters=2)
+        result_str = get_cluster_topics(conferences=["NeurIPS"])
         result = json.loads(result_str)
 
         # Verify result
@@ -361,10 +367,50 @@ class TestMCPTools:
         assert len(result["clusters"]) == 2
         assert result["clusters"][0]["cluster_id"] == 0
         assert result["clusters"][1]["cluster_id"] == 1
+        assert result["conference"] == "NeurIPS"
+
+        # Verify cache was queried with correct params
+        mock_db.get_clustering_cache.assert_called_once()
 
         # Verify cleanup
         mock_cm.embeddings_manager.close.assert_called_once()
         mock_db.close.assert_called_once()
+
+    @patch("abstracts_explorer.mcp_server.load_clustering_data")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_cluster_topics_no_conference(self, mock_config, mock_load):
+        """Test get_cluster_topics returns error when no conference is specified."""
+        from abstracts_explorer.mcp_server import get_cluster_topics
+
+        result_str = get_cluster_topics()
+        result = json.loads(result_str)
+
+        assert "error" in result
+        assert "conference must be specified" in result["error"]
+
+    @patch("abstracts_explorer.mcp_server.load_clustering_data")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_cluster_topics_no_cache(self, mock_config, mock_load):
+        """Test get_cluster_topics returns error when no cached results exist."""
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config_obj.embedding_model = "test-model"
+        mock_config.return_value = mock_config_obj
+
+        mock_cm = Mock()
+        mock_cm.embeddings_manager = Mock()
+        mock_db = Mock()
+        mock_load.return_value = (mock_cm, mock_db)
+        mock_db.get_clustering_cache.return_value = None
+
+        from abstracts_explorer.mcp_server import get_cluster_topics
+
+        result_str = get_cluster_topics(conferences=["NeurIPS"])
+        result = json.loads(result_str)
+
+        assert "error" in result
+        assert "No pre-computed clustering data" in result["error"]
+        assert "NeurIPS" in result["error"]
 
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
     @patch("abstracts_explorer.mcp_server.DatabaseManager")
@@ -645,10 +691,9 @@ class TestMCPTools:
         assert "Invalid WHERE clause" in result["error"]
 
     @patch("abstracts_explorer.mcp_server.load_clustering_data")
-    @patch("abstracts_explorer.mcp_server.compute_clusters_with_cache")
     @patch("abstracts_explorer.mcp_server.get_config")
-    def test_get_cluster_visualization(self, mock_config, mock_compute, mock_load):
-        """Test get_cluster_visualization tool."""
+    def test_get_cluster_visualization(self, mock_config, mock_load):
+        """Test get_cluster_visualization tool with cached results."""
         # Setup config mock
         mock_config_obj = Mock()
         mock_config_obj.embedding_db_path = "chroma_db"
@@ -663,8 +708,8 @@ class TestMCPTools:
         mock_db = Mock()
         mock_load.return_value = (mock_cm, mock_db)
 
-        # Setup clustering mock
-        mock_compute.return_value = {
+        # db.get_clustering_cache returns cached results
+        mock_db.get_clustering_cache.return_value = {
             "points": [
                 {"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0, "title": "Paper 1"},
                 {"id": "p2", "x": 1.0, "y": 1.0, "cluster": 1, "title": "Paper 2"},
@@ -681,7 +726,7 @@ class TestMCPTools:
         # Import and call the tool
         from abstracts_explorer.mcp_server import get_cluster_visualization
 
-        result_str = get_cluster_visualization(n_clusters=2)
+        result_str = get_cluster_visualization(conferences=["NeurIPS"])
         result = json.loads(result_str)
 
         # Verify result
@@ -690,6 +735,44 @@ class TestMCPTools:
         assert "statistics" in result
         assert result["statistics"]["n_clusters"] == 2
         assert len(result["points"]) == 2
+
+        # Verify cache was queried
+        mock_db.get_clustering_cache.assert_called_once()
+
+    @patch("abstracts_explorer.mcp_server.load_clustering_data")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_cluster_visualization_no_conference(self, mock_config, mock_load):
+        """Test get_cluster_visualization returns error when no conference is specified."""
+        from abstracts_explorer.mcp_server import get_cluster_visualization
+
+        result_str = get_cluster_visualization()
+        result = json.loads(result_str)
+
+        assert "error" in result
+        assert "conference must be specified" in result["error"]
+
+    @patch("abstracts_explorer.mcp_server.load_clustering_data")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_cluster_visualization_no_cache(self, mock_config, mock_load):
+        """Test get_cluster_visualization returns error when no cache."""
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config_obj.embedding_model = "test-model"
+        mock_config.return_value = mock_config_obj
+
+        mock_cm = Mock()
+        mock_cm.embeddings_manager = Mock()
+        mock_db = Mock()
+        mock_load.return_value = (mock_cm, mock_db)
+        mock_db.get_clustering_cache.return_value = None
+
+        from abstracts_explorer.mcp_server import get_cluster_visualization
+
+        result_str = get_cluster_visualization(conferences=["NeurIPS"])
+        result = json.loads(result_str)
+
+        assert "error" in result
+        assert "No pre-computed clustering data" in result["error"]
 
 
 class TestMCPServerIntegration:

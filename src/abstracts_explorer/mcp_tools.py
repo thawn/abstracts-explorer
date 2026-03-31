@@ -237,19 +237,30 @@ MCP_TOOLS_SCHEMA = [
         "function": {
             "name": "get_cluster_topics",
             "description": (
-                "Analyze clustered paper embeddings to identify the most frequently mentioned topics. "
+                "Analyze pre-computed clustered paper embeddings to identify the most frequently mentioned topics. "
                 "Use this tool when the user asks about: overall themes, main topics, research areas, "
-                "or wants to understand what topics are covered in the conference."
+                "or wants to understand what topics are covered in the conference. "
+                "A conference must be specified."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "conferences": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Conference names to retrieve cluster topics for (e.g., ['NeurIPS']). Required.",
+                    },
+                    "years": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Filter by specific years (e.g., [2024, 2025])",
+                    },
                     "collection_name": {
                         "type": "string",
                         "description": "Name of ChromaDB collection (optional, uses config default)",
                     },
                 },
-                "required": [],
+                "required": ["conferences"],
             },
         },
     },
@@ -317,17 +328,27 @@ MCP_TOOLS_SCHEMA = [
         "function": {
             "name": "get_cluster_visualization",
             "description": (
-                "Generate visualization data for clustered embeddings. "
+                "Retrieve pre-computed visualization data for clustered embeddings. "
                 "Use this tool when the user asks for: a visual representation, graphical view, "
-                "or wants to see clusters displayed."
+                "or wants to see clusters displayed. A conference must be specified."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "conferences": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Conference names to retrieve visualization for (e.g., ['NeurIPS']). Required.",
+                    },
+                    "years": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Filter by specific years (e.g., [2024, 2025])",
+                    },
                     "output_path": {"type": "string", "description": "Path to save visualization JSON (optional)"},
                     "collection_name": {"type": "string", "description": "Name of ChromaDB collection (optional)"},
                 },
-                "required": [],
+                "required": ["conferences"],
             },
         },
     },

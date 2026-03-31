@@ -50,9 +50,15 @@ class RAGDeps:
     tool_results : list of dict
         Accumulated tool call results from the current agent run.
         Each entry has 'name' (tool name) and 'raw_result' (JSON string).
+    conferences : list of str
+        Default conferences for MCP clustering tools (from web UI selection).
+    years : list of int
+        Default years for MCP clustering tools (from web UI selection).
     """
 
     tool_results: List[Dict[str, Any]] = field(default_factory=list)
+    conferences: List[str] = field(default_factory=list)
+    years: List[int] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -100,19 +106,37 @@ def _tool_search_papers(
     return format_tool_result_for_llm("search_papers", raw)
 
 
-def _tool_get_cluster_topics(ctx: RunContext[RAGDeps]) -> str:
-    """Get the main research topics from clustered paper embeddings.
+def _tool_get_cluster_topics(
+    ctx: RunContext[RAGDeps],
+    conference: Optional[str] = None,
+) -> str:
+    """Get the main research topics from pre-computed clustered paper embeddings.
 
     Use this tool to discover the most frequently mentioned topics
-    and research areas across all papers. Returns clusters with
-    keywords and statistics.
+    and research areas. Returns clusters with keywords and statistics.
+
+    A conference must be specified. If not provided by the user, the
+    currently selected conference from the web UI is used automatically.
 
     Parameters
     ----------
     ctx : RunContext[RAGDeps]
         Agent context with dependencies.
+    conference : str, optional
+        Conference name to retrieve cluster topics for (e.g. "NeurIPS").
+        When omitted, the default conference from the current session is used.
     """
-    raw = mcp_get_cluster_topics()
+    # Determine conferences: explicit param > deps default
+    if conference:
+        conferences = [conference]
+    elif ctx.deps.conferences:
+        conferences = ctx.deps.conferences
+    else:
+        conferences = None
+
+    years = ctx.deps.years if ctx.deps.years else None
+
+    raw = mcp_get_cluster_topics(conferences=conferences, years=years)
     ctx.deps.tool_results.append({"name": "get_cluster_topics", "raw_result": raw})
     return format_tool_result_for_llm("get_cluster_topics", raw)
 
@@ -192,18 +216,37 @@ def _tool_analyze_topic_relevance(
     return format_tool_result_for_llm("analyze_topic_relevance", raw)
 
 
-def _tool_get_cluster_visualization(ctx: RunContext[RAGDeps]) -> str:
-    """Generate 2D visualization data for clustered paper embeddings.
+def _tool_get_cluster_visualization(
+    ctx: RunContext[RAGDeps],
+    conference: Optional[str] = None,
+) -> str:
+    """Generate 2D visualization data for pre-computed clustered paper embeddings.
 
     Use this tool to produce data for plotting papers grouped by topic
     cluster. Returns points with x/y coordinates and cluster assignments.
+
+    A conference must be specified. If not provided by the user, the
+    currently selected conference from the web UI is used automatically.
 
     Parameters
     ----------
     ctx : RunContext[RAGDeps]
         Agent context with dependencies.
+    conference : str, optional
+        Conference name to retrieve visualization for (e.g. "NeurIPS").
+        When omitted, the default conference from the current session is used.
     """
-    raw = mcp_get_cluster_visualization()
+    # Determine conferences: explicit param > deps default
+    if conference:
+        conferences = [conference]
+    elif ctx.deps.conferences:
+        conferences = ctx.deps.conferences
+    else:
+        conferences = None
+
+    years = ctx.deps.years if ctx.deps.years else None
+
+    raw = mcp_get_cluster_visualization(conferences=conferences, years=years)
     ctx.deps.tool_results.append({"name": "get_cluster_visualization", "raw_result": raw})
     return format_tool_result_for_llm("get_cluster_visualization", raw)
 
@@ -340,6 +383,8 @@ class RAGChat:
         n_results: Optional[int] = None,
         metadata_filter: Optional[Dict[str, Any]] = None,
         system_prompt: Optional[str] = None,
+        conferences: Optional[List[str]] = None,
+        years: Optional[List[int]] = None,
     ) -> Dict[str, Any]:
         """
         Query the RAG system with a question.
@@ -354,6 +399,13 @@ class RAGChat:
             Metadata filter for paper search (currently unused with Pydantic AI agent).
         system_prompt : str, optional
             Custom system prompt for the model (overrides default instructions).
+        conferences : list of str, optional
+            Default conferences for MCP clustering tools.  Typically set from
+            the web UI conference selector so that clustering tools use cached
+            results for the selected conference.
+        years : list of int, optional
+            Default years for MCP clustering tools.  Typically set from the
+            web UI year selector.
 
         Returns
         -------
@@ -379,7 +431,10 @@ class RAGChat:
                 n_results = self.max_context_papers
 
             # Fresh deps for each query to capture tool results
-            deps = RAGDeps()
+            deps = RAGDeps(
+                conferences=conferences or [],
+                years=years or [],
+            )
 
             # Model settings
             settings = ModelSettings(

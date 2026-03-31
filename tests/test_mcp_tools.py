@@ -661,8 +661,8 @@ class TestExecuteMCPToolE2E:
         mock_cm.embeddings_manager = Mock()
         mock_db = Mock()
 
-        # Mock compute_clusters_with_cache to return cached points
-        mock_cached_results = {
+        # Mock db.get_clustering_cache to return cached results
+        mock_db.get_clustering_cache.return_value = {
             "points": [
                 {"id": "p1", "cluster": 0, "x": 0.0, "y": 0.0},
                 {"id": "p2", "cluster": 0, "x": 0.1, "y": 0.1},
@@ -680,9 +680,10 @@ class TestExecuteMCPToolE2E:
 
         with (
             patch("abstracts_explorer.mcp_server.load_clustering_data", return_value=(mock_cm, mock_db)),
-            patch("abstracts_explorer.mcp_server.compute_clusters_with_cache", return_value=mock_cached_results),
+            patch("abstracts_explorer.mcp_server.get_config") as mock_cfg,
         ):
-            result = execute_mcp_tool("get_cluster_topics", {"n_clusters": 2})
+            mock_cfg.return_value = Mock(collection_name="papers", embedding_model="test-model")
+            result = execute_mcp_tool("get_cluster_topics", {"conferences": ["NeurIPS"]})
 
         data = json.loads(result)
         assert "error" not in data
