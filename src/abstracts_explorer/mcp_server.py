@@ -86,6 +86,33 @@ def load_clustering_data(
         raise ClusterAnalysisError(f"Failed to load clustering data: {str(e)}") from e
 
 
+def _apply_cached_cluster_labels(
+    cm: ClusteringManager,
+    cached_results: Dict[str, Any],
+) -> None:
+    """
+    Restore ``cluster_labels`` on *cm* from cached clustering results.
+
+    Parameters
+    ----------
+    cm : ClusteringManager
+        Clustering manager with embeddings already loaded
+        (``cm.paper_ids`` must be populated).
+    cached_results : dict
+        Cached results dict containing a ``"points"`` list where each
+        element has ``"id"`` (or ``"paper_id"``) and ``"cluster"`` keys.
+    """
+    import numpy as np
+
+    point_id_to_cluster: Dict[str, int] = {}
+    for point in cached_results.get("points", []):
+        pid = point.get("id") or point.get("paper_id", "")
+        point_id_to_cluster[pid] = point.get("cluster", -1)
+
+    current_ids = cm.paper_ids or []
+    cm.cluster_labels = np.array([point_id_to_cluster.get(pid, -1) for pid in current_ids])
+
+
 def analyze_cluster_topics(
     cm: ClusteringManager,
     db: DatabaseManager,
@@ -221,17 +248,7 @@ def get_cluster_topics(
         # Reconstruct ClusteringManager state from the cached/computed results
         # so that analyze_cluster_topics can inspect per-cluster metadata.
         cm.load_embeddings()
-
-        if "points" in cached_results:
-            import numpy as np
-
-            point_id_to_cluster: Dict[str, int] = {}
-            for point in cached_results["points"]:
-                pid = point.get("id") or point.get("paper_id", "")
-                point_id_to_cluster[pid] = point.get("cluster", -1)
-
-            current_ids = cm.paper_ids or []
-            cm.cluster_labels = np.array([point_id_to_cluster.get(pid, -1) for pid in current_ids])
+        _apply_cached_cluster_labels(cm, cached_results)
 
         # Get cluster statistics
         stats = cm.get_cluster_statistics()
@@ -777,7 +794,11 @@ def get_cluster_visualization(
         if output_path:
             import pathlib
 
-            pathlib.Path(output_path).write_text(json.dumps(results, indent=2))
+            try:
+                pathlib.Path(output_path).write_text(json.dumps(results, indent=2))
+            except OSError as exc:
+                logger.warning(f"Failed to write visualization to {output_path}: {exc}")
+                output_path = None  # Don't claim the file was saved
 
         cm.embeddings_manager.close()
         db.close()

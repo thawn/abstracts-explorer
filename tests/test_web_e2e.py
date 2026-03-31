@@ -239,7 +239,7 @@ def _prepopulate_clustering_cache(test_database, em, collection_name):
     """
     Pre-populate the database with cached clustering results.
 
-    This mirrors the production workflow where ``abstracts-explorer clustering
+    This mirrors the production workflow where ``abstracts-explorer cluster
     pre-generate`` is run before the web UI is used.  With cached results
     present, MCP tools (``get_cluster_topics``, ``get_cluster_visualization``)
     return instantly instead of running t-SNE from scratch.
@@ -275,8 +275,11 @@ def _prepopulate_clustering_cache(test_database, em, collection_name):
         linkage="ward",
     )
 
-    # Use PCA instead of t-SNE for the cached reduction – PCA is
-    # deterministic and thread-safe.
+    # Use PCA for the reduction step (deterministic, thread-safe, and fast).
+    # The results are stored under the "tsne" cache key so that
+    # compute_clusters_with_cache() finds an exact cache hit when MCP tools
+    # request t-SNE reduction.  The x/y coordinates differ from a real t-SNE
+    # but are sufficient for testing the cache-lookup and topic-analysis paths.
     cm.reduce_dimensions(method="pca", n_components=2)
 
     try:
