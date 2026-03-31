@@ -913,13 +913,12 @@ def get_cluster_visualization(
                 combined_stats = cached.get("statistics", {})
             else:
                 # Merge stats across conferences
-                combined_stats["n_clusters"] = (
-                    combined_stats.get("n_clusters", 0) + cached.get("statistics", {}).get("n_clusters", 0)
+                combined_stats["n_clusters"] = combined_stats.get("n_clusters", 0) + cached.get("statistics", {}).get(
+                    "n_clusters", 0
                 )
-                combined_stats["total_papers"] = (
-                    combined_stats.get("total_papers", 0)
-                    + cached.get("statistics", {}).get("total_papers", 0)
-                )
+                combined_stats["total_papers"] = combined_stats.get("total_papers", 0) + cached.get(
+                    "statistics", {}
+                ).get("total_papers", 0)
 
         # Export if requested
         if output_path:
