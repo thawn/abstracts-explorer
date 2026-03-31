@@ -14,7 +14,9 @@ import {
     openChatSettings,
     closeSettings,
     syncFiltersToModal,
-    syncFiltersFromModal
+    syncFiltersFromModal,
+    handleYearChange,
+    handleConferenceChange
 } from '../static/modules/filters.js';
 
 describe('Filters Module', () => {
@@ -277,6 +279,94 @@ describe('Filters Module', () => {
 
             expect(sessionSelect.options[0].selected).toBe(false);
             expect(sessionSelect.options[1].selected).toBe(true);
+        });
+    });
+
+    describe('handleYearChange', () => {
+        beforeEach(() => {
+            document.body.innerHTML = `
+                <select id="year-selector" multiple>
+                    <option value="">All Years</option>
+                </select>
+                <select id="conference-selector"></select>
+                <select id="session-filter" multiple></select>
+                <div id="search-results">old results</div>
+            `;
+            window.loadStats = jest.fn();
+            window.loadInterestingPapers = jest.fn();
+            window.updateInterestingPapersCount = jest.fn();
+            window.resetClusters = jest.fn();
+            window.loadClusters = jest.fn();
+            global.fetch.mockResolvedValue({
+                ok: true,
+                json: async () => ({ sessions: [], topics: [] })
+            });
+        });
+
+        afterEach(() => {
+            delete window.loadStats;
+            delete window.loadInterestingPapers;
+            delete window.updateInterestingPapersCount;
+            delete window.resetClusters;
+            delete window.loadClusters;
+        });
+
+        it('should call resetClusters but not loadClusters when not on clusters tab', () => {
+            document.body.innerHTML += '<button id="tab-search" class="tab-btn border-purple-600"></button>';
+            handleYearChange();
+            expect(window.resetClusters).toHaveBeenCalled();
+            expect(window.loadClusters).not.toHaveBeenCalled();
+        });
+
+        it('should call resetClusters and loadClusters when on clusters tab', () => {
+            document.body.innerHTML += '<button id="tab-clusters" class="tab-btn border-purple-600"></button>';
+            handleYearChange();
+            expect(window.resetClusters).toHaveBeenCalled();
+            expect(window.loadClusters).toHaveBeenCalled();
+        });
+    });
+
+    describe('handleConferenceChange', () => {
+        beforeEach(() => {
+            document.body.innerHTML = `
+                <select id="year-selector" multiple>
+                    <option value="">All Years</option>
+                </select>
+                <select id="conference-selector"></select>
+                <select id="session-filter" multiple></select>
+                <div id="search-results">old results</div>
+            `;
+            window.loadStats = jest.fn();
+            window.loadInterestingPapers = jest.fn();
+            window.updateInterestingPapersCount = jest.fn();
+            window.resetClusters = jest.fn();
+            window.loadClusters = jest.fn();
+            global.fetch.mockResolvedValue({
+                ok: true,
+                json: async () => ({ sessions: [], topics: [] })
+            });
+        });
+
+        afterEach(() => {
+            delete window.loadStats;
+            delete window.loadInterestingPapers;
+            delete window.updateInterestingPapersCount;
+            delete window.resetClusters;
+            delete window.loadClusters;
+        });
+
+        it('should call resetClusters but not loadClusters when not on clusters tab', () => {
+            document.body.innerHTML += '<button id="tab-search" class="tab-btn border-purple-600"></button>';
+            handleConferenceChange();
+            expect(window.resetClusters).toHaveBeenCalled();
+            expect(window.loadClusters).not.toHaveBeenCalled();
+        });
+
+        it('should call resetClusters and loadClusters when on clusters tab', () => {
+            document.body.innerHTML += '<button id="tab-clusters" class="tab-btn border-purple-600"></button>';
+            handleConferenceChange();
+            expect(window.resetClusters).toHaveBeenCalled();
+            expect(window.loadClusters).toHaveBeenCalled();
         });
     });
 });

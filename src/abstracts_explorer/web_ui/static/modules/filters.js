@@ -272,9 +272,12 @@ export function handleYearChange() {
         `;
     }
     
-    // Reset cluster data so filters are respected on next cluster load
+    // Reset cluster data and refresh if currently viewing clusters
     if (window.resetClusters) {
         window.resetClusters();
+        if (currentTab === 'clusters' && window.loadClusters) {
+            window.loadClusters();
+        }
     }
 }
 
@@ -310,9 +313,12 @@ export function handleConferenceChange() {
         `;
     }
 
-    // Reset cluster data so the new filter is respected on next cluster load
+    // Reset cluster data and refresh if currently viewing clusters
     if (window.resetClusters) {
         window.resetClusters();
+        if (currentTab === 'clusters' && window.loadClusters) {
+            window.loadClusters();
+        }
     }
 }
 
