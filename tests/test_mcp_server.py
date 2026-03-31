@@ -1116,9 +1116,7 @@ class TestSearchPapersYearFilter:
 
         from abstracts_explorer.mcp_server import search_papers
 
-        result = json.loads(
-            search_papers(topic_keywords="neural networks", conference="NeurIPS", years=[2023, 2024])
-        )
+        result = json.loads(search_papers(topic_keywords="neural networks", conference="NeurIPS", years=[2023, 2024]))
 
         assert result["papers_found"] == 2
         titles = {p["title"] for p in result["papers"]}
