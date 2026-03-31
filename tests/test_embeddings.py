@@ -2,12 +2,8 @@
 Tests for the embeddings module.
 """
 
-import json
-
 import pytest
 from unittest.mock import Mock, patch
-
-import httpx
 
 from abstracts_explorer.embeddings import EmbeddingsError, EmbeddingsManager
 from tests.conftest import set_test_db
@@ -51,27 +47,16 @@ class TestEmbeddingsManager:
             assert em._client is not None
         assert embeddings_manager._client is None
 
-    def test_test_lm_studio_connection_success(self, embeddings_manager, monkeypatch):
+    def test_test_lm_studio_connection_success(self, embeddings_manager):
         """Test successful LM Studio connection."""
-        mock_resp = Mock()
-        mock_resp.raise_for_status = Mock()
-        mock_resp.json = Mock(return_value={"data": [{"id": "model-1"}]})
-        monkeypatch.setattr(httpx, "get", Mock(return_value=mock_resp))
         result = embeddings_manager.test_lm_studio_connection()
         assert result is True
+        embeddings_manager.openai_client.models.list.assert_called_once()
 
-    def test_test_lm_studio_connection_failure(self, embeddings_manager, monkeypatch):
+    def test_test_lm_studio_connection_failure(self, embeddings_manager):
         """Test failed LM Studio connection."""
-        monkeypatch.setattr(httpx, "get", Mock(side_effect=httpx.ConnectError("Connection error")))
-        result = embeddings_manager.test_lm_studio_connection()
-        assert result is False
-
-    def test_test_lm_studio_connection_non_json_response(self, embeddings_manager, monkeypatch):
-        """Test connection fails when API returns non-JSON (e.g. auth error as plain text)."""
-        mock_resp = Mock()
-        mock_resp.raise_for_status = Mock()
-        mock_resp.json = Mock(side_effect=json.JSONDecodeError("", "", 0))
-        monkeypatch.setattr(httpx, "get", Mock(return_value=mock_resp))
+        # Mock the OpenAI client's models.list() to raise an exception
+        embeddings_manager.openai_client.models.list.side_effect = Exception("Connection error")
         result = embeddings_manager.test_lm_studio_connection()
         assert result is False
 

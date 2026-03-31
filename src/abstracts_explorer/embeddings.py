@@ -297,12 +297,6 @@ class EmbeddingsManager:
         """
         Test connection to OpenAI-compatible API endpoint.
 
-        Performs a lightweight HTTP GET against the ``/v1/models`` endpoint to
-        verify that the API server is reachable and responds with valid JSON.
-        Unlike ``openai.Client.models.list()``, this avoids response-parsing
-        issues that can occur with newer ``openai`` library versions when the
-        server returns a non-standard payload.
-
         Returns
         -------
         bool
@@ -315,21 +309,8 @@ class EmbeddingsManager:
         ...     print("API is accessible")
         """
         try:
-            headers: dict[str, str] = {}
-            if self.llm_backend_auth_token:
-                headers["Authorization"] = f"Bearer {self.llm_backend_auth_token}"
-
-            resp = httpx.get(
-                f"{self.lm_studio_url}/v1/models",
-                headers=headers,
-                timeout=10,
-            )
-            resp.raise_for_status()
-
-            # Verify the response is valid JSON (not a plain-text error like
-            # "You must provide a valid API key").
-            resp.json()
-
+            # Try to get models list
+            _ = self.openai_client.models.list()
             logger.debug(f"Successfully connected to OpenAI API at {self.lm_studio_url}")
             return True
         except Exception as e:
