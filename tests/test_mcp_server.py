@@ -599,7 +599,9 @@ class TestMCPTools:
         from abstracts_explorer.mcp_server import search_papers
 
         where_clause = {"session": "Oral"}
-        result_str = search_papers(topic_keywords="llm", conference="NeurIPS", where=where_clause, years=[current_year, current_year - 1])
+        result_str = search_papers(
+            topic_keywords="llm", conference="NeurIPS", where=where_clause, years=[current_year, current_year - 1]
+        )
         result = json.loads(result_str)
 
         # Verify result
@@ -689,7 +691,9 @@ class TestMCPTools:
         from abstracts_explorer.mcp_server import get_topic_evolution
 
         result_str = get_topic_evolution(
-            topic_keywords="transformers", conference="NeurIPS", where="invalid string"  # Invalid: should be dict or None
+            topic_keywords="transformers",
+            conference="NeurIPS",
+            where="invalid string",  # Invalid: should be dict or None
         )
         result = json.loads(result_str)
 
