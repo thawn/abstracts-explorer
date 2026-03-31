@@ -56,7 +56,9 @@ describe('Paper Card Module', () => {
             expect(html).toContain('Author One');
             expect(html).toContain('Author Two');
             expect(html).toContain('Short abstract');
-            // Year and conference are not displayed in the card
+            // Conference should be displayed in the card
+            expect(html).toContain('NeurIPS');
+            expect(html).toContain('fa-university');
         });
 
         it('should show relevance score when provided', () => {
@@ -157,6 +159,11 @@ describe('Paper Card Module', () => {
             // The function creates a new modal element
             const modals = document.querySelectorAll('.fixed.inset-0');
             expect(modals.length).toBeGreaterThan(0);
+
+            // Conference should be shown in modal
+            const modalHtml = modals[0].innerHTML;
+            expect(modalHtml).toContain('NeurIPS');
+            expect(modalHtml).toContain('fa-university');
         });
 
         it('should handle missing PDF URL', async () => {

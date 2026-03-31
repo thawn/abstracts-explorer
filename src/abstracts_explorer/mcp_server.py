@@ -662,10 +662,14 @@ def search_papers(
 
                 # Filter by years list if provided
                 if years is None or (year and year in years):
+                    # Parse authors from semicolon-separated string stored in ChromaDB metadata
+                    authors_raw = metadata.get("authors", "")
+                    authors = [a.strip() for a in authors_raw.split(";") if a.strip()] if authors_raw else []
                     papers.append(
                         {
-                            "id": paper_id,
+                            "uid": paper_id,
                             "title": metadata.get("title", ""),
+                            "authors": authors,
                             "year": year,
                             "conference": metadata.get("conference", ""),
                             "session": metadata.get("session", ""),

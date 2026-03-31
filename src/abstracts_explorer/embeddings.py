@@ -68,7 +68,7 @@ class EmbeddingsError(Exception):
 
 # Maximum number of results to request from ChromaDB in a single query.
 # Prevents "too many SQL variables" errors in the underlying SQLite backend.
-_MAX_QUERY_RESULTS = 32766 # this is the maximum for sqlite 3.32 and above
+_MAX_QUERY_RESULTS = 32766  # this is the maximum for sqlite 3.32 and above
 
 
 class EmbeddingsManager:

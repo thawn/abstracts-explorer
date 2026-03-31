@@ -10,11 +10,12 @@ This module contains unit tests for the web UI application including:
 """
 
 import json
-import pytest
-from tests.conftest import set_test_db
 import sys
+import pytest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
+
+from tests.conftest import set_test_db
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -22,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from abstracts_explorer.web_ui import app as flask_app
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.config import get_config
+from abstracts_explorer.paper_utils import PaperFormattingError
 
 # ============================================================
 # Tests from test_web.py
@@ -1885,3 +1887,261 @@ class TestValidationDataModel:
         assert "ValidationData" in repr_str
         assert "test123" in repr_str
         assert "5" in repr_str
+
+
+# ============================================================
+# Paper card display field tests
+# ============================================================
+
+
+class TestPaperCardDisplayFieldsUnit:
+    """
+    Unit tests verifying that API endpoints return correct fields for paper card display.
+
+    Paper cards (formatPaperCard in paper-card.js) require specific fields:
+    - uid: for star ratings and the paper details modal onclick handler
+    - title: displayed as the card heading
+    - authors: must be a list (not a semicolon-separated string)
+    - conference: shown as indigo badge on every card
+    - abstract: shown in the card body
+
+    The showPaperDetails() modal also requires uid, title, authors (list), conference, abstract.
+    """
+
+    # Sample papers that represent what the DB returns after author parsing
+    _SAMPLE_PAPERS = [
+        {
+            "uid": "paper-uid-1",
+            "title": "Attention is All You Need",
+            "authors": ["Ashish Vaswani", "Noam Shazeer"],
+            "abstract": "We propose the Transformer architecture.",
+            "conference": "NeurIPS",
+            "session": "Oral Session 1",
+            "poster_position": "O1",
+            "year": 2017,
+            "url": "https://papers.nips.cc/paper/1",
+        },
+        {
+            "uid": "paper-uid-2",
+            "title": "BERT: Pre-training of Deep Bidirectional Transformers",
+            "authors": ["Jacob Devlin", "Ming-Wei Chang"],
+            "abstract": "We introduce BERT, a new language representation model.",
+            "conference": "NeurIPS",
+            "session": "Poster Session 2",
+            "poster_position": "P42",
+            "year": 2019,
+            "url": "https://papers.nips.cc/paper/2",
+        },
+    ]
+
+    def _make_mock_db(self, papers=None):
+        """Create a mock DatabaseManager that returns sample papers."""
+        mock_db = MagicMock()
+        if papers is None:
+            papers = self._SAMPLE_PAPERS
+        mock_db.search_papers_keyword.return_value = papers
+        return mock_db
+
+    @pytest.fixture
+    def app_client(self):
+        """Create a Flask test client and return (client, app_module) tuple."""
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        flask_app.config["TESTING"] = True
+        client = flask_app.test_client()
+        return client, app_module
+
+    def test_keyword_search_includes_conference_field(self, app_client):
+        """
+        Keyword search results must include the 'conference' field.
+
+        The conference badge in paper cards is only shown when paper.conference is set.
+        """
+        client, app_module = app_client
+        mock_db = self._make_mock_db()
+
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            response = client.post(
+                "/api/search",
+                json={"query": "attention", "use_embeddings": False, "limit": 5},
+            )
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert "papers" in data
+        assert len(data["papers"]) > 0
+
+        for paper in data["papers"]:
+            assert (
+                "conference" in paper
+            ), f"Paper '{paper.get('title')}' missing 'conference' field needed for paper card badge"
+            assert paper["conference"] == "NeurIPS"
+
+    def test_keyword_search_authors_is_list(self, app_client):
+        """
+        Keyword search results must return 'authors' as a list.
+
+        formatPaperCard() calls paper.authors.join(', ') which requires a list.
+        A string would cause TypeError: 'authors must be an array'.
+        """
+        client, app_module = app_client
+        mock_db = self._make_mock_db()
+
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            response = client.post(
+                "/api/search",
+                json={"query": "attention", "use_embeddings": False, "limit": 5},
+            )
+
+        assert response.status_code == 200
+        data = response.get_json()
+
+        for paper in data["papers"]:
+            authors = paper.get("authors")
+            assert isinstance(authors, list), (
+                f"Paper '{paper.get('title')}' has authors as "
+                f"{type(authors).__name__}, must be list for paper card"
+            )
+
+    def test_keyword_search_authors_no_semicolons(self, app_client):
+        """
+        Authors from keyword search must not contain semicolons.
+
+        The database stores authors as semicolon-separated strings.
+        The API must split them into individual author names.
+        """
+        client, app_module = app_client
+
+        # Return a paper with authors as already-parsed list (as search_papers_keyword returns)
+        papers_with_authors = [
+            {**self._SAMPLE_PAPERS[0], "authors": ["Alice Smith", "Bob Jones"]},
+        ]
+        mock_db = self._make_mock_db(papers=papers_with_authors)
+
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            response = client.post(
+                "/api/search",
+                json={"query": "attention", "use_embeddings": False, "limit": 5},
+            )
+
+        assert response.status_code == 200
+        data = response.get_json()
+
+        for paper in data["papers"]:
+            for author in paper.get("authors", []):
+                assert ";" not in author, f"Author '{author}' contains semicolons; authors were not split correctly"
+
+    def test_paper_detail_includes_conference_field(self, app_client):
+        """
+        The paper detail endpoint must include 'conference' for the modal badge.
+
+        The showPaperDetails() modal renders a conference badge using paper.conference.
+        """
+        client, app_module = app_client
+
+        expected_paper = {
+            "uid": "detail-uid-1",
+            "title": "Test Paper for Detail",
+            "authors": ["Author One", "Author Two"],
+            "abstract": "Test abstract text.",
+            "conference": "NeurIPS",
+            "session": "Oral Session 1",
+            "poster_position": "O1",
+            "year": 2024,
+            "url": "https://papers.nips.cc/paper/detail",
+        }
+
+        with patch("abstracts_explorer.web_ui.app.get_paper_with_authors") as mock_get_paper:
+            with patch.object(app_module, "get_database"):
+                mock_get_paper.return_value = expected_paper
+
+                response = client.get("/api/paper/detail-uid-1")
+
+        assert response.status_code == 200
+        paper = response.get_json()
+
+        assert "conference" in paper, "Paper detail modal requires 'conference' field"
+        assert paper["conference"] == "NeurIPS"
+
+    def test_paper_detail_authors_is_list(self, app_client):
+        """
+        The paper detail endpoint must return authors as a list.
+
+        showPaperDetails() joins authors with ', ' which requires a list.
+        """
+        client, app_module = app_client
+
+        expected_paper = {
+            "uid": "detail-uid-2",
+            "title": "Test Paper for Author Check",
+            "authors": ["First Author", "Second Author", "Third Author"],
+            "abstract": "Abstract text.",
+            "conference": "ICML",
+            "year": 2025,
+        }
+
+        with patch("abstracts_explorer.web_ui.app.get_paper_with_authors") as mock_get_paper:
+            with patch.object(app_module, "get_database"):
+                mock_get_paper.return_value = expected_paper
+
+                response = client.get("/api/paper/detail-uid-2")
+
+        assert response.status_code == 200
+        paper = response.get_json()
+
+        authors = paper.get("authors")
+        assert isinstance(authors, list), f"Paper detail modal requires authors as list, got {type(authors).__name__}"
+        assert authors == ["First Author", "Second Author", "Third Author"]
+
+    def test_batch_endpoint_includes_conference_field(self, app_client):
+        """
+        The /api/papers/batch endpoint must include 'conference' for paper cards.
+
+        The interesting papers tab and count filter use this endpoint to
+        render paper cards with the conference badge.
+        """
+        client, app_module = app_client
+
+        batch_papers = [
+            {
+                "uid": "batch-uid-1",
+                "title": "Batch Paper 1",
+                "authors": ["Author A"],
+                "abstract": "Abstract A",
+                "conference": "NeurIPS",
+                "year": 2024,
+            },
+            {
+                "uid": "batch-uid-2",
+                "title": "Batch Paper 2",
+                "authors": ["Author B", "Author C"],
+                "abstract": "Abstract B",
+                "conference": "ICLR",
+                "year": 2024,
+            },
+        ]
+
+        def mock_get_paper_side_effect(database, paper_uid):
+            for p in batch_papers:
+                if p["uid"] == paper_uid:
+                    return p
+            raise PaperFormattingError(f"Paper {paper_uid} not found")
+
+        with patch("abstracts_explorer.web_ui.app.get_paper_with_authors") as mock_get_paper:
+            with patch.object(app_module, "get_database"):
+                mock_get_paper.side_effect = mock_get_paper_side_effect
+
+                response = client.post(
+                    "/api/papers/batch",
+                    json={"paper_ids": ["batch-uid-1", "batch-uid-2"]},
+                )
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert "papers" in data
+        assert len(data["papers"]) == 2
+
+        for paper in data["papers"]:
+            assert "conference" in paper, "Batch endpoint must return 'conference' for paper card badge"
+            assert isinstance(
+                paper.get("authors"), list
+            ), f"Batch endpoint must return authors as list, got {type(paper.get('authors')).__name__}"
