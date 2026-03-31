@@ -326,7 +326,13 @@ MCP_TOOLS_SCHEMA = [
                     },
                     "start_year": {"type": "integer", "description": "Start year for analysis (inclusive)"},
                     "end_year": {"type": "integer", "description": "End year for analysis (inclusive)"},
-                    "where": {"type": "object", "description": "Custom ChromaDB WHERE clause for advanced filtering"},
+                    "distance_threshold": {
+                        "type": "number",
+                        "description": (
+                            "Maximum Euclidean distance in embedding space to consider papers "
+                            "relevant (default: 1.1). Lower values mean stricter matching."
+                        ),
+                    },
                     "collection_name": {"type": "string", "description": "Name of ChromaDB collection (optional)"},
                 },
                 "required": ["topic_keywords", "conference"],

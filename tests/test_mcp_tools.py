@@ -702,18 +702,20 @@ class TestExecuteMCPToolE2E:
     def test_get_topic_evolution_real_execution(self):
         """get_topic_evolution executes end-to-end with mocked EmbeddingsManager."""
         mock_em = Mock()
-        mock_em.search_similar.return_value = {
-            "ids": [["p1", "p2", "p3"]],
-            "metadatas": [
-                [
-                    {"title": "Paper 2022", "year": 2022, "session": "ML"},
-                    {"title": "Paper 2023", "year": 2023, "session": "ML"},
-                    {"title": "Paper 2024", "year": 2024, "session": "ML"},
-                ]
-            ],
-            "distances": [[0.1, 0.2, 0.3]],
-        }
+
+        def _find_papers(database, query, distance_threshold, conferences=None, years=None):
+            year = years[0] if years else None
+            if year == 2022:
+                return {"count": 1, "papers": [{"title": "Paper 2022", "session": "ML", "distance": 0.1}], "total_considered": 30}
+            elif year == 2023:
+                return {"count": 1, "papers": [{"title": "Paper 2023", "session": "ML", "distance": 0.2}], "total_considered": 30}
+            elif year == 2024:
+                return {"count": 1, "papers": [{"title": "Paper 2024", "session": "ML", "distance": 0.3}], "total_considered": 30}
+            return {"count": 0, "papers": [], "total_considered": 0}
+
+        mock_em.find_papers_within_distance.side_effect = _find_papers
         mock_db = Mock()
+        mock_db.get_years_for_conference.return_value = [2022, 2023, 2024]
 
         with (
             patch("abstracts_explorer.mcp_server.EmbeddingsManager", return_value=mock_em),
@@ -734,12 +736,13 @@ class TestExecuteMCPToolE2E:
     def test_get_topic_evolution_conference_list_normalized(self):
         """get_topic_evolution normalizes conference as list to string."""
         mock_em = Mock()
-        mock_em.search_similar.return_value = {
-            "ids": [["p1"]],
-            "metadatas": [[{"title": "P", "year": 2025, "session": "S"}]],
-            "distances": [[0.1]],
+        mock_em.find_papers_within_distance.return_value = {
+            "count": 1,
+            "papers": [{"title": "P", "session": "S", "distance": 0.1}],
+            "total_considered": 20,
         }
         mock_db = Mock()
+        mock_db.get_years_for_conference.return_value = [2025]
 
         with (
             patch("abstracts_explorer.mcp_server.EmbeddingsManager", return_value=mock_em),
