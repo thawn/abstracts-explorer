@@ -2,6 +2,8 @@
 Tests for the embeddings module.
 """
 
+import json
+
 import pytest
 from unittest.mock import Mock, patch
 
@@ -66,8 +68,6 @@ class TestEmbeddingsManager:
 
     def test_test_lm_studio_connection_non_json_response(self, embeddings_manager, monkeypatch):
         """Test connection fails when API returns non-JSON (e.g. auth error as plain text)."""
-        import json
-
         mock_resp = Mock()
         mock_resp.raise_for_status = Mock()
         mock_resp.json = Mock(side_effect=json.JSONDecodeError("", "", 0))
