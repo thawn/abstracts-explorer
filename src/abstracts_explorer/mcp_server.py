@@ -516,13 +516,6 @@ def get_topic_evolution(
                 metadata = results["metadatas"][0][idx]
                 year = metadata.get("year")
 
-                # Convert year to int (ChromaDB stores metadata as strings)
-                if year is not None:
-                    try:
-                        year = int(year)
-                    except (ValueError, TypeError):
-                        year = None
-
                 # Filter by year range if specified
                 if year:
                     if start_year and year < start_year:

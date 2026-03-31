@@ -431,9 +431,9 @@ class TestMCPTools:
             "ids": [["p1", "p2", "p3"]],
             "metadatas": [
                 [
-                    {"title": "Paper 1", "year": "2023", "session": "ML"},
-                    {"title": "Paper 2", "year": "2023", "session": "DL"},
-                    {"title": "Paper 3", "year": "2024", "session": "ML"},
+                    {"title": "Paper 1", "year": 2023, "session": "ML"},
+                    {"title": "Paper 2", "year": 2023, "session": "DL"},
+                    {"title": "Paper 3", "year": 2024, "session": "ML"},
                 ]
             ],
             "distances": [[0.1, 0.2, 0.3]],
@@ -467,8 +467,9 @@ class TestMCPTools:
     def test_get_topic_evolution_with_year_range(self, mock_config, mock_db_class, mock_em_class):
         """Test get_topic_evolution with start_year and end_year filters.
 
-        ChromaDB stores year as string, so this tests that string years
-        are correctly converted to int for comparison with integer year range params.
+        Metadata from search_similar has year as int (parsed by
+        EmbeddingsManager.parse_chromadb_metadata), so year range
+        filtering works with integer comparisons.
         """
         # Setup config mock
         mock_config_obj = Mock()
@@ -484,10 +485,10 @@ class TestMCPTools:
             "ids": [["p1", "p2", "p3", "p4"]],
             "metadatas": [
                 [
-                    {"title": "Paper 1", "year": "2022", "session": "ML"},
-                    {"title": "Paper 2", "year": "2023", "session": "DL"},
-                    {"title": "Paper 3", "year": "2024", "session": "ML"},
-                    {"title": "Paper 4", "year": "2025", "session": "NLP"},
+                    {"title": "Paper 1", "year": 2022, "session": "ML"},
+                    {"title": "Paper 2", "year": 2023, "session": "DL"},
+                    {"title": "Paper 3", "year": 2024, "session": "ML"},
+                    {"title": "Paper 4", "year": 2025, "session": "NLP"},
                 ]
             ],
             "distances": [[0.1, 0.2, 0.3, 0.4]],
@@ -534,8 +535,8 @@ class TestMCPTools:
             "ids": [["p1", "p2"]],
             "metadatas": [
                 [
-                    {"title": "Paper 1", "year": "2024", "session": "Oral Session 1"},
-                    {"title": "Paper 2", "year": "2024", "session": "Oral Session 1"},
+                    {"title": "Paper 1", "year": 2024, "session": "Oral Session 1"},
+                    {"title": "Paper 2", "year": 2024, "session": "Oral Session 1"},
                 ]
             ],
             "distances": [[0.1, 0.2]],
@@ -585,7 +586,7 @@ class TestMCPTools:
         mock_em_class.return_value = mock_em
         mock_em.search_similar.return_value = {
             "ids": [["p1"]],
-            "metadatas": [[{"title": "Paper 1", "year": "2024", "session": "Oral"}]],
+            "metadatas": [[{"title": "Paper 1", "year": 2024, "session": "Oral"}]],
             "distances": [[0.1]],
         }
 

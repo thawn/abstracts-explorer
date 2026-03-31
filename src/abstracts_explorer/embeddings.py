@@ -513,6 +513,42 @@ class EmbeddingsManager:
             raise ValueError(f"Cannot create embedding text for paper {paper['uid']}: no abstract and no title")
         return embedding_text
 
+    @staticmethod
+    def parse_chromadb_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Parse a raw ChromaDB metadata dict through the ChromaDBPaperMetadata model.
+
+        ChromaDB stores all values as strings (see :meth:`add_paper`).  This
+        method converts a raw metadata dict into one with properly typed values
+        (e.g. ``year`` and ``original_id`` become ``int``).
+
+        Parameters
+        ----------
+        metadata : dict
+            Raw metadata dictionary from ChromaDB.
+
+        Returns
+        -------
+        dict
+            Metadata dictionary with values converted to their canonical types.
+
+        Examples
+        --------
+        >>> raw = {"title": "My Paper", "year": "2024", "original_id": "42"}
+        >>> parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
+        >>> parsed["year"]
+        2024
+        >>> parsed["original_id"]
+        42
+
+        See Also
+        --------
+        ChromaDBPaperMetadata : Pydantic model that defines the type conversions.
+        """
+        from abstracts_explorer.plugin import ChromaDBPaperMetadata
+
+        return ChromaDBPaperMetadata(**metadata).model_dump(exclude_none=True)
+
     def add_paper(self, paper: dict) -> None:
         """
         Add a paper to the vector database.
@@ -607,7 +643,15 @@ class EmbeddingsManager:
             )
 
             logger.info(f"Found {len(results['ids'][0])} similar papers")
-            return dict(results)  # type: ignore[arg-type]
+
+            # Parse metadata through ChromaDBPaperMetadata model to convert
+            # string values back to their proper types (e.g. year → int).
+            parsed = dict(results)  # type: ignore[arg-type]
+            if parsed.get("metadatas"):
+                parsed["metadatas"] = [
+                    [self.parse_chromadb_metadata(m) for m in batch] for batch in parsed["metadatas"]
+                ]
+            return parsed
 
         except Exception as e:
             raise EmbeddingsError(f"Failed to search: {str(e)}") from e

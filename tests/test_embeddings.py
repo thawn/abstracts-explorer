@@ -693,6 +693,65 @@ def test_search_papers_semantic_with_year_filter(embeddings_manager, tmp_path, m
     embeddings_manager.close()
 
 
+class TestParseChromaDBMetadata:
+    """Tests for EmbeddingsManager.parse_chromadb_metadata."""
+
+    def test_converts_year_string_to_int(self):
+        """Test that year is converted from string to int."""
+        raw = {"title": "Paper", "year": "2024", "session": "ML"}
+        parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
+        assert parsed["year"] == 2024
+        assert isinstance(parsed["year"], int)
+
+    def test_converts_original_id_string_to_int(self):
+        """Test that original_id is converted from string to int."""
+        raw = {"title": "Paper", "original_id": "42"}
+        parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
+        assert parsed["original_id"] == 42
+        assert isinstance(parsed["original_id"], int)
+
+    def test_invalid_year_becomes_none(self):
+        """Test that invalid year value is excluded from result."""
+        raw = {"title": "Paper", "year": "not_a_year"}
+        parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
+        assert "year" not in parsed
+
+    def test_empty_year_becomes_none(self):
+        """Test that empty string year is excluded from result."""
+        raw = {"title": "Paper", "year": ""}
+        parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
+        assert "year" not in parsed
+
+    def test_string_fields_preserved(self):
+        """Test that string fields are preserved as-is."""
+        raw = {
+            "title": "Test Paper",
+            "authors": "Alice; Bob",
+            "session": "ML Track",
+            "conference": "NeurIPS",
+            "keywords": "ml, ai",
+        }
+        parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
+        assert parsed["title"] == "Test Paper"
+        assert parsed["authors"] == "Alice; Bob"
+        assert parsed["session"] == "ML Track"
+        assert parsed["conference"] == "NeurIPS"
+        assert parsed["keywords"] == "ml, ai"
+
+    def test_extra_fields_preserved(self):
+        """Test that extra fields not in the model are preserved."""
+        raw = {"title": "Paper", "custom_field": "custom_value"}
+        parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
+        assert parsed["custom_field"] == "custom_value"
+
+    def test_integer_year_stays_int(self):
+        """Test that integer year value passes through unchanged."""
+        raw = {"title": "Paper", "year": 2024}
+        parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
+        assert parsed["year"] == 2024
+        assert isinstance(parsed["year"], int)
+
+
 class TestRateLimiting:
     """Tests for rate limiting in EmbeddingsManager."""
 
