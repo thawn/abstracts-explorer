@@ -11,6 +11,7 @@ import threading
 import sys
 import os
 from pathlib import Path
+from unittest.mock import Mock
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -24,7 +25,6 @@ from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.firefox import GeckoDriverManager
 from webdriver_manager.core.os_manager import ChromeType
-from unittest.mock import Mock
 from abstracts_explorer.database import DatabaseManager
 from tests.helpers import find_free_port
 from tests.conftest import set_test_db
