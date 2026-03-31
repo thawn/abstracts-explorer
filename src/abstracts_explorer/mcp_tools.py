@@ -203,7 +203,7 @@ MCP_TOOLS_SCHEMA = [
                 "Analyze the relevance of a research topic by counting papers within a specified "
                 "distance in embedding space. Use this tool when the user asks about: topic relevance, "
                 "popularity of a research area, how many papers cover a topic, or identifying significant "
-                "research themes at a conference."
+                "research themes at a conference. A conference must be specified."
             ),
             "parameters": {
                 "type": "object",
@@ -219,7 +219,7 @@ MCP_TOOLS_SCHEMA = [
                     "conferences": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Filter by specific conferences (e.g., ['NeurIPS', 'ICLR'])",
+                        "description": "Conference names to analyze (e.g., ['NeurIPS']). Required.",
                     },
                     "years": {
                         "type": "array",
@@ -228,7 +228,7 @@ MCP_TOOLS_SCHEMA = [
                     },
                     "collection_name": {"type": "string", "description": "Name of ChromaDB collection (optional)"},
                 },
-                "required": ["topic"],
+                "required": ["topic", "conferences"],
             },
         },
     },
@@ -237,19 +237,30 @@ MCP_TOOLS_SCHEMA = [
         "function": {
             "name": "get_cluster_topics",
             "description": (
-                "Analyze clustered paper embeddings to identify the most frequently mentioned topics. "
+                "Analyze pre-computed clustered paper embeddings to identify the most frequently mentioned topics. "
                 "Use this tool when the user asks about: overall themes, main topics, research areas, "
-                "or wants to understand what topics are covered in the conference."
+                "or wants to understand what topics are covered in the conference. "
+                "A conference must be specified."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "conferences": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Conference names to retrieve cluster topics for (e.g., ['NeurIPS']). Required.",
+                    },
+                    "years": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Filter by specific years (e.g., [2024, 2025])",
+                    },
                     "collection_name": {
                         "type": "string",
                         "description": "Name of ChromaDB collection (optional, uses config default)",
                     },
                 },
-                "required": [],
+                "required": ["conferences"],
             },
         },
     },
@@ -260,7 +271,7 @@ MCP_TOOLS_SCHEMA = [
             "description": (
                 "Analyze how specific topics have evolved over the years. "
                 "Use this tool when the user asks about: trends over time, historical development, "
-                "how a topic has changed, or evolution of research areas."
+                "how a topic has changed, or evolution of research areas. A conference must be specified."
             ),
             "parameters": {
                 "type": "object",
@@ -271,14 +282,14 @@ MCP_TOOLS_SCHEMA = [
                     },
                     "conference": {
                         "type": "string",
-                        "description": "Filter by conference name (e.g., 'neurips', 'iclr')",
+                        "description": "Conference name to analyze (e.g., 'NeurIPS', 'ICLR'). Required.",
                     },
                     "start_year": {"type": "integer", "description": "Start year for analysis (inclusive)"},
                     "end_year": {"type": "integer", "description": "End year for analysis (inclusive)"},
                     "where": {"type": "object", "description": "Custom ChromaDB WHERE clause for advanced filtering"},
                     "collection_name": {"type": "string", "description": "Name of ChromaDB collection (optional)"},
                 },
-                "required": ["topic_keywords"],
+                "required": ["topic_keywords", "conference"],
             },
         },
     },
@@ -289,7 +300,8 @@ MCP_TOOLS_SCHEMA = [
             "description": (
                 "Search for papers on a specific topic. "
                 "Use this tool when the user asks about: papers on a topic, research about something, "
-                "specific work, or wants to find papers related to a particular area. Can filter by specific years or search all years."
+                "specific work, or wants to find papers related to a particular area. "
+                "Can filter by specific years or search all years. A conference must be specified."
             ),
             "parameters": {
                 "type": "object",
@@ -304,11 +316,14 @@ MCP_TOOLS_SCHEMA = [
                         "description": "List of specific years to filter by (e.g., [2024, 2025]). If not provided, searches all years.",
                     },
                     "n_results": {"type": "integer", "description": "Number of papers to return (default: 10)"},
-                    "conference": {"type": "string", "description": "Filter by conference name"},
+                    "conference": {
+                        "type": "string",
+                        "description": "Conference name to search (e.g., 'NeurIPS', 'ICLR'). Required.",
+                    },
                     "where": {"type": "object", "description": "Custom ChromaDB WHERE clause for filtering"},
                     "collection_name": {"type": "string", "description": "Name of ChromaDB collection (optional)"},
                 },
-                "required": ["topic_keywords"],
+                "required": ["topic_keywords", "conference"],
             },
         },
     },
@@ -317,17 +332,27 @@ MCP_TOOLS_SCHEMA = [
         "function": {
             "name": "get_cluster_visualization",
             "description": (
-                "Generate visualization data for clustered embeddings. "
+                "Retrieve pre-computed visualization data for clustered embeddings. "
                 "Use this tool when the user asks for: a visual representation, graphical view, "
-                "or wants to see clusters displayed."
+                "or wants to see clusters displayed. A conference must be specified."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "conferences": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Conference names to retrieve visualization for (e.g., ['NeurIPS']). Required.",
+                    },
+                    "years": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Filter by specific years (e.g., [2024, 2025])",
+                    },
                     "output_path": {"type": "string", "description": "Path to save visualization JSON (optional)"},
                     "collection_name": {"type": "string", "description": "Name of ChromaDB collection (optional)"},
                 },
-                "required": [],
+                "required": ["conferences"],
             },
         },
     },
@@ -507,10 +532,11 @@ def _format_topic_relevance_result(data: Dict[str, Any]) -> str:
     lines = [f"Topic Relevance Analysis for '{data.get('topic', 'unknown')}':\n"]
 
     total = data.get("total_papers", 0)
+    total_considered = data.get("total_considered", 0)
     distance = data.get("distance_threshold", 0)
     relevance = data.get("relevance_score", 0)
 
-    lines.append(f"Papers found: {total} within distance {distance}")
+    lines.append(f"Papers found: {total}/{total_considered} within distance {distance}")
     lines.append(f"Relevance score: {relevance}/100\n")
 
     if total > 0:
