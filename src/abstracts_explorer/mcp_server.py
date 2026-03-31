@@ -740,10 +740,11 @@ def analyze_topic_relevance(
         - topic: The topic analyzed
         - distance_threshold: Distance threshold applied
         - total_papers: Number of papers found within distance
+        - total_considered: Total number of filtered papers considered
         - conferences: Conferences represented (with counts)
         - years: Years represented (with counts)
         - sample_papers: Sample of closest papers with titles and distances
-        - relevance_score: Normalized relevance score (0-100 scale)
+        - relevance_score: Percentage of filtered papers within distance (0-100)
 
     Examples
     --------
@@ -800,6 +801,7 @@ def analyze_topic_relevance(
         # Analyze results
         papers = result_data["papers"]
         total_papers = len(papers)
+        total_considered = result_data.get("total_considered", total_papers)
 
         # Count by conference
         conference_counts: Counter[str] = Counter()
@@ -811,8 +813,11 @@ def analyze_topic_relevance(
                 year_counts[paper["year"]] += 1
 
         # Calculate relevance score (0-100 scale)
-        # Based on number of papers found - adjust scale as needed
-        relevance_score = min(100, (total_papers / 10) * 100) if total_papers > 0 else 0
+        # Ratio of papers within distance threshold to total filtered papers
+        if total_considered > 0:
+            relevance_score = (total_papers / total_considered) * 100
+        else:
+            relevance_score = 0
 
         # Get sample papers (top 5 closest)
         sample_papers = []
@@ -835,6 +840,7 @@ def analyze_topic_relevance(
                 "years": years,
             },
             "total_papers": total_papers,
+            "total_considered": total_considered,
             "relevance_score": round(relevance_score, 1),
             "conferences": dict(sorted(conference_counts.items(), key=lambda x: (-x[1], x[0]))),
             "years": dict(sorted(year_counts.items(), key=lambda x: x[0])),

@@ -532,10 +532,11 @@ def _format_topic_relevance_result(data: Dict[str, Any]) -> str:
     lines = [f"Topic Relevance Analysis for '{data.get('topic', 'unknown')}':\n"]
 
     total = data.get("total_papers", 0)
+    total_considered = data.get("total_considered", 0)
     distance = data.get("distance_threshold", 0)
     relevance = data.get("relevance_score", 0)
 
-    lines.append(f"Papers found: {total} within distance {distance}")
+    lines.append(f"Papers found: {total}/{total_considered} within distance {distance}")
     lines.append(f"Relevance score: {relevance}/100\n")
 
     if total > 0:

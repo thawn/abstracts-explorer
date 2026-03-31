@@ -907,7 +907,9 @@ class EmbeddingsManager:
             - query_embedding: list[float] - The generated embedding for the query
             - distance: float - The distance threshold used
             - papers: list[dict] - Papers within the distance radius with their distances
-            - count: int - Number of papers found
+            - count: int - Number of papers found within the distance threshold
+            - total_considered: int - Total number of papers matching the
+              conference/year filters (before distance filtering)
 
         Raises
         ------
@@ -1014,6 +1016,7 @@ class EmbeddingsManager:
                 "distance": distance_threshold,
                 "papers": matching_papers,
                 "count": len(matching_papers),
+                "total_considered": len(paper_ids),
             }
 
         except EmbeddingsError:

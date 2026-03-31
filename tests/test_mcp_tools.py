@@ -764,7 +764,8 @@ class TestExecuteMCPToolE2E:
             "papers": [
                 {"title": "Paper 1", "year": 2025, "conference": "NeurIPS", "distance": 0.5},
                 {"title": "Paper 2", "year": 2025, "conference": "NeurIPS", "distance": 1.0},
-            ]
+            ],
+            "total_considered": 100,
         }
 
         with (
@@ -788,7 +789,8 @@ class TestExecuteMCPToolE2E:
         """analyze_topic_relevance maps 'conference' (singular) to 'conferences'."""
         mock_em = Mock()
         mock_em.find_papers_within_distance.return_value = {
-            "papers": [{"title": "P", "year": 2025, "conference": "NeurIPS", "distance": 0.5}]
+            "papers": [{"title": "P", "year": 2025, "conference": "NeurIPS", "distance": 0.5}],
+            "total_considered": 50,
         }
 
         with (
