@@ -21,7 +21,6 @@ from abstracts_explorer.plugin import (
     convert_to_lightweight_schema,
     validate_lightweight_paper,
     LightweightPaper,
-    ChromaDBPaperMetadata,
 )
 from abstracts_explorer.plugins import (
     validate_lightweight_papers,
@@ -1473,64 +1472,3 @@ class TestPydanticValidation:
                 )
             ]
 
-
-class TestChromaDBPaperMetadata:
-    """Tests for ChromaDBPaperMetadata model."""
-
-    def test_year_coercion_from_string(self):
-        """Test that year is coerced from string to int."""
-        m = ChromaDBPaperMetadata(year="2024")
-        assert m.year == 2024
-
-    def test_year_empty_string_to_none(self):
-        """Test that empty string year becomes None."""
-        m = ChromaDBPaperMetadata(year="")
-        assert m.year is None
-
-    def test_year_invalid_string_to_none(self):
-        """Test that invalid year string becomes None."""
-        m = ChromaDBPaperMetadata(year="invalid")
-        assert m.year is None
-
-    def test_year_none_stays_none(self):
-        """Test that None year stays None."""
-        m = ChromaDBPaperMetadata(year=None)
-        assert m.year is None
-
-    def test_year_int_stays_int(self):
-        """Test that int year passes through unchanged."""
-        m = ChromaDBPaperMetadata(year=2024)
-        assert m.year == 2024
-
-    def test_original_id_coercion_from_string(self):
-        """Test that original_id is coerced from string to int."""
-        m = ChromaDBPaperMetadata(original_id="42")
-        assert m.original_id == 42
-
-    def test_original_id_empty_string_to_none(self):
-        """Test that empty string original_id becomes None."""
-        m = ChromaDBPaperMetadata(original_id="")
-        assert m.original_id is None
-
-    def test_string_fields_kept_as_strings(self):
-        """Test that string fields are not modified."""
-        m = ChromaDBPaperMetadata(
-            title="Test Paper",
-            authors="Alice; Bob",
-            keywords="ml, ai",
-        )
-        assert m.title == "Test Paper"
-        assert m.authors == "Alice; Bob"
-        assert m.keywords == "ml, ai"
-
-    def test_extra_fields_allowed(self):
-        """Test that extra fields not in the model are preserved."""
-        m = ChromaDBPaperMetadata(title="Paper", custom="value")
-        dump = m.model_dump()
-        assert dump["custom"] == "value"
-
-    def test_all_fields_optional(self):
-        """Test that model works with no fields at all."""
-        m = ChromaDBPaperMetadata()
-        assert m.year is None
-        assert m.title is None

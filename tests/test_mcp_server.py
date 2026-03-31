@@ -197,12 +197,12 @@ class TestAnalyzeClusterTopics:
         cm.cluster_labels = np.array([0, 0, 1, 0, 1, 2])
         cm.paper_ids = ["p1", "p2", "p3", "p4", "p5", "p6"]
         cm.metadatas = [
-            {"title": "Paper 1", "keywords": "ml, ai", "session": "ML Track", "year": 2023},
-            {"title": "Paper 2", "keywords": "dl, nn", "session": "ML Track", "year": 2023},
-            {"title": "Paper 3", "keywords": "nlp, transformers", "session": "NLP Track", "year": 2024},
-            {"title": "Paper 4", "keywords": "ml, dl", "session": "ML Track", "year": 2024},
-            {"title": "Paper 5", "keywords": "nlp, bert", "session": "NLP Track", "year": 2024},
-            {"title": "Paper 6", "keywords": "cv, vision", "session": "CV Track", "year": 2025},
+            {"title": "Paper 1", "keywords": ["ml", "ai"], "session": "ML Track", "year": 2023},
+            {"title": "Paper 2", "keywords": ["dl", "nn"], "session": "ML Track", "year": 2023},
+            {"title": "Paper 3", "keywords": ["nlp", "transformers"], "session": "NLP Track", "year": 2024},
+            {"title": "Paper 4", "keywords": ["ml", "dl"], "session": "ML Track", "year": 2024},
+            {"title": "Paper 5", "keywords": ["nlp", "bert"], "session": "NLP Track", "year": 2024},
+            {"title": "Paper 6", "keywords": ["cv", "vision"], "session": "CV Track", "year": 2025},
         ]
 
         db = Mock(spec=DatabaseManager)
@@ -234,10 +234,10 @@ class TestAnalyzeClusterTopics:
         cm.cluster_labels = np.array([0, 0, 1, 1])
         cm.paper_ids = ["p1", "p2", "p3", "p4"]
         cm.metadatas = [
-            {"title": "Paper 1", "keywords": "ml", "session": "ML", "year": 2023},
-            {"title": "Paper 2", "keywords": "dl", "session": "DL", "year": 2023},
-            {"title": "Paper 3", "keywords": "nlp", "session": "NLP", "year": 2024},
-            {"title": "Paper 4", "keywords": "cv", "session": "CV", "year": 2024},
+            {"title": "Paper 1", "keywords": ["ml"], "session": "ML", "year": 2023},
+            {"title": "Paper 2", "keywords": ["dl"], "session": "DL", "year": 2023},
+            {"title": "Paper 3", "keywords": ["nlp"], "session": "NLP", "year": 2024},
+            {"title": "Paper 4", "keywords": ["cv"], "session": "CV", "year": 2024},
         ]
 
         db = Mock(spec=DatabaseManager)
@@ -273,7 +273,7 @@ class TestAnalyzeClusterTopics:
         cm.paper_ids = ["p1", "p2"]
         cm.metadatas = [
             {"title": "Paper 1"},  # Missing keywords, session, year
-            {"title": "Paper 2", "keywords": "ml", "year": 2023},  # Missing session
+            {"title": "Paper 2", "keywords": ["ml"], "year": 2023},  # Missing session
         ]
 
         db = Mock(spec=DatabaseManager)
@@ -880,7 +880,7 @@ class TestSearchPapersPaperCardFields:
         mock_em_class.return_value = mock_em
         mock_em.search_similar.return_value = {
             "ids": [["abc123"]],
-            "metadatas": [[{"title": "Test Paper", "year": 2024, "conference": "NeurIPS", "authors": "Alice; Bob"}]],
+            "metadatas": [[{"title": "Test Paper", "year": 2024, "conference": "NeurIPS", "authors": ["Alice", "Bob"]}]],
             "documents": [["Test abstract"]],
             "distances": [[0.1]],
         }
@@ -925,7 +925,7 @@ class TestSearchPapersPaperCardFields:
                         "title": "Test Paper",
                         "year": 2024,
                         "conference": "NeurIPS",
-                        "authors": "Alice Smith; Bob Jones; Carol White",
+                        "authors": ["Alice Smith", "Bob Jones", "Carol White"],
                     }
                 ]
             ],
@@ -1001,7 +1001,7 @@ class TestSearchPapersPaperCardFields:
                         "year": 2025,
                         "conference": "NeurIPS",
                         "session": "Oral",
-                        "authors": "Author A",
+                        "authors": ["Author A"],
                     }
                 ]
             ],
@@ -1045,7 +1045,7 @@ class TestSearchPapersPaperCardFields:
                         "year": 2024,
                         "conference": "ICML",
                         "session": "Best Paper Session",
-                        "authors": "First Author; Second Author",
+                        "authors": ["First Author", "Second Author"],
                     }
                 ]
             ],

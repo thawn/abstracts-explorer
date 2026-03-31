@@ -516,11 +516,12 @@ class EmbeddingsManager:
     @staticmethod
     def parse_chromadb_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Parse a raw ChromaDB metadata dict through the ChromaDBPaperMetadata model.
+        Parse a raw ChromaDB metadata dict through the LightweightPaper model.
 
         ChromaDB stores all values as strings (see :meth:`add_paper`).  This
         method converts a raw metadata dict into one with properly typed values
-        (e.g. ``year`` and ``original_id`` become ``int``).
+        by running it through :func:`prepare_chroma_db_paper_data` and then
+        validating via :class:`LightweightPaper`.
 
         Parameters
         ----------
@@ -531,23 +532,30 @@ class EmbeddingsManager:
         -------
         dict
             Metadata dictionary with values converted to their canonical types.
+            Authors will be a ``list[str]`` and keywords a ``list[str]``.
 
         Examples
         --------
-        >>> raw = {"title": "My Paper", "year": "2024", "original_id": "42"}
+        >>> raw = {"title": "My Paper", "year": "2024", "original_id": "42",
+        ...        "authors": "Alice;Bob", "abstract": "An abstract",
+        ...        "session": "ML", "poster_position": "1",
+        ...        "conference": "NeurIPS"}
         >>> parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
         >>> parsed["year"]
         2024
-        >>> parsed["original_id"]
-        42
+        >>> parsed["authors"]
+        ['Alice', 'Bob']
 
         See Also
         --------
-        ChromaDBPaperMetadata : Pydantic model that defines the type conversions.
+        LightweightPaper : Pydantic model used for validation.
+        prepare_chroma_db_paper_data : Converts ChromaDB string fields to
+            proper types before validation.
         """
-        from abstracts_explorer.plugin import ChromaDBPaperMetadata
+        from abstracts_explorer.plugin import prepare_chroma_db_paper_data, LightweightPaper
 
-        return ChromaDBPaperMetadata(**metadata).model_dump(exclude_none=True)
+        prepared = prepare_chroma_db_paper_data(metadata.copy())
+        return LightweightPaper(**prepared).model_dump(exclude_none=True)
 
     def add_paper(self, paper: dict) -> None:
         """
@@ -644,7 +652,7 @@ class EmbeddingsManager:
 
             logger.info(f"Found {len(results['ids'][0])} similar papers")
 
-            # Parse metadata through ChromaDBPaperMetadata model to convert
+            # Parse metadata through LightweightPaper model to convert
             # string values back to their proper types (e.g. year → int).
             parsed = dict(results)  # type: ignore[arg-type]
             if parsed.get("metadatas"):
@@ -1116,7 +1124,7 @@ class EmbeddingsManager:
             # so the dict is always JSON-serializable.
             if embeddings is not None:
                 embeddings = [e.tolist() if hasattr(e, "tolist") else list(e) for e in embeddings]
-            # Parse metadata through ChromaDBPaperMetadata model to convert
+            # Parse metadata through LightweightPaper model to convert
             # string values back to their proper types (e.g. year → int).
             raw_metadatas = results.get("metadatas", [])
             parsed_metadatas = [self.parse_chromadb_metadata(m) for m in raw_metadatas]

@@ -192,10 +192,28 @@ class TestEmbeddingsManager:
         embeddings_manager.connect()
         embeddings_manager.create_collection()
 
-        # Add some papers
+        # Add some papers (all required LightweightPaper fields needed for metadata parsing)
         papers = [
-            {"uid": "paper1", "title": "DL Paper", "abstract": "Deep learning neural networks"},
-            {"uid": "paper2", "title": "NLP Paper", "abstract": "Natural language processing"},
+            {
+                "uid": "paper1",
+                "title": "DL Paper",
+                "abstract": "Deep learning neural networks",
+                "authors": "Alice;Bob",
+                "session": "ML Track",
+                "poster_position": "1",
+                "year": "2024",
+                "conference": "NeurIPS",
+            },
+            {
+                "uid": "paper2",
+                "title": "NLP Paper",
+                "abstract": "Natural language processing",
+                "authors": "Charlie",
+                "session": "NLP Track",
+                "poster_position": "2",
+                "year": "2024",
+                "conference": "NeurIPS",
+            },
         ]
         for paper in papers:
             embeddings_manager.add_paper(paper)
@@ -696,57 +714,57 @@ def test_search_papers_semantic_with_year_filter(embeddings_manager, tmp_path, m
 class TestParseChromaDBMetadata:
     """Tests for EmbeddingsManager.parse_chromadb_metadata."""
 
+    def _make_raw_metadata(self, **overrides):
+        """Create a complete raw ChromaDB metadata dict with all required fields."""
+        base = {
+            "title": "Test Paper",
+            "authors": "Alice;Bob",
+            "abstract": "An abstract",
+            "session": "ML Track",
+            "poster_position": "1",
+            "year": "2024",
+            "conference": "NeurIPS",
+        }
+        base.update(overrides)
+        return base
+
     def test_converts_year_string_to_int(self):
         """Test that year is converted from string to int."""
-        raw = {"title": "Paper", "year": "2024", "session": "ML"}
+        raw = self._make_raw_metadata(year="2024")
         parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
         assert parsed["year"] == 2024
         assert isinstance(parsed["year"], int)
 
     def test_converts_original_id_string_to_int(self):
         """Test that original_id is converted from string to int."""
-        raw = {"title": "Paper", "original_id": "42"}
+        raw = self._make_raw_metadata(original_id="42")
         parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
         assert parsed["original_id"] == 42
         assert isinstance(parsed["original_id"], int)
 
-    def test_invalid_year_becomes_none(self):
-        """Test that invalid year value is excluded from result."""
-        raw = {"title": "Paper", "year": "not_a_year"}
+    def test_authors_parsed_to_list(self):
+        """Test that semicolon-separated authors are parsed to a list."""
+        raw = self._make_raw_metadata(authors="Alice;Bob;Charlie")
         parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
-        assert "year" not in parsed
+        assert parsed["authors"] == ["Alice", "Bob", "Charlie"]
 
-    def test_empty_year_becomes_none(self):
-        """Test that empty string year is excluded from result."""
-        raw = {"title": "Paper", "year": ""}
+    def test_keywords_parsed_to_list(self):
+        """Test that comma-separated keywords are parsed to a list."""
+        raw = self._make_raw_metadata(keywords="ml,ai,deep learning")
         parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
-        assert "year" not in parsed
+        assert parsed["keywords"] == ["ml", "ai", "deep learning"]
 
     def test_string_fields_preserved(self):
-        """Test that string fields are preserved as-is."""
-        raw = {
-            "title": "Test Paper",
-            "authors": "Alice; Bob",
-            "session": "ML Track",
-            "conference": "NeurIPS",
-            "keywords": "ml, ai",
-        }
+        """Test that string fields are preserved correctly."""
+        raw = self._make_raw_metadata()
         parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
         assert parsed["title"] == "Test Paper"
-        assert parsed["authors"] == "Alice; Bob"
         assert parsed["session"] == "ML Track"
         assert parsed["conference"] == "NeurIPS"
-        assert parsed["keywords"] == "ml, ai"
-
-    def test_extra_fields_preserved(self):
-        """Test that extra fields not in the model are preserved."""
-        raw = {"title": "Paper", "custom_field": "custom_value"}
-        parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
-        assert parsed["custom_field"] == "custom_value"
 
     def test_integer_year_stays_int(self):
         """Test that integer year value passes through unchanged."""
-        raw = {"title": "Paper", "year": 2024}
+        raw = self._make_raw_metadata(year=2024)
         parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
         assert parsed["year"] == 2024
         assert isinstance(parsed["year"], int)

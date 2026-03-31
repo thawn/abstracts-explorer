@@ -269,7 +269,7 @@ class ClusteringManager:
 
             self.paper_ids = results["ids"]
             self.embeddings = np.array(results["embeddings"])
-            # Parse metadata through ChromaDBPaperMetadata model to convert
+            # Parse metadata through LightweightPaper model to convert
             # string values back to their proper types (e.g. year → int).
             self.metadatas = [EmbeddingsManager.parse_chromadb_metadata(m) for m in results["metadatas"]]
 

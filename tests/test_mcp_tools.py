@@ -657,11 +657,11 @@ class TestExecuteMCPToolE2E:
         mock_cm.paper_ids = ["p1", "p2", "p3", "p4", "p5"]
         mock_cm.cluster_labels = np.array([0, 0, 1, 1, 0])
         mock_cm.metadatas = [
-            {"title": "A", "keywords": "ml", "session": "S1", "year": 2025},
-            {"title": "B", "keywords": "dl", "session": "S1", "year": 2025},
-            {"title": "C", "keywords": "nlp", "session": "S2", "year": 2025},
-            {"title": "D", "keywords": "nlp", "session": "S2", "year": 2025},
-            {"title": "E", "keywords": "ml", "session": "S1", "year": 2025},
+            {"title": "A", "keywords": ["ml"], "session": "S1", "year": 2025},
+            {"title": "B", "keywords": ["dl"], "session": "S1", "year": 2025},
+            {"title": "C", "keywords": ["nlp"], "session": "S2", "year": 2025},
+            {"title": "D", "keywords": ["nlp"], "session": "S2", "year": 2025},
+            {"title": "E", "keywords": ["ml"], "session": "S1", "year": 2025},
         ]
         mock_cm.embeddings_manager = Mock()
         mock_db = Mock()

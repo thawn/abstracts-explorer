@@ -524,7 +524,26 @@ class TestEmbeddingsExportImport:
         mock_collection.get.return_value = {
             "ids": ["id1", "id2"],
             "documents": ["doc1", "doc2"],
-            "metadatas": [{"conference": "neurips", "year": "2024"}, {"conference": "neurips", "year": "2024"}],
+            "metadatas": [
+                {
+                    "title": "Paper 1",
+                    "authors": "Author A;Author B",
+                    "abstract": "Abstract 1",
+                    "session": "Session 1",
+                    "poster_position": "1",
+                    "conference": "neurips",
+                    "year": "2024",
+                },
+                {
+                    "title": "Paper 2",
+                    "authors": "Author C",
+                    "abstract": "Abstract 2",
+                    "session": "Session 2",
+                    "poster_position": "2",
+                    "conference": "neurips",
+                    "year": "2024",
+                },
+            ],
             "embeddings": [[0.1, 0.2], [0.3, 0.4]],
         }
 
@@ -556,7 +575,17 @@ class TestEmbeddingsExportImport:
         mock_collection.get.return_value = {
             "ids": ["id1"],
             "documents": ["doc1"],
-            "metadatas": [{"conference": "neurips", "year": "2024"}],
+            "metadatas": [
+                {
+                    "title": "Paper 1",
+                    "authors": "Author A",
+                    "abstract": "Abstract 1",
+                    "session": "Session 1",
+                    "poster_position": "1",
+                    "conference": "neurips",
+                    "year": "2024",
+                }
+            ],
             "embeddings": [np.array([0.1, 0.2, 0.3])],
         }
 
