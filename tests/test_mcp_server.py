@@ -404,12 +404,15 @@ class TestMCPTools:
         # Verify result
         assert "statistics" in result
         assert result["statistics"]["n_clusters"] == 2
+        # cluster_sizes should use cluster names (sorted by size desc)
+        assert result["statistics"]["cluster_sizes"] == {
+            "Machine Learning": 2,
+            "Natural Language Processing": 2,
+        }
         assert "clusters" in result
         assert len(result["clusters"]) == 2
-        assert result["clusters"][0]["cluster_id"] == 0
         assert result["clusters"][0]["cluster_name"] == "Machine Learning"
         assert result["clusters"][0]["tfidf_keywords"] == ["neural", "deep"]
-        assert result["clusters"][1]["cluster_id"] == 1
         assert result["clusters"][1]["cluster_name"] == "Natural Language Processing"
         assert result["conference"] == "NeurIPS"
 

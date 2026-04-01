@@ -711,12 +711,15 @@ class TestExecuteMCPToolE2E:
         assert "error" not in data
         assert "clusters" in data
         assert data["statistics"]["n_clusters"] == 2
-        # Verify cluster names and tfidf_keywords are returned
-        clusters_by_id = {c["cluster_id"]: c for c in data["clusters"]}
-        assert clusters_by_id[0]["cluster_name"] == "Machine Learning"
-        assert clusters_by_id[0]["tfidf_keywords"] == ["ml", "deep"]
-        assert clusters_by_id[1]["cluster_name"] == "NLP"
-        assert clusters_by_id[1]["tfidf_keywords"] == ["nlp", "bert"]
+        # cluster_sizes should use cluster names sorted by size descending
+        assert list(data["statistics"]["cluster_sizes"].keys()) == ["Machine Learning", "NLP"]
+        assert data["statistics"]["cluster_sizes"]["Machine Learning"] == 3
+        assert data["statistics"]["cluster_sizes"]["NLP"] == 2
+        # Verify cluster names and tfidf_keywords are returned, sorted by paper_count desc
+        assert data["clusters"][0]["cluster_name"] == "Machine Learning"
+        assert data["clusters"][0]["tfidf_keywords"] == ["ml", "deep"]
+        assert data["clusters"][1]["cluster_name"] == "NLP"
+        assert data["clusters"][1]["tfidf_keywords"] == ["nlp", "bert"]
 
     # ------------------------------------------------------------------
     # get_topic_evolution

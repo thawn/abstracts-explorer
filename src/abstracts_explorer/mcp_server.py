@@ -284,10 +284,22 @@ def _get_cluster_topics_for_single_conference(
 
         stats = cm.get_cluster_statistics()
 
+        # Replace integer cluster IDs in cluster_sizes with human-readable names
+        # and sort by size descending
+        label_names = cm.cluster_label_names or {}
+        named_sizes = {
+            label_names.get(cid, f"Cluster {cid}"): size
+            for cid, size in stats["cluster_sizes"].items()
+        }
+        stats["cluster_sizes"] = dict(sorted(named_sizes.items(), key=lambda x: x[1], reverse=True))
+
         cluster_topics = []
         for cluster_id in range(stats["n_clusters"]):
             topics = analyze_cluster_topics(cm, db, cluster_id)
             cluster_topics.append(topics)
+
+        # Sort clusters by paper_count descending
+        cluster_topics.sort(key=lambda t: t["paper_count"], reverse=True)
 
         return {
             "conference": conference,
