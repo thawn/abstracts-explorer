@@ -204,6 +204,8 @@ class TestAnalyzeClusterTopics:
             {"title": "Paper 5", "keywords": ["nlp", "bert"], "session": "NLP Track", "year": 2024},
             {"title": "Paper 6", "keywords": ["cv", "vision"], "session": "CV Track", "year": 2025},
         ]
+        cm.cluster_label_names = None
+        cm.cluster_keywords = None
 
         db = Mock(spec=DatabaseManager)
 
@@ -214,6 +216,9 @@ class TestAnalyzeClusterTopics:
         assert result["paper_count"] == 3
         assert len(result["sample_titles"]) == 3
         assert result["sample_titles"][0] == "Paper 1"
+        # cluster_name and tfidf_keywords are None/empty when not set
+        assert result["cluster_name"] is None
+        assert result["tfidf_keywords"] == []
 
         # Check keywords
         keyword_dict = {k["keyword"]: k["count"] for k in result["keywords"]}
@@ -228,6 +233,30 @@ class TestAnalyzeClusterTopics:
         assert result["years"][2023] == 2
         assert result["years"][2024] == 1
 
+    def test_analyze_cluster_with_label_names(self):
+        """Test that cluster_name and tfidf_keywords are included when available."""
+        cm = Mock(spec=ClusteringManager)
+        cm.cluster_labels = np.array([0, 0, 1, 1])
+        cm.paper_ids = ["p1", "p2", "p3", "p4"]
+        cm.metadatas = [
+            {"title": "Paper 1", "keywords": ["ml", "neural"], "session": "ML", "year": 2023},
+            {"title": "Paper 2", "keywords": ["deep", "learning"], "session": "ML", "year": 2023},
+            {"title": "Paper 3", "keywords": ["nlp", "bert"], "session": "NLP", "year": 2024},
+            {"title": "Paper 4", "keywords": ["nlp", "gpt"], "session": "NLP", "year": 2024},
+        ]
+        cm.cluster_label_names = {0: "Machine Learning", 1: "Natural Language Processing"}
+        cm.cluster_keywords = {0: ["neural", "deep", "learning"], 1: ["nlp", "bert", "gpt"]}
+
+        db = Mock(spec=DatabaseManager)
+
+        result_0 = analyze_cluster_topics(cm, db, cluster_id=0)
+        assert result_0["cluster_name"] == "Machine Learning"
+        assert result_0["tfidf_keywords"] == ["neural", "deep", "learning"]
+
+        result_1 = analyze_cluster_topics(cm, db, cluster_id=1)
+        assert result_1["cluster_name"] == "Natural Language Processing"
+        assert result_1["tfidf_keywords"] == ["nlp", "bert", "gpt"]
+
     def test_analyze_empty_cluster(self):
         """Test analyzing a cluster with no papers."""
         cm = Mock(spec=ClusteringManager)
@@ -239,6 +268,8 @@ class TestAnalyzeClusterTopics:
             {"title": "Paper 3", "keywords": ["nlp"], "session": "NLP", "year": 2024},
             {"title": "Paper 4", "keywords": ["cv"], "session": "CV", "year": 2024},
         ]
+        cm.cluster_label_names = None
+        cm.cluster_keywords = None
 
         db = Mock(spec=DatabaseManager)
 
@@ -247,6 +278,8 @@ class TestAnalyzeClusterTopics:
 
         assert result["cluster_id"] == 5
         assert result["paper_count"] == 0
+        assert result["cluster_name"] is None
+        assert result["tfidf_keywords"] == []
         assert result["keywords"] == []
         assert result["sessions"] == []
         assert result["years"] == {}
@@ -275,6 +308,8 @@ class TestAnalyzeClusterTopics:
             {"title": "Paper 1"},  # Missing keywords, session, year
             {"title": "Paper 2", "keywords": ["ml"], "year": 2023},  # Missing session
         ]
+        cm.cluster_label_names = None
+        cm.cluster_keywords = None
 
         db = Mock(spec=DatabaseManager)
 
@@ -312,7 +347,7 @@ class TestMCPTools:
 
         mock_cm.load_embeddings.return_value = 100
 
-        # db.get_clustering_cache returns cached results
+        # db.get_clustering_cache returns cached results (includes cluster names and keywords)
         mock_db.get_clustering_cache.return_value = {
             "points": [
                 {"id": "p1", "cluster": 0, "x": 0.0, "y": 0.0},
@@ -326,6 +361,8 @@ class TestMCPTools:
                 "cluster_sizes": {0: 2, 1: 2},
                 "total_papers": 4,
             },
+            "cluster_labels": {"0": "Machine Learning", "1": "Natural Language Processing"},
+            "cluster_keywords": {"0": ["neural", "deep"], "1": ["nlp", "bert"]},
         }
 
         mock_cm.get_cluster_statistics.return_value = {
@@ -338,6 +375,8 @@ class TestMCPTools:
         mock_analyze.side_effect = [
             {
                 "cluster_id": 0,
+                "cluster_name": "Machine Learning",
+                "tfidf_keywords": ["neural", "deep"],
                 "paper_count": 2,
                 "keywords": [{"keyword": "ml", "count": 2}],
                 "sessions": [{"session": "ML Track", "count": 2}],
@@ -346,6 +385,8 @@ class TestMCPTools:
             },
             {
                 "cluster_id": 1,
+                "cluster_name": "Natural Language Processing",
+                "tfidf_keywords": ["nlp", "bert"],
                 "paper_count": 2,
                 "keywords": [{"keyword": "nlp", "count": 2}],
                 "sessions": [{"session": "NLP Track", "count": 2}],
@@ -366,8 +407,15 @@ class TestMCPTools:
         assert "clusters" in result
         assert len(result["clusters"]) == 2
         assert result["clusters"][0]["cluster_id"] == 0
+        assert result["clusters"][0]["cluster_name"] == "Machine Learning"
+        assert result["clusters"][0]["tfidf_keywords"] == ["neural", "deep"]
         assert result["clusters"][1]["cluster_id"] == 1
+        assert result["clusters"][1]["cluster_name"] == "Natural Language Processing"
         assert result["conference"] == "NeurIPS"
+
+        # Verify _apply_cached_cluster_labels restored cluster_label_names and cluster_keywords
+        assert mock_cm.cluster_label_names == {0: "Machine Learning", 1: "Natural Language Processing"}
+        assert mock_cm.cluster_keywords == {0: ["neural", "deep"], 1: ["nlp", "bert"]}
 
         # Verify cache was queried with correct params
         mock_db.get_clustering_cache.assert_called_once()

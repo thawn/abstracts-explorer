@@ -669,6 +669,8 @@ class TestExecuteMCPToolE2E:
         }
         mock_cm.paper_ids = ["p1", "p2", "p3", "p4", "p5"]
         mock_cm.cluster_labels = np.array([0, 0, 1, 1, 0])
+        mock_cm.cluster_label_names = None
+        mock_cm.cluster_keywords = None
         mock_cm.metadatas = [
             {"title": "A", "keywords": ["ml"], "session": "S1", "year": 2025},
             {"title": "B", "keywords": ["dl"], "session": "S1", "year": 2025},
@@ -679,7 +681,7 @@ class TestExecuteMCPToolE2E:
         mock_cm.embeddings_manager = Mock()
         mock_db = Mock()
 
-        # Mock db.get_clustering_cache to return cached results
+        # Mock db.get_clustering_cache to return cached results with cluster names
         mock_db.get_clustering_cache.return_value = {
             "points": [
                 {"id": "p1", "cluster": 0, "x": 0.0, "y": 0.0},
@@ -694,6 +696,8 @@ class TestExecuteMCPToolE2E:
                 "cluster_sizes": {0: 3, 1: 2},
                 "total_papers": 5,
             },
+            "cluster_labels": {"0": "Machine Learning", "1": "NLP"},
+            "cluster_keywords": {"0": ["ml", "deep"], "1": ["nlp", "bert"]},
         }
 
         with (
@@ -707,6 +711,12 @@ class TestExecuteMCPToolE2E:
         assert "error" not in data
         assert "clusters" in data
         assert data["statistics"]["n_clusters"] == 2
+        # Verify cluster names and tfidf_keywords are returned
+        clusters_by_id = {c["cluster_id"]: c for c in data["clusters"]}
+        assert clusters_by_id[0]["cluster_name"] == "Machine Learning"
+        assert clusters_by_id[0]["tfidf_keywords"] == ["ml", "deep"]
+        assert clusters_by_id[1]["cluster_name"] == "NLP"
+        assert clusters_by_id[1]["tfidf_keywords"] == ["nlp", "bert"]
 
     # ------------------------------------------------------------------
     # get_topic_evolution

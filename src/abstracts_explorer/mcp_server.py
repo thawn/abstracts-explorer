@@ -91,7 +91,8 @@ def _apply_cached_cluster_labels(
     cached_results: Dict[str, Any],
 ) -> None:
     """
-    Restore ``cluster_labels`` on *cm* from cached clustering results.
+    Restore ``cluster_labels``, ``cluster_label_names``, and
+    ``cluster_keywords`` on *cm* from cached clustering results.
 
     Parameters
     ----------
@@ -101,6 +102,8 @@ def _apply_cached_cluster_labels(
     cached_results : dict
         Cached results dict containing a ``"points"`` list where each
         element has ``"id"`` (or ``"paper_id"``) and ``"cluster"`` keys.
+        May also contain ``"cluster_labels"`` (cluster name dict) and
+        ``"cluster_keywords"`` (TF-IDF keyword dict).
     """
     import numpy as np
 
@@ -111,6 +114,14 @@ def _apply_cached_cluster_labels(
 
     current_ids = cm.paper_ids or []
     cm.cluster_labels = np.array([point_id_to_cluster.get(pid, -1) for pid in current_ids])
+
+    # Restore cluster label names (LLM-generated or TF-IDF-based names)
+    if cached_results.get("cluster_labels"):
+        cm.cluster_label_names = {int(k): v for k, v in cached_results["cluster_labels"].items()}
+
+    # Restore TF-IDF cluster keywords
+    if cached_results.get("cluster_keywords"):
+        cm.cluster_keywords = {int(k): v for k, v in cached_results["cluster_keywords"].items()}
 
 
 def analyze_cluster_topics(
@@ -138,8 +149,10 @@ def analyze_cluster_topics(
     dict
         Dictionary containing:
         - cluster_id: Cluster ID
+        - cluster_name: Human-readable cluster name (from LLM/TF-IDF labels, if available)
+        - tfidf_keywords: TF-IDF keywords used for cluster labeling (if available)
         - paper_count: Number of papers in cluster
-        - keywords: Most common keywords
+        - keywords: Most common keywords from paper metadata
         - sessions: Most common sessions
         - years: Distribution by year
         - sample_titles: Sample paper titles
@@ -153,6 +166,8 @@ def analyze_cluster_topics(
     if not cluster_indices:
         return {
             "cluster_id": cluster_id,
+            "cluster_name": (cm.cluster_label_names or {}).get(cluster_id),
+            "tfidf_keywords": (cm.cluster_keywords or {}).get(cluster_id, []),
             "paper_count": 0,
             "keywords": [],
             "sessions": [],
@@ -192,6 +207,8 @@ def analyze_cluster_topics(
 
     return {
         "cluster_id": cluster_id,
+        "cluster_name": (cm.cluster_label_names or {}).get(cluster_id),
+        "tfidf_keywords": (cm.cluster_keywords or {}).get(cluster_id, []),
         "paper_count": len(cluster_indices),
         "keywords": [{"keyword": k, "count": c} for k, c in keyword_counts.most_common(10)],
         "sessions": [{"session": s, "count": c} for s, c in session_counts.most_common(5)],
