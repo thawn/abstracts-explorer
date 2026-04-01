@@ -88,7 +88,7 @@ response = chat.query(
 
 MCP (Model Context Protocol) tools are specialized functions that the LLM can call to perform specific tasks. The RAG system includes four clustering tools:
 
-1. **get_cluster_topics** - Analyze overall conference topics
+1. **get_conference_topics** - Analyze overall conference topics
 2. **get_topic_evolution** - Track how topics evolve over time
 3. **search_papers** - Find recent papers in specific areas
 4. **get_cluster_visualization** - Generate cluster visualizations
@@ -114,7 +114,7 @@ chat = RAGChat(em, db, enable_mcp_tools=True)
 # Ask about general topics - LLM will use clustering tools
 response = chat.query("What are the main research topics at NeurIPS?")
 print(response)
-# The LLM automatically calls get_cluster_topics() and analyzes the results
+# The LLM automatically calls get_conference_topics() and analyzes the results
 
 # Ask about trends - LLM uses topic evolution tool
 response = chat.query("How have transformers evolved at NeurIPS over the years?")
@@ -131,7 +131,7 @@ print(response)
 
 The LLM automatically decides which tool(s) to use based on the question:
 
-- **Questions about "main topics", "themes", "areas"** → Uses `get_cluster_topics`
+- **Questions about "main topics", "themes", "areas"** → Uses `get_conference_topics`
 - **Questions about "evolution", "trends", "over time"** → Uses `get_topic_evolution`
 - **Questions about "recent", "latest", "new"** → Uses `search_papers`
 - **Questions about specific papers** → Uses standard RAG (no tools)
@@ -160,7 +160,7 @@ response = chat.query(
     "the attention mechanism paper in detail?"
 )
 # The LLM might:
-# 1. Call get_cluster_topics() to identify main topics
+# 1. Call get_conference_topics() to identify main topics
 # 2. Search for "attention mechanism" papers
 # 3. Combine both to generate comprehensive answer
 ```
@@ -204,7 +204,7 @@ logging.basicConfig(level=logging.INFO)
 # Now tool calls will be logged
 chat = RAGChat(em, db, enable_mcp_tools=True)
 response = chat.query("What are the main topics?")
-# Logs: "LLM requested tool: get_cluster_topics with args: {'n_clusters': 8}"
+# Logs: "LLM requested tool: get_conference_topics with args: {'n_clusters': 8}"
 ```
 
 ### Requirements

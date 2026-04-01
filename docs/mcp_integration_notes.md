@@ -77,10 +77,10 @@ Tools are executed **directly in Python** rather than via IPC:
 
 ```python
 # Direct execution (our approach)
-result = get_cluster_topics(n_clusters=8)
+result = get_conference_topics(n_clusters=8)
 
 # vs. IPC approach (not used)
-result = mcp_client.call_tool("get_cluster_topics", {"n_clusters": 8})
+result = mcp_client.call_tool("get_conference_topics", {"n_clusters": 8})
 ```
 
 Benefits:
@@ -134,7 +134,7 @@ Benefits:
                             ▼
                 ┌─────────────────────────────────────────┐
                 │   Clustering Tools (mcp_server.py)       │
-                │  - get_cluster_topics()                  │
+                │  - get_conference_topics()                  │
                 │  - get_topic_evolution()                 │
                 │  - search_papers()             │
                 │  - get_cluster_visualization()           │
@@ -152,7 +152,7 @@ MCP_TOOLS_SCHEMA = [
     {
         "type": "function",
         "function": {
-            "name": "get_cluster_topics",
+            "name": "get_conference_topics",
             "description": "Analyze clustered papers to identify topics...",
             "parameters": {
                 "type": "object",

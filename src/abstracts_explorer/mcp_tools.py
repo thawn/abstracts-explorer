@@ -16,7 +16,7 @@ import logging
 from typing import Callable, Dict, List, Any, Optional
 
 from abstracts_explorer.mcp_server import (
-    get_cluster_topics,
+    get_conference_topics,
     get_topic_evolution,
     search_papers,
     get_cluster_visualization,
@@ -292,11 +292,12 @@ MCP_TOOLS_SCHEMA = [
     {
         "type": "function",
         "function": {
-            "name": "get_cluster_topics",
+            "name": "get_conference_topics",
             "description": (
-                "Analyze pre-computed clustered paper embeddings to identify the most frequently mentioned topics. "
+                "Get the main research topics of a conference. "
                 "Use this tool when the user asks about: overall themes, main topics, research areas, "
                 "or wants to understand what topics are covered in the conference. "
+                "Returns topic names, representative keywords, paper counts, and example titles. "
                 "A conference must be specified."
             ),
             "parameters": {
@@ -305,7 +306,7 @@ MCP_TOOLS_SCHEMA = [
                     "conferences": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Conference names to retrieve cluster topics for (e.g., ['NeurIPS']). Required.",
+                        "description": "Conference names (e.g., ['NeurIPS']). Required.",
                     },
                     "years": {
                         "type": "array",
@@ -496,9 +497,9 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
         if tool_name == "analyze_topic_relevance":
             args = _filter_unknown_kwargs(analyze_topic_relevance, _normalize_analyze_topic_relevance_args(arguments))
             result = analyze_topic_relevance(**args)
-        elif tool_name == "get_cluster_topics":
-            args = _filter_unknown_kwargs(get_cluster_topics, arguments)
-            result = get_cluster_topics(**args)
+        elif tool_name == "get_conference_topics":
+            args = _filter_unknown_kwargs(get_conference_topics, arguments)
+            result = get_conference_topics(**args)
         elif tool_name == "get_topic_evolution":
             args = _filter_unknown_kwargs(get_topic_evolution, _normalize_get_topic_evolution_args(arguments))
             result = get_topic_evolution(**args)
@@ -620,8 +621,8 @@ def format_tool_result_for_llm(tool_name: str, result: str) -> str:
         # Format based on tool type
         if tool_name == "analyze_topic_relevance":
             return _format_topic_relevance_result(result_data)
-        elif tool_name == "get_cluster_topics":
-            return _format_cluster_topics_result(result_data)
+        elif tool_name == "get_conference_topics":
+            return _format_conference_topics_result(result_data)
         elif tool_name == "get_topic_evolution":
             return _format_topic_evolution_result(result_data)
         elif tool_name == "search_papers":
@@ -684,23 +685,22 @@ def _format_topic_relevance_result(data: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _format_cluster_topics_result(data: Dict[str, Any]) -> str:
-    """Format cluster topics result for LLM."""
-    lines = ["Cluster Analysis Results:\n"]
+def _format_conference_topics_result(data: Dict[str, Any]) -> str:
+    """Format conference topics result for LLM."""
+    conference = data.get("conference", "unknown")
+    total = data.get("total_papers", 0)
+    n_topics = data.get("n_topics", 0)
+    lines = [f"Conference Topics for {conference} ({total} papers, {n_topics} topics):\n"]
 
-    stats = data.get("statistics", {})
-    lines.append(f"Found {stats.get('n_clusters', 0)} clusters covering {stats.get('total_papers', 0)} papers.\n")
+    topics = data.get("topics", [])
+    for topic in topics[:10]:  # Limit to top 10 topics
+        name = topic.get("topic") or "Unnamed"
+        paper_count = topic.get("paper_count", 0)
+        keywords = topic.get("keywords", [])
 
-    clusters = data.get("clusters", [])
-    for cluster in clusters[:10]:  # Limit to top 10 clusters
-        cluster_id = cluster.get("cluster_id")
-        paper_count = cluster.get("paper_count", 0)
-        keywords = cluster.get("keywords", [])[:5]  # Top 5 keywords
-
-        lines.append(f"\nCluster {cluster_id} ({paper_count} papers):")
+        lines.append(f"\n{name} ({paper_count} papers):")
         if keywords:
-            keyword_strs = [f"{kw['keyword']} ({kw['count']})" for kw in keywords]
-            lines.append(f"  Top keywords: {', '.join(keyword_strs)}")
+            lines.append(f"  Keywords: {', '.join(keywords[:8])}")
 
     return "\n".join(lines)
 

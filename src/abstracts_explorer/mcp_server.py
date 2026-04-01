@@ -16,7 +16,8 @@ Features:
 
 import logging
 import json
-from typing import Any, Dict, List, Optional
+import re
+from typing import Any, Dict, List, Optional, Tuple
 from collections import Counter
 from copy import deepcopy
 
@@ -91,7 +92,8 @@ def _apply_cached_cluster_labels(
     cached_results: Dict[str, Any],
 ) -> None:
     """
-    Restore ``cluster_labels`` on *cm* from cached clustering results.
+    Restore ``cluster_labels``, ``cluster_label_names``, and
+    ``cluster_keywords`` on *cm* from cached clustering results.
 
     Parameters
     ----------
@@ -101,6 +103,8 @@ def _apply_cached_cluster_labels(
     cached_results : dict
         Cached results dict containing a ``"points"`` list where each
         element has ``"id"`` (or ``"paper_id"``) and ``"cluster"`` keys.
+        May also contain ``"cluster_labels"`` (cluster name dict) and
+        ``"cluster_keywords"`` (TF-IDF keyword dict).
     """
     import numpy as np
 
@@ -112,6 +116,14 @@ def _apply_cached_cluster_labels(
     current_ids = cm.paper_ids or []
     cm.cluster_labels = np.array([point_id_to_cluster.get(pid, -1) for pid in current_ids])
 
+    # Restore cluster label names (LLM-generated or TF-IDF-based names)
+    if cached_results.get("cluster_labels"):
+        cm.cluster_label_names = {int(k): v for k, v in cached_results["cluster_labels"].items()}
+
+    # Restore TF-IDF cluster keywords
+    if cached_results.get("cluster_keywords"):
+        cm.cluster_keywords = {int(k): v for k, v in cached_results["cluster_keywords"].items()}
+
 
 def analyze_cluster_topics(
     cm: ClusteringManager,
@@ -120,7 +132,12 @@ def analyze_cluster_topics(
     use_llm: bool = False,
 ) -> Dict[str, Any]:
     """
-    Analyze topics in a specific cluster.
+    Analyze a single topic (cluster) and return a concise summary.
+
+    Each cluster represents a conference topic.  The returned dictionary
+    is designed to be consumed directly by an LLM — field names use the
+    word *topic* instead of *cluster* so the model does not need to know
+    about the underlying clustering implementation.
 
     Parameters
     ----------
@@ -129,7 +146,7 @@ def analyze_cluster_topics(
     db : DatabaseManager
         Database manager for paper metadata
     cluster_id : int
-        Cluster ID to analyze
+        Internal cluster ID to analyze
     use_llm : bool, optional
         Whether to use LLM for topic extraction (default: False)
 
@@ -137,85 +154,160 @@ def analyze_cluster_topics(
     -------
     dict
         Dictionary containing:
-        - cluster_id: Cluster ID
-        - paper_count: Number of papers in cluster
-        - keywords: Most common keywords
-        - sessions: Most common sessions
-        - years: Distribution by year
-        - sample_titles: Sample paper titles
+        - topic: Human-readable topic name (or ``None``)
+        - paper_count: Number of papers in this topic
+        - keywords: Representative keywords for the topic
+        - sample_titles: A few example paper titles
     """
     if cm.cluster_labels is None or cm.paper_ids is None or cm.metadatas is None:
         raise ClusterAnalysisError("Clustering data not loaded. Call load_embeddings() and cluster() first.")
+
+    label_names = cm.cluster_label_names or {}
+    cluster_kws = cm.cluster_keywords or {}
 
     # Find papers in this cluster
     cluster_indices = [i for i, label in enumerate(cm.cluster_labels) if label == cluster_id]
 
     if not cluster_indices:
         return {
-            "cluster_id": cluster_id,
+            "topic": label_names.get(cluster_id),
             "paper_count": 0,
-            "keywords": [],
-            "sessions": [],
-            "years": {},
+            "keywords": cluster_kws.get(cluster_id, []),
             "sample_titles": [],
         }
 
-    # Extract metadata for papers in this cluster
-    keywords = []
-    sessions = []
-    years = []
+    # Extract sample titles
     sample_titles: list[str] = []
-
     for idx in cluster_indices:
-        metadata = cm.metadatas[idx]
-
-        # Collect keywords
-        if metadata.get("keywords"):
-            keywords.extend(metadata.get("keywords", []))
-
-        # Collect sessions
-        if metadata.get("session"):
-            sessions.append(metadata.get("session"))
-
-        # Collect years
-        if metadata.get("year"):
-            years.append(metadata.get("year"))
-
-        # Collect sample titles (first 5)
-        if len(sample_titles) < 5:
-            sample_titles.append(metadata.get("title", ""))
-
-    # Count frequencies
-    keyword_counts = Counter([k.strip().lower() for k in keywords if k.strip()])
-    session_counts = Counter(sessions)
-    year_counts = Counter(years)
+        if len(sample_titles) >= 5:
+            break
+        title = cm.metadatas[idx].get("title", "")
+        if title:
+            sample_titles.append(title)
 
     return {
-        "cluster_id": cluster_id,
+        "topic": label_names.get(cluster_id),
         "paper_count": len(cluster_indices),
-        "keywords": [{"keyword": k, "count": c} for k, c in keyword_counts.most_common(10)],
-        "sessions": [{"session": s, "count": c} for s, c in session_counts.most_common(5)],
-        "years": dict(sorted(year_counts.items())),
+        "keywords": cluster_kws.get(cluster_id, []),
         "sample_titles": sample_titles,
     }
 
 
-def _get_cluster_topics_for_single_conference(
+def _parse_conference_year(conference: str) -> Tuple[str, Optional[int]]:
+    """
+    Parse a trailing year from a conference name.
+
+    LLMs often combine the conference name and year into a single string
+    (e.g. ``"NeurIPS 2025"``).  This helper splits them so the conference
+    name matches the database/cache entries which store the name and year
+    separately.
+
+    Parameters
+    ----------
+    conference : str
+        Conference name, possibly with a trailing 4-digit year.
+
+    Returns
+    -------
+    tuple of (str, int or None)
+        ``(conference_name, year)`` — *year* is ``None`` when no trailing
+        year was found.
+
+    Examples
+    --------
+    >>> _parse_conference_year("NeurIPS 2025")
+    ('NeurIPS', 2025)
+    >>> _parse_conference_year("ICLR")
+    ('ICLR', None)
+    """
+    match = re.match(r"^(.+)\s+(\d{4})$", conference.strip())
+    if match:
+        return match.group(1), int(match.group(2))
+    return conference, None
+
+
+def _lookup_clustering_cache(
+    db: "DatabaseManager",
+    config: Any,
+    conference: str,
+    years: Optional[List[int]],
+) -> Any:
+    """
+    Look up pre-computed clustering results from the database cache.
+
+    Tries an exact match first.  When *years* is non-empty and no exact
+    match is found, retries without the year filter so that an all-years
+    cache entry can serve as a fallback.
+
+    Parameters
+    ----------
+    db : DatabaseManager
+        Open database connection.
+    config : object
+        Configuration object (needs ``embedding_model``).
+    conference : str
+        Conference name (already parsed, no trailing year).
+    years : list of int or None
+        Year filter.
+
+    Returns
+    -------
+    dict or None
+        Cached clustering results, or ``None`` when nothing matches.
+    """
+    clustering_params: Dict[str, Any] = {
+        "linkage": "ward",
+        "distance_threshold": 150.0,
+        "conferences": sorted([conference]),
+    }
+    if years:
+        clustering_params["years"] = sorted([int(y) for y in years])
+
+    cached = db.get_clustering_cache(
+        embedding_model=config.embedding_model,
+        reduction_method="tsne",
+        n_components=2,
+        clustering_method="agglomerative",
+        n_clusters=None,
+        clustering_params=clustering_params,
+    )
+
+    # Fallback: if per-year cache not found, try the all-years cache
+    if not cached and years:
+        fallback_params = {k: v for k, v in clustering_params.items() if k != "years"}
+        cached = db.get_clustering_cache(
+            embedding_model=config.embedding_model,
+            reduction_method="tsne",
+            n_components=2,
+            clustering_method="agglomerative",
+            n_clusters=None,
+            clustering_params=fallback_params,
+        )
+
+    return cached
+
+
+def _get_conference_topics_for_single_conference(
     conference: str,
     years: Optional[List[int]] = None,
     collection_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Retrieve cached cluster topics for a single conference.
+    Retrieve the main research topics for a single conference.
 
     Looks up pre-computed clustering results from the database cache and
-    analyzes topics per cluster.  Returns an error dict when no cached
+    returns a topic-centric summary.  Returns an error dict when no cached
     results exist for the requested conference/year combination.
+
+    If the *conference* string contains a trailing year
+    (e.g. ``"NeurIPS 2025"``), the year is extracted and merged into *years*
+    so that the cache lookup matches entries stored under the plain
+    conference name.
 
     Parameters
     ----------
     conference : str
-        Conference name (e.g. "NeurIPS", "ICLR").
+        Conference name (e.g. "NeurIPS", "ICLR", or "NeurIPS 2025").
     years : list of int, optional
         Filter by publication years.
     collection_name : str, optional
@@ -224,32 +316,24 @@ def _get_cluster_topics_for_single_conference(
     Returns
     -------
     dict
-        Cluster topics result dict with ``"statistics"`` and ``"clusters"``
+        Topics result dict with ``"topic_sizes"`` and ``"topics"``
         keys, or an ``"error"`` key if no cache is available.
     """
     config = get_config()
     collection_name = collection_name or config.collection_name
 
+    # Parse year from conference name if present (e.g. "NeurIPS 2025" → "NeurIPS", 2025)
+    conference, extracted_year = _parse_conference_year(conference)
+    if extracted_year is not None:
+        if years is None:
+            years = [extracted_year]
+        elif extracted_year not in years:
+            years = sorted(years + [extracted_year])
+
     cm, db = load_clustering_data(collection_name)
 
     try:
-        # Build cache lookup params (must mirror pre-generate CLI)
-        clustering_params: Dict[str, Any] = {
-            "linkage": "ward",
-            "distance_threshold": 150.0,
-            "conferences": sorted([conference]),
-        }
-        if years:
-            clustering_params["years"] = sorted([int(y) for y in years])
-
-        cached = db.get_clustering_cache(
-            embedding_model=config.embedding_model,
-            reduction_method="tsne",
-            n_components=2,
-            clustering_method="agglomerative",
-            n_clusters=None,
-            clustering_params=clustering_params,
-        )
+        cached = _lookup_clustering_cache(db, config, conference, years)
 
         if not cached:
             return {
@@ -267,15 +351,25 @@ def _get_cluster_topics_for_single_conference(
 
         stats = cm.get_cluster_statistics()
 
-        cluster_topics = []
+        # Build topic_sizes with human-readable names, sorted by size descending
+        label_names = cm.cluster_label_names or {}
+        named_sizes = {label_names.get(cid, f"Topic {cid}"): size for cid, size in stats["cluster_sizes"].items()}
+        topic_sizes = dict(sorted(named_sizes.items(), key=lambda x: x[1], reverse=True))
+
+        topics = []
         for cluster_id in range(stats["n_clusters"]):
-            topics = analyze_cluster_topics(cm, db, cluster_id)
-            cluster_topics.append(topics)
+            topic = analyze_cluster_topics(cm, db, cluster_id)
+            topics.append(topic)
+
+        # Sort topics by paper_count descending
+        topics.sort(key=lambda t: t["paper_count"], reverse=True)
 
         return {
             "conference": conference,
-            "statistics": stats,
-            "clusters": cluster_topics,
+            "total_papers": stats["total_papers"],
+            "n_topics": stats["n_clusters"],
+            "topic_sizes": topic_sizes,
+            "topics": topics,
         }
     finally:
         cm.embeddings_manager.close()
@@ -283,26 +377,26 @@ def _get_cluster_topics_for_single_conference(
 
 
 @mcp.tool()
-def get_cluster_topics(
+def get_conference_topics(
     conferences: Optional[List[str]] = None,
     years: Optional[List[int]] = None,
     collection_name: Optional[str] = None,
     **kwargs,
 ) -> str:
     """
-    Get the most frequently mentioned topics from pre-computed clustered embeddings.
+    Get the main research topics of a conference.
 
-    This tool retrieves cached clustering results (pre-generated via CLI)
-    and analyzes the topics in each cluster based on keywords, sessions,
-    and paper titles.  A conference must be specified.
+    Returns the key research topics covered at the conference, each with a
+    descriptive name, representative keywords, paper count, and example
+    paper titles.  A conference must be specified.
 
-    When multiple conferences are provided, each conference is looked up
+    When multiple conferences are provided, each conference is analyzed
     individually and results are combined.
 
     Parameters
     ----------
     conferences : list of str, optional
-        Conference names to retrieve clusters for (e.g. ["NeurIPS"]).
+        Conference names (e.g. ["NeurIPS"]).
         Required – returns an error when not provided.
     years : list of int, optional
         Filter by publication years.
@@ -314,15 +408,14 @@ def get_cluster_topics(
     Returns
     -------
     str
-        JSON string containing cluster topics analysis.
+        JSON string containing the conference topics analysis.
     """
     try:
         if not conferences:
             return json.dumps(
                 {
                     "error": (
-                        "A conference must be specified for cluster topic analysis. "
-                        "Please provide conferences parameter."
+                        "A conference must be specified for topic analysis. " "Please provide conferences parameter."
                     )
                 },
                 indent=2,
@@ -330,7 +423,7 @@ def get_cluster_topics(
 
         all_results: List[Dict[str, Any]] = []
         for conf in conferences:
-            result = _get_cluster_topics_for_single_conference(
+            result = _get_conference_topics_for_single_conference(
                 conference=conf,
                 years=years,
                 collection_name=collection_name,
@@ -345,7 +438,7 @@ def get_cluster_topics(
         return json.dumps({"conference_results": all_results}, indent=2)
 
     except Exception as e:
-        logger.error(f"Failed to get cluster topics: {str(e)}")
+        logger.error(f"Failed to get conference topics: {str(e)}")
         return json.dumps({"error": str(e)}, indent=2)
 
 
@@ -1038,24 +1131,18 @@ def get_cluster_visualization(
         combined_stats: Dict[str, Any] = {}
 
         for conf in conferences:
-            clustering_params: Dict[str, Any] = {
-                "linkage": "ward",
-                "distance_threshold": 150.0,
-                "conferences": sorted([conf]),
-            }
-            if years:
-                clustering_params["years"] = sorted([int(y) for y in years])
+            # Parse year from conference name if present (e.g. "NeurIPS 2025")
+            parsed_conf, extracted_year = _parse_conference_year(conf)
+            vis_years = list(years) if years else None
+            if extracted_year is not None:
+                if vis_years is None:
+                    vis_years = [extracted_year]
+                elif extracted_year not in vis_years:
+                    vis_years = sorted(vis_years + [extracted_year])
 
             cm, db = load_clustering_data(collection_name)
             try:
-                cached = db.get_clustering_cache(
-                    embedding_model=config.embedding_model,
-                    reduction_method="tsne",
-                    n_components=2,
-                    clustering_method="agglomerative",
-                    n_clusters=None,
-                    clustering_params=clustering_params,
-                )
+                cached = _lookup_clustering_cache(db, config, parsed_conf, vis_years)
             finally:
                 cm.embeddings_manager.close()
                 db.close()
@@ -1065,8 +1152,8 @@ def get_cluster_visualization(
                     {
                         "error": (
                             f"No pre-computed clustering data available for conference "
-                            f"'{conf}'"
-                            + (f" years={years}" if years else "")
+                            f"'{parsed_conf}'"
+                            + (f" years={vis_years}" if vis_years else "")
                             + ". Run 'abstracts-explorer clustering pre-generate' first."
                         ),
                     },

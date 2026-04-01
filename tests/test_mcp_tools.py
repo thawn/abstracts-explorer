@@ -14,7 +14,7 @@ from abstracts_explorer.mcp_tools import (
     execute_mcp_tool,
     format_tool_result_for_llm,
     _abbreviate_result,
-    _format_cluster_topics_result,
+    _format_conference_topics_result,
     _format_topic_evolution_result,
     _format_search_papers_result,
     _format_visualization_result,
@@ -46,7 +46,7 @@ def test_get_mcp_tools_schema():
     # Verify all expected tools are present
     tool_names = [t["function"]["name"] for t in schema]
     assert "analyze_topic_relevance" in tool_names
-    assert "get_cluster_topics" in tool_names
+    assert "get_conference_topics" in tool_names
     assert "get_topic_evolution" in tool_names
     assert "search_papers" in tool_names
     assert "get_cluster_visualization" in tool_names
@@ -54,15 +54,15 @@ def test_get_mcp_tools_schema():
 
 
 def test_execute_mcp_tool_cluster_topics():
-    """Test executing get_cluster_topics tool."""
-    with patch("abstracts_explorer.mcp_tools.get_cluster_topics") as mock_tool:
-        mock_result = json.dumps({"statistics": {"n_clusters": 5, "total_papers": 100}, "clusters": []})
+    """Test executing get_conference_topics tool."""
+    with patch("abstracts_explorer.mcp_tools.get_conference_topics") as mock_tool:
+        mock_result = json.dumps({"n_topics": 5, "total_papers": 100, "topics": []})
         mock_tool.return_value = mock_result
 
-        result = execute_mcp_tool("get_cluster_topics", {"n_clusters": 5})
+        result = execute_mcp_tool("get_conference_topics", {"conferences": ["NeurIPS"]})
 
         assert result == mock_result
-        mock_tool.assert_called_once_with(n_clusters=5)
+        mock_tool.assert_called_once_with(conferences=["NeurIPS"])
 
 
 def test_execute_mcp_tool_topic_evolution():
@@ -105,39 +105,46 @@ def test_execute_mcp_tool_unknown():
 
 def test_execute_mcp_tool_exception_handling():
     """Test that tool execution exceptions are caught and returned as JSON."""
-    with patch("abstracts_explorer.mcp_tools.get_cluster_topics") as mock_tool:
+    with patch("abstracts_explorer.mcp_tools.get_conference_topics") as mock_tool:
         mock_tool.side_effect = Exception("Database connection failed")
 
-        result = execute_mcp_tool("get_cluster_topics", {})
+        result = execute_mcp_tool("get_conference_topics", {})
 
         result_data = json.loads(result)
         assert "error" in result_data
         assert "Tool execution failed" in result_data["error"]
 
 
-def test_format_cluster_topics_result():
-    """Test formatting cluster topics result for LLM."""
+def test_format_conference_topics_result():
+    """Test formatting conference topics result for LLM."""
     data = {
-        "statistics": {"n_clusters": 3, "total_papers": 150},
-        "clusters": [
+        "conference": "NeurIPS",
+        "n_topics": 3,
+        "total_papers": 150,
+        "topics": [
             {
-                "cluster_id": 0,
-                "paper_count": 50,
-                "keywords": [{"keyword": "transformer", "count": 30}, {"keyword": "attention", "count": 25}],
+                "topic": "Transformers",
+                "paper_count": 60,
+                "keywords": ["reinforcement learning", "policy"],
             },
-            {"cluster_id": 1, "paper_count": 60, "keywords": [{"keyword": "reinforcement learning", "count": 40}]},
+            {
+                "topic": "Attention Mechanisms",
+                "paper_count": 50,
+                "keywords": ["transformer", "attention"],
+            },
         ],
     }
 
-    result = _format_cluster_topics_result(data)
+    result = _format_conference_topics_result(data)
 
-    assert "Cluster Analysis Results" in result
-    assert "3 clusters" in result
+    assert "Conference Topics for NeurIPS" in result
     assert "150 papers" in result
-    assert "Cluster 0" in result
+    assert "3 topics" in result
+    assert "Transformers" in result
+    assert "60 papers" in result
+    assert "reinforcement learning" in result
+    assert "Attention Mechanisms" in result
     assert "50 papers" in result
-    assert "transformer (30)" in result
-    assert "attention (25)" in result
 
 
 def test_format_topic_evolution_result():
@@ -210,7 +217,7 @@ def test_format_tool_result_with_error():
     """Test formatting tool result when error is present."""
     error_result = json.dumps({"error": "Database not found"})
 
-    result = format_tool_result_for_llm("get_cluster_topics", error_result)
+    result = format_tool_result_for_llm("get_conference_topics", error_result)
 
     assert "Tool execution failed" in result
     assert "Database not found" in result
@@ -220,7 +227,7 @@ def test_format_tool_result_invalid_json():
     """Test formatting tool result with invalid JSON."""
     invalid_result = "This is not JSON"
 
-    result = format_tool_result_for_llm("get_cluster_topics", invalid_result)
+    result = format_tool_result_for_llm("get_conference_topics", invalid_result)
 
     # Should return the original result
     assert result == invalid_result
@@ -240,9 +247,9 @@ def test_mcp_tools_schema_parameters():
     """Test that tool schemas have correct parameter definitions."""
     schema = get_mcp_tools_schema()
 
-    # Check get_cluster_topics parameters (simplified - no clustering config)
-    cluster_topics = next(t for t in schema if t["function"]["name"] == "get_cluster_topics")
-    params = cluster_topics["function"]["parameters"]["properties"]
+    # Check get_conference_topics parameters
+    conference_topics = next(t for t in schema if t["function"]["name"] == "get_conference_topics")
+    params = conference_topics["function"]["parameters"]["properties"]
     assert "collection_name" in params
 
     # Check get_topic_evolution parameters
@@ -606,13 +613,13 @@ class TestExecuteMCPToolE2E:
         data = json.loads(result)
         assert "error" not in data
 
-    def test_get_cluster_topics_unknown_kwarg_does_not_raise(self):
-        """get_cluster_topics does not raise TypeError for unknown kwargs."""
-        mock_result = json.dumps({"statistics": {"n_clusters": 2}, "clusters": []})
-        with patch("abstracts_explorer.mcp_tools.get_cluster_topics", return_value=mock_result):
+    def test_get_conference_topics_unknown_kwarg_does_not_raise(self):
+        """get_conference_topics does not raise TypeError for unknown kwargs."""
+        mock_result = json.dumps({"n_topics": 2, "topics": []})
+        with patch("abstracts_explorer.mcp_tools.get_conference_topics", return_value=mock_result):
             result = execute_mcp_tool(
-                "get_cluster_topics",
-                {"n_clusters": 3, "unknown_extra": "ignored"},
+                "get_conference_topics",
+                {"conferences": ["NeurIPS"], "unknown_extra": "ignored"},
             )
 
         data = json.loads(result)
@@ -652,11 +659,11 @@ class TestExecuteMCPToolE2E:
         assert data["papers"][0]["title"] == "Paper 1"
 
     # ------------------------------------------------------------------
-    # get_cluster_topics
+    # get_conference_topics
     # ------------------------------------------------------------------
 
-    def test_get_cluster_topics_real_execution(self):
-        """get_cluster_topics executes end-to-end with mocked clustering stack."""
+    def test_get_conference_topics_real_execution(self):
+        """get_conference_topics executes end-to-end with mocked clustering stack."""
         import numpy as np
 
         mock_cm = Mock()
@@ -669,6 +676,8 @@ class TestExecuteMCPToolE2E:
         }
         mock_cm.paper_ids = ["p1", "p2", "p3", "p4", "p5"]
         mock_cm.cluster_labels = np.array([0, 0, 1, 1, 0])
+        mock_cm.cluster_label_names = None
+        mock_cm.cluster_keywords = None
         mock_cm.metadatas = [
             {"title": "A", "keywords": ["ml"], "session": "S1", "year": 2025},
             {"title": "B", "keywords": ["dl"], "session": "S1", "year": 2025},
@@ -679,7 +688,7 @@ class TestExecuteMCPToolE2E:
         mock_cm.embeddings_manager = Mock()
         mock_db = Mock()
 
-        # Mock db.get_clustering_cache to return cached results
+        # Mock db.get_clustering_cache to return cached results with cluster names
         mock_db.get_clustering_cache.return_value = {
             "points": [
                 {"id": "p1", "cluster": 0, "x": 0.0, "y": 0.0},
@@ -694,6 +703,8 @@ class TestExecuteMCPToolE2E:
                 "cluster_sizes": {0: 3, 1: 2},
                 "total_papers": 5,
             },
+            "cluster_labels": {"0": "Machine Learning", "1": "NLP"},
+            "cluster_keywords": {"0": ["ml", "deep"], "1": ["nlp", "bert"]},
         }
 
         with (
@@ -701,12 +712,21 @@ class TestExecuteMCPToolE2E:
             patch("abstracts_explorer.mcp_server.get_config") as mock_cfg,
         ):
             mock_cfg.return_value = Mock(collection_name="papers", embedding_model="test-model")
-            result = execute_mcp_tool("get_cluster_topics", {"conferences": ["NeurIPS"]})
+            result = execute_mcp_tool("get_conference_topics", {"conferences": ["NeurIPS"]})
 
         data = json.loads(result)
         assert "error" not in data
-        assert "clusters" in data
-        assert data["statistics"]["n_clusters"] == 2
+        assert "topics" in data
+        assert data["n_topics"] == 2
+        # topic_sizes should use topic names sorted by size descending
+        assert list(data["topic_sizes"].keys()) == ["Machine Learning", "NLP"]
+        assert data["topic_sizes"]["Machine Learning"] == 3
+        assert data["topic_sizes"]["NLP"] == 2
+        # Verify topics are returned, sorted by paper_count desc
+        assert data["topics"][0]["topic"] == "Machine Learning"
+        assert data["topics"][0]["keywords"] == ["ml", "deep"]
+        assert data["topics"][1]["topic"] == "NLP"
+        assert data["topics"][1]["keywords"] == ["nlp", "bert"]
 
     # ------------------------------------------------------------------
     # get_topic_evolution
@@ -1333,13 +1353,13 @@ class TestExecuteMCPToolLogging:
 
     def test_logs_tool_call_and_result(self, caplog):
         """execute_mcp_tool logs both the call and the return value."""
-        mock_result = json.dumps({"clusters": []})
-        with patch("abstracts_explorer.mcp_tools.get_cluster_topics", return_value=mock_result):
+        mock_result = json.dumps({"topics": []})
+        with patch("abstracts_explorer.mcp_tools.get_conference_topics", return_value=mock_result):
             with caplog.at_level("INFO", logger="abstracts_explorer.mcp_tools"):
-                execute_mcp_tool("get_cluster_topics", {"n_clusters": 5})
+                execute_mcp_tool("get_conference_topics", {"conferences": ["NeurIPS"]})
 
-        assert "Executing MCP tool: get_cluster_topics" in caplog.text
-        assert "MCP tool get_cluster_topics returned:" in caplog.text
+        assert "Executing MCP tool: get_conference_topics" in caplog.text
+        assert "MCP tool get_conference_topics returned:" in caplog.text
 
     def test_logs_abbreviated_long_result(self, caplog):
         """Long return values are abbreviated in the log."""

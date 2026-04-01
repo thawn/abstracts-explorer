@@ -140,16 +140,17 @@ def mock_search_papers():
 
 @pytest.fixture
 def mock_cluster_topics():
-    """Mock mcp_server.get_cluster_topics to return test data."""
-    with patch("abstracts_explorer.rag.mcp_get_cluster_topics") as mock_ct:
+    """Mock mcp_server.get_conference_topics to return test data."""
+    with patch("abstracts_explorer.rag.mcp_get_conference_topics") as mock_ct:
         mock_ct.return_value = json.dumps(
             {
-                "statistics": {"n_clusters": 8, "total_papers": 100},
-                "clusters": [
+                "n_topics": 8,
+                "total_papers": 100,
+                "topics": [
                     {
-                        "cluster_id": 0,
+                        "topic": "Transformers",
                         "paper_count": 20,
-                        "keywords": [{"keyword": "transformers", "count": 15}],
+                        "keywords": ["transformers", "attention"],
                     }
                 ],
             }
@@ -521,10 +522,10 @@ class TestRAGChatMCPTools:
         assert "search_papers" in result["metadata"]["tools_executed"]
 
     def test_query_calls_cluster_topics(self, mock_embeddings_manager, mock_database, mock_cluster_topics):
-        """Test that get_cluster_topics tool can be called."""
+        """Test that get_conference_topics tool can be called."""
 
         def model_fn(messages, info):
-            """Model that calls get_cluster_topics on first call, then responds."""
+            """Model that calls get_conference_topics on first call, then responds."""
             # Check if tool results already exist (tool was already called)
             for msg in messages:
                 for part in msg.parts:
@@ -533,7 +534,7 @@ class TestRAGChatMCPTools:
                             parts=[TextPart(content="The main topics are transformers and diffusion models.")]
                         )
             # First call: request the tool
-            return ModelResponse(parts=[ToolCallPart(tool_name="get_cluster_topics", args={})])
+            return ModelResponse(parts=[ToolCallPart(tool_name="get_conference_topics", args={})])
 
         chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
 
@@ -542,7 +543,7 @@ class TestRAGChatMCPTools:
 
         mock_cluster_topics.assert_called_once()
         assert result["metadata"]["used_tools"] is True
-        assert "get_cluster_topics" in result["metadata"]["tools_executed"]
+        assert "get_conference_topics" in result["metadata"]["tools_executed"]
 
     def test_query_calls_topic_evolution(self, mock_embeddings_manager, mock_database, mock_topic_evolution):
         """Test that get_topic_evolution tool can be called."""
@@ -624,7 +625,7 @@ class TestRAGChatMCPTools:
             # First call: return two tool calls
             return ModelResponse(
                 parts=[
-                    ToolCallPart(tool_name="get_cluster_topics", args={}),
+                    ToolCallPart(tool_name="get_conference_topics", args={}),
                     ToolCallPart(
                         tool_name="search_papers",
                         args={"topic_keywords": "transformers", "n_results": 5},
@@ -638,7 +639,7 @@ class TestRAGChatMCPTools:
             result = chat.query("What are the main topics and show me papers about transformers?")
 
         # Verify both tools were executed
-        assert "get_cluster_topics" in result["metadata"]["tools_executed"]
+        assert "get_conference_topics" in result["metadata"]["tools_executed"]
         assert "search_papers" in result["metadata"]["tools_executed"]
         assert len(result["metadata"]["tools_executed"]) == 2
 
@@ -691,8 +692,8 @@ class TestRAGChatPaperExtraction:
         """Test that non-paper tools return no papers."""
         tool_results = [
             {
-                "name": "get_cluster_topics",
-                "raw_result": json.dumps({"statistics": {}, "clusters": []}),
+                "name": "get_conference_topics",
+                "raw_result": json.dumps({"topics": []}),
             }
         ]
 
@@ -852,8 +853,8 @@ class TestRAGChatVisualizationExtraction:
                 "raw_result": json.dumps({"papers": [{"title": "Paper"}]}),
             },
             {
-                "name": "get_cluster_topics",
-                "raw_result": json.dumps({"clusters": []}),
+                "name": "get_conference_topics",
+                "raw_result": json.dumps({"topics": []}),
             },
         ]
 
@@ -1122,19 +1123,19 @@ class TestRAGToolLogging:
         assert "Tool call: search_papers" in caplog.text
         assert "Tool result: search_papers" in caplog.text
 
-    def test_get_cluster_topics_logs_call_and_result(self, caplog, mock_cluster_topics):
-        """_tool_get_cluster_topics logs the call arguments and abbreviated result."""
-        from abstracts_explorer.rag import _tool_get_cluster_topics, RAGDeps
+    def test_get_conference_topics_logs_call_and_result(self, caplog, mock_cluster_topics):
+        """_tool_get_conference_topics logs the call arguments and abbreviated result."""
+        from abstracts_explorer.rag import _tool_get_conference_topics, RAGDeps
 
         ctx = Mock()
         ctx.deps = RAGDeps()
         ctx.deps.conferences = ["NeurIPS"]
 
         with caplog.at_level("INFO", logger="abstracts_explorer.rag"):
-            _tool_get_cluster_topics(ctx, conference="NeurIPS")
+            _tool_get_conference_topics(ctx, conference="NeurIPS")
 
-        assert "Tool call: get_cluster_topics" in caplog.text
-        assert "Tool result: get_cluster_topics" in caplog.text
+        assert "Tool call: get_conference_topics" in caplog.text
+        assert "Tool result: get_conference_topics" in caplog.text
 
     def test_get_topic_evolution_logs_call_and_result(self, caplog, mock_topic_evolution):
         """_tool_get_topic_evolution logs the call arguments and abbreviated result."""

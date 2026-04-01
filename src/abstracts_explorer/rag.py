@@ -22,7 +22,7 @@ from pydantic_ai.settings import ModelSettings
 from abstracts_explorer.config import get_config
 from abstracts_explorer.mcp_server import (
     search_papers as mcp_search_papers,
-    get_cluster_topics as mcp_get_cluster_topics,
+    get_conference_topics as mcp_get_conference_topics,
     get_topic_evolution as mcp_get_topic_evolution,
     analyze_topic_relevance as mcp_analyze_topic_relevance,
     get_cluster_visualization as mcp_get_cluster_visualization,
@@ -117,14 +117,15 @@ def _tool_search_papers(
     return format_tool_result_for_llm("search_papers", raw)
 
 
-def _tool_get_cluster_topics(
+def _tool_get_conference_topics(
     ctx: RunContext[RAGDeps],
     conference: Optional[str] = None,
 ) -> str:
-    """Get the main research topics from pre-computed clustered paper embeddings.
+    """Get the main research topics of a conference.
 
-    Use this tool to discover the most frequently mentioned topics
-    and research areas. Returns clusters with keywords and statistics.
+    Returns the key research topics covered at the conference, each with
+    a descriptive name, representative keywords, paper count, and example
+    paper titles.
 
     A conference must be specified. If not provided by the user, the
     currently selected conference from the web UI is used automatically.
@@ -134,7 +135,7 @@ def _tool_get_cluster_topics(
     ctx : RunContext[RAGDeps]
         Agent context with dependencies.
     conference : str, optional
-        Conference name to retrieve cluster topics for (e.g. "NeurIPS").
+        Conference name (e.g. "NeurIPS").
         When omitted, the default conference from the current session is used.
     """
     # Determine conferences: explicit param > deps default
@@ -147,11 +148,11 @@ def _tool_get_cluster_topics(
 
     years = ctx.deps.years if ctx.deps.years else None
 
-    logger.info("Tool call: get_cluster_topics(conferences=%s, years=%s)", conferences, years)
-    raw = mcp_get_cluster_topics(conferences=conferences, years=years)
-    logger.info("Tool result: get_cluster_topics → %s", _abbreviate_result(raw))
-    ctx.deps.tool_results.append({"name": "get_cluster_topics", "raw_result": raw})
-    return format_tool_result_for_llm("get_cluster_topics", raw)
+    logger.info("Tool call: get_conference_topics(conferences=%s, years=%s)", conferences, years)
+    raw = mcp_get_conference_topics(conferences=conferences, years=years)
+    logger.info("Tool result: get_conference_topics → %s", _abbreviate_result(raw))
+    ctx.deps.tool_results.append({"name": "get_conference_topics", "raw_result": raw})
+    return format_tool_result_for_llm("get_conference_topics", raw)
 
 
 def _tool_get_topic_evolution(
@@ -392,7 +393,7 @@ class RAGChat:
         if self.enable_mcp_tools:
             tools.extend(
                 [
-                    Tool(_tool_get_cluster_topics, takes_ctx=True, name="get_cluster_topics"),
+                    Tool(_tool_get_conference_topics, takes_ctx=True, name="get_conference_topics"),
                     Tool(_tool_get_topic_evolution, takes_ctx=True, name="get_topic_evolution"),
                     Tool(_tool_analyze_topic_relevance, takes_ctx=True, name="analyze_topic_relevance"),
                     Tool(_tool_get_cluster_visualization, takes_ctx=True, name="get_cluster_visualization"),

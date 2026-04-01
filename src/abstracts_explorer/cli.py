@@ -1187,7 +1187,7 @@ def mcp_server_command(args: argparse.Namespace) -> int:
         print("=" * 70)
         print("\nStarting MCP server...")
         print("\nAvailable tools:")
-        print("  - get_cluster_topics: Get most frequently mentioned topics from clusters")
+        print("  - get_conference_topics: Get the main research topics of a conference")
         print("  - get_topic_evolution: Analyze how topics evolved over years")
         print("  - search_papers: Find abstracts about topics")
         print("  - get_cluster_visualization: Generate cluster visualization data")
