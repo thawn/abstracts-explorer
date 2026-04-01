@@ -616,15 +616,27 @@ class TestGenerateQAPairs:
 
         with patch(
             "abstracts_explorer.evaluation.execute_mcp_tool",
-            return_value=json.dumps({
-                "conference": "NeurIPS",
-                "n_topics": 2,
-                "total_papers": 100,
-                "topics": [
-                    {"topic": "deep learning", "paper_count": 60, "keywords": ["neural", "deep"], "sample_titles": ["DL Paper"]},
-                    {"topic": "RL", "paper_count": 40, "keywords": ["reinforcement"], "sample_titles": ["RL Paper"]},
-                ],
-            }),
+            return_value=json.dumps(
+                {
+                    "conference": "NeurIPS",
+                    "n_topics": 2,
+                    "total_papers": 100,
+                    "topics": [
+                        {
+                            "topic": "deep learning",
+                            "paper_count": 60,
+                            "keywords": ["neural", "deep"],
+                            "sample_titles": ["DL Paper"],
+                        },
+                        {
+                            "topic": "RL",
+                            "paper_count": 40,
+                            "keywords": ["reinforcement"],
+                            "sample_titles": ["RL Paper"],
+                        },
+                    ],
+                }
+            ),
         ):
             pairs = evaluator_with_papers.generate_qa_pairs(
                 n_pairs_per_tool=1,

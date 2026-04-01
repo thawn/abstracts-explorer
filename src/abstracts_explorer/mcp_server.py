@@ -323,8 +323,7 @@ def get_conference_topics(
             return json.dumps(
                 {
                     "error": (
-                        "A conference must be specified for topic analysis. "
-                        "Please provide conferences parameter."
+                        "A conference must be specified for topic analysis. " "Please provide conferences parameter."
                     )
                 },
                 indent=2,
