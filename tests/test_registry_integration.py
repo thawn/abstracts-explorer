@@ -33,15 +33,14 @@ from abstracts_explorer.registry import (
     RegistryClient,
     RegistryError,
     _build_tag,
-    _sanitize_model_name,
-    _sanitize_version,
+    _sanitize_str_for_oci_tag,
 )
 from tests.conftest import set_test_db, set_test_embedding_db
 
 pytestmark = pytest.mark.integration
 
 # Sanitized version string used in expected tag assertions
-_VER = _sanitize_version(__version__)
+_VER = _sanitize_str_for_oci_tag(__version__)
 
 
 # ---------------------------------------------------------------------------
@@ -586,7 +585,7 @@ class TestDownloadModelMismatchRecovery:
 
 
 # ---------------------------------------------------------------------------
-# _build_tag and _sanitize_model_name
+# _build_tag and _sanitize_str_for_oci_tag
 # ---------------------------------------------------------------------------
 
 
@@ -603,20 +602,24 @@ class TestTagHelpers:
         tag = _build_tag("neurips", embedding_model="text-embedding-qwen3-embedding-4b")
         assert tag == f"neurips_text-embedding-qwen3-embedding-4b_{_VER}"
 
-    def test_sanitize_model_name_slash_replaced(self):
-        """Slashes in model names are replaced with hyphens."""
-        sanitized = _sanitize_model_name("org/model-name:v2")
+    def test_sanitize_slash_replaced(self):
+        """Slashes are replaced with hyphens."""
+        sanitized = _sanitize_str_for_oci_tag("org/model-name:v2")
         assert "/" not in sanitized
         assert ":" not in sanitized
 
-    def test_sanitize_model_name_lowercase(self):
-        """Model names are lowercased."""
-        assert _sanitize_model_name("GPT-4o") == "gpt-4o"
+    def test_sanitize_lowercase(self):
+        """Values are lowercased."""
+        assert _sanitize_str_for_oci_tag("GPT-4o") == "gpt-4o"
 
-    def test_sanitize_model_name_collapses_hyphens(self):
-        """Consecutive hyphens in sanitized model names are collapsed."""
-        result = _sanitize_model_name("model//name")
+    def test_sanitize_collapses_hyphens(self):
+        """Consecutive hyphens are collapsed."""
+        result = _sanitize_str_for_oci_tag("model//name")
         assert "--" not in result
+
+    def test_sanitize_version_local_segment(self):
+        """PEP 440 '+' local-version separator is replaced with '-'."""
+        assert _sanitize_str_for_oci_tag("0.1.dev2+g2abcfb2a2") == "0.1.dev2-g2abcfb2a2"
 
 
 # ---------------------------------------------------------------------------

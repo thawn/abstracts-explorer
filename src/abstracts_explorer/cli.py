@@ -1777,7 +1777,7 @@ def registry_download_command(args: argparse.Namespace) -> int:
         EmbeddingModelMismatchError,
         RegistryClient,
         RegistryError,
-        _sanitize_model_name,
+        _sanitize_str_for_oci_tag,
     )
 
     config = get_config()
@@ -1854,7 +1854,7 @@ def registry_download_command(args: argparse.Namespace) -> int:
                 # The local DB uses a different model than the remote artifact.
                 # If the configured model matches the remote model, offer to wipe
                 # local embedding data and retry.
-                if embedding_model and _sanitize_model_name(embedding_model) == _sanitize_model_name(
+                if embedding_model and _sanitize_str_for_oci_tag(embedding_model) == _sanitize_str_for_oci_tag(
                     mismatch.remote_model
                 ):
                     print(
