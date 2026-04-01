@@ -464,13 +464,18 @@ class TestMCPTools:
         }
 
         mock_cm.get_cluster_statistics.return_value = {
-            "n_clusters": 1, "n_noise": 0, "cluster_sizes": {0: 2}, "total_papers": 2,
+            "n_clusters": 1,
+            "n_noise": 0,
+            "cluster_sizes": {0: 2},
+            "total_papers": 2,
         }
         mock_cm.cluster_label_names = {0: "Deep Learning"}
 
         mock_analyze.return_value = {
-            "topic": "Deep Learning", "paper_count": 2,
-            "keywords": ["neural", "deep"], "sample_titles": ["Paper 1"],
+            "topic": "Deep Learning",
+            "paper_count": 2,
+            "keywords": ["neural", "deep"],
+            "sample_titles": ["Paper 1"],
         }
 
         from abstracts_explorer.mcp_server import get_conference_topics
@@ -526,19 +531,24 @@ class TestParseConferenceYear:
         mock_load.return_value = (mock_cm, mock_db)
         mock_cm.load_embeddings.return_value = 10
         mock_cm.get_cluster_statistics.return_value = {
-            "n_clusters": 1, "n_noise": 0, "cluster_sizes": {0: 1}, "total_papers": 1,
+            "n_clusters": 1,
+            "n_noise": 0,
+            "cluster_sizes": {0: 1},
+            "total_papers": 1,
         }
         mock_cm.cluster_label_names = {0: "AI"}
 
         mock_analyze.return_value = {
-            "topic": "AI", "paper_count": 1,
-            "keywords": ["artificial"], "sample_titles": ["Paper 1"],
+            "topic": "AI",
+            "paper_count": 1,
+            "keywords": ["artificial"],
+            "sample_titles": ["Paper 1"],
         }
 
         # First call (with years) returns None, second (without years) returns cache
         mock_db.get_clustering_cache.side_effect = [
             None,  # per-year lookup fails
-            {       # all-years fallback succeeds
+            {  # all-years fallback succeeds
                 "points": [{"id": "p1", "cluster": 0, "x": 0.0, "y": 0.0}],
                 "statistics": {"n_clusters": 1, "n_noise": 0, "cluster_sizes": {0: 1}, "total_papers": 1},
                 "cluster_labels": {"0": "AI"},
@@ -557,8 +567,8 @@ class TestParseConferenceYear:
         assert "years" not in fallback_params
 
 
-class TestMCPToolsContinued:
-    """Continuation of MCP tool tests (split due to class insertion)."""
+class TestTopicEvolutionAndRelevance:
+    """Tests for get_topic_evolution and analyze_topic_relevance tools."""
 
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
     @patch("abstracts_explorer.mcp_server.DatabaseManager")

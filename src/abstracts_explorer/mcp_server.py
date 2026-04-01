@@ -220,10 +220,71 @@ def _parse_conference_year(conference: str) -> Tuple[str, Optional[int]]:
     >>> _parse_conference_year("ICLR")
     ('ICLR', None)
     """
-    match = re.match(r"^(.+?)\s+(\d{4})$", conference.strip())
+    match = re.match(r"^(.+)\s+(\d{4})$", conference.strip())
     if match:
         return match.group(1), int(match.group(2))
     return conference, None
+
+
+def _lookup_clustering_cache(
+    db: "DatabaseManager",
+    config: Any,
+    conference: str,
+    years: Optional[List[int]],
+) -> Any:
+    """
+    Look up pre-computed clustering results from the database cache.
+
+    Tries an exact match first.  When *years* is non-empty and no exact
+    match is found, retries without the year filter so that an all-years
+    cache entry can serve as a fallback.
+
+    Parameters
+    ----------
+    db : DatabaseManager
+        Open database connection.
+    config : object
+        Configuration object (needs ``embedding_model``).
+    conference : str
+        Conference name (already parsed, no trailing year).
+    years : list of int or None
+        Year filter.
+
+    Returns
+    -------
+    dict or None
+        Cached clustering results, or ``None`` when nothing matches.
+    """
+    clustering_params: Dict[str, Any] = {
+        "linkage": "ward",
+        "distance_threshold": 150.0,
+        "conferences": sorted([conference]),
+    }
+    if years:
+        clustering_params["years"] = sorted([int(y) for y in years])
+
+    cached = db.get_clustering_cache(
+        embedding_model=config.embedding_model,
+        reduction_method="tsne",
+        n_components=2,
+        clustering_method="agglomerative",
+        n_clusters=None,
+        clustering_params=clustering_params,
+    )
+
+    # Fallback: if per-year cache not found, try the all-years cache
+    if not cached and years:
+        fallback_params = {k: v for k, v in clustering_params.items() if k != "years"}
+        cached = db.get_clustering_cache(
+            embedding_model=config.embedding_model,
+            reduction_method="tsne",
+            n_components=2,
+            clustering_method="agglomerative",
+            n_clusters=None,
+            clustering_params=fallback_params,
+        )
+
+    return cached
 
 
 def _get_conference_topics_for_single_conference(
@@ -272,35 +333,7 @@ def _get_conference_topics_for_single_conference(
     cm, db = load_clustering_data(collection_name)
 
     try:
-        # Build cache lookup params (must mirror pre-generate CLI)
-        clustering_params: Dict[str, Any] = {
-            "linkage": "ward",
-            "distance_threshold": 150.0,
-            "conferences": sorted([conference]),
-        }
-        if years:
-            clustering_params["years"] = sorted([int(y) for y in years])
-
-        cached = db.get_clustering_cache(
-            embedding_model=config.embedding_model,
-            reduction_method="tsne",
-            n_components=2,
-            clustering_method="agglomerative",
-            n_clusters=None,
-            clustering_params=clustering_params,
-        )
-
-        # Fallback: if per-year cache not found, try the all-years cache
-        if not cached and years:
-            fallback_params = {k: v for k, v in clustering_params.items() if k != "years"}
-            cached = db.get_clustering_cache(
-                embedding_model=config.embedding_model,
-                reduction_method="tsne",
-                n_components=2,
-                clustering_method="agglomerative",
-                n_clusters=None,
-                clustering_params=fallback_params,
-            )
+        cached = _lookup_clustering_cache(db, config, conference, years)
 
         if not cached:
             return {
@@ -1107,36 +1140,9 @@ def get_cluster_visualization(
                 elif extracted_year not in vis_years:
                     vis_years = sorted(vis_years + [extracted_year])
 
-            clustering_params: Dict[str, Any] = {
-                "linkage": "ward",
-                "distance_threshold": 150.0,
-                "conferences": sorted([parsed_conf]),
-            }
-            if vis_years:
-                clustering_params["years"] = sorted([int(y) for y in vis_years])
-
             cm, db = load_clustering_data(collection_name)
             try:
-                cached = db.get_clustering_cache(
-                    embedding_model=config.embedding_model,
-                    reduction_method="tsne",
-                    n_components=2,
-                    clustering_method="agglomerative",
-                    n_clusters=None,
-                    clustering_params=clustering_params,
-                )
-
-                # Fallback: try without year filter
-                if not cached and vis_years:
-                    fallback_params = {k: v for k, v in clustering_params.items() if k != "years"}
-                    cached = db.get_clustering_cache(
-                        embedding_model=config.embedding_model,
-                        reduction_method="tsne",
-                        n_components=2,
-                        clustering_method="agglomerative",
-                        n_clusters=None,
-                        clustering_params=fallback_params,
-                    )
+                cached = _lookup_clustering_cache(db, config, parsed_conf, vis_years)
             finally:
                 cm.embeddings_manager.close()
                 db.close()
