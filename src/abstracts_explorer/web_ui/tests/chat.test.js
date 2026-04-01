@@ -263,6 +263,7 @@ describe('Chat Module', () => {
             expect(traces[0].name).toBe('NeurIPS');
             expect(layout.title).toContain('transformers');
             expect(layout.title).toContain('NeurIPS');
+            expect(layout.xaxis.title).toContain('Year');
             expect(layout.yaxis.title).toContain('Percentage');
         });
 

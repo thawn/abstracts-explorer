@@ -332,7 +332,7 @@ function _renderTopicEvolutionChart(plotId, viz) {
         title: `Topic Evolution: ${viz.topic || ''}${confLabel}`,
         xaxis: { title: 'Year', type: 'category' },
         yaxis: { title: 'Percentage of Papers (%)' },
-        margin: { t: 40, b: 50, l: 50, r: 20 },
+        margin: { t: 40, b: 60, l: 65, r: 20 },
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
         showlegend: conferences.length > 1
