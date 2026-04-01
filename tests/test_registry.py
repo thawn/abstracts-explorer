@@ -142,7 +142,10 @@ class TestBuildTag:
 
     def test_special_characters(self):
         """Special characters are replaced with hyphens."""
-        assert _build_tag("ML4PS/workshop", 2025, embedding_model="model-a", version="1.0.0") == "ml4ps-workshop-2025_model-a_1.0.0"
+        assert (
+            _build_tag("ML4PS/workshop", 2025, embedding_model="model-a", version="1.0.0")
+            == "ml4ps-workshop-2025_model-a_1.0.0"
+        )
 
     def test_conference_only_tag(self):
         """Tag without year contains conference, model and version."""
@@ -150,7 +153,9 @@ class TestBuildTag:
 
     def test_conference_only_tag_normalized(self):
         """Conference-only tag is lowercased and sanitized."""
-        assert _build_tag("ML4PS/workshop", embedding_model="model-a", version="1.0.0") == "ml4ps-workshop_model-a_1.0.0"
+        assert (
+            _build_tag("ML4PS/workshop", embedding_model="model-a", version="1.0.0") == "ml4ps-workshop_model-a_1.0.0"
+        )
 
     def test_tag_with_embedding_model(self):
         """Embedding model is appended after underscore separator."""
@@ -160,7 +165,10 @@ class TestBuildTag:
 
     def test_tag_conference_only_with_model(self):
         """Conference-only tag includes the embedding model and version."""
-        assert _build_tag("neurips", embedding_model="text-embedding-ada-002", version="1.0.0") == "neurips_text-embedding-ada-002_1.0.0"
+        assert (
+            _build_tag("neurips", embedding_model="text-embedding-ada-002", version="1.0.0")
+            == "neurips_text-embedding-ada-002_1.0.0"
+        )
 
     def test_version_with_local_segment(self):
         """Dev version with local segment (PEP 440 '+') is sanitized."""
