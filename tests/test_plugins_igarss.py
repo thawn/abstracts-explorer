@@ -157,7 +157,7 @@ class TestIGARSSPluginMetadata:
     def test_supported_years_range(self):
         plugin = IGARSSDownloaderPlugin()
         # _start_year is 2000 so years from 2000 onward should be included
-        assert 2020 in plugin.supported_years
+        assert 1994 in plugin.supported_years
         assert 2024 in plugin.supported_years
         assert 1993 not in plugin.supported_years
 
