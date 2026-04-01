@@ -287,10 +287,7 @@ def _get_cluster_topics_for_single_conference(
         # Replace integer cluster IDs in cluster_sizes with human-readable names
         # and sort by size descending
         label_names = cm.cluster_label_names or {}
-        named_sizes = {
-            label_names.get(cid, f"Cluster {cid}"): size
-            for cid, size in stats["cluster_sizes"].items()
-        }
+        named_sizes = {label_names.get(cid, f"Cluster {cid}"): size for cid, size in stats["cluster_sizes"].items()}
         stats["cluster_sizes"] = dict(sorted(named_sizes.items(), key=lambda x: x[1], reverse=True))
 
         cluster_topics = []
