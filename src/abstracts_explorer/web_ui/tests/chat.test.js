@@ -261,10 +261,10 @@ describe('Chat Module', () => {
             expect(traces[0].type).toBe('scatter');
             expect(traces[0].mode).toBe('lines+markers');
             expect(traces[0].name).toBe('NeurIPS');
-            expect(layout.title).toContain('transformers');
-            expect(layout.title).toContain('NeurIPS');
-            expect(layout.xaxis.title).toContain('Year');
-            expect(layout.yaxis.title).toContain('Percentage');
+            expect(layout.title.text).toContain('transformers');
+            expect(layout.title.text).toContain('NeurIPS');
+            expect(layout.xaxis.title.text).toContain('Year');
+            expect(layout.yaxis.title.text).toContain('Percentage');
         });
 
         it('should render cluster visualization chart', () => {

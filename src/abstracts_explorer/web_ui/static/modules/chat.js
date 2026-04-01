@@ -329,10 +329,10 @@ function _renderTopicEvolutionChart(plotId, viz) {
         : ` (${conferences.join(', ')})`;
 
     const layout = {
-        title: `Topic Evolution: ${viz.topic || ''}${confLabel}`,
-        xaxis: { title: 'Year', type: 'category' },
-        yaxis: { title: 'Percentage of Papers (%)' },
-        margin: { t: 40, b: 60, l: 65, r: 20 },
+        title: { text: `Topic Evolution: ${viz.topic || ''}${confLabel}` },
+        xaxis: { title: { text: 'Year' }, type: 'category', automargin: true },
+        yaxis: { title: { text: 'Percentage of Papers (%)' }, automargin: true },
+        margin: { t: 50, b: 60, l: 80, r: 20 },
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
         showlegend: conferences.length > 1
