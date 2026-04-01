@@ -12,7 +12,7 @@ Model Context Protocol (MCP) is a protocol that allows tools and servers to prov
 
 The MCP server provides four main tools:
 
-### 1. `get_cluster_topics`
+### 1. `get_conference_topics`
 
 Analyzes clustered embeddings to identify the most frequently mentioned topics in each cluster.
 
@@ -161,7 +161,7 @@ chat = RAGChat(em, db, enable_mcp_tools=True)
 
 # The LLM automatically uses clustering tools when appropriate
 response = chat.query("What are the main topics at NeurIPS?")
-# Internally calls get_cluster_topics() and uses results
+# Internally calls get_conference_topics() and uses results
 
 response = chat.query("How have transformers evolved over time?")
 # Internally calls get_topic_evolution(topic_keywords="transformers")
@@ -190,7 +190,7 @@ When an LLM assistant needs to analyze topics, it can call:
 
 ```json
 {
-  "tool": "get_cluster_topics",
+  "tool": "get_conference_topics",
   "arguments": {
     "n_clusters": 8,
     "reduction_method": "tsne",

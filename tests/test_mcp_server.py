@@ -212,29 +212,15 @@ class TestAnalyzeClusterTopics:
         # Analyze cluster 0 (papers 0, 1, 3)
         result = analyze_cluster_topics(cm, db, cluster_id=0)
 
-        assert result["cluster_id"] == 0
         assert result["paper_count"] == 3
         assert len(result["sample_titles"]) == 3
         assert result["sample_titles"][0] == "Paper 1"
-        # cluster_name and tfidf_keywords are None/empty when not set
-        assert result["cluster_name"] is None
-        assert result["tfidf_keywords"] == []
-
-        # Check keywords
-        keyword_dict = {k["keyword"]: k["count"] for k in result["keywords"]}
-        assert keyword_dict["ml"] == 2  # appears in papers 0 and 3
-        assert keyword_dict["dl"] == 2  # appears in papers 1 and 3
-
-        # Check sessions
-        session_dict = {s["session"]: s["count"] for s in result["sessions"]}
-        assert session_dict["ML Track"] == 3
-
-        # Check years
-        assert result["years"][2023] == 2
-        assert result["years"][2024] == 1
+        # topic and keywords are None/empty when not set
+        assert result["topic"] is None
+        assert result["keywords"] == []
 
     def test_analyze_cluster_with_label_names(self):
-        """Test that cluster_name and tfidf_keywords are included when available."""
+        """Test that topic and keywords are included when available."""
         cm = Mock(spec=ClusteringManager)
         cm.cluster_labels = np.array([0, 0, 1, 1])
         cm.paper_ids = ["p1", "p2", "p3", "p4"]
@@ -250,12 +236,12 @@ class TestAnalyzeClusterTopics:
         db = Mock(spec=DatabaseManager)
 
         result_0 = analyze_cluster_topics(cm, db, cluster_id=0)
-        assert result_0["cluster_name"] == "Machine Learning"
-        assert result_0["tfidf_keywords"] == ["neural", "deep", "learning"]
+        assert result_0["topic"] == "Machine Learning"
+        assert result_0["keywords"] == ["neural", "deep", "learning"]
 
         result_1 = analyze_cluster_topics(cm, db, cluster_id=1)
-        assert result_1["cluster_name"] == "Natural Language Processing"
-        assert result_1["tfidf_keywords"] == ["nlp", "bert", "gpt"]
+        assert result_1["topic"] == "Natural Language Processing"
+        assert result_1["keywords"] == ["nlp", "bert", "gpt"]
 
     def test_analyze_empty_cluster(self):
         """Test analyzing a cluster with no papers."""
@@ -276,13 +262,9 @@ class TestAnalyzeClusterTopics:
         # Analyze cluster 5 (doesn't exist)
         result = analyze_cluster_topics(cm, db, cluster_id=5)
 
-        assert result["cluster_id"] == 5
         assert result["paper_count"] == 0
-        assert result["cluster_name"] is None
-        assert result["tfidf_keywords"] == []
+        assert result["topic"] is None
         assert result["keywords"] == []
-        assert result["sessions"] == []
-        assert result["years"] == {}
         assert result["sample_titles"] == []
 
     def test_analyze_without_clustering(self):
@@ -315,13 +297,11 @@ class TestAnalyzeClusterTopics:
 
         result = analyze_cluster_topics(cm, db, cluster_id=0)
 
-        assert result["cluster_id"] == 0
         assert result["paper_count"] == 2
         assert len(result["sample_titles"]) == 2
         # Should handle missing fields gracefully
+        assert result["topic"] is None
         assert isinstance(result["keywords"], list)
-        assert isinstance(result["sessions"], list)
-        assert isinstance(result["years"], dict)
 
 
 class TestMCPTools:
@@ -330,8 +310,8 @@ class TestMCPTools:
     @patch("abstracts_explorer.mcp_server.load_clustering_data")
     @patch("abstracts_explorer.mcp_server.analyze_cluster_topics")
     @patch("abstracts_explorer.mcp_server.get_config")
-    def test_get_cluster_topics(self, mock_config, mock_analyze, mock_load):
-        """Test get_cluster_topics tool with cached results."""
+    def test_get_conference_topics(self, mock_config, mock_analyze, mock_load):
+        """Test get_conference_topics tool with cached results."""
         # Setup config mock
         mock_config_obj = Mock()
         mock_config_obj.collection_name = "papers"
@@ -374,46 +354,38 @@ class TestMCPTools:
 
         mock_analyze.side_effect = [
             {
-                "cluster_id": 0,
-                "cluster_name": "Machine Learning",
-                "tfidf_keywords": ["neural", "deep"],
+                "topic": "Machine Learning",
                 "paper_count": 2,
-                "keywords": [{"keyword": "ml", "count": 2}],
-                "sessions": [{"session": "ML Track", "count": 2}],
-                "years": {2023: 2},
+                "keywords": ["neural", "deep"],
                 "sample_titles": ["Paper 1", "Paper 2"],
             },
             {
-                "cluster_id": 1,
-                "cluster_name": "Natural Language Processing",
-                "tfidf_keywords": ["nlp", "bert"],
+                "topic": "Natural Language Processing",
                 "paper_count": 2,
-                "keywords": [{"keyword": "nlp", "count": 2}],
-                "sessions": [{"session": "NLP Track", "count": 2}],
-                "years": {2024: 2},
+                "keywords": ["nlp", "bert"],
                 "sample_titles": ["Paper 3", "Paper 4"],
             },
         ]
 
         # Import and call the tool
-        from abstracts_explorer.mcp_server import get_cluster_topics
+        from abstracts_explorer.mcp_server import get_conference_topics
 
-        result_str = get_cluster_topics(conferences=["NeurIPS"])
+        result_str = get_conference_topics(conferences=["NeurIPS"])
         result = json.loads(result_str)
 
-        # Verify result
-        assert "statistics" in result
-        assert result["statistics"]["n_clusters"] == 2
-        # cluster_sizes should use cluster names (sorted by size desc)
-        assert result["statistics"]["cluster_sizes"] == {
+        # Verify result uses topic-centric structure
+        assert result["n_topics"] == 2
+        assert result["total_papers"] == 4
+        # topic_sizes should use topic names (sorted by size desc)
+        assert result["topic_sizes"] == {
             "Machine Learning": 2,
             "Natural Language Processing": 2,
         }
-        assert "clusters" in result
-        assert len(result["clusters"]) == 2
-        assert result["clusters"][0]["cluster_name"] == "Machine Learning"
-        assert result["clusters"][0]["tfidf_keywords"] == ["neural", "deep"]
-        assert result["clusters"][1]["cluster_name"] == "Natural Language Processing"
+        assert "topics" in result
+        assert len(result["topics"]) == 2
+        assert result["topics"][0]["topic"] == "Machine Learning"
+        assert result["topics"][0]["keywords"] == ["neural", "deep"]
+        assert result["topics"][1]["topic"] == "Natural Language Processing"
         assert result["conference"] == "NeurIPS"
 
         # Verify _apply_cached_cluster_labels restored cluster_label_names and cluster_keywords
@@ -429,11 +401,11 @@ class TestMCPTools:
 
     @patch("abstracts_explorer.mcp_server.load_clustering_data")
     @patch("abstracts_explorer.mcp_server.get_config")
-    def test_get_cluster_topics_no_conference(self, mock_config, mock_load):
-        """Test get_cluster_topics returns error when no conference is specified."""
-        from abstracts_explorer.mcp_server import get_cluster_topics
+    def test_get_conference_topics_no_conference(self, mock_config, mock_load):
+        """Test get_conference_topics returns error when no conference is specified."""
+        from abstracts_explorer.mcp_server import get_conference_topics
 
-        result_str = get_cluster_topics()
+        result_str = get_conference_topics()
         result = json.loads(result_str)
 
         assert "error" in result
@@ -441,8 +413,8 @@ class TestMCPTools:
 
     @patch("abstracts_explorer.mcp_server.load_clustering_data")
     @patch("abstracts_explorer.mcp_server.get_config")
-    def test_get_cluster_topics_no_cache(self, mock_config, mock_load):
-        """Test get_cluster_topics returns error when no cached results exist."""
+    def test_get_conference_topics_no_cache(self, mock_config, mock_load):
+        """Test get_conference_topics returns error when no cached results exist."""
         mock_config_obj = Mock()
         mock_config_obj.collection_name = "papers"
         mock_config_obj.embedding_model = "test-model"
@@ -454,9 +426,9 @@ class TestMCPTools:
         mock_load.return_value = (mock_cm, mock_db)
         mock_db.get_clustering_cache.return_value = None
 
-        from abstracts_explorer.mcp_server import get_cluster_topics
+        from abstracts_explorer.mcp_server import get_conference_topics
 
-        result_str = get_cluster_topics(conferences=["NeurIPS"])
+        result_str = get_conference_topics(conferences=["NeurIPS"])
         result = json.loads(result_str)
 
         assert "error" in result

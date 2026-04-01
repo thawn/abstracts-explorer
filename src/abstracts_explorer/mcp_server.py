@@ -131,7 +131,12 @@ def analyze_cluster_topics(
     use_llm: bool = False,
 ) -> Dict[str, Any]:
     """
-    Analyze topics in a specific cluster.
+    Analyze a single topic (cluster) and return a concise summary.
+
+    Each cluster represents a conference topic.  The returned dictionary
+    is designed to be consumed directly by an LLM — field names use the
+    word *topic* instead of *cluster* so the model does not need to know
+    about the underlying clustering implementation.
 
     Parameters
     ----------
@@ -140,7 +145,7 @@ def analyze_cluster_topics(
     db : DatabaseManager
         Database manager for paper metadata
     cluster_id : int
-        Cluster ID to analyze
+        Internal cluster ID to analyze
     use_llm : bool, optional
         Whether to use LLM for topic extraction (default: False)
 
@@ -148,85 +153,55 @@ def analyze_cluster_topics(
     -------
     dict
         Dictionary containing:
-        - cluster_id: Cluster ID
-        - cluster_name: Human-readable cluster name (from LLM/TF-IDF labels, if available)
-        - tfidf_keywords: TF-IDF keywords used for cluster labeling (if available)
-        - paper_count: Number of papers in cluster
-        - keywords: Most common keywords from paper metadata
-        - sessions: Most common sessions
-        - years: Distribution by year
-        - sample_titles: Sample paper titles
+        - topic: Human-readable topic name (or ``None``)
+        - paper_count: Number of papers in this topic
+        - keywords: Representative keywords for the topic
+        - sample_titles: A few example paper titles
     """
     if cm.cluster_labels is None or cm.paper_ids is None or cm.metadatas is None:
         raise ClusterAnalysisError("Clustering data not loaded. Call load_embeddings() and cluster() first.")
+
+    label_names = cm.cluster_label_names or {}
+    cluster_kws = cm.cluster_keywords or {}
 
     # Find papers in this cluster
     cluster_indices = [i for i, label in enumerate(cm.cluster_labels) if label == cluster_id]
 
     if not cluster_indices:
         return {
-            "cluster_id": cluster_id,
-            "cluster_name": (cm.cluster_label_names or {}).get(cluster_id),
-            "tfidf_keywords": (cm.cluster_keywords or {}).get(cluster_id, []),
+            "topic": label_names.get(cluster_id),
             "paper_count": 0,
-            "keywords": [],
-            "sessions": [],
-            "years": {},
+            "keywords": cluster_kws.get(cluster_id, []),
             "sample_titles": [],
         }
 
-    # Extract metadata for papers in this cluster
-    keywords = []
-    sessions = []
-    years = []
+    # Extract sample titles
     sample_titles: list[str] = []
-
     for idx in cluster_indices:
-        metadata = cm.metadatas[idx]
-
-        # Collect keywords
-        if metadata.get("keywords"):
-            keywords.extend(metadata.get("keywords", []))
-
-        # Collect sessions
-        if metadata.get("session"):
-            sessions.append(metadata.get("session"))
-
-        # Collect years
-        if metadata.get("year"):
-            years.append(metadata.get("year"))
-
-        # Collect sample titles (first 5)
-        if len(sample_titles) < 5:
-            sample_titles.append(metadata.get("title", ""))
-
-    # Count frequencies
-    keyword_counts = Counter([k.strip().lower() for k in keywords if k.strip()])
-    session_counts = Counter(sessions)
-    year_counts = Counter(years)
+        if len(sample_titles) >= 5:
+            break
+        title = cm.metadatas[idx].get("title", "")
+        if title:
+            sample_titles.append(title)
 
     return {
-        "cluster_id": cluster_id,
-        "cluster_name": (cm.cluster_label_names or {}).get(cluster_id),
-        "tfidf_keywords": (cm.cluster_keywords or {}).get(cluster_id, []),
+        "topic": label_names.get(cluster_id),
         "paper_count": len(cluster_indices),
-        "keywords": [{"keyword": k, "count": c} for k, c in keyword_counts.most_common(10)],
-        "sessions": [{"session": s, "count": c} for s, c in session_counts.most_common(5)],
-        "years": dict(sorted(year_counts.items())),
+        "keywords": cluster_kws.get(cluster_id, []),
         "sample_titles": sample_titles,
     }
 
 
-def _get_cluster_topics_for_single_conference(
+def _get_conference_topics_for_single_conference(
     conference: str,
     years: Optional[List[int]] = None,
     collection_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Retrieve cached cluster topics for a single conference.
+    Retrieve the main research topics for a single conference.
 
     Looks up pre-computed clustering results from the database cache and
-    analyzes topics per cluster.  Returns an error dict when no cached
+    returns a topic-centric summary.  Returns an error dict when no cached
     results exist for the requested conference/year combination.
 
     Parameters
@@ -241,7 +216,7 @@ def _get_cluster_topics_for_single_conference(
     Returns
     -------
     dict
-        Cluster topics result dict with ``"statistics"`` and ``"clusters"``
+        Topics result dict with ``"topic_sizes"`` and ``"topics"``
         keys, or an ``"error"`` key if no cache is available.
     """
     config = get_config()
@@ -284,24 +259,25 @@ def _get_cluster_topics_for_single_conference(
 
         stats = cm.get_cluster_statistics()
 
-        # Replace integer cluster IDs in cluster_sizes with human-readable names
-        # and sort by size descending
+        # Build topic_sizes with human-readable names, sorted by size descending
         label_names = cm.cluster_label_names or {}
-        named_sizes = {label_names.get(cid, f"Cluster {cid}"): size for cid, size in stats["cluster_sizes"].items()}
-        stats["cluster_sizes"] = dict(sorted(named_sizes.items(), key=lambda x: x[1], reverse=True))
+        named_sizes = {label_names.get(cid, f"Topic {cid}"): size for cid, size in stats["cluster_sizes"].items()}
+        topic_sizes = dict(sorted(named_sizes.items(), key=lambda x: x[1], reverse=True))
 
-        cluster_topics = []
+        topics = []
         for cluster_id in range(stats["n_clusters"]):
-            topics = analyze_cluster_topics(cm, db, cluster_id)
-            cluster_topics.append(topics)
+            topic = analyze_cluster_topics(cm, db, cluster_id)
+            topics.append(topic)
 
-        # Sort clusters by paper_count descending
-        cluster_topics.sort(key=lambda t: t["paper_count"], reverse=True)
+        # Sort topics by paper_count descending
+        topics.sort(key=lambda t: t["paper_count"], reverse=True)
 
         return {
             "conference": conference,
-            "statistics": stats,
-            "clusters": cluster_topics,
+            "total_papers": stats["total_papers"],
+            "n_topics": stats["n_clusters"],
+            "topic_sizes": topic_sizes,
+            "topics": topics,
         }
     finally:
         cm.embeddings_manager.close()
@@ -309,26 +285,26 @@ def _get_cluster_topics_for_single_conference(
 
 
 @mcp.tool()
-def get_cluster_topics(
+def get_conference_topics(
     conferences: Optional[List[str]] = None,
     years: Optional[List[int]] = None,
     collection_name: Optional[str] = None,
     **kwargs,
 ) -> str:
     """
-    Get the most frequently mentioned topics from pre-computed clustered embeddings.
+    Get the main research topics of a conference.
 
-    This tool retrieves cached clustering results (pre-generated via CLI)
-    and analyzes the topics in each cluster based on keywords, sessions,
-    and paper titles.  A conference must be specified.
+    Returns the key research topics covered at the conference, each with a
+    descriptive name, representative keywords, paper count, and example
+    paper titles.  A conference must be specified.
 
-    When multiple conferences are provided, each conference is looked up
+    When multiple conferences are provided, each conference is analyzed
     individually and results are combined.
 
     Parameters
     ----------
     conferences : list of str, optional
-        Conference names to retrieve clusters for (e.g. ["NeurIPS"]).
+        Conference names (e.g. ["NeurIPS"]).
         Required – returns an error when not provided.
     years : list of int, optional
         Filter by publication years.
@@ -340,14 +316,14 @@ def get_cluster_topics(
     Returns
     -------
     str
-        JSON string containing cluster topics analysis.
+        JSON string containing the conference topics analysis.
     """
     try:
         if not conferences:
             return json.dumps(
                 {
                     "error": (
-                        "A conference must be specified for cluster topic analysis. "
+                        "A conference must be specified for topic analysis. "
                         "Please provide conferences parameter."
                     )
                 },
@@ -356,7 +332,7 @@ def get_cluster_topics(
 
         all_results: List[Dict[str, Any]] = []
         for conf in conferences:
-            result = _get_cluster_topics_for_single_conference(
+            result = _get_conference_topics_for_single_conference(
                 conference=conf,
                 years=years,
                 collection_name=collection_name,
@@ -371,7 +347,7 @@ def get_cluster_topics(
         return json.dumps({"conference_results": all_results}, indent=2)
 
     except Exception as e:
-        logger.error(f"Failed to get cluster topics: {str(e)}")
+        logger.error(f"Failed to get conference topics: {str(e)}")
         return json.dumps({"error": str(e)}, indent=2)
 
 

@@ -93,7 +93,7 @@ def eval_db_with_pairs(eval_db):
             "turn_number": 0,
             "query": "What are the main topics at NeurIPS 2025?",
             "expected_answer": "The main topics include deep learning and reinforcement learning.",
-            "tool_name": "get_cluster_topics",
+            "tool_name": "get_conference_topics",
         },
         {
             "conversation_id": "conv001",
@@ -180,7 +180,7 @@ class TestEvalQAPairModel:
             turn_number=0,
             query="Query 2",
             expected_answer="Answer 2",
-            tool_name="get_cluster_topics",
+            tool_name="get_conference_topics",
         )
 
         pairs = eval_db.get_eval_qa_pairs()
@@ -616,11 +616,19 @@ class TestGenerateQAPairs:
 
         with patch(
             "abstracts_explorer.evaluation.execute_mcp_tool",
-            return_value='{"topics": ["deep learning", "RL"]}',
+            return_value=json.dumps({
+                "conference": "NeurIPS",
+                "n_topics": 2,
+                "total_papers": 100,
+                "topics": [
+                    {"topic": "deep learning", "paper_count": 60, "keywords": ["neural", "deep"], "sample_titles": ["DL Paper"]},
+                    {"topic": "RL", "paper_count": 40, "keywords": ["reinforcement"], "sample_titles": ["RL Paper"]},
+                ],
+            }),
         ):
             pairs = evaluator_with_papers.generate_qa_pairs(
                 n_pairs_per_tool=1,
-                tools=["get_cluster_topics"],
+                tools=["get_conference_topics"],
                 generate_followups=True,
                 n_followups=1,
             )
@@ -801,7 +809,7 @@ class TestRunEvaluation:
             "response": "Deep learning and RL are the main topics.",
             "papers": [],
             "metadata": {
-                "tools_executed": ["get_cluster_topics"],
+                "tools_executed": ["get_conference_topics"],
                 "n_papers": 0,
             },
         }
@@ -909,7 +917,7 @@ class TestFormatting:
             "run_id": "eval-abc",
             "qa_pair_id": 5,
             "actual_answer": "The main topics are deep learning and transformers.",
-            "actual_tool_name": "get_cluster_topics",
+            "actual_tool_name": "get_conference_topics",
             "answer_score": 4.0,
             "tool_correct": 1,
             "latency_ms": 800,
@@ -920,7 +928,7 @@ class TestFormatting:
             "id": 5,
             "query": "What are the main topics?",
             "expected_answer": "Deep learning and transformers are the main topics.",
-            "tool_name": "get_cluster_topics",
+            "tool_name": "get_conference_topics",
         }
         output = format_eval_result_detail(result, qa_pair)
         assert "What are the main topics?" in output

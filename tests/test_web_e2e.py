@@ -241,7 +241,7 @@ def _prepopulate_clustering_cache(test_database, em, collection_name):
 
     This mirrors the production workflow where ``abstracts-explorer cluster
     pre-generate`` is run before the web UI is used.  With cached results
-    present, MCP tools (``get_cluster_topics``, ``get_cluster_visualization``)
+    present, MCP tools (``get_conference_topics``, ``get_cluster_visualization``)
     return instantly instead of running t-SNE from scratch.
 
     Parameters
@@ -378,7 +378,7 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     app_module.rag_chat = None
 
     # Pre-populate the database with cached clustering results so that MCP
-    # tools (get_cluster_topics, get_cluster_visualization) return instantly
+    # tools (get_conference_topics, get_cluster_visualization) return instantly
     # without running t-SNE.  This mirrors the production workflow where
     # clustering is pre-generated via the CLI.
     _prepopulate_clustering_cache(test_database, em, collection_name)

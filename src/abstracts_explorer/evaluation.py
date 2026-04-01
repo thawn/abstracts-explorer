@@ -41,7 +41,7 @@ class EvaluationError(Exception):
 
 _TOOL_DESCRIPTIONS: Dict[str, str] = {
     "search_papers": "Search for papers on a specific topic. Returns relevant papers from the database.",
-    "get_cluster_topics": "Get the main research topics from clustering analysis of paper embeddings.",
+    "get_conference_topics": "Get the main research topics of a conference.",
     "analyze_topic_relevance": (
         "Analyze the relevance and popularity of a research topic by counting "
         "papers within a specified distance in embedding space."
@@ -52,7 +52,7 @@ _TOOL_DESCRIPTIONS: Dict[str, str] = {
 
 _TOOL_ARGUMENT_EXAMPLES: Dict[str, str] = {
     "search_papers": '{"topic_keywords": "deep learning", "n_results": 5}',
-    "get_cluster_topics": '{"n_clusters": 8}',
+    "get_conference_topics": '{"conferences": ["NeurIPS"]}',
     "analyze_topic_relevance": '{"topic": "transformers", "distance_threshold": 1.1}',
     "get_topic_evolution": '{"topic_keywords": "reinforcement learning"}',
     "get_cluster_visualization": '{"n_clusters": 8, "reduction_method": "pca"}',
