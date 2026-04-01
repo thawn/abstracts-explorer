@@ -487,8 +487,7 @@ class TestIGARSSDownload:
         papers = plugin.download()  # No year specified
 
         assert len(papers) == 1
-        # The default year should be the latest supported year
-        assert papers[0].year == 2025 or papers[0].year >= 2000
+        assert papers[0].year == 2025
 
     @patch.object(IGARSSDownloaderPlugin, "_fetch_page")
     def test_download_saves_to_file(self, mock_fetch):
@@ -680,9 +679,7 @@ class TestIGARSSPluginDatabaseIntegration:
                 db.create_tables()
                 db.add_papers(papers)
 
-                rows = db.query(
-                    "SELECT uid, title, abstract, year, conference, authors FROM papers"
-                )
+                rows = db.query("SELECT uid, title, abstract, year, conference, authors FROM papers")
                 assert len(rows) == 2
 
                 titles = {r["title"] for r in rows}

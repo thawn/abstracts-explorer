@@ -14,6 +14,7 @@ the results into :class:`~abstracts_explorer.plugin.LightweightPaper` objects.
 
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -117,7 +118,7 @@ class IGARSSDownloaderPlugin(LightweightDownloaderPlugin):
         return (
             "https://ieeexplore.ieee.org/search/searchresult.jsp"
             f"?action=search&newsearch=true&matchBoolean=true"
-            f'&queryText=(%22Publication%20Title%22:igarss%20{year})'
+            f"&queryText=(%22Publication%20Title%22:igarss%20{year})"
         )
 
     def _build_search_payload(self, year: int, page_number: int = 1) -> Dict[str, Any]:
@@ -189,16 +190,12 @@ class IGARSSDownloaderPlugin(LightweightDownloaderPlugin):
             )
             response.raise_for_status()
         except requests.exceptions.RequestException as e:
-            raise RuntimeError(
-                f"Failed to fetch IGARSS {year} page {page_number} from IEEE Xplore: {e}"
-            ) from e
+            raise RuntimeError(f"Failed to fetch IGARSS {year} page {page_number} from IEEE Xplore: {e}") from e
 
         try:
             return response.json()
         except json.JSONDecodeError as e:
-            raise RuntimeError(
-                f"Invalid JSON response from IEEE Xplore (page {page_number}): {e}"
-            ) from e
+            raise RuntimeError(f"Invalid JSON response from IEEE Xplore (page {page_number}): {e}") from e
 
     def _convert_paper(self, record: Dict[str, Any], year: int) -> Optional[LightweightPaper]:
         """
@@ -229,10 +226,7 @@ class IGARSSDownloaderPlugin(LightweightDownloaderPlugin):
             if isinstance(author, dict):
                 # Try preferredName first, then authorName, then full name parts
                 name = (
-                    author.get("preferredName")
-                    or author.get("authorName")
-                    or author.get("normalizedName")
-                    or ""
+                    author.get("preferredName") or author.get("authorName") or author.get("normalizedName") or ""
                 ).strip()
                 name = _strip_highlight_tags(name)
                 if name:
@@ -247,14 +241,10 @@ class IGARSSDownloaderPlugin(LightweightDownloaderPlugin):
             return None
 
         # Abstract
-        abstract = _strip_highlight_tags(
-            (record.get("abstract") or "").strip()
-        )
+        abstract = _strip_highlight_tags((record.get("abstract") or "").strip())
 
         # Session / publication title
-        session = _strip_highlight_tags(
-            (record.get("publicationTitle") or "IGARSS").strip()
-        )
+        session = _strip_highlight_tags((record.get("publicationTitle") or "IGARSS").strip())
 
         paper_dict: Dict[str, Any] = {
             "title": title,
@@ -496,8 +486,6 @@ def _strip_highlight_tags(text: str) -> str:
     str
         Text with highlight tags removed.
     """
-    import re
-
     return re.sub(r"</?highlight>", "", text)
 
 
