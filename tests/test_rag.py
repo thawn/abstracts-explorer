@@ -162,7 +162,18 @@ def mock_topic_evolution():
     """Mock mcp_server.get_topic_evolution to return test data."""
     with patch("abstracts_explorer.rag.mcp_get_topic_evolution") as mock_te:
         mock_te.return_value = json.dumps(
-            {"topic": "transformers", "year_counts": {"2020": 10, "2021": 15, "2022": 20}, "total_papers": 45}
+            {
+                "topic": "transformers",
+                "conferences": ["NeurIPS"],
+                "conference_data": {
+                    "NeurIPS": {
+                        "year_counts": {"2020": 10, "2021": 15, "2022": 20},
+                        "year_relative": {"2020": 5.0, "2021": 6.0, "2022": 7.0},
+                        "year_totals": {"2020": 200, "2021": 250, "2022": 286},
+                    }
+                },
+                "total_papers": 45,
+            }
         )
         yield mock_te
 
@@ -547,7 +558,7 @@ class TestRAGChatMCPTools:
                 parts=[
                     ToolCallPart(
                         tool_name="get_topic_evolution",
-                        args={"topic_keywords": "transformers", "conference": "neurips"},
+                        args={"topic_keywords": "transformers", "conferences": ["neurips"]},
                     )
                 ]
             )
@@ -712,9 +723,15 @@ class TestRAGChatVisualizationExtraction:
                 "raw_result": json.dumps(
                     {
                         "topic": "transformers",
-                        "conference": "NeurIPS",
+                        "conferences": ["NeurIPS"],
                         "total_papers": 30,
-                        "year_counts": {"2022": 5, "2023": 10, "2024": 15},
+                        "conference_data": {
+                            "NeurIPS": {
+                                "year_counts": {"2022": 5, "2023": 10, "2024": 15},
+                                "year_relative": {"2022": 2.5, "2023": 4.0, "2024": 5.0},
+                                "year_totals": {"2022": 200, "2023": 250, "2024": 300},
+                            }
+                        },
                     }
                 ),
             }
@@ -725,8 +742,8 @@ class TestRAGChatVisualizationExtraction:
         viz = visualizations[0]
         assert viz["type"] == "topic_evolution"
         assert viz["topic"] == "transformers"
-        assert viz["conference"] == "NeurIPS"
-        assert viz["year_counts"] == {"2022": 5, "2023": 10, "2024": 15}
+        assert viz["conferences"] == ["NeurIPS"]
+        assert "NeurIPS" in viz["conference_data"]
 
     def test_extract_cluster_visualization(self):
         """Test extracting cluster visualization scatter data."""
@@ -807,8 +824,8 @@ class TestRAGChatVisualizationExtraction:
                 "raw_result": json.dumps(
                     {
                         "topic": "nothing",
-                        "conference": "NeurIPS",
-                        "year_counts": {},
+                        "conferences": ["NeurIPS"],
+                        "conference_data": {},
                     }
                 ),
             },
@@ -851,8 +868,13 @@ class TestRAGChatVisualizationExtraction:
                 "raw_result": json.dumps(
                     {
                         "topic": "attention",
-                        "conference": "ICLR",
-                        "year_counts": {"2023": 8},
+                        "conferences": ["ICLR"],
+                        "conference_data": {
+                            "ICLR": {
+                                "year_counts": {"2023": 8},
+                                "year_relative": {"2023": 3.0},
+                            }
+                        },
                     }
                 ),
             },
@@ -1122,7 +1144,7 @@ class TestRAGToolLogging:
         ctx.deps = RAGDeps()
 
         with caplog.at_level("INFO", logger="abstracts_explorer.rag"):
-            _tool_get_topic_evolution(ctx, topic_keywords="attention", conference="NeurIPS")
+            _tool_get_topic_evolution(ctx, topic_keywords="attention", conferences=["NeurIPS"])
 
         assert "Tool call: get_topic_evolution" in caplog.text
         assert "Tool result: get_topic_evolution" in caplog.text

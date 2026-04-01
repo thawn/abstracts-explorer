@@ -157,17 +157,18 @@ def _tool_get_cluster_topics(
 def _tool_get_topic_evolution(
     ctx: RunContext[RAGDeps],
     topic_keywords: str,
-    conference: Optional[str] = None,
+    conferences: Optional[list[str]] = None,
     start_year: Optional[int] = None,
     end_year: Optional[int] = None,
 ) -> str:
     """Analyze how a topic has evolved over the years.
 
     Use this tool to understand trends and year-over-year changes
-    in a research topic. Returns paper counts by year and sample papers.
+    in a research topic. Returns paper counts and relative percentages
+    by year for one or more conferences.
 
-    A conference must be specified. If not provided by the user, the
-    currently selected conference from the web UI is used automatically.
+    At least one conference must be specified. If not provided by the user,
+    the currently selected conferences from the web UI are used automatically.
 
     Parameters
     ----------
@@ -175,9 +176,9 @@ def _tool_get_topic_evolution(
         Agent context with dependencies.
     topic_keywords : str
         Keywords describing the topic to analyze (e.g. "transformers attention").
-    conference : str, optional
-        Filter by conference name (e.g. "NeurIPS", "ICLR").
-        When omitted, the default conference from the current session is used.
+    conferences : list of str, optional
+        Conference names to analyze (e.g. ["NeurIPS", "ICLR"]).
+        When omitted, the default conferences from the current session are used.
     start_year : int, optional
         Start year for analysis (inclusive).
     end_year : int, optional
@@ -185,11 +186,11 @@ def _tool_get_topic_evolution(
     """
     kwargs: Dict[str, Any] = {"topic_keywords": topic_keywords}
 
-    # Determine conference: explicit param > deps default
-    if conference:
-        kwargs["conference"] = conference
+    # Determine conferences: explicit param > deps default
+    if conferences:
+        kwargs["conferences"] = conferences
     elif ctx.deps.conferences:
-        kwargs["conference"] = ctx.deps.conferences[0]
+        kwargs["conferences"] = ctx.deps.conferences
 
     if start_year is not None:
         kwargs["start_year"] = start_year
@@ -700,14 +701,14 @@ class RAGChat:
                 continue
 
             if tr["name"] == "get_topic_evolution":
-                year_counts = data.get("year_counts", {})
-                if year_counts:
+                conference_data = data.get("conference_data", {})
+                if conference_data:
                     visualizations.append(
                         {
                             "type": "topic_evolution",
                             "topic": data.get("topic", ""),
-                            "conference": data.get("conference", ""),
-                            "year_counts": year_counts,
+                            "conferences": data.get("conferences", []),
+                            "conference_data": conference_data,
                         }
                     )
 

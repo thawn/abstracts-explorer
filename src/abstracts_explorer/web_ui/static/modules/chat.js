@@ -269,7 +269,7 @@ export function renderChatVisualizations(visualizations) {
         wrapper.innerHTML = `
             <div class="flex items-start gap-3 justify-start">
                 <div class="flex-shrink-0 w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white">
-                    <i class="fas fa-chart-bar text-sm"></i>
+                    <i class="fas fa-chart-line text-sm"></i>
                 </div>
                 <div class="bg-white rounded-lg p-4 shadow-sm w-full max-w-2xl">
                     <div id="${plotId}" style="width:100%;height:400px;"></div>
@@ -290,34 +290,57 @@ export function renderChatVisualizations(visualizations) {
 }
 
 /**
- * Render a topic evolution bar chart using Plotly.
+ * Color palette for multi-conference line plots.
+ * @type {string[]}
+ */
+const CONFERENCE_COLORS = ['#7c3aed', '#2563eb', '#059669', '#d97706', '#dc2626', '#6366f1', '#0891b2', '#be185d'];
+
+/**
+ * Render a topic evolution line chart using Plotly.
+ * Supports multiple conferences as separate traces.
  * @param {string} plotId - DOM element id for the plot container
- * @param {Object} viz - Visualization data with year_counts, topic, conference
+ * @param {Object} viz - Visualization data with conference_data, topic, conferences
  */
 function _renderTopicEvolutionChart(plotId, viz) {
-    const yearCounts = viz.year_counts || {};
-    const years = Object.keys(yearCounts).sort();
-    const counts = years.map(y => yearCounts[y]);
+    const conferenceData = viz.conference_data || {};
+    const conferences = Object.keys(conferenceData);
 
-    const trace = {
-        x: years,
-        y: counts,
-        type: 'bar',
-        marker: { color: '#7c3aed' }
-    };
+    if (conferences.length === 0) return;
+
+    const traces = conferences.map((conf, idx) => {
+        const cdata = conferenceData[conf] || {};
+        const yearRelative = cdata.year_relative || {};
+        const years = Object.keys(yearRelative).sort();
+        const values = years.map(y => yearRelative[y]);
+
+        return {
+            x: years,
+            y: values,
+            type: 'scatter',
+            mode: 'lines+markers',
+            name: conf,
+            line: { color: CONFERENCE_COLORS[idx % CONFERENCE_COLORS.length], width: 2 },
+            marker: { size: 6 }
+        };
+    });
+
+    const confLabel = conferences.length === 1
+        ? ` (${conferences[0]})`
+        : ` (${conferences.join(', ')})`;
 
     const layout = {
-        title: `Topic Evolution: ${viz.topic || ''}` + (viz.conference ? ` (${viz.conference})` : ''),
-        xaxis: { title: 'Year', type: 'category' },
-        yaxis: { title: 'Number of Papers', dtick: 1 },
-        margin: { t: 40, b: 50, l: 50, r: 20 },
+        title: { text: `Topic Evolution: ${viz.topic || ''}${confLabel}` },
+        xaxis: { title: { text: 'Year' }, type: 'category', automargin: true },
+        yaxis: { title: { text: 'Percentage of Papers (%)' }, automargin: true },
+        margin: { t: 50, b: 60, l: 80, r: 20 },
         paper_bgcolor: 'rgba(0,0,0,0)',
-        plot_bgcolor: 'rgba(0,0,0,0)'
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        showlegend: conferences.length > 1
     };
 
     /* global Plotly */
     if (typeof Plotly !== 'undefined') {
-        Plotly.newPlot(plotId, [trace], layout, { responsive: true, displayModeBar: false });
+        Plotly.newPlot(plotId, traces, layout, { responsive: true, displayModeBar: false });
     }
 }
 

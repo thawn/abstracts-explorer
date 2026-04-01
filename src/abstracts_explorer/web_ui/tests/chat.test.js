@@ -241,8 +241,13 @@ describe('Chat Module', () => {
             const visualizations = [{
                 type: 'topic_evolution',
                 topic: 'transformers',
-                conference: 'NeurIPS',
-                year_counts: { '2022': 5, '2023': 10, '2024': 15 }
+                conferences: ['NeurIPS'],
+                conference_data: {
+                    'NeurIPS': {
+                        year_relative: { '2022': 2.5, '2023': 4.0, '2024': 5.0 },
+                        year_counts: { '2022': 5, '2023': 10, '2024': 15 }
+                    }
+                }
             }];
 
             renderChatVisualizations(visualizations);
@@ -252,10 +257,14 @@ describe('Chat Module', () => {
             expect(plotId).toMatch(/^chat-plot-/);
             expect(traces).toHaveLength(1);
             expect(traces[0].x).toEqual(['2022', '2023', '2024']);
-            expect(traces[0].y).toEqual([5, 10, 15]);
-            expect(traces[0].type).toBe('bar');
-            expect(layout.title).toContain('transformers');
-            expect(layout.title).toContain('NeurIPS');
+            expect(traces[0].y).toEqual([2.5, 4.0, 5.0]);
+            expect(traces[0].type).toBe('scatter');
+            expect(traces[0].mode).toBe('lines+markers');
+            expect(traces[0].name).toBe('NeurIPS');
+            expect(layout.title.text).toContain('transformers');
+            expect(layout.title.text).toContain('NeurIPS');
+            expect(layout.xaxis.title.text).toContain('Year');
+            expect(layout.yaxis.title.text).toContain('Percentage');
         });
 
         it('should render cluster visualization chart', () => {
@@ -282,7 +291,14 @@ describe('Chat Module', () => {
 
         it('should render multiple visualizations', () => {
             const visualizations = [
-                { type: 'topic_evolution', topic: 'rl', conference: 'ICML', year_counts: { '2023': 3 } },
+                {
+                    type: 'topic_evolution',
+                    topic: 'rl',
+                    conferences: ['ICML'],
+                    conference_data: {
+                        'ICML': { year_relative: { '2023': 3.0 }, year_counts: { '2023': 3 } }
+                    }
+                },
                 { type: 'cluster_visualization', points: [{ x: 0, y: 0, cluster: 0 }], statistics: {} }
             ];
 
@@ -295,15 +311,17 @@ describe('Chat Module', () => {
             const visualizations = [{
                 type: 'topic_evolution',
                 topic: 'gnn',
-                conference: 'NeurIPS',
-                year_counts: { '2023': 2 }
+                conferences: ['NeurIPS'],
+                conference_data: {
+                    'NeurIPS': { year_relative: { '2023': 2.0 }, year_counts: { '2023': 2 } }
+                }
             }];
 
             renderChatVisualizations(visualizations);
 
             const messages = document.getElementById('chat-messages');
             expect(messages.querySelectorAll('.chat-message').length).toBe(1);
-            expect(messages.innerHTML).toContain('fa-chart-bar');
+            expect(messages.innerHTML).toContain('fa-chart-line');
         });
 
         it('should skip cluster chart when points array is empty', () => {
@@ -349,8 +367,10 @@ describe('Chat Module', () => {
                         visualizations: [{
                             type: 'topic_evolution',
                             topic: 'attention',
-                            conference: 'NeurIPS',
-                            year_counts: { '2023': 5 }
+                            conferences: ['NeurIPS'],
+                            conference_data: {
+                                'NeurIPS': { year_relative: { '2023': 5.0 }, year_counts: { '2023': 5 } }
+                            }
                         }]
                     }
                 })

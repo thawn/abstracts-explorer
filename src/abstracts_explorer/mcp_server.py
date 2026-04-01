@@ -17,7 +17,7 @@ Features:
 import logging
 import json
 from typing import Any, Dict, List, Optional
-from collections import defaultdict, Counter
+from collections import Counter
 from copy import deepcopy
 
 from mcp.server.fastmcp import FastMCP
@@ -424,54 +424,52 @@ def merge_where_clause_with_conference(
 @mcp.tool()
 def get_topic_evolution(
     topic_keywords: str,
-    conference: Optional[str] = None,
+    conferences: Optional[list[str]] = None,
     start_year: Optional[int] = None,
     end_year: Optional[int] = None,
-    where: Optional[Dict[str, Any]] = None,
+    distance_threshold: float = 1.1,
     collection_name: Optional[str] = None,
 ) -> str:
     """
-    Analyze how topics have evolved over the years for a conference.
+    Analyze how topics have evolved over the years for one or more conferences.
 
-    This tool searches for papers related to specific topic keywords and
-    analyzes their distribution and trends over time.
-    A conference must be specified.
+    For each conference and year in the given range, this tool uses
+    ``EmbeddingsManager.find_papers_within_distance()`` to count how many
+    papers are semantically close to the topic keywords.  It also
+    computes the relative percentage of matching papers with respect to
+    the total number of papers for that conference and year.
+    At least one conference must be specified.
 
     Parameters
     ----------
     topic_keywords : str
         Keywords describing the topic to analyze (e.g., "transformers attention")
-    conference : str, optional
-        Conference name to filter by (e.g., "NeurIPS", "ICLR").
+    conferences : list of str, optional
+        Conference names to analyze (e.g., ["NeurIPS", "ICLR"]).
         Required – returns an error when not provided.
     start_year : int, optional
         Start year for analysis (inclusive)
     end_year : int, optional
         End year for analysis (inclusive)
-    where : dict, optional
-        Custom ChromaDB WHERE clause for filtering results by metadata.
-        Supports ChromaDB query operators like $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin.
-        Logical operators $and, $or are also supported.
-        Examples:
-          {"year": 2025}  # Filter by specific year
-          {"session": {"$in": ["Oral Session 1", "Oral Session 2"]}}  # Multiple sessions
-          {"$and": [{"year": {"$gte": 2024}}, {"conference": "NeurIPS"}]}  # Multiple conditions
-        Note: If 'conference' parameter is provided, it will be merged with this WHERE clause.
+    distance_threshold : float, optional
+        Maximum Euclidean distance in embedding space to consider papers
+        relevant (default: 1.1).  Lower values mean stricter matching.
     collection_name : str, optional
         Name of ChromaDB collection
 
     Returns
     -------
     str
-        JSON string containing topic evolution analysis
+        JSON string containing topic evolution analysis with per-conference
+        year_counts, year_relative (percentage), and year_totals.
     """
     try:
-        if not conference:
+        if not conferences:
             return json.dumps(
                 {
                     "error": (
                         "A conference must be specified for topic evolution analysis. "
-                        "Please provide conference parameter."
+                        "Please provide conferences parameter."
                     )
                 },
                 indent=2,
@@ -490,68 +488,96 @@ def get_topic_evolution(
         db = DatabaseManager()
         db.connect()
 
-        # Build metadata filter using helper function
-        try:
-            where_filter = merge_where_clause_with_conference(where, conference)
-        except ValueError as e:
-            logger.error(f"Invalid WHERE clause: {str(e)}")
-            return json.dumps({"error": f"Invalid WHERE clause: {str(e)}"}, indent=2)
+        logger.info(f"Analyzing topic evolution for: {topic_keywords}")
+        logger.info(f"Conferences: {conferences}")
+        logger.info(f"Distance threshold: {distance_threshold}")
 
-        # Search for papers related to topic
-        logger.info(f"Searching for papers about: {topic_keywords}")
-        if where_filter:
-            logger.info(f"Applying WHERE filter: {where_filter}")
-        results = em.search_similar(
-            query=topic_keywords,
-            n_results=100,  # Get more results for trend analysis
-            where=where_filter,
-        )
+        conference_data: Dict[str, Dict[str, Any]] = {}
+        total_papers = 0
+        all_years: set[int] = set()
 
-        # Analyze results by year
-        year_distribution = defaultdict(list)
-        year_counts: Counter[Any] = Counter()
+        for conference in conferences:
+            # Determine year range from database for this conference
+            available_years = db.get_years_for_conference(conference)
+            if start_year is not None:
+                available_years = [y for y in available_years if y >= start_year]
+            if end_year is not None:
+                available_years = [y for y in available_years if y <= end_year]
 
-        if results["ids"] and results["ids"][0]:
-            for idx, paper_id in enumerate(results["ids"][0]):
-                metadata = results["metadatas"][0][idx]
-                year = metadata.get("year")
+            logger.info(f"Conference: {conference}, years: {available_years}")
 
-                # Filter by year range if specified
-                if year:
-                    if start_year and year < start_year:
-                        continue
-                    if end_year and year > end_year:
-                        continue
+            year_counts: Dict[int, int] = {}
+            year_relative: Dict[int, float] = {}
+            year_totals: Dict[int, int] = {}
+            year_distribution: Dict[int, list] = {}
 
-                    year_counts[year] += 1
-                    year_distribution[year].append(
+            for year in available_years:
+                result_data = em.find_papers_within_distance(
+                    database=db,
+                    query=topic_keywords,
+                    distance_threshold=distance_threshold,
+                    conferences=[conference],
+                    years=[year],
+                )
+
+                count = result_data["count"]
+                year_counts[year] = count
+                total_papers += count
+
+                # Get total papers for this conference+year for relative percentage
+                stats = db.get_stats(year=year, conference=conference)
+                total_for_year = stats["total_papers"]
+                year_totals[year] = total_for_year
+                if total_for_year > 0:
+                    year_relative[year] = round((count / total_for_year) * 100, 2)
+                else:
+                    year_relative[year] = 0.0
+
+                # Collect sample papers (top 3 closest)
+                sample_papers = []
+                for paper in result_data["papers"][:3]:
+                    sample_papers.append(
                         {
-                            "title": metadata.get("title", ""),
-                            "session": metadata.get("session", ""),
-                            "distance": results["distances"][0][idx] if "distances" in results else None,
+                            "title": paper.get("title", ""),
+                            "session": paper.get("session", ""),
+                            "distance": paper.get("distance"),
                         }
                     )
+                year_distribution[year] = sample_papers
 
-        # Sort by year
-        sorted_years = sorted(year_distribution.keys())
+            all_years.update(year_counts.keys())
+
+            # Sort by year
+            sorted_years = sorted(year_counts.keys())
+
+            conference_data[conference] = {
+                "year_counts": dict(sorted(year_counts.items())),
+                "year_relative": dict(sorted(year_relative.items())),
+                "year_totals": dict(sorted(year_totals.items())),
+                "papers_by_year": {
+                    year: {
+                        "count": year_counts[year],
+                        "relative_percent": year_relative[year],
+                        "total_for_year": year_totals[year],
+                        "sample_papers": year_distribution[year],
+                    }
+                    for year in sorted_years
+                },
+            }
+
+        sorted_all_years = sorted(all_years)
 
         # Build result
-        result = {
+        result: Dict[str, Any] = {
             "topic": topic_keywords,
-            "conference": conference,
-            "total_papers": len(results["ids"][0]) if results["ids"] else 0,
+            "conferences": conferences,
+            "distance_threshold": distance_threshold,
+            "total_papers": total_papers,
             "year_range": {
-                "start": min(sorted_years) if sorted_years else None,
-                "end": max(sorted_years) if sorted_years else None,
+                "start": min(sorted_all_years) if sorted_all_years else None,
+                "end": max(sorted_all_years) if sorted_all_years else None,
             },
-            "year_counts": dict(sorted(year_counts.items())),
-            "papers_by_year": {
-                year: {
-                    "count": len(papers),
-                    "sample_papers": papers[:3],  # Top 3 most relevant
-                }
-                for year, papers in sorted(year_distribution.items())
-            },
+            "conference_data": conference_data,
         }
 
         # Clean up

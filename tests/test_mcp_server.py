@@ -427,35 +427,56 @@ class TestMCPTools:
         # Setup embeddings manager mock
         mock_em = Mock()
         mock_em_class.return_value = mock_em
-        mock_em.search_similar.return_value = {
-            "ids": [["p1", "p2", "p3"]],
-            "metadatas": [
-                [
-                    {"title": "Paper 1", "year": 2023, "session": "ML"},
-                    {"title": "Paper 2", "year": 2023, "session": "DL"},
-                    {"title": "Paper 3", "year": 2024, "session": "ML"},
-                ]
-            ],
-            "distances": [[0.1, 0.2, 0.3]],
-        }
+
+        def _find_papers(database, query, distance_threshold, conferences=None, years=None):
+            year = years[0] if years else None
+            if year == 2023:
+                return {
+                    "count": 2,
+                    "papers": [
+                        {"title": "Paper 1", "session": "ML", "distance": 0.1},
+                        {"title": "Paper 2", "session": "DL", "distance": 0.2},
+                    ],
+                    "total_considered": 50,
+                }
+            elif year == 2024:
+                return {
+                    "count": 1,
+                    "papers": [
+                        {"title": "Paper 3", "session": "ML", "distance": 0.3},
+                    ],
+                    "total_considered": 40,
+                }
+            return {"count": 0, "papers": [], "total_considered": 0}
+
+        mock_em.find_papers_within_distance.side_effect = _find_papers
 
         # Setup database mock
         mock_db = Mock()
         mock_db_class.return_value = mock_db
+        mock_db.get_years_for_conference.return_value = [2023, 2024]
+        mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 100}
 
         # Import and call the tool
         from abstracts_explorer.mcp_server import get_topic_evolution
 
-        result_str = get_topic_evolution(topic_keywords="transformers", conference="NeurIPS")
+        result_str = get_topic_evolution(topic_keywords="transformers", conferences=["NeurIPS"])
         result = json.loads(result_str)
 
-        # Verify result
+        # Verify result structure
         assert result["topic"] == "transformers"
+        assert result["conferences"] == ["NeurIPS"]
         assert result["total_papers"] == 3
-        assert result["year_counts"]["2023"] == 2  # Keys are strings after JSON conversion
-        assert result["year_counts"]["2024"] == 1
-        assert "2023" in result["papers_by_year"]
-        assert "2024" in result["papers_by_year"]
+
+        # Per-conference data
+        assert "NeurIPS" in result["conference_data"]
+        cdata = result["conference_data"]["NeurIPS"]
+        assert cdata["year_counts"]["2023"] == 2  # Keys are strings after JSON
+        assert cdata["year_counts"]["2024"] == 1
+        assert cdata["year_relative"]["2023"] == 2.0  # 2/100 * 100
+        assert cdata["year_relative"]["2024"] == 1.0  # 1/100 * 100
+        assert "2023" in cdata["papers_by_year"]
+        assert "2024" in cdata["papers_by_year"]
 
         # Verify cleanup
         mock_em.close.assert_called_once()
@@ -465,62 +486,7 @@ class TestMCPTools:
     @patch("abstracts_explorer.mcp_server.DatabaseManager")
     @patch("abstracts_explorer.mcp_server.get_config")
     def test_get_topic_evolution_with_year_range(self, mock_config, mock_db_class, mock_em_class):
-        """Test get_topic_evolution with start_year and end_year filters.
-
-        Metadata from search_similar has year as int (parsed by
-        EmbeddingsManager.parse_chromadb_metadata), so year range
-        filtering works with integer comparisons.
-        """
-        # Setup config mock
-        mock_config_obj = Mock()
-        mock_config_obj.embedding_db_path = "chroma_db"
-        mock_config_obj.collection_name = "papers"
-        mock_config_obj.paper_db_path = "abstracts.db"
-        mock_config.return_value = mock_config_obj
-
-        # Setup embeddings manager mock with string years (as ChromaDB returns)
-        mock_em = Mock()
-        mock_em_class.return_value = mock_em
-        mock_em.search_similar.return_value = {
-            "ids": [["p1", "p2", "p3", "p4"]],
-            "metadatas": [
-                [
-                    {"title": "Paper 1", "year": 2022, "session": "ML"},
-                    {"title": "Paper 2", "year": 2023, "session": "DL"},
-                    {"title": "Paper 3", "year": 2024, "session": "ML"},
-                    {"title": "Paper 4", "year": 2025, "session": "NLP"},
-                ]
-            ],
-            "distances": [[0.1, 0.2, 0.3, 0.4]],
-        }
-
-        # Setup database mock
-        mock_db = Mock()
-        mock_db_class.return_value = mock_db
-
-        from abstracts_explorer.mcp_server import get_topic_evolution
-
-        result_str = get_topic_evolution(
-            topic_keywords="transformers",
-            conference="NeurIPS",
-            start_year=2023,
-            end_year=2024,
-        )
-        result = json.loads(result_str)
-
-        # Only papers from 2023 and 2024 should be included
-        assert result["year_counts"]["2023"] == 1
-        assert result["year_counts"]["2024"] == 1
-        assert "2022" not in result["year_counts"]
-        assert "2025" not in result["year_counts"]
-        assert result["year_range"]["start"] == 2023
-        assert result["year_range"]["end"] == 2024
-
-    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp_server.DatabaseManager")
-    @patch("abstracts_explorer.mcp_server.get_config")
-    def test_get_topic_evolution_with_where_clause(self, mock_config, mock_db_class, mock_em_class):
-        """Test get_topic_evolution tool with custom WHERE clause."""
+        """Test get_topic_evolution with start_year and end_year filters."""
         # Setup config mock
         mock_config_obj = Mock()
         mock_config_obj.embedding_db_path = "chroma_db"
@@ -531,39 +497,96 @@ class TestMCPTools:
         # Setup embeddings manager mock
         mock_em = Mock()
         mock_em_class.return_value = mock_em
-        mock_em.search_similar.return_value = {
-            "ids": [["p1", "p2"]],
-            "metadatas": [
-                [
-                    {"title": "Paper 1", "year": 2024, "session": "Oral Session 1"},
-                    {"title": "Paper 2", "year": 2024, "session": "Oral Session 1"},
-                ]
+
+        def _find_papers(database, query, distance_threshold, conferences=None, years=None):
+            year = years[0] if years else None
+            return {
+                "count": 1,
+                "papers": [{"title": f"Paper {year}", "session": "ML", "distance": 0.1}],
+                "total_considered": 30,
+            }
+
+        mock_em.find_papers_within_distance.side_effect = _find_papers
+
+        # Setup database mock - DB has years 2022-2025
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+        mock_db.get_years_for_conference.return_value = [2022, 2023, 2024, 2025]
+        mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 50}
+
+        from abstracts_explorer.mcp_server import get_topic_evolution
+
+        result_str = get_topic_evolution(
+            topic_keywords="transformers",
+            conferences=["NeurIPS"],
+            start_year=2023,
+            end_year=2024,
+        )
+        result = json.loads(result_str)
+
+        # Only papers from 2023 and 2024 should be included
+        cdata = result["conference_data"]["NeurIPS"]
+        assert cdata["year_counts"]["2023"] == 1
+        assert cdata["year_counts"]["2024"] == 1
+        assert "2022" not in cdata["year_counts"]
+        assert "2025" not in cdata["year_counts"]
+        assert result["year_range"]["start"] == 2023
+        assert result["year_range"]["end"] == 2024
+
+        # Verify find_papers_within_distance was called only for 2023 and 2024
+        assert mock_em.find_papers_within_distance.call_count == 2
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_topic_evolution_with_distance_threshold(self, mock_config, mock_db_class, mock_em_class):
+        """Test get_topic_evolution passes distance_threshold to find_papers_within_distance."""
+        # Setup config mock
+        mock_config_obj = Mock()
+        mock_config_obj.embedding_db_path = "chroma_db"
+        mock_config_obj.collection_name = "papers"
+        mock_config_obj.paper_db_path = "abstracts.db"
+        mock_config.return_value = mock_config_obj
+
+        # Setup embeddings manager mock
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+        mock_em.find_papers_within_distance.return_value = {
+            "count": 2,
+            "papers": [
+                {"title": "Paper 1", "session": "ML", "distance": 0.3},
+                {"title": "Paper 2", "session": "DL", "distance": 0.4},
             ],
-            "distances": [[0.1, 0.2]],
+            "total_considered": 50,
         }
 
         # Setup database mock
         mock_db = Mock()
         mock_db_class.return_value = mock_db
+        mock_db.get_years_for_conference.return_value = [2024]
+        mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 200}
 
-        # Import and call the tool with WHERE clause
         from abstracts_explorer.mcp_server import get_topic_evolution
 
-        where_clause = {"session": {"$in": ["Oral Session 1"]}}
-        result_str = get_topic_evolution(topic_keywords="transformers", conference="NeurIPS", where=where_clause)
+        result_str = get_topic_evolution(
+            topic_keywords="transformers",
+            conferences=["NeurIPS"],
+            distance_threshold=0.8,
+        )
         result = json.loads(result_str)
 
         # Verify result
         assert result["topic"] == "transformers"
-        assert result["total_papers"] == 2
+        assert result["distance_threshold"] == 0.8
 
-        # Verify search_similar was called with merged WHERE clause (session + conference)
-        mock_em.search_similar.assert_called_once()
-        call_args = mock_em.search_similar.call_args
-        where_arg = call_args[1]["where"]
-        assert "$and" in where_arg
-        assert {"session": {"$in": ["Oral Session 1"]}} in where_arg["$and"]
-        assert {"conference": "NeurIPS"} in where_arg["$and"]
+        # Verify find_papers_within_distance was called with correct threshold
+        mock_em.find_papers_within_distance.assert_called_once_with(
+            database=mock_db,
+            query="transformers",
+            distance_threshold=0.8,
+            conferences=["NeurIPS"],
+            years=[2024],
+        )
 
         # Verify cleanup
         mock_em.close.assert_called_once()
@@ -572,47 +595,68 @@ class TestMCPTools:
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
     @patch("abstracts_explorer.mcp_server.DatabaseManager")
     @patch("abstracts_explorer.mcp_server.get_config")
-    def test_get_topic_evolution_with_where_and_conference(self, mock_config, mock_db_class, mock_em_class):
-        """Test get_topic_evolution merges WHERE clause with conference parameter."""
+    def test_get_topic_evolution_multiple_conferences(self, mock_config, mock_db_class, mock_em_class):
+        """Test get_topic_evolution with multiple conferences."""
         # Setup config mock
         mock_config_obj = Mock()
-        mock_config_obj.embedding_db_path = "chroma_db"
         mock_config_obj.collection_name = "papers"
-        mock_config_obj.paper_db_path = "abstracts.db"
         mock_config.return_value = mock_config_obj
 
         # Setup embeddings manager mock
         mock_em = Mock()
         mock_em_class.return_value = mock_em
-        mock_em.search_similar.return_value = {
-            "ids": [["p1"]],
-            "metadatas": [[{"title": "Paper 1", "year": 2024, "session": "Oral"}]],
-            "distances": [[0.1]],
-        }
+
+        def _find_papers(database, query, distance_threshold, conferences=None, years=None):
+            conf = conferences[0] if conferences else None
+            year = years[0] if years else None
+            if conf == "NeurIPS" and year == 2023:
+                return {"count": 5, "papers": [], "total_considered": 100}
+            elif conf == "NeurIPS" and year == 2024:
+                return {"count": 10, "papers": [], "total_considered": 100}
+            elif conf == "ICLR" and year == 2023:
+                return {"count": 3, "papers": [], "total_considered": 80}
+            elif conf == "ICLR" and year == 2024:
+                return {"count": 8, "papers": [], "total_considered": 80}
+            return {"count": 0, "papers": [], "total_considered": 0}
+
+        mock_em.find_papers_within_distance.side_effect = _find_papers
 
         # Setup database mock
         mock_db = Mock()
         mock_db_class.return_value = mock_db
+        mock_db.get_years_for_conference.return_value = [2023, 2024]
 
-        # Import and call the tool
+        def _get_stats(year, conference):
+            if conference == "NeurIPS":
+                return {"total_papers": 200}
+            return {"total_papers": 150}
+
+        mock_db.get_stats.side_effect = _get_stats
+
         from abstracts_explorer.mcp_server import get_topic_evolution
 
-        where_clause = {"year": {"$gte": 2024}}
-        result_str = get_topic_evolution(topic_keywords="transformers", conference="NeurIPS", where=where_clause)
-
-        # Verify result is valid JSON
+        result_str = get_topic_evolution(
+            topic_keywords="transformers",
+            conferences=["NeurIPS", "ICLR"],
+        )
         result = json.loads(result_str)
-        assert result["topic"] == "transformers"
 
-        # Verify search_similar was called with merged WHERE clause
-        mock_em.search_similar.assert_called_once()
-        call_args = mock_em.search_similar.call_args
-        where_arg = call_args[1]["where"]
+        assert result["conferences"] == ["NeurIPS", "ICLR"]
+        assert result["total_papers"] == 26  # 5+10+3+8
 
-        # Should contain $and with both conditions
-        assert "$and" in where_arg
-        assert {"year": {"$gte": 2024}} in where_arg["$and"]
-        assert {"conference": "NeurIPS"} in where_arg["$and"]
+        # Verify per-conference data
+        assert "NeurIPS" in result["conference_data"]
+        assert "ICLR" in result["conference_data"]
+
+        neurips = result["conference_data"]["NeurIPS"]
+        assert neurips["year_counts"]["2023"] == 5
+        assert neurips["year_counts"]["2024"] == 10
+        assert neurips["year_relative"]["2023"] == 2.5  # 5/200*100
+
+        iclr = result["conference_data"]["ICLR"]
+        assert iclr["year_counts"]["2023"] == 3
+        assert iclr["year_counts"]["2024"] == 8
+        assert iclr["year_relative"]["2023"] == 2.0  # 3/150*100
 
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
     @patch("abstracts_explorer.mcp_server.DatabaseManager")
@@ -723,38 +767,6 @@ class TestMCPTools:
         assert {"year": {"$gte": 2024}} in where_arg["$and"]
         assert {"session": {"$in": ["Oral Session 1", "Spotlight Session"]}} in where_arg["$and"]
         assert {"conference": "NeurIPS"} in where_arg["$and"]
-
-    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp_server.DatabaseManager")
-    @patch("abstracts_explorer.mcp_server.get_config")
-    def test_get_topic_evolution_invalid_where_type(self, mock_config, mock_db_class, mock_em_class):
-        """Test get_topic_evolution with invalid WHERE clause type."""
-        # Setup config mock
-        mock_config_obj = Mock()
-        mock_config_obj.embedding_db_path = "chroma_db"
-        mock_config_obj.collection_name = "papers"
-        mock_config_obj.paper_db_path = "abstracts.db"
-        mock_config.return_value = mock_config_obj
-
-        # Setup mocks
-        mock_em = Mock()
-        mock_em_class.return_value = mock_em
-        mock_db = Mock()
-        mock_db_class.return_value = mock_db
-
-        # Import and call the tool with invalid WHERE type
-        from abstracts_explorer.mcp_server import get_topic_evolution
-
-        result_str = get_topic_evolution(
-            topic_keywords="transformers",
-            conference="NeurIPS",
-            where="invalid string",  # Invalid: should be dict or None
-        )
-        result = json.loads(result_str)
-
-        # Should return error
-        assert "error" in result
-        assert "Invalid WHERE clause" in result["error"]
 
     @patch("abstracts_explorer.mcp_server.load_clustering_data")
     @patch("abstracts_explorer.mcp_server.get_config")

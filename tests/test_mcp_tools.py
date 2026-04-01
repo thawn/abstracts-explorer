@@ -68,13 +68,17 @@ def test_execute_mcp_tool_cluster_topics():
 def test_execute_mcp_tool_topic_evolution():
     """Test executing get_topic_evolution tool."""
     with patch("abstracts_explorer.mcp_tools.get_topic_evolution") as mock_tool:
-        mock_result = json.dumps({"topic": "transformers", "year_counts": {"2023": 10, "2024": 15}})
+        mock_result = json.dumps(
+            {"topic": "transformers", "conference_data": {"NeurIPS": {"year_counts": {"2023": 10}}}}
+        )
         mock_tool.return_value = mock_result
 
-        result = execute_mcp_tool("get_topic_evolution", {"topic_keywords": "transformers", "conference": "neurips"})
+        result = execute_mcp_tool(
+            "get_topic_evolution", {"topic_keywords": "transformers", "conferences": ["NeurIPS"]}
+        )
 
         assert result == mock_result
-        mock_tool.assert_called_once_with(topic_keywords="transformers", conference="neurips")
+        mock_tool.assert_called_once_with(topic_keywords="transformers", conferences=["NeurIPS"])
 
 
 def test_execute_mcp_tool_recent_developments():
@@ -138,15 +142,25 @@ def test_format_cluster_topics_result():
 
 def test_format_topic_evolution_result():
     """Test formatting topic evolution result for LLM."""
-    data = {"topic": "transformers", "year_counts": {"2022": 10, "2023": 15, "2024": 20}, "total_papers": 45}
+    data = {
+        "topic": "transformers",
+        "conference_data": {
+            "NeurIPS": {
+                "year_counts": {"2022": 10, "2023": 15, "2024": 20},
+                "year_relative": {"2022": 5.0, "2023": 6.0, "2024": 7.5},
+            }
+        },
+        "total_papers": 45,
+    }
 
     result = _format_topic_evolution_result(data)
 
     assert "Topic Evolution Analysis" in result
     assert "transformers" in result
-    assert "2022: 10 papers" in result
-    assert "2023: 15 papers" in result
-    assert "2024: 20 papers" in result
+    assert "NeurIPS" in result
+    assert "2022: 10 papers (5.0%)" in result
+    assert "2023: 15 papers (6.0%)" in result
+    assert "2024: 20 papers (7.5%)" in result
     assert "Total papers found: 45" in result
 
 
@@ -235,7 +249,9 @@ def test_mcp_tools_schema_parameters():
     topic_evolution = next(t for t in schema if t["function"]["name"] == "get_topic_evolution")
     params = topic_evolution["function"]["parameters"]
     assert "topic_keywords" in params["properties"]
+    assert "conferences" in params["properties"]
     assert "topic_keywords" in params["required"]
+    assert "conferences" in params["required"]
 
     # Check search_papers parameters
     recent_dev = next(t for t in schema if t["function"]["name"] == "search_papers")
@@ -265,9 +281,10 @@ def test_get_mcp_tools_schema_with_conferences_enum():
     sp = next(t for t in schema if t["function"]["name"] == "search_papers")
     assert sp["function"]["parameters"]["properties"]["conference"]["enum"] == conferences
 
-    # get_topic_evolution has a single-string 'conference' field
+    # get_topic_evolution now has an array 'conferences' field
     te = next(t for t in schema if t["function"]["name"] == "get_topic_evolution")
-    assert te["function"]["parameters"]["properties"]["conference"]["enum"] == conferences
+    items = te["function"]["parameters"]["properties"]["conferences"]["items"]
+    assert items["enum"] == conferences
 
 
 def test_get_mcp_tools_schema_with_years_enum():
@@ -395,11 +412,6 @@ class TestNormalizeGetTopicEvolutionArgs:
         result = _normalize_get_topic_evolution_args({"topic_keywords": ["transformers", "attention"]})
         assert result["topic_keywords"] == "transformers attention"
 
-    def test_conference_list_first_element(self):
-        """conference list uses first element."""
-        result = _normalize_get_topic_evolution_args({"topic_keywords": "RL", "conference": ["NeurIPS", "ICLR"]})
-        assert result["conference"] == "NeurIPS"
-
     def test_start_end_year_list(self):
         """start_year and end_year as list use first element."""
         result = _normalize_get_topic_evolution_args(
@@ -410,7 +422,7 @@ class TestNormalizeGetTopicEvolutionArgs:
 
     def test_valid_args_unchanged(self):
         """Already-valid args pass through unchanged."""
-        args = {"topic_keywords": "transformers", "start_year": 2022, "end_year": 2025}
+        args = {"topic_keywords": "transformers", "conferences": ["NeurIPS"], "start_year": 2022, "end_year": 2025}
         assert _normalize_get_topic_evolution_args(args) == args
 
 
@@ -703,18 +715,33 @@ class TestExecuteMCPToolE2E:
     def test_get_topic_evolution_real_execution(self):
         """get_topic_evolution executes end-to-end with mocked EmbeddingsManager."""
         mock_em = Mock()
-        mock_em.search_similar.return_value = {
-            "ids": [["p1", "p2", "p3"]],
-            "metadatas": [
-                [
-                    {"title": "Paper 2022", "year": 2022, "session": "ML"},
-                    {"title": "Paper 2023", "year": 2023, "session": "ML"},
-                    {"title": "Paper 2024", "year": 2024, "session": "ML"},
-                ]
-            ],
-            "distances": [[0.1, 0.2, 0.3]],
-        }
+
+        def _find_papers(database, query, distance_threshold, conferences=None, years=None):
+            year = years[0] if years else None
+            if year == 2022:
+                return {
+                    "count": 1,
+                    "papers": [{"title": "Paper 2022", "session": "ML", "distance": 0.1}],
+                    "total_considered": 30,
+                }
+            elif year == 2023:
+                return {
+                    "count": 1,
+                    "papers": [{"title": "Paper 2023", "session": "ML", "distance": 0.2}],
+                    "total_considered": 30,
+                }
+            elif year == 2024:
+                return {
+                    "count": 1,
+                    "papers": [{"title": "Paper 2024", "session": "ML", "distance": 0.3}],
+                    "total_considered": 30,
+                }
+            return {"count": 0, "papers": [], "total_considered": 0}
+
+        mock_em.find_papers_within_distance.side_effect = _find_papers
         mock_db = Mock()
+        mock_db.get_years_for_conference.return_value = [2022, 2023, 2024]
+        mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 100}
 
         with (
             patch("abstracts_explorer.mcp_server.EmbeddingsManager", return_value=mock_em),
@@ -723,39 +750,14 @@ class TestExecuteMCPToolE2E:
         ):
             mock_cfg.return_value = Mock(collection_name="papers")
             result = execute_mcp_tool(
-                "get_topic_evolution", {"topic_keywords": "transformers", "conference": "NeurIPS"}
+                "get_topic_evolution", {"topic_keywords": "transformers", "conferences": ["NeurIPS"]}
             )
 
         data = json.loads(result)
         assert "error" not in data
         assert data["topic"] == "transformers"
         assert data["total_papers"] == 3
-        assert "year_counts" in data
-
-    def test_get_topic_evolution_conference_list_normalized(self):
-        """get_topic_evolution normalizes conference as list to string."""
-        mock_em = Mock()
-        mock_em.search_similar.return_value = {
-            "ids": [["p1"]],
-            "metadatas": [[{"title": "P", "year": 2025, "session": "S"}]],
-            "distances": [[0.1]],
-        }
-        mock_db = Mock()
-
-        with (
-            patch("abstracts_explorer.mcp_server.EmbeddingsManager", return_value=mock_em),
-            patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),
-            patch("abstracts_explorer.mcp_server.get_config") as mock_cfg,
-        ):
-            mock_cfg.return_value = Mock(collection_name="papers")
-            # conference passed as list — should not raise
-            result = execute_mcp_tool(
-                "get_topic_evolution",
-                {"topic_keywords": "RL", "conference": ["NeurIPS"]},
-            )
-
-        data = json.loads(result)
-        assert "error" not in data
+        assert "conference_data" in data
 
     # ------------------------------------------------------------------
     # analyze_topic_relevance
