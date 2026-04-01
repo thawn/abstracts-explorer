@@ -87,24 +87,28 @@ class EmbeddingModelMismatchError(RegistryError):
         )
 
 
-def _sanitize_model_name(model: str) -> str:
+def _sanitize_str_for_oci_tag(value: str) -> str:
     """
-    Sanitize an embedding model name for use as an OCI tag component.
+    Sanitize a string for use as an OCI tag component.
 
-    The name is lowercased and characters not in ``[a-z0-9._-]`` are
-    replaced with ``-``.  OCI tags allow ``[a-zA-Z0-9_.-]``.
+    The value is lowercased and characters not in ``[a-z0-9._-]`` are
+    replaced with ``-``.  OCI tags allow ``[a-zA-Z0-9_.-]``.  In
+    particular the ``+`` local-version separator used by PEP 440
+    (e.g. ``1.2.3+g1a2b3c4``) is replaced with ``-``.  Consecutive
+    hyphens are collapsed and leading/trailing hyphens are stripped.
 
     Parameters
     ----------
-    model : str
-        Embedding model name.
+    value : str
+        String to sanitize (e.g. a model name or a PEP 440 version).
 
     Returns
     -------
     str
-        Tag-safe model name.
+        Tag-safe string (e.g. ``text-embedding-ada-002`` or
+        ``0.1.dev2-g2abcfb2a2``).
     """
-    safe = model.lower()
+    safe = value.lower()
     safe = re.sub(r"[^a-z0-9._-]", "-", safe)
     # Collapse consecutive hyphens
     safe = re.sub(r"-{2,}", "-", safe)
@@ -116,9 +120,10 @@ def _build_tag(
     year: Optional[int] = None,
     *,
     embedding_model: str,
+    version: Optional[str] = None,
 ) -> str:
     """
-    Build an OCI tag from conference name, embedding model and optional year.
+    Build an OCI tag from conference name, embedding model, version and optional year.
 
     Parameters
     ----------
@@ -129,19 +134,26 @@ def _build_tag(
         conference name (e.g. ``neurips``).
     embedding_model : str
         Embedding model name.  Appended to the tag after a ``_``
-        separator (e.g. ``neurips-2024_text-embedding-ada-002``).
+        separator (e.g. ``neurips-2024_text-embedding-ada-002_1.0.0``).
+    version : str, optional
+        abstracts-explorer version string.  When ``None``, the current
+        package version (``__version__``) is used.  The version is
+        sanitized for OCI tag use and appended after a ``_`` separator
+        (e.g. ``neurips-2024_text-embedding-ada-002_0.1.0``).
 
     Returns
     -------
     str
-        Tag string (e.g. ``neurips-2024_text-embedding-ada-002``).
+        Tag string (e.g. ``neurips-2024_text-embedding-ada-002_0.1.0``).
     """
+    if version is None:
+        version = __version__
     safe_name = conference.lower().replace(" ", "-").replace("/", "-").replace("@", "-")
     if year is not None:
         tag = f"{safe_name}-{year}"
     else:
         tag = safe_name
-    tag = f"{tag}_{_sanitize_model_name(embedding_model)}"
+    tag = f"{tag}_{_sanitize_str_for_oci_tag(embedding_model)}_{_sanitize_str_for_oci_tag(version)}"
     return tag
 
 

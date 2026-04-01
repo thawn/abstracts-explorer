@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
+from abstracts_explorer._version import __version__
 from abstracts_explorer.config import get_config
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.plugin import LightweightPaper
@@ -19,9 +20,12 @@ from abstracts_explorer.registry import (
     RegistryClient,
     RegistryError,
     _build_tag,
-    _sanitize_model_name,
+    _sanitize_str_for_oci_tag,
 )
 from tests.conftest import get_env_test_path, set_test_db
+
+# Sanitized version string used in expected tag assertions
+_VER = _sanitize_str_for_oci_tag(__version__)
 
 # ---------------------------------------------------------------------------
 # Helper utilities
@@ -72,66 +76,102 @@ def _populate_test_db(db_path):
 
 
 # ---------------------------------------------------------------------------
-# Tests: _sanitize_model_name and _build_tag
+# Tests: _sanitize_str_for_oci_tag and _build_tag
 # ---------------------------------------------------------------------------
 
 
-class TestSanitizeModelName:
-    """Tests for the _sanitize_model_name helper."""
+class TestSanitizeStrForOciTag:
+    """Tests for the _sanitize_str_for_oci_tag helper (model names and version strings)."""
 
     def test_simple_model(self):
         """Simple model name passes through."""
-        assert _sanitize_model_name("text-embedding-ada-002") == "text-embedding-ada-002"
+        assert _sanitize_str_for_oci_tag("text-embedding-ada-002") == "text-embedding-ada-002"
 
     def test_uppercase(self):
-        """Model name is lowercased."""
-        assert _sanitize_model_name("Text-Embedding-ADA-002") == "text-embedding-ada-002"
+        """Value is lowercased."""
+        assert _sanitize_str_for_oci_tag("Text-Embedding-ADA-002") == "text-embedding-ada-002"
 
     def test_special_chars(self):
         """Non-allowed characters are replaced with hyphens."""
-        assert _sanitize_model_name("model/name:v1") == "model-name-v1"
+        assert _sanitize_str_for_oci_tag("model/name:v1") == "model-name-v1"
 
     def test_collapsed_hyphens(self):
         """Consecutive hyphens are collapsed."""
-        assert _sanitize_model_name("my--model") == "my-model"
+        assert _sanitize_str_for_oci_tag("my--model") == "my-model"
 
     def test_dots_underscores_preserved(self):
         """Dots and underscores are kept."""
-        assert _sanitize_model_name("model_v1.2") == "model_v1.2"
+        assert _sanitize_str_for_oci_tag("model_v1.2") == "model_v1.2"
+
+    def test_simple_version(self):
+        """Simple release version passes through unchanged."""
+        assert _sanitize_str_for_oci_tag("1.0.0") == "1.0.0"
+
+    def test_dev_version(self):
+        """Dev pre-release version passes through unchanged."""
+        assert _sanitize_str_for_oci_tag("0.1.dev2") == "0.1.dev2"
+
+    def test_local_segment_plus_replaced(self):
+        """PEP 440 '+' local-version separator is replaced with '-'."""
+        assert _sanitize_str_for_oci_tag("0.1.dev2+g2abcfb2a2") == "0.1.dev2-g2abcfb2a2"
+
+    def test_version_uppercase_lowercased(self):
+        """Version string is lowercased."""
+        assert _sanitize_str_for_oci_tag("1.0.0.Post1") == "1.0.0.post1"
 
 
 class TestBuildTag:
     """Tests for the _build_tag helper."""
 
     def test_simple_tag(self):
-        """Tag is built from conference, year and embedding model."""
-        assert _build_tag("neurips", 2024, embedding_model="model-a") == "neurips-2024_model-a"
+        """Tag is built from conference, year, embedding model and version."""
+        assert _build_tag("neurips", 2024, embedding_model="model-a", version="1.0.0") == "neurips-2024_model-a_1.0.0"
 
     def test_case_normalization(self):
         """Conference name is lowercased."""
-        assert _build_tag("NeurIPS", 2024, embedding_model="model-a") == "neurips-2024_model-a"
+        assert _build_tag("NeurIPS", 2024, embedding_model="model-a", version="1.0.0") == "neurips-2024_model-a_1.0.0"
 
     def test_special_characters(self):
         """Special characters are replaced with hyphens."""
-        assert _build_tag("ML4PS/workshop", 2025, embedding_model="model-a") == "ml4ps-workshop-2025_model-a"
+        assert (
+            _build_tag("ML4PS/workshop", 2025, embedding_model="model-a", version="1.0.0")
+            == "ml4ps-workshop-2025_model-a_1.0.0"
+        )
 
     def test_conference_only_tag(self):
-        """Tag without year contains conference and model."""
-        assert _build_tag("neurips", embedding_model="model-a") == "neurips_model-a"
+        """Tag without year contains conference, model and version."""
+        assert _build_tag("neurips", embedding_model="model-a", version="1.0.0") == "neurips_model-a_1.0.0"
 
     def test_conference_only_tag_normalized(self):
         """Conference-only tag is lowercased and sanitized."""
-        assert _build_tag("ML4PS/workshop", embedding_model="model-a") == "ml4ps-workshop_model-a"
+        assert (
+            _build_tag("ML4PS/workshop", embedding_model="model-a", version="1.0.0") == "ml4ps-workshop_model-a_1.0.0"
+        )
 
     def test_tag_with_embedding_model(self):
         """Embedding model is appended after underscore separator."""
-        assert _build_tag("neurips", 2024, embedding_model="text-embedding-ada-002") == (
-            "neurips-2024_text-embedding-ada-002"
+        assert _build_tag("neurips", 2024, embedding_model="text-embedding-ada-002", version="1.0.0") == (
+            "neurips-2024_text-embedding-ada-002_1.0.0"
         )
 
     def test_tag_conference_only_with_model(self):
-        """Conference-only tag includes the embedding model."""
-        assert _build_tag("neurips", embedding_model="text-embedding-ada-002") == "neurips_text-embedding-ada-002"
+        """Conference-only tag includes the embedding model and version."""
+        assert (
+            _build_tag("neurips", embedding_model="text-embedding-ada-002", version="1.0.0")
+            == "neurips_text-embedding-ada-002_1.0.0"
+        )
+
+    def test_version_with_local_segment(self):
+        """Dev version with local segment (PEP 440 '+') is sanitized."""
+        assert _build_tag("neurips", 2024, embedding_model="model-a", version="0.1.dev2+g2abcfb2a2") == (
+            "neurips-2024_model-a_0.1.dev2-g2abcfb2a2"
+        )
+
+    def test_default_version_uses_package_version(self):
+        """When version is not given, the package __version__ is used."""
+        tag = _build_tag("neurips", 2024, embedding_model="model-a")
+        expected_version = _sanitize_str_for_oci_tag(__version__)
+        assert tag == f"neurips-2024_model-a_{expected_version}"
 
 
 # ---------------------------------------------------------------------------
@@ -704,7 +744,7 @@ class TestUploadDownload:
 
         assert summary["paper_count"] == 1
         assert summary["embedding_count"] == 1
-        assert summary["tag"] == "neurips-2024_test-model"
+        assert summary["tag"] == f"neurips-2024_test-model_{_VER}"
         assert summary["years"] == [2024]
         mock_oras.push.assert_called_once()
 
@@ -789,16 +829,16 @@ class TestUploadDownload:
         ):
             summary = client.upload(conference="neurips")
 
-        assert summary["tag"] == "neurips_test-model"
+        assert summary["tag"] == f"neurips_test-model_{_VER}"
         assert sorted(summary["years"]) == [2024, 2025]
         # push is called once per year (individual tags) + once for the all-years tag
         assert mock_oras.push.call_count == 3
         pushed_targets = [call[1]["target"] for call in mock_oras.push.call_args_list]
-        assert "ghcr.io/thawn/abstracts-data:neurips-2024_test-model" in pushed_targets
-        assert "ghcr.io/thawn/abstracts-data:neurips-2025_test-model" in pushed_targets
-        assert "ghcr.io/thawn/abstracts-data:neurips_test-model" in pushed_targets
+        assert f"ghcr.io/thawn/abstracts-data:neurips-2024_test-model_{_VER}" in pushed_targets
+        assert f"ghcr.io/thawn/abstracts-data:neurips-2025_test-model_{_VER}" in pushed_targets
+        assert f"ghcr.io/thawn/abstracts-data:neurips_test-model_{_VER}" in pushed_targets
         assert "year_tags" in summary
-        assert sorted(summary["year_tags"]) == ["neurips-2024_test-model", "neurips-2025_test-model"]
+        assert sorted(summary["year_tags"]) == [f"neurips-2024_test-model_{_VER}", f"neurips-2025_test-model_{_VER}"]
 
     def test_upload_conference_only_no_data(self, tmp_path):
         """Upload without year fails when no data exists."""
@@ -1081,7 +1121,7 @@ class TestUploadDownload:
         ):
             summary = client.upload(conference="neurips", year=2024)
 
-        assert summary["tag"] == "neurips-2024_text-embedding-ada-002"
+        assert summary["tag"] == f"neurips-2024_text-embedding-ada-002_{_VER}"
         # Verify embedding model is in the manifest annotations
         push_kwargs = mock_oras.push.call_args[1]
         annotations = push_kwargs.get("manifest_annotations", {})
