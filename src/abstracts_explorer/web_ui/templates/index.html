@@ -379,14 +379,14 @@
 
         <!-- Chat Tab -->
         <div id="chat-tab" class="tab-content hidden">
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="flex flex-col lg:flex-row gap-6 chat-layout">
                 <!-- Chat Interface -->
-                <div class="lg:col-span-2 bg-white rounded-lg shadow-md overflow-hidden">
+                <div class="flex-1 flex flex-col min-h-0 bg-white rounded-lg shadow-md overflow-hidden">
                     <!-- Chat Header -->
-                    <div class="bg-purple-600 text-white px-6 py-4 flex justify-between items-center">
+                    <div class="flex-shrink-0 bg-purple-600 text-white px-6 py-4 flex justify-between items-center">
                         <div>
                             <h3 class="font-semibold text-lg">AI Research Assistant</h3>
-                            <p class="text-sm opacity-90">Ask questions about cpnference abstracts</p>
+                            <p class="text-sm opacity-90">Ask questions about conference abstracts</p>
                         </div>
                         <button onclick="resetChat()" class="px-4 py-2 bg-white/20 rounded-lg hover:bg-white/30">
                             <i class="fas fa-redo mr-2"></i>Reset
@@ -394,7 +394,7 @@
                     </div>
 
                     <!-- Chat Messages -->
-                    <div id="chat-messages" class="h-96 overflow-y-auto p-6 space-y-4 bg-gray-50">
+                    <div id="chat-messages" class="flex-1 min-h-0 overflow-y-auto p-6 space-y-4 bg-gray-50">
                         <div class="chat-message">
                             <div class="flex items-start gap-3">
                                 <div
@@ -411,8 +411,16 @@
                         </div>
                     </div>
 
+                    <!-- Mobile: View Papers button (shown after papers are loaded) -->
+                    <div id="mobile-papers-btn-wrapper" class="flex-shrink-0 lg:hidden border-t px-4 py-2 bg-white hidden">
+                        <button onclick="openPapersModal()"
+                            class="w-full py-2 bg-purple-50 text-purple-700 rounded-lg border border-purple-200 text-sm font-medium hover:bg-purple-100 focus:ring-2 focus:ring-purple-600 focus:ring-offset-1">
+                            <i class="fas fa-file-alt mr-2"></i>View Relevant Papers (<span id="mobile-papers-count">0</span>)
+                        </button>
+                    </div>
+
                     <!-- Chat Input -->
-                    <div class="p-6 bg-white border-t">
+                    <div class="flex-shrink-0 p-6 bg-white border-t">
                         <div class="flex gap-4">
                             <input type="text" id="chat-input"
                                 placeholder="Ask about abstracts, research areas, or specific techniques..."
@@ -435,15 +443,16 @@
                         </div>
                     </div>
                 </div>
-                <!-- Relevant Papers Panel -->
-                <div class="lg:col-span-1 bg-white rounded-lg shadow-md overflow-hidden">
-                    <div class="bg-purple-600 text-white px-6 py-4">
+
+                <!-- Relevant Papers Panel (desktop only) -->
+                <div class="hidden lg:flex lg:w-80 flex-col min-h-0 bg-white rounded-lg shadow-md overflow-hidden">
+                    <div class="flex-shrink-0 bg-purple-600 text-white px-6 py-4">
                         <h3 class="font-semibold text-lg">
                             <i class="fas fa-file-alt mr-2"></i>Relevant Papers
                         </h3>
                         <p class="text-sm opacity-90">Papers used for the response</p>
                     </div>
-                    <div id="chat-papers" class="h-[450px] overflow-y-auto p-4 space-y-3 bg-gray-50">
+                    <div id="chat-papers" class="flex-1 min-h-0 overflow-y-auto p-4 space-y-3 bg-gray-50">
                         <div class="text-center text-gray-500 py-8">
                             <i class="fas fa-inbox text-4xl mb-3 opacity-20"></i>
                             <p class="text-sm">Ask a question to see relevant papers</p>
@@ -613,6 +622,33 @@
             </div>
         </div>
     </footer>
+
+    <!-- Relevant Papers Modal (narrow screens only) -->
+    <div id="papers-modal"
+        class="fixed inset-0 bg-black bg-opacity-50 z-40 hidden items-end lg:hidden"
+        onclick="if(event.target===this) closePapersModal()">
+        <div class="w-full bg-white rounded-t-xl flex flex-col" style="max-height: 80vh;">
+            <div class="flex-shrink-0 bg-purple-600 text-white px-6 py-4 rounded-t-xl flex justify-between items-center">
+                <div>
+                    <h3 class="font-semibold text-lg">
+                        <i class="fas fa-file-alt mr-2"></i>Relevant Papers
+                    </h3>
+                    <p class="text-sm opacity-90">Papers used for the response</p>
+                </div>
+                <button onclick="closePapersModal()"
+                    class="w-8 h-8 flex items-center justify-center rounded-full bg-white/20 hover:bg-white/30 focus:ring-2 focus:ring-white/50"
+                    aria-label="Close papers panel">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div id="papers-modal-content" class="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">
+                <div class="text-center text-gray-500 py-8">
+                    <i class="fas fa-inbox text-4xl mb-3 opacity-20"></i>
+                    <p class="text-sm">Ask a question to see relevant papers</p>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Settings Modal (Shared for Search and Chat) -->
     <div id="settings-modal"

@@ -121,19 +121,25 @@ export async function sendChatMessage() {
 }
 
 /**
- * Display chat papers in the side panel
+ * Display chat papers in the side panel and mobile modal
  * @param {Array} papers - Array of paper objects
  * @param {Object} metadata - Metadata about the search
  */
 export function displayChatPapers(papers, metadata = {}) {
     const papersDiv = document.getElementById('chat-papers');
+    const modalContent = document.getElementById('papers-modal-content');
+    const mobileBtnWrapper = document.getElementById('mobile-papers-btn-wrapper');
+    const mobileCount = document.getElementById('mobile-papers-count');
 
     if (!papers || papers.length === 0) {
-        papersDiv.innerHTML = renderEmptyState(
+        const emptyHtml = renderEmptyState(
             'No papers found for this query',
             '',
             'fa-inbox'
         );
+        if (papersDiv) papersDiv.innerHTML = emptyHtml;
+        if (modalContent) modalContent.innerHTML = emptyHtml;
+        if (mobileBtnWrapper) mobileBtnWrapper.classList.add('hidden');
         return;
     }
 
@@ -173,7 +179,14 @@ export function displayChatPapers(papers, metadata = {}) {
         });
     });
 
-    papersDiv.innerHTML = html;
+    if (papersDiv) papersDiv.innerHTML = html;
+    if (modalContent) modalContent.innerHTML = html;
+
+    // Show the mobile "View Papers" button with paper count
+    if (mobileBtnWrapper) {
+        mobileBtnWrapper.classList.remove('hidden');
+        if (mobileCount) mobileCount.textContent = papers.length;
+    }
 }
 
 /**
@@ -240,13 +253,20 @@ export async function resetChat() {
         messagesDiv.innerHTML = '';
         addChatMessage('Conversation reset. How can I help you explore NeurIPS abstracts?', 'assistant');
 
-        // Clear papers panel
-        const papersDiv = document.getElementById('chat-papers');
-        papersDiv.innerHTML = renderEmptyState(
+        // Clear papers panel and modal
+        const emptyHtml = renderEmptyState(
             'Ask a question to see relevant papers',
             '',
             'fa-inbox'
         );
+        const papersDiv = document.getElementById('chat-papers');
+        if (papersDiv) papersDiv.innerHTML = emptyHtml;
+        const modalContent = document.getElementById('papers-modal-content');
+        if (modalContent) modalContent.innerHTML = emptyHtml;
+
+        // Hide mobile papers button
+        const mobileBtnWrapper = document.getElementById('mobile-papers-btn-wrapper');
+        if (mobileBtnWrapper) mobileBtnWrapper.classList.add('hidden');
     } catch (error) {
         console.error('Error resetting chat:', error);
     }
@@ -395,5 +415,27 @@ function _renderClusterVisualizationChart(plotId, viz) {
 
     if (typeof Plotly !== 'undefined') {
         Plotly.newPlot(plotId, traces, layout, { responsive: true, displayModeBar: false });
+    }
+}
+
+/**
+ * Open the relevant papers modal (used on narrow screens).
+ */
+export function openPapersModal() {
+    const modal = document.getElementById('papers-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    }
+}
+
+/**
+ * Close the relevant papers modal.
+ */
+export function closePapersModal() {
+    const modal = document.getElementById('papers-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
     }
 }

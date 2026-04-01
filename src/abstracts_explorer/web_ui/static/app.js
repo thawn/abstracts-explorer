@@ -13,7 +13,7 @@ import { loadPriorities } from './modules/state.js';
 
 // Import feature modules
 import { searchPapers } from './modules/search.js';
-import { sendChatMessage, resetChat } from './modules/chat.js';
+import { sendChatMessage, resetChat, openPapersModal, closePapersModal } from './modules/chat.js';
 import {
     loadInterestingPapers,
     saveInterestingPapersAsMarkdown,
@@ -112,6 +112,8 @@ function attachToWindow() {
     // Chat module
     window.sendChatMessage = sendChatMessage;
     window.resetChat = resetChat;
+    window.openPapersModal = openPapersModal;
+    window.closePapersModal = closePapersModal;
 
     // Interesting papers module
     window.loadInterestingPapers = loadInterestingPapers;

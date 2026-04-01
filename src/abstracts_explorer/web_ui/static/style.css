@@ -66,10 +66,31 @@ select:focus {
     .paper-card {
         padding: 1rem;
     }
+}
 
-    #chat-messages {
-        height: 60vh;
-    }
+/* Full-height responsive chat layout */
+.chat-layout {
+    height: calc(100vh - 220px);
+    min-height: 400px;
+}
+
+/* Papers modal animation */
+#papers-modal.flex {
+    animation: fadeIn 0.15s ease;
+}
+
+#papers-modal .w-full {
+    animation: slideUp 0.2s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes slideUp {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
 }
 
 /* Print styles */

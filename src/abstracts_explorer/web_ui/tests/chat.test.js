@@ -9,7 +9,7 @@ global.fetch = jest.fn();
 global.marked = { parse: jest.fn((text) => text), use: jest.fn() };
 global.Plotly = { newPlot: jest.fn() };
 
-import { sendChatMessage, displayChatPapers, addChatMessage, resetChat, renderChatVisualizations } from '../static/modules/chat.js';
+import { sendChatMessage, displayChatPapers, addChatMessage, resetChat, renderChatVisualizations, openPapersModal, closePapersModal } from '../static/modules/chat.js';
 import * as State from '../static/modules/state.js';
 
 describe('Chat Module', () => {
@@ -26,6 +26,10 @@ describe('Chat Module', () => {
             <select id="conference-selector"><option value="">All</option></select>
             <div id="chat-messages"></div>
             <div id="chat-papers"></div>
+            <div id="papers-modal" class="hidden"></div>
+            <div id="papers-modal-content"></div>
+            <div id="mobile-papers-btn-wrapper" class="hidden"></div>
+            <span id="mobile-papers-count"></span>
         `;
     });
 
@@ -397,6 +401,88 @@ describe('Chat Module', () => {
             await sendChatMessage();
 
             expect(global.Plotly.newPlot).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('displayChatPapers - mobile modal sync', () => {
+        it('should populate papers-modal-content alongside chat-papers', () => {
+            const papers = [{ uid: 'p1', title: 'Modal Paper', authors: [] }];
+            displayChatPapers(papers);
+
+            const modalContent = document.getElementById('papers-modal-content');
+            expect(modalContent.innerHTML).toContain('Modal Paper');
+        });
+
+        it('should show mobile papers button when papers are loaded', () => {
+            const papers = [{ uid: 'p1', title: 'Paper', authors: [] }];
+            displayChatPapers(papers);
+
+            const btn = document.getElementById('mobile-papers-btn-wrapper');
+            expect(btn.classList.contains('hidden')).toBe(false);
+        });
+
+        it('should update mobile papers count', () => {
+            const papers = [
+                { uid: 'p1', title: 'Paper 1', authors: [] },
+                { uid: 'p2', title: 'Paper 2', authors: [] }
+            ];
+            displayChatPapers(papers);
+
+            const count = document.getElementById('mobile-papers-count');
+            expect(count.textContent).toBe('2');
+        });
+
+        it('should hide mobile papers button when no papers', () => {
+            // First show it
+            const papers = [{ uid: 'p1', title: 'Paper', authors: [] }];
+            displayChatPapers(papers);
+            expect(document.getElementById('mobile-papers-btn-wrapper').classList.contains('hidden')).toBe(false);
+
+            // Then clear it
+            displayChatPapers([]);
+            expect(document.getElementById('mobile-papers-btn-wrapper').classList.contains('hidden')).toBe(true);
+        });
+    });
+
+    describe('openPapersModal / closePapersModal', () => {
+        it('should show the papers modal', () => {
+            openPapersModal();
+            const modal = document.getElementById('papers-modal');
+            expect(modal.classList.contains('hidden')).toBe(false);
+            expect(modal.classList.contains('flex')).toBe(true);
+        });
+
+        it('should hide the papers modal', () => {
+            openPapersModal();
+            closePapersModal();
+            const modal = document.getElementById('papers-modal');
+            expect(modal.classList.contains('hidden')).toBe(true);
+            expect(modal.classList.contains('flex')).toBe(false);
+        });
+    });
+
+    describe('resetChat - mobile modal', () => {
+        it('should hide mobile papers button on reset', async () => {
+            // Show the button first
+            const papers = [{ uid: 'p1', title: 'Paper', authors: [] }];
+            displayChatPapers(papers);
+            expect(document.getElementById('mobile-papers-btn-wrapper').classList.contains('hidden')).toBe(false);
+
+            global.fetch.mockResolvedValueOnce({ ok: true });
+            await resetChat();
+
+            expect(document.getElementById('mobile-papers-btn-wrapper').classList.contains('hidden')).toBe(true);
+        });
+
+        it('should clear papers-modal-content on reset', async () => {
+            const papers = [{ uid: 'p1', title: 'Paper', authors: [] }];
+            displayChatPapers(papers);
+            expect(document.getElementById('papers-modal-content').innerHTML).toContain('Paper');
+
+            global.fetch.mockResolvedValueOnce({ ok: true });
+            await resetChat();
+
+            expect(document.getElementById('papers-modal-content').innerHTML).not.toContain('Paper');
         });
     });
 });
