@@ -25,6 +25,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from abstracts_explorer._version import __version__
 from abstracts_explorer.database import DatabaseManager, EmbeddingModelConflictError
 from abstracts_explorer.plugin import LightweightPaper
 from abstracts_explorer.registry import (
@@ -33,10 +34,14 @@ from abstracts_explorer.registry import (
     RegistryError,
     _build_tag,
     _sanitize_model_name,
+    _sanitize_version,
 )
 from tests.conftest import set_test_db, set_test_embedding_db
 
 pytestmark = pytest.mark.integration
+
+# Sanitized version string used in expected tag assertions
+_VER = _sanitize_version(__version__)
 
 
 # ---------------------------------------------------------------------------
@@ -589,14 +594,14 @@ class TestTagHelpers:
     """Integration-level checks for tag-building helpers."""
 
     def test_build_tag_with_year(self):
-        """Tag with year includes conference-year and sanitized model."""
+        """Tag with year includes conference-year, sanitized model and version."""
         tag = _build_tag("neurips", 2024, embedding_model="text-embedding-qwen3-embedding-4b")
-        assert tag == "neurips-2024_text-embedding-qwen3-embedding-4b"
+        assert tag == f"neurips-2024_text-embedding-qwen3-embedding-4b_{_VER}"
 
     def test_build_tag_without_year(self):
-        """Conference-only tag omits the year segment."""
+        """Conference-only tag omits the year segment but includes the version."""
         tag = _build_tag("neurips", embedding_model="text-embedding-qwen3-embedding-4b")
-        assert tag == "neurips_text-embedding-qwen3-embedding-4b"
+        assert tag == f"neurips_text-embedding-qwen3-embedding-4b_{_VER}"
 
     def test_sanitize_model_name_slash_replaced(self):
         """Slashes in model names are replaced with hyphens."""
