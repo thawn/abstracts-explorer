@@ -58,7 +58,7 @@ class IGARSSDownloaderPlugin(LightweightDownloaderPlugin):
         "IGARSS (IEEE International Geoscience and Remote Sensing Symposium) "
         "conference data downloader via IEEE Xplore"
     )
-    _start_year = 2000
+    _start_year = 1994
     conference_name = "IGARSS"
 
     #: IEEE Xplore REST search API endpoint.
