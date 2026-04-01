@@ -12,6 +12,7 @@ from abstracts_explorer.mcp_server import (
     analyze_cluster_topics,
     merge_where_clause_with_conference,
     ClusterAnalysisError,
+    _parse_conference_year,
 )
 from abstracts_explorer.clustering import ClusteringManager
 from abstracts_explorer.database import DatabaseManager
@@ -434,6 +435,130 @@ class TestMCPTools:
         assert "error" in result
         assert "No pre-computed clustering data" in result["error"]
         assert "NeurIPS" in result["error"]
+
+    @patch("abstracts_explorer.mcp_server.load_clustering_data")
+    @patch("abstracts_explorer.mcp_server.analyze_cluster_topics")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_conference_topics_with_year_in_name(self, mock_config, mock_analyze, mock_load):
+        """Test get_conference_topics parses year from conference name like 'NeurIPS 2025'."""
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config_obj.embedding_model = "test-model"
+        mock_config.return_value = mock_config_obj
+
+        mock_cm = Mock()
+        mock_cm.embeddings_manager = Mock()
+        mock_cm.paper_ids = ["p1", "p2"]
+        mock_db = Mock()
+        mock_load.return_value = (mock_cm, mock_db)
+
+        mock_cm.load_embeddings.return_value = 100
+        mock_db.get_clustering_cache.return_value = {
+            "points": [
+                {"id": "p1", "cluster": 0, "x": 0.0, "y": 0.0},
+                {"id": "p2", "cluster": 0, "x": 1.0, "y": 1.0},
+            ],
+            "statistics": {"n_clusters": 1, "n_noise": 0, "cluster_sizes": {0: 2}, "total_papers": 2},
+            "cluster_labels": {"0": "Deep Learning"},
+            "cluster_keywords": {"0": ["neural", "deep"]},
+        }
+
+        mock_cm.get_cluster_statistics.return_value = {
+            "n_clusters": 1, "n_noise": 0, "cluster_sizes": {0: 2}, "total_papers": 2,
+        }
+        mock_cm.cluster_label_names = {0: "Deep Learning"}
+
+        mock_analyze.return_value = {
+            "topic": "Deep Learning", "paper_count": 2,
+            "keywords": ["neural", "deep"], "sample_titles": ["Paper 1"],
+        }
+
+        from abstracts_explorer.mcp_server import get_conference_topics
+
+        result_str = get_conference_topics(conferences=["NeurIPS 2025"])
+        result = json.loads(result_str)
+
+        # Should succeed (no error) by parsing "NeurIPS 2025" → conference="NeurIPS", years=[2025]
+        assert "error" not in result
+        assert result["conference"] == "NeurIPS"
+        assert "topics" in result
+
+        # Verify the cache was looked up with the parsed conference name (not "NeurIPS 2025")
+        call_args = mock_db.get_clustering_cache.call_args_list[0]
+        params = call_args[1]["clustering_params"]
+        assert params["conferences"] == ["NeurIPS"]
+        assert params["years"] == [2025]
+
+
+class TestParseConferenceYear:
+    """Tests for _parse_conference_year helper."""
+
+    def test_conference_with_year(self):
+        assert _parse_conference_year("NeurIPS 2025") == ("NeurIPS", 2025)
+
+    def test_conference_without_year(self):
+        assert _parse_conference_year("ICLR") == ("ICLR", None)
+
+    def test_conference_with_extra_spaces(self):
+        assert _parse_conference_year("  NeurIPS 2025  ") == ("NeurIPS", 2025)
+
+    def test_conference_name_with_spaces_and_year(self):
+        assert _parse_conference_year("IEEE VIS 2024") == ("IEEE VIS", 2024)
+
+    def test_conference_with_non_year_number(self):
+        # 3-digit numbers shouldn't be parsed as years
+        assert _parse_conference_year("NeurIPS 123") == ("NeurIPS 123", None)
+
+    @patch("abstracts_explorer.mcp_server.load_clustering_data")
+    @patch("abstracts_explorer.mcp_server.analyze_cluster_topics")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_fallback_to_all_years_cache(self, mock_config, mock_analyze, mock_load):
+        """When per-year cache is not found, fallback to all-years cache."""
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config_obj.embedding_model = "test-model"
+        mock_config.return_value = mock_config_obj
+
+        mock_cm = Mock()
+        mock_cm.embeddings_manager = Mock()
+        mock_cm.paper_ids = ["p1"]
+        mock_db = Mock()
+        mock_load.return_value = (mock_cm, mock_db)
+        mock_cm.load_embeddings.return_value = 10
+        mock_cm.get_cluster_statistics.return_value = {
+            "n_clusters": 1, "n_noise": 0, "cluster_sizes": {0: 1}, "total_papers": 1,
+        }
+        mock_cm.cluster_label_names = {0: "AI"}
+
+        mock_analyze.return_value = {
+            "topic": "AI", "paper_count": 1,
+            "keywords": ["artificial"], "sample_titles": ["Paper 1"],
+        }
+
+        # First call (with years) returns None, second (without years) returns cache
+        mock_db.get_clustering_cache.side_effect = [
+            None,  # per-year lookup fails
+            {       # all-years fallback succeeds
+                "points": [{"id": "p1", "cluster": 0, "x": 0.0, "y": 0.0}],
+                "statistics": {"n_clusters": 1, "n_noise": 0, "cluster_sizes": {0: 1}, "total_papers": 1},
+                "cluster_labels": {"0": "AI"},
+                "cluster_keywords": {"0": ["artificial"]},
+            },
+        ]
+
+        from abstracts_explorer.mcp_server import _get_conference_topics_for_single_conference
+
+        result = _get_conference_topics_for_single_conference("NeurIPS", years=[2025])
+
+        assert "error" not in result
+        assert mock_db.get_clustering_cache.call_count == 2
+        # Second call should NOT have 'years' in params
+        fallback_params = mock_db.get_clustering_cache.call_args_list[1][1]["clustering_params"]
+        assert "years" not in fallback_params
+
+
+class TestMCPToolsContinued:
+    """Continuation of MCP tool tests (split due to class insertion)."""
 
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
     @patch("abstracts_explorer.mcp_server.DatabaseManager")

@@ -16,7 +16,8 @@ Features:
 
 import logging
 import json
-from typing import Any, Dict, List, Optional
+import re
+from typing import Any, Dict, List, Optional, Tuple
 from collections import Counter
 from copy import deepcopy
 
@@ -192,6 +193,39 @@ def analyze_cluster_topics(
     }
 
 
+def _parse_conference_year(conference: str) -> Tuple[str, Optional[int]]:
+    """
+    Parse a trailing year from a conference name.
+
+    LLMs often combine the conference name and year into a single string
+    (e.g. ``"NeurIPS 2025"``).  This helper splits them so the conference
+    name matches the database/cache entries which store the name and year
+    separately.
+
+    Parameters
+    ----------
+    conference : str
+        Conference name, possibly with a trailing 4-digit year.
+
+    Returns
+    -------
+    tuple of (str, int or None)
+        ``(conference_name, year)`` — *year* is ``None`` when no trailing
+        year was found.
+
+    Examples
+    --------
+    >>> _parse_conference_year("NeurIPS 2025")
+    ('NeurIPS', 2025)
+    >>> _parse_conference_year("ICLR")
+    ('ICLR', None)
+    """
+    match = re.match(r"^(.+?)\s+(\d{4})$", conference.strip())
+    if match:
+        return match.group(1), int(match.group(2))
+    return conference, None
+
+
 def _get_conference_topics_for_single_conference(
     conference: str,
     years: Optional[List[int]] = None,
@@ -204,10 +238,15 @@ def _get_conference_topics_for_single_conference(
     returns a topic-centric summary.  Returns an error dict when no cached
     results exist for the requested conference/year combination.
 
+    If the *conference* string contains a trailing year
+    (e.g. ``"NeurIPS 2025"``), the year is extracted and merged into *years*
+    so that the cache lookup matches entries stored under the plain
+    conference name.
+
     Parameters
     ----------
     conference : str
-        Conference name (e.g. "NeurIPS", "ICLR").
+        Conference name (e.g. "NeurIPS", "ICLR", or "NeurIPS 2025").
     years : list of int, optional
         Filter by publication years.
     collection_name : str, optional
@@ -221,6 +260,14 @@ def _get_conference_topics_for_single_conference(
     """
     config = get_config()
     collection_name = collection_name or config.collection_name
+
+    # Parse year from conference name if present (e.g. "NeurIPS 2025" → "NeurIPS", 2025)
+    conference, extracted_year = _parse_conference_year(conference)
+    if extracted_year is not None:
+        if years is None:
+            years = [extracted_year]
+        elif extracted_year not in years:
+            years = sorted(years + [extracted_year])
 
     cm, db = load_clustering_data(collection_name)
 
@@ -242,6 +289,18 @@ def _get_conference_topics_for_single_conference(
             n_clusters=None,
             clustering_params=clustering_params,
         )
+
+        # Fallback: if per-year cache not found, try the all-years cache
+        if not cached and years:
+            fallback_params = {k: v for k, v in clustering_params.items() if k != "years"}
+            cached = db.get_clustering_cache(
+                embedding_model=config.embedding_model,
+                reduction_method="tsne",
+                n_components=2,
+                clustering_method="agglomerative",
+                n_clusters=None,
+                clustering_params=fallback_params,
+            )
 
         if not cached:
             return {
@@ -1039,13 +1098,22 @@ def get_cluster_visualization(
         combined_stats: Dict[str, Any] = {}
 
         for conf in conferences:
+            # Parse year from conference name if present (e.g. "NeurIPS 2025")
+            parsed_conf, extracted_year = _parse_conference_year(conf)
+            vis_years = list(years) if years else None
+            if extracted_year is not None:
+                if vis_years is None:
+                    vis_years = [extracted_year]
+                elif extracted_year not in vis_years:
+                    vis_years = sorted(vis_years + [extracted_year])
+
             clustering_params: Dict[str, Any] = {
                 "linkage": "ward",
                 "distance_threshold": 150.0,
-                "conferences": sorted([conf]),
+                "conferences": sorted([parsed_conf]),
             }
-            if years:
-                clustering_params["years"] = sorted([int(y) for y in years])
+            if vis_years:
+                clustering_params["years"] = sorted([int(y) for y in vis_years])
 
             cm, db = load_clustering_data(collection_name)
             try:
@@ -1057,6 +1125,18 @@ def get_cluster_visualization(
                     n_clusters=None,
                     clustering_params=clustering_params,
                 )
+
+                # Fallback: try without year filter
+                if not cached and vis_years:
+                    fallback_params = {k: v for k, v in clustering_params.items() if k != "years"}
+                    cached = db.get_clustering_cache(
+                        embedding_model=config.embedding_model,
+                        reduction_method="tsne",
+                        n_components=2,
+                        clustering_method="agglomerative",
+                        n_clusters=None,
+                        clustering_params=fallback_params,
+                    )
             finally:
                 cm.embeddings_manager.close()
                 db.close()
@@ -1066,8 +1146,8 @@ def get_cluster_visualization(
                     {
                         "error": (
                             f"No pre-computed clustering data available for conference "
-                            f"'{conf}'"
-                            + (f" years={years}" if years else "")
+                            f"'{parsed_conf}'"
+                            + (f" years={vis_years}" if vis_years else "")
                             + ". Run 'abstracts-explorer clustering pre-generate' first."
                         ),
                     },
