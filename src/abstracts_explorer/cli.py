@@ -1915,6 +1915,9 @@ def registry_download_command(args: argparse.Namespace) -> int:
             try:
                 summaries = client.download_all(
                     progress_callback=lambda msg: print(f"  {msg}"),
+                    ignore_embedding_model_mismatch=getattr(
+                        args, "ignore_embedding_model_mismatch", False
+                    ),
                 )
             except EmbeddingModelMismatchError as mismatch:
                 print(
