@@ -711,6 +711,7 @@ class RegistryClient:
         tag: Optional[str] = None,
         embedding_model: Optional[str] = None,
         progress_callback: Optional[Callable[[str], None]] = None,
+        ignore_embedding_model_mismatch: bool = False,
     ) -> Dict[str, Any]:
         """
         Download data for a conference (and optionally a specific year) from the registry.
@@ -737,6 +738,12 @@ class RegistryClient:
             A ``RegistryError`` is raised if the model cannot be determined.
         progress_callback : callable, optional
             Function called with status messages during download.
+        ignore_embedding_model_mismatch : bool, optional
+            When ``True``, proceed with the download even if the artifact's embedding model
+            differs from the configured model.  After a successful import the local embedding
+            model metadata is updated to match *embedding_model*.  Only use this option when
+            the mismatch is caused by the same model having different names on different
+            backends (e.g. LM Studio vs. Ollama).  Default is ``False``.
 
         Returns
         -------
@@ -745,6 +752,9 @@ class RegistryClient:
 
         Raises
         ------
+        EmbeddingModelMismatchError
+            If the artifact's embedding model differs from *embedding_model* and
+            *ignore_embedding_model_mismatch* is ``False``.
         RegistryError
             If download fails or the embedding model cannot be determined.
         """
@@ -780,6 +790,25 @@ class RegistryClient:
                     metadata = json.loads(p.read_text())
                     _progress(f"Artifact version: {metadata.get('version', 'unknown')}")
                     break
+
+            # --- 1b. Check for embedding model mismatch with configured model ---
+            artifact_embedding_model = metadata.get("embedding_model")
+            mismatch_was_ignored = False
+            if artifact_embedding_model and embedding_model:
+                if _sanitize_str_for_oci_tag(artifact_embedding_model) != _sanitize_str_for_oci_tag(embedding_model):
+                    if not ignore_embedding_model_mismatch:
+                        raise EmbeddingModelMismatchError(
+                            local_model=embedding_model,
+                            remote_model=artifact_embedding_model,
+                        )
+                    mismatch_was_ignored = True
+                    _progress(
+                        f"⚠️  WARNING: Embedding model mismatch detected!\n"
+                        f"  Configured model: '{embedding_model}'\n"
+                        f"  Artifact model:   '{artifact_embedding_model}'\n"
+                        f"  Proceeding because --ignore-embedding-model-mismatch was set.\n"
+                        f"  ⚠️  Only do this if both names refer to the same model on different backends!"
+                    )
 
             # --- 2. Group files by year ---
             # Files are named papers-YYYY.db and embeddings-YYYY.json
@@ -847,6 +876,15 @@ class RegistryClient:
 
             if not imported_years:
                 _progress("Warning: No data found in artifact to import")
+
+            # --- 5. Update local embedding model if mismatch was ignored ---
+            if mismatch_was_ignored and embedding_model:
+                from abstracts_explorer.database import DatabaseManager
+
+                _progress(f"Updating local embedding model metadata to configured model: '{embedding_model}'")
+                with DatabaseManager() as db:
+                    db.create_tables()
+                    db.set_embedding_model(embedding_model)
 
             _progress("Download complete!")
             return {

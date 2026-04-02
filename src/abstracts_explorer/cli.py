@@ -1843,6 +1843,7 @@ def registry_download_command(args: argparse.Namespace) -> int:
         - year: Conference year (optional; all years if omitted)
         - tag: Optional custom tag
         - yes: Skip confirmation prompt
+        - ignore_embedding_model_mismatch: Proceed despite embedding model mismatch
 
     Returns
     -------
@@ -1915,6 +1916,7 @@ def registry_download_command(args: argparse.Namespace) -> int:
                 )
         else:
             embedding_model = getattr(args, "embedding_model", None) or config.embedding_model
+            ignore_embedding_model_mismatch = getattr(args, "ignore_embedding_model_mismatch", False)
 
             def _do_download():
                 return client.download(
@@ -1923,6 +1925,7 @@ def registry_download_command(args: argparse.Namespace) -> int:
                     tag=args.tag,
                     embedding_model=embedding_model,
                     progress_callback=lambda msg: print(f"  {msg}"),
+                    ignore_embedding_model_mismatch=ignore_embedding_model_mismatch,
                 )
 
             try:
@@ -1960,7 +1963,15 @@ def registry_download_command(args: argparse.Namespace) -> int:
                     print("  Local embedding data cleared. Retrying download...")
                     summary = _do_download()
                 else:
-                    print(f"\n❌ Registry error: {mismatch}", file=sys.stderr)
+                    print(
+                        f"\n❌ Embedding model mismatch:\n"
+                        f"  Configured model: '{embedding_model}'\n"
+                        f"  Artifact model:   '{mismatch.remote_model}'\n"
+                        f"\nIf both names refer to the same model on different backends,\n"
+                        f"you can use --ignore-embedding-model-mismatch to proceed.\n"
+                        f"⚠️  Only use this option if you are certain the models are identical!",
+                        file=sys.stderr,
+                    )
                     return 1
 
             print("\n✅ Download complete!")
@@ -2996,6 +3007,14 @@ Examples:
         "--yes",
         action="store_true",
         help="Skip confirmation prompt",
+    )
+    registry_download_parser.add_argument(
+        "--ignore-embedding-model-mismatch",
+        action="store_true",
+        help="Proceed even if the downloaded artifact uses a different embedding model than configured. "
+        "Only use this option when the mismatch is caused by the same model having different names on "
+        "different backends (e.g. LM Studio vs. Ollama). "
+        "The local embedding model metadata will be updated to match the configured model after download.",
     )
 
     # registry list
