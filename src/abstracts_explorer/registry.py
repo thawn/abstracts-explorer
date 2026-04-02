@@ -307,7 +307,7 @@ class RegistryClient:
     @staticmethod
     def _get_embedding_model() -> Optional[str]:
         """
-        Return the embedding model from the configuration.
+        Return the embedding model stored in the local database.
 
         Returns
         -------
@@ -316,8 +316,9 @@ class RegistryClient:
         """
         from abstracts_explorer.database import DatabaseManager
 
-        config = get_config()
-        return config.embedding_model
+        with DatabaseManager() as db:
+            db.create_tables()
+            return db.get_embedding_model()
 
     def _find_best_matching_tag(self, tag: str) -> str:
         """
@@ -867,8 +868,8 @@ class RegistryClient:
             Custom tag.  If ``None``, derived from embedding model, conference and year.
         embedding_model : str, optional
             Embedding model name used for tag derivation.  When ``None``
-            and *tag* is also ``None``, the model is read from the local
-            database metadata or the ``EMBEDDING_MODEL`` configuration.
+            and *tag* is also ``None``, the model is read from the
+            ``EMBEDDING_MODEL`` configuration.
             A ``RegistryError`` is raised if the model cannot be determined.
         progress_callback : callable, optional
             Function called with status messages during download.
@@ -893,7 +894,7 @@ class RegistryClient:
             If download fails or the embedding model cannot be determined.
         """
         if embedding_model is None:
-            embedding_model = self._get_embedding_model()
+            embedding_model = get_config().embedding_model
         if not embedding_model:
             raise RegistryError(
                 "No embedding model specified and none found in the configuration. "

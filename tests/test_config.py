@@ -13,16 +13,49 @@ from abstracts_explorer import config as config_module
 from tests.conftest import get_env_test_path
 
 
+CONFIG_ENV_VARS = {
+    "DATA_DIR",
+    "CHAT_MODEL",
+    "CHAT_TEMPERATURE",
+    "CHAT_MAX_TOKENS",
+    "EMBEDDING_MODEL",
+    "LLM_BACKEND_URL",
+    "LLM_BACKEND_AUTH_TOKEN",
+    "PAPER_DB",
+    "DATABASE_URL",
+    "EMBEDDING_DB",
+    "EMBEDDING_DB_PATH",
+    "COLLECTION_NAME",
+    "MAX_CONTEXT_PAPERS",
+    "ENABLE_QUERY_REWRITING",
+    "QUERY_SIMILARITY_THRESHOLD",
+    "DEFAULT_CONFERENCE",
+    "DEFAULT_YEAR",
+    "LOG_LEVEL",
+    "PROXY_X_FOR",
+    "PROXY_X_PROTO",
+    "PROXY_X_HOST",
+    "PROXY_X_PREFIX",
+    "IMPRINT_LINK",
+    "REQUESTS_PER_MINUTE",
+    "GITHUB_TOKEN",
+    "REGISTRY_REPOSITORY",
+}
+
+
 def clean_config_env_vars():
     """Clean config-related environment variables.
 
-    Dynamically retrieves all environment variable names defined in the Config class.
-    Clears them to ensure that tests remain robust even if new variables are added in the future.
+    Uses an explicit list of supported environment variable names and augments it
+    with public ``Config`` attributes converted to uppercase. This ensures that
+    environment-only keys such as ``PAPER_DB`` are also removed.
+
+    Non-env-var attribute names (e.g. ``TO_DICT``) are harmlessly included:
+    they will simply not match anything in ``os.environ``.
     """
     config = Config(env_path=get_env_test_path())
-    env_vars = []
-    for attr in dir(config):
-        env_vars.append(attr.upper())
+    env_vars = set(CONFIG_ENV_VARS)
+    env_vars.update(attr.upper() for attr in dir(config) if not attr.startswith("_"))
     for var in env_vars:
         if var in os.environ:
             del os.environ[var]
