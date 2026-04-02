@@ -16,6 +16,8 @@ from abstracts_explorer.cli import (
     search_command,
     setup_logging,
     _build_embeddings_where_clause,
+    add_conference_year_args,
+    pre_process_command,
 )
 from abstracts_explorer.plugin import LightweightPaper
 from tests.conftest import set_test_db
@@ -55,9 +57,11 @@ class TestBuildEmbeddingsWhereClause:
         assert _build_embeddings_where_clause(args) is None
 
     def test_conference_only(self):
-        """Conference filter produces correct WHERE clause."""
+        """Conference filter produces a case-insensitive LOWER() WHERE clause."""
         args = argparse.Namespace(conference="NeurIPS", year=None, where=None)
-        assert _build_embeddings_where_clause(args) == "conference = 'NeurIPS'"
+        result = _build_embeddings_where_clause(args)
+        assert "LOWER(conference)" in result
+        assert "LOWER('NeurIPS')" in result
 
     def test_year_only(self):
         """Year filter produces correct WHERE clause."""
@@ -68,7 +72,8 @@ class TestBuildEmbeddingsWhereClause:
         """Both conference and year produce combined WHERE clause."""
         args = argparse.Namespace(conference="ICLR", year=2025, where=None)
         result = _build_embeddings_where_clause(args)
-        assert "conference = 'ICLR'" in result
+        assert "LOWER(conference)" in result
+        assert "LOWER('ICLR')" in result
         assert "year = 2025" in result
         assert " AND " in result
 
@@ -81,7 +86,8 @@ class TestBuildEmbeddingsWhereClause:
         """Conference + --where are combined with AND."""
         args = argparse.Namespace(conference="NeurIPS", year=None, where="award IS NOT NULL")
         result = _build_embeddings_where_clause(args)
-        assert "conference = 'NeurIPS'" in result
+        assert "LOWER(conference)" in result
+        assert "LOWER('NeurIPS')" in result
         assert "(award IS NOT NULL)" in result
         assert " AND " in result
 
@@ -89,7 +95,8 @@ class TestBuildEmbeddingsWhereClause:
         """All three filters are combined with AND."""
         args = argparse.Namespace(conference="NeurIPS", year=2024, where="award IS NOT NULL")
         result = _build_embeddings_where_clause(args)
-        assert "conference = 'NeurIPS'" in result
+        assert "LOWER(conference)" in result
+        assert "LOWER('NeurIPS')" in result
         assert "year = 2024" in result
         assert "(award IS NOT NULL)" in result
 
@@ -97,7 +104,56 @@ class TestBuildEmbeddingsWhereClause:
         """Single quotes in conference name are escaped."""
         args = argparse.Namespace(conference="O'Reilly", year=None, where=None)
         result = _build_embeddings_where_clause(args)
-        assert "conference = 'O''Reilly'" in result
+        assert "O''Reilly" in result
+
+    def test_conference_case_insensitive(self):
+        """Lowercase conference input produces the same LOWER() structure."""
+        args_lower = argparse.Namespace(conference="neurips", year=None, where=None)
+        args_upper = argparse.Namespace(conference="NeurIPS", year=None, where=None)
+        result_lower = _build_embeddings_where_clause(args_lower)
+        result_upper = _build_embeddings_where_clause(args_upper)
+        # Both use LOWER() so only the literal value differs
+        assert "LOWER(conference)" in result_lower
+        assert "LOWER(conference)" in result_upper
+
+
+class TestAddConferenceYearArgs:
+    """Test cases for the unified add_conference_year_args helper."""
+
+    def test_adds_conference_arg(self):
+        """add_conference_year_args adds --conference with correct defaults."""
+        parser = argparse.ArgumentParser()
+        add_conference_year_args(parser)
+        args = parser.parse_args([])
+        assert args.conference is None
+
+    def test_adds_year_arg(self):
+        """add_conference_year_args adds --year with correct defaults."""
+        parser = argparse.ArgumentParser()
+        add_conference_year_args(parser)
+        args = parser.parse_args([])
+        assert args.year is None
+
+    def test_conference_set(self):
+        """--conference value is passed through unchanged."""
+        parser = argparse.ArgumentParser()
+        add_conference_year_args(parser)
+        args = parser.parse_args(["--conference", "NeurIPS"])
+        assert args.conference == "NeurIPS"
+
+    def test_conference_lowercase(self):
+        """--conference accepts lowercase values."""
+        parser = argparse.ArgumentParser()
+        add_conference_year_args(parser)
+        args = parser.parse_args(["--conference", "neurips"])
+        assert args.conference == "neurips"
+
+    def test_year_set(self):
+        """--year value is converted to int."""
+        parser = argparse.ArgumentParser()
+        add_conference_year_args(parser)
+        args = parser.parse_args(["--year", "2025"])
+        assert args.year == 2025
 
 
 class TestCLI:
@@ -452,7 +508,129 @@ class TestCLI:
         assert "Downloaded 1 papers" in captured.out
         assert "error(s) occurred" in captured.err
 
-    def test_create_embeddings_db_not_found(self, tmp_path, capsys):
+    def test_download_conference_case_insensitive(self, tmp_path, capsys):
+        """Test download command accepts conference names in any case."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        mock_plugin = Mock()
+        mock_plugin.plugin_name = "neurips"
+        mock_plugin.plugin_description = "NeurIPS Test Plugin"
+        mock_plugin.download.return_value = [
+            LightweightPaper(
+                title="Paper 1",
+                abstract="Abstract 1",
+                authors=["Author 1"],
+                session="S1",
+                poster_position="P1",
+                year=2025,
+                conference="NeurIPS",
+            )
+        ]
+
+        # Pass "NeurIPS" (mixed case) – should still find the lowercase plugin "neurips"
+        with patch("abstracts_explorer.cli.get_plugin") as mock_get_plugin:
+            mock_get_plugin.return_value = mock_plugin
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "abstracts-explorer",
+                    "download",
+                    "--conference",
+                    "NeurIPS",
+                    "--year",
+                    "2025",
+                    "--output",
+                    str(output_db),
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        # get_plugin must have been called with the lowercased name
+        mock_get_plugin.assert_called_once_with("neurips")
+
+    def test_pre_process_command_success(self, tmp_path, capsys, monkeypatch):
+        """Test pre-process command chains download → embeddings → clustering."""
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with (
+            patch("abstracts_explorer.cli.download_command") as mock_download,
+            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+        ):
+            mock_download.return_value = 0
+            mock_embed.return_value = 0
+            mock_cluster.return_value = 0
+
+            args = argparse.Namespace(conference="neurips", year=2025, force=False, verbose=0)
+            rc = pre_process_command(args)
+
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "Step 1/3" in captured.out
+        assert "Step 2/3" in captured.out
+        assert "Step 3/3" in captured.out
+        assert "completed successfully" in captured.out
+
+        # Verify each sub-command was called
+        mock_download.assert_called_once()
+        mock_embed.assert_called_once()
+        mock_cluster.assert_called_once()
+
+        # Conference and year must be forwarded
+        download_args = mock_download.call_args[0][0]
+        assert download_args.conference == "neurips"
+        assert download_args.year == 2025
+
+    def test_pre_process_command_download_fails(self, tmp_path, capsys, monkeypatch):
+        """Test pre-process command stops on download failure."""
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with (
+            patch("abstracts_explorer.cli.download_command") as mock_download,
+            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+        ):
+            mock_download.return_value = 1  # failure
+            mock_embed.return_value = 0
+            mock_cluster.return_value = 0
+
+            args = argparse.Namespace(conference=None, year=None, force=False, verbose=0)
+            rc = pre_process_command(args)
+
+        assert rc == 1
+        mock_embed.assert_not_called()
+        mock_cluster.assert_not_called()
+
+    def test_pre_process_command_via_main(self, tmp_path, capsys, monkeypatch):
+        """Test pre-process command is dispatched correctly via main()."""
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with (
+            patch("abstracts_explorer.cli.download_command") as mock_download,
+            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+        ):
+            mock_download.return_value = 0
+            mock_embed.return_value = 0
+            mock_cluster.return_value = 0
+
+            with patch.object(
+                sys, "argv", ["abstracts-explorer", "pre-process", "--conference", "iclr", "--year", "2024"]
+            ):
+                rc = main()
+
+        assert rc == 0
+        mock_download.assert_called_once()
+        mock_embed.assert_called_once()
+        mock_cluster.assert_called_once()
+
+        download_args = mock_download.call_args[0][0]
+        assert download_args.conference == "iclr"
+        assert download_args.year == 2024
         """Test create-embeddings with non-existent database."""
         nonexistent_db = tmp_path / "nonexistent.db"
         set_test_db(nonexistent_db)
@@ -966,7 +1144,8 @@ class TestCLI:
 
         # Verify the WHERE clause was passed to embed_from_database
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
-        assert "conference = 'NeurIPS'" in call_kwargs["where_clause"]
+        assert "LOWER(conference)" in call_kwargs["where_clause"]
+        assert "NeurIPS" in call_kwargs["where_clause"]
 
     def test_create_embeddings_with_year(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with --year flag filters to one year."""
@@ -1103,7 +1282,8 @@ class TestCLI:
 
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
         where = call_kwargs["where_clause"]
-        assert "conference = 'NeurIPS'" in where
+        assert "LOWER(conference)" in where
+        assert "NeurIPS" in where
         assert "year = 2024" in where
 
     def test_create_embeddings_conference_with_where(self, tmp_path, capsys, monkeypatch):
@@ -1169,7 +1349,8 @@ class TestCLI:
 
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
         where = call_kwargs["where_clause"]
-        assert "conference = 'NeurIPS'" in where
+        assert "LOWER(conference)" in where
+        assert "NeurIPS" in where
         assert "(award IS NOT NULL)" in where
 
     def test_create_embeddings_default_embeds_all(self, tmp_path, capsys, monkeypatch):
