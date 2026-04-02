@@ -291,6 +291,114 @@ class TestRAGChatInit:
         assert chat.enable_mcp_tools is False
 
 
+class TestRAGChatInstructions:
+    """Test RAGChat instruction building with conference context."""
+
+    def test_build_base_instructions_contains_defaults(self, mock_embeddings_manager, mock_database):
+        """Test that base instructions contain the standard content."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        instructions = chat._build_base_instructions()
+
+        assert "AI assistant" in instructions
+        assert "conference data" in instructions
+        assert "Today's date" in instructions
+
+    def test_build_instructions_with_conference_and_year(self, mock_embeddings_manager, mock_database):
+        """Test instructions include selected conference and year."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        instructions = chat._build_instructions(
+            conferences=["NeurIPS"],
+            years=[2025],
+        )
+
+        assert "NeurIPS" in instructions
+        assert "2025" in instructions
+        assert "default conference" in instructions
+        assert "default year" in instructions
+
+    def test_build_instructions_with_conference_only(self, mock_embeddings_manager, mock_database):
+        """Test instructions include conference when no year selected."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        instructions = chat._build_instructions(conferences=["ICLR"])
+
+        assert "ICLR" in instructions
+        assert "default conference" in instructions
+        assert "default year" not in instructions
+
+    def test_build_instructions_with_year_only(self, mock_embeddings_manager, mock_database):
+        """Test instructions include year when no conference selected."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        instructions = chat._build_instructions(years=[2024])
+
+        assert "2024" in instructions
+        assert "default year" in instructions
+        assert "default conference" not in instructions
+
+    def test_build_instructions_with_available_conferences(self, mock_embeddings_manager, mock_database):
+        """Test instructions include available conferences list."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        instructions = chat._build_instructions(
+            available_conferences=["NeurIPS", "ICLR", "ICML"],
+        )
+
+        assert "NeurIPS" in instructions
+        assert "ICLR" in instructions
+        assert "ICML" in instructions
+        assert "available conferences" in instructions
+
+    def test_build_instructions_no_context(self, mock_embeddings_manager, mock_database):
+        """Test instructions without any context match base instructions."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        base = chat._build_base_instructions()
+        full = chat._build_instructions()
+
+        assert full == base
+
+    def test_build_instructions_multiple_conferences(self, mock_embeddings_manager, mock_database):
+        """Test instructions with multiple selected conferences."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        instructions = chat._build_instructions(
+            conferences=["NeurIPS", "ICLR"],
+            years=[2024, 2025],
+        )
+
+        assert "NeurIPS" in instructions
+        assert "ICLR" in instructions
+        assert "2024" in instructions
+        assert "2025" in instructions
+
+    def test_query_with_conference_context(self, mock_embeddings_manager, mock_database, mock_search_papers):
+        """Test that query passes conference context to instructions."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+
+        with chat.agent.override(model=TestModel()):
+            result = chat.query(
+                "What are the main topics?",
+                conferences=["NeurIPS"],
+                years=[2025],
+                available_conferences=["NeurIPS", "ICLR", "ICML"],
+            )
+
+        assert "response" in result
+
+    def test_query_system_prompt_overrides_conference_context(
+        self, mock_embeddings_manager, mock_database, mock_search_papers
+    ):
+        """Test that explicit system_prompt overrides conference context instructions."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+
+        custom_prompt = "Custom system prompt."
+        with chat.agent.override(model=TestModel()):
+            result = chat.query(
+                "Test question",
+                conferences=["NeurIPS"],
+                years=[2025],
+                system_prompt=custom_prompt,
+            )
+
+        assert "response" in result
+
+
 class TestRAGChatQuery:
     """Test RAGChat query method."""
 

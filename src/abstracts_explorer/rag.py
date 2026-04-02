@@ -368,6 +368,77 @@ class RAGChat:
         # Build the Pydantic AI agent
         self.agent = self._build_agent()
 
+    def _build_base_instructions(self) -> str:
+        """
+        Build the base system instructions for the RAG agent.
+
+        Returns
+        -------
+        str
+            Base instruction string without conference-specific context.
+        """
+        return (
+            "You are an AI assistant helping researchers analyze conference data. "
+            "Use the available tools to search for papers, analyze topics, and understand trends. "
+            "Present the information in a clear, easy-to-understand format. "
+            f"Today's date is {datetime.now().strftime('%Y-%m-%d')}. "
+            "When referencing specific papers, cite them using local links: "
+            "<a href='#paper-1'>Paper-1</a>, <a href='#paper-2'>Paper-2</a>, etc."
+        )
+
+    def _build_instructions(
+        self,
+        conferences: Optional[List[str]] = None,
+        years: Optional[List[int]] = None,
+        available_conferences: Optional[List[str]] = None,
+    ) -> str:
+        """
+        Build context-aware system instructions including conference information.
+
+        Parameters
+        ----------
+        conferences : list of str, optional
+            Currently selected conference(s) from the web UI.
+        years : list of int, optional
+            Currently selected year(s) from the web UI.
+        available_conferences : list of str, optional
+            All available conference names from registered plugins.
+
+        Returns
+        -------
+        str
+            Full instruction string with conference context appended when available.
+        """
+        instructions = self._build_base_instructions()
+
+        context_parts = []
+        if conferences and years:
+            conf_str = ", ".join(conferences)
+            year_str = ", ".join(str(y) for y in years)
+            context_parts.append(
+                f"Unless the user specifies otherwise, assume the default conference is "
+                f"{conf_str} and the default year is {year_str}."
+            )
+        elif conferences:
+            conf_str = ", ".join(conferences)
+            context_parts.append(
+                f"Unless the user specifies otherwise, assume the default conference is {conf_str}."
+            )
+        elif years:
+            year_str = ", ".join(str(y) for y in years)
+            context_parts.append(
+                f"Unless the user specifies otherwise, assume the default year is {year_str}."
+            )
+
+        if available_conferences:
+            avail_str = ", ".join(available_conferences)
+            context_parts.append(f"The available conferences are: {avail_str}.")
+
+        if context_parts:
+            instructions += " " + " ".join(context_parts)
+
+        return instructions
+
     def _build_agent(self) -> Agent[RAGDeps, str]:
         """
         Build the Pydantic AI agent with tools and model configuration.
@@ -400,21 +471,11 @@ class RAGChat:
                 ]
             )
 
-        # Build instructions
-        instructions = (
-            "You are an AI assistant helping researchers analyze conference data. "
-            "Use the available tools to search for papers, analyze topics, and understand trends. "
-            "Present the information in a clear, easy-to-understand format. "
-            f"Today's date is {datetime.now().strftime('%Y-%m-%d')}. "
-            "When referencing specific papers, cite them using local links: "
-            "<a href='#paper-1'>Paper-1</a>, <a href='#paper-2'>Paper-2</a>, etc."
-        )
-
         return Agent(
             ai_model,
             deps_type=RAGDeps,
             tools=tools,
-            instructions=instructions,
+            instructions=self._build_base_instructions(),
         )
 
     def query(
@@ -425,6 +486,7 @@ class RAGChat:
         system_prompt: Optional[str] = None,
         conferences: Optional[List[str]] = None,
         years: Optional[List[int]] = None,
+        available_conferences: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Query the RAG system with a question.
@@ -438,14 +500,21 @@ class RAGChat:
         metadata_filter : dict, optional
             Metadata filter for paper search (currently unused with Pydantic AI agent).
         system_prompt : str, optional
-            Custom system prompt for the model (overrides default instructions).
+            Custom system prompt for the model (overrides default instructions including
+            conference context).
         conferences : list of str, optional
             Default conferences for MCP clustering tools.  Typically set from
             the web UI conference selector so that clustering tools use cached
-            results for the selected conference.
+            results for the selected conference.  Also included in the system prompt
+            so the LLM knows the current conference context.
         years : list of int, optional
             Default years for MCP clustering tools.  Typically set from the
-            web UI year selector.
+            web UI year selector.  Also included in the system prompt so the LLM
+            knows the current year context.
+        available_conferences : list of str, optional
+            All conference names available in the system (from registered plugins).
+            Included in the system prompt so the LLM can inform the user about
+            which conferences can be queried.
 
         Returns
         -------
@@ -493,9 +562,16 @@ class RAGChat:
             if self._message_history:
                 run_kwargs["message_history"] = self._message_history
 
-            # Override instructions if custom system prompt provided
+            # Set per-run instructions: use explicit system_prompt if provided,
+            # otherwise build context-aware instructions with conference information
             if system_prompt is not None:
                 run_kwargs["instructions"] = system_prompt
+            else:
+                run_kwargs["instructions"] = self._build_instructions(
+                    conferences=conferences,
+                    years=years,
+                    available_conferences=available_conferences,
+                )
 
             # Run the agent
             result = self.agent.run_sync(question, **run_kwargs)
