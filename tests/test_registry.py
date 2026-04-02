@@ -1242,6 +1242,44 @@ class TestUploadDownload:
         with pytest.raises(RegistryError, match="No tags found"):
             client.download_all()
 
+    def test_download_all_forwards_ignore_mismatch_flag(self, tmp_path):
+        """download_all forwards ignore_embedding_model_mismatch to each download() call."""
+        set_test_db(tmp_path / "target.db")
+
+        with patch("oras.client.OrasClient") as MockOras:
+            mock_oras = MockOras.return_value
+            mock_oras.get_tags.return_value = [
+                "neurips-2024_model-a",
+                "iclr-2024_model-a",
+            ]
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        summary = {"conference": "neurips", "paper_count": 0, "embedding_count": 0}
+        with patch.object(client, "get_artifact_info", return_value={"annotations": {}}):
+            with patch.object(client, "download", return_value=summary) as mock_dl:
+                client.download_all(ignore_embedding_model_mismatch=True)
+
+        assert mock_dl.call_count == 2
+        for call in mock_dl.call_args_list:
+            assert call.kwargs["ignore_embedding_model_mismatch"] is True
+
+    def test_download_all_default_ignore_mismatch_false(self, tmp_path):
+        """download_all passes ignore_embedding_model_mismatch=False by default."""
+        set_test_db(tmp_path / "target.db")
+
+        with patch("oras.client.OrasClient") as MockOras:
+            mock_oras = MockOras.return_value
+            mock_oras.get_tags.return_value = ["neurips-2024_model-a"]
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        summary = {"conference": "neurips", "paper_count": 0, "embedding_count": 0}
+        with patch.object(client, "get_artifact_info", return_value={"annotations": {}}):
+            with patch.object(client, "download", return_value=summary) as mock_dl:
+                client.download_all()
+
+        mock_dl.assert_called_once()
+        assert mock_dl.call_args.kwargs["ignore_embedding_model_mismatch"] is False
+
     def test_cli_upload_all_conferences(self, tmp_path, capsys, monkeypatch):
         """CLI upload with --conference all invokes upload_all."""
         from abstracts_explorer.cli import registry_upload_command
@@ -1292,6 +1330,33 @@ class TestUploadDownload:
         captured = capsys.readouterr()
         assert "Download complete" in captured.out
         assert "2 artifact(s)" in captured.out
+
+    def test_cli_download_all_embedding_model_mismatch(self, capsys):
+        """CLI download --conference all returns 1 and prints guidance on EmbeddingModelMismatchError."""
+        from abstracts_explorer.cli import registry_download_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            conference="all",
+            year=None,
+            tag=None,
+            yes=True,
+            embedding_model="local-model",
+            ignore_embedding_model_mismatch=False,
+        )
+
+        mismatch = EmbeddingModelMismatchError("local-model", "remote-model")
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.download_all.side_effect = mismatch
+
+            result = registry_download_command(args)
+
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "remote-model" in captured.err
+        assert "--ignore-embedding-model-mismatch" in captured.err
 
 
 # ---------------------------------------------------------------------------
@@ -1599,6 +1664,32 @@ class TestCLICommands:
 
         assert result == 0
         mock_instance.download_all.assert_called_once()
+
+    def test_registry_download_all_ignore_mismatch_flag_forwarded(self, capsys):
+        """CLI --ignore-embedding-model-mismatch flag is forwarded to download_all() when --conference all."""
+        from abstracts_explorer.cli import registry_download_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            conference="all",
+            year=None,
+            tag=None,
+            yes=True,
+            embedding_model=None,
+            ignore_embedding_model_mismatch=True,
+        )
+
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.download_all.return_value = []
+
+            result = registry_download_command(args)
+
+        assert result == 0
+        mock_instance.download_all.assert_called_once()
+        call_kwargs = mock_instance.download_all.call_args.kwargs
+        assert call_kwargs["ignore_embedding_model_mismatch"] is True
 
     def test_embedding_model_mismatch_error_attributes(self):
         """EmbeddingModelMismatchError carries local_model and remote_model."""
