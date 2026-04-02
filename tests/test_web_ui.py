@@ -592,9 +592,12 @@ class TestWebUIChatEndpointSuccess:
 
                     assert response.status_code == 200
                     # Verify n_papers was used
-                    mock_rag.query.assert_called_with(
-                        "Test question", n_results=5, metadata_filter=None, conferences=None, years=None
-                    )
+                    call_kwargs = mock_rag.query.call_args
+                    assert call_kwargs.args[0] == "Test question"
+                    assert call_kwargs.kwargs["n_results"] == 5
+                    assert call_kwargs.kwargs["metadata_filter"] is None
+                    assert call_kwargs.kwargs["conferences"] is None
+                    assert call_kwargs.kwargs["years"] is None
 
     def test_chat_with_reset_flag(self):
         """Test chat with reset=True (lines 249-253)."""
