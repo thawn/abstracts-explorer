@@ -6,17 +6,17 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS python-builder
 
 WORKDIR /app
 
-# Install git for version detection (hatch-vcs needs git to read .git directory)
+# Install git for version detection (hatch-vcs needs git to determine the version from git tags)
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 
-# Copy .git directory for version detection (setuptools-scm/hatch-vcs)
-COPY .git/ ./.git/
-
-# Copy Python project files
-COPY pyproject.toml uv.lock README.md LICENSE ./
-COPY src/ ./src/
-
-# Install Python dependencies with uv
+# Copy the full repository including .git so hatch-vcs can read the git tags.
+# .dockerignore excludes some git-tracked files, which would make the working tree appear
+# dirty and cause hatch-vcs to generate a dev version. We fix this by running
+# `git checkout -- .` to restore all tracked files to HEAD before installing.
+# Layers in this builder stage don't matter — the final image only copies what it needs.
+COPY . .
+RUN git checkout -- .
+RUN rm -f src/abstracts_explorer/_version.py
 RUN uv sync --frozen --no-dev --extra web
 
 
