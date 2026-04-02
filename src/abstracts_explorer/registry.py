@@ -305,7 +305,7 @@ class RegistryClient:
         return conference
 
     @staticmethod
-    def _get_embedding_model() -> Optional[str]:
+    def _get_embedding_model_database() -> Optional[str]:
         """
         Return the embedding model stored in the local database.
 
@@ -733,7 +733,7 @@ class RegistryClient:
         conference = self._resolve_conference_name(conference)
 
         # --- Determine embedding model (needed for auto-tag) ---
-        embedding_model = self._get_embedding_model()
+        embedding_model = self._get_embedding_model_database()
         if not embedding_model:
             raise RegistryError(
                 "No embedding model found in local database. "
