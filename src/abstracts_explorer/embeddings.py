@@ -557,6 +557,53 @@ class EmbeddingsManager:
         prepared = prepare_chroma_db_paper_data(metadata.copy())
         return LightweightPaper(**prepared).model_dump(exclude_none=True)
 
+    @staticmethod
+    def _serialize_metadata_for_chromadb(metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Serialize a metadata dict to ChromaDB-compatible string values.
+
+        ChromaDB only accepts ``str``, ``int``, ``float``, ``bool``, or ``None``
+        as metadata values.  :meth:`export_embeddings` (and the registry export
+        path) runs raw ChromaDB metadata through :meth:`parse_chromadb_metadata`
+        which converts the semicolon-separated *authors* string and the
+        comma-separated *keywords* string back to Python lists.  When that data
+        is round-tripped through JSON and then passed back to ChromaDB via
+        :meth:`import_embeddings`, the list values must be re-serialised.
+
+        List fields use the same helpers as
+        :func:`~abstracts_explorer.plugin.serialize_authors_to_string` and
+        :func:`~abstracts_explorer.plugin.serialize_keywords_to_string` to
+        keep the stored format consistent with the SQL database.  All other
+        values are converted to strings so that ChromaDB metadata filters work
+        reliably (e.g. ``{"year": "2025"}``).
+
+        Parameters
+        ----------
+        metadata : dict
+            Metadata dict that may contain list values.
+
+        Returns
+        -------
+        dict
+            Metadata dict with all values converted to ChromaDB-compatible types.
+        """
+        from abstracts_explorer.plugin import serialize_authors_to_string, serialize_keywords_to_string
+
+        result: Dict[str, Any] = {}
+        for k, v in metadata.items():
+            if v is None:
+                result[k] = ""
+            elif isinstance(v, list):
+                if k == "authors":
+                    result[k] = serialize_authors_to_string(v)
+                elif k == "keywords":
+                    result[k] = serialize_keywords_to_string(v)
+                else:
+                    result[k] = str(v)
+            else:
+                result[k] = str(v)
+        return result
+
     def add_paper(self, paper: dict) -> None:
         """
         Add a paper to the vector database.
@@ -583,9 +630,10 @@ class EmbeddingsManager:
             # Generate embedding if not provided
             embedding = self.generate_embedding(embedding_text)
 
-            # Prepare metadata - convert all values to strings for ChromaDB compatibility
-            meta = paper.copy()
-            meta = {k: str(v) if v is not None else "" for k, v in meta.items()}
+            # Prepare metadata - serialize all values for ChromaDB compatibility,
+            # using the same format as _serialize_metadata_for_chromadb so that
+            # add_paper and import_embeddings produce identical stored representations.
+            meta = self._serialize_metadata_for_chromadb(paper.copy())
 
             # Add to collection
             self.collection.add(
@@ -1204,7 +1252,9 @@ class EmbeddingsManager:
                 if documents:
                     add_kwargs["documents"] = documents[i : i + batch_size]
                 if metadatas:
-                    add_kwargs["metadatas"] = metadatas[i : i + batch_size]
+                    add_kwargs["metadatas"] = [
+                        self._serialize_metadata_for_chromadb(m) for m in metadatas[i : i + batch_size]
+                    ]
                 if embeddings:
                     add_kwargs["embeddings"] = embeddings[i : i + batch_size]
 

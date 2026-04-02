@@ -19,7 +19,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError, ProgrammingError, IntegrityError
 
 # Import Pydantic models from plugin framework
-from abstracts_explorer.plugin import LightweightPaper
+from abstracts_explorer.plugin import LightweightPaper, serialize_authors_to_string, serialize_keywords_to_string
 
 # Import SQLAlchemy models
 from abstracts_explorer.db_models import (
@@ -304,11 +304,7 @@ class DatabaseManager:
             abstract = paper.abstract
 
             # Handle authors - store as semicolon-separated names
-            authors_data = paper.authors
-            if isinstance(authors_data, list):
-                authors_str = "; ".join(str(author) for author in authors_data)
-            else:
-                authors_str = str(authors_data) if authors_data else ""
+            authors_str = serialize_authors_to_string(paper.authors)
 
             # Generate UID as hash from title + conference + year
             uid_source = f"{title}:{paper_id}:{paper.conference}:{paper.year}"
@@ -322,14 +318,7 @@ class DatabaseManager:
                 return None
 
             # Handle keywords (could be list or None)
-            keywords_list = paper.keywords
-            keywords_str: str
-            if isinstance(keywords_list, list):
-                keywords_str = ", ".join(str(k) for k in keywords_list)
-            elif keywords_list is None:
-                keywords_str = ""
-            else:
-                keywords_str = ""
+            keywords_str = serialize_keywords_to_string(paper.keywords) if paper.keywords else ""
 
             # Use paper's original_id if available
             original_id = str(paper.original_id) if paper.original_id else None
