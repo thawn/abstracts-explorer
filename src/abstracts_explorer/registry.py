@@ -1109,6 +1109,7 @@ class RegistryClient:
     def download_all(
         self,
         progress_callback: Optional[Callable[[str], None]] = None,
+        ignore_embedding_model_mismatch: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Download data for **all** conference tags in the registry.
@@ -1120,6 +1121,9 @@ class RegistryClient:
         ----------
         progress_callback : callable, optional
             Function called with status messages during download.
+
+        ignore_embedding_model_mismatch : bool, optional
+            If True, ignore embedding model mismatches during download.
 
         Returns
         -------
@@ -1184,6 +1188,7 @@ class RegistryClient:
                 year=yr,
                 tag=tag,
                 progress_callback=progress_callback,
+                ignore_embedding_model_mismatch=ignore_embedding_model_mismatch,
             )
             summaries.append(summary)
 

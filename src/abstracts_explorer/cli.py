@@ -1910,9 +1910,22 @@ def registry_download_command(args: argparse.Namespace) -> int:
         client = RegistryClient(repository=repository, token=token)
 
         if conference == "all":
-            summaries = client.download_all(
-                progress_callback=lambda msg: print(f"  {msg}"),
-            )
+            try:
+                summaries = client.download_all(
+                    progress_callback=lambda msg: print(f"  {msg}"),
+                )
+            except EmbeddingModelMismatchError as mismatch:
+                print(
+                    f"\n❌ Embedding model mismatch:\n"
+                    f"  Configured model: '{embedding_model}'\n"
+                    f"  Artifact model:   '{mismatch.remote_model}'\n"
+                    f"\nIf both names refer to the same model on different backends,\n"
+                    f"you can use --ignore-embedding-model-mismatch to proceed.\n"
+                    f"⚠️  Only use this option if you are certain the models are identical!",
+                    file=sys.stderr,
+                )
+                return 1
+
             print(f"\n✅ Download complete! Downloaded {len(summaries)} artifact(s).")
             for s in summaries:
                 print(
