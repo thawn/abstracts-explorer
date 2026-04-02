@@ -40,6 +40,7 @@ import logging
 import os
 import re
 import shutil
+import sqlite3
 import tempfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -405,7 +406,9 @@ class RegistryClient:
         paper_db_file: Path,
         embeddings_file: Path,
         progress: Callable[[str], None],
-    ) -> Dict[str, int]:
+        embedding_model: Optional[str] = None,
+        ignore_embedding_model_mismatch: bool = False,
+    ) -> Dict[str, Any]:
         """
         Import paper DB and embeddings for a single conference+year.
 
@@ -414,10 +417,15 @@ class RegistryClient:
         rolled back to prevent inconsistency between the paper DB and the
         embedding DB.
 
-        Returns a dict with ``paper_count`` and ``embedding_count``.
+        Returns a dict with ``paper_count``, ``embedding_count``, and
+        ``mismatch_was_ignored`` (True if an embedding model mismatch was
+        detected but overridden via *ignore_embedding_model_mismatch*).
 
         Raises
         ------
+        EmbeddingModelMismatchError
+            If the artifact's embedding model differs from *embedding_model*
+            and *ignore_embedding_model_mismatch* is ``False``.
         RegistryError
             If either file is missing or an import step fails.
         """
@@ -435,6 +443,37 @@ class RegistryClient:
                 f"Incomplete data for {conference}/{year}: missing {', '.join(missing)}. "
                 "Cannot import — both paper DB and embeddings must be present."
             )
+
+        # --- pre-flight: validate embedding model from artifact paper DB ---
+        # This check catches mismatches even when the local DB is empty (in which case
+        # the normal import_papers_from_sqlite() check is skipped).
+        mismatch_was_ignored = False
+        if embedding_model:
+            artifact_model: Optional[str] = None
+            try:
+                with sqlite3.connect(str(paper_db_file)) as conn:
+                    row = conn.execute(
+                        "SELECT embedding_model FROM embeddings_metadata ORDER BY updated_at DESC LIMIT 1"
+                    ).fetchone()
+                    if row:
+                        artifact_model = row[0]
+            except (sqlite3.OperationalError, sqlite3.DatabaseError) as exc:
+                # Legacy DB without embeddings_metadata table or not a valid SQLite file
+                logger.debug("Could not read embedding model from artifact DB %s: %s", paper_db_file.name, exc)
+
+            if artifact_model and _sanitize_str_for_oci_tag(artifact_model) != _sanitize_str_for_oci_tag(
+                embedding_model
+            ):
+                if not ignore_embedding_model_mismatch:
+                    raise EmbeddingModelMismatchError(local_model=embedding_model, remote_model=artifact_model)
+                mismatch_was_ignored = True
+                progress(
+                    f"⚠️  WARNING: Embedding model mismatch detected for {conference}/{year}!\n"
+                    f"  Configured model: '{embedding_model}'\n"
+                    f"  Artifact model:   '{artifact_model}'\n"
+                    f"  Proceeding because --ignore-embedding-model-mismatch was set.\n"
+                    f"  ⚠️  Only do this if both names refer to the same model on different backends!"
+                )
 
         # --- import paper DB first ---
         progress(f"Importing paper database for {conference}/{year}...")
@@ -482,6 +521,7 @@ class RegistryClient:
         return {
             "paper_count": paper_count,
             "embedding_count": embedding_count,
+            "mismatch_was_ignored": mismatch_was_ignored,
         }
 
     # ------------------------------------------------------------------
@@ -869,9 +909,19 @@ class RegistryClient:
                 paper_db = files["paper_db"]
                 embeddings = files["embeddings"]
 
-                result = self._import_year(conference, yr, paper_db, embeddings, _progress)
+                result = self._import_year(
+                    conference,
+                    yr,
+                    paper_db,
+                    embeddings,
+                    _progress,
+                    embedding_model=embedding_model,
+                    ignore_embedding_model_mismatch=ignore_embedding_model_mismatch,
+                )
                 total_papers += result["paper_count"]
                 total_embeddings += result["embedding_count"]
+                if result.get("mismatch_was_ignored"):
+                    mismatch_was_ignored = True
                 imported_years.append(yr)
 
             if not imported_years:

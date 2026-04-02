@@ -1633,6 +1633,121 @@ class TestCLICommands:
         assert exc_info.value.local_model == "model-a"
         assert exc_info.value.remote_model == "model-b"
 
+    def _make_artifact_paper_db(self, path, embedding_model: str) -> None:
+        """Create a SQLite DB file with the real schema and an embeddings_metadata row for testing."""
+        from tests.conftest import set_test_db
+
+        set_test_db(path)
+        with DatabaseManager() as db:
+            db.create_tables()
+            db.set_embedding_model(embedding_model)
+
+    def test_import_year_raises_mismatch_when_db_empty_and_model_differs(self, tmp_path):
+        """_import_year raises EmbeddingModelMismatchError when local DB is empty but artifact model differs."""
+        set_test_db(tmp_path / "target.db")
+
+        paper_db_path = tmp_path / "papers-2024.db"
+        self._make_artifact_paper_db(paper_db_path, "artifact-model-b")
+        embeddings_path = tmp_path / "embeddings-2024.json"
+        embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        with pytest.raises(EmbeddingModelMismatchError) as exc_info:
+            client._import_year(
+                "neurips",
+                2024,
+                paper_db_path,
+                embeddings_path,
+                lambda m: None,
+                embedding_model="configured-model-a",
+            )
+
+        assert exc_info.value.local_model == "configured-model-a"
+        assert exc_info.value.remote_model == "artifact-model-b"
+
+    def test_import_year_ignores_mismatch_when_flag_set_and_db_empty(self, tmp_path):
+        """_import_year proceeds and returns mismatch_was_ignored=True when flag is set and local DB is empty."""
+        set_test_db(tmp_path / "target.db")
+
+        paper_db_path = tmp_path / "papers-2024.db"
+        self._make_artifact_paper_db(paper_db_path, "artifact-model-b")
+        embeddings_path = tmp_path / "embeddings-2024.json"
+        embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        with patch("abstracts_explorer.database.DatabaseManager.import_papers_from_sqlite", return_value=0):
+            with patch("abstracts_explorer.embeddings.EmbeddingsManager.import_embeddings", return_value=0):
+                result = client._import_year(
+                    "neurips",
+                    2024,
+                    paper_db_path,
+                    embeddings_path,
+                    lambda m: None,
+                    embedding_model="configured-model-a",
+                    ignore_embedding_model_mismatch=True,
+                )
+
+        assert result["mismatch_was_ignored"] is True
+
+    def test_import_year_no_mismatch_when_models_match(self, tmp_path):
+        """_import_year returns mismatch_was_ignored=False when models match."""
+        set_test_db(tmp_path / "target.db")
+
+        paper_db_path = tmp_path / "papers-2024.db"
+        self._make_artifact_paper_db(paper_db_path, "same-model")
+        embeddings_path = tmp_path / "embeddings-2024.json"
+        embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        with patch("abstracts_explorer.database.DatabaseManager.import_papers_from_sqlite", return_value=0):
+            with patch("abstracts_explorer.embeddings.EmbeddingsManager.import_embeddings", return_value=0):
+                result = client._import_year(
+                    "neurips",
+                    2024,
+                    paper_db_path,
+                    embeddings_path,
+                    lambda m: None,
+                    embedding_model="same-model",
+                )
+
+        assert result["mismatch_was_ignored"] is False
+
+    def test_download_raises_mismatch_when_db_empty_and_no_config_json_model(self, tmp_path):
+        """download() raises EmbeddingModelMismatchError from artifact paper DB when config.json has no model."""
+        set_test_db(tmp_path / "target.db")
+
+        config_metadata = {"version": "1.0.0", "conference": "neurips"}  # no embedding_model in config.json
+        paper_db_path = tmp_path / "papers-2024.db"
+        self._make_artifact_paper_db(paper_db_path, "artifact-model-b")
+        embeddings_path = tmp_path / "embeddings-2024.json"
+        embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+        config_path = tmp_path / "config.json"
+        config_path.write_text(json.dumps(config_metadata))
+
+        pulled_files = [str(paper_db_path), str(embeddings_path), str(config_path)]
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        with patch.object(client._client, "pull", return_value=pulled_files):
+            # Local DB is empty; config.json has no model → falls through to _import_year() check
+            with pytest.raises(EmbeddingModelMismatchError) as exc_info:
+                client.download(
+                    conference="neurips",
+                    year=2024,
+                    tag="neurips-2024_model-a",
+                    embedding_model="configured-model-a",
+                )
+
+        assert exc_info.value.local_model == "configured-model-a"
+        assert exc_info.value.remote_model == "artifact-model-b"
+
     def test_download_mismatch_with_matching_config_prompts_clear(self, tmp_path, capsys, monkeypatch):
         """Download offers to clear local data when configured model matches remote model."""
         from abstracts_explorer.cli import registry_download_command
