@@ -698,7 +698,7 @@ class TestUploadDownload:
         with patch("oras.client.OrasClient"):
             client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
-        with patch.object(RegistryClient, "_get_embedding_model", return_value="test-model"):
+        with patch.object(RegistryClient, "_get_embedding_model_database", return_value="test-model"):
             with pytest.raises(RegistryError, match="No papers found"):
                 client.upload(conference="icml", year=2024)
 
@@ -714,7 +714,7 @@ class TestUploadDownload:
 
         with (
             patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em),
-            patch.object(RegistryClient, "_get_embedding_model", return_value="test-model"),
+            patch.object(RegistryClient, "_get_embedding_model_database", return_value="test-model"),
         ):
             with pytest.raises(RegistryError, match="No embeddings found"):
                 client.upload(conference="neurips", year=2024)
@@ -738,7 +738,7 @@ class TestUploadDownload:
 
         with (
             patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em),
-            patch.object(RegistryClient, "_get_embedding_model", return_value="test-model"),
+            patch.object(RegistryClient, "_get_embedding_model_database", return_value="test-model"),
         ):
             summary = client.upload(conference="neurips", year=2024)
 
@@ -767,7 +767,7 @@ class TestUploadDownload:
 
         with (
             patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em),
-            patch.object(RegistryClient, "_get_embedding_model", return_value="test-model"),
+            patch.object(RegistryClient, "_get_embedding_model_database", return_value="test-model"),
         ):
             summary = client.upload(conference="neurips", year=2024, tag="custom-tag")
 
@@ -795,7 +795,7 @@ class TestUploadDownload:
         messages = []
         with (
             patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em),
-            patch.object(RegistryClient, "_get_embedding_model", return_value="test-model"),
+            patch.object(RegistryClient, "_get_embedding_model_database", return_value="test-model"),
         ):
             client.upload(
                 conference="neurips",
@@ -825,7 +825,7 @@ class TestUploadDownload:
 
         with (
             patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em),
-            patch.object(RegistryClient, "_get_embedding_model", return_value="test-model"),
+            patch.object(RegistryClient, "_get_embedding_model_database", return_value="test-model"),
         ):
             summary = client.upload(conference="neurips")
 
@@ -847,7 +847,7 @@ class TestUploadDownload:
         with patch("oras.client.OrasClient"):
             client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
-        with patch.object(RegistryClient, "_get_embedding_model", return_value="test-model"):
+        with patch.object(RegistryClient, "_get_embedding_model_database", return_value="test-model"):
             with pytest.raises(RegistryError, match="No data found"):
                 client.upload(conference="icml")
 
@@ -887,7 +887,7 @@ class TestUploadDownload:
 
         with (
             patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em),
-            patch.object(RegistryClient, "_get_embedding_model", return_value="test-model"),
+            patch.object(RegistryClient, "_get_embedding_model_database", return_value="test-model"),
         ):
             # User passes lowercase "neurips", DB has "NeurIPS" — should succeed
             summary = client.upload(conference="neurips")
@@ -903,7 +903,7 @@ class TestUploadDownload:
         with patch("oras.client.OrasClient"):
             client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
-        with patch.object(RegistryClient, "_get_embedding_model", return_value=None):
+        with patch.object(RegistryClient, "_get_embedding_model_database", return_value=None):
             with pytest.raises(RegistryError, match="No embedding model found"):
                 client.upload(conference="neurips", year=2024)
 
@@ -1117,7 +1117,7 @@ class TestUploadDownload:
         # Mock the embedding model lookup
         with (
             patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em),
-            patch.object(RegistryClient, "_get_embedding_model", return_value="text-embedding-ada-002"),
+            patch.object(RegistryClient, "_get_embedding_model_database", return_value="text-embedding-ada-002"),
         ):
             summary = client.upload(conference="neurips", year=2024)
 
@@ -1148,7 +1148,7 @@ class TestUploadDownload:
 
         with (
             patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em),
-            patch.object(RegistryClient, "_get_embedding_model", return_value="test-model"),
+            patch.object(RegistryClient, "_get_embedding_model_database", return_value="test-model"),
         ):
             summaries = client.upload_all(progress_callback=lambda m: None)
 
