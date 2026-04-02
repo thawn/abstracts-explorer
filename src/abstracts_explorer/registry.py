@@ -562,7 +562,7 @@ class RegistryClient:
                 if not ignore_embedding_model_mismatch:
                     raise EmbeddingModelMismatchError(local_model=embedding_model, remote_model=artifact_model)
                 mismatch_was_ignored = True
-                progress(
+                logger.debug(
                     f"⚠️  WARNING: Embedding model mismatch detected for {conference}/{year}!\n"
                     f"  Configured model: '{embedding_model}'\n"
                     f"  Artifact model:   '{artifact_model}'\n"
