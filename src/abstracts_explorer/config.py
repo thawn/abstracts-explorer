@@ -356,6 +356,49 @@ class Config:
         # Resolve relative to data_dir and make absolute
         return str((Path(self.data_dir) / path).absolute())
 
+    def get_supported_env_vars(self) -> set:
+        """
+        Get a set of all supported environment variable names.
+
+        Returns
+        -------
+        set
+            Set of supported environment variable names.
+
+        Examples
+        --------
+        >>> config = Config()
+        >>> env_vars = config.supported_env_vars()
+        >>> print("CHAT_MODEL" in env_vars)
+        True
+        """
+        return {
+            "DATA_DIR",
+            "CHAT_MODEL",
+            "CHAT_TEMPERATURE",
+            "CHAT_MAX_TOKENS",
+            "EMBEDDING_MODEL",
+            "LLM_BACKEND_URL",
+            "LLM_BACKEND_AUTH_TOKEN",
+            "PAPER_DB",
+            "EMBEDDING_DB",
+            "COLLECTION_NAME",
+            "MAX_CONTEXT_PAPERS",
+            "ENABLE_QUERY_REWRITING",
+            "QUERY_SIMILARITY_THRESHOLD",
+            "DEFAULT_CONFERENCE",
+            "DEFAULT_YEAR",
+            "LOG_LEVEL",
+            "PROXY_X_FOR",
+            "PROXY_X_PROTO",
+            "PROXY_X_HOST",
+            "PROXY_X_PREFIX",
+            "IMPRINT_LINK",
+            "REQUESTS_PER_MINUTE",
+            "GITHUB_TOKEN",
+            "REGISTRY_REPOSITORY",
+        }
+
     def to_dict(self) -> Dict[str, Any]:
         """
         Convert configuration to dictionary.

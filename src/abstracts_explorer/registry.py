@@ -51,6 +51,7 @@ import oras.oci
 import oras.provider
 
 from abstracts_explorer._version import __version__
+from abstracts_explorer.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -304,7 +305,7 @@ class RegistryClient:
         return conference
 
     @staticmethod
-    def _get_embedding_model() -> Optional[str]:
+    def _get_embedding_model_database() -> Optional[str]:
         """
         Return the embedding model stored in the local database.
 
@@ -732,7 +733,7 @@ class RegistryClient:
         conference = self._resolve_conference_name(conference)
 
         # --- Determine embedding model (needed for auto-tag) ---
-        embedding_model = self._get_embedding_model()
+        embedding_model = self._get_embedding_model_database()
         if not embedding_model:
             raise RegistryError(
                 "No embedding model found in local database. "
@@ -867,8 +868,8 @@ class RegistryClient:
             Custom tag.  If ``None``, derived from embedding model, conference and year.
         embedding_model : str, optional
             Embedding model name used for tag derivation.  When ``None``
-            and *tag* is also ``None``, the model is read from the local
-            database metadata or the ``EMBEDDING_MODEL`` configuration.
+            and *tag* is also ``None``, the model is read from the
+            ``EMBEDDING_MODEL`` configuration.
             A ``RegistryError`` is raised if the model cannot be determined.
         progress_callback : callable, optional
             Function called with status messages during download.
@@ -892,14 +893,14 @@ class RegistryClient:
         RegistryError
             If download fails or the embedding model cannot be determined.
         """
+        if embedding_model is None:
+            embedding_model = get_config().embedding_model
+        if not embedding_model:
+            raise RegistryError(
+                "No embedding model specified and none found in the configuration. "
+                "Use --embedding-model to specify the model name."
+            )
         if tag is None:
-            if embedding_model is None:
-                embedding_model = self._get_embedding_model()
-            if not embedding_model:
-                raise RegistryError(
-                    "No embedding model specified and none found in local database. "
-                    "Use --embedding-model to specify the model name."
-                )
             tag = _build_tag(conference, year, embedding_model=embedding_model)
 
         def _progress(msg: str) -> None:
