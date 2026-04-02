@@ -421,14 +421,10 @@ class RAGChat:
             )
         elif conferences:
             conf_str = ", ".join(conferences)
-            context_parts.append(
-                f"Unless the user specifies otherwise, assume the default conference is {conf_str}."
-            )
+            context_parts.append(f"Unless the user specifies otherwise, assume the default conference is {conf_str}.")
         elif years:
             year_str = ", ".join(str(y) for y in years)
-            context_parts.append(
-                f"Unless the user specifies otherwise, assume the default year is {year_str}."
-            )
+            context_parts.append(f"Unless the user specifies otherwise, assume the default year is {year_str}.")
 
         if available_conferences:
             avail_str = ", ".join(available_conferences)
