@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Multi-stage Dockerfile for Abstracts Explorer
 # This Dockerfile supports both Docker and Podman
 
@@ -9,18 +10,25 @@ WORKDIR /app
 # Install git for version detection (hatch-vcs needs git to read .git directory)
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 
-# Copy .git directory for version detection (setuptools-scm/hatch-vcs)
-COPY .git/ ./.git/
-
-# Copy Python project files
-COPY pyproject.toml uv.lock README.md LICENSE ./
-COPY src/ ./src/
-
-# Delete any potentially stale _version.py so hatch-vcs regenerates it from the git history above
-RUN rm -f src/abstracts_explorer/_version.py
-
-# Install Python dependencies with uv (this triggers hatch-vcs to write _version.py)
-RUN uv sync --frozen --no-dev --extra web
+# Mount the full build context (including .git with complete git history) without
+# adding any files to an image layer.  Everything is done in one RUN so that only
+# the net result (.venv and src) appears in the layer:
+#   1. Copy the full build context to a temp directory.
+#   2. Restore all git-tracked files via `git checkout -- .` so hatch-vcs sees a
+#      clean working tree (a dirty tree causes it to append a dev marker).
+#   3. Delete any stale _version.py so hatch-vcs regenerates it from git tags.
+#   4. Run `uv sync`, which triggers hatch-vcs to write the correct version.
+#   5. Copy only .venv and src to /app, then remove the temp directory.
+RUN --mount=type=bind,target=/build \
+    mkdir /tmp/repo && \
+    cp -rp /build/. /tmp/repo/ && \
+    cd /tmp/repo && \
+    git checkout -- . && \  # Restore files excluded by .dockerignore so the working tree is clean
+    rm -f src/abstracts_explorer/_version.py && \
+    uv sync --frozen --no-dev --extra web && \
+    cp -rp .venv /app/.venv && \
+    cp -rp src /app/src && \
+    cd / && rm -rf /tmp/repo
 
 
 # Stage 2: Final runtime image
