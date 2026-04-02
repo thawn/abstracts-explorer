@@ -38,6 +38,11 @@ from abstracts_explorer.evaluation import (
     format_eval_result_detail,
 )
 
+try:
+    from abstracts_explorer._version import __version__
+except ImportError:
+    from abstracts_explorer import __version__  # type: ignore[no-redef]
+
 logger = logging.getLogger(__name__)
 
 
@@ -2213,6 +2218,13 @@ Examples:
         action="count",
         default=0,
         help="Increase verbosity (can be repeated: -v for INFO, -vv for DEBUG)",
+    )
+
+    # Add version flag
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")

@@ -2823,6 +2823,19 @@ class TestMainDispatch:
         assert exit_code == 0
         mock_web.assert_called_once()
 
+    def test_main_version_flag(self, capsys):
+        """Test --version flag prints version and exits with code 0."""
+        with patch.object(sys, "argv", ["abstracts-explorer", "--version"]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert "abstracts-explorer" in captured.out
+        # Version string should be present in output
+        from abstracts_explorer.cli import __version__
+
+        assert __version__ in captured.out
+
 
 class TestCLISearchErrorHandling:
     """Test search command error handling paths."""

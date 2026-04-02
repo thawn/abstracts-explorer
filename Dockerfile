@@ -16,7 +16,10 @@ COPY .git/ ./.git/
 COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY src/ ./src/
 
-# Install Python dependencies with uv
+# Delete any potentially stale _version.py so hatch-vcs regenerates it from the git history above
+RUN rm -f src/abstracts_explorer/_version.py
+
+# Install Python dependencies with uv (this triggers hatch-vcs to write _version.py)
 RUN uv sync --frozen --no-dev --extra web
 
 
