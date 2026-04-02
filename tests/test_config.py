@@ -10,7 +10,7 @@ from pathlib import Path
 from abstracts_explorer.config import Config, get_config, load_env_file
 from abstracts_explorer import config as config_module
 
-from tests.conftest import get_env_test_path
+from tests.conftest import get_env_test_path, EnvClearer
 
 
 class TestLoadEnvFile:
@@ -315,22 +315,27 @@ PAPER_DB=/absolute/path/to/papers.db
     def test_config_default_conference_and_year(self, tmp_path):
         """Test that DEFAULT_CONFERENCE and DEFAULT_YEAR can be configured."""
         env_file = tmp_path / ".env"
-        env_file.write_text("""
-DEFAULT_CONFERENCE=NeurIPS
-DEFAULT_YEAR=2024
-""")
+        env_file.write_text(
+            """
+DEFAULT_CONFERENCE=MadeUp
+DEFAULT_YEAR=2224
+"""
+        )
 
-        config = Config(env_path=env_file)
+        # clear os.environ to prevent it from overriding .env file
+        with EnvClearer("DEFAULT_CONFERENCE", "DEFAULT_YEAR"):
+            config = Config(env_path=env_file)
 
-        assert config.default_conference == "NeurIPS"
-        assert config.default_year == 2024
+        assert config.default_conference == "MadeUp"
+        assert config.default_year == 2224
 
     def test_config_default_conference_and_year_defaults(self, tmp_path):
         """Test that DEFAULT_CONFERENCE defaults to 'ML4PS@NeurIPS' and DEFAULT_YEAR to 0."""
         env_file = tmp_path / ".env"
         env_file.write_text("")
 
-        config = Config(env_path=env_file)
+        with EnvClearer("DEFAULT_CONFERENCE", "DEFAULT_YEAR"):
+            config = Config(env_path=env_file)
 
         assert config.default_conference == "ML4PS@NeurIPS"
         assert config.default_year == 0

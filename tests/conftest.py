@@ -15,6 +15,37 @@ from abstracts_explorer.plugin import LightweightPaper
 from abstracts_explorer.config import get_config
 
 
+# Helper context to temporarily clear environment variables for testing config loading behavior
+class EnvClearer:
+    """
+    Context manager to temporarily clear environment variables.
+
+    This is useful for testing configuration loading behavior when no environment
+    variables are set, ensuring that the system falls back to .env files or defaults.
+    """
+
+    def __init__(self, *env_vars):
+        self.env_vars = env_vars
+        self.original_values = {}
+
+    def __enter__(self):
+        import os
+
+        for var in self.env_vars:
+            self.original_values[var] = os.environ.get(var)
+            if var in os.environ:
+                del os.environ[var]
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        import os
+
+        for var, value in self.original_values.items():
+            if value is not None:
+                os.environ[var] = value
+            elif var in os.environ:
+                del os.environ[var]
+
+
 def get_env_test_path() -> Path:
     """
     Get the path to the .env.tests file.
