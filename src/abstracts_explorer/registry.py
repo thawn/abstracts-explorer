@@ -319,6 +319,62 @@ class RegistryClient:
             db.create_tables()
             return db.get_embedding_model()
 
+    def _find_best_matching_tag(self, tag: str) -> str:
+        """
+        Resolve *tag* to the best matching tag available in the registry.
+
+        OCI tags in this project have the format
+        ``{conference}[-year]_{model}_{version}``.  When the exact tag does not
+        exist in the registry (e.g. because the local package version differs
+        from the version used when the artifact was pushed), this method strips
+        the version suffix and looks for other tags that share the same
+        ``{conference}[-year]_{model}`` prefix.  The candidate with the
+        lexicographically highest version suffix is returned.
+
+        If the exact tag exists, it is returned unchanged.  If listing tags
+        fails or no prefix-matching candidate is found, *tag* is returned
+        unchanged so that the caller can still attempt the operation and
+        produce an informative error message.
+
+        Parameters
+        ----------
+        tag : str
+            OCI tag to resolve (without repository prefix, e.g.
+            ``neurips-2024_my-model_0.4.2``).
+
+        Returns
+        -------
+        str
+            The resolved tag.
+        """
+        try:
+            available_tags = self._client.get_tags(self.repository)
+        except Exception as exc:
+            logger.debug("Could not list tags for tag resolution: %s", exc)
+            return tag
+
+        if tag in available_tags:
+            return tag
+
+        # Strip the version suffix (the last '_'-separated component) and search
+        # for tags that share the same prefix.  The version is always the last
+        # component, so rsplit("_", 1) correctly isolates it even when the model
+        # name itself contains underscores.
+        if "_" not in tag:
+            return tag
+
+        prefix = tag.rsplit("_", 1)[0]
+        candidates = [t for t in available_tags if t.rsplit("_", 1)[0] == prefix]
+
+        if not candidates:
+            return tag
+
+        # Return the candidate with the highest lexicographic version suffix.
+        # This works correctly for standard semver strings (e.g. "0.4.1" < "0.4.2").
+        resolved = max(candidates)
+        logger.debug("Tag '%s' not found; resolved to closest match '%s'", tag, resolved)
+        return resolved
+
     def _get_manifest_embedding_model(self, target: str) -> Optional[str]:
         """
         Retrieve the embedding model name from the OCI manifest for *target*.
@@ -847,7 +903,18 @@ class RegistryClient:
 
         target = f"{self.repository}:{tag}"
 
-        # --- 0. Pre-download: check embedding model from manifest labels ---
+        # --- 0a. Resolve tag: find the best matching tag in the registry ---
+        # The locally-built tag includes the current package version, which may
+        # differ from the version used when the artifact was pushed.  Resolve to
+        # the closest matching tag so that both the manifest check and the pull
+        # use a tag that actually exists.
+        resolved_tag = self._find_best_matching_tag(tag)
+        if resolved_tag != tag:
+            _progress(f"Tag '{tag}' not found in registry; using closest match '{resolved_tag}'")
+            tag = resolved_tag
+            target = f"{self.repository}:{tag}"
+
+        # --- 0b. Pre-download: check embedding model from manifest labels ---
         # Fetch the manifest before pulling any data so we can fail fast if
         # the artifact was built with a different embedding model.
         mismatch_was_ignored = False

@@ -1999,6 +1999,102 @@ class TestCLICommands:
         call_kwargs = mock_instance.download.call_args.kwargs
         assert call_kwargs["ignore_embedding_model_mismatch"] is False
 
+    # ------------------------------------------------------------------
+    # _find_best_matching_tag tests
+    # ------------------------------------------------------------------
+
+    def test_find_best_matching_tag_exact_match_returned(self):
+        """Returns the exact tag when it exists in the registry."""
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        available = ["neurips-2024_my-model_0.4.0", "neurips-2024_my-model_0.4.1"]
+        with patch.object(client._client, "get_tags", return_value=available):
+            result = client._find_best_matching_tag("neurips-2024_my-model_0.4.1")
+
+        assert result == "neurips-2024_my-model_0.4.1"
+
+    def test_find_best_matching_tag_resolves_version_mismatch(self):
+        """Resolves a tag with the wrong version to the highest available version."""
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        available = ["neurips-2024_my-model_0.4.0", "neurips-2024_my-model_0.4.1"]
+        with patch.object(client._client, "get_tags", return_value=available):
+            result = client._find_best_matching_tag("neurips-2024_my-model_0.5.0")
+
+        assert result == "neurips-2024_my-model_0.4.1"
+
+    def test_find_best_matching_tag_no_prefix_match_returns_original(self):
+        """Returns the original tag when no prefix-matching tag exists."""
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        available = ["iclr-2024_other-model_0.4.0"]
+        with patch.object(client._client, "get_tags", return_value=available):
+            result = client._find_best_matching_tag("neurips-2024_my-model_0.5.0")
+
+        assert result == "neurips-2024_my-model_0.5.0"
+
+    def test_find_best_matching_tag_list_failure_returns_original(self):
+        """Returns the original tag when listing tags fails."""
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        with patch.object(client._client, "get_tags", side_effect=Exception("network error")):
+            result = client._find_best_matching_tag("neurips-2024_my-model_0.5.0")
+
+        assert result == "neurips-2024_my-model_0.5.0"
+
+    def test_find_best_matching_tag_model_with_underscore(self):
+        """Correctly resolves a tag where the model name contains underscores."""
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        available = ["neurips-2024_my_model_name_0.4.0", "neurips-2024_my_model_name_0.4.1"]
+        with patch.object(client._client, "get_tags", return_value=available):
+            result = client._find_best_matching_tag("neurips-2024_my_model_name_0.5.0")
+
+        assert result == "neurips-2024_my_model_name_0.4.1"
+
+    def test_download_resolves_version_mismatch_before_pull(self, tmp_path):
+        """download() resolves the tag version before pulling when exact tag is not in registry."""
+        set_test_db(tmp_path / "target.db")
+
+        paper_db_path = tmp_path / "papers-2024.db"
+        paper_db_path.touch()
+        embeddings_path = tmp_path / "embeddings-2024.json"
+        embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+
+        available_tags = ["neurips-2024_my-model_0.4.1"]
+        pulled_files = [str(paper_db_path), str(embeddings_path)]
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        mock_pull = MagicMock(return_value=pulled_files)
+        mock_manifest = MagicMock(return_value=None)
+        with patch.object(client._client, "get_tags", return_value=available_tags):
+            with patch.object(client, "_get_manifest_embedding_model", mock_manifest):
+                with patch.object(client._client, "pull", mock_pull):
+                    with patch.object(client, "_import_year", return_value={"paper_count": 0, "embedding_count": 0}):
+                        client.download(
+                            conference="neurips",
+                            year=2024,
+                            tag="neurips-2024_my-model_0.5.0",
+                            embedding_model="my-model",
+                        )
+
+        # pull() must have been called with the resolved tag (0.4.1), not the original (0.5.0)
+        pull_target = mock_pull.call_args.kwargs.get("target") or mock_pull.call_args.args[0]
+        assert "0.4.1" in pull_target
+        assert "0.5.0" not in pull_target
+
+        # _get_manifest_embedding_model must also have been called with the resolved tag
+        manifest_target = mock_manifest.call_args.args[0]
+        assert "0.4.1" in manifest_target
+        assert "0.5.0" not in manifest_target
+
     def test_download_raises_mismatch_from_manifest_before_pull(self, tmp_path):
         """download() raises EmbeddingModelMismatchError from manifest labels BEFORE pulling any data."""
         set_test_db(tmp_path / "target.db")
