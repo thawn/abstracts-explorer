@@ -1909,6 +1909,8 @@ def registry_download_command(args: argparse.Namespace) -> int:
     try:
         client = RegistryClient(repository=repository, token=token)
 
+        embedding_model = getattr(args, "embedding_model", None) or config.embedding_model
+
         if conference == "all":
             try:
                 summaries = client.download_all(
@@ -1933,7 +1935,6 @@ def registry_download_command(args: argparse.Namespace) -> int:
                     f"{s.get('embedding_count', 0)} embeddings"
                 )
         else:
-            embedding_model = getattr(args, "embedding_model", None) or config.embedding_model
             ignore_embedding_model_mismatch = getattr(args, "ignore_embedding_model_mismatch", False)
 
             def _do_download():
