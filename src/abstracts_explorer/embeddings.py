@@ -570,6 +570,13 @@ class EmbeddingsManager:
         is round-tripped through JSON and then passed back to ChromaDB via
         :meth:`import_embeddings`, the list values must be re-serialised.
 
+        List fields use the same helpers as
+        :func:`~abstracts_explorer.plugin.serialize_authors_to_string` and
+        :func:`~abstracts_explorer.plugin.serialize_keywords_to_string` to
+        keep the stored format consistent with the SQL database.  All other
+        values are converted to strings so that ChromaDB metadata filters work
+        reliably (e.g. ``{"year": "2025"}``).
+
         Parameters
         ----------
         metadata : dict
@@ -580,19 +587,19 @@ class EmbeddingsManager:
         dict
             Metadata dict with all values converted to ChromaDB-compatible types.
         """
+        from abstracts_explorer.plugin import serialize_authors_to_string, serialize_keywords_to_string
+
         result: Dict[str, Any] = {}
         for k, v in metadata.items():
             if v is None:
                 result[k] = ""
             elif isinstance(v, list):
                 if k == "authors":
-                    result[k] = ";".join(str(x) for x in v)
+                    result[k] = serialize_authors_to_string(v)
                 elif k == "keywords":
-                    result[k] = ",".join(str(x) for x in v)
+                    result[k] = serialize_keywords_to_string(v)
                 else:
                     result[k] = str(v)
-            elif isinstance(v, (int, float, bool)):
-                result[k] = v
             else:
                 result[k] = str(v)
         return result
@@ -623,9 +630,10 @@ class EmbeddingsManager:
             # Generate embedding if not provided
             embedding = self.generate_embedding(embedding_text)
 
-            # Prepare metadata - convert all values to strings for ChromaDB compatibility
-            meta = paper.copy()
-            meta = {k: str(v) if v is not None else "" for k, v in meta.items()}
+            # Prepare metadata - serialize all values for ChromaDB compatibility,
+            # using the same format as _serialize_metadata_for_chromadb so that
+            # add_paper and import_embeddings produce identical stored representations.
+            meta = self._serialize_metadata_for_chromadb(paper.copy())
 
             # Add to collection
             self.collection.add(

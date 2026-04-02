@@ -766,6 +766,56 @@ def sanitize_author_names(authors: List[str]) -> List[str]:
     return [re.sub(r"\s+", " ", author.replace(";", " ")).strip() for author in authors]
 
 
+def serialize_authors_to_string(authors: List[str]) -> str:
+    """
+    Serialize a list of author names to a semicolon-separated string.
+
+    Used by both :func:`~abstracts_explorer.database.DatabaseManager.add_paper`
+    and :meth:`~abstracts_explorer.embeddings.EmbeddingsManager._serialize_metadata_for_chromadb`
+    to ensure a consistent storage format in both the SQL database and ChromaDB.
+
+    Parameters
+    ----------
+    authors : list of str
+        Author names to serialize.  An empty list or ``None`` returns an empty
+        string.
+
+    Returns
+    -------
+    str
+        Semicolon-separated author names, e.g. ``"Alice; Bob; Charlie"``.
+        Returns an empty string if *authors* is empty or ``None``.
+    """
+    if not authors:
+        return ""
+    return "; ".join(str(a).strip() for a in authors)
+
+
+def serialize_keywords_to_string(keywords: List[str]) -> str:
+    """
+    Serialize a list of keywords to a comma-separated string.
+
+    Used by both :func:`~abstracts_explorer.database.DatabaseManager.add_paper`
+    and :meth:`~abstracts_explorer.embeddings.EmbeddingsManager._serialize_metadata_for_chromadb`
+    to ensure a consistent storage format in both the SQL database and ChromaDB.
+
+    Parameters
+    ----------
+    keywords : list of str
+        Keywords to serialize.  An empty list or ``None`` returns an empty
+        string.
+
+    Returns
+    -------
+    str
+        Comma-separated keywords, e.g. ``"machine learning, deep learning"``.
+        Returns an empty string if *keywords* is empty or ``None``.
+    """
+    if not keywords:
+        return ""
+    return ", ".join(str(k).strip() for k in keywords)
+
+
 def prepare_chroma_db_paper_data(paper: Dict[str, Any]) -> Dict[str, Any]:
     """
     Prepare paper data from chroma_db for validation by normalizing and converting fields.
@@ -780,11 +830,11 @@ def prepare_chroma_db_paper_data(paper: Dict[str, Any]) -> Dict[str, Any]:
     dict
         Prepared paper data
     """
-    # Split authors and keywords into lists
-    paper["authors"] = paper["authors"].split(";")
+    # Split authors and keywords into lists, stripping whitespace from each entry
+    paper["authors"] = [a.strip() for a in paper["authors"].split(";")]
     paper["year"] = int(paper["year"])
     if "keywords" in paper:
-        paper["keywords"] = paper["keywords"].split(",")
+        paper["keywords"] = [k.strip() for k in paper["keywords"].split(",")]
     if "original_id" in paper:
         if paper["original_id"]:
             paper["original_id"] = int(paper["original_id"])

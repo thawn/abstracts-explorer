@@ -800,17 +800,17 @@ class TestParseChromaDBMetadata:
 class TestSerializeMetadataForChromaDB:
     """Tests for EmbeddingsManager._serialize_metadata_for_chromadb."""
 
-    def test_authors_list_joined_with_semicolon(self):
-        """Test that authors list is joined with semicolons for ChromaDB."""
+    def test_authors_list_joined_with_semicolon_and_space(self):
+        """Test that authors list is joined with '; ' matching the DB format."""
         metadata = {"authors": ["Alice", "Bob", "Charlie"], "year": 2024, "title": "Test"}
         result = EmbeddingsManager._serialize_metadata_for_chromadb(metadata)
-        assert result["authors"] == "Alice;Bob;Charlie"
+        assert result["authors"] == "Alice; Bob; Charlie"
 
-    def test_keywords_list_joined_with_comma(self):
-        """Test that keywords list is joined with commas for ChromaDB."""
+    def test_keywords_list_joined_with_comma_and_space(self):
+        """Test that keywords list is joined with ', ' matching the DB format."""
         metadata = {"keywords": ["ml", "ai", "deep learning"], "authors": ["Alice"], "year": 2024}
         result = EmbeddingsManager._serialize_metadata_for_chromadb(metadata)
-        assert result["keywords"] == "ml,ai,deep learning"
+        assert result["keywords"] == "ml, ai, deep learning"
 
     def test_none_values_converted_to_empty_string(self):
         """Test that None values are converted to empty strings."""
@@ -818,31 +818,34 @@ class TestSerializeMetadataForChromaDB:
         result = EmbeddingsManager._serialize_metadata_for_chromadb(metadata)
         assert result["title"] == ""
 
-    def test_numeric_values_preserved(self):
-        """Test that int and float values are preserved as-is (ChromaDB accepts them)."""
-        metadata = {"year": 2024, "score": 3.14, "authors": ["Alice"]}
+    def test_numeric_values_converted_to_string(self):
+        """Test that numeric values are converted to strings for consistent ChromaDB filters."""
+        metadata = {"year": 2024, "authors": ["Alice"]}
         result = EmbeddingsManager._serialize_metadata_for_chromadb(metadata)
-        assert result["year"] == 2024
-        assert isinstance(result["year"], int)
-        assert result["score"] == 3.14
-        assert isinstance(result["score"], float)
-
-    def test_bool_values_preserved(self):
-        """Test that bool values are preserved as-is."""
-        metadata = {"flag": True, "authors": ["Alice"], "year": 2024}
-        result = EmbeddingsManager._serialize_metadata_for_chromadb(metadata)
-        assert result["flag"] is True
+        assert result["year"] == "2024"
+        assert isinstance(result["year"], str)
 
     def test_string_values_preserved(self):
         """Test that existing string values are not changed."""
-        metadata = {"title": "My Paper", "conference": "NeurIPS", "authors": "Alice;Bob", "year": "2024"}
+        metadata = {"title": "My Paper", "conference": "NeurIPS", "authors": "Alice; Bob", "year": "2024"}
         result = EmbeddingsManager._serialize_metadata_for_chromadb(metadata)
         assert result["title"] == "My Paper"
         assert result["conference"] == "NeurIPS"
-        assert result["authors"] == "Alice;Bob"
-        # String year stays as string (no type conversion; int year would stay int)
+        assert result["authors"] == "Alice; Bob"
         assert result["year"] == "2024"
         assert isinstance(result["year"], str)
+
+    def test_authors_list_whitespace_stripped(self):
+        """Test that whitespace is stripped from each author name before joining."""
+        metadata = {"authors": [" Alice ", "Bob", "  Charlie  "], "year": 2024}
+        result = EmbeddingsManager._serialize_metadata_for_chromadb(metadata)
+        assert result["authors"] == "Alice; Bob; Charlie"
+
+    def test_keywords_list_whitespace_stripped(self):
+        """Test that whitespace is stripped from each keyword before joining."""
+        metadata = {"keywords": [" ml ", "ai", "  deep learning  "], "authors": ["Alice"]}
+        result = EmbeddingsManager._serialize_metadata_for_chromadb(metadata)
+        assert result["keywords"] == "ml, ai, deep learning"
 
 
 class TestImportEmbeddings:
@@ -888,8 +891,8 @@ class TestImportEmbeddings:
 
         embeddings_manager.close()
 
-    def test_import_embeddings_authors_stored_as_semicolon_string(self, embeddings_manager):
-        """Test that after importing with list authors, they are stored as semicolons in ChromaDB."""
+    def test_import_embeddings_authors_stored_with_consistent_separator(self, embeddings_manager):
+        """Test that after importing with list authors, they are stored consistently with the DB format."""
         embeddings_manager.connect()
         embeddings_manager.create_collection()
 
@@ -912,11 +915,217 @@ class TestImportEmbeddings:
 
         embeddings_manager.import_embeddings(data, "NeurIPS", 2024)
 
-        # Retrieve raw metadata from ChromaDB and verify authors are stored as a string
+        # Retrieve raw metadata from ChromaDB and verify authors are stored as a
+        # semicolon-and-space-separated string (same format as the SQL database).
         raw = embeddings_manager.collection.get(ids=["paper1"], include=["metadatas"])
         stored_authors = raw["metadatas"][0]["authors"]
         assert isinstance(stored_authors, str)
-        assert stored_authors == "Alice;Bob;Charlie"
+        assert stored_authors == "Alice; Bob; Charlie"
+
+        embeddings_manager.close()
+
+
+class TestExportImportRoundTrip:
+    """Integration tests for the export→import round-trip (no registry involved)."""
+
+    def test_export_import_round_trip_preserves_data(self, embeddings_manager):
+        """Test that papers survive an export→import round-trip with their metadata intact.
+
+        This tests the full cycle: add a paper with list authors → export to dict →
+        import back from that dict → verify authors are stored correctly.
+        """
+        embeddings_manager.connect()
+        embeddings_manager.create_collection()
+
+        # Add a paper via add_paper (as would happen from embed_from_database)
+        paper = {
+            "uid": "roundtrip1",
+            "title": "Round Trip Test Paper",
+            "abstract": "Testing the full export-import cycle.",
+            "authors": "Cynthia Putnam; Mary Bungum; Dan Spinner",  # already string (from DB)
+            "keywords": "testing, round trip, embeddings",
+            "year": "2018",
+            "conference": "CHI",
+            "session": "Session A",
+            "poster_position": "1",
+        }
+        embeddings_manager.add_paper(paper)
+
+        # Export embeddings to a local dict (no registry)
+        exported = embeddings_manager.export_embeddings("CHI", 2018)
+
+        assert exported["ids"] == ["roundtrip1"]
+        assert len(exported["metadatas"]) == 1
+
+        # After export, authors should be a list (parse_chromadb_metadata converts to list)
+        exported_authors = exported["metadatas"][0]["authors"]
+        assert isinstance(exported_authors, list)
+        assert exported_authors == ["Cynthia Putnam", "Mary Bungum", "Dan Spinner"]
+
+        # Clear the collection so we can re-import
+        embeddings_manager.collection.delete(ids=["roundtrip1"])
+        assert embeddings_manager.get_collection_stats()["count"] == 0
+
+        # Import from the exported dict (simulating registry import)
+        count = embeddings_manager.import_embeddings(exported, "CHI", 2018)
+        assert count == 1
+
+        # Retrieve raw metadata and verify authors stored as string with '; ' separator
+        raw = embeddings_manager.collection.get(ids=["roundtrip1"], include=["metadatas"])
+        stored_meta = raw["metadatas"][0]
+        assert isinstance(stored_meta["authors"], str)
+        assert stored_meta["authors"] == "Cynthia Putnam; Mary Bungum; Dan Spinner"
+
+        # Parse back through LightweightPaper to verify round-trip fidelity
+        reparsed = embeddings_manager.parse_chromadb_metadata(stored_meta)
+        assert reparsed["authors"] == ["Cynthia Putnam", "Mary Bungum", "Dan Spinner"]
+
+        embeddings_manager.close()
+
+    def test_export_import_round_trip_with_keywords(self, embeddings_manager):
+        """Test that keywords survive an export→import round-trip."""
+        embeddings_manager.connect()
+        embeddings_manager.create_collection()
+
+        paper = {
+            "uid": "kw_roundtrip",
+            "title": "Keyword Round Trip Paper",
+            "abstract": "Tests keyword export-import.",
+            "authors": "Alice Author",
+            "keywords": "machine learning, deep learning, neural networks",
+            "year": "2024",
+            "conference": "NeurIPS",
+            "session": "ML Track",
+            "poster_position": "P1",
+        }
+        embeddings_manager.add_paper(paper)
+
+        exported = embeddings_manager.export_embeddings("NeurIPS", 2024)
+
+        # After export, keywords should be a list
+        exported_keywords = exported["metadatas"][0]["keywords"]
+        assert isinstance(exported_keywords, list)
+        assert exported_keywords == ["machine learning", "deep learning", "neural networks"]
+
+        # Import and verify storage
+        embeddings_manager.collection.delete(ids=["kw_roundtrip"])
+        embeddings_manager.import_embeddings(exported, "NeurIPS", 2024)
+
+        raw = embeddings_manager.collection.get(ids=["kw_roundtrip"], include=["metadatas"])
+        stored_keywords = raw["metadatas"][0]["keywords"]
+        assert isinstance(stored_keywords, str)
+        assert stored_keywords == "machine learning, deep learning, neural networks"
+
+        embeddings_manager.close()
+
+
+class TestEmbeddingsMetadataRoundTrip:
+    """Integration tests for the SQL DB → ChromaDB metadata round-trip."""
+
+    def test_sql_to_chromadb_round_trip(self, embeddings_manager, tmp_path):
+        """Test that paper metadata is preserved when going SQL DB → embed → ChromaDB → retrieve.
+
+        Verifies that:
+        1. A LightweightPaper stored in the SQL DB is embedded into ChromaDB.
+        2. The raw ChromaDB metadata can be parsed back via parse_chromadb_metadata.
+        3. The parsed metadata matches the original LightweightPaper.
+        """
+        from abstracts_explorer.database import DatabaseManager
+        from abstracts_explorer.plugin import LightweightPaper
+        from tests.conftest import set_test_db
+
+        # Build an isolated DB
+        db_path = tmp_path / "roundtrip_test.db"
+        set_test_db(db_path)
+
+        original_paper = LightweightPaper(
+            title="SQL to ChromaDB Round Trip Paper",
+            abstract="This paper tests the full round-trip from SQL DB to ChromaDB.",
+            authors=["Cynthia Putnam", "Mary Bungum", "Dan Spinner"],
+            keywords=["testing", "round trip", "embeddings"],
+            session="Integration Session",
+            poster_position="RT1",
+            year=2018,
+            conference="CHI",
+        )
+
+        with DatabaseManager() as db:
+            db.create_tables()
+            uid = db.add_paper(original_paper)
+
+        assert uid is not None
+
+        # Embed the paper from the database (embedding API call is mocked in the fixture)
+        embeddings_manager.connect()
+        embeddings_manager.create_collection()
+        embedded_count = embeddings_manager.embed_from_database()
+        assert embedded_count == 1
+
+        # Retrieve the raw metadata directly from ChromaDB
+        raw_results = embeddings_manager.collection.get(ids=[uid], include=["metadatas"])
+        assert len(raw_results["metadatas"]) == 1
+        raw_meta = raw_results["metadatas"][0]
+
+        # Raw metadata must not contain list values (ChromaDB rejects lists)
+        for value in raw_meta.values():
+            assert not isinstance(value, list), f"ChromaDB metadata contains a list: {value!r}"
+
+        # Authors and keywords should be stored as strings with the canonical separators
+        assert raw_meta["authors"] == "Cynthia Putnam; Mary Bungum; Dan Spinner"
+        assert raw_meta["keywords"] == "testing, round trip, embeddings"
+
+        # Parse the raw metadata back through LightweightPaper
+        parsed = embeddings_manager.parse_chromadb_metadata(raw_meta)
+
+        # Verify that the parsed data matches the original paper
+        assert parsed["authors"] == original_paper.authors
+        assert parsed["keywords"] == original_paper.keywords
+        assert parsed["year"] == original_paper.year
+        assert parsed["conference"] == original_paper.conference
+        assert parsed["title"] == original_paper.title
+
+        embeddings_manager.close()
+
+    def test_sql_to_chromadb_round_trip_no_keywords(self, embeddings_manager, tmp_path):
+        """Test that papers without keywords are handled correctly in the SQL → ChromaDB round-trip."""
+        from abstracts_explorer.database import DatabaseManager
+        from abstracts_explorer.plugin import LightweightPaper
+        from tests.conftest import set_test_db
+
+        db_path = tmp_path / "roundtrip_nokw.db"
+        set_test_db(db_path)
+
+        original_paper = LightweightPaper(
+            title="Paper Without Keywords",
+            abstract="This paper has no keywords.",
+            authors=["Solo Author"],
+            keywords=None,  # no keywords
+            session="Solo Session",
+            poster_position="S1",
+            year=2020,
+            conference="CHI",
+        )
+
+        with DatabaseManager() as db:
+            db.create_tables()
+            uid = db.add_paper(original_paper)
+
+        assert uid is not None
+
+        embeddings_manager.connect()
+        embeddings_manager.create_collection()
+        embedded_count = embeddings_manager.embed_from_database()
+        assert embedded_count == 1
+
+        raw_results = embeddings_manager.collection.get(ids=[uid], include=["metadatas"])
+        raw_meta = raw_results["metadatas"][0]
+
+        # keywords should be stored as an empty string (not None, not a list)
+        assert isinstance(raw_meta.get("keywords", ""), str)
+
+        # No list values should appear in metadata
+        for value in raw_meta.values():
+            assert not isinstance(value, list), f"ChromaDB metadata contains a list: {value!r}"
 
         embeddings_manager.close()
 
