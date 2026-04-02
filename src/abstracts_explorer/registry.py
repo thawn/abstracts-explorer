@@ -319,6 +319,38 @@ class RegistryClient:
             db.create_tables()
             return db.get_embedding_model()
 
+    def _get_manifest_embedding_model(self, target: str) -> Optional[str]:
+        """
+        Retrieve the embedding model name from the OCI manifest for *target*.
+
+        Fetches the manifest from the registry and reads the
+        ``com.abstracts-explorer.embedding-model`` label without downloading any
+        artifact data.  Checks both the ``labels`` field (used by
+        abstracts-explorer when pushing) and the ``annotations`` field
+        (used by some alternative OCI implementations).
+
+        Parameters
+        ----------
+        target : str
+            Full OCI reference including tag (e.g.
+            ``ghcr.io/thawn/abstracts-data:neurips-2024_model_1.0.0``).
+
+        Returns
+        -------
+        str or None
+            The embedding model stored in the manifest, or ``None`` if the
+            manifest has no such label (e.g. legacy artifacts) or if the
+            manifest could not be fetched.
+        """
+        try:
+            manifest = self._client.get_manifest(target)
+            labels = manifest.get("labels") or manifest.get("annotations") or {}
+            result = labels.get("com.abstracts-explorer.embedding-model")
+            return result if isinstance(result, str) else None
+        except Exception as exc:
+            logger.debug("Could not fetch manifest for %s: %s", target, exc)
+            return None
+
     @staticmethod
     def clear_local_embedding_data() -> None:
         """
@@ -813,10 +845,32 @@ class RegistryClient:
                 progress_callback(msg)
             logger.info(msg)
 
+        target = f"{self.repository}:{tag}"
+
+        # --- 0. Pre-download: check embedding model from manifest labels ---
+        # Fetch the manifest before pulling any data so we can fail fast if
+        # the artifact was built with a different embedding model.
+        mismatch_was_ignored = False
+        manifest_embedding_model = self._get_manifest_embedding_model(target)
+        if manifest_embedding_model and embedding_model:
+            if _sanitize_str_for_oci_tag(manifest_embedding_model) != _sanitize_str_for_oci_tag(embedding_model):
+                if not ignore_embedding_model_mismatch:
+                    raise EmbeddingModelMismatchError(
+                        local_model=embedding_model,
+                        remote_model=manifest_embedding_model,
+                    )
+                mismatch_was_ignored = True
+                _progress(
+                    f"⚠️  WARNING: Embedding model mismatch detected!\n"
+                    f"  Configured model: '{embedding_model}'\n"
+                    f"  Artifact model:   '{manifest_embedding_model}'\n"
+                    f"  Proceeding because --ignore-embedding-model-mismatch was set.\n"
+                    f"  ⚠️  Only do this if both names refer to the same model on different backends!"
+                )
+
         temp_dir = Path(tempfile.mkdtemp())
         try:
             # --- 1. Pull from oras ---
-            target = f"{self.repository}:{tag}"
             _progress(f"Pulling {target}...")
 
             pulled_files = self._client.pull(target=target, outdir=str(temp_dir))
@@ -830,25 +884,6 @@ class RegistryClient:
                     metadata = json.loads(p.read_text())
                     _progress(f"Artifact version: {metadata.get('version', 'unknown')}")
                     break
-
-            # --- 1b. Check for embedding model mismatch with configured model ---
-            artifact_embedding_model = metadata.get("embedding_model")
-            mismatch_was_ignored = False
-            if artifact_embedding_model and embedding_model:
-                if _sanitize_str_for_oci_tag(artifact_embedding_model) != _sanitize_str_for_oci_tag(embedding_model):
-                    if not ignore_embedding_model_mismatch:
-                        raise EmbeddingModelMismatchError(
-                            local_model=embedding_model,
-                            remote_model=artifact_embedding_model,
-                        )
-                    mismatch_was_ignored = True
-                    _progress(
-                        f"⚠️  WARNING: Embedding model mismatch detected!\n"
-                        f"  Configured model: '{embedding_model}'\n"
-                        f"  Artifact model:   '{artifact_embedding_model}'\n"
-                        f"  Proceeding because --ignore-embedding-model-mismatch was set.\n"
-                        f"  ⚠️  Only do this if both names refer to the same model on different backends!"
-                    )
 
             # --- 2. Group files by year ---
             # Files are named papers-YYYY.db and embeddings-YYYY.json
