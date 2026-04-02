@@ -1983,4 +1983,3 @@ class TestCLICommands:
                 )
 
         assert result["paper_count"] == 0
-
