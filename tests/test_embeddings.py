@@ -797,6 +797,130 @@ class TestParseChromaDBMetadata:
         assert isinstance(parsed["year"], int)
 
 
+class TestSerializeMetadataForChromaDB:
+    """Tests for EmbeddingsManager._serialize_metadata_for_chromadb."""
+
+    def test_authors_list_joined_with_semicolon(self):
+        """Test that authors list is joined with semicolons for ChromaDB."""
+        metadata = {"authors": ["Alice", "Bob", "Charlie"], "year": 2024, "title": "Test"}
+        result = EmbeddingsManager._serialize_metadata_for_chromadb(metadata)
+        assert result["authors"] == "Alice;Bob;Charlie"
+
+    def test_keywords_list_joined_with_comma(self):
+        """Test that keywords list is joined with commas for ChromaDB."""
+        metadata = {"keywords": ["ml", "ai", "deep learning"], "authors": ["Alice"], "year": 2024}
+        result = EmbeddingsManager._serialize_metadata_for_chromadb(metadata)
+        assert result["keywords"] == "ml,ai,deep learning"
+
+    def test_none_values_converted_to_empty_string(self):
+        """Test that None values are converted to empty strings."""
+        metadata = {"title": None, "authors": ["Alice"], "year": 2024}
+        result = EmbeddingsManager._serialize_metadata_for_chromadb(metadata)
+        assert result["title"] == ""
+
+    def test_numeric_values_preserved(self):
+        """Test that int and float values are preserved as-is (ChromaDB accepts them)."""
+        metadata = {"year": 2024, "score": 3.14, "authors": ["Alice"]}
+        result = EmbeddingsManager._serialize_metadata_for_chromadb(metadata)
+        assert result["year"] == 2024
+        assert isinstance(result["year"], int)
+        assert result["score"] == 3.14
+        assert isinstance(result["score"], float)
+
+    def test_bool_values_preserved(self):
+        """Test that bool values are preserved as-is."""
+        metadata = {"flag": True, "authors": ["Alice"], "year": 2024}
+        result = EmbeddingsManager._serialize_metadata_for_chromadb(metadata)
+        assert result["flag"] is True
+
+    def test_string_values_preserved(self):
+        """Test that existing string values are not changed."""
+        metadata = {"title": "My Paper", "conference": "NeurIPS", "authors": "Alice;Bob", "year": "2024"}
+        result = EmbeddingsManager._serialize_metadata_for_chromadb(metadata)
+        assert result["title"] == "My Paper"
+        assert result["conference"] == "NeurIPS"
+        assert result["authors"] == "Alice;Bob"
+        # String year stays as string (no type conversion; int year would stay int)
+        assert result["year"] == "2024"
+        assert isinstance(result["year"], str)
+
+
+class TestImportEmbeddings:
+    """Tests for EmbeddingsManager.import_embeddings."""
+
+    def test_import_embeddings_with_list_metadata(self, embeddings_manager):
+        """Test that import_embeddings handles list metadata values (authors, keywords).
+
+        Regression test for the registry import bug where exported metadata
+        contains Python lists (after being parsed through LightweightPaper) but
+        ChromaDB only accepts scalar values.
+        """
+        embeddings_manager.connect()
+        embeddings_manager.create_collection()
+
+        # Simulate data as it would appear after export_embeddings() + JSON round-trip:
+        # authors and keywords are lists, year is an int.
+        data = {
+            "ids": ["paper1"],
+            "documents": ["Title: Test Paper\nAbstract: Test abstract"],
+            "metadatas": [
+                {
+                    "title": "Test Paper",
+                    "abstract": "Test abstract",
+                    "authors": ["Alice", "Bob", "Charlie"],  # list, not string
+                    "keywords": ["ml", "ai"],  # list, not string
+                    "year": 2018,  # int, not string
+                    "conference": "CHI",
+                    "session": "Session A",
+                    "poster_position": "1",
+                }
+            ],
+            "embeddings": [[0.1, 0.2, 0.3]],
+        }
+
+        # Should not raise an error
+        count = embeddings_manager.import_embeddings(data, "CHI", 2018)
+        assert count == 1
+
+        # Verify the paper was actually stored
+        stats = embeddings_manager.get_collection_stats()
+        assert stats["count"] == 1
+
+        embeddings_manager.close()
+
+    def test_import_embeddings_authors_stored_as_semicolon_string(self, embeddings_manager):
+        """Test that after importing with list authors, they are stored as semicolons in ChromaDB."""
+        embeddings_manager.connect()
+        embeddings_manager.create_collection()
+
+        data = {
+            "ids": ["paper1"],
+            "documents": ["Title: Test Paper\nAbstract: Test abstract"],
+            "metadatas": [
+                {
+                    "title": "Test Paper",
+                    "abstract": "Test abstract",
+                    "authors": ["Alice", "Bob", "Charlie"],
+                    "year": 2024,
+                    "conference": "NeurIPS",
+                    "session": "Session A",
+                    "poster_position": "1",
+                }
+            ],
+            "embeddings": [[0.1, 0.2, 0.3]],
+        }
+
+        embeddings_manager.import_embeddings(data, "NeurIPS", 2024)
+
+        # Retrieve raw metadata from ChromaDB and verify authors are stored as a string
+        raw = embeddings_manager.collection.get(ids=["paper1"], include=["metadatas"])
+        stored_authors = raw["metadatas"][0]["authors"]
+        assert isinstance(stored_authors, str)
+        assert stored_authors == "Alice;Bob;Charlie"
+
+        embeddings_manager.close()
+
+
 class TestRateLimiting:
     """Tests for rate limiting in EmbeddingsManager."""
 

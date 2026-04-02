@@ -557,6 +557,46 @@ class EmbeddingsManager:
         prepared = prepare_chroma_db_paper_data(metadata.copy())
         return LightweightPaper(**prepared).model_dump(exclude_none=True)
 
+    @staticmethod
+    def _serialize_metadata_for_chromadb(metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Serialize a metadata dict to ChromaDB-compatible string values.
+
+        ChromaDB only accepts ``str``, ``int``, ``float``, ``bool``, or ``None``
+        as metadata values.  :meth:`export_embeddings` (and the registry export
+        path) runs raw ChromaDB metadata through :meth:`parse_chromadb_metadata`
+        which converts the semicolon-separated *authors* string and the
+        comma-separated *keywords* string back to Python lists.  When that data
+        is round-tripped through JSON and then passed back to ChromaDB via
+        :meth:`import_embeddings`, the list values must be re-serialised.
+
+        Parameters
+        ----------
+        metadata : dict
+            Metadata dict that may contain list values.
+
+        Returns
+        -------
+        dict
+            Metadata dict with all values converted to ChromaDB-compatible types.
+        """
+        result: Dict[str, Any] = {}
+        for k, v in metadata.items():
+            if v is None:
+                result[k] = ""
+            elif isinstance(v, list):
+                if k == "authors":
+                    result[k] = ";".join(str(x) for x in v)
+                elif k == "keywords":
+                    result[k] = ",".join(str(x) for x in v)
+                else:
+                    result[k] = str(v)
+            elif isinstance(v, (int, float, bool)):
+                result[k] = v
+            else:
+                result[k] = str(v)
+        return result
+
     def add_paper(self, paper: dict) -> None:
         """
         Add a paper to the vector database.
@@ -1204,7 +1244,9 @@ class EmbeddingsManager:
                 if documents:
                     add_kwargs["documents"] = documents[i : i + batch_size]
                 if metadatas:
-                    add_kwargs["metadatas"] = metadatas[i : i + batch_size]
+                    add_kwargs["metadatas"] = [
+                        self._serialize_metadata_for_chromadb(m) for m in metadatas[i : i + batch_size]
+                    ]
                 if embeddings:
                     add_kwargs["embeddings"] = embeddings[i : i + batch_size]
 
