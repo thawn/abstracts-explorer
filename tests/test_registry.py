@@ -1633,6 +1633,119 @@ class TestCLICommands:
         assert exc_info.value.local_model == "model-a"
         assert exc_info.value.remote_model == "model-b"
 
+    def _make_artifact_paper_db(self, path, embedding_model: str) -> None:
+        """Create a SQLite DB file with the real schema and an embeddings_metadata row for testing."""
+        from tests.conftest import set_test_db
+
+        set_test_db(path)
+        with DatabaseManager() as db:
+            db.create_tables()
+            db.set_embedding_model(embedding_model)
+
+    def test_import_year_raises_mismatch_when_db_empty_and_model_differs(self, tmp_path):
+        """_import_year raises EmbeddingModelMismatchError when local DB is empty but artifact model differs."""
+        set_test_db(tmp_path / "target.db")
+
+        paper_db_path = tmp_path / "papers-2024.db"
+        self._make_artifact_paper_db(paper_db_path, "artifact-model-b")
+        embeddings_path = tmp_path / "embeddings-2024.json"
+        embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        with pytest.raises(EmbeddingModelMismatchError) as exc_info:
+            client._import_year(
+                "neurips",
+                2024,
+                paper_db_path,
+                embeddings_path,
+                lambda m: None,
+                embedding_model="configured-model-a",
+            )
+
+        assert exc_info.value.local_model == "configured-model-a"
+        assert exc_info.value.remote_model == "artifact-model-b"
+
+    def test_import_year_ignores_mismatch_when_flag_set_and_db_empty(self, tmp_path):
+        """_import_year proceeds and returns mismatch_was_ignored=True when flag is set and local DB is empty."""
+        set_test_db(tmp_path / "target.db")
+
+        paper_db_path = tmp_path / "papers-2024.db"
+        self._make_artifact_paper_db(paper_db_path, "artifact-model-b")
+        embeddings_path = tmp_path / "embeddings-2024.json"
+        embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        with patch("abstracts_explorer.database.DatabaseManager.import_papers_from_sqlite", return_value=0):
+            with patch("abstracts_explorer.embeddings.EmbeddingsManager.import_embeddings", return_value=0):
+                result = client._import_year(
+                    "neurips",
+                    2024,
+                    paper_db_path,
+                    embeddings_path,
+                    lambda m: None,
+                    embedding_model="configured-model-a",
+                    ignore_embedding_model_mismatch=True,
+                )
+
+        assert result["mismatch_was_ignored"] is True
+
+    def test_import_year_no_mismatch_when_models_match(self, tmp_path):
+        """_import_year returns mismatch_was_ignored=False when models match."""
+        set_test_db(tmp_path / "target.db")
+
+        paper_db_path = tmp_path / "papers-2024.db"
+        self._make_artifact_paper_db(paper_db_path, "same-model")
+        embeddings_path = tmp_path / "embeddings-2024.json"
+        embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        with patch("abstracts_explorer.database.DatabaseManager.import_papers_from_sqlite", return_value=0):
+            with patch("abstracts_explorer.embeddings.EmbeddingsManager.import_embeddings", return_value=0):
+                result = client._import_year(
+                    "neurips",
+                    2024,
+                    paper_db_path,
+                    embeddings_path,
+                    lambda m: None,
+                    embedding_model="same-model",
+                )
+
+        assert result["mismatch_was_ignored"] is False
+
+    def test_download_raises_mismatch_when_db_empty_and_no_manifest_model(self, tmp_path):
+        """download() raises EmbeddingModelMismatchError from artifact paper DB when manifest has no model label."""
+        set_test_db(tmp_path / "target.db")
+
+        paper_db_path = tmp_path / "papers-2024.db"
+        self._make_artifact_paper_db(paper_db_path, "artifact-model-b")
+        embeddings_path = tmp_path / "embeddings-2024.json"
+        embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+
+        pulled_files = [str(paper_db_path), str(embeddings_path)]
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        with patch.object(client, "_get_manifest_embedding_model", return_value=None):
+            with patch.object(client._client, "pull", return_value=pulled_files):
+                # Manifest has no model (legacy) → falls through to _import_year() check on paper DB
+                with pytest.raises(EmbeddingModelMismatchError) as exc_info:
+                    client.download(
+                        conference="neurips",
+                        year=2024,
+                        tag="neurips-2024_model-a",
+                        embedding_model="configured-model-a",
+                    )
+
+        assert exc_info.value.local_model == "configured-model-a"
+        assert exc_info.value.remote_model == "artifact-model-b"
+
     def test_download_mismatch_with_matching_config_prompts_clear(self, tmp_path, capsys, monkeypatch):
         """Download offers to clear local data when configured model matches remote model."""
         from abstracts_explorer.cli import registry_download_command
@@ -1757,3 +1870,324 @@ class TestCLICommands:
 
         mock_clear.assert_not_called()
         assert result == 1
+
+    def test_download_mismatch_config_does_not_match_remote_suggests_ignore_flag(self, tmp_path, capsys):
+        """Download error message mentions --ignore-embedding-model-mismatch when configured model differs."""
+        from abstracts_explorer.cli import registry_download_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            conference="neurips",
+            year=2024,
+            tag=None,
+            yes=True,
+            embedding_model="model-c",
+        )
+
+        mismatch = EmbeddingModelMismatchError("model-c", "model-b")
+
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.download.side_effect = mismatch
+
+            result = registry_download_command(args)
+
+        captured = capsys.readouterr()
+        assert result == 1
+        assert "--ignore-embedding-model-mismatch" in captured.err
+
+    def test_download_ignore_embedding_model_mismatch_proceeds(self, tmp_path, capsys):
+        """Download proceeds when --ignore-embedding-model-mismatch is set and models differ."""
+        from abstracts_explorer.cli import registry_download_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            conference="neurips",
+            year=2024,
+            tag=None,
+            yes=True,
+            embedding_model="model-a",
+            ignore_embedding_model_mismatch=True,
+        )
+
+        success_summary = {
+            "tag": "neurips-2024_model-a",
+            "conference": "neurips",
+            "years": [2024],
+            "paper_count": 5,
+            "embedding_count": 5,
+            "metadata": {},
+        }
+
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.download.return_value = success_summary
+
+            result = registry_download_command(args)
+
+        assert result == 0
+        mock_instance.download.assert_called_once_with(
+            conference="neurips",
+            year=2024,
+            tag=None,
+            embedding_model="model-a",
+            progress_callback=mock_instance.download.call_args.kwargs["progress_callback"],
+            ignore_embedding_model_mismatch=True,
+        )
+
+    def test_download_ignore_mismatch_flag_passed_to_client(self, tmp_path, capsys):
+        """When --ignore-embedding-model-mismatch is set, the flag is passed to client.download()."""
+        from abstracts_explorer.cli import registry_download_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            conference="neurips",
+            year=2024,
+            tag=None,
+            yes=True,
+            embedding_model="model-a",
+            ignore_embedding_model_mismatch=True,
+        )
+
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.download.return_value = {
+                "tag": "neurips-2024_model-a",
+                "conference": "neurips",
+                "years": [2024],
+                "paper_count": 0,
+                "embedding_count": 0,
+                "metadata": {},
+            }
+
+            registry_download_command(args)
+
+        call_kwargs = mock_instance.download.call_args.kwargs
+        assert call_kwargs["ignore_embedding_model_mismatch"] is True
+
+    def test_download_ignore_mismatch_flag_default_false(self, tmp_path, capsys):
+        """When --ignore-embedding-model-mismatch is not set, false is passed to client.download()."""
+        from abstracts_explorer.cli import registry_download_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            conference="neurips",
+            year=2024,
+            tag=None,
+            yes=True,
+            embedding_model="model-a",
+            # no ignore_embedding_model_mismatch attribute — should default to False
+        )
+
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.download.return_value = {
+                "tag": "neurips-2024_model-a",
+                "conference": "neurips",
+                "years": [2024],
+                "paper_count": 0,
+                "embedding_count": 0,
+                "metadata": {},
+            }
+
+            registry_download_command(args)
+
+        call_kwargs = mock_instance.download.call_args.kwargs
+        assert call_kwargs["ignore_embedding_model_mismatch"] is False
+
+    # ------------------------------------------------------------------
+    # _find_best_matching_tag tests
+    # ------------------------------------------------------------------
+
+    def test_find_best_matching_tag_exact_match_returned(self):
+        """Returns the exact tag when it exists in the registry."""
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        available = ["neurips-2024_my-model_0.4.0", "neurips-2024_my-model_0.4.1"]
+        with patch.object(client._client, "get_tags", return_value=available):
+            result = client._find_best_matching_tag("neurips-2024_my-model_0.4.1")
+
+        assert result == "neurips-2024_my-model_0.4.1"
+
+    def test_find_best_matching_tag_resolves_version_mismatch(self):
+        """Resolves a tag with the wrong version to the highest available version."""
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        available = ["neurips-2024_my-model_0.4.0", "neurips-2024_my-model_0.4.1"]
+        with patch.object(client._client, "get_tags", return_value=available):
+            result = client._find_best_matching_tag("neurips-2024_my-model_0.5.0")
+
+        assert result == "neurips-2024_my-model_0.4.1"
+
+    def test_find_best_matching_tag_no_prefix_match_returns_original(self):
+        """Returns the original tag when no prefix-matching tag exists."""
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        available = ["iclr-2024_other-model_0.4.0"]
+        with patch.object(client._client, "get_tags", return_value=available):
+            result = client._find_best_matching_tag("neurips-2024_my-model_0.5.0")
+
+        assert result == "neurips-2024_my-model_0.5.0"
+
+    def test_find_best_matching_tag_list_failure_returns_original(self):
+        """Returns the original tag when listing tags fails."""
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        with patch.object(client._client, "get_tags", side_effect=Exception("network error")):
+            result = client._find_best_matching_tag("neurips-2024_my-model_0.5.0")
+
+        assert result == "neurips-2024_my-model_0.5.0"
+
+    def test_find_best_matching_tag_model_with_underscore(self):
+        """Correctly resolves a tag where the model name contains underscores."""
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        available = ["neurips-2024_my_model_name_0.4.0", "neurips-2024_my_model_name_0.4.1"]
+        with patch.object(client._client, "get_tags", return_value=available):
+            result = client._find_best_matching_tag("neurips-2024_my_model_name_0.5.0")
+
+        assert result == "neurips-2024_my_model_name_0.4.1"
+
+    def test_download_resolves_version_mismatch_before_pull(self, tmp_path):
+        """download() resolves the tag version before pulling when exact tag is not in registry."""
+        set_test_db(tmp_path / "target.db")
+
+        paper_db_path = tmp_path / "papers-2024.db"
+        paper_db_path.touch()
+        embeddings_path = tmp_path / "embeddings-2024.json"
+        embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+
+        available_tags = ["neurips-2024_my-model_0.4.1"]
+        pulled_files = [str(paper_db_path), str(embeddings_path)]
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        mock_pull = MagicMock(return_value=pulled_files)
+        mock_manifest = MagicMock(return_value=None)
+        with patch.object(client._client, "get_tags", return_value=available_tags):
+            with patch.object(client, "_get_manifest_embedding_model", mock_manifest):
+                with patch.object(client._client, "pull", mock_pull):
+                    with patch.object(client, "_import_year", return_value={"paper_count": 0, "embedding_count": 0}):
+                        client.download(
+                            conference="neurips",
+                            year=2024,
+                            tag="neurips-2024_my-model_0.5.0",
+                            embedding_model="my-model",
+                        )
+
+        # pull() must have been called with the resolved tag (0.4.1), not the original (0.5.0)
+        pull_target = mock_pull.call_args.kwargs.get("target") or mock_pull.call_args.args[0]
+        assert "0.4.1" in pull_target
+        assert "0.5.0" not in pull_target
+
+        # _get_manifest_embedding_model must also have been called with the resolved tag
+        manifest_target = mock_manifest.call_args.args[0]
+        assert "0.4.1" in manifest_target
+        assert "0.5.0" not in manifest_target
+
+    def test_download_raises_mismatch_from_manifest_before_pull(self, tmp_path):
+        """download() raises EmbeddingModelMismatchError from manifest labels BEFORE pulling any data."""
+        set_test_db(tmp_path / "target.db")
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        mock_pull = MagicMock(return_value=[])
+        with patch.object(client, "_get_manifest_embedding_model", return_value="artifact-model-b"):
+            with patch.object(client._client, "pull", mock_pull):
+                with pytest.raises(EmbeddingModelMismatchError) as exc_info:
+                    client.download(
+                        conference="neurips",
+                        year=2024,
+                        tag="neurips-2024_model-a",
+                        embedding_model="configured-model-a",
+                    )
+
+        # pull() must NOT have been called — mismatch detected from manifest before download
+        mock_pull.assert_not_called()
+        assert exc_info.value.local_model == "configured-model-a"
+        assert exc_info.value.remote_model == "artifact-model-b"
+
+    def test_download_raises_mismatch_when_artifact_model_differs(self, tmp_path):
+        """download() raises EmbeddingModelMismatchError when artifact embedding model differs from configured."""
+        set_test_db(tmp_path / "target.db")
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        with patch.object(client, "_get_manifest_embedding_model", return_value="artifact-model-b"):
+            with pytest.raises(EmbeddingModelMismatchError) as exc_info:
+                client.download(
+                    conference="neurips",
+                    year=2024,
+                    tag="neurips-2024_model-a",
+                    embedding_model="configured-model-a",
+                )
+
+        assert exc_info.value.local_model == "configured-model-a"
+        assert exc_info.value.remote_model == "artifact-model-b"
+
+    def test_download_ignore_mismatch_updates_embedding_model(self, tmp_path):
+        """download() updates local embedding model metadata when ignore_embedding_model_mismatch=True."""
+        set_test_db(tmp_path / "target.db")
+
+        paper_db_path = tmp_path / "papers-2024.db"
+        paper_db_path.touch()
+        embeddings_path = tmp_path / "embeddings-2024.json"
+        embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+
+        pulled_files = [str(paper_db_path), str(embeddings_path)]
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        with patch.object(client, "_get_manifest_embedding_model", return_value="artifact-model-b"):
+            with patch.object(client._client, "pull", return_value=pulled_files):
+                with patch.object(client, "_import_year", return_value={"paper_count": 0, "embedding_count": 0}):
+                    with patch("abstracts_explorer.database.DatabaseManager.set_embedding_model") as mock_set_model:
+                        client.download(
+                            conference="neurips",
+                            year=2024,
+                            tag="neurips-2024_model-a",
+                            embedding_model="configured-model-a",
+                            ignore_embedding_model_mismatch=True,
+                        )
+
+        mock_set_model.assert_called_once_with("configured-model-a")
+
+    def test_download_no_mismatch_check_when_no_manifest_model(self, tmp_path):
+        """download() skips model check when manifest has no embedding model label (legacy artifact)."""
+        set_test_db(tmp_path / "target.db")
+
+        paper_db_path = tmp_path / "papers-2024.db"
+        paper_db_path.touch()
+        embeddings_path = tmp_path / "embeddings-2024.json"
+        embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+
+        pulled_files = [str(paper_db_path), str(embeddings_path)]
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        with patch.object(client, "_get_manifest_embedding_model", return_value=None):
+            with patch.object(client._client, "pull", return_value=pulled_files):
+                with patch.object(client, "_import_year", return_value={"paper_count": 0, "embedding_count": 0}):
+                    # Should not raise even though configured model differs from artifact (no manifest model label)
+                    result = client.download(
+                        conference="neurips",
+                        year=2024,
+                        tag="neurips-2024_model-a",
+                        embedding_model="configured-model-a",
+                    )
+
+        assert result["paper_count"] == 0

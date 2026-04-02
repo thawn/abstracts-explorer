@@ -40,6 +40,7 @@ import logging
 import os
 import re
 import shutil
+import sqlite3
 import tempfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -318,6 +319,100 @@ class RegistryClient:
             db.create_tables()
             return db.get_embedding_model()
 
+    def _find_best_matching_tag(self, tag: str) -> str:
+        """
+        Resolve *tag* to the best matching tag available in the registry.
+
+        OCI tags in this project have the format
+        ``{conference}[-year]_{model}_{version}``.  When the exact tag does not
+        exist in the registry (e.g. because the local package version differs
+        from the version used when the artifact was pushed), this method strips
+        the version suffix and looks for other tags that share the same
+        ``{conference}[-year]_{model}`` prefix.  The candidate with the
+        lexicographically highest version suffix is returned.
+
+        If the exact tag exists, it is returned unchanged.  If listing tags
+        fails or no prefix-matching candidate is found, *tag* is returned
+        unchanged so that the caller can still attempt the operation and
+        produce an informative error message.
+
+        Parameters
+        ----------
+        tag : str
+            OCI tag to resolve (without repository prefix, e.g.
+            ``neurips-2024_my-model_0.4.2``).
+
+        Returns
+        -------
+        str
+            The resolved tag.
+        """
+        try:
+            available_tags = self._client.get_tags(self.repository)
+        except Exception as exc:
+            logger.debug("Could not list tags for tag resolution: %s", exc)
+            return tag
+
+        if tag in available_tags:
+            return tag
+
+        # Strip the version suffix (the last '_'-separated component) and search
+        # for tags that share the same prefix.  The version is always the last
+        # component, so rsplit("_", 1) correctly isolates it even when the model
+        # name itself contains underscores.
+        if "_" not in tag:
+            return tag
+
+        # first split off the version suffix, then iteratively strip components from the end of the prefix until we find candidates that match the start of the tag.  This allows us to resolve to a tag with a different version and/or model, as long as the conference and year match.
+        candidates: List[str] = []
+        prefix: str = tag
+        maxsplit: int = 1
+        while candidates == [] and "_" in prefix:
+            prefix = prefix.rsplit("_", 1)[0]
+            candidates = [t for t in available_tags if t.rsplit("_", maxsplit=maxsplit)[0] == prefix]
+            maxsplit += 1
+
+        if not candidates:
+            return tag
+
+        # Return the candidate with the highest lexicographic version suffix.
+        # This works correctly for standard semver strings (e.g. "0.4.1" < "0.4.2").
+        resolved = max(candidates)
+        logger.debug("Tag '%s' not found; resolved to closest match '%s'", tag, resolved)
+        return resolved
+
+    def _get_manifest_embedding_model(self, target: str) -> Optional[str]:
+        """
+        Retrieve the embedding model name from the OCI manifest for *target*.
+
+        Fetches the manifest from the registry and reads the
+        ``com.abstracts-explorer.embedding-model`` label without downloading any
+        artifact data.  Checks both the ``labels`` field (used by
+        abstracts-explorer when pushing) and the ``annotations`` field
+        (used by some alternative OCI implementations).
+
+        Parameters
+        ----------
+        target : str
+            Full OCI reference including tag (e.g.
+            ``ghcr.io/thawn/abstracts-data:neurips-2024_model_1.0.0``).
+
+        Returns
+        -------
+        str or None
+            The embedding model stored in the manifest, or ``None`` if the
+            manifest has no such label (e.g. legacy artifacts) or if the
+            manifest could not be fetched.
+        """
+        try:
+            manifest = self._client.get_manifest(target)
+            labels = manifest.get("labels") or manifest.get("annotations") or {}
+            result = labels.get("com.abstracts-explorer.embedding-model")
+            return result if isinstance(result, str) else None
+        except Exception as exc:
+            logger.debug("Could not fetch manifest for %s: %s", target, exc)
+            return None
+
     @staticmethod
     def clear_local_embedding_data() -> None:
         """
@@ -405,7 +500,9 @@ class RegistryClient:
         paper_db_file: Path,
         embeddings_file: Path,
         progress: Callable[[str], None],
-    ) -> Dict[str, int]:
+        embedding_model: Optional[str] = None,
+        ignore_embedding_model_mismatch: bool = False,
+    ) -> Dict[str, Any]:
         """
         Import paper DB and embeddings for a single conference+year.
 
@@ -414,10 +511,15 @@ class RegistryClient:
         rolled back to prevent inconsistency between the paper DB and the
         embedding DB.
 
-        Returns a dict with ``paper_count`` and ``embedding_count``.
+        Returns a dict with ``paper_count``, ``embedding_count``, and
+        ``mismatch_was_ignored`` (True if an embedding model mismatch was
+        detected but overridden via *ignore_embedding_model_mismatch*).
 
         Raises
         ------
+        EmbeddingModelMismatchError
+            If the artifact's embedding model differs from *embedding_model*
+            and *ignore_embedding_model_mismatch* is ``False``.
         RegistryError
             If either file is missing or an import step fails.
         """
@@ -435,6 +537,37 @@ class RegistryClient:
                 f"Incomplete data for {conference}/{year}: missing {', '.join(missing)}. "
                 "Cannot import — both paper DB and embeddings must be present."
             )
+
+        # --- pre-flight: validate embedding model from artifact paper DB ---
+        # This check catches mismatches even when the local DB is empty (in which case
+        # the normal import_papers_from_sqlite() check is skipped).
+        mismatch_was_ignored = False
+        if embedding_model:
+            artifact_model: Optional[str] = None
+            try:
+                with sqlite3.connect(str(paper_db_file)) as conn:
+                    row = conn.execute(
+                        "SELECT embedding_model FROM embeddings_metadata ORDER BY updated_at DESC LIMIT 1"
+                    ).fetchone()
+                    if row:
+                        artifact_model = row[0]
+            except (sqlite3.OperationalError, sqlite3.DatabaseError) as exc:
+                # Legacy DB without embeddings_metadata table or not a valid SQLite file
+                logger.debug("Could not read embedding model from artifact DB %s: %s", paper_db_file.name, exc)
+
+            if artifact_model and _sanitize_str_for_oci_tag(artifact_model) != _sanitize_str_for_oci_tag(
+                embedding_model
+            ):
+                if not ignore_embedding_model_mismatch:
+                    raise EmbeddingModelMismatchError(local_model=embedding_model, remote_model=artifact_model)
+                mismatch_was_ignored = True
+                progress(
+                    f"⚠️  WARNING: Embedding model mismatch detected for {conference}/{year}!\n"
+                    f"  Configured model: '{embedding_model}'\n"
+                    f"  Artifact model:   '{artifact_model}'\n"
+                    f"  Proceeding because --ignore-embedding-model-mismatch was set.\n"
+                    f"  ⚠️  Only do this if both names refer to the same model on different backends!"
+                )
 
         # --- import paper DB first ---
         progress(f"Importing paper database for {conference}/{year}...")
@@ -482,6 +615,7 @@ class RegistryClient:
         return {
             "paper_count": paper_count,
             "embedding_count": embedding_count,
+            "mismatch_was_ignored": mismatch_was_ignored,
         }
 
     # ------------------------------------------------------------------
@@ -711,6 +845,7 @@ class RegistryClient:
         tag: Optional[str] = None,
         embedding_model: Optional[str] = None,
         progress_callback: Optional[Callable[[str], None]] = None,
+        ignore_embedding_model_mismatch: bool = False,
     ) -> Dict[str, Any]:
         """
         Download data for a conference (and optionally a specific year) from the registry.
@@ -737,6 +872,12 @@ class RegistryClient:
             A ``RegistryError`` is raised if the model cannot be determined.
         progress_callback : callable, optional
             Function called with status messages during download.
+        ignore_embedding_model_mismatch : bool, optional
+            When ``True``, proceed with the download even if the artifact's embedding model
+            differs from the configured model.  After a successful import the local embedding
+            model metadata is updated to match *embedding_model*.  Only use this option when
+            the mismatch is caused by the same model having different names on different
+            backends (e.g. LM Studio vs. Ollama).  Default is ``False``.
 
         Returns
         -------
@@ -745,6 +886,9 @@ class RegistryClient:
 
         Raises
         ------
+        EmbeddingModelMismatchError
+            If the artifact's embedding model differs from *embedding_model* and
+            *ignore_embedding_model_mismatch* is ``False``.
         RegistryError
             If download fails or the embedding model cannot be determined.
         """
@@ -763,10 +907,43 @@ class RegistryClient:
                 progress_callback(msg)
             logger.info(msg)
 
+        target = f"{self.repository}:{tag}"
+
+        # --- 0a. Resolve tag: find the best matching tag in the registry ---
+        # The locally-built tag includes the current package version, which may
+        # differ from the version used when the artifact was pushed.  Resolve to
+        # the closest matching tag so that both the manifest check and the pull
+        # use a tag that actually exists.
+        resolved_tag = self._find_best_matching_tag(tag)
+        if resolved_tag != tag:
+            _progress(f"Tag '{tag}' not found in registry; using closest match '{resolved_tag}'")
+            tag = resolved_tag
+            target = f"{self.repository}:{tag}"
+
+        # --- 0b. Pre-download: check embedding model from manifest labels ---
+        # Fetch the manifest before pulling any data so we can fail fast if
+        # the artifact was built with a different embedding model.
+        mismatch_was_ignored = False
+        manifest_embedding_model = self._get_manifest_embedding_model(target)
+        if manifest_embedding_model and embedding_model:
+            if _sanitize_str_for_oci_tag(manifest_embedding_model) != _sanitize_str_for_oci_tag(embedding_model):
+                if not ignore_embedding_model_mismatch:
+                    raise EmbeddingModelMismatchError(
+                        local_model=embedding_model,
+                        remote_model=manifest_embedding_model,
+                    )
+                mismatch_was_ignored = True
+                _progress(
+                    f"⚠️  WARNING: Embedding model mismatch detected!\n"
+                    f"  Configured model: '{embedding_model}'\n"
+                    f"  Artifact model:   '{manifest_embedding_model}'\n"
+                    f"  Proceeding because --ignore-embedding-model-mismatch was set.\n"
+                    f"  ⚠️  Only do this if both names refer to the same model on different backends!"
+                )
+
         temp_dir = Path(tempfile.mkdtemp())
         try:
             # --- 1. Pull from oras ---
-            target = f"{self.repository}:{tag}"
             _progress(f"Pulling {target}...")
 
             pulled_files = self._client.pull(target=target, outdir=str(temp_dir))
@@ -840,13 +1017,32 @@ class RegistryClient:
                 paper_db = files["paper_db"]
                 embeddings = files["embeddings"]
 
-                result = self._import_year(conference, yr, paper_db, embeddings, _progress)
+                result = self._import_year(
+                    conference,
+                    yr,
+                    paper_db,
+                    embeddings,
+                    _progress,
+                    embedding_model=embedding_model,
+                    ignore_embedding_model_mismatch=ignore_embedding_model_mismatch,
+                )
                 total_papers += result["paper_count"]
                 total_embeddings += result["embedding_count"]
+                if result.get("mismatch_was_ignored"):
+                    mismatch_was_ignored = True
                 imported_years.append(yr)
 
             if not imported_years:
                 _progress("Warning: No data found in artifact to import")
+
+            # --- 5. Update local embedding model if mismatch was ignored ---
+            if mismatch_was_ignored and embedding_model:
+                from abstracts_explorer.database import DatabaseManager
+
+                _progress(f"Updating local embedding model metadata to configured model: '{embedding_model}'")
+                with DatabaseManager() as db:
+                    db.create_tables()
+                    db.set_embedding_model(embedding_model)
 
             _progress("Download complete!")
             return {
