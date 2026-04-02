@@ -51,6 +51,7 @@ import oras.oci
 import oras.provider
 
 from abstracts_explorer._version import __version__
+from abstracts_explorer.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -306,7 +307,7 @@ class RegistryClient:
     @staticmethod
     def _get_embedding_model() -> Optional[str]:
         """
-        Return the embedding model stored in the local database.
+        Return the embedding model from the configuration.
 
         Returns
         -------
@@ -315,9 +316,8 @@ class RegistryClient:
         """
         from abstracts_explorer.database import DatabaseManager
 
-        with DatabaseManager() as db:
-            db.create_tables()
-            return db.get_embedding_model()
+        config = get_config()
+        return config.embedding_model
 
     def _find_best_matching_tag(self, tag: str) -> str:
         """
@@ -892,14 +892,14 @@ class RegistryClient:
         RegistryError
             If download fails or the embedding model cannot be determined.
         """
+        if embedding_model is None:
+            embedding_model = self._get_embedding_model()
+        if not embedding_model:
+            raise RegistryError(
+                "No embedding model specified and none found in the configuration. "
+                "Use --embedding-model to specify the model name."
+            )
         if tag is None:
-            if embedding_model is None:
-                embedding_model = self._get_embedding_model()
-            if not embedding_model:
-                raise RegistryError(
-                    "No embedding model specified and none found in local database. "
-                    "Use --embedding-model to specify the model name."
-                )
             tag = _build_tag(conference, year, embedding_model=embedding_model)
 
         def _progress(msg: str) -> None:
