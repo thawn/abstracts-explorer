@@ -91,9 +91,38 @@ def setup_logging(verbosity: int) -> None:
     logging.getLogger("abstracts_explorer").setLevel(logging.NOTSET)
 
 
+def add_conference_year_args(parser: argparse.ArgumentParser) -> None:
+    """
+    Add standard --conference and --year arguments to a parser.
+
+    Creates a unified, case-insensitive option handler for conference and year
+    filtering.  All commands that accept these options should use this helper
+    so that help text, types, and defaults are consistent across the CLI.
+
+    Parameters
+    ----------
+    parser : argparse.ArgumentParser
+        Parser to add the arguments to.
+    """
+    parser.add_argument(
+        "--conference",
+        type=str,
+        default=None,
+        help="Conference to use (default: all conferences). Case-insensitive.",
+    )
+    parser.add_argument(
+        "--year",
+        type=int,
+        default=None,
+        help="Year of conference/workshop (default: all available years).",
+    )
+
+
 def _build_embeddings_where_clause(args: argparse.Namespace) -> Optional[str]:
     """
     Build a SQL WHERE clause from --conference, --year, and --where arguments.
+
+    The conference comparison is case-insensitive (uses SQL ``LOWER()``).
 
     Parameters
     ----------
@@ -111,9 +140,9 @@ def _build_embeddings_where_clause(args: argparse.Namespace) -> Optional[str]:
     where = getattr(args, "where", None)
 
     if conference:
-        # Escape single quotes to prevent SQL injection
+        # Escape single quotes and use LOWER() for case-insensitive matching
         safe_conf = conference.replace("'", "''")
-        conditions.append(f"conference = '{safe_conf}'")
+        conditions.append(f"LOWER(conference) = LOWER('{safe_conf}')")
     if year is not None:
         conditions.append(f"year = {int(year)}")
     if where:
@@ -316,12 +345,19 @@ def search_command(args: argparse.Namespace) -> int:
             print("  abstracts-explorer create-embeddings", file=sys.stderr)
             return 1
 
+    conference = getattr(args, "conference", None)
+    year = getattr(args, "year", None)
+
     print("NeurIPS Semantic Search")
     print("=" * 70)
     print(f"Query: {args.query}")
     print(f"Embeddings: {config.embedding_db}")
     print(f"Collection: {args.collection}")
     print(f"Results: {args.n_results}")
+    if conference:
+        print(f"Conference: {conference}")
+    if year is not None:
+        print(f"Year:       {year}")
     print("=" * 70)
 
     try:
@@ -348,8 +384,8 @@ def search_command(args: argparse.Namespace) -> int:
         stats = em.get_collection_stats()
         print(f"\n📊 Searching {stats['count']:,} papers in collection '{stats['name']}'")
 
-        # Parse metadata filter if provided
-        where_filter = None
+        # Parse metadata filter from --where option
+        where_filter: Optional[Dict[str, Any]] = None
         if args.where:
             # Simple key=value parsing
             try:
@@ -360,6 +396,23 @@ def search_command(args: argparse.Namespace) -> int:
                 print(f"🔍 Filter: {where_filter}")
             except Exception as e:
                 print(f"⚠️  Warning: Could not parse filter '{args.where}': {e}", file=sys.stderr)
+
+        # Add conference/year filters from dedicated options (case-insensitive via DB lookup)
+        if conference or year is not None:
+            if where_filter is None:
+                where_filter = {}
+            if conference:
+                # Look up the stored conference name case-insensitively from the DB
+                with DatabaseManager() as db:
+                    rows = db.query(
+                        "SELECT DISTINCT conference FROM papers WHERE LOWER(conference) = LOWER(?)",
+                        (conference,),
+                    )
+                stored_name = rows[0]["conference"] if rows else conference
+                where_filter["conference"] = stored_name
+            if year is not None:
+                # ChromaDB stores all metadata values as strings
+                where_filter["year"] = str(year)
 
         # Perform search
         print(f"\n🔍 Searching for: '{args.query}'...\n")
@@ -440,6 +493,8 @@ def chat_command(args: argparse.Namespace) -> int:
         - max_context: Maximum papers to use as context
         - temperature: Sampling temperature
         - export: Path to export conversation
+        - conference: Conference to scope chat context (optional)
+        - year: Year to scope chat context (optional)
 
     Returns
     -------
@@ -449,6 +504,9 @@ def chat_command(args: argparse.Namespace) -> int:
     try:
         config = get_config()
 
+        conference = getattr(args, "conference", None)
+        year = getattr(args, "year", None)
+
         print("=" * 70)
         print("NeurIPS RAG Chat")
         print("=" * 70)
@@ -457,6 +515,10 @@ def chat_command(args: argparse.Namespace) -> int:
         print(f"Chat Model: {args.model}")
         print(f"Embedding Model: {args.embedding_model}")
         print(f"API URL: {args.lm_studio_url}")
+        if conference:
+            print(f"Conference: {conference}")
+        if year is not None:
+            print(f"Year:       {year}")
         print("=" * 70)
 
         # Check embeddings exist (for local paths only)
@@ -498,6 +560,19 @@ def chat_command(args: argparse.Namespace) -> int:
         # Initialize database connection
         db = DatabaseManager()
         db.connect()
+
+        # Build conference/year context for RAG queries (case-insensitive via DB lookup)
+        chat_conferences: Optional[List[str]] = None
+        chat_years: Optional[List[int]] = None
+        if conference:
+            rows = db.query(
+                "SELECT DISTINCT conference FROM papers WHERE LOWER(conference) = LOWER(?)",
+                (conference,),
+            )
+            stored_name = rows[0]["conference"] if rows else conference
+            chat_conferences = [stored_name]
+        if year is not None:
+            chat_years = [year]
 
         # Initialize RAG chat
         chat = RAGChat(
@@ -542,7 +617,7 @@ def chat_command(args: argparse.Namespace) -> int:
 
                 # Query RAG system
                 print("\n🔍 Searching papers...", end="", flush=True)
-                result = chat.query(user_input)
+                result = chat.query(user_input, conferences=chat_conferences, years=chat_years)
                 print("\r" + " " * 50 + "\r", end="")  # Clear the line
 
                 # Display response
@@ -682,8 +757,8 @@ def download_command(args: argparse.Namespace) -> int:
 
     # Determine which plugins to use
     if plugin_name:
-        # Specific plugin requested
-        plugin = get_plugin(plugin_name)
+        # Specific plugin requested – look up case-insensitively (plugin names are lowercase)
+        plugin = get_plugin(plugin_name.lower())
         if not plugin:
             print(f"❌ Error: Plugin '{plugin_name}' not found", file=sys.stderr)
             print(f"\nAvailable plugins: {', '.join(list_plugin_names())}", file=sys.stderr)
@@ -1691,7 +1766,8 @@ def registry_upload_command(args: argparse.Namespace) -> int:
     config = get_config()
     repository = args.repository or config.registry_repository
     token = args.token or config.github_token
-    args.conference = args.conference.lower()
+    # Normalise conference to lowercase; treat None as "all"
+    conference = (args.conference or "all").lower()
 
     if not repository:
         print(
@@ -1710,7 +1786,7 @@ def registry_upload_command(args: argparse.Namespace) -> int:
     print("Abstracts Explorer - Registry Upload")
     print("=" * 70)
     print(f"Repository:     {repository}")
-    print(f"Conference:     {args.conference}")
+    print(f"Conference:     {conference}")
     print(f"Year:           {args.year if args.year else 'all'}")
     if args.tag:
         print(f"Tag:            {args.tag}")
@@ -1719,7 +1795,7 @@ def registry_upload_command(args: argparse.Namespace) -> int:
     try:
         client = RegistryClient(repository=repository, token=token)
 
-        if args.conference == "all":
+        if conference == "all":
             summaries = client.upload_all(
                 progress_callback=lambda msg: print(f"  {msg}"),
             )
@@ -1731,7 +1807,7 @@ def registry_upload_command(args: argparse.Namespace) -> int:
                 )
         else:
             summary = client.upload(
-                conference=args.conference,
+                conference=conference,
                 year=args.year,
                 tag=args.tag,
                 progress_callback=lambda msg: print(f"  {msg}"),
@@ -1783,7 +1859,8 @@ def registry_download_command(args: argparse.Namespace) -> int:
     config = get_config()
     repository = args.repository or config.registry_repository
     token = args.token or config.github_token
-    args.conference = args.conference.lower()
+    # Normalise conference to lowercase; treat None as "all"
+    conference = (args.conference or "all").lower()
 
     if not repository:
         print(
@@ -1803,15 +1880,15 @@ def registry_download_command(args: argparse.Namespace) -> int:
     print("Abstracts Explorer - Registry Download")
     print("=" * 70)
     print(f"Repository:     {repository}")
-    print(f"Conference:     {args.conference}")
+    print(f"Conference:     {conference}")
     print(f"Year:           {year_display}")
     if args.tag:
         print(f"Tag:            {args.tag}")
     print("=" * 70)
 
     if not args.yes:
-        scope = f"{args.conference}/{year_display}"
-        if args.conference == "all":
+        scope = f"{conference}/{year_display}"
+        if conference == "all":
             scope = "all conferences"
         print(f"\n⚠️  Warning: This will replace existing data for {scope}!")
         try:
@@ -1826,7 +1903,7 @@ def registry_download_command(args: argparse.Namespace) -> int:
     try:
         client = RegistryClient(repository=repository, token=token)
 
-        if args.conference == "all":
+        if conference == "all":
             summaries = client.download_all(
                 progress_callback=lambda msg: print(f"  {msg}"),
             )
@@ -1841,7 +1918,7 @@ def registry_download_command(args: argparse.Namespace) -> int:
 
             def _do_download():
                 return client.download(
-                    conference=args.conference,
+                    conference=conference,
                     year=args.year,
                     tag=args.tag,
                     embedding_model=embedding_model,
@@ -1988,6 +2065,97 @@ def registry_list_command(args: argparse.Namespace) -> int:
         return 1
 
 
+def pre_process_command(args: argparse.Namespace) -> int:
+    """
+    Run the full pre-processing pipeline: download → create-embeddings → clustering pre-generate.
+
+    This command chains the three main data-preparation steps in the correct order,
+    passing the same ``--conference`` and ``--year`` filters to each step.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments containing:
+        - conference: Conference to process (optional; all conferences if omitted)
+        - year: Year to process (optional; all available years if omitted)
+        - force: Force re-download / reset embeddings / force recompute clustering
+
+    Returns
+    -------
+    int
+        Exit code (0 for success, non-zero for failure)
+    """
+    config = get_config()
+
+    conference = getattr(args, "conference", None)
+    year = getattr(args, "year", None)
+    force = getattr(args, "force", False)
+    verbose = getattr(args, "verbose", 0)
+
+    print("Abstracts Explorer - Pre-process Pipeline")
+    print("=" * 70)
+    if conference:
+        print(f"Conference: {conference}")
+    if year is not None:
+        print(f"Year:       {year}")
+    print(f"Force:      {force}")
+    print("Steps: download → create-embeddings → clustering pre-generate")
+    print("=" * 70)
+
+    # Step 1: Download
+    print("\n📥 Step 1/3: Downloading conference data...")
+    download_args = argparse.Namespace(
+        conference=conference,
+        year=year,
+        output="data/abstracts.json",
+        force=force,
+        list_plugins=False,
+        max_workers=20,
+        input_file=None,
+        verbose=verbose,
+    )
+    rc = download_command(download_args)
+    if rc != 0:
+        print(f"\n❌ Download step failed (exit code {rc})", file=sys.stderr)
+        return rc
+
+    # Step 2: Create embeddings
+    print("\n🧮 Step 2/3: Creating embeddings...")
+    embeddings_args = argparse.Namespace(
+        conference=conference,
+        year=year,
+        collection=config.collection_name,
+        lm_studio_url=config.llm_backend_url,
+        model=config.embedding_model,
+        force=force,
+        where=None,
+        requests_per_minute=config.requests_per_minute,
+        verbose=verbose,
+    )
+    rc = create_embeddings_command(embeddings_args)
+    if rc != 0:
+        print(f"\n❌ Create-embeddings step failed (exit code {rc})", file=sys.stderr)
+        return rc
+
+    # Step 3: Clustering pre-generate
+    print("\n🔮 Step 3/3: Pre-generating clustering results...")
+    clustering_args = argparse.Namespace(
+        conference=conference,
+        year=year,
+        collection=config.collection_name,
+        force=force,
+        requests_per_minute=config.requests_per_minute,
+        verbose=verbose,
+    )
+    rc = pre_generate_clustering_command(clustering_args)
+    if rc != 0:
+        print(f"\n❌ Clustering pre-generate step failed (exit code {rc})", file=sys.stderr)
+        return rc
+
+    print("\n✅ Pre-process pipeline completed successfully!")
+    return 0
+
+
 def main() -> int:
     """
     Main entry point for the CLI.
@@ -2075,24 +2243,12 @@ Examples:
         """,
     )
     download_parser.add_argument(
-        "--conference",
-        type=str,
-        default=None,
-        dest="conference",
-        help="Conference plugin to use (default: all conferences). Use --list-plugins to see available plugins",
-    )
-    download_parser.add_argument(
-        "--year",
-        type=int,
-        default=None,
-        help="Year of conference/workshop (default: all available years)",
-    )
-    download_parser.add_argument(
         "--output",
         type=str,
         default="data/abstracts.json",
         help="Output path for intermediate JSON file (default: data/abstracts.json)",
     )
+    add_conference_year_args(download_parser)
     download_parser.add_argument(
         "--force",
         action="store_true",
@@ -2150,18 +2306,7 @@ Examples:
   abstracts-explorer create-embeddings --conference NeurIPS --where "award IS NOT NULL"
         """,
     )
-    embeddings_parser.add_argument(
-        "--conference",
-        type=str,
-        default=None,
-        help="Only embed papers from this conference (default: all conferences)",
-    )
-    embeddings_parser.add_argument(
-        "--year",
-        type=int,
-        default=None,
-        help="Only embed papers from this year (default: all years)",
-    )
+    add_conference_year_args(embeddings_parser)
     embeddings_parser.add_argument(
         "--collection",
         type=str,
@@ -2244,6 +2389,7 @@ Examples:
         default=config.embedding_model,
         help=f"Name of the embedding model (default: {config.embedding_model})",
     )
+    add_conference_year_args(search_parser)
 
     # Chat command
     chat_parser = subparsers.add_parser(
@@ -2299,6 +2445,7 @@ Examples:
         default=None,
         help="Export conversation to JSON file",
     )
+    add_conference_year_args(chat_parser)
 
     # Web UI command
     web_parser = subparsers.add_parser(
@@ -2392,6 +2539,7 @@ Examples:
         default=None,
         help="Maximum number of embeddings to process (optional)",
     )
+    add_conference_year_args(cluster_parser)
 
     # clustering clear-cache
     clear_cache_parser = clustering_subparsers.add_parser(
@@ -2418,6 +2566,7 @@ Examples:
         default=None,
         help="Only clear cache for this embedding model (optional)",
     )
+    add_conference_year_args(clear_cache_parser)
 
     # clustering pre-generate
     pre_gen_parser = clustering_subparsers.add_parser(
@@ -2459,18 +2608,7 @@ Examples:
         default=config.collection_name,
         help=f"Name of the ChromaDB collection (default: {config.collection_name})",
     )
-    pre_gen_parser.add_argument(
-        "--conference",
-        type=str,
-        default=None,
-        help="Only cluster papers from this conference (default: all conferences)",
-    )
-    pre_gen_parser.add_argument(
-        "--year",
-        type=int,
-        default=None,
-        help="Only cluster papers from this year, e.g. --year 2024 (requires --conference; default: all years)",
-    )
+    add_conference_year_args(pre_gen_parser)
     pre_gen_parser.add_argument(
         "--force",
         action="store_true",
@@ -2617,6 +2755,7 @@ Examples:
         default=config.llm_backend_url,
         help=f"LLM backend URL (default: {config.llm_backend_url})",
     )
+    add_conference_year_args(eval_gen_parser)
 
     # eval verify
     eval_verify_parser = eval_subparsers.add_parser(
@@ -2635,6 +2774,7 @@ Examples:
         action="store_true",
         help="Review all pairs (including already verified)",
     )
+    add_conference_year_args(eval_verify_parser)
 
     # eval run
     eval_run_parser = eval_subparsers.add_parser(
@@ -2677,6 +2817,7 @@ Examples:
         action="store_true",
         help="Include unverified Q/A pairs in evaluation",
     )
+    add_conference_year_args(eval_run_parser)
 
     # eval results
     eval_results_parser = eval_subparsers.add_parser(
@@ -2712,6 +2853,7 @@ Examples:
         action="store_true",
         help="Skip confirmation prompt when using --clear",
     )
+    add_conference_year_args(eval_results_parser)
 
     # eval clear
     eval_clear_parser = eval_subparsers.add_parser(
@@ -2725,6 +2867,7 @@ Examples:
         action="store_true",
         help="Skip confirmation prompt",
     )
+    add_conference_year_args(eval_clear_parser)
 
     # Registry command (with sub-subcommands)
     registry_parser = subparsers.add_parser(
@@ -2798,8 +2941,8 @@ Examples:
         "--conference",
         "-c",
         type=str,
-        required=True,
-        help="Conference name (e.g., neurips, iclr) or 'all' for all conferences",
+        default=None,
+        help="Conference name (e.g., neurips, iclr) or 'all' for all conferences (default: all).",
     )
     registry_upload_parser.add_argument(
         "--year",
@@ -2826,8 +2969,8 @@ Examples:
         "--conference",
         "-c",
         type=str,
-        required=True,
-        help="Conference name (e.g., neurips, iclr) or 'all' for all available tags",
+        default=None,
+        help="Conference name (e.g., neurips, iclr) or 'all' for all available tags (default: all).",
     )
     registry_download_parser.add_argument(
         "--year",
@@ -2868,6 +3011,42 @@ Examples:
         default=None,
         help="Inspect a specific tag (shows details instead of listing all tags)",
     )
+    add_conference_year_args(registry_list_parser)
+
+    # Pre-process command
+    pre_process_parser = subparsers.add_parser(
+        "pre-process",
+        help="Run the full pre-processing pipeline (download → create-embeddings → clustering pre-generate)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+Run the full pre-processing pipeline in order:
+  1. download          - Download conference data
+  2. create-embeddings - Generate embeddings for abstracts
+  3. clustering pre-generate - Pre-generate clustering results for the web UI
+
+All three steps receive the same --conference and --year filters.
+Other options for each step use their default values (from config).
+
+Examples:
+  # Process all conferences and years
+  abstracts-explorer pre-process
+
+  # Process only NeurIPS (all years)
+  abstracts-explorer pre-process --conference neurips
+
+  # Process NeurIPS 2025 only
+  abstracts-explorer pre-process --conference neurips --year 2025
+
+  # Re-process, overwriting existing data
+  abstracts-explorer pre-process --conference neurips --force
+        """,
+    )
+    add_conference_year_args(pre_process_parser)
+    pre_process_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force re-download and reset embeddings even if they already exist",
+    )
 
     argcomplete.autocomplete(parser)
     args = parser.parse_args()
@@ -2883,6 +3062,8 @@ Examples:
         return download_command(args)
     elif args.command == "create-embeddings":
         return create_embeddings_command(args)
+    elif args.command == "pre-process":
+        return pre_process_command(args)
     elif args.command == "search":
         return search_command(args)
     elif args.command == "chat":
