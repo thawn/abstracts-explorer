@@ -364,9 +364,9 @@ class RegistryClient:
             return tag
 
         # first split off the version suffix, then iteratively strip components from the end of the prefix until we find candidates that match the start of the tag.  This allows us to resolve to a tag with a different version and/or model, as long as the conference and year match.
-        candidates = []
-        prefix = tag
-        maxsplit = 1  # prevent infinite loop in case of unexpected tag formats
+        candidates: List[str] = []
+        prefix: str = tag
+        maxsplit: int = 1
         while candidates == [] and "_" in prefix:
             prefix = prefix.rsplit("_", 1)[0]
             candidates = [t for t in available_tags if t.rsplit("_", maxsplit=maxsplit)[0] == prefix]
