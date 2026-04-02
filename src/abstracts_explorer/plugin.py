@@ -831,15 +831,26 @@ def prepare_chroma_db_paper_data(paper: Dict[str, Any]) -> Dict[str, Any]:
         Prepared paper data
     """
     # Split authors and keywords into lists, stripping whitespace from each entry
-    paper["authors"] = [a.strip() for a in paper["authors"].split(";")]
+    paper["authors"] = [a.strip() for a in paper["authors"].split(";") if a.strip()]
     paper["year"] = int(paper["year"])
     if "keywords" in paper:
-        paper["keywords"] = [k.strip() for k in paper["keywords"].split(",")]
+        kws = [k.strip() for k in paper["keywords"].split(",") if k.strip()]
+        if kws:
+            paper["keywords"] = kws
+        else:
+            # Empty string → remove so LightweightPaper defaults keywords to None
+            del paper["keywords"]
     if "original_id" in paper:
         if paper["original_id"]:
             paper["original_id"] = int(paper["original_id"])
         else:
             del paper["original_id"]
+    # Remove empty strings for optional string fields so they default to None in
+    # LightweightPaper, preserving round-trip fidelity with the SQL database (where
+    # None values are serialised to "" by _serialize_metadata_for_chromadb).
+    for field in ("paper_pdf_url", "poster_image_url", "url", "room_name", "starttime", "endtime", "award"):
+        if field in paper and paper[field] == "":
+            del paper[field]
     return paper
 
 

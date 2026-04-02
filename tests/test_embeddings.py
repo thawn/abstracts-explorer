@@ -978,7 +978,11 @@ class TestExportImportRoundTrip:
 
         # Parse back through LightweightPaper to verify round-trip fidelity
         reparsed = embeddings_manager.parse_chromadb_metadata(stored_meta)
-        assert reparsed["authors"] == ["Cynthia Putnam", "Mary Bungum", "Dan Spinner"]
+
+        # The full dictionary must be identical to what was exported before the delete+re-import.
+        # This covers all fields: authors (list), keywords (list), year (int), title, conference,
+        # session, poster_position, abstract, and any other metadata that was stored.
+        assert reparsed == exported["metadatas"][0]
 
         embeddings_manager.close()
 
@@ -1007,14 +1011,16 @@ class TestExportImportRoundTrip:
         assert isinstance(exported_keywords, list)
         assert exported_keywords == ["machine learning", "deep learning", "neural networks"]
 
-        # Import and verify storage
+        # Import and verify full dictionary equality
         embeddings_manager.collection.delete(ids=["kw_roundtrip"])
         embeddings_manager.import_embeddings(exported, "NeurIPS", 2024)
 
         raw = embeddings_manager.collection.get(ids=["kw_roundtrip"], include=["metadatas"])
-        stored_keywords = raw["metadatas"][0]["keywords"]
-        assert isinstance(stored_keywords, str)
-        assert stored_keywords == "machine learning, deep learning, neural networks"
+        reparsed = embeddings_manager.parse_chromadb_metadata(raw["metadatas"][0])
+
+        # The full dictionary must equal what was exported: keywords as a list,
+        # authors as a list, year as int, and all other metadata fields intact.
+        assert reparsed == exported["metadatas"][0]
 
         embeddings_manager.close()
 
@@ -1077,12 +1083,10 @@ class TestEmbeddingsMetadataRoundTrip:
         # Parse the raw metadata back through LightweightPaper
         parsed = embeddings_manager.parse_chromadb_metadata(raw_meta)
 
-        # Verify that the parsed data matches the original paper
-        assert parsed["authors"] == original_paper.authors
-        assert parsed["keywords"] == original_paper.keywords
-        assert parsed["year"] == original_paper.year
-        assert parsed["conference"] == original_paper.conference
-        assert parsed["title"] == original_paper.title
+        # All fields must match the original LightweightPaper.  Optional fields
+        # that were None in the original are excluded from both dicts via
+        # model_dump(exclude_none=True), so equality holds end-to-end.
+        assert parsed == original_paper.model_dump(exclude_none=True)
 
         embeddings_manager.close()
 
@@ -1126,6 +1130,12 @@ class TestEmbeddingsMetadataRoundTrip:
         # No list values should appear in metadata
         for value in raw_meta.values():
             assert not isinstance(value, list), f"ChromaDB metadata contains a list: {value!r}"
+
+        # Parsing back must reproduce all fields of the original paper exactly.
+        # Optional fields that were None on the original are absent from both
+        # model_dump(exclude_none=True) dicts (including keywords=None).
+        parsed = embeddings_manager.parse_chromadb_metadata(raw_meta)
+        assert parsed == original_paper.model_dump(exclude_none=True)
 
         embeddings_manager.close()
 
