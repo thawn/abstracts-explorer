@@ -12,7 +12,6 @@ from abstracts_explorer import config as config_module
 
 from tests.conftest import get_env_test_path
 
-
 CONFIG_ENV_VARS = {
     "DATA_DIR",
     "CHAT_MODEL",
