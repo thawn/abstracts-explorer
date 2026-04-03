@@ -494,6 +494,110 @@ class RegistryClient:
             "embedding_count": embedding_count,
         }
 
+    @staticmethod
+    def _read_artifact_embedding_model(paper_db_file: Path) -> Optional[str]:
+        """
+        Read the embedding model name from the ``embeddings_metadata`` table
+        in a downloaded artifact's paper DB.
+
+        Parameters
+        ----------
+        paper_db_file : Path
+            Path to the artifact's SQLite paper database.
+
+        Returns
+        -------
+        str or None
+            The embedding model stored in the artifact, or ``None`` if
+            the table does not exist or is empty (legacy artifacts).
+        """
+        try:
+            with sqlite3.connect(str(paper_db_file)) as conn:
+                row = conn.execute(
+                    "SELECT embedding_model FROM embeddings_metadata ORDER BY updated_at DESC LIMIT 1"
+                ).fetchone()
+                return row[0] if row else None
+        except (sqlite3.OperationalError, sqlite3.DatabaseError) as exc:
+            logger.debug("Could not read embedding model from artifact DB %s: %s", paper_db_file.name, exc)
+            return None
+
+    @staticmethod
+    def _replace_artifact_embedding_model(paper_db_file: Path, new_model: str) -> None:
+        """
+        Overwrite the embedding model in the artifact's paper DB so that
+        subsequent imports do not trigger model-consistency checks.
+
+        Parameters
+        ----------
+        paper_db_file : Path
+            Path to the artifact's SQLite paper database.
+        new_model : str
+            The model name to write.
+        """
+        try:
+            with sqlite3.connect(str(paper_db_file)) as conn:
+                conn.execute(
+                    "UPDATE embeddings_metadata SET embedding_model = ?",
+                    (new_model,),
+                )
+        except (sqlite3.OperationalError, sqlite3.DatabaseError) as exc:
+            logger.debug("Could not update embedding model in artifact DB %s: %s", paper_db_file.name, exc)
+
+    @staticmethod
+    def _check_embedding_model(
+        paper_db_file: Path,
+        embedding_model: str,
+        ignore_embedding_model_mismatch: bool,
+        progress: Callable[[str], None],
+    ) -> None:
+        """
+        Single authoritative embedding-model check for one conference/year import.
+
+        Reads the model stored in the artifact paper DB and compares it to
+        *embedding_model*.  When the models differ:
+
+        * If *ignore_embedding_model_mismatch* is ``False``,
+          ``EmbeddingModelMismatchError`` is raised.
+        * If *ignore_embedding_model_mismatch* is ``True``, the artifact
+          DB is patched in-place so that the downstream
+          ``import_papers_from_sqlite()`` consistency check will not
+          trigger again.
+
+        Parameters
+        ----------
+        paper_db_file : Path
+            Path to the artifact's SQLite paper database.
+        embedding_model : str
+            The configured/expected embedding model name.
+        ignore_embedding_model_mismatch : bool
+            When ``True``, overwrite the artifact model and continue.
+        progress : callable
+            Status-message callback.
+
+        Raises
+        ------
+        EmbeddingModelMismatchError
+            When models differ and *ignore_embedding_model_mismatch* is ``False``.
+        """
+        artifact_model = RegistryClient._read_artifact_embedding_model(paper_db_file)
+        if not artifact_model:
+            return  # Legacy artifact without metadata — nothing to check
+
+        if _sanitize_str_for_oci_tag(artifact_model) == _sanitize_str_for_oci_tag(embedding_model):
+            return  # Models match — nothing to do
+
+        if not ignore_embedding_model_mismatch:
+            raise EmbeddingModelMismatchError(local_model=embedding_model, remote_model=artifact_model)
+
+        # Models differ but the user explicitly asked to proceed.
+        progress(
+            f"⚠️  Embedding model mismatch ignored for {paper_db_file.name}:\n"
+            f"  Configured model: '{embedding_model}'\n"
+            f"  Artifact model:   '{artifact_model}'\n"
+            f"  Replacing artifact model with configured model."
+        )
+        RegistryClient._replace_artifact_embedding_model(paper_db_file, embedding_model)
+
     def _import_year(
         self,
         conference: str,
@@ -512,9 +616,14 @@ class RegistryClient:
         rolled back to prevent inconsistency between the paper DB and the
         embedding DB.
 
-        Returns a dict with ``paper_count``, ``embedding_count``, and
-        ``mismatch_was_ignored`` (True if an embedding model mismatch was
-        detected but overridden via *ignore_embedding_model_mismatch*).
+        The embedding-model consistency check happens **here** — this is
+        the single authoritative location.  When
+        *ignore_embedding_model_mismatch* is ``True`` and the models
+        differ, the artifact DB is patched before the import so that the
+        downstream ``import_papers_from_sqlite()`` check will not trigger
+        again.
+
+        Returns a dict with ``paper_count`` and ``embedding_count``.
 
         Raises
         ------
@@ -539,42 +648,9 @@ class RegistryClient:
                 "Cannot import — both paper DB and embeddings must be present."
             )
 
-        # --- pre-flight: validate embedding model from artifact paper DB ---
-        # This check catches mismatches even when the local DB is empty (in which case
-        # the normal import_papers_from_sqlite() check is skipped).
-        mismatch_was_ignored = False
+        # --- single authoritative embedding-model check ---
         if embedding_model:
-            artifact_model: Optional[str] = None
-            try:
-                with sqlite3.connect(str(paper_db_file)) as conn:
-                    row = conn.execute(
-                        "SELECT embedding_model FROM embeddings_metadata ORDER BY updated_at DESC LIMIT 1"
-                    ).fetchone()
-                    if row:
-                        artifact_model = row[0]
-                    if ignore_embedding_model_mismatch:
-                        # replace the model in the artifact DB with the local model so that the import can proceed without triggering the mismatch check again later
-                        conn.execute(
-                            "UPDATE embeddings_metadata SET embedding_model = ?",
-                            (embedding_model,),
-                        )
-            except (sqlite3.OperationalError, sqlite3.DatabaseError) as exc:
-                # Legacy DB without embeddings_metadata table or not a valid SQLite file
-                logger.debug("Could not read embedding model from artifact DB %s: %s", paper_db_file.name, exc)
-
-            if artifact_model and _sanitize_str_for_oci_tag(artifact_model) != _sanitize_str_for_oci_tag(
-                embedding_model
-            ):
-                if not ignore_embedding_model_mismatch:
-                    raise EmbeddingModelMismatchError(local_model=embedding_model, remote_model=artifact_model)
-                mismatch_was_ignored = True
-                logger.debug(
-                    f"⚠️  WARNING: Embedding model mismatch detected for {conference}/{year}!\n"
-                    f"  Configured model: '{embedding_model}'\n"
-                    f"  Artifact model:   '{artifact_model}'\n"
-                    f"  Proceeding because --ignore-embedding-model-mismatch was set.\n"
-                    f"  ⚠️  Only do this if both names refer to the same model on different backends!"
-                )
+            self._check_embedding_model(paper_db_file, embedding_model, ignore_embedding_model_mismatch, progress)
 
         # --- import paper DB first ---
         progress(f"Importing paper database for {conference}/{year}...")
@@ -622,7 +698,6 @@ class RegistryClient:
         return {
             "paper_count": paper_count,
             "embedding_count": embedding_count,
-            "mismatch_was_ignored": mismatch_was_ignored,
         }
 
     # ------------------------------------------------------------------
@@ -928,9 +1003,8 @@ class RegistryClient:
             target = f"{self.repository}:{tag}"
 
         # --- 0b. Pre-download: check embedding model from manifest labels ---
-        # Fetch the manifest before pulling any data so we can fail fast if
-        # the artifact was built with a different embedding model.
-        mismatch_was_ignored = False
+        # Fail fast before pulling data when the artifact's model does not
+        # match and the user has not opted to ignore the mismatch.
         manifest_embedding_model = self._get_manifest_embedding_model(target)
         if manifest_embedding_model and embedding_model:
             if _sanitize_str_for_oci_tag(manifest_embedding_model) != _sanitize_str_for_oci_tag(embedding_model):
@@ -939,14 +1013,6 @@ class RegistryClient:
                         local_model=embedding_model,
                         remote_model=manifest_embedding_model,
                     )
-                mismatch_was_ignored = True
-                _progress(
-                    f"⚠️  WARNING: Embedding model mismatch detected!\n"
-                    f"  Configured model: '{embedding_model}'\n"
-                    f"  Artifact model:   '{manifest_embedding_model}'\n"
-                    f"  Proceeding because --ignore-embedding-model-mismatch was set.\n"
-                    f"  ⚠️  Only do this if both names refer to the same model on different backends!"
-                )
 
         temp_dir = Path(tempfile.mkdtemp())
         try:
@@ -1035,21 +1101,10 @@ class RegistryClient:
                 )
                 total_papers += result["paper_count"]
                 total_embeddings += result["embedding_count"]
-                if result.get("mismatch_was_ignored"):
-                    mismatch_was_ignored = True
                 imported_years.append(yr)
 
             if not imported_years:
                 _progress("Warning: No data found in artifact to import")
-
-            # --- 5. Update local embedding model if mismatch was ignored ---
-            if mismatch_was_ignored and embedding_model:
-                from abstracts_explorer.database import DatabaseManager
-
-                _progress(f"Updating local embedding model metadata to configured model: '{embedding_model}'")
-                with DatabaseManager() as db:
-                    db.create_tables()
-                    db.set_embedding_model(embedding_model)
 
             _progress("Download complete!")
             return {
