@@ -1422,7 +1422,7 @@ class RegistryClient:
         RegistryError
             If the API call fails or the registry is not hosted on ``ghcr.io``.
         """
-        if not self.registry.lower().startswith("ghcr.io"):
+        if not self.registry.lower() == "ghcr.io":
             raise RegistryError(
                 f"Deletion via the GitHub Packages API is only supported for 'ghcr.io' registries, "
                 f"not '{self.registry}'."
@@ -1611,7 +1611,7 @@ class RegistryClient:
                 # Optional conference filter
                 if conference is not None:
                     base = tag.split("_", 1)[0]
-                    conf_prefix = conference.lower().replace(" ", "-").replace("/", "-").replace("@", "-")
+                    conf_prefix = _sanitize_str_for_oci_tag(conference)
                     # Accept both exact match (e.g. "neurips") and year-specific
                     # (e.g. "neurips-2024").
                     if not (base == conf_prefix or base.startswith(conf_prefix + "-")):

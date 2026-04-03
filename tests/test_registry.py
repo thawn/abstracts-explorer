@@ -3214,7 +3214,7 @@ class TestDeleteOldVersions:
                     progress_callback=messages.append,
                 )
         assert any("Fetching" in m for m in messages)
-        assert any("1" in m for m in messages)
+        assert any("Done" in m for m in messages)
 
     def test_non_ghcr_registry_raises(self):
         with patch("oras.client.OrasClient"):

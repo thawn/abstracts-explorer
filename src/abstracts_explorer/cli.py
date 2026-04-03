@@ -2126,7 +2126,7 @@ def registry_delete_command(args: argparse.Namespace) -> int:
         return 1
 
     below_version = args.below_version
-    conference = getattr(args, "conference", None) or None
+    conference = getattr(args, "conference", None)
     dry_run: bool = getattr(args, "dry_run", False)
 
     print("Abstracts Explorer - Registry Delete Old Versions")
