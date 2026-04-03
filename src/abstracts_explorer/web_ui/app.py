@@ -876,6 +876,52 @@ def donate_data():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/donate-chat", methods=["POST"])
+def donate_chat():
+    """
+    Donate a chat transcript with thumbs up/down feedback.
+
+    Parameters
+    ----------
+    rating : str
+        Feedback rating ('up' or 'down').
+    transcript : list
+        List of message dicts with 'role' and 'text' keys.
+
+    Returns
+    -------
+    dict
+        Success message with donation ID.
+    """
+    try:
+        data = request.json
+        rating = data.get("rating")
+        transcript = data.get("transcript")
+
+        if not rating or not transcript:
+            return jsonify({"error": "Both 'rating' and 'transcript' are required"}), 400
+
+        database = get_database()
+
+        try:
+            donation_id = database.donate_chat_transcript(rating, transcript)
+
+            return jsonify(
+                {
+                    "success": True,
+                    "message": "Thank you for your feedback!",
+                    "id": donation_id,
+                }
+            )
+
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+    except Exception as e:
+        logger.error(f"Error donating chat transcript: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.errorhandler(404)
 def not_found(e):
     """Handle 404 errors."""

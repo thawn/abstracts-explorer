@@ -12,6 +12,17 @@ import { setCurrentSearchTerm } from './state.js';
 import { formatPaperCard } from './paper-card.js';
 
 /**
+ * Get the current chat donation consent status from localStorage.
+ * @returns {boolean|null} true if accepted, false if declined, null if not yet asked
+ */
+function getChatDonationConsent() {
+    const stored = localStorage.getItem('chatDonationConsent');
+    if (stored === 'true') return true;
+    if (stored === 'false') return false;
+    return null;
+}
+
+/**
  * Send chat message
  * @async
  */
@@ -214,6 +225,7 @@ export function addChatMessage(text, role, isLoading = false) {
     const messageDiv = document.createElement('div');
     messageDiv.id = messageId;
     messageDiv.className = 'chat-message';
+    messageDiv.dataset.role = role;
     messageDiv.innerHTML = `
         <div class="flex items-start gap-3 ${justifyClass}">
             ${!isUser ? `
@@ -222,8 +234,21 @@ export function addChatMessage(text, role, isLoading = false) {
                 </div>
             ` : ''}
             <div class="${bgColor} rounded-lg p-4 shadow-sm max-w-2xl">
-                ${contentHtml}
+                <div data-chat-content>${contentHtml}</div>
                 ${isLoading ? '<div class="spinner mt-2" style="width: 20px; height: 20px; border-width: 2px;"></div>' : ''}
+                ${!isUser && !isLoading ? `
+                <div class="chat-feedback-buttons flex items-center gap-2 mt-3 pt-2 border-t border-gray-100">
+                    <span class="text-xs text-gray-400 mr-1">Helpful?</span>
+                    <button class="chat-feedback-btn text-gray-300 hover:text-green-500 transition-colors p-1"
+                        data-rating="up" data-msg-id="${messageId}" title="Thumbs up">
+                        <i class="fas fa-thumbs-up text-sm"></i>
+                    </button>
+                    <button class="chat-feedback-btn text-gray-300 hover:text-red-500 transition-colors p-1"
+                        data-rating="down" data-msg-id="${messageId}" title="Thumbs down">
+                        <i class="fas fa-thumbs-down text-sm"></i>
+                    </button>
+                </div>
+                ` : ''}
             </div>
             ${isUser ? `
                 <div class="flex-shrink-0 w-8 h-8 ${iconBg} rounded-full flex items-center justify-center text-white">
@@ -232,6 +257,16 @@ export function addChatMessage(text, role, isLoading = false) {
             ` : ''}
         </div>
     `;
+
+    // Attach click handlers for feedback buttons
+    if (!isUser && !isLoading) {
+        const feedbackBtns = messageDiv.querySelectorAll('.chat-feedback-btn');
+        feedbackBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                handleChatFeedback(btn.dataset.msgId, btn.dataset.rating);
+            });
+        });
+    }
 
     messagesDiv.appendChild(messageDiv);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
@@ -415,6 +450,125 @@ function _renderClusterVisualizationChart(plotId, viz) {
 
     if (typeof Plotly !== 'undefined') {
         Plotly.newPlot(plotId, traces, layout, { responsive: true, displayModeBar: false });
+    }
+}
+
+/**
+ * Collect the current chat transcript from the DOM.
+ * @returns {Array<{role: string, text: string}>} Array of message objects
+ */
+function collectChatTranscript() {
+    const messagesDiv = document.getElementById('chat-messages');
+    if (!messagesDiv) return [];
+
+    const messages = [];
+    const messageDivs = messagesDiv.querySelectorAll('.chat-message[data-role]');
+
+    for (const msgDiv of messageDivs) {
+        const role = msgDiv.dataset.role;
+        const contentEl = msgDiv.querySelector('[data-chat-content]');
+
+        if (contentEl) {
+            messages.push({
+                role: role,
+                text: contentEl.textContent.trim()
+            });
+        }
+    }
+
+    return messages;
+}
+
+/**
+ * Handle chat feedback (thumbs up/down) button click.
+ * Shows a consent popup on first use, then sends the transcript to the server.
+ * @param {string} messageId - The ID of the message being rated
+ * @param {string} rating - 'up' or 'down'
+ * @async
+ */
+export async function handleChatFeedback(messageId, rating) {
+    // Check consent status from localStorage
+    let consent = getChatDonationConsent();
+
+    // If consent has not been asked yet, show the consent popup
+    if (consent === null) {
+        const accepted = confirm(
+            'Thank you for your feedback! 🎉\n\n' +
+            'To help us improve, clicking this button will upload your current chat conversation.\n\n' +
+            '✓ Your data will be fully anonymized\n' +
+            '✓ No personal information will be collected\n' +
+            '✓ Data will only be used to improve chat quality\n\n' +
+            'Do you agree to share your chat conversation?'
+        );
+
+        consent = accepted;
+        localStorage.setItem('chatDonationConsent', String(accepted));
+
+        if (!accepted) {
+            return;
+        }
+    }
+
+    // If user previously declined, do nothing
+    if (consent === false) {
+        return;
+    }
+
+    // Collect transcript and send to backend
+    const transcript = collectChatTranscript();
+    if (transcript.length === 0) {
+        return;
+    }
+
+    // Disable the feedback buttons for this message to prevent duplicate submissions
+    const messageDiv = document.getElementById(messageId);
+    if (messageDiv) {
+        const feedbackDiv = messageDiv.querySelector('.chat-feedback-buttons');
+        if (feedbackDiv) {
+            const buttons = feedbackDiv.querySelectorAll('.chat-feedback-btn');
+            buttons.forEach(btn => { btn.disabled = true; });
+
+            // Highlight the selected rating button
+            const selectedBtn = feedbackDiv.querySelector(`[data-rating="${rating}"]`);
+            if (selectedBtn) {
+                selectedBtn.classList.remove('text-gray-300');
+                selectedBtn.classList.add(rating === 'up' ? 'text-green-500' : 'text-red-500');
+            }
+        }
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/api/donate-chat`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ rating, transcript })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.error || 'Failed to send feedback');
+        }
+
+        // Show a brief "thank you" in place of the buttons
+        if (messageDiv) {
+            const feedbackDiv = messageDiv.querySelector('.chat-feedback-buttons');
+            if (feedbackDiv) {
+                feedbackDiv.innerHTML = '<span class="text-xs text-gray-400">Thanks for your feedback!</span>';
+            }
+        }
+    } catch (error) {
+        console.error('Error sending chat feedback:', error);
+        // Re-enable buttons on error
+        if (messageDiv) {
+            const feedbackDiv = messageDiv.querySelector('.chat-feedback-buttons');
+            if (feedbackDiv) {
+                const buttons = feedbackDiv.querySelectorAll('.chat-feedback-btn');
+                buttons.forEach(btn => { btn.disabled = false; });
+            }
+        }
     }
 }
 

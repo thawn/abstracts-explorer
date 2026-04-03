@@ -29,6 +29,7 @@ from abstracts_explorer.db_models import (
     ClusteringCache,
     HierarchicalLabelCache,
     ValidationData,
+    ChatDonation,
     EvalQAPair,
     EvalResult,
 )
@@ -493,6 +494,75 @@ class DatabaseManager:
             self._session.rollback()
             logger.error(f"Error donating validation data: {e}", exc_info=True)
             raise DatabaseError(f"Failed to donate validation data: {e}")
+
+    def donate_chat_transcript(self, rating: str, transcript: List[Dict[str, str]]) -> int:
+        """
+        Store a donated chat transcript with thumbs up/down feedback.
+
+        This method accepts an anonymized chat transcript and a rating from
+        the user and stores it for improving the chat system.
+
+        Parameters
+        ----------
+        rating : str
+            User feedback rating, must be 'up' or 'down'.
+        transcript : List[Dict[str, str]]
+            List of message dicts, each with 'role' and 'text' keys.
+
+        Returns
+        -------
+        int
+            ID of the stored donation entry.
+
+        Raises
+        ------
+        ValueError
+            If rating is invalid or transcript is empty/malformed.
+        DatabaseError
+            If database operation fails.
+
+        Examples
+        --------
+        >>> db = DatabaseManager()
+        >>> with db:
+        ...     transcript = [
+        ...         {"role": "user", "text": "What papers discuss transformers?"},
+        ...         {"role": "assistant", "text": "Here are some relevant papers..."}
+        ...     ]
+        ...     donation_id = db.donate_chat_transcript("up", transcript)
+        """
+        if rating not in ("up", "down"):
+            raise ValueError(f"Invalid rating: {rating}. Must be 'up' or 'down'.")
+
+        if not transcript or not isinstance(transcript, list):
+            raise ValueError("Transcript must be a non-empty list of messages.")
+
+        for msg in transcript:
+            if not isinstance(msg, dict) or "role" not in msg or "text" not in msg:
+                raise ValueError("Each message must be a dict with 'role' and 'text' keys.")
+
+        if self._session is None:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            import json
+
+            donation = ChatDonation(
+                rating=rating,
+                transcript=json.dumps(transcript),
+            )
+            self._session.add(donation)
+            self._session.commit()
+
+            logger.info(f"Successfully donated chat transcript (rating={rating})")
+            return donation.id
+
+        except ValueError:
+            raise
+        except Exception as e:
+            self._session.rollback()
+            logger.error(f"Error donating chat transcript: {e}", exc_info=True)
+            raise DatabaseError(f"Failed to donate chat transcript: {e}")
 
     def query(self, sql: str, parameters: tuple = ()) -> List[Dict[str, Any]]:
         """
