@@ -2042,14 +2042,13 @@ class DatabaseManager:
         output_path: "Path",
         conference: str,
         year: int,
-        include_clustering_cache: bool = True,
     ) -> int:
         """
         Export papers for a given conference and year to a standalone SQLite file.
 
-        The exported file also includes any matching clustering cache
-        (unless *include_clustering_cache* is ``False``),
-        hierarchical label cache, and embeddings metadata rows.
+        The exported file includes hierarchical label cache and embeddings
+        metadata rows.  Clustering cache is **not** included — it is exported
+        separately via :meth:`export_clustering_cache_to_json`.
 
         Parameters
         ----------
@@ -2059,11 +2058,6 @@ class DatabaseManager:
             Conference name to export.
         year : int
             Year to export.
-        include_clustering_cache : bool, optional
-            Whether to include matching clustering cache entries in the
-            exported SQLite file.  Set to ``False`` when the clustering
-            cache is exported as a separate artifact layer.  Default is
-            ``True`` for backward compatibility.
 
         Returns
         -------
@@ -2092,13 +2086,6 @@ class DatabaseManager:
                     paper_dict = {c.name: getattr(paper, c.name) for c in Paper.__table__.columns}
                     export_session.add(Paper(**paper_dict))
                     paper_count += 1
-
-                # Export only clustering cache entries matching conference+year
-                if include_clustering_cache:
-                    for entry in self._session.execute(select(ClusteringCache)).scalars():
-                        if self._clustering_cache_matches_conference_year(entry, conference, year):
-                            entry_dict = {c.name: getattr(entry, c.name) for c in ClusteringCache.__table__.columns}
-                            export_session.add(ClusteringCache(**entry_dict))
 
                 # Export hierarchical label cache
                 for entry in self._session.execute(select(HierarchicalLabelCache)).scalars():
@@ -2214,11 +2201,6 @@ class DatabaseManager:
                 # Delete existing papers for this conference+year
                 self._session.execute(delete(Paper).where(and_(Paper.conference == conference, Paper.year == year)))
 
-                # Delete only clustering cache entries that match the conference+year
-                for entry in self._session.execute(select(ClusteringCache)).scalars().all():
-                    if self._clustering_cache_matches_conference_year(entry, conference, year):
-                        self._session.delete(entry)
-
                 # Delete only hierarchical label cache entries whose
                 # embedding_model matches one from the imported data
                 imported_models_result = (
@@ -2240,11 +2222,6 @@ class DatabaseManager:
                     paper_dict = {c.name: getattr(paper, c.name) for c in Paper.__table__.columns}
                     self._session.merge(Paper(**paper_dict))
                     paper_count += 1
-
-                # Import clustering cache entries
-                for entry in source_session.execute(select(ClusteringCache)).scalars():
-                    entry_dict = {c.name: getattr(entry, c.name) for c in ClusteringCache.__table__.columns}
-                    self._session.add(ClusteringCache(**entry_dict))
 
                 # Import hierarchical labels
                 for entry in source_session.execute(select(HierarchicalLabelCache)).scalars():

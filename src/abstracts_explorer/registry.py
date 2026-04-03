@@ -455,7 +455,7 @@ class RegistryClient:
         paper_db_path = temp_dir / f"papers-{year}.db"
         with DatabaseManager() as db:
             db.create_tables()
-            paper_count = db.export_papers_to_sqlite(paper_db_path, conference, year, include_clustering_cache=False)
+            paper_count = db.export_papers_to_sqlite(paper_db_path, conference, year)
 
         if paper_count == 0:
             raise RegistryError(f"No papers found for {conference}/{year}. Download the conference data first.")
@@ -484,6 +484,12 @@ class RegistryClient:
             db.create_tables()
             cache_data = db.export_clustering_cache_to_json(conference, year)
         clustering_cache_count = len(cache_data.get("entries", []))
+
+        if clustering_cache_count == 0:
+            raise RegistryError(
+                f"No clustering cache found for {conference}/{year}."
+                " Generate the clustering cache first with 'abstracts-explorer clustering pre-generate'."
+            )
 
         clustering_cache_path = temp_dir / f"clustering-{year}.json"
         clustering_cache_path.write_text(json.dumps(cache_data))
@@ -627,15 +633,10 @@ class RegistryClient:
         """
         Import paper DB, embeddings, and clustering cache for a single conference+year.
 
-        Both *paper_db_file* and *embeddings_file* must exist.  If either
-        import fails, any already-imported data for this conference+year is
-        rolled back to prevent inconsistency between the paper DB and the
-        embedding DB.
-
-        *clustering_cache_file* is optional.  When present the clustering
-        cache entries are imported from the separate JSON layer.  When
-        absent (legacy artifacts) the clustering cache is still imported
-        from the paper DB SQLite file via ``import_papers_from_sqlite()``.
+        All three files (*paper_db_file*, *embeddings_file*, and
+        *clustering_cache_file*) must exist.  If any import fails, any
+        already-imported data for this conference+year is rolled back to
+        prevent inconsistency between the paper DB and the embedding DB.
 
         The embedding-model consistency check happens **here** — this is
         the single authoritative location.  When
@@ -653,21 +654,23 @@ class RegistryClient:
             If the artifact's embedding model differs from *embedding_model*
             and *ignore_embedding_model_mismatch* is ``False``.
         RegistryError
-            If either file is missing or an import step fails.
+            If any file is missing or an import step fails.
         """
         from abstracts_explorer.database import DatabaseManager
         from abstracts_explorer.embeddings import EmbeddingsManager
 
-        # --- pre-flight: both files must exist ---
-        if not paper_db_file.exists() or not embeddings_file.exists():
-            missing = []
-            if not paper_db_file.exists():
-                missing.append(f"paper DB ({paper_db_file.name})")
-            if not embeddings_file.exists():
-                missing.append(f"embeddings ({embeddings_file.name})")
+        # --- pre-flight: all three files must exist ---
+        missing = []
+        if not paper_db_file.exists():
+            missing.append(f"paper DB ({paper_db_file.name})")
+        if not embeddings_file.exists():
+            missing.append(f"embeddings ({embeddings_file.name})")
+        if clustering_cache_file is None or not clustering_cache_file.exists():
+            missing.append(f"clustering cache ({clustering_cache_file.name if clustering_cache_file else 'not provided'})")
+        if missing:
             raise RegistryError(
                 f"Incomplete data for {conference}/{year}: missing {', '.join(missing)}. "
-                "Cannot import — both paper DB and embeddings must be present."
+                "Cannot import — paper DB, embeddings, and clustering cache must all be present."
             )
 
         # --- single authoritative embedding-model check ---
@@ -717,22 +720,19 @@ class RegistryClient:
                 "Paper DB changes have been rolled back."
             ) from embed_err
 
-        # --- import clustering cache from separate layer (if present) ---
+        # --- import clustering cache from separate layer ---
         clustering_cache_count = 0
-        if clustering_cache_file and clustering_cache_file.exists():
-            progress(f"Importing clustering cache for {conference}/{year}...")
-            try:
-                cache_data = json.loads(clustering_cache_file.read_text())
-                with DatabaseManager() as db:
-                    db.create_tables()
-                    clustering_cache_count = db.import_clustering_cache_from_json(cache_data, conference, year)
-                progress(f"  Imported {clustering_cache_count} clustering cache entries")
-            except Exception as cache_err:
-                # Clustering cache import failure is non-fatal — the cache
-                # can be regenerated, so we log a warning instead of
-                # rolling back the entire import.
-                progress(f"  ⚠️  Clustering cache import failed (non-fatal): {cache_err}")
-                logger.warning("Clustering cache import failed for %s/%s: %s", conference, year, cache_err)
+        progress(f"Importing clustering cache for {conference}/{year}...")
+        try:
+            cache_data = json.loads(clustering_cache_file.read_text())  # type: ignore[union-attr]
+            with DatabaseManager() as db:
+                db.create_tables()
+                clustering_cache_count = db.import_clustering_cache_from_json(cache_data, conference, year)
+            progress(f"  Imported {clustering_cache_count} clustering cache entries")
+        except Exception as cache_err:
+            raise RegistryError(
+                f"Clustering cache import failed for {conference}/{year}: {cache_err}"
+            ) from cache_err
 
         return {
             "paper_count": paper_count,
@@ -1075,9 +1075,7 @@ class RegistryClient:
                     break
 
             # --- 2. Group files by year ---
-            # Files are named papers-YYYY.db, embeddings-YYYY.json, and
-            # clustering-YYYY.json (or papers.db / embeddings.json for
-            # legacy single-year artifacts)
+            # Files are named papers-YYYY.db, embeddings-YYYY.json, and clustering-YYYY.json
             year_files: Dict[int, Dict[str, Path]] = {}
             for fpath in pulled_files:
                 p = Path(fpath)
@@ -1103,15 +1101,6 @@ class RegistryClient:
                         logger.warning(f"Skipping file with invalid year format: {name}")
                         continue
                     year_files.setdefault(yr, {})["clustering_cache"] = p
-                elif name == "papers.db":
-                    # Legacy single-year format
-                    legacy_year = year or metadata.get("year")
-                    if legacy_year:
-                        year_files.setdefault(int(legacy_year), {})["paper_db"] = p
-                elif name == "embeddings.json":
-                    legacy_year = year or metadata.get("year")
-                    if legacy_year:
-                        year_files.setdefault(int(legacy_year), {})["embeddings"] = p
 
             # If user requested a specific year, filter
             if year is not None:
@@ -1120,15 +1109,17 @@ class RegistryClient:
             # --- 3. Validate completeness ---
             for yr in sorted(year_files.keys()):
                 files = year_files[yr]
-                if not files.get("paper_db") or not files.get("embeddings"):
-                    missing = []
-                    if not files.get("paper_db"):
-                        missing.append("paper DB")
-                    if not files.get("embeddings"):
-                        missing.append("embeddings")
+                missing = []
+                if not files.get("paper_db"):
+                    missing.append("paper DB")
+                if not files.get("embeddings"):
+                    missing.append("embeddings")
+                if not files.get("clustering_cache"):
+                    missing.append("clustering cache")
+                if missing:
                     raise RegistryError(
                         f"Incomplete data for {conference}/{yr}: missing {', '.join(missing)}. "
-                        "Cannot import — both paper DB and embeddings must be present."
+                        "Cannot import — paper DB, embeddings, and clustering cache must all be present."
                     )
 
             # --- 4. Import each year ---
@@ -1141,7 +1132,7 @@ class RegistryClient:
                 files = year_files[yr]
                 paper_db = files["paper_db"]
                 embeddings = files["embeddings"]
-                clustering_cache = files.get("clustering_cache")
+                clustering_cache = files["clustering_cache"]
 
                 result = self._import_year(
                     conference,
