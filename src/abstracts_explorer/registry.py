@@ -500,9 +500,7 @@ class RegistryClient:
         paper_db_path = temp_dir / f"papers-{year}.db"
         with DatabaseManager() as db:
             db.create_tables()
-            paper_count = db.export_papers_to_sqlite(
-                paper_db_path, conference, year, include_clustering_cache=False
-            )
+            paper_count = db.export_papers_to_sqlite(paper_db_path, conference, year, include_clustering_cache=False)
 
         if paper_count == 0:
             raise RegistryError(f"No papers found for {conference}/{year}. Download the conference data first.")

@@ -2600,7 +2600,11 @@ class TestCLICommands:
         with patch.object(client._client, "get_tags", return_value=available_tags):
             with patch.object(client, "_get_manifest_embedding_model", mock_manifest):
                 with patch.object(client._client, "pull", mock_pull):
-                    with patch.object(client, "_import_year", return_value={"paper_count": 0, "embedding_count": 0, "clustering_cache_count": 0}):
+                    with patch.object(
+                        client,
+                        "_import_year",
+                        return_value={"paper_count": 0, "embedding_count": 0, "clustering_cache_count": 0},
+                    ):
                         client.download(
                             conference="neurips",
                             year=2024,
@@ -2676,7 +2680,11 @@ class TestCLICommands:
 
         with patch.object(client, "_get_manifest_embedding_model", return_value="artifact-model-b"):
             with patch.object(client._client, "pull", return_value=pulled_files):
-                with patch.object(client, "_import_year", return_value={"paper_count": 0, "embedding_count": 0, "clustering_cache_count": 0}):
+                with patch.object(
+                    client,
+                    "_import_year",
+                    return_value={"paper_count": 0, "embedding_count": 0, "clustering_cache_count": 0},
+                ):
                     result = client.download(
                         conference="neurips",
                         year=2024,
@@ -2703,7 +2711,11 @@ class TestCLICommands:
 
         with patch.object(client, "_get_manifest_embedding_model", return_value=None):
             with patch.object(client._client, "pull", return_value=pulled_files):
-                with patch.object(client, "_import_year", return_value={"paper_count": 0, "embedding_count": 0, "clustering_cache_count": 0}):
+                with patch.object(
+                    client,
+                    "_import_year",
+                    return_value={"paper_count": 0, "embedding_count": 0, "clustering_cache_count": 0},
+                ):
                     # Should not raise even though configured model differs from artifact (no manifest model label)
                     result = client.download(
                         conference="neurips",
