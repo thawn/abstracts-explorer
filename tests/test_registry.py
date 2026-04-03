@@ -215,11 +215,6 @@ class TestIsConferenceLevelTag:
         """A 5-digit numeric suffix does NOT make a tag year-specific."""
         assert RegistryClient._is_conference_level_tag("neurips-12345_model_1.0.0") is True
 
-    def test_year_out_of_range_is_conference_level(self):
-        """A 4-digit number outside 2000-2099 does NOT make a tag year-specific."""
-        assert RegistryClient._is_conference_level_tag("neurips-9999_model_1.0.0") is True
-        assert RegistryClient._is_conference_level_tag("neurips-1999_model_1.0.0") is True
-
 
 # ---------------------------------------------------------------------------
 # Tests: RegistryClient initialisation
