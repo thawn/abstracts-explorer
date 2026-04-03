@@ -844,3 +844,88 @@ class TestValidationData:
 
         with pytest.raises(DatabaseError, match="Not connected"):
             db.donate_validation_data({"test": {"priority": 5}})
+
+
+class TestChatDonation:
+    """Tests for chat transcript donation functionality."""
+
+    def test_donate_chat_transcript_success(self, connected_db):
+        """Test successful donation of a chat transcript."""
+        transcript = [
+            {"role": "user", "text": "What papers discuss transformers?"},
+            {"role": "assistant", "text": "Here are some relevant papers..."},
+        ]
+
+        donation_id = connected_db.donate_chat_transcript("up", transcript)
+        assert donation_id is not None
+
+        # Verify data was stored
+        import json
+        from abstracts_explorer.db_models import ChatDonation
+        from sqlalchemy.orm import Session
+
+        session = Session(connected_db.engine)
+        try:
+            entry = session.query(ChatDonation).filter_by(id=donation_id).first()
+            assert entry is not None
+            assert entry.rating == "up"
+            stored_transcript = json.loads(entry.transcript)
+            assert len(stored_transcript) == 2
+            assert stored_transcript[0]["role"] == "user"
+            assert stored_transcript[1]["role"] == "assistant"
+            assert entry.donated_at is not None
+        finally:
+            session.close()
+
+    def test_donate_chat_transcript_thumbs_down(self, connected_db):
+        """Test donation with thumbs down rating."""
+        transcript = [
+            {"role": "user", "text": "Tell me about NLP"},
+            {"role": "assistant", "text": "NLP is..."},
+        ]
+
+        donation_id = connected_db.donate_chat_transcript("down", transcript)
+        assert donation_id is not None
+
+        from abstracts_explorer.db_models import ChatDonation
+        from sqlalchemy.orm import Session
+
+        session = Session(connected_db.engine)
+        try:
+            entry = session.query(ChatDonation).filter_by(id=donation_id).first()
+            assert entry.rating == "down"
+        finally:
+            session.close()
+
+    def test_donate_chat_transcript_invalid_rating(self, connected_db):
+        """Test donation with invalid rating raises ValueError."""
+        transcript = [{"role": "user", "text": "test"}]
+
+        with pytest.raises(ValueError, match="Invalid rating"):
+            connected_db.donate_chat_transcript("neutral", transcript)
+
+    def test_donate_chat_transcript_empty_transcript(self, connected_db):
+        """Test donation with empty transcript raises ValueError."""
+        with pytest.raises(ValueError, match="non-empty list"):
+            connected_db.donate_chat_transcript("up", [])
+
+    def test_donate_chat_transcript_invalid_transcript_type(self, connected_db):
+        """Test donation with non-list transcript raises ValueError."""
+        with pytest.raises(ValueError, match="non-empty list"):
+            connected_db.donate_chat_transcript("up", "not a list")
+
+    def test_donate_chat_transcript_invalid_message_format(self, connected_db):
+        """Test donation with invalid message format raises ValueError."""
+        transcript = [{"role": "user"}]  # Missing 'text' key
+
+        with pytest.raises(ValueError, match="'role' and 'text'"):
+            connected_db.donate_chat_transcript("up", transcript)
+
+    def test_donate_chat_transcript_not_connected(self):
+        """Test donation without connection raises DatabaseError."""
+        from abstracts_explorer.database import DatabaseError
+
+        db = DatabaseManager()
+
+        with pytest.raises(DatabaseError, match="Not connected"):
+            db.donate_chat_transcript("up", [{"role": "user", "text": "test"}])

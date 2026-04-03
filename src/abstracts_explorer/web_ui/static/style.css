@@ -31,6 +31,19 @@ select:focus {
     line-height: 1.6;
 }
 
+/* Chat feedback buttons */
+.chat-feedback-btn {
+    cursor: pointer;
+    border: none;
+    background: none;
+    line-height: 1;
+}
+
+.chat-feedback-btn:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
 /* Code blocks in chat (if LLM returns code) */
 .chat-message code {
     background-color: rgba(0, 0, 0, 0.05);

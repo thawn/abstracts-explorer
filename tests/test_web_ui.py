@@ -1842,6 +1842,120 @@ class TestDataDonationEndpoint:
                 assert "error" in data
 
 
+class TestChatDonationEndpoint:
+    """Tests for the /api/donate-chat endpoint."""
+
+    def test_donate_chat_success(self, tmp_path):
+        """Test successful chat transcript donation."""
+        from abstracts_explorer.web_ui.app import app
+
+        db_path = tmp_path / "test_chat_donate.db"
+        set_test_db(str(db_path))
+
+        db = DatabaseManager()
+        with db:
+            db.create_tables()
+
+        transcript = [
+            {"role": "user", "text": "What papers discuss transformers?"},
+            {"role": "assistant", "text": "Here are some relevant papers..."},
+        ]
+
+        with app.test_client() as client:
+            response = client.post(
+                "/api/donate-chat",
+                json={"rating": "up", "transcript": transcript},
+                content_type="application/json",
+            )
+
+            assert response.status_code == 200
+            data = response.get_json()
+            assert data["success"] is True
+            assert "Thank you" in data["message"]
+            assert "id" in data
+
+    def test_donate_chat_thumbs_down(self, tmp_path):
+        """Test chat donation with thumbs down rating."""
+        from abstracts_explorer.web_ui.app import app
+
+        db_path = tmp_path / "test_chat_donate_down.db"
+        set_test_db(str(db_path))
+
+        db = DatabaseManager()
+        with db:
+            db.create_tables()
+
+        transcript = [{"role": "user", "text": "test"}, {"role": "assistant", "text": "response"}]
+
+        with app.test_client() as client:
+            response = client.post(
+                "/api/donate-chat",
+                json={"rating": "down", "transcript": transcript},
+                content_type="application/json",
+            )
+
+            assert response.status_code == 200
+            data = response.get_json()
+            assert data["success"] is True
+
+    def test_donate_chat_missing_rating(self, client):
+        """Test chat donation with missing rating."""
+        response = client.post(
+            "/api/donate-chat",
+            json={"transcript": [{"role": "user", "text": "test"}]},
+            content_type="application/json",
+        )
+
+        assert response.status_code == 400
+        data = response.get_json()
+        assert "error" in data
+
+    def test_donate_chat_missing_transcript(self, client):
+        """Test chat donation with missing transcript."""
+        response = client.post(
+            "/api/donate-chat",
+            json={"rating": "up"},
+            content_type="application/json",
+        )
+
+        assert response.status_code == 400
+        data = response.get_json()
+        assert "error" in data
+
+    def test_donate_chat_invalid_rating(self, tmp_path):
+        """Test chat donation with invalid rating value."""
+        from abstracts_explorer.web_ui.app import app
+
+        db_path = tmp_path / "test_chat_donate_invalid.db"
+        set_test_db(str(db_path))
+
+        db = DatabaseManager()
+        with db:
+            db.create_tables()
+
+        with app.test_client() as client:
+            response = client.post(
+                "/api/donate-chat",
+                json={"rating": "neutral", "transcript": [{"role": "user", "text": "test"}]},
+                content_type="application/json",
+            )
+
+            assert response.status_code == 400
+            data = response.get_json()
+            assert "error" in data
+            assert "Invalid rating" in data["error"]
+
+    def test_donate_chat_empty_body(self, client):
+        """Test chat donation with empty body."""
+        response = client.post(
+            "/api/donate-chat",
+            json={},
+            content_type="application/json",
+        )
+
+        assert response.status_code == 400
+
+
 class TestValidationDataModel:
     """Test the ValidationData database model."""
 

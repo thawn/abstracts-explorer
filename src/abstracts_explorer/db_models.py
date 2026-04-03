@@ -266,6 +266,39 @@ class ValidationData(Base):
         return f"<ValidationData(id={self.id}, paper_uid='{self.paper_uid}', priority={self.priority})>"
 
 
+class ChatDonation(Base):
+    """
+    Chat donation model.
+
+    Stores anonymized user-donated chat transcripts with thumbs up/down
+    feedback for improving the chat system.
+
+    Attributes
+    ----------
+    id : int
+        Auto-incrementing primary key.
+    rating : str
+        User feedback rating ('up' or 'down').
+    transcript : str
+        JSON string containing the chat transcript (list of messages).
+    donated_at : datetime
+        Timestamp when data was donated.
+    """
+
+    __tablename__ = "chat_donations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    rating = Column(String, nullable=False)
+    transcript = Column(Text, nullable=False)
+    donated_at = Column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now()
+    )
+
+    def __repr__(self) -> str:
+        """String representation of ChatDonation."""
+        return f"<ChatDonation(id={self.id}, rating='{self.rating}')>"
+
+
 class EvalQAPair(Base):
     """
     Evaluation query/answer pair.

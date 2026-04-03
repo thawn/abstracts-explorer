@@ -9,7 +9,7 @@ global.fetch = jest.fn();
 global.marked = { parse: jest.fn((text) => text), use: jest.fn() };
 global.Plotly = { newPlot: jest.fn() };
 
-import { sendChatMessage, displayChatPapers, addChatMessage, resetChat, renderChatVisualizations, openPapersModal, closePapersModal } from '../static/modules/chat.js';
+import { sendChatMessage, displayChatPapers, addChatMessage, resetChat, renderChatVisualizations, openPapersModal, closePapersModal, handleChatFeedback } from '../static/modules/chat.js';
 import * as State from '../static/modules/state.js';
 
 describe('Chat Module', () => {
@@ -483,6 +483,155 @@ describe('Chat Module', () => {
             await resetChat();
 
             expect(document.getElementById('papers-modal-content').innerHTML).not.toContain('Paper');
+        });
+    });
+
+    describe('addChatMessage - feedback buttons', () => {
+        it('should show feedback buttons on assistant messages', () => {
+            addChatMessage('Test response', 'assistant');
+
+            const messages = document.getElementById('chat-messages');
+            expect(messages.innerHTML).toContain('chat-feedback-buttons');
+            expect(messages.innerHTML).toContain('fa-thumbs-up');
+            expect(messages.innerHTML).toContain('fa-thumbs-down');
+            expect(messages.innerHTML).toContain('Helpful?');
+        });
+
+        it('should not show feedback buttons on user messages', () => {
+            addChatMessage('User question', 'user');
+
+            const messages = document.getElementById('chat-messages');
+            expect(messages.innerHTML).not.toContain('chat-feedback-buttons');
+            expect(messages.innerHTML).not.toContain('fa-thumbs-up');
+        });
+
+        it('should not show feedback buttons on loading messages', () => {
+            addChatMessage('Thinking...', 'assistant', true);
+
+            const messages = document.getElementById('chat-messages');
+            expect(messages.innerHTML).not.toContain('chat-feedback-buttons');
+        });
+
+        it('should have data attributes on feedback buttons', () => {
+            const messageId = addChatMessage('Test response', 'assistant');
+
+            const msgDiv = document.getElementById(messageId);
+            const upBtn = msgDiv.querySelector('[data-rating="up"]');
+            const downBtn = msgDiv.querySelector('[data-rating="down"]');
+
+            expect(upBtn).not.toBeNull();
+            expect(downBtn).not.toBeNull();
+            expect(upBtn.dataset.msgId).toBe(messageId);
+            expect(downBtn.dataset.msgId).toBe(messageId);
+        });
+    });
+
+    describe('handleChatFeedback', () => {
+        beforeEach(() => {
+            localStorage.clear();
+            global.confirm = jest.fn();
+        });
+
+        it('should show consent popup on first click', async () => {
+            global.confirm.mockReturnValue(false);
+
+            const messageId = addChatMessage('Test response', 'assistant');
+            await handleChatFeedback(messageId, 'up');
+
+            expect(global.confirm).toHaveBeenCalledTimes(1);
+            expect(global.confirm.mock.calls[0][0]).toContain('anonymized');
+        });
+
+        it('should not send data if user declines consent', async () => {
+            global.confirm.mockReturnValue(false);
+
+            const messageId = addChatMessage('Test response', 'assistant');
+            await handleChatFeedback(messageId, 'up');
+
+            expect(global.fetch).not.toHaveBeenCalledWith(
+                '/api/donate-chat',
+                expect.anything()
+            );
+        });
+
+        it('should send transcript to backend if user accepts consent', async () => {
+            global.confirm.mockReturnValue(true);
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ success: true, message: 'Thank you!' })
+            });
+
+            addChatMessage('User question', 'user');
+            const assistantId = addChatMessage('AI response', 'assistant');
+
+            await handleChatFeedback(assistantId, 'up');
+
+            // Should have called fetch with /api/donate-chat
+            const chatCalls = global.fetch.mock.calls.filter(c => c[0] === '/api/donate-chat');
+            expect(chatCalls.length).toBe(1);
+
+            const body = JSON.parse(chatCalls[0][1].body);
+            expect(body.rating).toBe('up');
+            expect(body.transcript).toBeInstanceOf(Array);
+            expect(body.transcript.length).toBeGreaterThan(0);
+        });
+
+        it('should replace buttons with thank you message after success', async () => {
+            global.confirm.mockReturnValue(true);
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ success: true, message: 'Thank you!' })
+            });
+
+            const messageId = addChatMessage('Test response', 'assistant');
+            await handleChatFeedback(messageId, 'up');
+
+            const msgDiv = document.getElementById(messageId);
+            const feedbackDiv = msgDiv.querySelector('.chat-feedback-buttons');
+            expect(feedbackDiv.innerHTML).toContain('Thanks for your feedback');
+        });
+
+        it('should store consent in localStorage', async () => {
+            global.confirm.mockReturnValue(true);
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ success: true })
+            });
+
+            const messageId = addChatMessage('Test', 'assistant');
+            await handleChatFeedback(messageId, 'up');
+
+            expect(localStorage.getItem('chatDonationConsent')).toBe('true');
+        });
+
+        it('should not show consent popup on subsequent clicks after acceptance', async () => {
+            // Simulate previously accepted consent
+            localStorage.setItem('chatDonationConsent', 'true');
+
+            // Need to re-import to pick up localStorage change
+            // Since module already loaded, we set consent directly via another feedback call
+            global.confirm.mockReturnValue(true);
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ success: true })
+            });
+
+            // First call to establish consent
+            const messageId1 = addChatMessage('Test 1', 'assistant');
+            await handleChatFeedback(messageId1, 'up');
+
+            // Reset confirm mock
+            global.confirm.mockClear();
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ success: true })
+            });
+
+            // Second call should not show confirm
+            const messageId2 = addChatMessage('Test 2', 'assistant');
+            await handleChatFeedback(messageId2, 'down');
+
+            expect(global.confirm).not.toHaveBeenCalled();
         });
     });
 });
