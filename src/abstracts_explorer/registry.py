@@ -518,7 +518,12 @@ class RegistryClient:
                 ).fetchone()
                 return row[0] if row else None
         except (sqlite3.OperationalError, sqlite3.DatabaseError) as exc:
-            logger.debug("Could not read embedding model from artifact DB %s: %s", paper_db_file.name, exc)
+            logger.debug(
+                "Could not read embedding model from artifact DB %s: %s: %s",
+                paper_db_file.name,
+                type(exc).__name__,
+                exc,
+            )
             return None
 
     @staticmethod
@@ -537,11 +542,17 @@ class RegistryClient:
         try:
             with sqlite3.connect(str(paper_db_file)) as conn:
                 conn.execute(
-                    "UPDATE embeddings_metadata SET embedding_model = ?",
+                    "UPDATE embeddings_metadata SET embedding_model = ? "
+                    "WHERE rowid = (SELECT rowid FROM embeddings_metadata ORDER BY updated_at DESC LIMIT 1)",
                     (new_model,),
                 )
         except (sqlite3.OperationalError, sqlite3.DatabaseError) as exc:
-            logger.debug("Could not update embedding model in artifact DB %s: %s", paper_db_file.name, exc)
+            logger.debug(
+                "Could not update embedding model in artifact DB %s: %s: %s",
+                paper_db_file.name,
+                type(exc).__name__,
+                exc,
+            )
 
     @staticmethod
     def _check_embedding_model(

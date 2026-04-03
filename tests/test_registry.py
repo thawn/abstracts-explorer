@@ -7,6 +7,7 @@ EmbeddingsManager export/import methods, and CLI command integration.
 
 import argparse
 import json
+import sqlite3
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -1854,7 +1855,6 @@ class TestCLICommands:
     def test_read_artifact_embedding_model_legacy_db(self, tmp_path):
         """_read_artifact_embedding_model returns None for a legacy DB without embeddings_metadata."""
         paper_db = tmp_path / "papers.db"
-        import sqlite3
 
         with sqlite3.connect(str(paper_db)) as conn:
             conn.execute("CREATE TABLE dummy (id INTEGER)")
@@ -1901,7 +1901,6 @@ class TestCLICommands:
     def test_check_embedding_model_no_op_for_legacy(self, tmp_path):
         """_check_embedding_model does nothing for legacy artifacts without metadata."""
         paper_db = tmp_path / "papers.db"
-        import sqlite3
 
         with sqlite3.connect(str(paper_db)) as conn:
             conn.execute("CREATE TABLE dummy (id INTEGER)")
