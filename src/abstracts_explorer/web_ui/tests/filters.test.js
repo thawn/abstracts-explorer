@@ -143,6 +143,37 @@ describe('Filters Module', () => {
             delete window.loadStats;
         });
 
+        it('should NOT override "All Years" selection with default_year when user explicitly selected All Years', async () => {
+            // Simulate: dropdown already populated (more than 1 option), user selected "All Years"
+            const yearSelect = document.getElementById('year-selector');
+            const opt2024 = document.createElement('option');
+            opt2024.value = '2024'; opt2024.textContent = '2024';
+            const opt2025 = document.createElement('option');
+            opt2025.value = '2025'; opt2025.textContent = '2025';
+            yearSelect.appendChild(opt2024);
+            yearSelect.appendChild(opt2025);
+            yearSelect.value = '';  // User selected "All Years"
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    conferences: [],
+                    years: [2024, 2025],
+                    conference_years: {},
+                    default_conference: '',
+                    default_year: 2025
+                })
+            });
+
+            await loadFilterOptions();
+
+            // The year should remain "All Years" (empty string), not jump to 2025
+            expect(yearSelect.value).toBe('');
+        });
+
         it('should select the first conference and call window.loadStats even when no default_conference is configured', async () => {
             const mockLoadStats = jest.fn();
             window.loadStats = mockLoadStats;
