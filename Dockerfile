@@ -67,4 +67,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
 # Use ENTRYPOINT + CMD pattern to allow passing arguments
 ENTRYPOINT ["abstracts-explorer"]
-CMD ["web-ui", "--host", "0.0.0.0", "--port", "5000"]
+CMD ["-v", "web-ui", "--host", "0.0.0.0", "--port", "5000"]
