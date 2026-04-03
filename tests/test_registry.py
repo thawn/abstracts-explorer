@@ -175,7 +175,6 @@ class TestBuildTag:
         assert tag == f"neurips-2024_model-a_{expected_version}"
 
 
-
 # ---------------------------------------------------------------------------
 # Tests: _is_conference_level_tag
 # ---------------------------------------------------------------------------
@@ -211,6 +210,15 @@ class TestIsConferenceLevelTag:
     def test_three_digit_suffix_is_conference_level(self):
         """A 3-digit numeric suffix does NOT make a tag year-specific."""
         assert RegistryClient._is_conference_level_tag("neurips-123_model_1.0.0") is True
+
+    def test_five_digit_suffix_is_conference_level(self):
+        """A 5-digit numeric suffix does NOT make a tag year-specific."""
+        assert RegistryClient._is_conference_level_tag("neurips-12345_model_1.0.0") is True
+
+    def test_year_out_of_range_is_conference_level(self):
+        """A 4-digit number outside 2000-2099 does NOT make a tag year-specific."""
+        assert RegistryClient._is_conference_level_tag("neurips-9999_model_1.0.0") is True
+        assert RegistryClient._is_conference_level_tag("neurips-1999_model_1.0.0") is True
 
 
 # ---------------------------------------------------------------------------

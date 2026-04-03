@@ -347,7 +347,11 @@ class RegistryClient:
         """
         base = tag.split("_", 1)[0]
         parts = base.rsplit("-", 1)
-        return not (len(parts) == 2 and parts[1].isdigit() and len(parts[1]) == 4)
+        if len(parts) != 2:
+            return True
+        suffix = parts[1]
+        # A year suffix is exactly 4 digits in a plausible conference year range.
+        return not (suffix.isdigit() and len(suffix) == 4 and 2000 <= int(suffix) <= 2099)
 
     def _find_best_matching_tag(self, tag: str) -> str:
         """
@@ -1252,7 +1256,9 @@ class RegistryClient:
                 progress_callback(msg)
             logger.info(msg)
 
-        _progress(f"Found {len(conference_tags)} conference tag(s) in registry (skipping {len(tags) - len(conference_tags)} year-specific tag(s))")
+        _progress(
+            f"Found {len(conference_tags)} conference tag(s) in registry (skipping {len(tags) - len(conference_tags)} year-specific tag(s))"
+        )
 
         summaries: List[Dict[str, Any]] = []
         for tag in sorted(conference_tags):
