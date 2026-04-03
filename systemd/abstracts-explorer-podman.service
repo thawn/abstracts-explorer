@@ -1,0 +1,78 @@
+# Abstracts Explorer — rootless Podman systemd service (existing-certificate variant)
+#
+# This is a user-level (rootless) systemd service unit for running the
+# Abstracts Explorer stack with Podman Compose and your own SSL certificate.
+# User services run without root privileges, making them more secure.
+#
+# If you prefer a system-level Docker service, use abstracts-explorer.service.
+# For automatic Let's Encrypt certificates with Podman, use
+# abstracts-explorer-letsencrypt-podman.service.
+#
+# REQUIREMENTS
+# ============
+# - Podman 3.x or later (podman-compose) or Podman 4.x+ (podman compose built-in)
+# - podman-compose: install with "pip install podman-compose" or your distro's package
+# - Lingering enabled for your user so the service survives log-out (see below)
+#
+# QUICK START
+# ===========
+# 1. Place docker-compose.yml, .env, and the nginx/ and certs/ directories in
+#    the deployment directory (default: ~/abstracts-explorer).
+#    Adjust the WorkingDirectory path below if you chose a different location.
+#
+# 2. Enable lingering so your user services start at boot (one-time setup):
+#
+#      loginctl enable-linger $USER
+#
+# 3. Install and start the service as your regular user (no sudo needed):
+#
+#      mkdir -p ~/.config/systemd/user/
+#      cp abstracts-explorer-podman.service ~/.config/systemd/user/abstracts-explorer.service
+#      systemctl --user daemon-reload
+#      systemctl --user enable --now abstracts-explorer
+#
+# 4. Check service status:
+#
+#      systemctl --user status abstracts-explorer
+#      journalctl --user -u abstracts-explorer -f
+#
+# NOTE ON podman-compose vs podman compose
+# =========================================
+# If you have Podman 4.x or later and prefer the built-in compose support,
+# replace "podman-compose" with "podman compose" in ExecStart/ExecStop below.
+
+[Unit]
+Description=Abstracts Explorer (Podman Compose — existing certificate)
+Documentation=https://abstracts-explorer.readthedocs.io/en/latest/docker.html
+# Wait for the network to be available.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# Path to the directory that contains docker-compose.yml and the .env file.
+# Change this to your deployment directory.
+WorkingDirectory=%h/abstracts-explorer
+
+# Pull the latest images before starting (comment out to skip during restart).
+ExecStartPre=-/usr/bin/podman-compose pull
+
+# Start all containers in detached mode.
+ExecStart=/usr/bin/podman-compose up -d
+
+# Stop all containers cleanly when the service is stopped or the system shuts down.
+ExecStop=/usr/bin/podman-compose down
+
+# Allow enough time for images to pull and all containers to become healthy.
+TimeoutStartSec=300
+TimeoutStopSec=120
+
+# Automatically restart the service if it exits unexpectedly.
+Restart=on-failure
+RestartSec=10
+
+[Install]
+# User services use default.target instead of multi-user.target.
+WantedBy=default.target

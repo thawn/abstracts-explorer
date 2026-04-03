@@ -600,6 +600,81 @@ services:
     restart: unless-stopped
 ```
 
+## Starting Automatically with systemd
+
+Example systemd unit files are provided in the `systemd/` directory so that
+the container stack starts automatically when the system boots.  Four variants
+are available:
+
+| File | Runtime | TLS |
+|------|---------|-----|
+| `abstracts-explorer.service` | Docker | Existing certificate (`docker-compose.yml`) |
+| `abstracts-explorer-letsencrypt.service` | Docker | Let's Encrypt (`docker-compose.letsencrypt.yml`) |
+| `abstracts-explorer-podman.service` | Podman (rootless user service) | Existing certificate |
+| `abstracts-explorer-letsencrypt-podman.service` | Podman (rootless user service) | Let's Encrypt |
+
+Each file is self-contained and contains step-by-step installation instructions
+in its header comments.  The general workflow is shown below.
+
+### Docker (system service)
+
+```bash
+# 1. Place the compose files in your deployment directory (default: /opt/abstracts-explorer).
+sudo mkdir -p /opt/abstracts-explorer
+sudo cp docker-compose.yml .env nginx/ certs/ /opt/abstracts-explorer/
+
+# 2. Install the unit file.
+sudo cp systemd/abstracts-explorer.service /etc/systemd/system/
+sudo systemctl daemon-reload
+
+# 3. Enable and start the service.
+sudo systemctl enable --now abstracts-explorer
+
+# 4. Check status and logs.
+sudo systemctl status abstracts-explorer
+sudo journalctl -u abstracts-explorer -f
+```
+
+For the Let's Encrypt variant, run the one-time Certbot certificate issuance
+step first (see [Option 2: Let's Encrypt Certificate](#option-2-lets-encrypt-certificate)),
+then install `abstracts-explorer-letsencrypt.service` instead.
+
+### Podman (rootless user service)
+
+Rootless Podman services run as your regular user account — no root privileges
+are required.  The service starts at boot because lingering is enabled.
+
+```bash
+# 1. Enable lingering so user services survive log-out (one-time setup).
+loginctl enable-linger $USER
+
+# 2. Place the compose files in your home directory.
+mkdir -p ~/abstracts-explorer
+cp docker-compose.yml .env nginx/ certs/ ~/abstracts-explorer/
+
+# 3. Install the unit file as a user service.
+mkdir -p ~/.config/systemd/user/
+cp systemd/abstracts-explorer-podman.service \
+     ~/.config/systemd/user/abstracts-explorer.service
+systemctl --user daemon-reload
+
+# 4. Enable and start the service.
+systemctl --user enable --now abstracts-explorer
+
+# 5. Check status and logs.
+systemctl --user status abstracts-explorer
+journalctl --user -u abstracts-explorer -f
+```
+
+For the Let's Encrypt variant use
+`abstracts-explorer-letsencrypt-podman.service` and follow the Certbot
+prerequisite steps documented inside the file.
+
+> **Tip:** The `WorkingDirectory` path in each unit file defaults to
+> `/opt/abstracts-explorer` (Docker) or `%h/abstracts-explorer` (Podman,
+> where `%h` expands to your home directory).  Edit the unit file before
+> installing it if you placed the files in a different location.
+
 ## Further Reading
 
 - [Podman Documentation](https://docs.podman.io/)
