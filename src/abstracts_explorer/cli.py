@@ -150,12 +150,9 @@ def _resolve_conference_arg(conference: Optional[str]) -> Optional[str]:
     """
     if not conference:
         return conference
-    try:
-        with DatabaseManager() as db:
-            db.create_tables()
-            return db.resolve_conference_name(conference)
-    except Exception:
-        return conference
+    with DatabaseManager() as db:
+        db.create_tables()
+        return db.resolve_conference_name(conference)
 
 
 def _build_embeddings_where_clause(args: argparse.Namespace) -> Optional[str]:
