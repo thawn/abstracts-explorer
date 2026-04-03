@@ -1014,8 +1014,10 @@ class DatabaseManager:
         except Exception:
             pass
 
-        # 3. No match — return unchanged
-        return conference
+        raise DatabaseError(
+            f"Failed to resolve conference name: {conference}.\n"
+            f"No match found in database or plugins. Available conferences in the database: {filters.get('conferences', [])}"
+        )
 
     def get_filter_options(self, year: Optional[int] = None, conference: Optional[str] = None) -> dict:
         """
