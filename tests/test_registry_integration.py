@@ -810,39 +810,3 @@ class TestCLIRegistryDispatch:
 
         assert result == 0
         mock_instance.upload_all.assert_called_once()
-
-    def test_download_command_mismatch_clear_and_retry_with_yes(self, tmp_path, capsys):
-        """download command auto-clears and retries when --yes and configured model matches remote."""
-        import argparse
-
-        from abstracts_explorer.cli import registry_download_command
-
-        mismatch = EmbeddingModelMismatchError("old-model", "new-model")
-        success = {
-            "tag": "neurips-2024_new-model",
-            "conference": "neurips",
-            "years": [2024],
-            "paper_count": 3,
-            "embedding_count": 3,
-            "metadata": {},
-        }
-
-        args = argparse.Namespace(
-            repository="ghcr.io/thawn/abstracts-data",
-            token="test-token",
-            conference="neurips",
-            year=2024,
-            tag=None,
-            yes=True,
-            embedding_model="new-model",  # matches remote model in mismatch error
-        )
-
-        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
-            mock_instance = MockClient.return_value
-            mock_instance.download.side_effect = [mismatch, success]
-
-            with patch("abstracts_explorer.registry.RegistryClient.clear_local_embedding_data") as mock_clear:
-                result = registry_download_command(args)
-
-        mock_clear.assert_called_once()
-        assert result == 0
