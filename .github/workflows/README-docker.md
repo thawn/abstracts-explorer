@@ -5,7 +5,7 @@ This workflow automatically builds and publishes Docker container images for Abs
 ## Triggers
 
 The workflow runs on:
-- **Push to main/develop branches** - Builds and pushes to GitHub Container Registry
+- **Push to main/dev branches** - Builds and pushes to GitHub Container Registry
 - **Pull requests** - Builds only (no push) for validation
 - **Git tags** (v*.*.*) - Builds and pushes to both GitHub Container Registry and Docker Hub
 - **Manual trigger** - Via workflow_dispatch
@@ -32,7 +32,7 @@ The workflow creates the following tags following best practices:
 |-------------|--------------|---------|-------|
 | `latest` | Release tags only | `latest` | Always points to latest release |
 | `main` | Main branch | `main` | Latest main branch build |
-| `develop` | Develop branch | `develop` | Latest develop branch build |
+| `dev` | Dev branch | `dev` | Latest dev branch build |
 | `v*.*.*` | Release tags | `v1.0.0` | Full semver version |
 | `v*.*` | Release tags | `v1.0` | Major.minor version |
 | `v*` | Release tags | `v1` | Major version |
@@ -54,7 +54,7 @@ The workflow automatically cleans up old container images:
 
 1. **Untagged images**: Deleted immediately after new build
 2. **Old images (including SHA tags)**: Deleted after 7 days
-3. **Protected tags**: Never deleted (latest, main, develop, release versions like v*.*.*)
+3. **Protected tags**: Never deleted (latest, main, dev, release versions like v*.*.*)
 4. **Minimum kept**: Always keeps at least 10 most recent versions
 
 **Note**: SHA tags (`sha-*`) are cleaned up after 7 days since they're primarily for debugging and development. For long-term reproducibility, use release version tags (`v*.*.*`).

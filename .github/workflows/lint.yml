@@ -2,7 +2,7 @@ name: Lint
 
 on:
     push:
-        branches: [main, develop]
+        branches: [main, dev]
         paths:
             - 'src/**/*.py'
             - 'tests/**/*.py'
@@ -10,7 +10,7 @@ on:
             - 'uv.lock'
             - '.github/workflows/lint.yml'
     pull_request:
-        branches: [main, develop]
+        branches: [main, dev]
         paths:
             - 'src/**/*.py'
             - 'tests/**/*.py'

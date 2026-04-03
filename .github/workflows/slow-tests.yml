@@ -2,7 +2,7 @@ name: Slow Tests
 
 on:
     push:
-        branches: [main, develop]
+        branches: [main, dev]
         paths:
             - 'src/**/*.py'
             - 'tests/**/*.py'
@@ -17,7 +17,7 @@ on:
             - '.github/scripts/setup-ci.ps1'
             - '.github/actions/setup-environment/**'
     pull_request:
-        branches: [main, develop]
+        branches: [main, dev]
         paths:
             - 'src/**/*.py'
             - 'tests/**/*.py'
