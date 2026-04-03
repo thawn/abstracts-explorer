@@ -388,6 +388,103 @@ class TestDatabaseExportImport:
         finally:
             db2.close()
 
+    def test_import_case_insensitive_conference_delete(self, tmp_path):
+        """Import deletes papers case-insensitively, preventing UniqueViolation on PostgreSQL."""
+        from abstracts_explorer.db_models import Paper
+
+        # Populate with mixed-case conference name (e.g. "ML4PS@Neurips")
+        set_test_db(tmp_path / "db.db")
+        db = DatabaseManager()
+        db.connect()
+        db.create_tables()
+        db.add_papers(
+            [
+                LightweightPaper(
+                    title="Paper One",
+                    authors=["Author A"],
+                    abstract="Abstract",
+                    session="Session 1",
+                    poster_position="A1",
+                    year=2025,
+                    conference="ML4PS@Neurips",
+                ),
+            ]
+        )
+
+        try:
+            # Export with mixed-case conference
+            export_path = tmp_path / "export.db"
+            db.export_papers_to_sqlite(export_path, "ML4PS@Neurips", 2025)
+
+            # Now import with lowercase conference — should delete existing
+            # papers via case-insensitive match, not raise UniqueViolation
+            count = db.import_papers_from_sqlite(export_path, "ml4ps@neurips", 2025)
+            assert count == 1
+
+            # The paper should exist (imported fresh)
+            papers = db._session.query(Paper).filter(Paper.year == 2025).all()
+            assert len(papers) == 1
+        finally:
+            db.close()
+
+    def test_import_duplicate_uid_uses_merge(self, tmp_path):
+        """Import handles UID collisions via merge instead of raising UniqueViolation."""
+        from abstracts_explorer.db_models import Paper
+
+        # Create a paper with a known UID
+        set_test_db(tmp_path / "source.db")
+        db = DatabaseManager()
+        db.connect()
+        db.create_tables()
+        db.add_papers(
+            [
+                LightweightPaper(
+                    title="Shared Paper",
+                    authors=["Author A"],
+                    abstract="Updated abstract",
+                    session="Session 1",
+                    poster_position="A1",
+                    year=2025,
+                    conference="NeurIPS",
+                ),
+            ]
+        )
+        try:
+            # Export for NeurIPS/2025
+            export_path = tmp_path / "export.db"
+            db.export_papers_to_sqlite(export_path, "NeurIPS", 2025)
+        finally:
+            db.close()
+
+        # Create a target DB with a paper having the same UID (same title+id+conf+year)
+        set_test_db(tmp_path / "target.db")
+        db2 = DatabaseManager()
+        db2.connect()
+        db2.create_tables()
+        db2.add_papers(
+            [
+                LightweightPaper(
+                    title="Shared Paper",
+                    authors=["Author A"],
+                    abstract="Original abstract",
+                    session="Session 1",
+                    poster_position="A1",
+                    year=2025,
+                    conference="NeurIPS",
+                ),
+            ]
+        )
+        try:
+            # Import — same UID paper already exists, merge should update it
+            count = db2.import_papers_from_sqlite(export_path, "NeurIPS", 2025)
+            assert count == 1
+
+            papers = db2._session.query(Paper).all()
+            assert len(papers) == 1
+            assert papers[0].abstract == "Updated abstract"
+        finally:
+            db2.close()
+
     def test_export_not_connected(self, tmp_path):
         """Export raises error when not connected."""
         set_test_db(tmp_path / "not_connected.db")

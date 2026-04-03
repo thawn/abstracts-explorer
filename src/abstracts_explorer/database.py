@@ -2147,8 +2147,14 @@ class DatabaseManager:
                             existing_meta.embedding_model, imported_meta.embedding_model
                         )
 
-                # Delete existing papers for this conference+year
-                self._session.execute(delete(Paper).where(and_(Paper.conference == conference, Paper.year == year)))
+                # Delete existing papers for this conference+year.
+                # Use case-insensitive comparison because conference names may
+                # differ in case between the caller and the stored data (e.g.
+                # "ml4ps@neurips" vs "ML4PS@Neurips").  PostgreSQL text
+                # comparison is case-sensitive by default.
+                self._session.execute(
+                    delete(Paper).where(and_(func.lower(Paper.conference) == conference.lower(), Paper.year == year))
+                )
 
                 # Delete only clustering cache entries that match the conference+year
                 for entry in self._session.execute(select(ClusteringCache)).scalars().all():
@@ -2169,10 +2175,12 @@ class DatabaseManager:
 
                 self._session.commit()
 
-                # Import papers
+                # Import papers — use merge() to handle any UID collisions
+                # (e.g. the same paper existing under a different conference
+                # casing that the DELETE above didn't catch).
                 for paper in source_session.execute(select(Paper)).scalars():
                     paper_dict = {c.name: getattr(paper, c.name) for c in Paper.__table__.columns}
-                    self._session.add(Paper(**paper_dict))
+                    self._session.merge(Paper(**paper_dict))
                     paper_count += 1
 
                 # Import clustering cache entries
