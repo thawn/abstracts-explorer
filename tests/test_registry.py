@@ -3064,3 +3064,355 @@ class TestCLICommands:
                     )
 
         assert result["paper_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests for _parse_version_from_tag
+# ---------------------------------------------------------------------------
+
+
+class TestParseVersionFromTag:
+    """Tests for the _parse_version_from_tag helper."""
+
+    def test_simple_semver(self):
+        from abstracts_explorer.registry import _parse_version_from_tag
+        from packaging.version import Version
+
+        assert _parse_version_from_tag("neurips-2024_model_0.4.1") == Version("0.4.1")
+
+    def test_conference_only_tag(self):
+        from abstracts_explorer.registry import _parse_version_from_tag
+        from packaging.version import Version
+
+        assert _parse_version_from_tag("neurips_text-embedding-ada-002_1.0.0") == Version("1.0.0")
+
+    def test_no_underscore_returns_none(self):
+        from abstracts_explorer.registry import _parse_version_from_tag
+
+        assert _parse_version_from_tag("neurips-2024") is None
+
+    def test_invalid_version_returns_none(self):
+        from abstracts_explorer.registry import _parse_version_from_tag
+
+        assert _parse_version_from_tag("neurips-2024_model_not-a-version") is None
+
+    def test_dev_version(self):
+        from abstracts_explorer.registry import _parse_version_from_tag
+        from packaging.version import Version
+
+        result = _parse_version_from_tag("neurips_model_0.4.1.dev2")
+        assert result == Version("0.4.1.dev2")
+
+    def test_model_with_underscores(self):
+        from abstracts_explorer.registry import _parse_version_from_tag
+        from packaging.version import Version
+
+        # Version is always the *last* _-separated component
+        result = _parse_version_from_tag("neurips-2024_text_embedding_ada_002_0.3.0")
+        assert result == Version("0.3.0")
+
+
+# ---------------------------------------------------------------------------
+# Tests for RegistryClient.delete_old_versions
+# ---------------------------------------------------------------------------
+
+
+def _make_pkg_version(version_id, tags):
+    """Build a minimal GitHub Packages API version entry."""
+    return {"id": version_id, "name": f"sha256:abc{version_id}", "metadata": {"container": {"tags": tags}}}
+
+
+class TestDeleteOldVersions:
+    """Tests for RegistryClient.delete_old_versions."""
+
+    def _make_client(self):
+        with patch("oras.client.OrasClient"):
+            return RegistryClient("ghcr.io/thawn/abstracts-data", token="test-token")
+
+    def test_deletes_versions_below_threshold(self):
+        client = self._make_client()
+        pkg_versions = [
+            _make_pkg_version(1, ["neurips-2024_model_0.3.0"]),
+            _make_pkg_version(2, ["neurips-2024_model_0.4.0"]),
+            _make_pkg_version(3, ["neurips-2024_model_0.5.0"]),
+        ]
+        with patch.object(client, "_list_github_package_versions", return_value=pkg_versions):
+            with patch.object(client, "_delete_github_package_version") as mock_delete:
+                deleted = client.delete_old_versions(below_version="0.4.0")
+
+        assert len(deleted) == 1
+        assert deleted[0]["version_id"] == 1
+        mock_delete.assert_called_once_with("thawn", "abstracts-data", 1)
+
+    def test_dry_run_does_not_delete(self):
+        client = self._make_client()
+        pkg_versions = [
+            _make_pkg_version(1, ["neurips-2024_model_0.3.0"]),
+            _make_pkg_version(2, ["neurips-2024_model_0.5.0"]),
+        ]
+        with patch.object(client, "_list_github_package_versions", return_value=pkg_versions):
+            with patch.object(client, "_delete_github_package_version") as mock_delete:
+                deleted = client.delete_old_versions(below_version="0.4.0", dry_run=True)
+
+        assert len(deleted) == 1
+        mock_delete.assert_not_called()
+
+    def test_conference_filter_limits_scope(self):
+        client = self._make_client()
+        pkg_versions = [
+            _make_pkg_version(1, ["neurips-2024_model_0.3.0"]),
+            _make_pkg_version(2, ["iclr-2024_model_0.3.0"]),
+        ]
+        with patch.object(client, "_list_github_package_versions", return_value=pkg_versions):
+            with patch.object(client, "_delete_github_package_version") as mock_delete:
+                deleted = client.delete_old_versions(below_version="0.4.0", conference="neurips")
+
+        assert len(deleted) == 1
+        assert deleted[0]["version_id"] == 1
+        mock_delete.assert_called_once_with("thawn", "abstracts-data", 1)
+
+    def test_untagged_versions_skipped(self):
+        client = self._make_client()
+        pkg_versions = [
+            _make_pkg_version(1, []),  # untagged
+            _make_pkg_version(2, ["neurips-2024_model_0.3.0"]),
+        ]
+        with patch.object(client, "_list_github_package_versions", return_value=pkg_versions):
+            with patch.object(client, "_delete_github_package_version") as mock_del:
+                deleted = client.delete_old_versions(below_version="0.4.0")
+
+        # Only version 2 should be deleted; version 1 is untagged
+        assert len(deleted) == 1
+        assert deleted[0]["version_id"] == 2
+        mock_del.assert_called_once_with("thawn", "abstracts-data", 2)
+
+    def test_no_matching_versions_returns_empty(self):
+        client = self._make_client()
+        pkg_versions = [
+            _make_pkg_version(1, ["neurips-2024_model_0.5.0"]),
+        ]
+        with patch.object(client, "_list_github_package_versions", return_value=pkg_versions):
+            with patch.object(client, "_delete_github_package_version") as mock_delete:
+                deleted = client.delete_old_versions(below_version="0.4.0")
+
+        assert deleted == []
+        mock_delete.assert_not_called()
+
+    def test_invalid_below_version_raises_value_error(self):
+        client = self._make_client()
+        with pytest.raises(ValueError, match="Invalid version"):
+            client.delete_old_versions(below_version="not-a-version")
+
+    def test_progress_callback_called(self):
+        client = self._make_client()
+        messages = []
+        pkg_versions = [_make_pkg_version(1, ["neurips-2024_model_0.3.0"])]
+        with patch.object(client, "_list_github_package_versions", return_value=pkg_versions):
+            with patch.object(client, "_delete_github_package_version"):
+                client.delete_old_versions(
+                    below_version="0.4.0",
+                    progress_callback=messages.append,
+                )
+        assert any("Fetching" in m for m in messages)
+        assert any("1" in m for m in messages)
+
+    def test_non_ghcr_registry_raises(self):
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("docker.io/thawn/abstracts-data", token="tok")
+        with pytest.raises(RegistryError, match="ghcr.io"):
+            client.delete_old_versions(below_version="0.4.0")
+
+    def test_conference_level_tags_matched(self):
+        """Conference-level tags (no year suffix) should also be matched."""
+        client = self._make_client()
+        pkg_versions = [
+            _make_pkg_version(1, ["neurips_model_0.3.0"]),  # conference-level tag
+        ]
+        with patch.object(client, "_list_github_package_versions", return_value=pkg_versions):
+            with patch.object(client, "_delete_github_package_version") as mock_delete:
+                deleted = client.delete_old_versions(below_version="0.4.0")
+
+        assert len(deleted) == 1
+        mock_delete.assert_called_once()
+
+    def test_tags_with_unparseable_version_skipped(self):
+        """Tags without a valid version component are ignored (not deleted)."""
+        client = self._make_client()
+        pkg_versions = [
+            _make_pkg_version(1, ["neurips-2024"]),  # no model/version suffix
+            _make_pkg_version(2, ["neurips-2024_model_0.3.0"]),
+        ]
+        with patch.object(client, "_list_github_package_versions", return_value=pkg_versions):
+            with patch.object(client, "_delete_github_package_version") as mock_del:
+                deleted = client.delete_old_versions(below_version="0.4.0")
+
+        # Only version 2 has a parseable version < 0.4.0
+        assert len(deleted) == 1
+        assert deleted[0]["version_id"] == 2
+        mock_del.assert_called_once_with("thawn", "abstracts-data", 2)
+
+
+# ---------------------------------------------------------------------------
+# Tests for registry_delete_command (CLI)
+# ---------------------------------------------------------------------------
+
+
+class TestRegistryDeleteCommand:
+    """Tests for the registry_delete_command CLI function."""
+
+    def test_delete_success(self, capsys):
+        from abstracts_explorer.cli import registry_delete_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            below_version="0.4.0",
+            conference=None,
+            dry_run=False,
+            yes=True,
+        )
+        deleted_entries = [
+            {"version_id": 1, "tags": ["neurips-2024_model_0.3.0"], "version": "0.3.0"},
+        ]
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.delete_old_versions.return_value = deleted_entries
+
+            result = registry_delete_command(args)
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "Done" in captured.out
+        assert "1" in captured.out
+
+    def test_dry_run_shows_preview(self, capsys):
+        from abstracts_explorer.cli import registry_delete_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            below_version="0.4.0",
+            conference=None,
+            dry_run=True,
+            yes=True,
+        )
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.delete_old_versions.return_value = []
+
+            result = registry_delete_command(args)
+
+        assert result == 0
+        # dry_run=True was forwarded to the method
+        mock_instance.delete_old_versions.assert_called_once()
+        call_kwargs = mock_instance.delete_old_versions.call_args
+        assert call_kwargs.kwargs.get("dry_run") is True
+
+    def test_no_repository_returns_error(self, capsys, monkeypatch):
+        from abstracts_explorer.cli import registry_delete_command
+
+        monkeypatch.setenv("REGISTRY_REPOSITORY", "")
+        mock_cfg = MagicMock()
+        mock_cfg.registry_repository = None
+        mock_cfg.github_token = "some-token"
+        args = argparse.Namespace(
+            repository=None,
+            token="test-token",
+            below_version="0.4.0",
+            conference=None,
+            dry_run=False,
+            yes=True,
+        )
+        with patch("abstracts_explorer.cli.get_config", return_value=mock_cfg):
+            # Override repository to None (mock_cfg.registry_repository is None)
+            args.repository = None
+            mock_cfg.registry_repository = None
+            result = registry_delete_command(args)
+        assert result == 1
+        assert "Repository not specified" in capsys.readouterr().err
+
+    def test_no_token_returns_error(self, capsys, monkeypatch):
+        from abstracts_explorer.cli import registry_delete_command
+
+        monkeypatch.setenv("GITHUB_TOKEN", "")
+        # Also mock get_config so it cannot find a token from the environment
+        mock_cfg = MagicMock()
+        mock_cfg.registry_repository = None
+        mock_cfg.github_token = ""
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token=None,
+            below_version="0.4.0",
+            conference=None,
+            dry_run=False,
+            yes=True,
+        )
+        with patch("abstracts_explorer.cli.get_config", return_value=mock_cfg):
+            result = registry_delete_command(args)
+        assert result == 1
+        assert "Authentication token" in capsys.readouterr().err
+
+    def test_invalid_version_returns_error(self, capsys):
+        from abstracts_explorer.cli import registry_delete_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            below_version="not-a-version",
+            conference=None,
+            dry_run=False,
+            yes=True,
+        )
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.delete_old_versions.side_effect = ValueError("Invalid version")
+
+            result = registry_delete_command(args)
+
+        assert result == 1
+        assert "Invalid version" in capsys.readouterr().err
+
+    def test_registry_error_returns_error(self, capsys):
+        from abstracts_explorer.cli import registry_delete_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            below_version="0.4.0",
+            conference=None,
+            dry_run=False,
+            yes=True,
+        )
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.delete_old_versions.side_effect = RegistryError("API failure")
+
+            result = registry_delete_command(args)
+
+        assert result == 1
+        assert "Registry error" in capsys.readouterr().err
+
+    def test_main_dispatch_registry_delete(self):
+        """Main dispatches to registry delete command."""
+        from abstracts_explorer.cli import main
+
+        with patch(
+            "sys.argv",
+            [
+                "abstracts-explorer",
+                "registry",
+                "delete",
+                "-r",
+                "ghcr.io/o/r",
+                "--token",
+                "tok",
+                "--below-version",
+                "0.4.0",
+                "--yes",
+            ],
+        ):
+            with patch("abstracts_explorer.cli.registry_delete_command", return_value=0) as mock_cmd:
+                result = main()
+
+        assert result == 0
+        mock_cmd.assert_called_once()
