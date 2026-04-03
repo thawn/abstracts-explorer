@@ -666,7 +666,9 @@ class RegistryClient:
         if not embeddings_file.exists():
             missing.append(f"embeddings ({embeddings_file.name})")
         if clustering_cache_file is None or not clustering_cache_file.exists():
-            missing.append(f"clustering cache ({clustering_cache_file.name if clustering_cache_file else 'not provided'})")
+            missing.append(
+                f"clustering cache ({clustering_cache_file.name if clustering_cache_file else 'not provided'})"
+            )
         if missing:
             raise RegistryError(
                 f"Incomplete data for {conference}/{year}: missing {', '.join(missing)}. "
@@ -730,9 +732,7 @@ class RegistryClient:
                 clustering_cache_count = db.import_clustering_cache_from_json(cache_data, conference, year)
             progress(f"  Imported {clustering_cache_count} clustering cache entries")
         except Exception as cache_err:
-            raise RegistryError(
-                f"Clustering cache import failed for {conference}/{year}: {cache_err}"
-            ) from cache_err
+            raise RegistryError(f"Clustering cache import failed for {conference}/{year}: {cache_err}") from cache_err
 
         return {
             "paper_count": paper_count,

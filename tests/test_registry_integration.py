@@ -368,7 +368,9 @@ class TestImportYearIntegration:
             side_effect=EmbeddingModelConflictError("local-model", "remote-model"),
         ):
             with pytest.raises(EmbeddingModelMismatchError) as exc_info:
-                client._import_year("neurips", 2024, paper_db, embeddings, lambda m: None, clustering_cache_file=cache)
+                client._import_year(
+                    "neurips", 2024, paper_db, embeddings, lambda m: None, clustering_cache_file=cache
+                )
 
         assert exc_info.value.local_model == "local-model"
         assert exc_info.value.remote_model == "remote-model"
@@ -407,7 +409,9 @@ class TestImportYearIntegration:
             side_effect=RuntimeError("embedding failure"),
         ):
             with pytest.raises(RegistryError, match="Embedding import failed"):
-                client._import_year("neurips", 2024, paper_db, embeddings, lambda m: None, clustering_cache_file=cache)
+                client._import_year(
+                    "neurips", 2024, paper_db, embeddings, lambda m: None, clustering_cache_file=cache
+                )
 
         # Paper DB should be rolled back — no papers for neurips/2024
         with DatabaseManager() as db:

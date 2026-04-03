@@ -67,7 +67,11 @@ def _make_sample_papers():
 
 
 def _populate_test_db(db_path):
-    """Create and populate a test database with papers only, return the DatabaseManager."""
+    """Create and populate a test database with papers only (no clustering cache).
+
+    Use :func:`_populate_test_db_with_cache` when you also need clustering cache
+    entries (e.g. for upload tests that require a non-empty clustering cache).
+    """
     set_test_db(db_path)
     db = DatabaseManager()
     db.connect()
@@ -103,9 +107,6 @@ def _make_clustering_cache_file(path, entries=None):
     data = {"entries": entries or []}
     path.write_text(json.dumps(data))
     return path
-
-
-
 
 
 class TestSanitizeStrForOciTag:
@@ -1190,7 +1191,7 @@ class TestUploadDownload:
         ):
             summary = client.upload(conference="neurips", year=2024)
 
-        assert summary["clustering_cache_count"] >= 1
+        assert summary["clustering_cache_count"] == 1
 
         # Verify push was called with 3 files (papers, embeddings, clustering)
         push_kwargs = mock_oras.push.call_args[1]
@@ -1588,7 +1589,11 @@ class TestUploadDownload:
 
         with pytest.raises(RegistryError, match="Incomplete data.*missing.*paper DB"):
             client._import_year(
-                "neurips", 2024, tmp_path / "papers-2024.db", embeddings_path, lambda m: None,
+                "neurips",
+                2024,
+                tmp_path / "papers-2024.db",
+                embeddings_path,
+                lambda m: None,
                 clustering_cache_file=cache_path,
             )
 
@@ -1608,7 +1613,11 @@ class TestUploadDownload:
 
         with pytest.raises(RegistryError, match="Incomplete data.*missing.*embeddings"):
             client._import_year(
-                "neurips", 2024, papers_2024, tmp_path / "embeddings-2024.json", lambda m: None,
+                "neurips",
+                2024,
+                papers_2024,
+                tmp_path / "embeddings-2024.json",
+                lambda m: None,
                 clustering_cache_file=cache_path,
             )
 
@@ -1653,7 +1662,11 @@ class TestUploadDownload:
 
             with pytest.raises(RegistryError, match="Embedding import failed.*rolled back"):
                 client._import_year(
-                    "neurips", 2024, papers_2024, embeddings_path, lambda m: None,
+                    "neurips",
+                    2024,
+                    papers_2024,
+                    embeddings_path,
+                    lambda m: None,
                     clustering_cache_file=cache_path,
                 )
 
@@ -2342,7 +2355,11 @@ class TestCLICommands:
         ):
             with pytest.raises(EmbeddingModelMismatchError) as exc_info:
                 client._import_year(
-                    "neurips", 2024, paper_db_path, embeddings_path, lambda m: None,
+                    "neurips",
+                    2024,
+                    paper_db_path,
+                    embeddings_path,
+                    lambda m: None,
                     clustering_cache_file=cache_path,
                 )
 
@@ -2400,7 +2417,9 @@ class TestCLICommands:
 
         with patch("abstracts_explorer.database.DatabaseManager.import_papers_from_sqlite", return_value=0):
             with patch("abstracts_explorer.embeddings.EmbeddingsManager.import_embeddings", return_value=0):
-                with patch("abstracts_explorer.database.DatabaseManager.import_clustering_cache_from_json", return_value=0):
+                with patch(
+                    "abstracts_explorer.database.DatabaseManager.import_clustering_cache_from_json", return_value=0
+                ):
                     result = client._import_year(
                         "neurips",
                         2024,
@@ -2430,7 +2449,9 @@ class TestCLICommands:
 
         with patch("abstracts_explorer.database.DatabaseManager.import_papers_from_sqlite", return_value=0):
             with patch("abstracts_explorer.embeddings.EmbeddingsManager.import_embeddings", return_value=0):
-                with patch("abstracts_explorer.database.DatabaseManager.import_clustering_cache_from_json", return_value=0):
+                with patch(
+                    "abstracts_explorer.database.DatabaseManager.import_clustering_cache_from_json", return_value=0
+                ):
                     client._import_year(
                         "neurips",
                         2024,
@@ -2461,7 +2482,9 @@ class TestCLICommands:
 
         with patch("abstracts_explorer.database.DatabaseManager.import_papers_from_sqlite", return_value=0):
             with patch("abstracts_explorer.embeddings.EmbeddingsManager.import_embeddings", return_value=0):
-                with patch("abstracts_explorer.database.DatabaseManager.import_clustering_cache_from_json", return_value=0):
+                with patch(
+                    "abstracts_explorer.database.DatabaseManager.import_clustering_cache_from_json", return_value=0
+                ):
                     result = client._import_year(
                         "neurips",
                         2024,
