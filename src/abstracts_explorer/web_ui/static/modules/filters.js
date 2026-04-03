@@ -45,6 +45,8 @@ export async function loadFilterOptions() {
             window.allYears = availableData.years || [];
 
             // Populate year selector in header (only on initial load when just "All Years" is present)
+            // Track if we just populated it to apply defaults afterward.
+            let yearsJustPopulated = false;
             if (yearSelect && yearSelect.options.length === 1) {
                 if (availableData.years && availableData.years.length > 0) {
                     availableData.years.forEach(year => {
@@ -53,6 +55,7 @@ export async function loadFilterOptions() {
                         option.textContent = year;
                         yearSelect.appendChild(option);
                     });
+                    yearsJustPopulated = true;
                 }
             }
 
@@ -93,7 +96,7 @@ export async function loadFilterOptions() {
                 defaultApplied = true;
             }
 
-            if (yearSelect && getSelectedYears().length === 0 && availableData.default_year != null) {
+            if ((yearsJustPopulated || conferencesJustPopulated) && yearSelect && getSelectedYears().length === 0 && availableData.default_year != null) {
                 const defaultYear = String(availableData.default_year);
                 const yearOption = Array.from(yearSelect.options).find(opt => opt.value === defaultYear);
                 if (yearOption) {
