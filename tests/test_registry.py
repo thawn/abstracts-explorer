@@ -895,9 +895,9 @@ class TestDatabaseExportImport:
             assert len(entries) == 2
             # All entries must carry the LOCAL model name, not the remote one
             for entry in entries:
-                assert entry.embedding_model == "local-model", (
-                    f"Expected 'local-model', got '{entry.embedding_model}'"
-                )
+                assert (
+                    entry.embedding_model == "local-model"
+                ), f"Expected 'local-model', got '{entry.embedding_model}'"
         finally:
             db.close()
 
