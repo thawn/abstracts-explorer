@@ -225,6 +225,7 @@ export function addChatMessage(text, role, isLoading = false) {
     const messageDiv = document.createElement('div');
     messageDiv.id = messageId;
     messageDiv.className = 'chat-message';
+    messageDiv.dataset.role = role;
     messageDiv.innerHTML = `
         <div class="flex items-start gap-3 ${justifyClass}">
             ${!isUser ? `
@@ -233,7 +234,7 @@ export function addChatMessage(text, role, isLoading = false) {
                 </div>
             ` : ''}
             <div class="${bgColor} rounded-lg p-4 shadow-sm max-w-2xl">
-                ${contentHtml}
+                <div data-chat-content>${contentHtml}</div>
                 ${isLoading ? '<div class="spinner mt-2" style="width: 20px; height: 20px; border-width: 2px;"></div>' : ''}
                 ${!isUser && !isLoading ? `
                 <div class="chat-feedback-buttons flex items-center gap-2 mt-3 pt-2 border-t border-gray-100">
@@ -461,18 +462,15 @@ function collectChatTranscript() {
     if (!messagesDiv) return [];
 
     const messages = [];
-    const messageDivs = messagesDiv.querySelectorAll('.chat-message');
+    const messageDivs = messagesDiv.querySelectorAll('.chat-message[data-role]');
 
     for (const msgDiv of messageDivs) {
-        const isUser = msgDiv.querySelector('.bg-purple-600.text-white.rounded-lg') !== null
-            && msgDiv.querySelector('.fa-user') !== null;
-        const contentEl = isUser
-            ? msgDiv.querySelector('.whitespace-pre-wrap')
-            : msgDiv.querySelector('.markdown-content');
+        const role = msgDiv.dataset.role;
+        const contentEl = msgDiv.querySelector('[data-chat-content]');
 
         if (contentEl) {
             messages.push({
-                role: isUser ? 'user' : 'assistant',
+                role: role,
                 text: contentEl.textContent.trim()
             });
         }
