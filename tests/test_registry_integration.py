@@ -528,24 +528,24 @@ class TestConferenceNameResolution:
     """Tests for case-insensitive conference name resolution."""
 
     def test_resolve_finds_stored_name(self, tmp_path):
-        """_resolve_conference_name returns the DB-stored name regardless of input case."""
+        """DatabaseManager.resolve_conference_name returns the DB-stored name regardless of input case."""
         set_test_db(tmp_path / "test.db")
         with DatabaseManager() as db:
             db.create_tables()
             db.add_papers(_make_papers(conference="NeurIPS", year=2024))
 
-        assert RegistryClient._resolve_conference_name("neurips") == "NeurIPS"
-        assert RegistryClient._resolve_conference_name("NEURIPS") == "NeurIPS"
-        assert RegistryClient._resolve_conference_name("NeurIPS") == "NeurIPS"
+            assert db.resolve_conference_name("neurips") == "NeurIPS"
+            assert db.resolve_conference_name("NEURIPS") == "NeurIPS"
+            assert db.resolve_conference_name("NeurIPS") == "NeurIPS"
 
     def test_resolve_returns_input_if_not_found(self, tmp_path):
-        """_resolve_conference_name returns input unchanged when no match exists."""
+        """resolve_conference_name returns input unchanged when no match exists (and no plugin matches)."""
         set_test_db(tmp_path / "test.db")
         with DatabaseManager() as db:
             db.create_tables()
 
-        result = RegistryClient._resolve_conference_name("unknown-conf")
-        assert result == "unknown-conf"
+            result = db.resolve_conference_name("unknown-conf-xyz-999")
+            assert result == "unknown-conf-xyz-999"
 
 
 # ---------------------------------------------------------------------------
@@ -698,9 +698,10 @@ class TestCLIRegistryDispatch:
             result = registry_upload_command(args)
 
         assert result == 0
-        # Verify upload was called with the conference, year, and tag args
+        # Verify upload was called with the resolved conference name
+        # "neurips" resolves to "NeurIPS" via plugin fallback since DB is empty
         call_kwargs = mock_instance.upload.call_args.kwargs
-        assert call_kwargs["conference"] == "neurips"
+        assert call_kwargs["conference"] == "NeurIPS"
         assert call_kwargs["year"] == 2024
         assert call_kwargs["tag"] is None
 

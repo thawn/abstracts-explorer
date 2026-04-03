@@ -57,11 +57,10 @@ class TestBuildEmbeddingsWhereClause:
         assert _build_embeddings_where_clause(args) is None
 
     def test_conference_only(self):
-        """Conference filter produces a case-insensitive LOWER() WHERE clause."""
+        """Conference filter produces an exact-match WHERE clause."""
         args = argparse.Namespace(conference="NeurIPS", year=None, where=None)
         result = _build_embeddings_where_clause(args)
-        assert "LOWER(conference)" in result
-        assert "LOWER('NeurIPS')" in result
+        assert "conference = 'NeurIPS'" in result
 
     def test_year_only(self):
         """Year filter produces correct WHERE clause."""
@@ -72,8 +71,7 @@ class TestBuildEmbeddingsWhereClause:
         """Both conference and year produce combined WHERE clause."""
         args = argparse.Namespace(conference="ICLR", year=2025, where=None)
         result = _build_embeddings_where_clause(args)
-        assert "LOWER(conference)" in result
-        assert "LOWER('ICLR')" in result
+        assert "conference = 'ICLR'" in result
         assert "year = 2025" in result
         assert " AND " in result
 
@@ -86,8 +84,7 @@ class TestBuildEmbeddingsWhereClause:
         """Conference + --where are combined with AND."""
         args = argparse.Namespace(conference="NeurIPS", year=None, where="award IS NOT NULL")
         result = _build_embeddings_where_clause(args)
-        assert "LOWER(conference)" in result
-        assert "LOWER('NeurIPS')" in result
+        assert "conference = 'NeurIPS'" in result
         assert "(award IS NOT NULL)" in result
         assert " AND " in result
 
@@ -95,8 +92,7 @@ class TestBuildEmbeddingsWhereClause:
         """All three filters are combined with AND."""
         args = argparse.Namespace(conference="NeurIPS", year=2024, where="award IS NOT NULL")
         result = _build_embeddings_where_clause(args)
-        assert "LOWER(conference)" in result
-        assert "LOWER('NeurIPS')" in result
+        assert "conference = 'NeurIPS'" in result
         assert "year = 2024" in result
         assert "(award IS NOT NULL)" in result
 
@@ -106,15 +102,15 @@ class TestBuildEmbeddingsWhereClause:
         result = _build_embeddings_where_clause(args)
         assert "O''Reilly" in result
 
-    def test_conference_case_insensitive(self):
-        """Lowercase conference input produces the same LOWER() structure."""
+    def test_conference_exact_match(self):
+        """Conference name is used as-is (already resolved to canonical form)."""
         args_lower = argparse.Namespace(conference="neurips", year=None, where=None)
         args_upper = argparse.Namespace(conference="NeurIPS", year=None, where=None)
         result_lower = _build_embeddings_where_clause(args_lower)
         result_upper = _build_embeddings_where_clause(args_upper)
-        # Both use LOWER() so only the literal value differs
-        assert "LOWER(conference)" in result_lower
-        assert "LOWER(conference)" in result_upper
+        # Exact match — the literal value must match what was passed
+        assert "conference = 'neurips'" in result_lower
+        assert "conference = 'NeurIPS'" in result_upper
 
 
 class TestAddConferenceYearArgs:
@@ -1144,8 +1140,7 @@ class TestCLI:
 
         # Verify the WHERE clause was passed to embed_from_database
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
-        assert "LOWER(conference)" in call_kwargs["where_clause"]
-        assert "NeurIPS" in call_kwargs["where_clause"]
+        assert "conference = 'NeurIPS'" in call_kwargs["where_clause"]
 
     def test_create_embeddings_with_year(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with --year flag filters to one year."""
@@ -1282,8 +1277,7 @@ class TestCLI:
 
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
         where = call_kwargs["where_clause"]
-        assert "LOWER(conference)" in where
-        assert "NeurIPS" in where
+        assert "conference = 'NeurIPS'" in where
         assert "year = 2024" in where
 
     def test_create_embeddings_conference_with_where(self, tmp_path, capsys, monkeypatch):
@@ -1349,8 +1343,7 @@ class TestCLI:
 
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
         where = call_kwargs["where_clause"]
-        assert "LOWER(conference)" in where
-        assert "NeurIPS" in where
+        assert "conference = 'NeurIPS'" in where
         assert "(award IS NOT NULL)" in where
 
     def test_create_embeddings_default_embeds_all(self, tmp_path, capsys, monkeypatch):
@@ -2399,6 +2392,7 @@ class TestCLI:
 
             mock_db_instance = Mock()
             mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.resolve_conference_name.return_value = "ML4PS@NeurIPS"
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
@@ -2554,6 +2548,8 @@ class TestCLI:
             # DatabaseManager used as context manager for conference resolution
             mock_db_instance = Mock()
             mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            # resolve_conference_name returns the canonical form for "ml4ps@neurips"
+            mock_db_instance.resolve_conference_name.return_value = "ML4PS@NeurIPS"
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance

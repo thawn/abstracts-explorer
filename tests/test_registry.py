@@ -388,8 +388,53 @@ class TestDatabaseExportImport:
         finally:
             db2.close()
 
-    def test_import_case_insensitive_conference_delete(self, tmp_path):
-        """Import deletes papers case-insensitively, preventing UniqueViolation on PostgreSQL."""
+    def test_resolve_conference_name_from_db(self, tmp_path):
+        """resolve_conference_name returns the DB-stored canonical name (case-insensitive match)."""
+        # Populate with mixed-case conference name (e.g. "ML4PS@Neurips")
+        set_test_db(tmp_path / "db.db")
+        db = DatabaseManager()
+        db.connect()
+        db.create_tables()
+        db.add_papers(
+            [
+                LightweightPaper(
+                    title="Paper One",
+                    authors=["Author A"],
+                    abstract="Abstract",
+                    session="Session 1",
+                    poster_position="A1",
+                    year=2025,
+                    conference="ML4PS@Neurips",
+                ),
+            ]
+        )
+
+        try:
+            # Case-insensitive resolution should return stored canonical form
+            assert db.resolve_conference_name("ml4ps@neurips") == "ML4PS@Neurips"
+            assert db.resolve_conference_name("ML4PS@NEURIPS") == "ML4PS@Neurips"
+            assert db.resolve_conference_name("ML4PS@Neurips") == "ML4PS@Neurips"
+            # Unknown conference returns unchanged
+            assert db.resolve_conference_name("unknown") == "unknown"
+        finally:
+            db.close()
+
+    def test_resolve_conference_name_plugin_fallback(self, tmp_path):
+        """resolve_conference_name falls back to plugin conference_name if not in DB."""
+        set_test_db(tmp_path / "empty.db")
+        db = DatabaseManager()
+        db.connect()
+        db.create_tables()
+        try:
+            # DB is empty; should fall back to plugin that has "NeurIPS"
+            resolved = db.resolve_conference_name("neurips")
+            # Plugins define "NeurIPS" as the canonical name
+            assert resolved == "NeurIPS"
+        finally:
+            db.close()
+
+    def test_import_with_resolved_conference_name(self, tmp_path):
+        """Import works correctly when conference name is resolved before calling import."""
         from abstracts_explorer.db_models import Paper
 
         # Populate with mixed-case conference name (e.g. "ML4PS@Neurips")
@@ -416,9 +461,11 @@ class TestDatabaseExportImport:
             export_path = tmp_path / "export.db"
             db.export_papers_to_sqlite(export_path, "ML4PS@Neurips", 2025)
 
-            # Now import with lowercase conference — should delete existing
-            # papers via case-insensitive match, not raise UniqueViolation
-            count = db.import_papers_from_sqlite(export_path, "ml4ps@neurips", 2025)
+            # Resolve conference name first (as CLI would do), then import with exact name
+            resolved = db.resolve_conference_name("ml4ps@neurips")
+            assert resolved == "ML4PS@Neurips"
+
+            count = db.import_papers_from_sqlite(export_path, resolved, 2025)
             assert count == 1
 
             # The paper should exist (imported fresh)
@@ -1264,8 +1311,8 @@ class TestUploadDownload:
             with pytest.raises(RegistryError, match="No data found"):
                 client.upload(conference="icml")
 
-    def test_upload_conference_name_case_insensitive_resolution(self, tmp_path):
-        """Upload resolves conference name case-insensitively against DB data."""
+    def test_upload_conference_name_exact_match_required(self, tmp_path):
+        """Upload uses the conference name exactly as passed; resolution is the caller's responsibility."""
         # Populate DB with mixed-case conference name "NeurIPS"
         set_test_db(tmp_path / "test.db")
         db = DatabaseManager()
@@ -1284,6 +1331,7 @@ class TestUploadDownload:
                 )
             ]
         )
+        db.close()
 
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
@@ -1302,11 +1350,10 @@ class TestUploadDownload:
             patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em),
             patch.object(RegistryClient, "_get_embedding_model_database", return_value="test-model"),
         ):
-            # User passes lowercase "neurips", DB has "NeurIPS" — should succeed
-            summary = client.upload(conference="neurips")
+            # CLI resolves "neurips" → "NeurIPS" before calling upload; pass exact name here
+            summary = client.upload(conference="NeurIPS")
 
         assert summary["paper_count"] == 1
-        # Tag is built from the resolved "NeurIPS" name (sanitized)
         assert "neurips" in summary["tag"]
 
     def test_upload_no_embedding_model(self, tmp_path):
@@ -2534,7 +2581,7 @@ class TestCLICommands:
 
         success_summary = {
             "tag": "neurips-2024_model-a",
-            "conference": "neurips",
+            "conference": "NeurIPS",
             "years": [2024],
             "paper_count": 5,
             "embedding_count": 5,
@@ -2548,14 +2595,13 @@ class TestCLICommands:
             result = registry_download_command(args)
 
         assert result == 0
-        mock_instance.download.assert_called_once_with(
-            conference="neurips",
-            year=2024,
-            tag=None,
-            embedding_model="model-a",
-            progress_callback=mock_instance.download.call_args.kwargs["progress_callback"],
-            ignore_embedding_model_mismatch=True,
-        )
+        call_kwargs = mock_instance.download.call_args.kwargs
+        # CLI resolves "neurips" → "NeurIPS" via plugin fallback before calling download
+        assert call_kwargs["conference"] == "NeurIPS"
+        assert call_kwargs["year"] == 2024
+        assert call_kwargs["tag"] is None
+        assert call_kwargs["embedding_model"] == "model-a"
+        assert call_kwargs["ignore_embedding_model_mismatch"] is True
 
     def test_download_ignore_mismatch_flag_passed_to_client(self, tmp_path, capsys):
         """When --ignore-embedding-model-mismatch is set, the flag is passed to client.download()."""

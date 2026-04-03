@@ -955,6 +955,68 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Failed to get years for conference: {str(e)}") from e
 
+    def resolve_conference_name(self, conference: str) -> str:
+        """
+        Resolve a conference name to the canonical form stored in the database.
+
+        Performs a case-insensitive match against conference names already
+        present in the database.  If no database match is found, falls back
+        to a case-insensitive match against the ``conference_name`` attribute of
+        every registered downloader plugin.  If neither lookup succeeds the
+        original *conference* string is returned unchanged.
+
+        This is the single authoritative place where conference-name
+        normalisation must happen.  CLI commands should call this method
+        **once** at the entry point of each command and then work with the
+        returned canonical name for all subsequent operations.
+
+        Parameters
+        ----------
+        conference : str
+            Conference name as supplied by the caller.  May differ in case or
+            spelling from the form stored in the database (e.g. ``ml4ps@neurips``
+            vs. ``ML4PS@Neurips``).
+
+        Returns
+        -------
+        str
+            The conference name exactly as it appears in the database (first
+            match), or exactly as defined by the first matching plugin, or the
+            input string if no match is found.
+
+        Examples
+        --------
+        >>> with DatabaseManager() as db:
+        ...     db.create_tables()
+        ...     canonical = db.resolve_conference_name("ml4ps@neurips")
+        ...     # Returns "ML4PS@Neurips" if that form is stored in the DB
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        # 1. Try case-insensitive match against conferences already in the DB
+        try:
+            filters = self.get_filter_options()
+            for conf in filters.get("conferences", []):
+                if conf.lower() == conference.lower():
+                    return conf
+        except Exception:
+            pass
+
+        # 2. Fall back to plugin conference names
+        try:
+            from abstracts_explorer.plugins import get_all_plugins
+
+            for plugin in get_all_plugins():
+                plugin_conf = getattr(plugin, "conference_name", None)
+                if plugin_conf and plugin_conf.lower() == conference.lower():
+                    return plugin_conf
+        except Exception:
+            pass
+
+        # 3. No match — return unchanged
+        return conference
+
     def get_filter_options(self, year: Optional[int] = None, conference: Optional[str] = None) -> dict:
         """
         Get distinct values for filterable fields (lightweight schema).
@@ -2147,14 +2209,8 @@ class DatabaseManager:
                             existing_meta.embedding_model, imported_meta.embedding_model
                         )
 
-                # Delete existing papers for this conference+year.
-                # Use case-insensitive comparison because conference names may
-                # differ in case between the caller and the stored data (e.g.
-                # "ml4ps@neurips" vs "ML4PS@Neurips").  PostgreSQL text
-                # comparison is case-sensitive by default.
-                self._session.execute(
-                    delete(Paper).where(and_(func.lower(Paper.conference) == conference.lower(), Paper.year == year))
-                )
+                # Delete existing papers for this conference+year
+                self._session.execute(delete(Paper).where(and_(Paper.conference == conference, Paper.year == year)))
 
                 # Delete only clustering cache entries that match the conference+year
                 for entry in self._session.execute(select(ClusteringCache)).scalars().all():
