@@ -2352,6 +2352,26 @@ class DatabaseManager:
                     self._session.delete(entry)
             self._session.flush()
 
+            # For PostgreSQL the auto-increment sequence can fall out of sync when rows
+            # were previously inserted with explicit primary-key values (e.g. by an older
+            # version of import_papers_from_sqlite that included the clustering cache).
+            # If other rows for a different conference/year remain in the table and the
+            # sequence tries to reuse one of their IDs, the next INSERT will raise
+            # UniqueViolation.  Reset the sequence to max(existing id)+1 so that every
+            # new row gets a safe ID regardless of sequence history.
+            db_url = self.database_url.lower()
+            if "postgresql" in db_url or "postgres" in db_url:
+                self._session.execute(
+                    text(
+                        "SELECT setval("
+                        "  pg_get_serial_sequence('clustering_cache', 'id'),"
+                        "  COALESCE((SELECT MAX(id) FROM clustering_cache), 0) + 1,"
+                        "  false"
+                        ")"
+                    )
+                )
+                self._session.flush()
+
             count = 0
             for item in data.get("entries", []):
                 row = dict(item)  # shallow copy

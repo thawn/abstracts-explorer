@@ -940,6 +940,90 @@ class TestDatabaseExportImport:
         finally:
             db.close()
 
+    def test_import_clustering_cache_with_explicit_id_entries(self, tmp_path):
+        """Import replaces entries that were previously inserted with explicit IDs.
+
+        This reproduces the scenario where old code inserted clustering cache rows with
+        explicit primary-key values (bypassing the auto-increment sequence).  If the
+        sequence is not re-synced after the deletes, a subsequent INSERT may try to use
+        an ID still occupied by a non-matching row (e.g. for a different conference),
+        causing a UniqueViolation on PostgreSQL.  The fix resets the sequence so that
+        new inserts always receive a safe, non-conflicting ID.
+        """
+        import json as _json
+
+        from sqlalchemy import text as sa_text
+
+        from abstracts_explorer.db_models import ClusteringCache
+
+        db = _populate_test_db(tmp_path / "db.db")
+        try:
+            # Use raw SQL to bypass the ORM auto-increment and insert rows with
+            # explicit IDs — this simulates entries that were imported by an older
+            # version of the code that included explicit PKs.
+            for row_id, conf, yr in [
+                (1, "TestConf", 2024),
+                (2, "TestConf", 2024),
+                (3, "OtherConf", 2025),  # different conference — must NOT be deleted
+            ]:
+                db._session.execute(
+                    sa_text(
+                        "INSERT INTO clustering_cache "
+                        "(id, embedding_model, reduction_method, n_components, "
+                        "clustering_method, clustering_params, results_json, created_at) "
+                        "VALUES (:id, 'model', 'pca', 2, 'kmeans', :params, '{}', '2024-01-01')"
+                    ),
+                    {
+                        "id": row_id,
+                        "params": _json.dumps({"conferences": [conf], "years": [yr]}),
+                    },
+                )
+            db._session.commit()
+            assert db._session.query(ClusteringCache).count() == 3
+
+            # Import 2 new entries for TestConf/2024 — should replace rows 1 & 2,
+            # leave row 3 (OtherConf/2025) untouched, and never raise UniqueViolation.
+            data = {
+                "entries": [
+                    {
+                        "embedding_model": "model",
+                        "reduction_method": "tsne",
+                        "n_components": 2,
+                        "clustering_method": "kmeans",
+                        "n_clusters": 5,
+                        "clustering_params": {"conferences": ["TestConf"], "years": [2024]},
+                        "results_json": {"points": []},
+                        "created_at": "2025-06-01T00:00:00+00:00",
+                    },
+                    {
+                        "embedding_model": "model",
+                        "reduction_method": "umap",
+                        "n_components": 2,
+                        "clustering_method": "kmeans",
+                        "n_clusters": 3,
+                        "clustering_params": {"conferences": ["TestConf"], "years": [2024]},
+                        "results_json": {"points": []},
+                        "created_at": "2025-06-01T00:00:00+00:00",
+                    },
+                ]
+            }
+            count = db.import_clustering_cache_from_json(data, "TestConf", 2024)
+            assert count == 2
+
+            all_entries = db._session.query(ClusteringCache).all()
+            # Row 3 (OtherConf/2025) must still be present; the 2 new rows must exist.
+            assert len(all_entries) == 3
+
+            other_entries = [e for e in all_entries if "OtherConf" in (e.clustering_params or "")]
+            assert len(other_entries) == 1, "OtherConf/2025 entry should not have been deleted"
+
+            test_entries = [e for e in all_entries if "TestConf" in (e.clustering_params or "")]
+            assert len(test_entries) == 2, "Two new TestConf/2024 entries should exist"
+            reduction_methods = {e.reduction_method for e in test_entries}
+            assert reduction_methods == {"tsne", "umap"}, "New entries should have updated reduction methods"
+        finally:
+            db.close()
+
 
 # ---------------------------------------------------------------------------
 # Tests: EmbeddingsManager export/import
