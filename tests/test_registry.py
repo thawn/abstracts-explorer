@@ -175,6 +175,44 @@ class TestBuildTag:
         assert tag == f"neurips-2024_model-a_{expected_version}"
 
 
+
+# ---------------------------------------------------------------------------
+# Tests: _is_conference_level_tag
+# ---------------------------------------------------------------------------
+
+
+class TestIsConferenceLevelTag:
+    """Tests for RegistryClient._is_conference_level_tag."""
+
+    def test_conference_only_tag(self):
+        """Conference-only tag (no year) is a conference-level tag."""
+        assert RegistryClient._is_conference_level_tag("neurips_model-a_1.0.0") is True
+
+    def test_year_specific_tag(self):
+        """Tag with a 4-digit year suffix is NOT a conference-level tag."""
+        assert RegistryClient._is_conference_level_tag("neurips-2024_model-a_1.0.0") is False
+
+    def test_year_specific_tag_other_year(self):
+        """Any 4-digit year suffix marks a year-specific tag."""
+        assert RegistryClient._is_conference_level_tag("chi-2026_model_0.4.1") is False
+
+    def test_conference_with_hyphen_no_year(self):
+        """Conference name containing a hyphen but no year is still conference-level."""
+        assert RegistryClient._is_conference_level_tag("ml4ps-workshop_model_0.4.1") is True
+
+    def test_tag_without_underscore(self):
+        """Legacy tag without underscore separator and no year is treated as conference-level."""
+        assert RegistryClient._is_conference_level_tag("neurips") is True
+
+    def test_legacy_tag_with_year_no_underscore(self):
+        """Legacy year-specific tag without underscore is correctly identified."""
+        assert RegistryClient._is_conference_level_tag("neurips-2024") is False
+
+    def test_three_digit_suffix_is_conference_level(self):
+        """A 3-digit numeric suffix does NOT make a tag year-specific."""
+        assert RegistryClient._is_conference_level_tag("neurips-123_model_1.0.0") is True
+
+
 # ---------------------------------------------------------------------------
 # Tests: RegistryClient initialisation
 # ---------------------------------------------------------------------------
@@ -1173,20 +1211,20 @@ class TestUploadDownload:
             client.upload_all()
 
     def test_download_all_conferences(self, tmp_path):
-        """download_all downloads all tags from registry."""
+        """download_all downloads conference-level tags from registry."""
         set_test_db(tmp_path / "target.db")
 
         # Create fake pulled files for each download
         source_db = _populate_test_db(tmp_path / "source.db")
 
-        # For iclr-2024 tag (alphabetically first)
+        # For iclr tag (alphabetically first)
         papers_i = tmp_path / "pull_i" / "papers-2024.db"
         papers_i.parent.mkdir()
         source_db.export_papers_to_sqlite(papers_i, "iclr", 2024)
         emb_i = tmp_path / "pull_i" / "embeddings-2024.json"
         emb_i.write_text(json.dumps({"ids": ["b"], "documents": ["d"], "metadatas": [{}], "embeddings": [[0.2]]}))
 
-        # For neurips-2024 tag
+        # For neurips tag
         papers_n = tmp_path / "pull_n" / "papers-2024.db"
         papers_n.parent.mkdir()
         source_db.export_papers_to_sqlite(papers_n, "neurips", 2024)
@@ -1202,8 +1240,8 @@ class TestUploadDownload:
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
             mock_oras.get_tags.return_value = [
-                "neurips-2024_text-embedding-ada-002",
-                "iclr-2024_text-embedding-ada-002",
+                "neurips_text-embedding-ada-002",
+                "iclr_text-embedding-ada-002",
             ]
             # get_manifest returns annotations for each tag
             mock_oras.get_manifest.side_effect = [
@@ -1222,8 +1260,8 @@ class TestUploadDownload:
             ]
             # Side effect returns files in order of download (sorted tags: iclr..., neurips...)
             mock_oras.pull.side_effect = [
-                [str(papers_i), str(emb_i)],  # first call: iclr-2024
-                [str(papers_n), str(emb_n)],  # second call: neurips-2024
+                [str(papers_i), str(emb_i)],  # first call: iclr
+                [str(papers_n), str(emb_n)],  # second call: neurips
             ]
             client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
@@ -1232,6 +1270,49 @@ class TestUploadDownload:
 
         assert len(summaries) == 2
         assert mock_em.import_embeddings.call_count == 2
+
+    def test_download_all_skips_year_specific_tags(self, tmp_path):
+        """download_all skips year-specific tags and only downloads conference-level tags."""
+        set_test_db(tmp_path / "target.db")
+
+        with patch("oras.client.OrasClient") as MockOras:
+            mock_oras = MockOras.return_value
+            # Mix of year-specific and conference-level tags
+            mock_oras.get_tags.return_value = [
+                "neurips-2024_model-a_0.4.1",
+                "neurips-2025_model-a_0.4.1",
+                "neurips_model-a_0.4.1",
+                "iclr-2024_model-a_0.4.1",
+                "iclr_model-a_0.4.1",
+            ]
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        summary = {"conference": "neurips", "paper_count": 0, "embedding_count": 0, "years": []}
+        with patch.object(client, "get_artifact_info", return_value={"annotations": {}}):
+            with patch.object(client, "download", return_value=summary) as mock_dl:
+                client.download_all()
+
+        # Only 2 conference-level tags should be downloaded, not the 3 year-specific ones
+        assert mock_dl.call_count == 2
+        downloaded_tags = [call.kwargs["tag"] for call in mock_dl.call_args_list]
+        assert "neurips_model-a_0.4.1" in downloaded_tags
+        assert "iclr_model-a_0.4.1" in downloaded_tags
+        assert "neurips-2024_model-a_0.4.1" not in downloaded_tags
+        assert "neurips-2025_model-a_0.4.1" not in downloaded_tags
+        assert "iclr-2024_model-a_0.4.1" not in downloaded_tags
+
+    def test_download_all_only_year_tags_raises(self, tmp_path):
+        """download_all raises RegistryError when only year-specific tags exist."""
+        with patch("oras.client.OrasClient") as MockOras:
+            mock_oras = MockOras.return_value
+            mock_oras.get_tags.return_value = [
+                "neurips-2024_model-a_0.4.1",
+                "iclr-2024_model-a_0.4.1",
+            ]
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        with pytest.raises(RegistryError, match="No conference-level tags"):
+            client.download_all()
 
     def test_download_all_no_tags(self, tmp_path):
         """download_all raises RegistryError when no tags exist."""
@@ -1250,8 +1331,8 @@ class TestUploadDownload:
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
             mock_oras.get_tags.return_value = [
-                "neurips-2024_model-a",
-                "iclr-2024_model-a",
+                "neurips_model-a",
+                "iclr_model-a",
             ]
             client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
@@ -1270,7 +1351,7 @@ class TestUploadDownload:
 
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
-            mock_oras.get_tags.return_value = ["neurips-2024_model-a"]
+            mock_oras.get_tags.return_value = ["neurips_model-a"]
             client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         summary = {"conference": "neurips", "paper_count": 0, "embedding_count": 0}

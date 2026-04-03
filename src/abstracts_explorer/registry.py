@@ -320,6 +320,35 @@ class RegistryClient:
             db.create_tables()
             return db.get_embedding_model()
 
+    @staticmethod
+    def _is_conference_level_tag(tag: str) -> bool:
+        """
+        Return ``True`` when *tag* is a conference-level tag (no year suffix).
+
+        OCI tags in this project have the format
+        ``{conference}[-{year}]_{model}_{version}``.  Year-specific tags
+        contain a ``-YYYY`` suffix in the base component (before the first
+        ``_``), e.g. ``chi-2026_model_0.4.1``.  Conference-level tags
+        omit the year, e.g. ``chi_model_0.4.1``.
+
+        Download operations should only use conference-level tags so that
+        each year is not imported twice (once from its dedicated year tag
+        and again from the combined conference tag).
+
+        Parameters
+        ----------
+        tag : str
+            OCI tag string (without repository prefix).
+
+        Returns
+        -------
+        bool
+            ``True`` if the tag does not carry a year suffix.
+        """
+        base = tag.split("_", 1)[0]
+        parts = base.rsplit("-", 1)
+        return not (len(parts) == 2 and parts[1].isdigit() and len(parts[1]) == 4)
+
     def _find_best_matching_tag(self, tag: str) -> str:
         """
         Resolve *tag* to the best matching tag available in the registry.
@@ -1211,15 +1240,22 @@ class RegistryClient:
         if not tags:
             raise RegistryError("No tags found in registry.")
 
+        # Only download conference-level tags (e.g. "chi_model_0.4.1").
+        # Year-specific tags (e.g. "chi-2026_model_0.4.1") are subsets of the
+        # conference tag and would cause each year to be imported twice.
+        conference_tags = [t for t in tags if self._is_conference_level_tag(t)]
+        if not conference_tags:
+            raise RegistryError("No conference-level tags found in registry.")
+
         def _progress(msg: str) -> None:
             if progress_callback:
                 progress_callback(msg)
             logger.info(msg)
 
-        _progress(f"Found {len(tags)} tag(s) in registry")
+        _progress(f"Found {len(conference_tags)} conference tag(s) in registry (skipping {len(tags) - len(conference_tags)} year-specific tag(s))")
 
         summaries: List[Dict[str, Any]] = []
-        for tag in sorted(tags):
+        for tag in sorted(conference_tags):
             _progress(f"\n--- Downloading {tag} ---")
             # Read manifest annotations to derive conference/year
             try:
