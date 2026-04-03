@@ -15,7 +15,7 @@ All commands support these global options:
 
 ### download
 
-Download NeurIPS papers from OpenReview API.
+Download conference papers from OpenReview API or via plugins.
 
 **Usage:**
 
