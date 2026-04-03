@@ -123,11 +123,45 @@ def add_conference_year_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _resolve_conference_arg(conference: Optional[str]) -> Optional[str]:
+    """
+    Resolve a CLI ``--conference`` value to the canonical conference name.
+
+    Opens the local database, calls
+    :py:meth:`~abstracts_explorer.database.DatabaseManager.resolve_conference_name`,
+    and returns the result.  If *conference* is ``None`` or the database
+    cannot be reached, the original value is returned unchanged.
+
+    This helper should be called **once** at the entry point of every CLI
+    command that accepts a ``--conference`` option.  After the call, all
+    subsequent operations within that command receive the exact name as
+    stored in the database (or the plugin's canonical name), preventing
+    case-mismatch errors.
+
+    Parameters
+    ----------
+    conference : str or None
+        Raw value from ``args.conference``.
+
+    Returns
+    -------
+    str or None
+        Resolved conference name, or ``None`` if *conference* was ``None``.
+    """
+    if not conference:
+        return conference
+    with DatabaseManager() as db:
+        db.create_tables()
+        return db.resolve_conference_name(conference)
+
+
 def _build_embeddings_where_clause(args: argparse.Namespace) -> Optional[str]:
     """
     Build a SQL WHERE clause from --conference, --year, and --where arguments.
 
-    The conference comparison is case-insensitive (uses SQL ``LOWER()``).
+    The conference name in *args* is expected to already be resolved to its
+    canonical form (via ``DatabaseManager.resolve_conference_name``); an exact
+    comparison is used.
 
     Parameters
     ----------
@@ -145,9 +179,9 @@ def _build_embeddings_where_clause(args: argparse.Namespace) -> Optional[str]:
     where = getattr(args, "where", None)
 
     if conference:
-        # Escape single quotes and use LOWER() for case-insensitive matching
+        # Escape single quotes; conference name is already resolved to canonical form
         safe_conf = conference.replace("'", "''")
-        conditions.append(f"LOWER(conference) = LOWER('{safe_conf}')")
+        conditions.append(f"conference = '{safe_conf}'")
     if year is not None:
         conditions.append(f"year = {int(year)}")
     if where:
@@ -182,6 +216,9 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         Exit code (0 for success, non-zero for failure)
     """
     config = get_config()
+
+    # Resolve conference name once to canonical form
+    args.conference = _resolve_conference_arg(args.conference)
 
     # Build combined WHERE clause from --conference, --year, and --where
     where_clause = _build_embeddings_where_clause(args)
@@ -350,7 +387,8 @@ def search_command(args: argparse.Namespace) -> int:
             print("  abstracts-explorer create-embeddings", file=sys.stderr)
             return 1
 
-    conference = getattr(args, "conference", None)
+    # Resolve conference name once to canonical form
+    conference = _resolve_conference_arg(getattr(args, "conference", None))
     year = getattr(args, "year", None)
 
     print("NeurIPS Semantic Search")
@@ -402,19 +440,13 @@ def search_command(args: argparse.Namespace) -> int:
             except Exception as e:
                 print(f"⚠️  Warning: Could not parse filter '{args.where}': {e}", file=sys.stderr)
 
-        # Add conference/year filters from dedicated options (case-insensitive via DB lookup)
+        # Add conference/year filters from dedicated options
         if conference or year is not None:
             if where_filter is None:
                 where_filter = {}
             if conference:
-                # Look up the stored conference name case-insensitively from the DB
-                with DatabaseManager() as db:
-                    rows = db.query(
-                        "SELECT DISTINCT conference FROM papers WHERE LOWER(conference) = LOWER(?)",
-                        (conference,),
-                    )
-                stored_name = rows[0]["conference"] if rows else conference
-                where_filter["conference"] = stored_name
+                # Conference name is already resolved to canonical form
+                where_filter["conference"] = conference
             if year is not None:
                 # ChromaDB stores all metadata values as strings
                 where_filter["year"] = str(year)
@@ -509,7 +541,8 @@ def chat_command(args: argparse.Namespace) -> int:
     try:
         config = get_config()
 
-        conference = getattr(args, "conference", None)
+        # Resolve conference name once to canonical form
+        conference = _resolve_conference_arg(getattr(args, "conference", None))
         year = getattr(args, "year", None)
 
         print("=" * 70)
@@ -1073,27 +1106,31 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
             print("  abstracts-explorer create-embeddings", file=sys.stderr)
             return 1
 
-    # Build optional conference/year filters
+    # Resolve conference name once to canonical form
     raw_conference: Optional[str] = getattr(args, "conference", None) or None
+    resolved_conference = _resolve_conference_arg(raw_conference)
+    if resolved_conference is not None and resolved_conference != raw_conference:
+        print(f"ℹ️  Resolved conference '{raw_conference}' → '{resolved_conference}'")
     year_arg: Optional[int] = getattr(args, "year", None)
 
-    # Resolve conference name case-insensitively and discover available combos.
+    # Discover available conference × year combinations from the DB
+    stored_conferences: list = []
     try:
         with DatabaseManager() as _db_resolve:
             opts = _db_resolve.get_filter_options()
-            stored_conferences: list = opts.get("conferences", [])
+            stored_conferences = opts.get("conferences", [])
     except Exception:
-        stored_conferences = []
+        pass
 
     combos: list = []
 
     # Get plugin-supported years for each conference
     plugin_filters = get_available_filters()
     plugin_conf_years = plugin_filters.get("conference_years", {})
-    # Build case-insensitive lookup for plugin supported years
-    plugin_years_map = {k.lower(): set(v) for k, v in plugin_conf_years.items()}
+    # Build lookup for plugin supported years (keyed by canonical conference name)
+    plugin_years_map = {k: set(v) for k, v in plugin_conf_years.items()}
 
-    if raw_conference is None and year_arg is None:
+    if resolved_conference is None and year_arg is None:
         # No filters: generate all conference × year combinations
         for conf in stored_conferences:
             conf_opts = None
@@ -1104,7 +1141,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
                 pass
             conf_years = conf_opts.get("years", []) if conf_opts else []
             # Filter years to only those supported by the plugin
-            plugin_years = plugin_years_map.get(conf.lower())
+            plugin_years = plugin_years_map.get(conf)
             if plugin_years is not None:
                 conf_years = [y for y in conf_years if y in plugin_years]
             # conference + all years combined
@@ -1115,44 +1152,29 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
         if not combos:
             print("❌ No conferences found in the database.", file=sys.stderr)
             return 1
-    elif raw_conference is not None and year_arg is None:
+    elif resolved_conference is not None and year_arg is None:
         # Conference specified, no year: generate for that conference with all years
         # and each individual year
-        match = next(
-            (c for c in stored_conferences if c.lower() == raw_conference.lower()),
-            None,
-        )
-        resolved = match if match is not None else raw_conference
-        if match is not None and match != raw_conference:
-            print(f"ℹ️  Resolved conference '{raw_conference}' → '{resolved}'")
-        # Get years for this conference
         conf_years_for_single: list = []
         try:
             with DatabaseManager() as _db_conf_years:
-                conf_opts = _db_conf_years.get_filter_options(conference=resolved)
+                conf_opts = _db_conf_years.get_filter_options(conference=resolved_conference)
                 conf_years_for_single = conf_opts.get("years", [])
         except Exception:
             pass
         # Filter years to only those supported by the plugin
-        plugin_years = plugin_years_map.get(resolved.lower())
+        plugin_years = plugin_years_map.get(resolved_conference)
         if plugin_years is not None:
             conf_years_for_single = [y for y in conf_years_for_single if y in plugin_years]
         # conference + all years combined
-        combos.append((resolved, None))
+        combos.append((resolved_conference, None))
         # conference + each individual year
         for y in conf_years_for_single:
-            combos.append((resolved, y))
+            combos.append((resolved_conference, y))
     else:
         # Both conference and year specified: single combo
-        if raw_conference is not None:
-            match = next(
-                (c for c in stored_conferences if c.lower() == raw_conference.lower()),
-                None,
-            )
-            resolved = match if match is not None else raw_conference
-            if match is not None and match != raw_conference:
-                print(f"ℹ️  Resolved conference '{raw_conference}' → '{resolved}'")
-            combos.append((resolved, year_arg))
+        if resolved_conference is not None:
+            combos.append((resolved_conference, year_arg))
         else:
             # year only, no conference
             combos.append((None, year_arg))
@@ -1771,8 +1793,12 @@ def registry_upload_command(args: argparse.Namespace) -> int:
     config = get_config()
     repository = args.repository or config.registry_repository
     token = args.token or config.github_token
-    # Normalise conference to lowercase; treat None as "all"
-    conference = (args.conference or "all").lower()
+    # Resolve conference name to canonical form; treat None/"all" as "all"
+    raw_conf = args.conference or None
+    if raw_conf and raw_conf.lower() != "all":
+        conference = _resolve_conference_arg(raw_conf) or raw_conf
+    else:
+        conference = "all"
 
     if not repository:
         print(
@@ -1808,7 +1834,8 @@ def registry_upload_command(args: argparse.Namespace) -> int:
             for s in summaries:
                 print(
                     f"  📦 {s.get('conference', '')}: {s.get('paper_count', 0)} papers, "
-                    f"{s.get('embedding_count', 0)} embeddings (tag: {s.get('tag', '')})"
+                    f"{s.get('embedding_count', 0)} embeddings, "
+                    f"{s.get('clustering_cache_count', 0)} cache entries (tag: {s.get('tag', '')})"
                 )
         else:
             summary = client.upload(
@@ -1820,6 +1847,7 @@ def registry_upload_command(args: argparse.Namespace) -> int:
             print("\n✅ Upload complete!")
             print(f"  📄 Papers:     {summary.get('paper_count', 0)}")
             print(f"  🧮 Embeddings: {summary.get('embedding_count', 0)}")
+            print(f"  📦 Cache:      {summary.get('clustering_cache_count', 0)}")
             print(f"  📅 Years:      {summary.get('years', [])}")
             print(f"  🏷️  Tag:        {summary.get('tag', '')}")
 
@@ -1864,8 +1892,12 @@ def registry_download_command(args: argparse.Namespace) -> int:
     config = get_config()
     repository = args.repository or config.registry_repository
     token = args.token or config.github_token
-    # Normalise conference to lowercase; treat None as "all"
-    conference = (args.conference or "all").lower()
+    # Resolve conference name to canonical form; treat None/"all" as "all"
+    raw_conf = args.conference or None
+    if raw_conf and raw_conf.lower() != "all":
+        conference = _resolve_conference_arg(raw_conf) or raw_conf
+    else:
+        conference = "all"
 
     if not repository:
         print(
@@ -1922,7 +1954,8 @@ def registry_download_command(args: argparse.Namespace) -> int:
                 for s in summaries:
                     print(
                         f"  📦 {s.get('conference', '')}: {s.get('paper_count', 0)} papers, "
-                        f"{s.get('embedding_count', 0)} embeddings"
+                        f"{s.get('embedding_count', 0)} embeddings, "
+                        f"{s.get('clustering_cache_count', 0)} cache entries"
                     )
             else:
                 summary = client.download(
@@ -1937,6 +1970,7 @@ def registry_download_command(args: argparse.Namespace) -> int:
                 print("\n✅ Download complete!")
                 print(f"  📄 Papers:     {summary.get('paper_count', 0)}")
                 print(f"  🧮 Embeddings: {summary.get('embedding_count', 0)}")
+                print(f"  📦 Cache:      {summary.get('clustering_cache_count', 0)}")
                 print(f"  📅 Years:      {summary.get('years', [])}")
 
                 metadata = summary.get("metadata", {})

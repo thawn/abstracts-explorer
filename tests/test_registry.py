@@ -67,7 +67,11 @@ def _make_sample_papers():
 
 
 def _populate_test_db(db_path):
-    """Create and populate a test database, return the DatabaseManager."""
+    """Create and populate a test database with papers only (no clustering cache).
+
+    Use :func:`_populate_test_db_with_cache` when you also need clustering cache
+    entries (e.g. for upload tests that require a non-empty clustering cache).
+    """
     set_test_db(db_path)
     db = DatabaseManager()
     db.connect()
@@ -76,9 +80,33 @@ def _populate_test_db(db_path):
     return db
 
 
-# ---------------------------------------------------------------------------
-# Tests: _sanitize_str_for_oci_tag and _build_tag
-# ---------------------------------------------------------------------------
+def _populate_test_db_with_cache(db_path):
+    """Create and populate a test database with papers AND clustering cache, return the DatabaseManager."""
+    from abstracts_explorer.db_models import ClusteringCache
+
+    db = _populate_test_db(db_path)
+    papers = _make_sample_papers()
+    for conf, yr in {(p.conference, p.year) for p in papers}:
+        db._session.add(
+            ClusteringCache(
+                embedding_model="test-model",
+                reduction_method="pca",
+                n_components=2,
+                clustering_method="kmeans",
+                n_clusters=2,
+                clustering_params=json.dumps({"conferences": [conf], "years": [yr]}),
+                results_json=json.dumps({"points": []}),
+            )
+        )
+    db._session.commit()
+    return db
+
+
+def _make_clustering_cache_file(path, entries=None):
+    """Create a minimal clustering cache JSON file for testing."""
+    data = {"entries": entries or []}
+    path.write_text(json.dumps(data))
+    return path
 
 
 class TestSanitizeStrForOciTag:
@@ -388,6 +416,153 @@ class TestDatabaseExportImport:
         finally:
             db2.close()
 
+    def test_resolve_conference_name_from_db(self, tmp_path):
+        """resolve_conference_name returns the DB-stored canonical name (case-insensitive match)."""
+        # Populate with mixed-case conference name (e.g. "ML4PS@Neurips")
+        set_test_db(tmp_path / "db.db")
+        db = DatabaseManager()
+        db.connect()
+        db.create_tables()
+        db.add_papers(
+            [
+                LightweightPaper(
+                    title="Paper One",
+                    authors=["Author A"],
+                    abstract="Abstract",
+                    session="Session 1",
+                    poster_position="A1",
+                    year=2025,
+                    conference="ML4PS@Neurips",
+                ),
+            ]
+        )
+
+        try:
+            # Case-insensitive resolution should return stored canonical form
+            assert db.resolve_conference_name("ml4ps@neurips") == "ML4PS@Neurips"
+            assert db.resolve_conference_name("ML4PS@NEURIPS") == "ML4PS@Neurips"
+            assert db.resolve_conference_name("ML4PS@Neurips") == "ML4PS@Neurips"
+            # Unknown conference raises DatabaseError
+            from abstracts_explorer.database import DatabaseError
+
+            with pytest.raises(DatabaseError, match="Failed to resolve conference name"):
+                db.resolve_conference_name("unknown")
+        finally:
+            db.close()
+
+    def test_resolve_conference_name_plugin_fallback(self, tmp_path):
+        """resolve_conference_name falls back to plugin conference_name if not in DB."""
+        set_test_db(tmp_path / "empty.db")
+        db = DatabaseManager()
+        db.connect()
+        db.create_tables()
+        try:
+            # DB is empty; should fall back to plugin that has "NeurIPS"
+            resolved = db.resolve_conference_name("neurips")
+            # Plugins define "NeurIPS" as the canonical name
+            assert resolved == "NeurIPS"
+        finally:
+            db.close()
+
+    def test_import_with_resolved_conference_name(self, tmp_path):
+        """Import works correctly when conference name is resolved before calling import."""
+        from abstracts_explorer.db_models import Paper
+
+        # Populate with mixed-case conference name (e.g. "ML4PS@Neurips")
+        set_test_db(tmp_path / "db.db")
+        db = DatabaseManager()
+        db.connect()
+        db.create_tables()
+        db.add_papers(
+            [
+                LightweightPaper(
+                    title="Paper One",
+                    authors=["Author A"],
+                    abstract="Abstract",
+                    session="Session 1",
+                    poster_position="A1",
+                    year=2025,
+                    conference="ML4PS@Neurips",
+                ),
+            ]
+        )
+
+        try:
+            # Export with mixed-case conference
+            export_path = tmp_path / "export.db"
+            db.export_papers_to_sqlite(export_path, "ML4PS@Neurips", 2025)
+
+            # Resolve conference name first (as CLI would do), then import with exact name
+            resolved = db.resolve_conference_name("ml4ps@neurips")
+            assert resolved == "ML4PS@Neurips"
+
+            count = db.import_papers_from_sqlite(export_path, resolved, 2025)
+            assert count == 1
+
+            # The paper should exist (imported fresh)
+            papers = db._session.query(Paper).filter(Paper.year == 2025).all()
+            assert len(papers) == 1
+        finally:
+            db.close()
+
+    def test_import_duplicate_uid_uses_merge(self, tmp_path):
+        """Import handles UID collisions via merge instead of raising UniqueViolation."""
+        from abstracts_explorer.db_models import Paper
+
+        # Create a paper with a known UID
+        set_test_db(tmp_path / "source.db")
+        db = DatabaseManager()
+        db.connect()
+        db.create_tables()
+        db.add_papers(
+            [
+                LightweightPaper(
+                    title="Shared Paper",
+                    authors=["Author A"],
+                    abstract="Updated abstract",
+                    session="Session 1",
+                    poster_position="A1",
+                    year=2025,
+                    conference="NeurIPS",
+                ),
+            ]
+        )
+        try:
+            # Export for NeurIPS/2025
+            export_path = tmp_path / "export.db"
+            db.export_papers_to_sqlite(export_path, "NeurIPS", 2025)
+        finally:
+            db.close()
+
+        # Create a target DB with a paper having the same UID (same title+id+conf+year)
+        set_test_db(tmp_path / "target.db")
+        db2 = DatabaseManager()
+        db2.connect()
+        db2.create_tables()
+        db2.add_papers(
+            [
+                LightweightPaper(
+                    title="Shared Paper",
+                    authors=["Author A"],
+                    abstract="Original abstract",
+                    session="Session 1",
+                    poster_position="A1",
+                    year=2025,
+                    conference="NeurIPS",
+                ),
+            ]
+        )
+        try:
+            # Import — same UID paper already exists, merge should update it
+            count = db2.import_papers_from_sqlite(export_path, "NeurIPS", 2025)
+            assert count == 1
+
+            papers = db2._session.query(Paper).all()
+            assert len(papers) == 1
+            assert papers[0].abstract == "Updated abstract"
+        finally:
+            db2.close()
+
     def test_export_not_connected(self, tmp_path):
         """Export raises error when not connected."""
         set_test_db(tmp_path / "not_connected.db")
@@ -591,6 +766,315 @@ class TestDatabaseExportImport:
         finally:
             db.close()
 
+    def test_export_clustering_cache_to_json(self, tmp_path):
+        """Matching clustering cache entries are exported as JSON."""
+        from abstracts_explorer.db_models import ClusteringCache
+
+        db = _populate_test_db(tmp_path / "db.db")
+        try:
+            import json as _json
+
+            db._session.add(
+                ClusteringCache(
+                    embedding_model="test-model",
+                    reduction_method="pca",
+                    n_components=2,
+                    clustering_method="kmeans",
+                    n_clusters=5,
+                    clustering_params=_json.dumps({"conferences": ["neurips"], "years": [2024]}),
+                    results_json=_json.dumps({"points": [{"id": "p1", "cluster": 0}]}),
+                )
+            )
+            db._session.add(
+                ClusteringCache(
+                    embedding_model="test-model",
+                    reduction_method="pca",
+                    n_components=2,
+                    clustering_method="kmeans",
+                    n_clusters=5,
+                    clustering_params=_json.dumps({"conferences": ["iclr"], "years": [2024]}),
+                    results_json=_json.dumps({"points": []}),
+                )
+            )
+            db._session.commit()
+
+            data = db.export_clustering_cache_to_json("neurips", 2024)
+            assert len(data["entries"]) == 1
+            entry = data["entries"][0]
+            assert entry["embedding_model"] == "test-model"
+            assert entry["clustering_method"] == "kmeans"
+            # JSON fields should be parsed objects, not strings
+            assert entry["clustering_params"]["conferences"] == ["neurips"]
+            assert entry["results_json"]["points"] == [{"id": "p1", "cluster": 0}]
+            # id should not be in the export
+            assert "id" not in entry
+        finally:
+            db.close()
+
+    def test_export_clustering_cache_no_match(self, tmp_path):
+        """Export returns empty entries when no matching cache exists."""
+        db = _populate_test_db(tmp_path / "db.db")
+        try:
+            data = db.export_clustering_cache_to_json("neurips", 2024)
+            assert data == {"entries": []}
+        finally:
+            db.close()
+
+    def test_import_clustering_cache_from_json(self, tmp_path):
+        """Clustering cache entries are imported from JSON data."""
+        from abstracts_explorer.db_models import ClusteringCache
+
+        db = _populate_test_db(tmp_path / "db.db")
+        try:
+            data = {
+                "entries": [
+                    {
+                        "embedding_model": "test-model",
+                        "reduction_method": "tsne",
+                        "n_components": 2,
+                        "clustering_method": "dbscan",
+                        "n_clusters": None,
+                        "clustering_params": {"conferences": ["neurips"], "years": [2024]},
+                        "results_json": {"points": [{"id": "p1"}]},
+                        "created_at": "2025-01-01T00:00:00+00:00",
+                    }
+                ]
+            }
+            count = db.import_clustering_cache_from_json(data, "neurips", 2024)
+            assert count == 1
+
+            entries = db._session.query(ClusteringCache).all()
+            assert len(entries) == 1
+            assert entries[0].clustering_method == "dbscan"
+            assert entries[0].embedding_model == "test-model"
+        finally:
+            db.close()
+
+    def test_import_clustering_cache_overwrites_embedding_model(self, tmp_path):
+        """overwrite_embedding_model replaces the model in every imported entry.
+
+        This covers the --ignore-embedding-model-mismatch scenario: the remote
+        artifact was built with a different embedding model.  After import the
+        cache entries must use the local model name so get_clustering_cache()
+        can find them.
+        """
+        from abstracts_explorer.db_models import ClusteringCache
+
+        db = _populate_test_db(tmp_path / "db.db")
+        try:
+            data = {
+                "entries": [
+                    {
+                        "embedding_model": "remote-model",
+                        "reduction_method": "pca",
+                        "n_components": 2,
+                        "clustering_method": "kmeans",
+                        "n_clusters": 3,
+                        "clustering_params": {"conferences": ["neurips"], "years": [2024]},
+                        "results_json": {"points": []},
+                        "created_at": "2025-01-01T00:00:00+00:00",
+                    },
+                    {
+                        "embedding_model": "remote-model",
+                        "reduction_method": "tsne",
+                        "n_components": 2,
+                        "clustering_method": "kmeans",
+                        "n_clusters": 5,
+                        "clustering_params": {"conferences": ["neurips"], "years": [2024]},
+                        "results_json": {"points": []},
+                        "created_at": "2025-01-01T00:00:00+00:00",
+                    },
+                ]
+            }
+            count = db.import_clustering_cache_from_json(
+                data, "neurips", 2024, overwrite_embedding_model="local-model"
+            )
+            assert count == 2
+
+            entries = db._session.query(ClusteringCache).all()
+            assert len(entries) == 2
+            # All entries must carry the LOCAL model name, not the remote one
+            for entry in entries:
+                assert (
+                    entry.embedding_model == "local-model"
+                ), f"Expected 'local-model', got '{entry.embedding_model}'"
+        finally:
+            db.close()
+
+    def test_import_clustering_cache_replaces_existing(self, tmp_path):
+        """Import replaces existing matching cache entries."""
+        import json as _json
+
+        from abstracts_explorer.db_models import ClusteringCache
+
+        db = _populate_test_db(tmp_path / "db.db")
+        try:
+            # Add existing entry for neurips/2024
+            db._session.add(
+                ClusteringCache(
+                    embedding_model="test-model",
+                    reduction_method="pca",
+                    n_components=2,
+                    clustering_method="kmeans",
+                    n_clusters=3,
+                    clustering_params=_json.dumps({"conferences": ["neurips"], "years": [2024]}),
+                    results_json="{}",
+                )
+            )
+            db._session.commit()
+            assert db._session.query(ClusteringCache).count() == 1
+
+            # Import new entry for neurips/2024 (should replace)
+            data = {
+                "entries": [
+                    {
+                        "embedding_model": "test-model",
+                        "reduction_method": "tsne",
+                        "n_components": 3,
+                        "clustering_method": "kmeans",
+                        "n_clusters": 5,
+                        "clustering_params": {"conferences": ["neurips"], "years": [2024]},
+                        "results_json": {"points": []},
+                        "created_at": "2025-06-01T00:00:00+00:00",
+                    }
+                ]
+            }
+            count = db.import_clustering_cache_from_json(data, "neurips", 2024)
+            assert count == 1
+
+            entries = db._session.query(ClusteringCache).all()
+            assert len(entries) == 1
+            assert entries[0].n_clusters == 5
+            assert entries[0].reduction_method == "tsne"
+        finally:
+            db.close()
+
+    def test_export_import_clustering_cache_roundtrip(self, tmp_path):
+        """Export + import clustering cache roundtrip preserves data."""
+        import json as _json
+
+        from abstracts_explorer.db_models import ClusteringCache
+
+        db = _populate_test_db(tmp_path / "db.db")
+        try:
+            db._session.add(
+                ClusteringCache(
+                    embedding_model="test-model",
+                    reduction_method="pca",
+                    n_components=2,
+                    clustering_method="kmeans",
+                    n_clusters=5,
+                    clustering_params=_json.dumps({"conferences": ["neurips"], "years": [2024]}),
+                    results_json=_json.dumps({"points": [{"id": "p1", "cluster": 0}], "labels": {"0": "topic"}}),
+                )
+            )
+            db._session.commit()
+
+            # Export
+            data = db.export_clustering_cache_to_json("neurips", 2024)
+            assert len(data["entries"]) == 1
+
+            # Clear existing entries
+            db._session.query(ClusteringCache).delete()
+            db._session.commit()
+            assert db._session.query(ClusteringCache).count() == 0
+
+            # Import
+            count = db.import_clustering_cache_from_json(data, "neurips", 2024)
+            assert count == 1
+
+            entries = db._session.query(ClusteringCache).all()
+            assert len(entries) == 1
+            results = _json.loads(entries[0].results_json)
+            assert results["points"] == [{"id": "p1", "cluster": 0}]
+            assert results["labels"] == {"0": "topic"}
+        finally:
+            db.close()
+
+    def test_import_clustering_cache_with_explicit_id_entries(self, tmp_path):
+        """Import replaces entries that were previously inserted with explicit IDs.
+
+        This reproduces the scenario where old code inserted clustering cache rows with
+        explicit primary-key values (bypassing the auto-increment sequence).  If the
+        sequence is not re-synced after the deletes, a subsequent INSERT may try to use
+        an ID still occupied by a non-matching row (e.g. for a different conference),
+        causing a UniqueViolation on PostgreSQL.  The fix resets the sequence so that
+        new inserts always receive a safe, non-conflicting ID.
+        """
+        import json as _json
+
+        from sqlalchemy import text as sa_text
+
+        from abstracts_explorer.db_models import ClusteringCache
+
+        db = _populate_test_db(tmp_path / "db.db")
+        try:
+            # Use raw SQL to bypass the ORM auto-increment and insert rows with
+            # explicit IDs — this simulates entries that were imported by an older
+            # version of the code that included explicit PKs.
+            for row_id, conf, yr in [
+                (1, "TestConf", 2024),
+                (2, "TestConf", 2024),
+                (3, "OtherConf", 2025),  # different conference — must NOT be deleted
+            ]:
+                db._session.execute(
+                    sa_text(
+                        "INSERT INTO clustering_cache "
+                        "(id, embedding_model, reduction_method, n_components, "
+                        "clustering_method, clustering_params, results_json, created_at) "
+                        "VALUES (:id, 'model', 'pca', 2, 'kmeans', :params, '{}', '2024-01-01')"
+                    ),
+                    {
+                        "id": row_id,
+                        "params": _json.dumps({"conferences": [conf], "years": [yr]}),
+                    },
+                )
+            db._session.commit()
+            assert db._session.query(ClusteringCache).count() == 3
+
+            # Import 2 new entries for TestConf/2024 — should replace rows 1 & 2,
+            # leave row 3 (OtherConf/2025) untouched, and never raise UniqueViolation.
+            data = {
+                "entries": [
+                    {
+                        "embedding_model": "model",
+                        "reduction_method": "tsne",
+                        "n_components": 2,
+                        "clustering_method": "kmeans",
+                        "n_clusters": 5,
+                        "clustering_params": {"conferences": ["TestConf"], "years": [2024]},
+                        "results_json": {"points": []},
+                        "created_at": "2025-06-01T00:00:00+00:00",
+                    },
+                    {
+                        "embedding_model": "model",
+                        "reduction_method": "umap",
+                        "n_components": 2,
+                        "clustering_method": "kmeans",
+                        "n_clusters": 3,
+                        "clustering_params": {"conferences": ["TestConf"], "years": [2024]},
+                        "results_json": {"points": []},
+                        "created_at": "2025-06-01T00:00:00+00:00",
+                    },
+                ]
+            }
+            count = db.import_clustering_cache_from_json(data, "TestConf", 2024)
+            assert count == 2
+
+            all_entries = db._session.query(ClusteringCache).all()
+            # Row 3 (OtherConf/2025) must still be present; the 2 new rows must exist.
+            assert len(all_entries) == 3
+
+            other_entries = [e for e in all_entries if "OtherConf" in (e.clustering_params or "")]
+            assert len(other_entries) == 1, "OtherConf/2025 entry should not have been deleted"
+
+            test_entries = [e for e in all_entries if "TestConf" in (e.clustering_params or "")]
+            assert len(test_entries) == 2, "Two new TestConf/2024 entries should exist"
+            reduction_methods = {e.reduction_method for e in test_entries}
+            assert reduction_methods == {"tsne", "umap"}, "New entries should have updated reduction methods"
+        finally:
+            db.close()
+
 
 # ---------------------------------------------------------------------------
 # Tests: EmbeddingsManager export/import
@@ -763,7 +1247,7 @@ class TestUploadDownload:
 
     def test_upload_success(self, tmp_path):
         """Upload succeeds with valid data."""
-        _populate_test_db(tmp_path / "test.db")
+        _populate_test_db_with_cache(tmp_path / "test.db")
 
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
@@ -790,9 +1274,69 @@ class TestUploadDownload:
         assert summary["years"] == [2024]
         mock_oras.push.assert_called_once()
 
+    def test_upload_validates_clustering_cache(self, tmp_path):
+        """Upload fails when no clustering cache exists for conference+year."""
+        set_test_db(tmp_path / "test.db")
+        db = DatabaseManager()
+        db.connect()
+        db.create_tables()
+        db.add_papers(_make_sample_papers())  # papers only, no clustering cache
+        db.close()
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        mock_em = MagicMock()
+        mock_em.export_embeddings.return_value = {
+            "ids": ["id1"],
+            "documents": ["doc1"],
+            "metadatas": [{}],
+            "embeddings": [[0.1]],
+        }
+
+        with (
+            patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em),
+            patch.object(RegistryClient, "_get_embedding_model_database", return_value="test-model"),
+        ):
+            with pytest.raises(RegistryError, match="No clustering cache found"):
+                client.upload(conference="neurips", year=2024)
+
+    def test_upload_includes_clustering_cache(self, tmp_path):
+        """Upload pushes clustering cache files alongside paper DB and embeddings."""
+        db = _populate_test_db_with_cache(tmp_path / "test.db")
+        db.close()
+
+        with patch("oras.client.OrasClient") as MockOras:
+            mock_oras = MockOras.return_value
+            mock_oras.push.return_value = Mock(status_code=201)
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        mock_em = MagicMock()
+        mock_em.export_embeddings.return_value = {
+            "ids": ["id1"],
+            "documents": ["doc1"],
+            "metadatas": [{}],
+            "embeddings": [[0.1, 0.2]],
+        }
+
+        set_test_db(tmp_path / "test.db")
+        with (
+            patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em),
+            patch.object(RegistryClient, "_get_embedding_model_database", return_value="test-model"),
+        ):
+            summary = client.upload(conference="neurips", year=2024)
+
+        assert summary["clustering_cache_count"] == 1
+
+        # Verify push was called with 3 files (papers, embeddings, clustering)
+        push_kwargs = mock_oras.push.call_args[1]
+        pushed_files = push_kwargs.get("files", [])
+        assert len(pushed_files) == 3
+        assert any("clustering-2024.json" in f for f in pushed_files)
+
     def test_upload_custom_tag(self, tmp_path):
         """Upload uses custom tag when provided."""
-        _populate_test_db(tmp_path / "test.db")
+        _populate_test_db_with_cache(tmp_path / "test.db")
 
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
@@ -819,7 +1363,7 @@ class TestUploadDownload:
 
     def test_upload_progress_callback(self, tmp_path):
         """Progress callback is invoked during upload."""
-        _populate_test_db(tmp_path / "test.db")
+        _populate_test_db_with_cache(tmp_path / "test.db")
 
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
@@ -850,7 +1394,7 @@ class TestUploadDownload:
 
     def test_upload_conference_only(self, tmp_path):
         """Upload without year uploads each year individually plus an all-years tag."""
-        _populate_test_db(tmp_path / "test.db")
+        _populate_test_db_with_cache(tmp_path / "test.db")
 
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
@@ -893,8 +1437,12 @@ class TestUploadDownload:
             with pytest.raises(RegistryError, match="No data found"):
                 client.upload(conference="icml")
 
-    def test_upload_conference_name_case_insensitive_resolution(self, tmp_path):
-        """Upload resolves conference name case-insensitively against DB data."""
+    def test_upload_conference_name_exact_match_required(self, tmp_path):
+        """Upload uses the conference name exactly as passed; resolution is the caller's responsibility."""
+        import json as _json
+
+        from abstracts_explorer.db_models import ClusteringCache
+
         # Populate DB with mixed-case conference name "NeurIPS"
         set_test_db(tmp_path / "test.db")
         db = DatabaseManager()
@@ -913,6 +1461,19 @@ class TestUploadDownload:
                 )
             ]
         )
+        db._session.add(
+            ClusteringCache(
+                embedding_model="test-model",
+                reduction_method="pca",
+                n_components=2,
+                clustering_method="kmeans",
+                n_clusters=2,
+                clustering_params=_json.dumps({"conferences": ["NeurIPS"], "years": [2024]}),
+                results_json=_json.dumps({"points": []}),
+            )
+        )
+        db._session.commit()
+        db.close()
 
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
@@ -931,11 +1492,10 @@ class TestUploadDownload:
             patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em),
             patch.object(RegistryClient, "_get_embedding_model_database", return_value="test-model"),
         ):
-            # User passes lowercase "neurips", DB has "NeurIPS" — should succeed
-            summary = client.upload(conference="neurips")
+            # CLI resolves "neurips" → "NeurIPS" before calling upload; pass exact name here
+            summary = client.upload(conference="NeurIPS")
 
         assert summary["paper_count"] == 1
-        # Tag is built from the resolved "NeurIPS" name (sanitized)
         assert "neurips" in summary["tag"]
 
     def test_upload_no_embedding_model(self, tmp_path):
@@ -970,14 +1530,18 @@ class TestUploadDownload:
         embeddings_2025.write_text(
             json.dumps({"ids": ["b"], "documents": ["d"], "metadatas": [{}], "embeddings": [[0.2]]})
         )
+        clustering_2024 = _make_clustering_cache_file(tmp_path / "clustering-2024.json")
+        clustering_2025 = _make_clustering_cache_file(tmp_path / "clustering-2025.json")
 
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
             mock_oras.pull.return_value = [
                 str(papers_2024),
                 str(embeddings_2024),
+                str(clustering_2024),
                 str(papers_2025),
                 str(embeddings_2025),
+                str(clustering_2025),
             ]
             client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
@@ -1013,10 +1577,11 @@ class TestUploadDownload:
         }
         embeddings_path = tmp_path / "embeddings-2024.json"
         embeddings_path.write_text(json.dumps(embeddings_data))
+        clustering_path = _make_clustering_cache_file(tmp_path / "clustering-2024.json")
 
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
-            mock_oras.pull.return_value = [str(export_path), str(embeddings_path)]
+            mock_oras.pull.return_value = [str(export_path), str(embeddings_path), str(clustering_path)]
             client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         mock_em = MagicMock()
@@ -1032,6 +1597,98 @@ class TestUploadDownload:
         assert summary["embedding_count"] == 1
         assert 2024 in summary["years"]
         mock_em.import_embeddings.assert_called_once()
+
+    def test_download_with_clustering_cache(self, tmp_path):
+        """Download imports clustering cache from separate JSON layer."""
+        set_test_db(tmp_path / "target.db")
+
+        # Create a fake paper db
+        source_db_path = tmp_path / "source.db"
+        source_db = _populate_test_db(source_db_path)
+        export_path = tmp_path / "papers-2024.db"
+        source_db.export_papers_to_sqlite(export_path, "neurips", 2024)
+        source_db.close()
+
+        # Create fake embeddings file
+        embeddings_path = tmp_path / "embeddings-2024.json"
+        embeddings_path.write_text(
+            json.dumps({"ids": ["id1"], "documents": ["doc1"], "metadatas": [{}], "embeddings": [[0.1]]})
+        )
+
+        # Create fake clustering cache file
+        cache_data = {
+            "entries": [
+                {
+                    "embedding_model": "test-model",
+                    "reduction_method": "pca",
+                    "n_components": 2,
+                    "clustering_method": "kmeans",
+                    "n_clusters": 5,
+                    "clustering_params": {"conferences": ["neurips"], "years": [2024]},
+                    "results_json": {"points": [{"id": "p1", "cluster": 0}]},
+                    "created_at": "2025-01-01T00:00:00+00:00",
+                }
+            ]
+        }
+        clustering_path = tmp_path / "clustering-2024.json"
+        clustering_path.write_text(json.dumps(cache_data))
+
+        with patch("oras.client.OrasClient") as MockOras:
+            mock_oras = MockOras.return_value
+            mock_oras.pull.return_value = [str(export_path), str(embeddings_path), str(clustering_path)]
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        mock_em = MagicMock()
+        mock_em.import_embeddings.return_value = 1
+
+        set_test_db(tmp_path / "target.db")
+
+        with patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=mock_em):
+            summary = client.download(conference="neurips", year=2024, embedding_model="test-model")
+
+        assert summary["paper_count"] == 1
+        assert summary["embedding_count"] == 1
+        assert summary["clustering_cache_count"] == 1
+
+        # Verify the clustering cache was imported into the database
+        from abstracts_explorer.db_models import ClusteringCache
+
+        set_test_db(tmp_path / "target.db")
+        db = DatabaseManager()
+        db.connect()
+        db.create_tables()
+        try:
+            entries = db._session.query(ClusteringCache).all()
+            assert len(entries) == 1
+            assert entries[0].clustering_method == "kmeans"
+        finally:
+            db.close()
+
+    def test_download_without_clustering_cache_raises_error(self, tmp_path):
+        """Download without clustering cache layer raises RegistryError."""
+        set_test_db(tmp_path / "target.db")
+
+        source_db_path = tmp_path / "source.db"
+        source_db = _populate_test_db(source_db_path)
+        export_path = tmp_path / "papers-2024.db"
+        source_db.export_papers_to_sqlite(export_path, "neurips", 2024)
+        source_db.close()
+
+        embeddings_path = tmp_path / "embeddings-2024.json"
+        embeddings_path.write_text(
+            json.dumps({"ids": ["id1"], "documents": ["doc1"], "metadatas": [{}], "embeddings": [[0.1]]})
+        )
+
+        # No clustering-2024.json — should raise an error
+        with patch("oras.client.OrasClient") as MockOras:
+            mock_oras = MockOras.return_value
+            mock_oras.pull.return_value = [str(export_path), str(embeddings_path)]
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        set_test_db(tmp_path / "target.db")
+
+        with pytest.raises(RegistryError, match="Incomplete data.*missing.*clustering cache"):
+            client.download(conference="neurips", year=2024, embedding_model="test-model")
 
     def test_download_incomplete_data_raises_error(self, tmp_path):
         """Download raises RegistryError when artifact has paper DB but no embeddings."""
@@ -1063,9 +1720,17 @@ class TestUploadDownload:
 
         embeddings_path = tmp_path / "embeddings-2024.json"
         embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+        cache_path = _make_clustering_cache_file(tmp_path / "clustering-2024.json")
 
         with pytest.raises(RegistryError, match="Incomplete data.*missing.*paper DB"):
-            client._import_year("neurips", 2024, tmp_path / "papers-2024.db", embeddings_path, lambda m: None)
+            client._import_year(
+                "neurips",
+                2024,
+                tmp_path / "papers-2024.db",
+                embeddings_path,
+                lambda m: None,
+                clustering_cache_file=cache_path,
+            )
 
     def test_import_year_missing_embeddings(self, tmp_path):
         """_import_year raises RegistryError when embeddings file is missing."""
@@ -1079,8 +1744,17 @@ class TestUploadDownload:
         with patch("oras.client.OrasClient"):
             client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
+        cache_path = _make_clustering_cache_file(tmp_path / "clustering-2024.json")
+
         with pytest.raises(RegistryError, match="Incomplete data.*missing.*embeddings"):
-            client._import_year("neurips", 2024, papers_2024, tmp_path / "embeddings-2024.json", lambda m: None)
+            client._import_year(
+                "neurips",
+                2024,
+                papers_2024,
+                tmp_path / "embeddings-2024.json",
+                lambda m: None,
+                clustering_cache_file=cache_path,
+            )
 
     def test_import_year_rollback_on_embedding_failure(self, tmp_path):
         """Paper DB import is rolled back when embedding import fails."""
@@ -1119,9 +1793,17 @@ class TestUploadDownload:
         # Make EmbeddingsManager.import_embeddings raise an error
         with patch("abstracts_explorer.embeddings.EmbeddingsManager") as MockEM:
             MockEM.return_value.import_embeddings.side_effect = Exception("ChromaDB failure")
+            cache_path = _make_clustering_cache_file(tmp_path / "clustering-2024.json")
 
             with pytest.raises(RegistryError, match="Embedding import failed.*rolled back"):
-                client._import_year("neurips", 2024, papers_2024, embeddings_path, lambda m: None)
+                client._import_year(
+                    "neurips",
+                    2024,
+                    papers_2024,
+                    embeddings_path,
+                    lambda m: None,
+                    clustering_cache_file=cache_path,
+                )
 
         # Verify that paper DB was rolled back (no neurips/2024 papers in target)
         from abstracts_explorer.db_models import Paper
@@ -1141,7 +1823,7 @@ class TestUploadDownload:
 
     def test_upload_includes_embedding_model(self, tmp_path):
         """Upload manifest includes the embedding model annotation."""
-        _populate_test_db(tmp_path / "test.db")
+        _populate_test_db_with_cache(tmp_path / "test.db")
 
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
@@ -1173,7 +1855,7 @@ class TestUploadDownload:
 
     def test_upload_all_conferences(self, tmp_path):
         """upload_all uploads data for all conferences."""
-        _populate_test_db(tmp_path / "test.db")
+        _populate_test_db_with_cache(tmp_path / "test.db")
 
         with patch("oras.client.OrasClient") as MockOras:
             mock_oras = MockOras.return_value
@@ -1226,6 +1908,7 @@ class TestUploadDownload:
         source_db.export_papers_to_sqlite(papers_i, "iclr", 2024)
         emb_i = tmp_path / "pull_i" / "embeddings-2024.json"
         emb_i.write_text(json.dumps({"ids": ["b"], "documents": ["d"], "metadatas": [{}], "embeddings": [[0.2]]}))
+        cache_i = _make_clustering_cache_file(tmp_path / "pull_i" / "clustering-2024.json")
 
         # For neurips tag
         papers_n = tmp_path / "pull_n" / "papers-2024.db"
@@ -1233,6 +1916,7 @@ class TestUploadDownload:
         source_db.export_papers_to_sqlite(papers_n, "neurips", 2024)
         emb_n = tmp_path / "pull_n" / "embeddings-2024.json"
         emb_n.write_text(json.dumps({"ids": ["a"], "documents": ["d"], "metadatas": [{}], "embeddings": [[0.1]]}))
+        cache_n = _make_clustering_cache_file(tmp_path / "pull_n" / "clustering-2024.json")
         source_db.close()
 
         mock_em = MagicMock()
@@ -1263,8 +1947,8 @@ class TestUploadDownload:
             ]
             # Side effect returns files in order of download (sorted tags: iclr..., neurips...)
             mock_oras.pull.side_effect = [
-                [str(papers_i), str(emb_i)],  # first call: iclr
-                [str(papers_n), str(emb_n)],  # second call: neurips
+                [str(papers_i), str(emb_i), str(cache_i)],  # first call: iclr
+                [str(papers_n), str(emb_n), str(cache_n)],  # second call: neurips
             ]
             client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
@@ -1795,6 +2479,7 @@ class TestCLICommands:
         paper_db_path.touch()  # Just needs to exist for pre-flight check
         embeddings_path = tmp_path / "embeddings-2024.json"
         embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+        cache_path = _make_clustering_cache_file(tmp_path / "clustering-2024.json")
 
         with patch("oras.client.OrasClient"):
             client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
@@ -1804,7 +2489,14 @@ class TestCLICommands:
             side_effect=EmbeddingModelConflictError("model-a", "model-b"),
         ):
             with pytest.raises(EmbeddingModelMismatchError) as exc_info:
-                client._import_year("neurips", 2024, paper_db_path, embeddings_path, lambda m: None)
+                client._import_year(
+                    "neurips",
+                    2024,
+                    paper_db_path,
+                    embeddings_path,
+                    lambda m: None,
+                    clustering_cache_file=cache_path,
+                )
 
         assert exc_info.value.local_model == "model-a"
         assert exc_info.value.remote_model == "model-b"
@@ -1826,6 +2518,7 @@ class TestCLICommands:
         self._make_artifact_paper_db(paper_db_path, "artifact-model-b")
         embeddings_path = tmp_path / "embeddings-2024.json"
         embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+        cache_path = _make_clustering_cache_file(tmp_path / "clustering-2024.json")
 
         with patch("oras.client.OrasClient"):
             client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
@@ -1838,6 +2531,7 @@ class TestCLICommands:
                 embeddings_path,
                 lambda m: None,
                 embedding_model="configured-model-a",
+                clustering_cache_file=cache_path,
             )
 
         assert exc_info.value.local_model == "configured-model-a"
@@ -1851,21 +2545,26 @@ class TestCLICommands:
         self._make_artifact_paper_db(paper_db_path, "artifact-model-b")
         embeddings_path = tmp_path / "embeddings-2024.json"
         embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+        cache_path = _make_clustering_cache_file(tmp_path / "clustering-2024.json")
 
         with patch("oras.client.OrasClient"):
             client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         with patch("abstracts_explorer.database.DatabaseManager.import_papers_from_sqlite", return_value=0):
             with patch("abstracts_explorer.embeddings.EmbeddingsManager.import_embeddings", return_value=0):
-                result = client._import_year(
-                    "neurips",
-                    2024,
-                    paper_db_path,
-                    embeddings_path,
-                    lambda m: None,
-                    embedding_model="configured-model-a",
-                    ignore_embedding_model_mismatch=True,
-                )
+                with patch(
+                    "abstracts_explorer.database.DatabaseManager.import_clustering_cache_from_json", return_value=0
+                ):
+                    result = client._import_year(
+                        "neurips",
+                        2024,
+                        paper_db_path,
+                        embeddings_path,
+                        lambda m: None,
+                        embedding_model="configured-model-a",
+                        ignore_embedding_model_mismatch=True,
+                        clustering_cache_file=cache_path,
+                    )
 
         assert result["paper_count"] == 0
         assert result["embedding_count"] == 0
@@ -1878,21 +2577,26 @@ class TestCLICommands:
         self._make_artifact_paper_db(paper_db_path, "artifact-model-b")
         embeddings_path = tmp_path / "embeddings-2024.json"
         embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+        cache_path = _make_clustering_cache_file(tmp_path / "clustering-2024.json")
 
         with patch("oras.client.OrasClient"):
             client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         with patch("abstracts_explorer.database.DatabaseManager.import_papers_from_sqlite", return_value=0):
             with patch("abstracts_explorer.embeddings.EmbeddingsManager.import_embeddings", return_value=0):
-                client._import_year(
-                    "neurips",
-                    2024,
-                    paper_db_path,
-                    embeddings_path,
-                    lambda m: None,
-                    embedding_model="configured-model-a",
-                    ignore_embedding_model_mismatch=True,
-                )
+                with patch(
+                    "abstracts_explorer.database.DatabaseManager.import_clustering_cache_from_json", return_value=0
+                ):
+                    client._import_year(
+                        "neurips",
+                        2024,
+                        paper_db_path,
+                        embeddings_path,
+                        lambda m: None,
+                        embedding_model="configured-model-a",
+                        ignore_embedding_model_mismatch=True,
+                        clustering_cache_file=cache_path,
+                    )
 
         # Verify the artifact DB was patched
         updated_model = RegistryClient._read_artifact_embedding_model(paper_db_path)
@@ -1906,20 +2610,25 @@ class TestCLICommands:
         self._make_artifact_paper_db(paper_db_path, "same-model")
         embeddings_path = tmp_path / "embeddings-2024.json"
         embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+        cache_path = _make_clustering_cache_file(tmp_path / "clustering-2024.json")
 
         with patch("oras.client.OrasClient"):
             client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         with patch("abstracts_explorer.database.DatabaseManager.import_papers_from_sqlite", return_value=0):
             with patch("abstracts_explorer.embeddings.EmbeddingsManager.import_embeddings", return_value=0):
-                result = client._import_year(
-                    "neurips",
-                    2024,
-                    paper_db_path,
-                    embeddings_path,
-                    lambda m: None,
-                    embedding_model="same-model",
-                )
+                with patch(
+                    "abstracts_explorer.database.DatabaseManager.import_clustering_cache_from_json", return_value=0
+                ):
+                    result = client._import_year(
+                        "neurips",
+                        2024,
+                        paper_db_path,
+                        embeddings_path,
+                        lambda m: None,
+                        embedding_model="same-model",
+                        clustering_cache_file=cache_path,
+                    )
 
         assert result["paper_count"] == 0
         assert result["embedding_count"] == 0
@@ -2000,8 +2709,9 @@ class TestCLICommands:
         self._make_artifact_paper_db(paper_db_path, "artifact-model-b")
         embeddings_path = tmp_path / "embeddings-2024.json"
         embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+        cache_path = _make_clustering_cache_file(tmp_path / "clustering-2024.json")
 
-        pulled_files = [str(paper_db_path), str(embeddings_path)]
+        pulled_files = [str(paper_db_path), str(embeddings_path), str(cache_path)]
 
         with patch("oras.client.OrasClient"):
             client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
@@ -2064,7 +2774,7 @@ class TestCLICommands:
 
         success_summary = {
             "tag": "neurips-2024_model-a",
-            "conference": "neurips",
+            "conference": "NeurIPS",
             "years": [2024],
             "paper_count": 5,
             "embedding_count": 5,
@@ -2078,14 +2788,13 @@ class TestCLICommands:
             result = registry_download_command(args)
 
         assert result == 0
-        mock_instance.download.assert_called_once_with(
-            conference="neurips",
-            year=2024,
-            tag=None,
-            embedding_model="model-a",
-            progress_callback=mock_instance.download.call_args.kwargs["progress_callback"],
-            ignore_embedding_model_mismatch=True,
-        )
+        call_kwargs = mock_instance.download.call_args.kwargs
+        # CLI resolves "neurips" → "NeurIPS" via plugin fallback before calling download
+        assert call_kwargs["conference"] == "NeurIPS"
+        assert call_kwargs["year"] == 2024
+        assert call_kwargs["tag"] is None
+        assert call_kwargs["embedding_model"] == "model-a"
+        assert call_kwargs["ignore_embedding_model_mismatch"] is True
 
     def test_download_ignore_mismatch_flag_passed_to_client(self, tmp_path, capsys):
         """When --ignore-embedding-model-mismatch is set, the flag is passed to client.download()."""
@@ -2215,9 +2924,10 @@ class TestCLICommands:
         paper_db_path.touch()
         embeddings_path = tmp_path / "embeddings-2024.json"
         embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+        cache_path = _make_clustering_cache_file(tmp_path / "clustering-2024.json")
 
         available_tags = ["neurips-2024_my-model_0.4.1"]
-        pulled_files = [str(paper_db_path), str(embeddings_path)]
+        pulled_files = [str(paper_db_path), str(embeddings_path), str(cache_path)]
 
         with patch("oras.client.OrasClient"):
             client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
@@ -2227,7 +2937,11 @@ class TestCLICommands:
         with patch.object(client._client, "get_tags", return_value=available_tags):
             with patch.object(client, "_get_manifest_embedding_model", mock_manifest):
                 with patch.object(client._client, "pull", mock_pull):
-                    with patch.object(client, "_import_year", return_value={"paper_count": 0, "embedding_count": 0}):
+                    with patch.object(
+                        client,
+                        "_import_year",
+                        return_value={"paper_count": 0, "embedding_count": 0, "clustering_cache_count": 0},
+                    ):
                         client.download(
                             conference="neurips",
                             year=2024,
@@ -2295,15 +3009,20 @@ class TestCLICommands:
         paper_db_path.touch()
         embeddings_path = tmp_path / "embeddings-2024.json"
         embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+        cache_path = _make_clustering_cache_file(tmp_path / "clustering-2024.json")
 
-        pulled_files = [str(paper_db_path), str(embeddings_path)]
+        pulled_files = [str(paper_db_path), str(embeddings_path), str(cache_path)]
 
         with patch("oras.client.OrasClient"):
             client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         with patch.object(client, "_get_manifest_embedding_model", return_value="artifact-model-b"):
             with patch.object(client._client, "pull", return_value=pulled_files):
-                with patch.object(client, "_import_year", return_value={"paper_count": 0, "embedding_count": 0}):
+                with patch.object(
+                    client,
+                    "_import_year",
+                    return_value={"paper_count": 0, "embedding_count": 0, "clustering_cache_count": 0},
+                ):
                     result = client.download(
                         conference="neurips",
                         year=2024,
@@ -2322,15 +3041,20 @@ class TestCLICommands:
         paper_db_path.touch()
         embeddings_path = tmp_path / "embeddings-2024.json"
         embeddings_path.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+        cache_path = _make_clustering_cache_file(tmp_path / "clustering-2024.json")
 
-        pulled_files = [str(paper_db_path), str(embeddings_path)]
+        pulled_files = [str(paper_db_path), str(embeddings_path), str(cache_path)]
 
         with patch("oras.client.OrasClient"):
             client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         with patch.object(client, "_get_manifest_embedding_model", return_value=None):
             with patch.object(client._client, "pull", return_value=pulled_files):
-                with patch.object(client, "_import_year", return_value={"paper_count": 0, "embedding_count": 0}):
+                with patch.object(
+                    client,
+                    "_import_year",
+                    return_value={"paper_count": 0, "embedding_count": 0, "clustering_cache_count": 0},
+                ):
                     # Should not raise even though configured model differs from artifact (no manifest model label)
                     result = client.download(
                         conference="neurips",

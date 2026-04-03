@@ -357,6 +357,8 @@ class TestImportYearIntegration:
         paper_db.touch()
         embeddings = tmp_path / "embeddings-2024.json"
         embeddings.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+        cache = tmp_path / "clustering-2024.json"
+        cache.write_text(json.dumps({"entries": []}))
 
         with patch("oras.client.OrasClient"):
             client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
@@ -366,7 +368,9 @@ class TestImportYearIntegration:
             side_effect=EmbeddingModelConflictError("local-model", "remote-model"),
         ):
             with pytest.raises(EmbeddingModelMismatchError) as exc_info:
-                client._import_year("neurips", 2024, paper_db, embeddings, lambda m: None)
+                client._import_year(
+                    "neurips", 2024, paper_db, embeddings, lambda m: None, clustering_cache_file=cache
+                )
 
         assert exc_info.value.local_model == "local-model"
         assert exc_info.value.remote_model == "remote-model"
@@ -393,6 +397,8 @@ class TestImportYearIntegration:
         paper_db = tmp_path / "papers-2024.db"
         embeddings = tmp_path / "embeddings-2024.json"
         embeddings.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+        cache = tmp_path / "clustering-2024.json"
+        cache.write_text(json.dumps({"entries": []}))
 
         with patch("oras.client.OrasClient"):
             client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
@@ -403,7 +409,9 @@ class TestImportYearIntegration:
             side_effect=RuntimeError("embedding failure"),
         ):
             with pytest.raises(RegistryError, match="Embedding import failed"):
-                client._import_year("neurips", 2024, paper_db, embeddings, lambda m: None)
+                client._import_year(
+                    "neurips", 2024, paper_db, embeddings, lambda m: None, clustering_cache_file=cache
+                )
 
         # Paper DB should be rolled back — no papers for neurips/2024
         with DatabaseManager() as db:
@@ -528,24 +536,26 @@ class TestConferenceNameResolution:
     """Tests for case-insensitive conference name resolution."""
 
     def test_resolve_finds_stored_name(self, tmp_path):
-        """_resolve_conference_name returns the DB-stored name regardless of input case."""
+        """DatabaseManager.resolve_conference_name returns the DB-stored name regardless of input case."""
         set_test_db(tmp_path / "test.db")
         with DatabaseManager() as db:
             db.create_tables()
             db.add_papers(_make_papers(conference="NeurIPS", year=2024))
 
-        assert RegistryClient._resolve_conference_name("neurips") == "NeurIPS"
-        assert RegistryClient._resolve_conference_name("NEURIPS") == "NeurIPS"
-        assert RegistryClient._resolve_conference_name("NeurIPS") == "NeurIPS"
+            assert db.resolve_conference_name("neurips") == "NeurIPS"
+            assert db.resolve_conference_name("NEURIPS") == "NeurIPS"
+            assert db.resolve_conference_name("NeurIPS") == "NeurIPS"
 
-    def test_resolve_returns_input_if_not_found(self, tmp_path):
-        """_resolve_conference_name returns input unchanged when no match exists."""
+    def test_resolve_raises_when_not_found(self, tmp_path):
+        """resolve_conference_name raises DatabaseError when no match exists in DB or plugins."""
+        from abstracts_explorer.database import DatabaseError
+
         set_test_db(tmp_path / "test.db")
         with DatabaseManager() as db:
             db.create_tables()
 
-        result = RegistryClient._resolve_conference_name("unknown-conf")
-        assert result == "unknown-conf"
+            with pytest.raises(DatabaseError, match="Failed to resolve conference name"):
+                db.resolve_conference_name("unknown-conf-xyz-999")
 
 
 # ---------------------------------------------------------------------------
@@ -568,12 +578,14 @@ class TestDownloadModelMismatchRecovery:
         paper_db.touch()
         embeddings = tmp_path / "embeddings-2024.json"
         embeddings.write_text(json.dumps({"ids": [], "documents": [], "metadatas": [], "embeddings": []}))
+        cache = tmp_path / "clustering-2024.json"
+        cache.write_text(json.dumps({"entries": []}))
 
         with patch("oras.client.OrasClient"):
             client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
 
         # Mock the oras client pull to return our fake files
-        client._client.pull = MagicMock(return_value=[str(paper_db), str(embeddings)])
+        client._client.pull = MagicMock(return_value=[str(paper_db), str(embeddings), str(cache)])
 
         with patch.object(client, "_import_year", side_effect=mismatch):
             with pytest.raises(EmbeddingModelMismatchError):
@@ -698,9 +710,10 @@ class TestCLIRegistryDispatch:
             result = registry_upload_command(args)
 
         assert result == 0
-        # Verify upload was called with the conference, year, and tag args
+        # Verify upload was called with the resolved conference name
+        # "neurips" resolves to "NeurIPS" via plugin fallback since DB is empty
         call_kwargs = mock_instance.upload.call_args.kwargs
-        assert call_kwargs["conference"] == "neurips"
+        assert call_kwargs["conference"] == "NeurIPS"
         assert call_kwargs["year"] == 2024
         assert call_kwargs["tag"] is None
 

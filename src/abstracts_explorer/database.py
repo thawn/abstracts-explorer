@@ -955,6 +955,70 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Failed to get years for conference: {str(e)}") from e
 
+    def resolve_conference_name(self, conference: str) -> str:
+        """
+        Resolve a conference name to the canonical form stored in the database.
+
+        Performs a case-insensitive match against conference names already
+        present in the database.  If no database match is found, falls back
+        to a case-insensitive match against the ``conference_name`` attribute of
+        every registered downloader plugin.  If neither lookup succeeds the
+        original *conference* string is returned unchanged.
+
+        This is the single authoritative place where conference-name
+        normalization must happen.  CLI commands should call this method
+        **once** at the entry point of each command and then work with the
+        returned canonical name for all subsequent operations.
+
+        Parameters
+        ----------
+        conference : str
+            Conference name as supplied by the caller.  May differ in case or
+            spelling from the form stored in the database (e.g. ``ml4ps@neurips``
+            vs. ``ML4PS@Neurips``).
+
+        Returns
+        -------
+        str
+            The conference name exactly as it appears in the database (first
+            match), or exactly as defined by the first matching plugin, or the
+            input string if no match is found.
+
+        Examples
+        --------
+        >>> with DatabaseManager() as db:
+        ...     db.create_tables()
+        ...     canonical = db.resolve_conference_name("ml4ps@neurips")
+        ...     # Returns "ML4PS@Neurips" if that form is stored in the DB
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        # 1. Try case-insensitive match against conferences already in the DB
+        try:
+            filters = self.get_filter_options()
+            for conf in filters.get("conferences", []):
+                if conf.lower() == conference.lower():
+                    return conf
+        except Exception:
+            pass
+
+        # 2. Fall back to plugin conference names
+        try:
+            from abstracts_explorer.plugins import get_all_plugins
+
+            for plugin in get_all_plugins():
+                plugin_conf = getattr(plugin, "conference_name", None)
+                if plugin_conf and plugin_conf.lower() == conference.lower():
+                    return plugin_conf
+        except Exception:
+            pass
+
+        raise DatabaseError(
+            f"Failed to resolve conference name: {conference}.\n"
+            f"No match found in database or plugins. Available conferences in the database: {filters.get('conferences', [])}"
+        )
+
     def get_filter_options(self, year: Optional[int] = None, conference: Optional[str] = None) -> dict:
         """
         Get distinct values for filterable fields (lightweight schema).
@@ -1982,8 +2046,9 @@ class DatabaseManager:
         """
         Export papers for a given conference and year to a standalone SQLite file.
 
-        The exported file also includes any matching clustering cache,
-        hierarchical label cache, and embeddings metadata rows.
+        The exported file includes hierarchical label cache and embeddings
+        metadata rows.  Clustering cache is **not** included — it is exported
+        separately via :meth:`export_clustering_cache_to_json`.
 
         Parameters
         ----------
@@ -2021,12 +2086,6 @@ class DatabaseManager:
                     paper_dict = {c.name: getattr(paper, c.name) for c in Paper.__table__.columns}
                     export_session.add(Paper(**paper_dict))
                     paper_count += 1
-
-                # Export only clustering cache entries matching conference+year
-                for entry in self._session.execute(select(ClusteringCache)).scalars():
-                    if self._clustering_cache_matches_conference_year(entry, conference, year):
-                        entry_dict = {c.name: getattr(entry, c.name) for c in ClusteringCache.__table__.columns}
-                        export_session.add(ClusteringCache(**entry_dict))
 
                 # Export hierarchical label cache
                 for entry in self._session.execute(select(HierarchicalLabelCache)).scalars():
@@ -2142,11 +2201,6 @@ class DatabaseManager:
                 # Delete existing papers for this conference+year
                 self._session.execute(delete(Paper).where(and_(Paper.conference == conference, Paper.year == year)))
 
-                # Delete only clustering cache entries that match the conference+year
-                for entry in self._session.execute(select(ClusteringCache)).scalars().all():
-                    if self._clustering_cache_matches_conference_year(entry, conference, year):
-                        self._session.delete(entry)
-
                 # Delete only hierarchical label cache entries whose
                 # embedding_model matches one from the imported data
                 imported_models_result = (
@@ -2161,16 +2215,13 @@ class DatabaseManager:
 
                 self._session.commit()
 
-                # Import papers
+                # Import papers — use merge() to handle any UID collisions
+                # (e.g. the same paper existing under a different conference
+                # casing that the DELETE above didn't catch).
                 for paper in source_session.execute(select(Paper)).scalars():
                     paper_dict = {c.name: getattr(paper, c.name) for c in Paper.__table__.columns}
-                    self._session.add(Paper(**paper_dict))
+                    self._session.merge(Paper(**paper_dict))
                     paper_count += 1
-
-                # Import clustering cache entries
-                for entry in source_session.execute(select(ClusteringCache)).scalars():
-                    entry_dict = {c.name: getattr(entry, c.name) for c in ClusteringCache.__table__.columns}
-                    self._session.add(ClusteringCache(**entry_dict))
 
                 # Import hierarchical labels
                 for entry in source_session.execute(select(HierarchicalLabelCache)).scalars():
@@ -2196,3 +2247,171 @@ class DatabaseManager:
         except Exception as e:
             self._session.rollback()
             raise DatabaseError(f"Failed to import papers: {str(e)}") from e
+
+    # ------------------------------------------------------------------
+    # Clustering cache JSON export / import
+    # ------------------------------------------------------------------
+
+    def export_clustering_cache_to_json(
+        self,
+        conference: str,
+        year: int,
+    ) -> Dict[str, Any]:
+        """
+        Export clustering cache entries matching *conference* and *year* as JSON.
+
+        Parameters
+        ----------
+        conference : str
+            Conference name to match.
+        year : int
+            Year to match.
+
+        Returns
+        -------
+        dict
+            A JSON-serialisable dictionary with an ``entries`` list.
+            Each entry contains all :class:`ClusteringCache` columns except
+            ``id`` (auto-generated on import).
+
+        Raises
+        ------
+        DatabaseError
+            If the export fails.
+        """
+        import json as _json
+
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            entries: List[Dict[str, Any]] = []
+            for entry in self._session.execute(select(ClusteringCache)).scalars():
+                if self._clustering_cache_matches_conference_year(entry, conference, year):
+                    row: Dict[str, Any] = {}
+                    for col in ClusteringCache.__table__.columns:
+                        if col.name == "id":
+                            continue  # skip PK; it will be auto-generated on import
+                        val = getattr(entry, col.name)
+                        if col.name in ("clustering_params", "results_json") and isinstance(val, str):
+                            val = _json.loads(val)
+                        elif col.name == "created_at" and val is not None:
+                            val = val.isoformat()
+                        row[col.name] = val
+                    entries.append(row)
+
+            return {"entries": entries}
+
+        except DatabaseError:
+            raise
+        except Exception as e:
+            raise DatabaseError(f"Failed to export clustering cache: {str(e)}") from e
+
+    def import_clustering_cache_from_json(
+        self,
+        data: Dict[str, Any],
+        conference: str,
+        year: int,
+        overwrite_embedding_model: Optional[str] = None,
+    ) -> int:
+        """
+        Import clustering cache entries from a JSON dictionary.
+
+        Existing clustering cache entries matching *conference* and *year*
+        are deleted before importing the new entries.
+
+        Parameters
+        ----------
+        data : dict
+            Dictionary previously returned by
+            :meth:`export_clustering_cache_to_json`.
+        conference : str
+            Conference name for scoping the delete.
+        year : int
+            Year for scoping the delete.
+        overwrite_embedding_model : str, optional
+            When provided, the ``embedding_model`` field of every imported
+            entry is replaced with this value.  Use this when importing an
+            artifact whose embedding model differs from the locally
+            configured one (i.e. when ``--ignore-embedding-model-mismatch``
+            was passed) so that :meth:`get_clustering_cache` can find the
+            entries using the local model name.
+
+        Returns
+        -------
+        int
+            Number of cache entries imported.
+
+        Raises
+        ------
+        DatabaseError
+            If the import fails.
+        """
+        import json as _json
+
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            # Delete existing matching entries and flush immediately so PostgreSQL
+            # processes the DELETEs before the subsequent INSERTs.
+            for entry in self._session.execute(select(ClusteringCache)).scalars().all():
+                if self._clustering_cache_matches_conference_year(entry, conference, year):
+                    self._session.delete(entry)
+            self._session.flush()
+
+            # For PostgreSQL the auto-increment sequence can fall out of sync when rows
+            # were previously inserted with explicit primary-key values (e.g. by an older
+            # version of import_papers_from_sqlite that included the clustering cache).
+            # If other rows for a different conference/year remain in the table and the
+            # sequence tries to reuse one of their IDs, the next INSERT will raise
+            # UniqueViolation.  Reset the sequence to max(existing id)+1 so that every
+            # new row gets a safe ID regardless of sequence history.
+            db_url = self.database_url.lower()
+            if "postgresql" in db_url or "postgres" in db_url:
+                self._session.execute(
+                    text(
+                        "SELECT setval("
+                        "  pg_get_serial_sequence('clustering_cache', 'id'),"
+                        "  COALESCE((SELECT MAX(id) FROM clustering_cache), 0) + 1,"
+                        "  false"
+                        ")"
+                    )
+                )
+                self._session.flush()
+
+            count = 0
+            for item in data.get("entries", []):
+                row = dict(item)  # shallow copy
+
+                # Re-serialise parsed JSON fields back to strings for DB storage
+                if "clustering_params" in row and row["clustering_params"] is not None:
+                    if not isinstance(row["clustering_params"], str):
+                        row["clustering_params"] = _json.dumps(row["clustering_params"])
+
+                if "results_json" in row and row["results_json"] is not None:
+                    if not isinstance(row["results_json"], str):
+                        row["results_json"] = _json.dumps(row["results_json"])
+
+                # Convert ISO-format created_at back to datetime
+                if "created_at" in row and isinstance(row["created_at"], str):
+                    row["created_at"] = datetime.fromisoformat(row["created_at"])
+
+                # Drop 'id' if present — let the DB auto-generate it
+                row.pop("id", None)
+
+                # Replace embedding_model when instructed (e.g. mismatch ignored)
+                if overwrite_embedding_model is not None:
+                    row["embedding_model"] = overwrite_embedding_model
+
+                self._session.add(ClusteringCache(**row))
+                count += 1
+
+            self._session.commit()
+            return count
+
+        except DatabaseError:
+            raise
+        except Exception as e:
+            self._session.rollback()
+            raise DatabaseError(f"Failed to import clustering cache: {str(e)}") from e
