@@ -1093,6 +1093,39 @@ class TestWebUIRunServer:
         assert "neurips-abstracts download" in captured.err
         assert "create-embeddings" in captured.err
 
+    def test_run_server_registers_sigterm_handler(self):
+        """Test that run_server registers a SIGTERM handler for graceful shutdown."""
+        import signal as signal_module
+        from abstracts_explorer.web_ui import run_server
+
+        with patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=True):
+            with patch("abstracts_explorer.web_ui.app.get_config") as mock_config:
+                mock_cfg = Mock()
+                mock_cfg.paper_db_path = "/some/path/test.db"
+                mock_cfg.embedding_db_path = "/some/path/chroma_db"
+                mock_config.return_value = mock_cfg
+
+                sigterm_handler = None
+
+                def capture_signal(signum, handler):
+                    nonlocal sigterm_handler
+                    if signum == signal_module.SIGTERM:
+                        sigterm_handler = handler
+
+                with patch("abstracts_explorer.web_ui.app.signal.signal", side_effect=capture_signal):
+                    with patch("waitress.serve") as mock_serve:
+                        mock_serve.side_effect = KeyboardInterrupt()
+
+                        with pytest.raises(KeyboardInterrupt):
+                            run_server(host="127.0.0.1", port=5000)
+
+                # Verify a SIGTERM handler was registered
+                assert sigterm_handler is not None, "SIGTERM handler was not registered"
+                # Verify the handler raises SystemExit(0) when called
+                with pytest.raises(SystemExit) as exc_info:
+                    sigterm_handler(signal_module.SIGTERM, None)
+                assert exc_info.value.code == 0
+
 
 class TestConferencePluginMapping:
     """Test conference name to plugin name mapping in download endpoint."""

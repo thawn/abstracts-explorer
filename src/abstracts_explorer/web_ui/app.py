@@ -6,6 +6,7 @@ and exploring the abstracts database.
 """
 
 import os
+import signal
 import sys
 import logging
 import json
@@ -942,6 +943,11 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=6):
     print(f"Embeddings: {config.embedding_db}")
 
     print(f"Server: http://{host}:{port}")
+
+    # Register SIGTERM handler for graceful shutdown (e.g., docker stop).
+    # Without this, PID 1 in a container ignores SIGTERM by default, forcing Docker
+    # to wait the full stop-timeout before sending SIGKILL.
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(0))
 
     # Use Flask development server if explicitly requested
     if dev:
