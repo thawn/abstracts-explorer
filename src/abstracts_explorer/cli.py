@@ -1859,7 +1859,6 @@ def registry_download_command(args: argparse.Namespace) -> int:
         EmbeddingModelMismatchError,
         RegistryClient,
         RegistryError,
-        _sanitize_str_for_oci_tag,
     )
 
     config = get_config()
@@ -1909,22 +1908,24 @@ def registry_download_command(args: argparse.Namespace) -> int:
     try:
         client = RegistryClient(repository=repository, token=token)
 
-        if conference == "all":
-            summaries = client.download_all(
-                progress_callback=lambda msg: print(f"  {msg}"),
-            )
-            print(f"\n✅ Download complete! Downloaded {len(summaries)} artifact(s).")
-            for s in summaries:
-                print(
-                    f"  📦 {s.get('conference', '')}: {s.get('paper_count', 0)} papers, "
-                    f"{s.get('embedding_count', 0)} embeddings"
-                )
-        else:
-            embedding_model = getattr(args, "embedding_model", None) or config.embedding_model
-            ignore_embedding_model_mismatch = getattr(args, "ignore_embedding_model_mismatch", False)
+        embedding_model = getattr(args, "embedding_model", None) or config.embedding_model
+        ignore_embedding_model_mismatch = getattr(args, "ignore_embedding_model_mismatch", False)
 
-            def _do_download():
-                return client.download(
+        try:
+            if conference == "all":
+                summaries = client.download_all(
+                    progress_callback=lambda msg: print(f"  {msg}"),
+                    ignore_embedding_model_mismatch=ignore_embedding_model_mismatch,
+                )
+
+                print(f"\n✅ Download complete! Downloaded {len(summaries)} artifact(s).")
+                for s in summaries:
+                    print(
+                        f"  📦 {s.get('conference', '')}: {s.get('paper_count', 0)} papers, "
+                        f"{s.get('embedding_count', 0)} embeddings"
+                    )
+            else:
+                summary = client.download(
                     conference=conference,
                     year=args.year,
                     tag=args.tag,
@@ -1933,60 +1934,26 @@ def registry_download_command(args: argparse.Namespace) -> int:
                     ignore_embedding_model_mismatch=ignore_embedding_model_mismatch,
                 )
 
-            try:
-                summary = _do_download()
-            except EmbeddingModelMismatchError as mismatch:
-                # The local DB uses a different model than the remote artifact.
-                # If the configured model matches the remote model, offer to wipe
-                # local embedding data and retry.
-                if embedding_model and _sanitize_str_for_oci_tag(embedding_model) == _sanitize_str_for_oci_tag(
-                    mismatch.remote_model
-                ):
-                    print(
-                        f"\n⚠️  Embedding model mismatch detected:\n"
-                        f"  Local database:  '{mismatch.local_model}'\n"
-                        f"  Downloaded data: '{mismatch.remote_model}'\n"
-                        f"\nThe configured model ('{embedding_model}') matches the downloaded data.\n"
-                        f"To proceed, all local embeddings, clustering cache, and embedding metadata\n"
-                        f"must be cleared so the new model's data can be imported.\n"
-                        f"⚠️  This will delete ALL local embeddings and clustering cache!",
-                        file=sys.stderr,
-                    )
-                    if not args.yes:
-                        try:
-                            confirm = (
-                                input("Clear all local embedding data and retry download? [y/N]: ").strip().lower()
-                            )
-                        except (EOFError, KeyboardInterrupt):
-                            print("\nAborted.")
-                            return 1
-                        if confirm != "y":
-                            print("Aborted.")
-                            return 1
-                    print("  Clearing local embedding data...")
-                    RegistryClient.clear_local_embedding_data()
-                    print("  Local embedding data cleared. Retrying download...")
-                    summary = _do_download()
-                else:
-                    print(
-                        f"\n❌ Embedding model mismatch:\n"
-                        f"  Configured model: '{embedding_model}'\n"
-                        f"  Artifact model:   '{mismatch.remote_model}'\n"
-                        f"\nIf both names refer to the same model on different backends,\n"
-                        f"you can use --ignore-embedding-model-mismatch to proceed.\n"
-                        f"⚠️  Only use this option if you are certain the models are identical!",
-                        file=sys.stderr,
-                    )
-                    return 1
+                print("\n✅ Download complete!")
+                print(f"  📄 Papers:     {summary.get('paper_count', 0)}")
+                print(f"  🧮 Embeddings: {summary.get('embedding_count', 0)}")
+                print(f"  📅 Years:      {summary.get('years', [])}")
 
-            print("\n✅ Download complete!")
-            print(f"  📄 Papers:     {summary.get('paper_count', 0)}")
-            print(f"  🧮 Embeddings: {summary.get('embedding_count', 0)}")
-            print(f"  📅 Years:      {summary.get('years', [])}")
+                metadata = summary.get("metadata", {})
+                if metadata:
+                    print(f"\n  ℹ️  Artifact version: {metadata.get('version', 'unknown')}")
 
-            metadata = summary.get("metadata", {})
-            if metadata:
-                print(f"\n  ℹ️  Artifact version: {metadata.get('version', 'unknown')}")
+        except EmbeddingModelMismatchError as mismatch:
+            print(
+                f"\n❌ Embedding model mismatch:\n"
+                f"  Configured model: '{embedding_model}'\n"
+                f"  Artifact model:   '{mismatch.remote_model}'\n"
+                f"\nIf both names refer to the same model on different backends,\n"
+                f"you can use --ignore-embedding-model-mismatch to proceed.\n"
+                f"⚠️  Only use this option if you are certain the models are identical!",
+                file=sys.stderr,
+            )
+            return 1
 
         return 0
 
