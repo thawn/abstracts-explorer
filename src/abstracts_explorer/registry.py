@@ -552,6 +552,12 @@ class RegistryClient:
                     ).fetchone()
                     if row:
                         artifact_model = row[0]
+                    if ignore_embedding_model_mismatch:
+                        # replace the model in the artifact DB with the local model so that the import can proceed without triggering the mismatch check again later
+                        conn.execute(
+                            "UPDATE embeddings_metadata SET embedding_model = ?",
+                            (embedding_model,),
+                        )
             except (sqlite3.OperationalError, sqlite3.DatabaseError) as exc:
                 # Legacy DB without embeddings_metadata table or not a valid SQLite file
                 logger.debug("Could not read embedding model from artifact DB %s: %s", paper_db_file.name, exc)
