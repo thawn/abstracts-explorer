@@ -2345,10 +2345,12 @@ class DatabaseManager:
             raise DatabaseError("Not connected to database")
 
         try:
-            # Delete existing matching entries
+            # Delete existing matching entries and flush immediately so PostgreSQL
+            # processes the DELETEs before the subsequent INSERTs.
             for entry in self._session.execute(select(ClusteringCache)).scalars().all():
                 if self._clustering_cache_matches_conference_year(entry, conference, year):
                     self._session.delete(entry)
+            self._session.flush()
 
             count = 0
             for item in data.get("entries", []):
