@@ -8,7 +8,8 @@ such as GitHub Container Registry (ghcr.io).
 Artifacts are pushed and pulled using the `oras <https://oras-project.github.io/oras-py/>`_
 Python SDK. Each artifact is tagged by conference (e.g. ``neurips``) or by conference
 and year (e.g. ``neurips-2024``).  A conference-only tag contains all available years
-with each year stored as its own pair of OCI layers (paper DB + embeddings).
+with each year stored as its own set of OCI layers (paper DB + embeddings +
+clustering cache).
 
 Examples
 --------
@@ -58,6 +59,7 @@ logger = logging.getLogger(__name__)
 # Custom media types for abstracts-explorer artifacts
 PAPER_DB_MEDIA_TYPE = "application/vnd.abstracts-explorer.paper-db.v1.tar+gzip"
 EMBEDDING_DB_MEDIA_TYPE = "application/vnd.abstracts-explorer.embedding-db.v1.tar+gzip"
+CLUSTERING_CACHE_MEDIA_TYPE = "application/vnd.abstracts-explorer.clustering-cache.v1.tar+gzip"
 CONFIG_MEDIA_TYPE = "application/vnd.abstracts-explorer.config.v1+json"
 
 
@@ -484,20 +486,23 @@ class RegistryClient:
         progress: Callable[[str], None],
     ) -> Dict[str, Any]:
         """
-        Export paper DB and embeddings for a single conference+year.
+        Export paper DB, embeddings, and clustering cache for a single conference+year.
 
         Returns a dict with ``paper_db_path``, ``embeddings_path``,
-        ``paper_count``, and ``embedding_count``.
+        ``clustering_cache_path``, ``paper_count``, ``embedding_count``,
+        and ``clustering_cache_count``.
         """
         from abstracts_explorer.database import DatabaseManager
         from abstracts_explorer.embeddings import EmbeddingsManager
 
-        # --- paper DB ---
+        # --- paper DB (without clustering cache — it goes into a separate layer) ---
         progress(f"Exporting paper database for {conference}/{year}...")
         paper_db_path = temp_dir / f"papers-{year}.db"
         with DatabaseManager() as db:
             db.create_tables()
-            paper_count = db.export_papers_to_sqlite(paper_db_path, conference, year)
+            paper_count = db.export_papers_to_sqlite(
+                paper_db_path, conference, year, include_clustering_cache=False
+            )
 
         if paper_count == 0:
             raise RegistryError(f"No papers found for {conference}/{year}. Download the conference data first.")
@@ -520,11 +525,24 @@ class RegistryClient:
         embeddings_path.write_text(json.dumps(embeddings_data))
         progress(f"  Exported {embedding_count} embeddings")
 
+        # --- clustering cache (separate layer) ---
+        progress(f"Exporting clustering cache for {conference}/{year}...")
+        with DatabaseManager() as db:
+            db.create_tables()
+            cache_data = db.export_clustering_cache_to_json(conference, year)
+        clustering_cache_count = len(cache_data.get("entries", []))
+
+        clustering_cache_path = temp_dir / f"clustering-{year}.json"
+        clustering_cache_path.write_text(json.dumps(cache_data))
+        progress(f"  Exported {clustering_cache_count} clustering cache entries")
+
         return {
             "paper_db_path": paper_db_path,
             "embeddings_path": embeddings_path,
+            "clustering_cache_path": clustering_cache_path,
             "paper_count": paper_count,
             "embedding_count": embedding_count,
+            "clustering_cache_count": clustering_cache_count,
         }
 
     @staticmethod
@@ -651,14 +669,20 @@ class RegistryClient:
         progress: Callable[[str], None],
         embedding_model: Optional[str] = None,
         ignore_embedding_model_mismatch: bool = False,
+        clustering_cache_file: Optional[Path] = None,
     ) -> Dict[str, Any]:
         """
-        Import paper DB and embeddings for a single conference+year.
+        Import paper DB, embeddings, and clustering cache for a single conference+year.
 
         Both *paper_db_file* and *embeddings_file* must exist.  If either
         import fails, any already-imported data for this conference+year is
         rolled back to prevent inconsistency between the paper DB and the
         embedding DB.
+
+        *clustering_cache_file* is optional.  When present the clustering
+        cache entries are imported from the separate JSON layer.  When
+        absent (legacy artifacts) the clustering cache is still imported
+        from the paper DB SQLite file via ``import_papers_from_sqlite()``.
 
         The embedding-model consistency check happens **here** — this is
         the single authoritative location.  When
@@ -667,7 +691,8 @@ class RegistryClient:
         downstream ``import_papers_from_sqlite()`` check will not trigger
         again.
 
-        Returns a dict with ``paper_count`` and ``embedding_count``.
+        Returns a dict with ``paper_count``, ``embedding_count``, and
+        ``clustering_cache_count``.
 
         Raises
         ------
@@ -739,9 +764,27 @@ class RegistryClient:
                 "Paper DB changes have been rolled back."
             ) from embed_err
 
+        # --- import clustering cache from separate layer (if present) ---
+        clustering_cache_count = 0
+        if clustering_cache_file and clustering_cache_file.exists():
+            progress(f"Importing clustering cache for {conference}/{year}...")
+            try:
+                cache_data = json.loads(clustering_cache_file.read_text())
+                with DatabaseManager() as db:
+                    db.create_tables()
+                    clustering_cache_count = db.import_clustering_cache_from_json(cache_data, conference, year)
+                progress(f"  Imported {clustering_cache_count} clustering cache entries")
+            except Exception as cache_err:
+                # Clustering cache import failure is non-fatal — the cache
+                # can be regenerated, so we log a warning instead of
+                # rolling back the entire import.
+                progress(f"  ⚠️  Clustering cache import failed (non-fatal): {cache_err}")
+                logger.warning("Clustering cache import failed for %s/%s: %s", conference, year, cache_err)
+
         return {
             "paper_count": paper_count,
             "embedding_count": embedding_count,
+            "clustering_cache_count": clustering_cache_count,
         }
 
     # ------------------------------------------------------------------
@@ -885,14 +928,17 @@ class RegistryClient:
             all_files: List[str] = []
             total_papers = 0
             total_embeddings = 0
+            total_clustering_cache = 0
             year_tags: List[str] = []
 
             for yr in years:
                 yr_data = self._export_year(conference, yr, temp_dir, _progress)
                 yr_files = [str(yr_data["paper_db_path"]), str(yr_data["embeddings_path"])]
+                yr_files.append(str(yr_data["clustering_cache_path"]))
                 all_files.extend(yr_files)
                 total_papers += yr_data["paper_count"]
                 total_embeddings += yr_data["embedding_count"]
+                total_clustering_cache += yr_data["clustering_cache_count"]
 
                 # When uploading multiple years, push each year as its own tag first
                 if year is None:
@@ -906,6 +952,7 @@ class RegistryClient:
                         "years": [yr],
                         "paper_count": yr_data["paper_count"],
                         "embedding_count": yr_data["embedding_count"],
+                        "clustering_cache_count": yr_data["clustering_cache_count"],
                         "embedding_model": embedding_model,
                     }
                     yr_config_path = temp_dir / f"config-{yr}.json"
@@ -931,6 +978,7 @@ class RegistryClient:
                 "years": years,
                 "paper_count": total_papers,
                 "embedding_count": total_embeddings,
+                "clustering_cache_count": total_clustering_cache,
                 "embedding_model": embedding_model,
             }
             config_path = temp_dir / "config.json"
@@ -956,6 +1004,7 @@ class RegistryClient:
                 "years": years,
                 "paper_count": total_papers,
                 "embedding_count": total_embeddings,
+                "clustering_cache_count": total_clustering_cache,
             }
             if year_tags:
                 summary["year_tags"] = year_tags
@@ -1076,8 +1125,9 @@ class RegistryClient:
                     break
 
             # --- 2. Group files by year ---
-            # Files are named papers-YYYY.db and embeddings-YYYY.json
-            # (or papers.db / embeddings.json for legacy single-year artifacts)
+            # Files are named papers-YYYY.db, embeddings-YYYY.json, and
+            # clustering-YYYY.json (or papers.db / embeddings.json for
+            # legacy single-year artifacts)
             year_files: Dict[int, Dict[str, Path]] = {}
             for fpath in pulled_files:
                 p = Path(fpath)
@@ -1096,6 +1146,13 @@ class RegistryClient:
                         logger.warning(f"Skipping file with invalid year format: {name}")
                         continue
                     year_files.setdefault(yr, {})["embeddings"] = p
+                elif name.startswith("clustering-") and name.endswith(".json"):
+                    try:
+                        yr = int(name[len("clustering-") : -len(".json")])
+                    except ValueError:
+                        logger.warning(f"Skipping file with invalid year format: {name}")
+                        continue
+                    year_files.setdefault(yr, {})["clustering_cache"] = p
                 elif name == "papers.db":
                     # Legacy single-year format
                     legacy_year = year or metadata.get("year")
@@ -1127,12 +1184,14 @@ class RegistryClient:
             # --- 4. Import each year ---
             total_papers = 0
             total_embeddings = 0
+            total_clustering_cache = 0
             imported_years: List[int] = []
 
             for yr in sorted(year_files.keys()):
                 files = year_files[yr]
                 paper_db = files["paper_db"]
                 embeddings = files["embeddings"]
+                clustering_cache = files.get("clustering_cache")
 
                 result = self._import_year(
                     conference,
@@ -1142,9 +1201,11 @@ class RegistryClient:
                     _progress,
                     embedding_model=embedding_model,
                     ignore_embedding_model_mismatch=ignore_embedding_model_mismatch,
+                    clustering_cache_file=clustering_cache,
                 )
                 total_papers += result["paper_count"]
                 total_embeddings += result["embedding_count"]
+                total_clustering_cache += result["clustering_cache_count"]
                 imported_years.append(yr)
 
             if not imported_years:
@@ -1157,6 +1218,7 @@ class RegistryClient:
                 "years": imported_years,
                 "paper_count": total_papers,
                 "embedding_count": total_embeddings,
+                "clustering_cache_count": total_clustering_cache,
                 "metadata": metadata,
             }
 

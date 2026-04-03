@@ -1978,11 +1978,13 @@ class DatabaseManager:
         output_path: "Path",
         conference: str,
         year: int,
+        include_clustering_cache: bool = True,
     ) -> int:
         """
         Export papers for a given conference and year to a standalone SQLite file.
 
-        The exported file also includes any matching clustering cache,
+        The exported file also includes any matching clustering cache
+        (unless *include_clustering_cache* is ``False``),
         hierarchical label cache, and embeddings metadata rows.
 
         Parameters
@@ -1993,6 +1995,11 @@ class DatabaseManager:
             Conference name to export.
         year : int
             Year to export.
+        include_clustering_cache : bool, optional
+            Whether to include matching clustering cache entries in the
+            exported SQLite file.  Set to ``False`` when the clustering
+            cache is exported as a separate artifact layer.  Default is
+            ``True`` for backward compatibility.
 
         Returns
         -------
@@ -2023,10 +2030,11 @@ class DatabaseManager:
                     paper_count += 1
 
                 # Export only clustering cache entries matching conference+year
-                for entry in self._session.execute(select(ClusteringCache)).scalars():
-                    if self._clustering_cache_matches_conference_year(entry, conference, year):
-                        entry_dict = {c.name: getattr(entry, c.name) for c in ClusteringCache.__table__.columns}
-                        export_session.add(ClusteringCache(**entry_dict))
+                if include_clustering_cache:
+                    for entry in self._session.execute(select(ClusteringCache)).scalars():
+                        if self._clustering_cache_matches_conference_year(entry, conference, year):
+                            entry_dict = {c.name: getattr(entry, c.name) for c in ClusteringCache.__table__.columns}
+                            export_session.add(ClusteringCache(**entry_dict))
 
                 # Export hierarchical label cache
                 for entry in self._session.execute(select(HierarchicalLabelCache)).scalars():
@@ -2196,3 +2204,137 @@ class DatabaseManager:
         except Exception as e:
             self._session.rollback()
             raise DatabaseError(f"Failed to import papers: {str(e)}") from e
+
+    # ------------------------------------------------------------------
+    # Clustering cache JSON export / import
+    # ------------------------------------------------------------------
+
+    def export_clustering_cache_to_json(
+        self,
+        conference: str,
+        year: int,
+    ) -> Dict[str, Any]:
+        """
+        Export clustering cache entries matching *conference* and *year* as JSON.
+
+        Parameters
+        ----------
+        conference : str
+            Conference name to match.
+        year : int
+            Year to match.
+
+        Returns
+        -------
+        dict
+            A JSON-serialisable dictionary with an ``entries`` list.
+            Each entry contains all :class:`ClusteringCache` columns except
+            ``id`` (auto-generated on import).
+
+        Raises
+        ------
+        DatabaseError
+            If the export fails.
+        """
+        import json as _json
+
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            entries: List[Dict[str, Any]] = []
+            for entry in self._session.execute(select(ClusteringCache)).scalars():
+                if self._clustering_cache_matches_conference_year(entry, conference, year):
+                    row: Dict[str, Any] = {}
+                    for col in ClusteringCache.__table__.columns:
+                        if col.name == "id":
+                            continue  # skip PK; it will be auto-generated on import
+                        val = getattr(entry, col.name)
+                        if col.name in ("clustering_params", "results_json") and isinstance(val, str):
+                            val = _json.loads(val)
+                        elif col.name == "created_at" and val is not None:
+                            val = val.isoformat()
+                        row[col.name] = val
+                    entries.append(row)
+
+            return {"entries": entries}
+
+        except DatabaseError:
+            raise
+        except Exception as e:
+            raise DatabaseError(f"Failed to export clustering cache: {str(e)}") from e
+
+    def import_clustering_cache_from_json(
+        self,
+        data: Dict[str, Any],
+        conference: str,
+        year: int,
+    ) -> int:
+        """
+        Import clustering cache entries from a JSON dictionary.
+
+        Existing clustering cache entries matching *conference* and *year*
+        are deleted before importing the new entries.
+
+        Parameters
+        ----------
+        data : dict
+            Dictionary previously returned by
+            :meth:`export_clustering_cache_to_json`.
+        conference : str
+            Conference name for scoping the delete.
+        year : int
+            Year for scoping the delete.
+
+        Returns
+        -------
+        int
+            Number of cache entries imported.
+
+        Raises
+        ------
+        DatabaseError
+            If the import fails.
+        """
+        import json as _json
+
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            # Delete existing matching entries
+            for entry in self._session.execute(select(ClusteringCache)).scalars().all():
+                if self._clustering_cache_matches_conference_year(entry, conference, year):
+                    self._session.delete(entry)
+
+            count = 0
+            for item in data.get("entries", []):
+                row = dict(item)  # shallow copy
+
+                # Re-serialise parsed JSON fields back to strings for DB storage
+                if "clustering_params" in row and row["clustering_params"] is not None:
+                    if not isinstance(row["clustering_params"], str):
+                        row["clustering_params"] = _json.dumps(row["clustering_params"])
+
+                if "results_json" in row and row["results_json"] is not None:
+                    if not isinstance(row["results_json"], str):
+                        row["results_json"] = _json.dumps(row["results_json"])
+
+                # Convert ISO-format created_at back to datetime
+                if "created_at" in row and isinstance(row["created_at"], str):
+                    row["created_at"] = datetime.fromisoformat(row["created_at"])
+
+                # Drop 'id' if present — let the DB auto-generate it
+                row.pop("id", None)
+
+                self._session.add(ClusteringCache(**row))
+                count += 1
+
+            self._session.commit()
+            return count
+
+        except DatabaseError:
+            raise
+        except Exception as e:
+            self._session.rollback()
+            raise DatabaseError(f"Failed to import clustering cache: {str(e)}") from e

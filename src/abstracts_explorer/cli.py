@@ -1808,7 +1808,8 @@ def registry_upload_command(args: argparse.Namespace) -> int:
             for s in summaries:
                 print(
                     f"  📦 {s.get('conference', '')}: {s.get('paper_count', 0)} papers, "
-                    f"{s.get('embedding_count', 0)} embeddings (tag: {s.get('tag', '')})"
+                    f"{s.get('embedding_count', 0)} embeddings, "
+                    f"{s.get('clustering_cache_count', 0)} cache entries (tag: {s.get('tag', '')})"
                 )
         else:
             summary = client.upload(
@@ -1820,6 +1821,7 @@ def registry_upload_command(args: argparse.Namespace) -> int:
             print("\n✅ Upload complete!")
             print(f"  📄 Papers:     {summary.get('paper_count', 0)}")
             print(f"  🧮 Embeddings: {summary.get('embedding_count', 0)}")
+            print(f"  📦 Cache:      {summary.get('clustering_cache_count', 0)}")
             print(f"  📅 Years:      {summary.get('years', [])}")
             print(f"  🏷️  Tag:        {summary.get('tag', '')}")
 
@@ -1922,7 +1924,8 @@ def registry_download_command(args: argparse.Namespace) -> int:
                 for s in summaries:
                     print(
                         f"  📦 {s.get('conference', '')}: {s.get('paper_count', 0)} papers, "
-                        f"{s.get('embedding_count', 0)} embeddings"
+                        f"{s.get('embedding_count', 0)} embeddings, "
+                        f"{s.get('clustering_cache_count', 0)} cache entries"
                     )
             else:
                 summary = client.download(
@@ -1937,6 +1940,7 @@ def registry_download_command(args: argparse.Namespace) -> int:
                 print("\n✅ Download complete!")
                 print(f"  📄 Papers:     {summary.get('paper_count', 0)}")
                 print(f"  🧮 Embeddings: {summary.get('embedding_count', 0)}")
+                print(f"  📦 Cache:      {summary.get('clustering_cache_count', 0)}")
                 print(f"  📅 Years:      {summary.get('years', [])}")
 
                 metadata = summary.get("metadata", {})
