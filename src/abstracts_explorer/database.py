@@ -966,7 +966,7 @@ class DatabaseManager:
         original *conference* string is returned unchanged.
 
         This is the single authoritative place where conference-name
-        normalisation must happen.  CLI commands should call this method
+        normalization must happen.  CLI commands should call this method
         **once** at the entry point of each command and then work with the
         returned canonical name for all subsequent operations.
 
