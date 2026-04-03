@@ -3103,6 +3103,24 @@ class TestParseVersionFromTag:
         result = _parse_version_from_tag("neurips_model_0.4.1.dev2")
         assert result == Version("0.4.1.dev2")
 
+    def test_dev_version_with_local_segment_sanitized(self):
+        """OCI-sanitized dev+local versions ('+' replaced with '-') must round-trip correctly."""
+        from abstracts_explorer.registry import _parse_version_from_tag
+        from packaging.version import Version
+
+        # "0.4.6.dev16+g7005b7837" is sanitized to "0.4.6.dev16-g7005b7837" in OCI tags.
+        result = _parse_version_from_tag("ml4ps-neurips-2022_alias-qwen3-8b-embeddings_0.4.6.dev16-g7005b7837")
+        assert result == Version("0.4.6.dev16+g7005b7837")
+
+    def test_dev_version_local_segment_compares_below_release(self):
+        """Sanitized dev+local versions must compare as < the corresponding release."""
+        from abstracts_explorer.registry import _parse_version_from_tag
+        from packaging.version import Version
+
+        v = _parse_version_from_tag("ml4ps-neurips-2022_model_0.4.6.dev16-g7005b7837")
+        assert v is not None
+        assert v < Version("0.5.0")  # must be picked up by --below-version 0.5.0
+
     def test_model_with_underscores(self):
         from abstracts_explorer.registry import _parse_version_from_tag
         from packaging.version import Version

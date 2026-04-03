@@ -173,11 +173,18 @@ def _parse_version_from_tag(tag: str) -> Optional[Version]:
     step so a normal semantic-version string (e.g. ``0.4.1``) round-trips
     unchanged.
 
+    OCI sanitization (``_sanitize_str_for_oci_tag``) replaces the ``+``
+    PEP 440 local-version separator with ``-``, so dev versions such as
+    ``0.4.6.dev16+g7005b7837`` appear in tags as ``0.4.6.dev16-g7005b7837``.
+    This function recovers the original version by trying all ``-`` → ``+``
+    substitution positions until one produces a valid PEP 440 version.
+
     Parameters
     ----------
     tag : str
         OCI tag string (without repository prefix), e.g.
-        ``neurips-2024_text-embedding-ada-002_0.4.1``.
+        ``neurips-2024_text-embedding-ada-002_0.4.1`` or
+        ``ml4ps-neurips-2022_model_0.4.6.dev16-g7005b7837``.
 
     Returns
     -------
@@ -188,10 +195,21 @@ def _parse_version_from_tag(tag: str) -> Optional[Version]:
     if "_" not in tag:
         return None
     raw = tag.rsplit("_", 1)[-1]
+    # Fast path: standard release or pre-release without a local segment.
     try:
         return Version(raw)
     except InvalidVersion:
-        return None
+        pass
+    # OCI sanitization replaces '+' (PEP 440 local-version separator) with '-'.
+    # Try restoring '+' at each '-' position until we find a valid version.
+    parts = raw.split("-")
+    for i in range(1, len(parts)):
+        candidate = "-".join(parts[:i]) + "+" + "-".join(parts[i:])
+        try:
+            return Version(candidate)
+        except InvalidVersion:
+            continue
+    return None
 
 
 class RegistryClient:
