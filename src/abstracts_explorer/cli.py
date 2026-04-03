@@ -2082,6 +2082,98 @@ def registry_list_command(args: argparse.Namespace) -> int:
         return 1
 
 
+def registry_delete_command(args: argparse.Namespace) -> int:
+    """
+    Delete registry package versions whose tag version is older than a given version.
+
+    Uses the GitHub Packages API to list all versions of the container package
+    and deletes those whose OCI tag version is strictly below *below_version*.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments containing:
+        - repository: OCI repository path
+        - token: Authentication token
+        - below_version: Threshold version (e.g. "0.4.0"); versions older than this are deleted
+        - conference: Optional conference filter (only tags for this conference are checked)
+        - dry_run: When True, print what would be deleted without deleting
+        - yes: Skip confirmation prompt
+
+    Returns
+    -------
+    int
+        Exit code (0 for success, non-zero for failure)
+    """
+    from abstracts_explorer.registry import RegistryClient, RegistryError
+
+    config = get_config()
+    repository = args.repository or config.registry_repository
+    token = args.token or config.github_token
+
+    if not repository:
+        print(
+            "❌ Repository not specified. Use --repository or set REGISTRY_REPOSITORY env var.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if not token:
+        print(
+            "❌ Authentication token not specified. Use --token or set GITHUB_TOKEN env var.",
+            file=sys.stderr,
+        )
+        return 1
+
+    below_version = args.below_version
+    conference = getattr(args, "conference", None)
+    dry_run: bool = getattr(args, "dry_run", False)
+
+    print("Abstracts Explorer - Registry Delete Old Versions")
+    print("=" * 70)
+    print(f"Repository:     {repository}")
+    print(f"Delete below:   {below_version}")
+    print(f"Conference:     {conference or 'all'}")
+    print(f"Dry-run:        {dry_run}")
+    print("=" * 70)
+
+    if not dry_run and not getattr(args, "yes", False):
+        confirm = input(
+            f"\n⚠️  This will permanently delete all versions below {below_version} from {repository}.\n"
+            "Type 'yes' to confirm: "
+        )
+        if confirm.strip().lower() != "yes":
+            print("Aborted.")
+            return 1
+
+    try:
+        client = RegistryClient(repository=repository, token=token)
+        deleted = client.delete_old_versions(
+            below_version=below_version,
+            conference=conference,
+            dry_run=dry_run,
+            progress_callback=lambda msg: print(f"  {msg}"),
+        )
+        action = "would be deleted" if dry_run else "deleted"
+        print(f"\n{'✅' if not dry_run else '🔍'} Done. {len(deleted)} version(s) {action}.")
+        if deleted:
+            for entry in deleted:
+                tags_str = ", ".join(entry.get("tags", []))
+                print(f"  {'[dry-run] ' if dry_run else ''}🗑️  {tags_str}")
+        return 0
+
+    except ValueError as e:
+        print(f"\n❌ Invalid version: {e}", file=sys.stderr)
+        return 1
+    except RegistryError as e:
+        print(f"\n❌ Registry error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"\n❌ Unexpected error: {e}", file=sys.stderr)
+        logger.exception("Delete failed")
+        return 1
+
+
 def pre_process_command(args: argparse.Namespace) -> int:
     """
     Run the full pre-processing pipeline: download → create-embeddings → clustering pre-generate.
@@ -3045,6 +3137,61 @@ Examples:
     )
     add_conference_year_args(registry_list_parser)
 
+    # registry delete
+    registry_delete_parser = registry_subparsers.add_parser(
+        "delete",
+        help="Delete registry package versions below a given version",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+Delete registry package versions whose OCI tag version is strictly below a given threshold.
+
+Uses the GitHub Packages API to list all versions of the container package and permanently
+deletes those that are outdated.  Untagged (dangling) versions are left untouched.
+
+Examples:
+  # Delete all versions below 0.4.0
+  abstracts-explorer registry delete --below-version 0.4.0 \\
+    --repository ghcr.io/thawn/abstracts-data
+
+  # Preview without actually deleting (dry-run)
+  abstracts-explorer registry delete --below-version 0.4.0 --dry-run \\
+    --repository ghcr.io/thawn/abstracts-data
+
+  # Delete only NeurIPS versions below 0.4.0
+  abstracts-explorer registry delete --below-version 0.4.0 --conference neurips \\
+    --repository ghcr.io/thawn/abstracts-data
+
+  # Skip confirmation prompt
+  abstracts-explorer registry delete --below-version 0.4.0 --yes \\
+    --repository ghcr.io/thawn/abstracts-data
+        """,
+    )
+    _add_registry_args(registry_delete_parser)
+    registry_delete_parser.add_argument(
+        "--below-version",
+        type=str,
+        required=True,
+        metavar="VERSION",
+        help="Delete all versions strictly below this version (e.g., '0.4.0'). Must be a valid PEP 440 version.",
+    )
+    registry_delete_parser.add_argument(
+        "--conference",
+        "-c",
+        type=str,
+        default=None,
+        help="Only delete versions whose tags belong to this conference (optional; all conferences if omitted).",
+    )
+    registry_delete_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview which versions would be deleted without actually deleting them.",
+    )
+    registry_delete_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip confirmation prompt.",
+    )
+
     # Pre-process command
     pre_process_parser = subparsers.add_parser(
         "pre-process",
@@ -3144,6 +3291,8 @@ Examples:
             return registry_download_command(args)
         elif args.registry_command == "list":
             return registry_list_command(args)
+        elif args.registry_command == "delete":
+            return registry_delete_command(args)
         else:
             registry_parser.print_help()
             return 1
