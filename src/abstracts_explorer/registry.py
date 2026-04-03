@@ -350,7 +350,7 @@ class RegistryClient:
         if len(parts) != 2:
             return True
         suffix = parts[1]
-        # A year suffix is exactly 4 digits in a plausible conference year range.
+        # A year suffix is exactly 4 digits.
         return not (suffix.isdigit() and len(suffix) == 4)
 
     def _find_best_matching_tag(self, tag: str) -> str:
