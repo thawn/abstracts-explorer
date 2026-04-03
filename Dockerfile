@@ -29,6 +29,7 @@ WORKDIR /app
 # Install runtime dependencies only
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    bash-completion \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
@@ -47,6 +48,9 @@ COPY --chown=abstracts:abstracts README.md LICENSE ./
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONPATH="/app/src:${PYTHONPATH}" \
     PYTHONUNBUFFERED=1
+
+# Enable bash tab completion for the abstracts-explorer command
+RUN activate-global-python-argcomplete
 
 # Copy default .env configuration
 COPY --chown=abstracts:abstracts .env.docker /app/.env
