@@ -850,6 +850,57 @@ class TestDatabaseExportImport:
         finally:
             db.close()
 
+    def test_import_clustering_cache_overwrites_embedding_model(self, tmp_path):
+        """overwrite_embedding_model replaces the model in every imported entry.
+
+        This covers the --ignore-embedding-model-mismatch scenario: the remote
+        artifact was built with a different embedding model.  After import the
+        cache entries must use the local model name so get_clustering_cache()
+        can find them.
+        """
+        from abstracts_explorer.db_models import ClusteringCache
+
+        db = _populate_test_db(tmp_path / "db.db")
+        try:
+            data = {
+                "entries": [
+                    {
+                        "embedding_model": "remote-model",
+                        "reduction_method": "pca",
+                        "n_components": 2,
+                        "clustering_method": "kmeans",
+                        "n_clusters": 3,
+                        "clustering_params": {"conferences": ["neurips"], "years": [2024]},
+                        "results_json": {"points": []},
+                        "created_at": "2025-01-01T00:00:00+00:00",
+                    },
+                    {
+                        "embedding_model": "remote-model",
+                        "reduction_method": "tsne",
+                        "n_components": 2,
+                        "clustering_method": "kmeans",
+                        "n_clusters": 5,
+                        "clustering_params": {"conferences": ["neurips"], "years": [2024]},
+                        "results_json": {"points": []},
+                        "created_at": "2025-01-01T00:00:00+00:00",
+                    },
+                ]
+            }
+            count = db.import_clustering_cache_from_json(
+                data, "neurips", 2024, overwrite_embedding_model="local-model"
+            )
+            assert count == 2
+
+            entries = db._session.query(ClusteringCache).all()
+            assert len(entries) == 2
+            # All entries must carry the LOCAL model name, not the remote one
+            for entry in entries:
+                assert entry.embedding_model == "local-model", (
+                    f"Expected 'local-model', got '{entry.embedding_model}'"
+                )
+        finally:
+            db.close()
+
     def test_import_clustering_cache_replaces_existing(self, tmp_path):
         """Import replaces existing matching cache entries."""
         import json as _json

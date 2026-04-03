@@ -2312,6 +2312,7 @@ class DatabaseManager:
         data: Dict[str, Any],
         conference: str,
         year: int,
+        overwrite_embedding_model: Optional[str] = None,
     ) -> int:
         """
         Import clustering cache entries from a JSON dictionary.
@@ -2328,6 +2329,13 @@ class DatabaseManager:
             Conference name for scoping the delete.
         year : int
             Year for scoping the delete.
+        overwrite_embedding_model : str, optional
+            When provided, the ``embedding_model`` field of every imported
+            entry is replaced with this value.  Use this when importing an
+            artifact whose embedding model differs from the locally
+            configured one (i.e. when ``--ignore-embedding-model-mismatch``
+            was passed) so that :meth:`get_clustering_cache` can find the
+            entries using the local model name.
 
         Returns
         -------
@@ -2391,6 +2399,10 @@ class DatabaseManager:
 
                 # Drop 'id' if present — let the DB auto-generate it
                 row.pop("id", None)
+
+                # Replace embedding_model when instructed (e.g. mismatch ignored)
+                if overwrite_embedding_model is not None:
+                    row["embedding_model"] = overwrite_embedding_model
 
                 self._session.add(ClusteringCache(**row))
                 count += 1

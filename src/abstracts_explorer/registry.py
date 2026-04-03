@@ -729,7 +729,12 @@ class RegistryClient:
             cache_data = json.loads(clustering_cache_file.read_text())  # type: ignore[union-attr]
             with DatabaseManager() as db:
                 db.create_tables()
-                clustering_cache_count = db.import_clustering_cache_from_json(cache_data, conference, year)
+                clustering_cache_count = db.import_clustering_cache_from_json(
+                    cache_data,
+                    conference,
+                    year,
+                    overwrite_embedding_model=embedding_model if embedding_model else None,
+                )
             progress(f"  Imported {clustering_cache_count} clustering cache entries")
         except Exception as cache_err:
             raise RegistryError(f"Clustering cache import failed for {conference}/{year}: {cache_err}") from cache_err
