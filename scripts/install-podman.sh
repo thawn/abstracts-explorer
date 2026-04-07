@@ -49,8 +49,9 @@ download() {
 }
 
 generate_password() {
-    # 32-character alphanumeric password
-    head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 32
+    # 32-character alphanumeric password.  Read 48 random bytes to ensure
+    # enough characters survive the base64 + alphanumeric filter.
+    head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 32
 }
 
 # ── parse arguments ──────────────────────────────────────────────────────────
@@ -92,9 +93,10 @@ fi
 # ── 2. Download configuration files ──────────────────────────────────────────
 info "Downloading configuration files from branch '$BRANCH'"
 
-# Environment file
+# Environment file (contains database password — restrict permissions)
 download "$BASE_URL/systemd/abstracts-explorer.env" \
          "$DEPLOY_DIR/abstracts-explorer.env"
+chmod 600 "$DEPLOY_DIR/abstracts-explorer.env"
 
 # Update script
 download "$BASE_URL/scripts/update-podman.sh" \

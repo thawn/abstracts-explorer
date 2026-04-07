@@ -22,15 +22,15 @@ podman pull ghcr.io/thawn/abstracts-explorer:latest
 podman pull docker.io/postgres:16-alpine
 podman pull docker.io/chromadb/chroma:latest
 
-# Pull the reverse-proxy image (whichever variant is installed)
-if systemctl --user cat abstracts-nginx.service >/dev/null 2>&1; then
+# Pull the reverse-proxy image (whichever variant is active)
+if systemctl --user is-active --quiet abstracts-nginx.service 2>/dev/null; then
     podman pull docker.io/nginx:stable-alpine
     PROXY_UNIT="abstracts-nginx"
-elif systemctl --user cat abstracts-caddy.service >/dev/null 2>&1; then
+elif systemctl --user is-active --quiet abstracts-caddy.service 2>/dev/null; then
     podman pull docker.io/caddy:alpine
     PROXY_UNIT="abstracts-caddy"
 else
-    warn "No reverse-proxy unit found (nginx or caddy). Skipping proxy pull."
+    warn "No active reverse-proxy unit found (nginx or caddy). Skipping proxy pull."
     PROXY_UNIT=""
 fi
 

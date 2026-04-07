@@ -3,8 +3,8 @@
 #
 # Shared by both the nginx and Caddy TLS variants.  Configuration is loaded
 # from the environment file ~/abstracts-explorer/abstracts-explorer.env.
-# Sensitive values (API tokens, database password) are injected at runtime
-# via Podman secrets — see the install script or docs for setup.
+# API tokens are injected at runtime via Podman secrets — see the install
+# script or docs for setup.
 
 [Unit]
 Description=Abstracts Explorer application
@@ -19,11 +19,11 @@ Network=abstracts.network
 Volume=abstracts-data.volume:/app/data
 
 # Load all configurable environment variables from a single file.
+# The PAPER_DB connection string (including the database password) is set there.
 EnvironmentFile=%h/abstracts-explorer/abstracts-explorer.env
 
-# Sensitive values are injected via Podman secrets (never stored in plain text).
+# API token injected via Podman secret (never stored in plain text).
 Secret=llm-backend-auth-token,type=env,target=LLM_BACKEND_AUTH_TOKEN
-Secret=postgres-password,type=env,target=ABSTRACTS_POSTGRES_PASSWORD
 
 # Optional: uncomment after creating the secret with
 #   podman secret create github-token -
