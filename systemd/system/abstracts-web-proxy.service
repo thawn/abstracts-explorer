@@ -1,0 +1,24 @@
+# Forwards connections arriving on ports 80 and 443 (held by
+# abstracts-web.socket) to the rootless Podman proxy container (nginx or
+# Caddy) listening on 127.0.0.1:8080.
+#
+# systemd-socket-proxyd is part of systemd itself — no extra packages needed.
+# It transparently proxies the raw TCP stream so the proxy container sees the
+# original client connection.
+#
+# Because the socket unit sets SocketUser= to the deploying user, this
+# service inherits the socket file descriptors and runs without root.
+
+[Unit]
+Description=Forward HTTP/HTTPS to Abstracts Explorer proxy container
+Documentation=https://abstracts-explorer.readthedocs.io/en/latest/docker.html
+Requires=abstracts-web.socket
+After=abstracts-web.socket
+
+[Service]
+ExecStart=/lib/systemd/systemd-socket-proxyd 127.0.0.1:8080
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

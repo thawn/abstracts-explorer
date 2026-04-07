@@ -53,6 +53,7 @@ docs = [
     "myst-parser>=2.0.0",
     "sphinx-autodoc-typehints>=1.25.0",
     "linkify-it-py>=2.0.0",
+    "sphinxcontrib-mermaid>=2.0.1",
 ]
 web = [
     "flask>=3.0.0",
