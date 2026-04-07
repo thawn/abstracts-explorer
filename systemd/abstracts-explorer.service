@@ -1,37 +1,59 @@
-# Abstracts Explorer — systemd service unit (Docker Compose, existing-certificate variant)
+# Abstracts Explorer — systemd service unit (Docker Compose)
 #
-# This unit starts the Abstracts Explorer stack defined in docker-compose.yml,
-# which uses nginx with your own SSL certificate files (certs/cert.pem and
-# certs/key.pem).  If you want automatic Let's Encrypt certificates, use
-# abstracts-explorer-letsencrypt.service instead.
+# This unit starts the Abstracts Explorer stack defined in docker-compose.yml.
+# It works with any of the provided Compose configurations (existing certificate
+# or Let's Encrypt); copy the chosen file to this directory as docker-compose.yml.
 #
-# QUICK START
-# ===========
-# 1. Place docker-compose.yml, .env, and the nginx/ and certs/ directories in
-#    the deployment directory (default: /opt/abstracts-explorer).
-#    Adjust the WorkingDirectory path below if you chose a different location.
+# SETUP
+# =====
+# 1. Choose the Compose file that best matches your setup:
+#      - docker-compose.yml              (existing SSL certificate)
+#      - docker-compose.letsencrypt.yml  (automatic Let's Encrypt certificate)
 #
-# 2. Install and start the service:
+# 2. Copy the chosen file and its nginx configuration to the deployment directory
+#    (default: /opt/abstracts-explorer), renaming the Compose file to
+#    docker-compose.yml if necessary:
+#
+#      sudo mkdir -p /opt/abstracts-explorer
+#      sudo cp docker-compose.yml /opt/abstracts-explorer/
+#      sudo cp -r nginx/ /opt/abstracts-explorer/
+#      # If using the existing-certificate variant also copy the certs/ directory:
+#      sudo cp -r certs/ /opt/abstracts-explorer/
+#
+# 3. Add a .env file with any required tokens (e.g. LLM_BACKEND_AUTH_TOKEN):
+#
+#      sudo cp .env /opt/abstracts-explorer/
+#
+# 4. Edit /opt/abstracts-explorer/docker-compose.yml to set your configuration
+#    (domain name, model names, passwords, etc.).
+#
+# 5. If using Let's Encrypt, obtain the initial certificate first (nginx must
+#    not be running yet):
+#
+#      docker run --rm -p 80:80 \
+#        -v letsencrypt-certs:/etc/letsencrypt \
+#        certbot/certbot certonly --standalone \
+#        --domain your.domain.com \
+#        --email your@email.com \
+#        --agree-tos --non-interactive
+#
+# 6. Install and start the service:
 #
 #      sudo cp abstracts-explorer.service /etc/systemd/system/
 #      sudo systemctl daemon-reload
 #      sudo systemctl enable --now abstracts-explorer
 #
-# 3. Check service status:
+# 7. Check service status:
 #
 #      sudo systemctl status abstracts-explorer
 #      sudo journalctl -u abstracts-explorer -f
 #
 # PODMAN USERS
 # ============
-# Replace "docker compose" with "podman-compose" (or "podman compose" on
-# Podman 4.x+) in the ExecStart/ExecStop lines below, and change the
-# docker.socket dependency to "After=network-online.target" only (Podman is
-# daemonless).  For a rootless setup, install the unit as a user service
-# instead (see abstracts-explorer-podman.service).
+# Use abstracts-explorer-podman.service instead of this file.
 
 [Unit]
-Description=Abstracts Explorer (Docker Compose — existing certificate)
+Description=Abstracts Explorer (Docker Compose)
 Documentation=https://abstracts-explorer.readthedocs.io/en/latest/docker.html
 # Docker socket must be available before this service starts.
 Requires=docker.socket

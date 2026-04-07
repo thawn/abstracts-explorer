@@ -1,12 +1,12 @@
-# Abstracts Explorer — rootless Podman systemd service (existing-certificate variant)
+# Abstracts Explorer — rootless Podman systemd service
 #
 # This is a user-level (rootless) systemd service unit for running the
-# Abstracts Explorer stack with Podman Compose and your own SSL certificate.
+# Abstracts Explorer stack with Podman Compose.  It works with any of the
+# provided Compose configurations (existing certificate or Let's Encrypt);
+# copy the chosen file to this directory as docker-compose.yml.
 # User services run without root privileges, making them more secure.
 #
 # If you prefer a system-level Docker service, use abstracts-explorer.service.
-# For automatic Let's Encrypt certificates with Podman, use
-# abstracts-explorer-letsencrypt-podman.service.
 #
 # REQUIREMENTS
 # ============
@@ -14,24 +14,60 @@
 # - podman-compose: install with "pip install podman-compose" or your distro's package
 # - Lingering enabled for your user so the service survives log-out (see below)
 #
-# QUICK START
-# ===========
-# 1. Place docker-compose.yml, .env, and the nginx/ and certs/ directories in
-#    the deployment directory (default: ~/abstracts-explorer).
-#    Adjust the WorkingDirectory path below if you chose a different location.
+# SETUP
+# =====
+# 1. Choose the Compose file that best matches your setup:
+#      - docker-compose.yml              (existing SSL certificate)
+#      - docker-compose.letsencrypt.yml  (automatic Let's Encrypt certificate)
 #
-# 2. Enable lingering so your user services start at boot (one-time setup):
+# 2. Copy the chosen file and its nginx configuration to the deployment directory
+#    (default: ~/abstracts-explorer), renaming the Compose file to
+#    docker-compose.yml if necessary:
+#
+#      mkdir -p ~/abstracts-explorer
+#      cp docker-compose.yml ~/abstracts-explorer/
+#      cp -r nginx/ ~/abstracts-explorer/
+#      # If using the existing-certificate variant also copy the certs/ directory:
+#      cp -r certs/ ~/abstracts-explorer/
+#
+# 3. Add a .env file with any required tokens (e.g. LLM_BACKEND_AUTH_TOKEN):
+#
+#      cp .env ~/abstracts-explorer/
+#
+# 4. Edit ~/abstracts-explorer/docker-compose.yml to set your configuration
+#    (domain name, model names, passwords, etc.).
+#
+# 5. If using Let's Encrypt, obtain the initial certificate first (nginx must
+#    not be running yet):
+#
+#      podman run --rm -p 80:80 \
+#        -v letsencrypt-certs:/etc/letsencrypt \
+#        certbot/certbot certonly --standalone \
+#        --domain your.domain.com \
+#        --email your@email.com \
+#        --agree-tos --non-interactive
+#
+#    NOTE: Binding to ports 80 and 443 as a non-root user requires either
+#    "net.ipv4.ip_unprivileged_port_start=80" in sysctl, or a port mapping
+#    workaround.  On many distributions:
+#
+#      sudo sysctl -w net.ipv4.ip_unprivileged_port_start=80
+#      # To make it permanent:
+#      echo "net.ipv4.ip_unprivileged_port_start=80" | \
+#        sudo tee /etc/sysctl.d/99-unprivileged-ports.conf
+#
+# 6. Enable lingering so user services start at boot (one-time setup):
 #
 #      loginctl enable-linger $USER
 #
-# 3. Install and start the service as your regular user (no sudo needed):
+# 7. Install and start the service as your regular user (no sudo needed):
 #
 #      mkdir -p ~/.config/systemd/user/
 #      cp abstracts-explorer-podman.service ~/.config/systemd/user/abstracts-explorer.service
 #      systemctl --user daemon-reload
 #      systemctl --user enable --now abstracts-explorer
 #
-# 4. Check service status:
+# 8. Check service status:
 #
 #      systemctl --user status abstracts-explorer
 #      journalctl --user -u abstracts-explorer -f
@@ -42,7 +78,7 @@
 # replace "podman-compose" with "podman compose" in ExecStart/ExecStop below.
 
 [Unit]
-Description=Abstracts Explorer (Podman Compose — existing certificate)
+Description=Abstracts Explorer (Podman Compose)
 Documentation=https://abstracts-explorer.readthedocs.io/en/latest/docker.html
 # Wait for the network to be available.
 After=network-online.target
