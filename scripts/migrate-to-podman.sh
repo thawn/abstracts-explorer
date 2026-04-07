@@ -121,7 +121,7 @@ copy_to_volume() {
     podman run --rm \
         -v "$src_dir:/source:ro" \
         -v "${volume_name}:/dest" \
-        docker.io/alpine:latest \
+        docker.io/alpine:3.21 \
         sh -c "cp -a /source/. /dest/ && chown -R ${container_uid}:${container_gid} /dest/"
 
     ok "Copied to volume $volume_name"

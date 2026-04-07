@@ -758,8 +758,8 @@ journalctl --namespace=abstracts -u abstracts-explorer -f
 journalctl --namespace=abstracts -u 'abstracts-*' -f
 ```
 
-Logs are automatically deleted after 7 days (configured in the systemd
-service units).
+Logs are automatically deleted after 7 days via a dedicated journald namespace
+(`abstracts`) with `MaxRetentionSec=7day`.
 
 ### Updating containers
 

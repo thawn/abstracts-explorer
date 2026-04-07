@@ -180,8 +180,8 @@ cat > "$TMPDIR_JOURNAL/journald@abstracts.conf.d/retention.conf" <<'RETENTION'
 MaxRetentionSec=7day
 MaxFileSec=1day
 RETENTION
-sudo mkdir -p "$JOURNAL_NS_DIR"
-sudo cp "$TMPDIR_JOURNAL/journald@abstracts.conf.d/retention.conf" "$JOURNAL_NS_DIR/"
+sudo mkdir -p "$JOURNAL_NS_DIR" || die "Failed to create journal namespace directory (sudo required)"
+sudo cp "$TMPDIR_JOURNAL/journald@abstracts.conf.d/retention.conf" "$JOURNAL_NS_DIR/" || die "Failed to install journal retention config"
 rm -rf "$TMPDIR_JOURNAL"
 # Start the namespaced journal daemon
 sudo systemctl enable --now "systemd-journald@abstracts.service" 2>/dev/null || true
