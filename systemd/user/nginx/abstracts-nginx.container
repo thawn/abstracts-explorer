@@ -1,0 +1,28 @@
+[Unit]
+Description=Nginx reverse proxy for Abstracts Explorer (existing SSL certificate)
+After=abstracts-explorer.service
+Requires=abstracts-explorer.service
+
+[Container]
+Image=docker.io/nginx:stable-alpine
+ContainerName=abstracts-nginx
+Network=abstracts.network
+
+# nginx configuration listening on ports 8080 (HTTP) and 8443 (HTTPS).
+# Copy nginx/nginx.quadlet.conf from the repository to ~/abstracts-explorer/nginx/.
+Volume=%h/abstracts-explorer/nginx/nginx.quadlet.conf:/etc/nginx/nginx.conf:ro
+
+# SSL certificate files — place cert.pem and key.pem in ~/abstracts-explorer/certs/.
+Volume=%h/abstracts-explorer/certs:/etc/nginx/certs:ro
+
+# Bind to localhost only; the system-level socket proxy forwards port 80 → 8080
+# and port 443 → 8443, so these ports must not be publicly reachable directly.
+PublishPort=127.0.0.1:8080:8080
+PublishPort=127.0.0.1:8443:8443
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=60
+
+[Install]
+WantedBy=default.target

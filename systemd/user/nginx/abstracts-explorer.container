@@ -1,0 +1,70 @@
+[Unit]
+Description=Abstracts Explorer application
+After=abstracts-postgres.service abstracts-chromadb.service abstracts-data-volume.service
+Requires=abstracts-postgres.service abstracts-chromadb.service abstracts-data-volume.service
+
+[Container]
+Image=ghcr.io/thawn/abstracts-explorer:latest
+ContainerName=abstracts-explorer
+Network=abstracts.network
+
+Volume=abstracts-data.volume:/app/data
+
+Environment=DATA_DIR=/app/data
+
+# PostgreSQL connection string.
+# The password must match POSTGRES_PASSWORD in abstracts-postgres.container.
+Environment=PAPER_DB=postgresql://abstracts:change_me_in_production@abstracts-postgres:5432/abstracts
+
+# ChromaDB vector database (internal service name)
+Environment=EMBEDDING_DB=http://abstracts-chromadb:8000
+Environment=COLLECTION_NAME=papers
+
+# LLM backend — Blablador (external service) or LM Studio on the host.
+# For Blablador:
+Environment=LLM_BACKEND_URL=https://api.helmholtz-blablador.fz-juelich.de
+# For LM Studio on the host (Linux):
+# Environment=LLM_BACKEND_URL=http://host.containers.internal:1234
+
+# LLM_BACKEND_AUTH_TOKEN is read from a Podman secret (see docs/docker.md).
+#   podman secret create llm-backend-auth-token -
+Secret=llm-backend-auth-token,type=env,target=LLM_BACKEND_AUTH_TOKEN
+
+# Model names (Blablador defaults — adjust for your backend).
+Environment=CHAT_MODEL=alias-code
+Environment=EMBEDDING_MODEL=alias-qwen3-8b-embeddings
+# For LM Studio:
+# Environment=CHAT_MODEL=gemma-3-4b-it-qat
+# Environment=EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b
+
+# RAG settings
+Environment=MAX_CONTEXT_PAPERS=5
+Environment=ENABLE_QUERY_REWRITING=true
+Environment=QUERY_SIMILARITY_THRESHOLD=0.7
+
+# Logging (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+Environment=LOG_LEVEL=WARNING
+
+# Optional: registry credentials (uncomment and create secrets to enable).
+# podman secret create github-token -
+# Secret=github-token,type=env,target=GITHUB_TOKEN
+# Environment=REGISTRY_REPOSITORY=ghcr.io/thawn/abstracts-data
+
+# Reverse-proxy hop counts — must match the number of proxy layers (nginx = 1).
+Environment=PROXY_X_FOR=1
+Environment=PROXY_X_PROTO=1
+Environment=PROXY_X_HOST=1
+Environment=PROXY_X_PREFIX=1
+
+HealthCmd=curl -sf http://localhost:5000/health
+HealthInterval=30s
+HealthTimeout=10s
+HealthRetries=3
+HealthStartPeriod=15s
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=120
+
+[Install]
+WantedBy=default.target

@@ -600,91 +600,169 @@ services:
     restart: unless-stopped
 ```
 
-## Starting Automatically with systemd
+## Starting Automatically with systemd (Podman Quadlets)
 
-Example systemd unit files are provided in the `systemd/` directory so that
-the container stack starts automatically when the system boots.  Two unit files
-are available — one for Docker and one for Podman:
+The `systemd/` directory contains Podman
+[quadlet](https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html)
+files that integrate the container stack directly with systemd.  Quadlets are
+the modern, daemonless alternative to podman-compose: each container,
+volume, and network is a native systemd unit, giving you the full
+`systemctl` and `journalctl` experience with no compose wrapper needed.
 
-| File | Runtime |
-|------|---------|
-| `abstracts-explorer.service` | Docker (system service) |
-| `abstracts-explorer-podman.service` | Podman (rootless user service) |
+Two TLS variants are provided:
 
-Both unit files work with **any** of the Compose configurations in this
-repository.  The TLS setup (existing certificate or Let's Encrypt) is
-determined by which Compose file you copy and rename to `docker-compose.yml`
-in your deployment directory — the unit file itself does not change.
+| Directory | Reverse proxy | Certificate source |
+|---|---|---|
+| `systemd/user/nginx/` | nginx | Your own certificate files (`cert.pem` / `key.pem`) |
+| `systemd/user/caddy/` | Caddy | Automatic Let's Encrypt (recommended for public domains) |
 
-Each file is self-contained and contains step-by-step setup instructions in
-its header comments.  The general workflow is shown below.
+Choose **one** variant and follow the corresponding setup section below.
 
-### Workflow
+### How privileged ports work
 
-1. **Choose a Compose file** that best matches your setup:
-   - `docker-compose.yml` — existing SSL certificate
-   - `docker-compose.letsencrypt.yml` — automatic Let's Encrypt certificate
+Binding to ports 80 and 443 normally requires root.  Instead of relaxing the
+kernel's unprivileged-port limit (a system-wide change), the `systemd/system/`
+socket units let systemd (root) hold both ports and forward every accepted
+connection to the proxy container which listens on `127.0.0.1:8080` /
+`127.0.0.1:8443` as a normal user.  Only four files need root; all containers
+run rootless.
 
-2. **Copy the files** to a directory on your server.  If you chose
-   `docker-compose.letsencrypt.yml`, rename it to `docker-compose.yml`:
-
-   ```bash
-   # Example using the Let's Encrypt variant
-   sudo mkdir -p /opt/abstracts-explorer
-   sudo cp docker-compose.letsencrypt.yml /opt/abstracts-explorer/docker-compose.yml
-   sudo cp -r nginx/ /opt/abstracts-explorer/
-   ```
-
-3. **Add a `.env` file** with any required secrets (e.g. `LLM_BACKEND_AUTH_TOKEN`):
-
-   ```bash
-   sudo cp .env /opt/abstracts-explorer/
-   ```
-
-4. **Edit the Compose file** to set your configuration (domain name, model
-   names, passwords, etc.).
-
-5. **If using Let's Encrypt**, obtain the initial certificate before starting
-   the stack (see [Option 2: Let's Encrypt Certificate](#option-2-lets-encrypt-certificate)).
-
-6. **Install and start the systemd unit** — see the sections below.
-
-### Docker (system service)
+### Step 1 — Install the system socket units (run once as root)
 
 ```bash
-sudo cp systemd/abstracts-explorer.service /etc/systemd/system/
+sudo cp systemd/system/abstracts-http.socket          /etc/systemd/system/
+sudo cp systemd/system/abstracts-https.socket         /etc/systemd/system/
+sudo cp systemd/system/abstracts-http-proxy.service   /etc/systemd/system/
+sudo cp systemd/system/abstracts-https-proxy.service  /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now abstracts-explorer
-
-# Check status and logs
-sudo systemctl status abstracts-explorer
-sudo journalctl -u abstracts-explorer -f
+sudo systemctl enable --now abstracts-http.socket abstracts-https.socket
 ```
 
-### Podman (rootless user service)
+### Step 2 — Enable lingering for your user (run once)
 
-Rootless Podman services run as your regular user account — no root privileges
-are required.  The service starts at boot because lingering is enabled.
+Lingering allows your user-level systemd services to start at boot even when
+you are not logged in:
 
 ```bash
-# Enable lingering so user services survive log-out (one-time setup)
 loginctl enable-linger $USER
-
-mkdir -p ~/.config/systemd/user/
-cp systemd/abstracts-explorer-podman.service \
-     ~/.config/systemd/user/abstracts-explorer.service
-systemctl --user daemon-reload
-systemctl --user enable --now abstracts-explorer
-
-# Check status and logs
-systemctl --user status abstracts-explorer
-journalctl --user -u abstracts-explorer -f
 ```
 
-> **Tip:** The `WorkingDirectory` in each unit file defaults to
-> `/opt/abstracts-explorer` (Docker) or `%h/abstracts-explorer` (Podman,
-> where `%h` expands to your home directory).  Edit the unit file before
-> installing it if you placed the files in a different location.
+### Step 3 — Create Podman secrets for sensitive values
+
+Podman secrets are stored encrypted on disk and injected into containers as
+environment variables at runtime.  Create them before placing the quadlet files:
+
+```bash
+# Required: LLM backend API token
+printf '%s' 'your_blablador_token_here' | podman secret create llm-backend-auth-token -
+
+# Optional: GitHub token for the registry feature
+# printf '%s' 'ghp_xxxx' | podman secret create github-token -
+```
+
+> **Database password:** The `abstracts-postgres.container` and
+> `abstracts-explorer.container` quadlets ship with a placeholder password
+> (`change_me_in_production`).  Edit both files and replace every occurrence
+> of `change_me_in_production` with the same strong password before deploying.
+> Alternatively, create a Podman secret and follow the commented-out
+> `Secret=` instructions in each file.
+
+### Step 4 — Choose a TLS variant and copy quadlet files
+
+**Variant A — nginx with existing certificate:**
+
+```bash
+# Copy quadlet files
+mkdir -p ~/.config/containers/systemd
+cp systemd/user/nginx/*.container \
+   systemd/user/nginx/*.network \
+   systemd/user/nginx/*.volume \
+   ~/.config/containers/systemd/
+
+# Create the deployment directory and copy configuration
+mkdir -p ~/abstracts-explorer/nginx ~/abstracts-explorer/certs
+cp nginx/nginx.quadlet.conf ~/abstracts-explorer/nginx/
+
+# Place your SSL certificate and key
+cp /path/to/your/cert.pem ~/abstracts-explorer/certs/
+cp /path/to/your/key.pem  ~/abstracts-explorer/certs/
+```
+
+**Variant B — Caddy with automatic Let's Encrypt:**
+
+```bash
+# Copy quadlet files
+mkdir -p ~/.config/containers/systemd
+cp systemd/user/caddy/*.container \
+   systemd/user/caddy/*.network \
+   systemd/user/caddy/*.volume \
+   ~/.config/containers/systemd/
+
+# Create the deployment directory and copy Caddyfile
+mkdir -p ~/abstracts-explorer/caddy
+cp caddy/Caddyfile ~/abstracts-explorer/caddy/
+
+# Edit the Caddyfile — replace the placeholder domain and email
+nano ~/abstracts-explorer/caddy/Caddyfile
+```
+
+> **Let's Encrypt requirements:** your domain must be publicly reachable on
+> port 80 for the ACME HTTP-01 challenge.  Caddy handles certificate issuance
+> and renewal automatically on first startup — no manual Certbot step needed.
+
+### Step 5 — Customise the quadlet files
+
+Before starting, edit the container files in `~/.config/containers/systemd/`
+to match your deployment:
+
+| What to change | File(s) | Key |
+|---|---|---|
+| Database password | `abstracts-postgres.container`, `abstracts-explorer.container` | `POSTGRES_PASSWORD` / connection string |
+| LLM backend URL | `abstracts-explorer.container` | `LLM_BACKEND_URL` |
+| Model names | `abstracts-explorer.container` | `CHAT_MODEL`, `EMBEDDING_MODEL` |
+| Log level | `abstracts-explorer.container` | `LOG_LEVEL` |
+| Registry repo | `abstracts-explorer.container` | `REGISTRY_REPOSITORY` |
+
+### Step 6 — Start all services
+
+```bash
+systemctl --user daemon-reload
+systemctl --user start abstracts-postgres.service \
+                       abstracts-chromadb.service \
+                       abstracts-explorer.service \
+                       abstracts-nginx.service   # or abstracts-caddy.service
+```
+
+To start all units at once with auto-start on boot already set by `WantedBy=default.target`:
+
+```bash
+systemctl --user daemon-reload
+# The WantedBy=default.target directive in each .container file means all units
+# are already enabled.  Reload the daemon and start the default target:
+systemctl --user start default.target
+```
+
+### Step 7 — Check status and logs
+
+```bash
+# Summary of all user units
+systemctl --user status 'abstracts-*'
+
+# Follow logs for a specific container
+journalctl --user -u abstracts-explorer -f
+
+# Follow logs for all containers at once
+journalctl --user -u 'abstracts-*' -f
+```
+
+### Updating containers
+
+Pull new images and restart affected units:
+
+```bash
+podman pull ghcr.io/thawn/abstracts-explorer:latest
+systemctl --user restart abstracts-explorer.service
+```
 
 ## Further Reading
 

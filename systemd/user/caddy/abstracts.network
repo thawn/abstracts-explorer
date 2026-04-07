@@ -1,0 +1,7 @@
+# Shared Podman network for all Abstracts Explorer containers (Caddy variant).
+# All containers communicate over this internal bridge.
+# Ingress is handled by the Caddy container which publishes only
+# 127.0.0.1:8080 and 127.0.0.1:8443.
+
+[Network]
+Driver=bridge

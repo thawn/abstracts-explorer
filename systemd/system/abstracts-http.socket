@@ -1,0 +1,27 @@
+# System-level socket that opens port 80 on behalf of the rootless Podman stack.
+#
+# Why a system socket?
+#   Binding to ports below 1024 normally requires root.  Instead of lowering the
+#   kernel's unprivileged-port limit (which is a system-wide change), this socket
+#   unit lets systemd (running as root) hold port 80 and forward every accepted
+#   connection to the proxy container listening on 127.0.0.1:8080.
+#
+# Install (one-time, run as root):
+#   sudo cp systemd/system/abstracts-http.socket  /etc/systemd/system/
+#   sudo cp systemd/system/abstracts-https.socket /etc/systemd/system/
+#   sudo cp systemd/system/abstracts-http-proxy.service  /etc/systemd/system/
+#   sudo cp systemd/system/abstracts-https-proxy.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now abstracts-http.socket abstracts-https.socket
+
+[Unit]
+Description=HTTP socket for Abstracts Explorer (port 80)
+Documentation=https://abstracts-explorer.readthedocs.io/en/latest/docker.html
+
+[Socket]
+ListenStream=0.0.0.0:80
+# Accept=no means the socket is passed to a single service, not forked per connection.
+Accept=no
+
+[Install]
+WantedBy=sockets.target

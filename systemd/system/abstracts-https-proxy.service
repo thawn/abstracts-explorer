@@ -1,0 +1,18 @@
+# Forwards connections arriving on port 443 (held by abstracts-https.socket) to the
+# rootless Podman proxy container (nginx or Caddy) listening on 127.0.0.1:8443.
+#
+# See abstracts-http.socket for installation instructions.
+
+[Unit]
+Description=Forward HTTPS (port 443) to Abstracts Explorer proxy container
+Documentation=https://abstracts-explorer.readthedocs.io/en/latest/docker.html
+Requires=abstracts-https.socket
+After=abstracts-https.socket
+
+[Service]
+ExecStart=/lib/systemd/systemd-socket-proxyd 127.0.0.1:8443
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

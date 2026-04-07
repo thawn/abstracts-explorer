@@ -1,0 +1,27 @@
+[Unit]
+Description=ChromaDB vector database for Abstracts Explorer (Caddy variant)
+After=abstracts-chromadb-data-volume.service
+Requires=abstracts-chromadb-data-volume.service
+
+[Container]
+Image=docker.io/chromadb/chroma:latest
+ContainerName=abstracts-chromadb
+Network=abstracts.network
+
+Volume=abstracts-chromadb-data.volume:/data
+
+Environment=IS_PERSISTENT=TRUE
+Environment=ANONYMIZED_TELEMETRY=FALSE
+
+HealthCmd=curl -sf http://localhost:8000/api/v1/heartbeat
+HealthInterval=10s
+HealthTimeout=5s
+HealthRetries=5
+HealthStartPeriod=15s
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=120
+
+[Install]
+WantedBy=default.target
