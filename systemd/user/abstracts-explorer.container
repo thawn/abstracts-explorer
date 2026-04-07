@@ -3,8 +3,8 @@
 #
 # Shared by both the nginx and Caddy TLS variants.  Configuration is loaded
 # from the environment file ~/abstracts-explorer/abstracts-explorer.env.
-# API tokens are injected at runtime via Podman secrets — see the install
-# script or docs for setup.
+# Secrets (API tokens, database password) are injected at runtime via Podman
+# secrets — see the install script or docs for setup.
 
 [Unit]
 Description=Abstracts Explorer application
@@ -19,15 +19,25 @@ Network=abstracts.network
 Volume=abstracts-data.volume:/app/data
 
 # Load all configurable environment variables from a single file.
-# The PAPER_DB connection string (including the database password) is set there.
 EnvironmentFile=%h/abstracts-explorer/abstracts-explorer.env
 
-# API token injected via Podman secret (never stored in plain text).
+# Database password injected via Podman secret.  The entrypoint wrapper below
+# assembles the PAPER_DB connection string from the env-file variables
+# (POSTGRES_USER, POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB) and this secret.
+Secret=postgres-password,type=env,target=ABSTRACTS_DB_PASSWORD
+
+# LLM backend API token injected via Podman secret (never stored in plain text).
 Secret=llm-backend-auth-token,type=env,target=LLM_BACKEND_AUTH_TOKEN
 
 # Optional: uncomment after creating the secret with
-#   podman secret create github-token -
+#   printf '%s' 'YOUR_GITHUB_TOKEN' | podman secret create github-token -
+# See https://abstracts-explorer.readthedocs.io/en/latest/docker.html
 # Secret=github-token,type=env,target=GITHUB_TOKEN
+
+# Build PAPER_DB at runtime from env-file components + the secret password,
+# then exec the application.  This keeps the password out of the env file.
+Entrypoint=sh
+Exec=-c export PAPER_DB="postgresql://$${POSTGRES_USER}:$${ABSTRACTS_DB_PASSWORD}@$${POSTGRES_HOST}:$${POSTGRES_PORT}/$${POSTGRES_DB}" && exec abstracts-explorer web-ui --host 0.0.0.0 --port 5000
 
 HealthCmd=curl -sf http://localhost:5000/health
 HealthInterval=30s
@@ -38,6 +48,9 @@ HealthStartPeriod=15s
 [Service]
 Restart=on-failure
 TimeoutStartSec=120
+# GDPR: container logs go to a separate journal namespace that auto-deletes
+# entries older than 7 days (see /etc/systemd/journald@abstracts.conf.d/).
+LogNamespace=abstracts
 
 [Install]
 WantedBy=default.target

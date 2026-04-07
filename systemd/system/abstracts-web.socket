@@ -21,7 +21,7 @@ ListenStream=0.0.0.0:443
 # SocketUser is set to the uid of the user running the install script.
 # This allows the proxy service to run without root privileges.
 SocketUser=1000
-SocketMode=0660
+SocketMode=0600
 Accept=no
 
 [Install]

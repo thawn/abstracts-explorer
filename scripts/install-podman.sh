@@ -10,14 +10,14 @@
 #   curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/main/scripts/install-podman.sh | bash -s -- [OPTIONS]
 #
 # Options:
-#   --variant nginx|caddy   TLS variant (default: nginx)
+#   --variant caddy|nginx   TLS variant (default: caddy)
 #   --branch  BRANCH        Git branch to download from (default: main)
 #   --help                  Show this help message
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 # ── defaults ──────────────────────────────────────────────────────────────────
-VARIANT="nginx"
+VARIANT="caddy"
 BRANCH="main"
 BASE_URL=""  # set after parsing args
 DEPLOY_DIR="$HOME/abstracts-explorer"
@@ -32,7 +32,7 @@ die()   { printf '\033[1;31m✘ %s\033[0m\n' "$*" >&2; exit 1; }
 usage() {
     sed -n '/^# Usage:/,/^# ─/{ /^# ─/d; s/^# //; p }' "$0" 2>/dev/null || cat <<'EOF'
 Usage: install-podman.sh [OPTIONS]
-  --variant nginx|caddy   TLS variant (default: nginx)
+  --variant caddy|nginx   TLS variant (default: caddy)
   --branch  BRANCH        Git branch to download from (default: main)
   --help                  Show this help message
 EOF
@@ -93,7 +93,7 @@ fi
 # ── 2. Download configuration files ──────────────────────────────────────────
 info "Downloading configuration files from branch '$BRANCH'"
 
-# Environment file (contains database password — restrict permissions)
+# Environment file (no secrets — restrict permissions anyway for safety)
 download "$BASE_URL/systemd/abstracts-explorer.env" \
          "$DEPLOY_DIR/abstracts-explorer.env"
 chmod 600 "$DEPLOY_DIR/abstracts-explorer.env"
@@ -157,22 +157,37 @@ loginctl enable-linger "$USER"
 ok "Lingering enabled"
 
 # ── 4. Generate database password and store as Podman secret ─────────────────
-info "Generating database password"
-DB_PASSWORD=$(generate_password)
-
-# Create or replace the postgres-password secret
 if podman secret inspect postgres-password >/dev/null 2>&1; then
-    podman secret rm postgres-password >/dev/null
+    ok "Podman secret 'postgres-password' already exists — keeping it"
+else
+    info "Generating database password"
+    DB_PASSWORD=$(generate_password)
+    printf '%s' "$DB_PASSWORD" | podman secret create postgres-password -
+    ok "Podman secret 'postgres-password' created"
 fi
-printf '%s' "$DB_PASSWORD" | podman secret create postgres-password -
-ok "Podman secret 'postgres-password' created"
 
-# Patch the PAPER_DB connection string in the environment file
-sed -i "s|change_me_in_production|${DB_PASSWORD}|g" \
-    "$DEPLOY_DIR/abstracts-explorer.env"
-ok "Database password set in environment file"
+# ── 5. Configure log retention (GDPR: 7 days) ───────────────────────────────
+info "Configuring log retention (7 days) via journal namespace"
+# Create a journal namespace for Abstracts Explorer containers so their logs
+# are automatically deleted after 7 days without affecting system logs.
+JOURNAL_NS_DIR="/etc/systemd/journald@abstracts.conf.d"
+TMPDIR_JOURNAL=$(mktemp -d)
+mkdir -p "$TMPDIR_JOURNAL/journald@abstracts.conf.d"
+cat > "$TMPDIR_JOURNAL/journald@abstracts.conf.d/retention.conf" <<'RETENTION'
+# GDPR: delete Abstracts Explorer container logs after 7 days.
+# Installed by the Abstracts Explorer install script.
+[Journal]
+MaxRetentionSec=7day
+MaxFileSec=1day
+RETENTION
+sudo mkdir -p "$JOURNAL_NS_DIR"
+sudo cp "$TMPDIR_JOURNAL/journald@abstracts.conf.d/retention.conf" "$JOURNAL_NS_DIR/"
+rm -rf "$TMPDIR_JOURNAL"
+# Start the namespaced journal daemon
+sudo systemctl enable --now "systemd-journald@abstracts.service" 2>/dev/null || true
+ok "Log retention set to 7 days (journal namespace: abstracts)"
 
-# ── 5. Prompt for remaining configuration ────────────────────────────────────
+# ── 6. Prompt for remaining configuration ────────────────────────────────────
 echo ""
 info "Configuration files are in $DEPLOY_DIR"
 
@@ -194,7 +209,7 @@ warn "Review and edit the environment file:"
 echo "  $DEPLOY_DIR/abstracts-explorer.env"
 echo ""
 
-# ── 6. Print next steps ──────────────────────────────────────────────────────
+# ── 7. Print next steps ──────────────────────────────────────────────────────
 cat <<EOF
 
 $(ok "Installation complete!")
@@ -239,6 +254,11 @@ cat <<EOF
 
   5. Check status:
        systemctl --user status 'abstracts-*'
+
+  Optional — enable GitHub token for OCI registry downloads:
+       printf '%s' 'YOUR_GITHUB_TOKEN' | podman secret create github-token -
+       # Then uncomment the Secret=github-token line in:
+       #   $QUADLET_DIR/abstracts-explorer.container
 
 Documentation: https://abstracts-explorer.readthedocs.io/en/latest/docker.html
 EOF

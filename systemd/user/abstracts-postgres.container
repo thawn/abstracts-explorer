@@ -26,6 +26,7 @@ HealthStartPeriod=10s
 [Service]
 Restart=on-failure
 TimeoutStartSec=120
+LogNamespace=abstracts
 
 [Install]
 WantedBy=default.target

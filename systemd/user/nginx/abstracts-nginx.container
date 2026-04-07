@@ -4,7 +4,7 @@ After=abstracts-explorer.service
 Requires=abstracts-explorer.service
 
 [Container]
-Image=docker.io/nginx:stable-alpine
+Image=docker.io/nginxinc/nginx-unprivileged:stable-alpine
 ContainerName=abstracts-nginx
 Network=abstracts.network
 
@@ -21,6 +21,7 @@ PublishPort=127.0.0.1:8080:8080
 [Service]
 Restart=on-failure
 TimeoutStartSec=60
+LogNamespace=abstracts
 
 [Install]
 WantedBy=default.target

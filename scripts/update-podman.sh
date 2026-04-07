@@ -24,7 +24,7 @@ podman pull docker.io/chromadb/chroma:latest
 
 # Pull the reverse-proxy image (whichever variant is active)
 if systemctl --user is-active --quiet abstracts-nginx.service 2>/dev/null; then
-    podman pull docker.io/nginx:stable-alpine
+    podman pull docker.io/nginxinc/nginx-unprivileged:stable-alpine
     PROXY_UNIT="abstracts-nginx"
 elif systemctl --user is-active --quiet abstracts-caddy.service 2>/dev/null; then
     podman pull docker.io/caddy:alpine
@@ -45,4 +45,4 @@ fi
 ok "All services updated and restarted"
 echo ""
 echo "Check status:  systemctl --user status 'abstracts-*'"
-echo "Follow logs:   journalctl --user -u 'abstracts-*' -f"
+echo "Follow logs:   journalctl --namespace=abstracts -u 'abstracts-*' -f"

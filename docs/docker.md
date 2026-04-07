@@ -613,25 +613,27 @@ Two TLS variants are provided:
 
 | Variant | Reverse proxy | Certificate source |
 |---|---|---|
-| **nginx** | nginx | Your own certificate files (`cert.pem` / `key.pem`) |
-| **caddy** | Caddy | Automatic Let's Encrypt (recommended for public domains) |
+| **caddy** (default) | Caddy | Automatic Let's Encrypt (recommended for public domains) |
+| **nginx** | nginx (unprivileged) | Your own certificate files (`cert.pem` / `key.pem`) |
 
 ### Architecture
 
-```
-Internet ──► :80/:443 (systemd socket, root)
-                 │
-                 ▼
-         systemd-socket-proxyd ──► 127.0.0.1:8080
-                                        │
-                                        ▼
-                               nginx or Caddy (rootless Podman)
-                                        │
-                                        ▼
-                               abstracts-explorer:5000
-                                   │           │
-                                   ▼           ▼
-                              PostgreSQL    ChromaDB
+```mermaid
+flowchart TD
+    Internet["Internet"]
+    socket["systemd socket<br/>:80 / :443 (root)"]
+    proxy["systemd-socket-proxyd"]
+    rproxy["nginx or Caddy<br/>(rootless Podman)"]
+    app["abstracts-explorer:5000"]
+    pg["PostgreSQL"]
+    chroma["ChromaDB"]
+
+    Internet --> socket
+    socket --> proxy
+    proxy -->|"127.0.0.1:8080"| rproxy
+    rproxy --> app
+    app --> pg
+    app --> chroma
 ```
 
 Privileged ports 80/443 are held by a system-level systemd socket.
@@ -640,20 +642,22 @@ changes, no Docker daemon, no root containers.
 
 Sensitive values (API tokens, database password) are stored as
 [Podman secrets](https://docs.podman.io/en/latest/markdown/podman-secret-create.1.html)
-and injected at runtime — they never appear in plain text in unit files.
+and injected at runtime — they never appear in plain text in unit files or
+environment files.
+
+Container logs are automatically deleted after 7 days to comply with GDPR.
 
 ### Automated install
 
 An install script automates the full setup:
 
 ```bash
+# Caddy variant (automatic Let's Encrypt — default):
+curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/main/scripts/install-podman.sh | bash
+
 # nginx variant (existing SSL certificate):
 curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/main/scripts/install-podman.sh \
   | bash -s -- --variant nginx
-
-# Caddy variant (automatic Let's Encrypt):
-curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/main/scripts/install-podman.sh \
-  | bash -s -- --variant caddy
 ```
 
 The script:
@@ -661,6 +665,7 @@ The script:
 2. Installs the system socket units (requires `sudo`)
 3. Enables lingering for your user
 4. Generates a secure database password and stores it as a Podman secret
+   (skipped if the secret already exists)
 5. Prints the remaining manual steps
 
 After the script finishes, you only need to:
@@ -675,6 +680,10 @@ After the script finishes, you only need to:
    adjust model names, LLM backend URL, and other settings.
 
 3. **Set up TLS:**
+   - **Caddy:** edit `~/abstracts-explorer/caddy/Caddyfile` — replace
+     `abstracts.example.com` with your domain and `your@email.com` with
+     your email address.
+
    - **nginx:** place your certificate and key in `~/abstracts-explorer/certs/`
 
      ```bash
@@ -682,19 +691,15 @@ After the script finishes, you only need to:
      cp /path/to/key.pem  ~/abstracts-explorer/certs/
      ```
 
-   - **Caddy:** edit `~/abstracts-explorer/caddy/Caddyfile` — replace
-     `abstracts.example.com` with your domain and `your@email.com` with
-     your email address.
-
 4. **Start all services:**
 
    ```bash
    systemctl --user daemon-reload
    systemctl --user start abstracts-postgres abstracts-chromadb abstracts-explorer
-   # nginx variant:
-   systemctl --user start abstracts-nginx
    # Caddy variant:
    systemctl --user start abstracts-caddy
+   # nginx variant:
+   systemctl --user start abstracts-nginx
    ```
 
 ### Configuration
@@ -728,18 +733,33 @@ printf '%s' 'NEW_VALUE' | podman secret create --replace SECRET_NAME -
 systemctl --user restart abstracts-explorer  # pick up the new value
 ```
 
+**GitHub token (optional):** To enable OCI registry downloads, create the
+secret and then uncomment the `Secret=github-token` line in
+`~/.config/containers/systemd/abstracts-explorer.container`:
+
+```bash
+printf '%s' 'YOUR_GITHUB_TOKEN' | podman secret create github-token -
+# Then edit ~/.config/containers/systemd/abstracts-explorer.container
+# and uncomment:  Secret=github-token,type=env,target=GITHUB_TOKEN
+systemctl --user daemon-reload
+systemctl --user restart abstracts-explorer
+```
+
 ### Checking status and logs
 
 ```bash
 # Status of all services
 systemctl --user status 'abstracts-*'
 
-# Follow logs for a specific container
-journalctl --user -u abstracts-explorer -f
+# Follow logs for a specific container (uses the 'abstracts' journal namespace)
+journalctl --namespace=abstracts -u abstracts-explorer -f
 
 # Follow logs for all containers
-journalctl --user -u 'abstracts-*' -f
+journalctl --namespace=abstracts -u 'abstracts-*' -f
 ```
+
+Logs are automatically deleted after 7 days (configured in the systemd
+service units).
 
 ### Updating containers
 
@@ -754,6 +774,20 @@ Or download and run it directly:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/main/scripts/update-podman.sh | bash
 ```
+
+### Migrating existing data
+
+If you have an existing Docker Compose deployment and want to migrate to the
+Podman quadlet setup, use the migration script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/main/scripts/migrate-to-podman.sh | bash
+```
+
+The script copies data from `./data`, `./chroma_db`, and the PostgreSQL data
+directory into the new Podman named volumes and sets the correct ownership and
+permissions.  It creates a timestamped backup of the existing data before
+migrating.
 
 ## Further Reading
 
