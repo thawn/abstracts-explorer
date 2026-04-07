@@ -27,6 +27,7 @@ extensions = [
     "sphinx.ext.coverage",  # Check documentation coverage
     "myst_parser",  # Markdown support
     "sphinx_autodoc_typehints",  # Type hints support
+    "sphinxcontrib.mermaid",  # Mermaid diagram support
 ]
 
 # Napoleon settings for NumPy-style docstrings

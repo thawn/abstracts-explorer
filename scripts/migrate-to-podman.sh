@@ -94,49 +94,96 @@ if [ -d "$SOURCE_DIR/chroma_db" ]; then
 fi
 ok "Backup complete: $BACKUP_DIR"
 
+# ── helper: resolve UID/GID for an image ─────────────────────────────────────
+# In rootless Podman the host UID of files inside a volume differs from the
+# container-internal UID due to user-namespace UID remapping.  We therefore
+# query the container's own view of its UID/GID so that the chown command
+# runs inside the target namespace and Podman applies the correct mapping
+# automatically.
+#
+# Resolution order:
+#   1. Inspect the existing volume's mountpoint for the owner of its contents
+#      (most accurate when the volume was already initialised by the service).
+#   2. Run the image briefly with `id -u` / `id -g` to query the runtime UID.
+#   3. Fall back to the supplied defaults.
+get_uid_gid_for_volume() {
+    local volume_name="$1"
+    local image="$2"
+    local default_uid="${3:-0}"
+    local default_gid="${4:-0}"
+
+    # 1. Try to read from an existing, populated volume mountpoint
+    local mount_point
+    mount_point=$(podman volume inspect "$volume_name" --format '{{ .Mountpoint }}' 2>/dev/null || true)
+    if [ -n "$mount_point" ] && [ -d "$mount_point" ]; then
+        local first_entry
+        first_entry=$(find "$mount_point" -maxdepth 1 -mindepth 1 2>/dev/null | head -1)
+        if [ -n "$first_entry" ]; then
+            local vol_uid vol_gid
+            vol_uid=$(stat -c '%u' "$first_entry" 2>/dev/null || true)
+            vol_gid=$(stat -c '%g' "$first_entry" 2>/dev/null || true)
+            if [ -n "$vol_uid" ] && [ "$vol_uid" != "0" ]; then
+                echo "${vol_uid}:${vol_gid}"
+                return
+            fi
+        fi
+    fi
+
+    # 2. Query the running UID directly from the container image
+    local run_uid run_gid
+    run_uid=$(podman run --rm --quiet "$image" id -u 2>/dev/null || true)
+    run_gid=$(podman run --rm --quiet "$image" id -g 2>/dev/null || true)
+    if [ -n "$run_uid" ]; then
+        echo "${run_uid}:${run_gid:-$run_uid}"
+        return
+    fi
+
+    # 3. Fall back to defaults
+    echo "${default_uid}:${default_gid}"
+}
+
 # ── helper: copy data into a named volume ─────────────────────────────────────
 copy_to_volume() {
     local src_dir="$1"
     local volume_name="$2"
-    local container_uid="${3:-0}"
-    local container_gid="${4:-0}"
+    local owner="${3:-0:0}"   # "uid:gid" as seen inside the container namespace
 
     if [ ! -d "$src_dir" ]; then
         warn "Source directory $src_dir does not exist — skipping"
         return
     fi
 
-    info "Copying $src_dir → volume $volume_name"
+    info "Copying $src_dir → volume $volume_name (owner ${owner})"
 
     # Ensure the volume exists
     podman volume inspect "$volume_name" >/dev/null 2>&1 || \
         podman volume create "$volume_name"
 
-    # Get the volume mount point
-    local mount_point
-    mount_point=$(podman volume inspect "$volume_name" --format '{{ .Mountpoint }}')
-
-    # Copy contents (preserve structure, update ownership)
-    # Use a temporary container to copy data with correct permissions
+    # Copy contents inside a container so that Podman's user-namespace UID
+    # remapping is applied correctly — chown uses container-internal IDs.
     podman run --rm \
         -v "$src_dir:/source:ro" \
         -v "${volume_name}:/dest" \
         docker.io/alpine:3.21 \
-        sh -c "cp -a /source/. /dest/ && chown -R ${container_uid}:${container_gid} /dest/"
+        sh -c "cp -a /source/. /dest/ && chown -R ${owner} /dest/"
 
     ok "Copied to volume $volume_name"
 }
 
 # ── migrate application data ─────────────────────────────────────────────────
 if [ -d "$SOURCE_DIR/data" ]; then
-    # abstracts-explorer runs as uid 1000 inside the container
-    copy_to_volume "$SOURCE_DIR/data" "systemd-abstracts-data" 1000 1000
+    APP_IMAGE="ghcr.io/thawn/abstracts-explorer:latest"
+    APP_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-data" "$APP_IMAGE" 1000 1000)
+    info "abstracts-explorer data owner: $APP_OWNER"
+    copy_to_volume "$SOURCE_DIR/data" "systemd-abstracts-data" "$APP_OWNER"
 fi
 
 # ── migrate ChromaDB data ────────────────────────────────────────────────────
 if [ -d "$SOURCE_DIR/chroma_db" ]; then
-    # ChromaDB runs as root (uid 0) by default in the official image
-    copy_to_volume "$SOURCE_DIR/chroma_db" "systemd-abstracts-chromadb-data" 0 0
+    CHROMA_IMAGE="docker.io/chromadb/chroma:latest"
+    CHROMA_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-chromadb-data" "$CHROMA_IMAGE" 1000 1000)
+    info "ChromaDB data owner: $CHROMA_OWNER"
+    copy_to_volume "$SOURCE_DIR/chroma_db" "systemd-abstracts-chromadb-data" "$CHROMA_OWNER"
 fi
 
 # ── migrate PostgreSQL data (if available) ────────────────────────────────────
@@ -146,8 +193,10 @@ PG_DATA_DIRS=("$SOURCE_DIR/postgres_data" "$SOURCE_DIR/pgdata" "$SOURCE_DIR/post
 for pg_dir in "${PG_DATA_DIRS[@]}"; do
     if [ -d "$pg_dir" ]; then
         info "Found PostgreSQL data at $pg_dir"
-        # PostgreSQL runs as uid 999 (postgres) in the alpine image
-        copy_to_volume "$pg_dir" "systemd-abstracts-postgres-data" 999 999
+        PG_IMAGE="docker.io/postgres:16-alpine"
+        PG_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-postgres-data" "$PG_IMAGE" 999 999)
+        info "PostgreSQL data owner: $PG_OWNER"
+        copy_to_volume "$pg_dir" "systemd-abstracts-postgres-data" "$PG_OWNER"
         break
     fi
 done
