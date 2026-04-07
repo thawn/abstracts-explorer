@@ -605,169 +605,159 @@ services:
 The `systemd/` directory contains Podman
 [quadlet](https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html)
 files that integrate the container stack directly with systemd.  Quadlets are
-the modern, daemonless alternative to podman-compose: each container,
-volume, and network is a native systemd unit, giving you the full
-`systemctl` and `journalctl` experience with no compose wrapper needed.
+the modern, daemonless alternative to podman-compose: each container, volume,
+and network is a native systemd unit, giving you the full `systemctl` and
+`journalctl` experience with no compose wrapper needed.
 
 Two TLS variants are provided:
 
-| Directory | Reverse proxy | Certificate source |
+| Variant | Reverse proxy | Certificate source |
 |---|---|---|
-| `systemd/user/nginx/` | nginx | Your own certificate files (`cert.pem` / `key.pem`) |
-| `systemd/user/caddy/` | Caddy | Automatic Let's Encrypt (recommended for public domains) |
+| **nginx** | nginx | Your own certificate files (`cert.pem` / `key.pem`) |
+| **caddy** | Caddy | Automatic Let's Encrypt (recommended for public domains) |
 
-Choose **one** variant and follow the corresponding setup section below.
+### Architecture
 
-### How privileged ports work
-
-Binding to ports 80 and 443 normally requires root.  Instead of relaxing the
-kernel's unprivileged-port limit (a system-wide change), the `systemd/system/`
-socket units let systemd (root) hold both ports and forward every accepted
-connection to the proxy container which listens on `127.0.0.1:8080` /
-`127.0.0.1:8443` as a normal user.  Only four files need root; all containers
-run rootless.
-
-### Step 1 — Install the system socket units (run once as root)
-
-```bash
-sudo cp systemd/system/abstracts-http.socket          /etc/systemd/system/
-sudo cp systemd/system/abstracts-https.socket         /etc/systemd/system/
-sudo cp systemd/system/abstracts-http-proxy.service   /etc/systemd/system/
-sudo cp systemd/system/abstracts-https-proxy.service  /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now abstracts-http.socket abstracts-https.socket
+```
+Internet ──► :80/:443 (systemd socket, root)
+                 │
+                 ▼
+         systemd-socket-proxyd ──► 127.0.0.1:8080
+                                        │
+                                        ▼
+                               nginx or Caddy (rootless Podman)
+                                        │
+                                        ▼
+                               abstracts-explorer:5000
+                                   │           │
+                                   ▼           ▼
+                              PostgreSQL    ChromaDB
 ```
 
-### Step 2 — Enable lingering for your user (run once)
+Privileged ports 80/443 are held by a system-level systemd socket.
+All containers run rootless under your normal user account — no `sysctl`
+changes, no Docker daemon, no root containers.
 
-Lingering allows your user-level systemd services to start at boot even when
-you are not logged in:
+Sensitive values (API tokens, database password) are stored as
+[Podman secrets](https://docs.podman.io/en/latest/markdown/podman-secret-create.1.html)
+and injected at runtime — they never appear in plain text in unit files.
 
-```bash
-loginctl enable-linger $USER
-```
+### Automated install
 
-### Step 3 — Create Podman secrets for sensitive values
-
-Podman secrets are stored encrypted on disk and injected into containers as
-environment variables at runtime.  Create them before placing the quadlet files:
+An install script automates the full setup:
 
 ```bash
-# Required: LLM backend API token
-printf '%s' 'your_blablador_token_here' | podman secret create llm-backend-auth-token -
+# nginx variant (existing SSL certificate):
+curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/main/scripts/install-podman.sh \
+  | bash -s -- --variant nginx
 
-# Optional: GitHub token for the registry feature
-# printf '%s' 'ghp_xxxx' | podman secret create github-token -
+# Caddy variant (automatic Let's Encrypt):
+curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/main/scripts/install-podman.sh \
+  | bash -s -- --variant caddy
 ```
 
-> **Database password:** The `abstracts-postgres.container` and
-> `abstracts-explorer.container` quadlets ship with a placeholder password
-> (`change_me_in_production`).  Edit both files and replace every occurrence
-> of `change_me_in_production` with the same strong password before deploying.
-> Alternatively, create a Podman secret and follow the commented-out
-> `Secret=` instructions in each file.
+The script:
+1. Downloads all quadlet, configuration, and environment files
+2. Installs the system socket units (requires `sudo`)
+3. Enables lingering for your user
+4. Generates a secure database password and stores it as a Podman secret
+5. Prints the remaining manual steps
 
-### Step 4 — Choose a TLS variant and copy quadlet files
+After the script finishes, you only need to:
 
-**Variant A — nginx with existing certificate:**
+1. **Create the LLM backend API token secret:**
+
+   ```bash
+   printf '%s' 'YOUR_BLABLADOR_TOKEN' | podman secret create llm-backend-auth-token -
+   ```
+
+2. **Edit the environment file** (`~/abstracts-explorer/abstracts-explorer.env`) to
+   adjust model names, LLM backend URL, and other settings.
+
+3. **Set up TLS:**
+   - **nginx:** place your certificate and key in `~/abstracts-explorer/certs/`
+
+     ```bash
+     cp /path/to/cert.pem ~/abstracts-explorer/certs/
+     cp /path/to/key.pem  ~/abstracts-explorer/certs/
+     ```
+
+   - **Caddy:** edit `~/abstracts-explorer/caddy/Caddyfile` — replace
+     `abstracts.example.com` with your domain and `your@email.com` with
+     your email address.
+
+4. **Start all services:**
+
+   ```bash
+   systemctl --user daemon-reload
+   systemctl --user start abstracts-postgres abstracts-chromadb abstracts-explorer
+   # nginx variant:
+   systemctl --user start abstracts-nginx
+   # Caddy variant:
+   systemctl --user start abstracts-caddy
+   ```
+
+### Configuration
+
+All non-secret settings live in a single environment file:
+
+```
+~/abstracts-explorer/abstracts-explorer.env
+```
+
+Edit this file to change the LLM backend URL, model names, log level, RAG
+parameters, and other options.  Changes take effect after restarting the
+abstracts-explorer service:
 
 ```bash
-# Copy quadlet files
-mkdir -p ~/.config/containers/systemd
-cp systemd/user/nginx/*.container \
-   systemd/user/nginx/*.network \
-   systemd/user/nginx/*.volume \
-   ~/.config/containers/systemd/
-
-# Create the deployment directory and copy configuration
-mkdir -p ~/abstracts-explorer/nginx ~/abstracts-explorer/certs
-cp nginx/nginx.quadlet.conf ~/abstracts-explorer/nginx/
-
-# Place your SSL certificate and key
-cp /path/to/your/cert.pem ~/abstracts-explorer/certs/
-cp /path/to/your/key.pem  ~/abstracts-explorer/certs/
+systemctl --user restart abstracts-explorer
 ```
 
-**Variant B — Caddy with automatic Let's Encrypt:**
+### Managing secrets
 
-```bash
-# Copy quadlet files
-mkdir -p ~/.config/containers/systemd
-cp systemd/user/caddy/*.container \
-   systemd/user/caddy/*.network \
-   systemd/user/caddy/*.volume \
-   ~/.config/containers/systemd/
-
-# Create the deployment directory and copy Caddyfile
-mkdir -p ~/abstracts-explorer/caddy
-cp caddy/Caddyfile ~/abstracts-explorer/caddy/
-
-# Edit the Caddyfile — replace the placeholder domain and email
-nano ~/abstracts-explorer/caddy/Caddyfile
-```
-
-> **Let's Encrypt requirements:** your domain must be publicly reachable on
-> port 80 for the ACME HTTP-01 challenge.  Caddy handles certificate issuance
-> and renewal automatically on first startup — no manual Certbot step needed.
-
-### Step 5 — Customise the quadlet files
-
-Before starting, edit the container files in `~/.config/containers/systemd/`
-to match your deployment:
-
-| What to change | File(s) | Key |
+| Secret | Required | Purpose |
 |---|---|---|
-| Database password | `abstracts-postgres.container`, `abstracts-explorer.container` | `POSTGRES_PASSWORD` / connection string |
-| LLM backend URL | `abstracts-explorer.container` | `LLM_BACKEND_URL` |
-| Model names | `abstracts-explorer.container` | `CHAT_MODEL`, `EMBEDDING_MODEL` |
-| Log level | `abstracts-explorer.container` | `LOG_LEVEL` |
-| Registry repo | `abstracts-explorer.container` | `REGISTRY_REPOSITORY` |
+| `postgres-password` | Yes | PostgreSQL database password (auto-generated by install script) |
+| `llm-backend-auth-token` | Yes | Blablador or other LLM backend API key |
+| `github-token` | No | GitHub token for the OCI registry feature |
 
-### Step 6 — Start all services
+Create or update a secret:
 
 ```bash
-systemctl --user daemon-reload
-systemctl --user start abstracts-postgres.service \
-                       abstracts-chromadb.service \
-                       abstracts-explorer.service \
-                       abstracts-nginx.service   # or abstracts-caddy.service
+printf '%s' 'NEW_VALUE' | podman secret create --replace SECRET_NAME -
+systemctl --user restart abstracts-explorer  # pick up the new value
 ```
 
-To start all units at once with auto-start on boot already set by `WantedBy=default.target`:
+### Checking status and logs
 
 ```bash
-systemctl --user daemon-reload
-# The WantedBy=default.target directive in each .container file means all units
-# are already enabled.  Reload the daemon and start the default target:
-systemctl --user start default.target
-```
-
-### Step 7 — Check status and logs
-
-```bash
-# Summary of all user units
+# Status of all services
 systemctl --user status 'abstracts-*'
 
 # Follow logs for a specific container
 journalctl --user -u abstracts-explorer -f
 
-# Follow logs for all containers at once
+# Follow logs for all containers
 journalctl --user -u 'abstracts-*' -f
 ```
 
 ### Updating containers
 
-Pull new images and restart affected units:
+An update script pulls the latest images and restarts all services:
 
 ```bash
-podman pull ghcr.io/thawn/abstracts-explorer:latest
-systemctl --user restart abstracts-explorer.service
+~/abstracts-explorer/update-podman.sh
+```
+
+Or download and run it directly:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/main/scripts/update-podman.sh | bash
 ```
 
 ## Further Reading
 
 - [Podman Documentation](https://docs.podman.io/)
-- [Docker Documentation](https://docs.docker.com/)
 - [Main README](../README.md)
 - [Configuration Guide](configuration.md)
 

@@ -1,0 +1,43 @@
+# Abstracts Explorer application container.
+# Documentation: https://abstracts-explorer.readthedocs.io/en/latest/docker.html
+#
+# Shared by both the nginx and Caddy TLS variants.  Configuration is loaded
+# from the environment file ~/abstracts-explorer/abstracts-explorer.env.
+# Sensitive values (API tokens, database password) are injected at runtime
+# via Podman secrets — see the install script or docs for setup.
+
+[Unit]
+Description=Abstracts Explorer application
+After=abstracts-postgres.service abstracts-chromadb.service abstracts-data-volume.service
+Requires=abstracts-postgres.service abstracts-chromadb.service abstracts-data-volume.service
+
+[Container]
+Image=ghcr.io/thawn/abstracts-explorer:latest
+ContainerName=abstracts-explorer
+Network=abstracts.network
+
+Volume=abstracts-data.volume:/app/data
+
+# Load all configurable environment variables from a single file.
+EnvironmentFile=%h/abstracts-explorer/abstracts-explorer.env
+
+# Sensitive values are injected via Podman secrets (never stored in plain text).
+Secret=llm-backend-auth-token,type=env,target=LLM_BACKEND_AUTH_TOKEN
+Secret=postgres-password,type=env,target=ABSTRACTS_POSTGRES_PASSWORD
+
+# Optional: uncomment after creating the secret with
+#   podman secret create github-token -
+# Secret=github-token,type=env,target=GITHUB_TOKEN
+
+HealthCmd=curl -sf http://localhost:5000/health
+HealthInterval=30s
+HealthTimeout=10s
+HealthRetries=3
+HealthStartPeriod=15s
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=120
+
+[Install]
+WantedBy=default.target

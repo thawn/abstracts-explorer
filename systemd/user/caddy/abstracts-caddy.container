@@ -1,5 +1,5 @@
 [Unit]
-Description=Caddy reverse proxy for Abstracts Explorer (Let's Encrypt)
+Description=Caddy reverse proxy for Abstracts Explorer (automatic Let's Encrypt)
 After=abstracts-explorer.service abstracts-caddy-data-volume.service
 Requires=abstracts-explorer.service abstracts-caddy-data-volume.service
 
@@ -8,17 +8,15 @@ Image=docker.io/caddy:alpine
 ContainerName=abstracts-caddy
 Network=abstracts.network
 
-# Caddyfile — copy caddy/Caddyfile from the repository to ~/abstracts-explorer/caddy/
-# and edit it to set your domain and email before starting.
+# Caddyfile — placed by the install script.
 Volume=%h/abstracts-explorer/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
 
 # Persistent certificate and ACME state storage.
 Volume=abstracts-caddy-data.volume:/data
 
-# Bind to localhost only; the system-level socket proxy forwards port 80 → 8080
-# and port 443 → 8443, so these ports must not be publicly reachable directly.
+# Bind to localhost only; the system-level socket proxy forwards ports 80/443
+# here via abstracts-web.socket / abstracts-web-proxy.service.
 PublishPort=127.0.0.1:8080:8080
-PublishPort=127.0.0.1:8443:8443
 
 [Service]
 Restart=on-failure

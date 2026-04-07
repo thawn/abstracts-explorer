@@ -4,6 +4,10 @@
 # No manual Certbot steps are required: on first startup Caddy issues the
 # certificate and stores it in the abstracts-caddy-data volume.
 #
+# Both HTTP and HTTPS traffic arrives on port 8080 via the system-level
+# socket proxy (abstracts-web.socket + abstracts-web-proxy.service).
+# Caddy auto-detects TLS vs. plain-HTTP connections and redirects HTTP to HTTPS.
+#
 # Before using this file:
 #   1. Replace "abstracts.example.com" with your actual domain name.
 #   2. Replace "your@email.com" with your email address (used for ACME registration
@@ -14,10 +18,10 @@
 # Copy this file to ~/abstracts-explorer/caddy/Caddyfile on the server.
 
 {
-    # Use non-privileged ports; connections on port 80/443 are forwarded from the
-    # system-level abstracts-http-proxy / abstracts-https-proxy services.
+    # Both HTTP and HTTPS share a single port — the system socket proxy
+    # forwards port 80 and 443 to 8080.  Caddy auto-detects protocol.
     http_port  8080
-    https_port 8443
+    https_port 8080
 
     # Email for ACME account registration and certificate expiry notifications.
     email your@email.com
@@ -34,12 +38,13 @@ abstracts.example.com {
 
     # Security headers
     header {
-        Strict-Transport-Security "max-age=63072000; includeSubDomains"
-        X-Content-Type-Options    "nosniff"
-        X-Frame-Options           "SAMEORIGIN"
-        Referrer-Policy           "strict-origin-when-cross-origin"
-        X-XSS-Protection          "1; mode=block"
-        Content-Security-Policy   "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self';"
+        Strict-Transport-Security  "max-age=63072000; includeSubDomains"
+        X-Content-Type-Options     "nosniff"
+        X-Frame-Options            "SAMEORIGIN"
+        Referrer-Policy            "strict-origin-when-cross-origin"
+        X-XSS-Protection           "1; mode=block"
+        Content-Security-Policy    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self';"
+        Permissions-Policy         "camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()"
         # Strip implementation-detail headers from upstream responses.
         -Server
         -X-Powered-By
@@ -48,5 +53,10 @@ abstracts.example.com {
         -Access-Control-Allow-Credentials
         -Access-Control-Allow-Methods
         -Access-Control-Allow-Headers
+    }
+
+    # TLS configuration — Caddy manages certificate issuance automatically.
+    tls {
+        protocols tls1.3
     }
 }
