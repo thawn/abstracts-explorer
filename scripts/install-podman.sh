@@ -115,6 +115,13 @@ for f in \
     download "$BASE_URL/systemd/user/$f" "$QUADLET_DIR/$f"
 done
 
+# Log-retention timer (regular user units, not Quadlet)
+SYSTEMD_USER_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+mkdir -p "$SYSTEMD_USER_DIR"
+for f in abstracts-log-cleanup.service abstracts-log-cleanup.timer; do
+    download "$BASE_URL/systemd/user/$f" "$SYSTEMD_USER_DIR/$f"
+done
+
 # Variant-specific files
 if [ "$VARIANT" = "nginx" ]; then
     download "$BASE_URL/systemd/user/nginx/abstracts-nginx.container" \
@@ -173,34 +180,14 @@ else
     ok "Podman secret 'postgres-password' created"
 fi
 
-# ── 5. Configure log retention (GDPR: 7 days) — optional ────────────────────
-# LogNamespace=abstracts is commented out in the container units by default
-# because systemd's journal namespace requires kernel mount namespace support
-# (not available on all hosts).  If your kernel supports it, you can:
-#   1. Uncomment "LogNamespace=abstracts" in each *.container file
-#   2. Enable the journal namespace daemon with:
-#        sudo systemctl enable --now systemd-journald@abstracts.service
-#
-# Attempt to configure the journal namespace retention config.  Failures here
-# are non-fatal — the services will still start without the log namespace.
-JOURNAL_NS_DIR="/etc/systemd/journald@abstracts.conf.d"
-TMPDIR_JOURNAL=$(mktemp -d)
-mkdir -p "$TMPDIR_JOURNAL/journald@abstracts.conf.d"
-cat > "$TMPDIR_JOURNAL/journald@abstracts.conf.d/retention.conf" <<'RETENTION'
-# GDPR: delete Abstracts Explorer container logs after 7 days.
-# Installed by the Abstracts Explorer install script.
-[Journal]
-MaxRetentionSec=7day
-MaxFileSec=1day
-RETENTION
-if sudo mkdir -p "$JOURNAL_NS_DIR" 2>/dev/null && \
-   sudo cp "$TMPDIR_JOURNAL/journald@abstracts.conf.d/retention.conf" "$JOURNAL_NS_DIR/" 2>/dev/null; then
-    sudo systemctl enable --now "systemd-journald@abstracts.service" 2>/dev/null || true
-    ok "Log retention configured (journal namespace: abstracts)"
-else
-    warn "Could not configure journal namespace (sudo or mount-namespace support unavailable) — skipping log retention setup"
-fi
-rm -rf "$TMPDIR_JOURNAL"
+# ── 5. Enable log-retention timer (GDPR: 7 days) ────────────────────────────
+info "Enabling log-retention timer (GDPR: 7-day vacuum)"
+# The timer runs 'journalctl --user --vacuum-time=7d' daily so container logs
+# are automatically deleted after 7 days.
+# Reload to ensure the timer unit is visible before enabling it.
+systemctl --user daemon-reload
+systemctl --user enable --now abstracts-log-cleanup.timer
+ok "Log-retention timer enabled"
 
 # ── 6. Prompt for remaining configuration ────────────────────────────────────
 echo ""

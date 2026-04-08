@@ -645,8 +645,9 @@ Sensitive values (API tokens, database password) are stored as
 and injected at runtime — they never appear in plain text in unit files or
 environment files.
 
-Container logs are automatically deleted after 7 days to comply with GDPR when
-the host kernel supports user mount namespaces (see [Checking status and logs](#checking-status-and-logs)).
+Container logs are automatically deleted after 7 days to comply with GDPR.
+The install script sets up a daily systemd user timer (`abstracts-log-cleanup.timer`)
+that vacuums journal entries older than 7 days.
 
 ### Automated install
 
@@ -759,42 +760,13 @@ journalctl --user -u abstracts-explorer -f
 journalctl --user -u 'abstracts-*' -f
 ```
 
-#### Optional: GDPR log retention via journal namespace
+Log entries older than 7 days are vacuumed automatically by the
+`abstracts-log-cleanup.timer` user timer installed by the install script.
+To check the timer's status:
 
-The container units include a commented-out `LogNamespace=abstracts` directive.
-Enabling it routes logs through a dedicated journald namespace with a 7-day
-retention policy — but it requires kernel mount namespace support, which is not
-available on all hosts (e.g. certain VMs or hardened kernels will fail with
-`status=226/NAMESPACE`).
-
-To enable it on a supported host:
-
-1. Uncomment `LogNamespace=abstracts` in each
-   `~/.config/containers/systemd/*.container` file.
-2. Install and start the journal namespace daemon:
-
-   ```bash
-   sudo mkdir -p /etc/systemd/journald@abstracts.conf.d
-   sudo tee /etc/systemd/journald@abstracts.conf.d/retention.conf <<'EOF'
-   [Journal]
-   MaxRetentionSec=7day
-   MaxFileSec=1day
-   EOF
-   sudo systemctl enable --now systemd-journald@abstracts.service
-   ```
-
-3. Reload and restart the services:
-
-   ```bash
-   systemctl --user daemon-reload
-   systemctl --user restart 'abstracts-*'
-   ```
-
-4. View logs via the namespace:
-
-   ```bash
-   journalctl --namespace=abstracts -u 'abstracts-*' -f
-   ```
+```bash
+systemctl --user status abstracts-log-cleanup.timer
+```
 
 ### Updating containers
 

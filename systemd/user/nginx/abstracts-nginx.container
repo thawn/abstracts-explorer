@@ -21,7 +21,6 @@ PublishPort=127.0.0.1:8080:8080
 [Service]
 Restart=on-failure
 TimeoutStartSec=60
-# LogNamespace=abstracts  # Uncomment only if your kernel supports user mount namespaces
 
 [Install]
 WantedBy=default.target
