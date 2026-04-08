@@ -184,6 +184,20 @@ class Config:
         # 2. A file path for SQLite (e.g., "abstracts.db" or "/path/to/abstracts.db")
         paper_db = self._get_env("PAPER_DB", default="abstracts.db")
 
+        # Support Podman/Docker deployments where the database password is
+        # injected as a separate secret (ABSTRACTS_DB_PASSWORD) rather than
+        # embedded in PAPER_DB.  If PAPER_DB is still a plain file path (i.e.
+        # no URL scheme) and all PostgreSQL component variables are present,
+        # assemble the full connection URL automatically.
+        if "://" not in paper_db:
+            pg_user = self._get_env("POSTGRES_USER", default="")
+            pg_password = self._get_env("ABSTRACTS_DB_PASSWORD", default="")
+            pg_host = self._get_env("POSTGRES_HOST", default="")
+            pg_port = self._get_env("POSTGRES_PORT", default="5432")
+            pg_db = self._get_env("POSTGRES_DB", default="")
+            if pg_user and pg_password and pg_host and pg_db:
+                paper_db = f"postgresql://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_db}"
+
         if paper_db.startswith("postgresql://") or paper_db.startswith("sqlite://"):
             # Full database URL provided
             self.database_url = paper_db
@@ -381,6 +395,11 @@ class Config:
             "LLM_BACKEND_URL",
             "LLM_BACKEND_AUTH_TOKEN",
             "PAPER_DB",
+            "POSTGRES_USER",
+            "POSTGRES_HOST",
+            "POSTGRES_PORT",
+            "POSTGRES_DB",
+            "ABSTRACTS_DB_PASSWORD",
             "EMBEDDING_DB",
             "COLLECTION_NAME",
             "MAX_CONTEXT_PAPERS",

@@ -21,9 +21,9 @@ Volume=abstracts-data.volume:/app/data
 # Load all configurable environment variables from a single file.
 EnvironmentFile=%h/abstracts-explorer/abstracts-explorer.env
 
-# Database password injected via Podman secret.  The entrypoint wrapper below
-# assembles the PAPER_DB connection string from the env-file variables
-# (POSTGRES_USER, POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB) and this secret.
+# Database password injected via Podman secret.  The application assembles
+# the full PostgreSQL connection string at startup from the POSTGRES_* env
+# vars in the env file and the ABSTRACTS_DB_PASSWORD secret (see config.py).
 Secret=postgres-password,type=env,target=ABSTRACTS_DB_PASSWORD
 
 # LLM backend API token injected via Podman secret (never stored in plain text).
@@ -33,11 +33,6 @@ Secret=llm-backend-auth-token,type=env,target=LLM_BACKEND_AUTH_TOKEN
 #   printf '%s' 'YOUR_GITHUB_TOKEN' | podman secret create github-token -
 # See https://abstracts-explorer.readthedocs.io/en/latest/docker.html
 # Secret=github-token,type=env,target=GITHUB_TOKEN
-
-# Build PAPER_DB at runtime from env-file components + the secret password,
-# then exec the application.  This keeps the password out of the env file.
-Entrypoint=sh
-Exec=-c export PAPER_DB="postgresql://$${POSTGRES_USER}:$${ABSTRACTS_DB_PASSWORD}@$${POSTGRES_HOST}:$${POSTGRES_PORT}/$${POSTGRES_DB}" && exec abstracts-explorer web-ui --host 0.0.0.0 --port 5000
 
 HealthCmd=curl -sf http://localhost:5000/health
 HealthInterval=30s
