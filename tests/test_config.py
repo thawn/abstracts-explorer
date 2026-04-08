@@ -276,6 +276,52 @@ PAPER_DB=/absolute/path/to/papers.db
         # URLs should remain unchanged
         assert config.embedding_db == "http://chromadb:8000"
 
+    def test_config_postgres_components_assemble_url(self, tmp_path):
+        """POSTGRES_* + ABSTRACTS_DB_PASSWORD assembles a PostgreSQL URL when PAPER_DB is unset."""
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            "POSTGRES_USER=abstracts\n"
+            "POSTGRES_HOST=abstracts-postgres\n"
+            "POSTGRES_PORT=5432\n"
+            "POSTGRES_DB=abstracts\n"
+            "ABSTRACTS_DB_PASSWORD=secret123\n"
+        )
+
+        config = Config(env_path=env_file)
+
+        assert config.database_url == "postgresql://abstracts:secret123@abstracts-postgres:5432/abstracts"
+
+    def test_config_postgres_components_ignored_when_paper_db_is_url(self, tmp_path):
+        """POSTGRES_* vars are ignored when PAPER_DB already contains a full URL."""
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            "PAPER_DB=postgresql://user:pass@host:5432/db\n"
+            "POSTGRES_USER=abstracts\n"
+            "POSTGRES_HOST=abstracts-postgres\n"
+            "POSTGRES_PORT=5432\n"
+            "POSTGRES_DB=abstracts\n"
+            "ABSTRACTS_DB_PASSWORD=secret123\n"
+        )
+
+        config = Config(env_path=env_file)
+
+        # Explicit PAPER_DB takes precedence
+        assert config.database_url == "postgresql://user:pass@host:5432/db"
+
+    def test_config_postgres_components_partial_does_not_assemble(self, tmp_path):
+        """Partial POSTGRES_* vars (missing password) fall back to SQLite."""
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            "POSTGRES_USER=abstracts\n"
+            "POSTGRES_HOST=abstracts-postgres\n"
+            # ABSTRACTS_DB_PASSWORD deliberately omitted
+        )
+
+        config = Config(env_path=env_file)
+
+        # Falls back to the default SQLite path
+        assert config.database_url.startswith("sqlite:///")
+
     def test_config_default_conference_and_year(self, tmp_path):
         """Test that DEFAULT_CONFERENCE and DEFAULT_YEAR can be configured."""
         env_file = tmp_path / ".env"

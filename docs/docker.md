@@ -646,6 +646,8 @@ and injected at runtime — they never appear in plain text in unit files or
 environment files.
 
 Container logs are automatically deleted after 7 days to comply with GDPR.
+The install script sets up a daily systemd user timer (`abstracts-log-cleanup.timer`)
+that vacuums journal entries older than 7 days.
 
 ### Automated install
 
@@ -751,15 +753,20 @@ systemctl --user restart abstracts-explorer
 # Status of all services
 systemctl --user status 'abstracts-*'
 
-# Follow logs for a specific container (uses the 'abstracts' journal namespace)
-journalctl --namespace=abstracts -u abstracts-explorer -f
+# Follow logs for a specific container
+journalctl --user -u abstracts-explorer -f
 
 # Follow logs for all containers
-journalctl --namespace=abstracts -u 'abstracts-*' -f
+journalctl --user -u 'abstracts-*' -f
 ```
 
-Logs are automatically deleted after 7 days via a dedicated journald namespace
-(`abstracts`) with `MaxRetentionSec=7day`.
+Log entries older than 7 days are vacuumed automatically by the
+`abstracts-log-cleanup.timer` user timer installed by the install script.
+To check the timer's status:
+
+```bash
+systemctl --user status abstracts-log-cleanup.timer
+```
 
 ### Updating containers
 

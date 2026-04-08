@@ -45,4 +45,4 @@ fi
 ok "All services updated and restarted"
 echo ""
 echo "Check status:  systemctl --user status 'abstracts-*'"
-echo "Follow logs:   journalctl --namespace=abstracts -u 'abstracts-*' -f"
+echo "Follow logs:   journalctl --user -u 'abstracts-*' -f"

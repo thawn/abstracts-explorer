@@ -115,6 +115,13 @@ for f in \
     download "$BASE_URL/systemd/user/$f" "$QUADLET_DIR/$f"
 done
 
+# Log-retention timer (regular user units, not Quadlet)
+SYSTEMD_USER_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+mkdir -p "$SYSTEMD_USER_DIR"
+for f in abstracts-log-cleanup.service abstracts-log-cleanup.timer; do
+    download "$BASE_URL/systemd/user/$f" "$SYSTEMD_USER_DIR/$f"
+done
+
 # Variant-specific files
 if [ "$VARIANT" = "nginx" ]; then
     download "$BASE_URL/systemd/user/nginx/abstracts-nginx.container" \
@@ -151,6 +158,13 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now abstracts-web.socket
 ok "System socket units installed and enabled"
 
+# Reload the user systemd manager so Podman Quadlet generates the .service
+# units from the .container / .volume / .network files installed above.
+# Without this step 'abstracts-explorer.service' (and friends) do not exist yet.
+info "Reloading user systemd daemon (Podman Quadlet generator)"
+systemctl --user daemon-reload
+ok "User systemd daemon reloaded — quadlet service units are now available"
+
 # ── 3. Enable lingering ──────────────────────────────────────────────────────
 info "Enabling lingering for user $USER"
 loginctl enable-linger "$USER"
@@ -166,26 +180,14 @@ else
     ok "Podman secret 'postgres-password' created"
 fi
 
-# ── 5. Configure log retention (GDPR: 7 days) ───────────────────────────────
-info "Configuring log retention (7 days) via journal namespace"
-# Create a journal namespace for Abstracts Explorer containers so their logs
-# are automatically deleted after 7 days without affecting system logs.
-JOURNAL_NS_DIR="/etc/systemd/journald@abstracts.conf.d"
-TMPDIR_JOURNAL=$(mktemp -d)
-mkdir -p "$TMPDIR_JOURNAL/journald@abstracts.conf.d"
-cat > "$TMPDIR_JOURNAL/journald@abstracts.conf.d/retention.conf" <<'RETENTION'
-# GDPR: delete Abstracts Explorer container logs after 7 days.
-# Installed by the Abstracts Explorer install script.
-[Journal]
-MaxRetentionSec=7day
-MaxFileSec=1day
-RETENTION
-sudo mkdir -p "$JOURNAL_NS_DIR" || die "Failed to create journal namespace directory (sudo required)"
-sudo cp "$TMPDIR_JOURNAL/journald@abstracts.conf.d/retention.conf" "$JOURNAL_NS_DIR/" || die "Failed to install journal retention config"
-rm -rf "$TMPDIR_JOURNAL"
-# Start the namespaced journal daemon
-sudo systemctl enable --now "systemd-journald@abstracts.service" 2>/dev/null || true
-ok "Log retention set to 7 days (journal namespace: abstracts)"
+# ── 5. Enable log-retention timer (GDPR: 7 days) ────────────────────────────
+info "Enabling log-retention timer (GDPR: 7-day vacuum)"
+# The timer runs 'journalctl --user --vacuum-time=7d' daily so container logs
+# are automatically deleted after 7 days.
+# Reload to ensure the timer unit is visible before enabling it.
+systemctl --user daemon-reload
+systemctl --user enable --now abstracts-log-cleanup.timer
+ok "Log-retention timer enabled"
 
 # ── 6. Prompt for remaining configuration ────────────────────────────────────
 echo ""
@@ -240,7 +242,6 @@ fi
 cat <<EOF
 
   4. Start all services:
-       systemctl --user daemon-reload
        systemctl --user start abstracts-postgres abstracts-chromadb abstracts-explorer
 EOF
 
