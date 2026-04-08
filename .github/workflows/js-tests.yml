@@ -2,7 +2,7 @@ name: Javascript Tests
 
 on:
     push:
-        branches: [main, dev]
+        branches: [main, develop]
         paths:
             - "src/**/*.js"
             - "src/abstracts_explorer/web_ui/templates/**"
@@ -13,7 +13,7 @@ on:
             - ".github/scripts/setup-ci.ps1"
             - ".github/actions/setup-environment/**"
     pull_request:
-        branches: [main, dev]
+        branches: [main, develop]
         paths:
             - "src/**/*.js"
             - "src/abstracts_explorer/web_ui/templates/**"
