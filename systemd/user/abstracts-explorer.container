@@ -45,7 +45,7 @@ Restart=on-failure
 TimeoutStartSec=120
 # GDPR: container logs go to a separate journal namespace that auto-deletes
 # entries older than 7 days (see /etc/systemd/journald@abstracts.conf.d/).
-LogNamespace=abstracts
+# LogNamespace=abstracts  # Uncomment only if your kernel supports user mount namespaces
 
 [Install]
 WantedBy=default.target

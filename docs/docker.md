@@ -645,7 +645,8 @@ Sensitive values (API tokens, database password) are stored as
 and injected at runtime — they never appear in plain text in unit files or
 environment files.
 
-Container logs are automatically deleted after 7 days to comply with GDPR.
+Container logs are automatically deleted after 7 days to comply with GDPR when
+the host kernel supports user mount namespaces (see [Checking status and logs](#checking-status-and-logs)).
 
 ### Automated install
 
@@ -751,15 +752,49 @@ systemctl --user restart abstracts-explorer
 # Status of all services
 systemctl --user status 'abstracts-*'
 
-# Follow logs for a specific container (uses the 'abstracts' journal namespace)
-journalctl --namespace=abstracts -u abstracts-explorer -f
+# Follow logs for a specific container
+journalctl --user -u abstracts-explorer -f
 
 # Follow logs for all containers
-journalctl --namespace=abstracts -u 'abstracts-*' -f
+journalctl --user -u 'abstracts-*' -f
 ```
 
-Logs are automatically deleted after 7 days via a dedicated journald namespace
-(`abstracts`) with `MaxRetentionSec=7day`.
+#### Optional: GDPR log retention via journal namespace
+
+The container units include a commented-out `LogNamespace=abstracts` directive.
+Enabling it routes logs through a dedicated journald namespace with a 7-day
+retention policy — but it requires kernel mount namespace support, which is not
+available on all hosts (e.g. certain VMs or hardened kernels will fail with
+`status=226/NAMESPACE`).
+
+To enable it on a supported host:
+
+1. Uncomment `LogNamespace=abstracts` in each
+   `~/.config/containers/systemd/*.container` file.
+2. Install and start the journal namespace daemon:
+
+   ```bash
+   sudo mkdir -p /etc/systemd/journald@abstracts.conf.d
+   sudo tee /etc/systemd/journald@abstracts.conf.d/retention.conf <<'EOF'
+   [Journal]
+   MaxRetentionSec=7day
+   MaxFileSec=1day
+   EOF
+   sudo systemctl enable --now systemd-journald@abstracts.service
+   ```
+
+3. Reload and restart the services:
+
+   ```bash
+   systemctl --user daemon-reload
+   systemctl --user restart 'abstracts-*'
+   ```
+
+4. View logs via the namespace:
+
+   ```bash
+   journalctl --namespace=abstracts -u 'abstracts-*' -f
+   ```
 
 ### Updating containers
 

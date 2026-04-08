@@ -173,10 +173,16 @@ else
     ok "Podman secret 'postgres-password' created"
 fi
 
-# ── 5. Configure log retention (GDPR: 7 days) ───────────────────────────────
-info "Configuring log retention (7 days) via journal namespace"
-# Create a journal namespace for Abstracts Explorer containers so their logs
-# are automatically deleted after 7 days without affecting system logs.
+# ── 5. Configure log retention (GDPR: 7 days) — optional ────────────────────
+# LogNamespace=abstracts is commented out in the container units by default
+# because systemd's journal namespace requires kernel mount namespace support
+# (not available on all hosts).  If your kernel supports it, you can:
+#   1. Uncomment "LogNamespace=abstracts" in each *.container file
+#   2. Enable the journal namespace daemon with:
+#        sudo systemctl enable --now systemd-journald@abstracts.service
+#
+# Attempt to configure the journal namespace retention config.  Failures here
+# are non-fatal — the services will still start without the log namespace.
 JOURNAL_NS_DIR="/etc/systemd/journald@abstracts.conf.d"
 TMPDIR_JOURNAL=$(mktemp -d)
 mkdir -p "$TMPDIR_JOURNAL/journald@abstracts.conf.d"
@@ -187,12 +193,14 @@ cat > "$TMPDIR_JOURNAL/journald@abstracts.conf.d/retention.conf" <<'RETENTION'
 MaxRetentionSec=7day
 MaxFileSec=1day
 RETENTION
-sudo mkdir -p "$JOURNAL_NS_DIR" || die "Failed to create journal namespace directory (sudo required)"
-sudo cp "$TMPDIR_JOURNAL/journald@abstracts.conf.d/retention.conf" "$JOURNAL_NS_DIR/" || die "Failed to install journal retention config"
+if sudo mkdir -p "$JOURNAL_NS_DIR" 2>/dev/null && \
+   sudo cp "$TMPDIR_JOURNAL/journald@abstracts.conf.d/retention.conf" "$JOURNAL_NS_DIR/" 2>/dev/null; then
+    sudo systemctl enable --now "systemd-journald@abstracts.service" 2>/dev/null || true
+    ok "Log retention configured (journal namespace: abstracts)"
+else
+    warn "Could not configure journal namespace (sudo or mount-namespace support unavailable) — skipping log retention setup"
+fi
 rm -rf "$TMPDIR_JOURNAL"
-# Start the namespaced journal daemon
-sudo systemctl enable --now "systemd-journald@abstracts.service" 2>/dev/null || true
-ok "Log retention set to 7 days (journal namespace: abstracts)"
 
 # ── 6. Prompt for remaining configuration ────────────────────────────────────
 echo ""
