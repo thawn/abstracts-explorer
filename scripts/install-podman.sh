@@ -151,6 +151,13 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now abstracts-web.socket
 ok "System socket units installed and enabled"
 
+# Reload the user systemd manager so Podman Quadlet generates the .service
+# units from the .container / .volume / .network files installed above.
+# Without this step 'abstracts-explorer.service' (and friends) do not exist yet.
+info "Reloading user systemd daemon (Podman Quadlet generator)"
+systemctl --user daemon-reload
+ok "User systemd daemon reloaded — quadlet service units are now available"
+
 # ── 3. Enable lingering ──────────────────────────────────────────────────────
 info "Enabling lingering for user $USER"
 loginctl enable-linger "$USER"
@@ -240,7 +247,6 @@ fi
 cat <<EOF
 
   4. Start all services:
-       systemctl --user daemon-reload
        systemctl --user start abstracts-postgres abstracts-chromadb abstracts-explorer
 EOF
 

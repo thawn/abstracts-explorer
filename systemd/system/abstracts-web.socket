@@ -23,6 +23,9 @@ ListenStream=0.0.0.0:443
 SocketUser=1000
 SocketMode=0600
 Accept=no
+# Explicitly name the service to activate — without this systemd defaults to
+# abstracts-web.service (same prefix) which does not exist.
+Service=abstracts-web-proxy.service
 
 [Install]
 WantedBy=sockets.target
