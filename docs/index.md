@@ -4,19 +4,14 @@ Welcome to the documentation for Abstracts Explorer! This package provides tools
 
 ## Web Interface
 
-Abstracts Explorer includes a web interface for browsing, searching, and analyzing conference abstracts:
+Abstracts Explorer includes a browser-based UI for searching, chatting, rating,
+and visualizing conference abstracts.
 
 ![Web UI Screenshot](images/screenshot.png)
-*The web interface provides an intuitive way to search and explore conference abstracts.*
 
-The web interface offers four main tabs:
-
-- **Search Abstracts** — keyword and AI-powered semantic search with filters for conference, year, track, and more
-- **AI Chat** — interactive RAG (Retrieval-Augmented Generation) chat to ask questions about the abstracts
-- **Interesting Papers** — save, rate, and export papers you find interesting
-- **Clusters** — interactive visualization of paper embeddings clustered by topic
-
-You can try a live deployment at [abstracts.hzdr.de](https://abstracts.hzdr.de).
+The interface provides four tabs — **Search**, **AI Chat**, **Interesting Papers**,
+and **Clusters** — described in detail in the [Web Interface guide](web_ui.md).
+A live demo is available at [abstracts.hzdr.de](https://abstracts.hzdr.de).
 
 ## Features
 
@@ -87,6 +82,7 @@ uv run abstracts-explorer chat
 :caption: User Guide
 
 installation
+web_ui
 docker
 configuration
 usage
