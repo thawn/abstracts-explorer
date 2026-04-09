@@ -55,7 +55,8 @@ jobs:
               if: github.event_name == 'pull_request'
               id: pr_version
               run: |
-                  if [[ "${{ github.base_ref }}" == "develop" || "${{ github.head_ref }}" == "develop" ]]; then
+                  # Use base_ref to determine which version this PR targets
+                  if [[ "${{ github.base_ref }}" == "develop" ]]; then
                       echo "version=dev" >> "$GITHUB_OUTPUT"
                   else
                       echo "version=stable" >> "$GITHUB_OUTPUT"
@@ -90,7 +91,8 @@ jobs:
             - name: Fetch main and develop branches
               if: github.event_name != 'pull_request'
               run: |
-                  git fetch origin main develop
+                  git fetch origin main || echo "::warning::Could not fetch main branch"
+                  git fetch origin develop || echo "::warning::Could not fetch develop branch"
 
             - name: Build stable docs from main branch
               if: github.event_name != 'pull_request'
@@ -98,6 +100,7 @@ jobs:
                   git checkout main
                   uv sync --extra docs --quiet
                   cd docs
+                  git clean -fdx _build/
                   DOCS_VERSION=stable uv run make html
                   mkdir -p /tmp/site
                   cp -r _build/html/. /tmp/site/
@@ -108,6 +111,7 @@ jobs:
                   git checkout develop
                   uv sync --extra docs --quiet
                   cd docs
+                  git clean -fdx _build/
                   DOCS_VERSION=dev uv run make html
                   mkdir -p /tmp/site/dev
                   cp -r _build/html/. /tmp/site/dev/
