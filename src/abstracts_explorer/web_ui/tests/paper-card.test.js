@@ -5,6 +5,16 @@
 import { jest } from '@jest/globals';
 
 global.fetch = jest.fn();
+global.marked = {
+    parse: jest.fn((text) => `<p>${text}</p>`),
+    parseInline: jest.fn((text) => {
+        // Simulate marked's HTML escaping behaviour for test purposes
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }),
+    use: jest.fn()
+};
 
 import { formatPaperCard, showPaperDetails, updateStarDisplay, updateInterestingPapersCount, setPaperPriority } from '../static/modules/paper-card.js';
 import * as State from '../static/modules/state.js';
@@ -117,6 +127,25 @@ describe('Paper Card Module', () => {
 
             expect(html).not.toContain('<script>');
             expect(html).toContain('&lt;script&gt;');
+        });
+
+        it('should render LaTeX in titles via marked.parseInline', () => {
+            const latexTitle = 'The $\\boldsymbol{\\lambda}$ Method';
+            global.marked.parseInline.mockReturnValueOnce('The <span class="katex">λ</span> Method');
+
+            const paper = {
+                uid: 'latex-paper',
+                title: latexTitle,
+                authors: [],
+                abstract: 'Abstract'
+            };
+
+            const html = formatPaperCard(paper);
+
+            // parseInline should be called with the title to render LaTeX
+            expect(global.marked.parseInline).toHaveBeenCalledWith(latexTitle);
+            // The rendered KaTeX output should appear in the card
+            expect(html).toContain('katex');
         });
 
         it('should show star ratings', () => {
