@@ -210,7 +210,7 @@ copy_to_volume() {
         docker.io/alpine:3.21 \
         sh -c "cp -a /source/. /dest/"
     sudo chown -R "$owner" "$(podman volume inspect "$volume_name" --format '{{ .Mountpoint }}')" || \
-        warn "Failed to set ownership for volume $volume_name — you may need to run: sudo chown -R $owner $(podman volume inspect "$volume_name" --format '{{
+        warn "Failed to set ownership for volume $volume_name — you may need to run: sudo chown -R $owner $(podman volume inspect "$volume_name" --format '{{ .Mountpoint }}')"
     ok "Copied to volume $volume_name"
 }
 
