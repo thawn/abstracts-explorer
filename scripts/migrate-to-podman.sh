@@ -24,6 +24,7 @@ set -euo pipefail
 SOURCE_DIR="."
 BACKUP_DIR=""
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+declare -A ORIGINAL_OWNERS  # tracks dirs whose ownership we temporarily changed
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 info()  { printf '\033[1;34m▸ %s\033[0m\n' "$*"; }
@@ -43,6 +44,38 @@ EOF
 require_cmd() {
     command -v "$1" >/dev/null 2>&1 || die "'$1' is required but not installed."
 }
+
+# ── helper: temporarily grant the current user access to a source directory ───
+# Docker Compose volumes are often owned by root or a service account, making
+# them unreadable by the unprivileged user running this script.  We chown the
+# directory to the current user for the duration of the migration and restore
+# the original ownership when the script exits (see the EXIT trap below).
+ensure_accessible() {
+    local dir="$1"
+    [ -d "$dir" ] || return 0   # nothing to do if the directory does not exist
+    if ! [ -r "$dir" ] || ! [ -x "$dir" ]; then
+        info "Source directory $dir is not accessible — requesting elevated access"
+        ORIGINAL_OWNERS["$dir"]=$(sudo stat -c '%u:%g' "$dir") || \
+            die "Cannot stat $dir. Ensure sudo is available and you have permission to use it."
+        sudo chown -R "$(id -u):$(id -g)" "$dir" || \
+            die "Cannot access $dir. Run: sudo chown -R $(id -u):$(id -g) $dir"
+        ok "Temporarily changed ownership of $dir"
+    fi
+}
+
+# Restore original ownership of any directories we temporarily chowned.
+# Called automatically via the EXIT trap so ownership is always restored,
+# regardless of whether the script succeeds or fails.
+restore_ownership() {
+    for dir in "${!ORIGINAL_OWNERS[@]}"; do
+        local original="${ORIGINAL_OWNERS[$dir]}"
+        info "Restoring ownership of $dir to $original"
+        sudo chown -R "$original" "$dir" 2>/dev/null || \
+            warn "Could not restore ownership of $dir to $original — please run: sudo chown -R $original $dir"
+    done
+}
+
+trap restore_ownership EXIT
 
 # ── parse arguments ──────────────────────────────────────────────────────────
 while [ $# -gt 0 ]; do
@@ -78,6 +111,16 @@ systemctl --user stop abstracts-explorer.service 2>/dev/null || true
 systemctl --user stop abstracts-chromadb.service 2>/dev/null || true
 systemctl --user stop abstracts-postgres.service 2>/dev/null || true
 ok "Services stopped"
+
+# ── ensure source directories are accessible ─────────────────────────────────
+# Docker Compose volumes are often owned by root; request elevated access now
+# so that both the backup (cp -a) and the Podman bind-mount can read them.
+[ -d "$SOURCE_DIR/data" ]      && ensure_accessible "$SOURCE_DIR/data"
+[ -d "$SOURCE_DIR/chroma_db" ] && ensure_accessible "$SOURCE_DIR/chroma_db"
+for _pg_dir in "$SOURCE_DIR/postgres_data" "$SOURCE_DIR/pgdata" "$SOURCE_DIR/postgres"; do
+    [ -d "$_pg_dir" ] && ensure_accessible "$_pg_dir"
+done
+unset _pg_dir
 
 # ── create backup ─────────────────────────────────────────────────────────────
 info "Creating backup at $BACKUP_DIR"
@@ -189,6 +232,7 @@ fi
 # ── migrate PostgreSQL data (if available) ────────────────────────────────────
 # Docker Compose PostgreSQL data is usually in a Docker named volume.
 # If the user has extracted it to a local directory, handle it here.
+PG_MIGRATED=false
 PG_DATA_DIRS=("$SOURCE_DIR/postgres_data" "$SOURCE_DIR/pgdata" "$SOURCE_DIR/postgres")
 for pg_dir in "${PG_DATA_DIRS[@]}"; do
     if [ -d "$pg_dir" ]; then
@@ -197,9 +241,101 @@ for pg_dir in "${PG_DATA_DIRS[@]}"; do
         PG_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-postgres-data" "$PG_IMAGE" 999 999)
         info "PostgreSQL data owner: $PG_OWNER"
         copy_to_volume "$pg_dir" "systemd-abstracts-postgres-data" "$PG_OWNER"
+        PG_MIGRATED=true
         break
     fi
 done
+
+# ── reset PostgreSQL password to match the Podman secret ─────────────────────
+# The Docker Compose deployment uses a hard-coded password; after migrating the
+# data directory that password is still stored in pg_shadow.  We start a
+# temporary postgres container with trust authentication (via a custom
+# hba_file so the original pg_hba.conf is never modified) and run ALTER USER
+# to set the password to what is stored in the 'postgres-password' Podman
+# secret, which is what abstracts-postgres.container expects.
+if [ "$PG_MIGRATED" = "true" ]; then
+    if ! podman secret inspect postgres-password >/dev/null 2>&1; then
+        warn "Podman secret 'postgres-password' not found — skipping password reset"
+        warn "Run install-podman.sh first, then manually reset the PostgreSQL password"
+    else
+        info "Resetting PostgreSQL user password to match Podman secret"
+
+        # Retrieve the secret value via a helper container
+        NEW_PG_PASSWORD=$(podman run --rm \
+            --secret postgres-password,type=env,target=POSTGRES_PASSWORD \
+            docker.io/alpine:3.21 \
+            sh -c 'printf "%s" "$POSTGRES_PASSWORD"' 2>/dev/null) || NEW_PG_PASSWORD=""
+
+        if [ -z "$NEW_PG_PASSWORD" ]; then
+            warn "Could not read postgres-password secret — skipping password reset"
+        else
+            # Write password and a trust-only pg_hba.conf to temp files so they
+            # can be bind-mounted into the container without appearing in `ps`.
+            PG_TEMP_DIR=$(mktemp -d)
+            printf '%s' "$NEW_PG_PASSWORD" > "$PG_TEMP_DIR/new_password"
+            chmod 600 "$PG_TEMP_DIR/new_password"
+            cat > "$PG_TEMP_DIR/pg_hba.conf" << 'PGEOF'
+# Temporary trust config for password migration — replaced immediately after
+local   all             all                                     trust
+host    all             all             127.0.0.1/32            trust
+host    all             all             ::1/128                 trust
+PGEOF
+            unset NEW_PG_PASSWORD  # clear from shell memory
+
+            # Remove any leftover container from a previous failed run
+            podman rm -f abstracts-postgres-pwmigration >/dev/null 2>&1 || true
+
+            # Start a temporary postgres container with our trust HBA so we can
+            # connect without knowing the old password.
+            # Passing 'postgres -c hba_file=...' as CMD causes docker-entrypoint.sh
+            # to exec postgres directly (existing PGDATA is not re-initialised).
+            MIGRATION_CID=$(podman run -d \
+                --name abstracts-postgres-pwmigration \
+                -v "systemd-abstracts-postgres-data:/var/lib/postgresql/data" \
+                -v "$PG_TEMP_DIR/pg_hba.conf:/tmp/pg_hba.conf:ro" \
+                -v "$PG_TEMP_DIR/new_password:/tmp/new_password:ro" \
+                docker.io/postgres:16-alpine \
+                postgres -c hba_file=/tmp/pg_hba.conf 2>/dev/null) || MIGRATION_CID=""
+
+            if [ -z "$MIGRATION_CID" ]; then
+                warn "Could not start temporary postgres container — skipping password reset"
+            else
+                # Wait up to 30 s for postgres to become ready
+                PG_READY=false
+                PG_WAIT=0
+                while [ "$PG_WAIT" -lt 30 ]; do
+                    if podman exec "$MIGRATION_CID" pg_isready -U abstracts -q 2>/dev/null; then
+                        PG_READY=true
+                        break
+                    fi
+                    sleep 1
+                    PG_WAIT=$((PG_WAIT + 1))
+                done
+
+                if [ "$PG_READY" = "true" ]; then
+                    # Escape any single quotes in the password for SQL string literal
+                    # safety (passwords from install-podman.sh are alphanumeric, but
+                    # guard against manually created secrets too).
+                    if podman exec "$MIGRATION_CID" \
+                        sh -c "PW=\$(cat /tmp/new_password)
+                               PW_ESC=\$(printf '%s' \"\$PW\" | sed \"s/'/''/g\")
+                               psql -U abstracts -c \"ALTER USER abstracts PASSWORD '\$PW_ESC';\""; then
+                        ok "PostgreSQL password updated to match Podman secret"
+                    else
+                        warn "Failed to update PostgreSQL password — you may need to do this manually"
+                    fi
+                else
+                    warn "PostgreSQL did not become ready in time — skipping password reset"
+                fi
+
+                podman stop "$MIGRATION_CID" >/dev/null
+                podman rm   "$MIGRATION_CID" >/dev/null
+            fi
+
+            rm -rf "$PG_TEMP_DIR"
+        fi
+    fi
+fi
 
 # ── print summary ────────────────────────────────────────────────────────────
 echo ""
