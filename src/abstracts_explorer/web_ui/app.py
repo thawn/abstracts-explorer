@@ -315,60 +315,14 @@ def get_available_filters_endpoint():
     try:
         filters = get_available_filters()
         config = get_config()
-
-        # Build db_conference_years from actual DB data so the frontend can show only
-        # years that have papers, and so that defaults never point at an empty state.
         database = get_database()
-        db_filter_options = database.get_filter_options()
-        db_conferences_in_db = db_filter_options.get("conferences", [])
 
-        db_conference_years: dict[str, list[int]] = {}
-        for conf in db_conferences_in_db:
-            years = database.get_years_for_conference(conf)
-            if years:
-                db_conference_years[conf] = sorted(years, reverse=True)
-
+        db_conference_years = database.get_conference_years_from_db()
         filters["db_conference_years"] = db_conference_years
 
-        # Determine effective defaults: the configured values are used when they
-        # point at a conference/year that actually has data; otherwise we fall back
-        # to the most recent conference/year available in the database.
         configured_conf = config.default_conference or ""
         configured_year = config.default_year if config.default_year else None
-
-        effective_conf = configured_conf
-        effective_year = configured_year
-
-        # Try to match the configured default conference against DB conferences
-        conf_matched = None
-        if configured_conf:
-            for db_conf in db_conference_years:
-                if db_conf.lower() == configured_conf.lower():
-                    conf_matched = db_conf
-                    break
-
-        if conf_matched:
-            effective_conf = conf_matched
-            years_for_conf = db_conference_years[conf_matched]
-            if configured_year and configured_year in years_for_conf:
-                effective_year = configured_year
-            elif years_for_conf:
-                # Configured year not in DB for this conference – use the most recent one
-                effective_year = years_for_conf[0]
-        elif db_conference_years:
-            # Configured default has no data (or was not set) – fall back to the
-            # conference/year combination with the most recent year in the database.
-            best_conf = None
-            best_year = None
-            for conf, years in db_conference_years.items():
-                if years:
-                    most_recent = years[0]  # already sorted descending
-                    if best_year is None or most_recent > best_year:
-                        best_year = most_recent
-                        best_conf = conf
-            if best_conf:
-                effective_conf = best_conf
-                effective_year = best_year
+        effective_conf, effective_year = database.resolve_default_conference_year(configured_conf, configured_year)
 
         filters["default_conference"] = effective_conf
         filters["default_year"] = effective_year

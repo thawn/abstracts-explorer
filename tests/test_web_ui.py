@@ -177,10 +177,15 @@ class TestWebInterface:
         MagicMock
             Configured mock database.
         """
+        from abstracts_explorer.database import DatabaseManager
+
         mock_db = MagicMock()
-        all_conferences = list(conferences_with_years.keys())
-        mock_db.get_filter_options.return_value = {"sessions": [], "years": [], "conferences": all_conferences}
-        mock_db.get_years_for_conference.side_effect = lambda conf: conferences_with_years.get(conf, [])
+        mock_db.get_conference_years_from_db.return_value = conferences_with_years
+        # Delegate resolve_default_conference_year to the real implementation so
+        # the business logic is exercised via database.py.
+        mock_db.resolve_default_conference_year.side_effect = lambda conf, year: DatabaseManager.resolve_default_conference_year(
+            mock_db, conf, year
+        )
         return mock_db
 
     def test_available_filters_includes_defaults(self, client):
