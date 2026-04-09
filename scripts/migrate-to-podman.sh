@@ -25,14 +25,10 @@ SOURCE_DIR="."
 BACKUP_DIR=""
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 declare -A ORIGINAL_OWNERS  # tracks dirs whose ownership we temporarily changed
-
-for dir in "$SOURCE_DIR/chroma_db" "$SOURCE_DIR/chromadb_data" "$SOURCE_DIR/chroma"; do
-    [ -d "$dir" ] && CHR_DATA_DIR=$dir && echo "Found ChromaDB data at $dir"
-done
-for dir in "$SOURCE_DIR/postgres_data" "$SOURCE_DIR/pgdata" "$SOURCE_DIR/postgres"; do
-    [ -d "$dir" ] && PG_DATA_DIR=$dir && echo "Found PostgreSQL data at $dir"
-done
-
+# Initialised to empty; populated after SOURCE_DIR is resolved (see below)
+CHR_DATA_DIR=""
+PG_DATA_DIR=""
+PG_TEMP_DIR=""
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 info()  { printf '\033[1;34m▸ %s\033[0m\n' "$*"; }
@@ -71,10 +67,16 @@ ensure_accessible() {
     fi
 }
 
-# Restore original ownership of any directories we temporarily chowned.
-# Called automatically via the EXIT trap so ownership is always restored,
-# regardless of whether the script succeeds or fails.
-restore_ownership() {
+# Restore original ownership of any directories we temporarily chowned, and
+# remove any leftover temp directory that held the postgres password.
+# Called automatically via the EXIT trap so cleanup always happens regardless
+# of whether the script succeeds, fails, or is interrupted.
+cleanup() {
+    # Remove the password temp dir if it was created
+    if [ -n "$PG_TEMP_DIR" ] && [ -d "$PG_TEMP_DIR" ]; then
+        rm -rf "$PG_TEMP_DIR"
+    fi
+    # Restore original ownership of any directories we temporarily chowned
     for dir in "${!ORIGINAL_OWNERS[@]}"; do
         local original="${ORIGINAL_OWNERS[$dir]}"
         info "Restoring ownership of $dir to $original"
@@ -83,7 +85,7 @@ restore_ownership() {
     done
 }
 
-trap restore_ownership EXIT
+trap cleanup EXIT
 
 # ── parse arguments ──────────────────────────────────────────────────────────
 while [ $# -gt 0 ]; do
@@ -97,6 +99,22 @@ done
 SOURCE_DIR=$(cd "$SOURCE_DIR" && pwd)
 BACKUP_DIR="$SOURCE_DIR/backup_${TIMESTAMP}"
 
+# ── discover data directories (after SOURCE_DIR is resolved) ─────────────────
+for dir in "$SOURCE_DIR/chroma_db" "$SOURCE_DIR/chromadb_data" "$SOURCE_DIR/chroma"; do
+    if [ -d "$dir" ]; then
+        CHR_DATA_DIR="$dir"
+        info "Found ChromaDB data at $dir"
+        break
+    fi
+done
+for dir in "$SOURCE_DIR/postgres_data" "$SOURCE_DIR/pgdata" "$SOURCE_DIR/postgres"; do
+    if [ -d "$dir" ]; then
+        PG_DATA_DIR="$dir"
+        info "Found PostgreSQL data at $dir"
+        break
+    fi
+done
+
 # ── pre-flight checks ────────────────────────────────────────────────────────
 require_cmd podman
 
@@ -104,12 +122,12 @@ info "Migrating data from $SOURCE_DIR to Podman named volumes"
 
 # Check that at least one data source exists
 HAS_DATA=false
-[ -d "$SOURCE_DIR/data" ]      && HAS_DATA=true
-[ -d "$PG_DATA_DIR" ] && HAS_DATA=true
-[ -d "$CHR_DATA_DIR" ] && HAS_DATA=true
+[ -d "$SOURCE_DIR/data" ]       && HAS_DATA=true
+[ -n "$PG_DATA_DIR" ]           && HAS_DATA=true
+[ -n "$CHR_DATA_DIR" ]          && HAS_DATA=true
 
 if [ "$HAS_DATA" = false ]; then
-    die "No data directories found in $SOURCE_DIR (expected data/ or chroma_db/)"
+    die "No data directories found in $SOURCE_DIR (expected data/, chroma_db/, or postgres_data/)"
 fi
 
 # ── stop running services ────────────────────────────────────────────────────
@@ -124,61 +142,56 @@ ok "Services stopped"
 # ── ensure source directories are accessible ─────────────────────────────────
 # Docker Compose volumes are often owned by root; request elevated access now
 # so that both the backup (cp -a) and the Podman bind-mount can read them.
-[ -d "$SOURCE_DIR/data" ]      && ensure_accessible "$SOURCE_DIR/data"
-[ -d "$CHR_DATA_DIR" ] && ensure_accessible "$CHR_DATA_DIR"
-[ -d "$PG_DATA_DIR" ] && ensure_accessible "$PG_DATA_DIR"
+[ -d "$SOURCE_DIR/data" ]  && ensure_accessible "$SOURCE_DIR/data"
+[ -n "$CHR_DATA_DIR" ]     && ensure_accessible "$CHR_DATA_DIR"
+[ -n "$PG_DATA_DIR" ]      && ensure_accessible "$PG_DATA_DIR"
 
 # ── create backup ─────────────────────────────────────────────────────────────
 info "Creating backup at $BACKUP_DIR"
 mkdir -p "$BACKUP_DIR"
 
 if [ -d "$SOURCE_DIR/data" ]; then
-    sudo cp -a "$SOURCE_DIR/data" "$BACKUP_DIR/data"
+    cp -a "$SOURCE_DIR/data" "$BACKUP_DIR/data"
     ok "Backed up data/"
 fi
 
-if [ -d "$PG_DATA_DIR" ]; then
-    sudo cp -a "$PG_DATA_DIR" "$BACKUP_DIR/$(basename "$PG_DATA_DIR")"
+if [ -n "$PG_DATA_DIR" ]; then
+    cp -a "$PG_DATA_DIR" "$BACKUP_DIR/$(basename "$PG_DATA_DIR")"
     ok "Backed up PostgreSQL data from $PG_DATA_DIR"
 fi
 
-if [ -d "$CHR_DATA_DIR" ]; then
-    sudo cp -a "$CHR_DATA_DIR" "$BACKUP_DIR/$(basename "$CHR_DATA_DIR")"
+if [ -n "$CHR_DATA_DIR" ]; then
+    cp -a "$CHR_DATA_DIR" "$BACKUP_DIR/$(basename "$CHR_DATA_DIR")"
     ok "Backed up ChromaDB data from $CHR_DATA_DIR"
 fi
 ok "Backup complete: $BACKUP_DIR"
 
-# ── helper: resolve UID/GID for an image ─────────────────────────────────────
+# ── helper: resolve UID/GID for a volume ─────────────────────────────────────
 # In rootless Podman the host UID of files inside a volume differs from the
 # container-internal UID due to user-namespace UID remapping.  We therefore
-# query the container's own view of its UID/GID so that the chown command
-# runs inside the target namespace and Podman applies the correct mapping
-# automatically.
+# mount the volume inside an alpine container and stat its contents from
+# within that container namespace — the IDs returned are the correct values
+# to pass to chown inside copy_to_volume.
 #
 # Resolution order:
-#   1. Inspect the existing volume's mountpoint for the owner of its contents
-#      (most accurate when the volume was already initialised by the service).
+#   1. Mount an existing, populated volume inside an alpine container and stat
+#      the owner of its contents (most accurate when already initialised).
 #   2. Fall back to the supplied defaults.
 get_uid_gid_for_volume() {
     local volume_name="$1"
     local default_uid="${2:-0}"
     local default_gid="${3:-0}"
 
-    # 1. Try to read from an existing, populated volume mountpoint
-    local mount_point
-    mount_point=$(podman volume inspect "$volume_name" --format '{{ .Mountpoint }}' 2>/dev/null || true)
-    if [ -n "$mount_point" ] && [ -d "$mount_point" ]; then
-        local first_entry
-        first_entry=$(sudo find "$mount_point" -maxdepth 1 -mindepth 1 2>/dev/null | head -1)
-        if [ -n "$first_entry" ]; then
-            local vol_uid vol_gid
-            vol_uid=$(sudo stat -c '%u' "$first_entry" 2>/dev/null || true)
-            vol_gid=$(sudo stat -c '%g' "$first_entry" 2>/dev/null || true)
-            if [ -n "$vol_uid" ] && [ "$vol_uid" != "0" ]; then
-                echo "${vol_uid}:${vol_gid}"
-                return
-            fi
-        fi
+    # 1. Query ownership from inside the container namespace
+    local uid_gid
+    uid_gid=$(podman run --rm \
+        -v "${volume_name}:/mnt" \
+        docker.io/alpine:3.21 \
+        sh -c 'f=$(find /mnt -maxdepth 1 -mindepth 1 2>/dev/null | head -1); [ -n "$f" ] && stat -c "%u:%g" "$f"' \
+        2>/dev/null || true)
+    if [ -n "$uid_gid" ] && [ "$uid_gid" != "0:0" ]; then
+        echo "$uid_gid"
+        return
     fi
 
     # 2. Fall back to defaults
@@ -208,10 +221,8 @@ copy_to_volume() {
         -v "$src_dir:/source:ro" \
         -v "${volume_name}:/dest" \
         docker.io/alpine:3.21 \
-        sh -c "cp -a /source/. /dest/"
-    mount_point=$(podman volume inspect "$volume_name" --format '{{ .Mountpoint }}' 2>/dev/null || true)
-    sudo chown -R "$owner" "$mount_point" || \
-        warn "Failed to set ownership for volume $volume_name — you may need to run: sudo chown -R $owner \"$mount_point\""
+        sh -c 'cp -a /source/. /dest/ && chown -R "$1" /dest' sh "$owner"
+
     ok "Copied to volume $volume_name"
 }
 
@@ -223,20 +234,18 @@ if [ -d "$SOURCE_DIR/data" ]; then
 fi
 
 # ── migrate ChromaDB data ────────────────────────────────────────────────────
-if [ -d "$CHR_DATA_DIR" ]; then
-    info "Found ChromaDB data at $CHR_DATA_DIR"
+if [ -n "$CHR_DATA_DIR" ]; then
     CHROMA_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-chromadb-data" 1000 1000)
     info "ChromaDB data owner: $CHROMA_OWNER"
-        copy_to_volume "$CHR_DATA_DIR" "systemd-abstracts-chromadb-data" "$CHROMA_OWNER"
+    copy_to_volume "$CHR_DATA_DIR" "systemd-abstracts-chromadb-data" "$CHROMA_OWNER"
 fi
 
 # ── migrate PostgreSQL data (if available) ────────────────────────────────────
 # Docker Compose PostgreSQL data is usually in a Docker named volume.
 # If the user has extracted it to a local directory, handle it here.
 PG_MIGRATED=false
-if [ -d "$PG_DATA_DIR" ]; then
-    info "Found PostgreSQL data at $PG_DATA_DIR"
-    PG_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-postgres-data" 1000 1000)
+if [ -n "$PG_DATA_DIR" ]; then
+    PG_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-postgres-data" 999 999)
     info "PostgreSQL data owner: $PG_OWNER"
     copy_to_volume "$PG_DATA_DIR" "systemd-abstracts-postgres-data" "$PG_OWNER"
     PG_MIGRATED=true
@@ -267,6 +276,8 @@ if [ "$PG_MIGRATED" = "true" ]; then
         else
             # Write password and a trust-only pg_hba.conf to temp files so they
             # can be bind-mounted into the container without appearing in `ps`.
+            # PG_TEMP_DIR is tracked by the EXIT trap (cleanup()) so it is always
+            # removed even if the script is interrupted.
             PG_TEMP_DIR=$(mktemp -d)
             printf '%s' "$NEW_PG_PASSWORD" > "$PG_TEMP_DIR/new_password"
             chmod 600 "$PG_TEMP_DIR/new_password"
@@ -329,6 +340,7 @@ PGEOF
             fi
 
             rm -rf "$PG_TEMP_DIR"
+            PG_TEMP_DIR=""  # prevent double-removal by cleanup()
         fi
     fi
 fi
