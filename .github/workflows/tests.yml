@@ -40,7 +40,7 @@ jobs:
                   fetch-depth: 0 # Needed for hatch-vcs to determine version
 
             - name: Install uv
-              uses: actions/setup-python@v8
+              uses: astral-sh/setup-uv@v8
               with:
                   version: "latest"
                   enable-cache: true
