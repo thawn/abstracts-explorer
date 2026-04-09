@@ -383,11 +383,14 @@ function _renderTopicEvolutionChart(plotId, viz) {
             const values = years.map(y => yearRelative[y]);
 
             // Build trace name: include topic and/or conference as needed
-            const name = topics.length > 1 && allConferences.size > 1
-                ? `${topicName} (${conf})`
-                : topics.length > 1
-                    ? topicName
-                    : conf;
+            let name;
+            if (topics.length > 1 && allConferences.size > 1) {
+                name = `${topicName} (${conf})`;
+            } else if (topics.length > 1) {
+                name = topicName;
+            } else {
+                name = conf;
+            }
 
             traces.push({
                 x: years.map(Number),
