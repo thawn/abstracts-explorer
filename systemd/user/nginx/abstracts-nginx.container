@@ -8,6 +8,11 @@ Image=docker.io/nginxinc/nginx-unprivileged:stable-alpine
 ContainerName=abstracts-nginx
 Network=abstracts.network
 
+# Map the running user to UID/GID 101 (the nginx user inside the unprivileged image).
+# In rootless Podman the host user's files appear as UID 0 inside the container without
+# this option, so nginx (UID 101) would be denied access to a 0600 key.pem file.
+UserNS=keep-id:uid=101,gid=101
+
 # nginx configuration — placed by the install script.
 Volume=%h/abstracts-explorer/nginx/nginx.quadlet.conf:/etc/nginx/nginx.conf:ro
 
