@@ -8,7 +8,7 @@
 import { API_BASE } from './utils/constants.js';
 import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
 import { showError } from './utils/ui-utils.js';
-import { renderMarkdownWithLatex } from './utils/markdown-utils.js';
+import { renderMarkdownWithLatex, renderInlineMarkdownWithLatex } from './utils/markdown-utils.js';
 import {
     getPaperPriority,
     setPaperPriority as setPaperPriorityInState,
@@ -119,7 +119,7 @@ export function formatPaperCard(paper, options = {}) {
                 </div>
             ` : ''}
             <div class="flex items-start justify-between ${compact ? 'mb-1' : 'mb-2'}">
-                <h${compact ? '4' : '3'} class="${compact ? 'text-sm' : 'text-lg'} font-semibold text-gray-800 flex-1 ${compact ? 'leading-tight pr-2' : 'pr-2'}">${escapeHtml(title)}</h${compact ? '4' : '3'}>
+                <h${compact ? '4' : '3'} class="${compact ? 'text-sm' : 'text-lg'} font-semibold text-gray-800 flex-1 ${compact ? 'leading-tight pr-2' : 'pr-2'}">${renderInlineMarkdownWithLatex(title)}</h${compact ? '4' : '3'}>
                 ${starsHtml}
             </div>
             <p class="${compact ? 'text-xs' : 'text-sm'} text-gray-600 ${compact ? 'mb-2 truncate' : 'mb-3'}">
@@ -181,7 +181,7 @@ export async function showPaperDetails(paperId) {
         modal.innerHTML = `
             <div class="bg-white rounded-lg max-w-4xl max-h-[90vh] overflow-y-auto p-8">
                 <div class="flex items-start justify-between mb-4">
-                    <h2 class="text-2xl font-bold text-gray-800 flex-1">${escapeHtml(title)}</h2>
+                    <h2 class="text-2xl font-bold text-gray-800 flex-1">${renderInlineMarkdownWithLatex(title)}</h2>
                     <button onclick="this.closest('.fixed').remove()" class="ml-4 text-gray-500 hover:text-gray-700">
                         <i class="fas fa-times text-xl"></i>
                     </button>

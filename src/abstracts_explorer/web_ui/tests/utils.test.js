@@ -5,7 +5,7 @@
 import { jest } from '@jest/globals';
 
 // Mock dependencies
-global.marked = { parse: jest.fn((text) => text), use: jest.fn() };
+global.marked = { parse: jest.fn((text) => text), parseInline: jest.fn((text) => text), use: jest.fn() };
 global.markedKatex = jest.fn(() => ({}));
 
 // Import all utility modules
@@ -13,7 +13,7 @@ import { escapeHtml } from '../static/modules/utils/dom-utils.js';
 import { renderEmptyState, renderErrorBlock, renderLoadingSpinner, showLoading, showErrorInElement, showError } from '../static/modules/utils/ui-utils.js';
 import { naturalSortPosterPosition, sortClustersBySizeDesc } from '../static/modules/utils/sort-utils.js';
 import { getClusterLabelWithCount } from '../static/modules/utils/cluster-utils.js';
-import { renderMarkdownWithLatex, configureMarkedWithKatex } from '../static/modules/utils/markdown-utils.js';
+import { renderMarkdownWithLatex, configureMarkedWithKatex, renderInlineMarkdownWithLatex } from '../static/modules/utils/markdown-utils.js';
 import { getSelectedFilters, buildFilteredRequestBody, applyYearConferenceFilters, fetchJSON } from '../static/modules/utils/api-utils.js';
 import { API_BASE, PLOTLY_COLORS } from '../static/modules/utils/constants.js';
 
@@ -205,6 +205,35 @@ describe('Utility Modules', () => {
     });
 
     describe('Markdown Utils', () => {
+        describe('renderInlineMarkdownWithLatex', () => {
+            it('should render inline markdown', () => {
+                global.marked.parseInline.mockReturnValueOnce('<strong>Test</strong>');
+                const result = renderInlineMarkdownWithLatex('**Test**');
+                expect(result).toContain('Test');
+            });
+
+            it('should handle empty string', () => {
+                expect(renderInlineMarkdownWithLatex('')).toBe('');
+            });
+
+            it('should handle parsing errors gracefully', () => {
+                global.marked.parseInline.mockImplementationOnce(() => {
+                    throw new Error('Parse error');
+                });
+                const result = renderInlineMarkdownWithLatex('Title text');
+                expect(result).toContain('Title text');
+            });
+
+            it('should escape HTML on parsing error fallback', () => {
+                global.marked.parseInline.mockImplementationOnce(() => {
+                    throw new Error('Parse error');
+                });
+                const result = renderInlineMarkdownWithLatex('<script>xss</script>');
+                expect(result).not.toContain('<script>');
+                expect(result).toContain('&lt;script&gt;');
+            });
+        });
+
         describe('renderMarkdownWithLatex', () => {
             it('should render markdown', () => {
                 global.marked.parse.mockReturnValueOnce('<p>Test</p>');

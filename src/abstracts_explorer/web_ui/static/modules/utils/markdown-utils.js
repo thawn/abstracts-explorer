@@ -5,6 +5,27 @@
  */
 
 /**
+ * Render inline markdown with LaTeX support (no block-level wrappers)
+ * Use this for titles and other inline content where block elements like <p> are not desired.
+ * @param {string} text - Inline markdown text to render
+ * @returns {string} Rendered HTML without block-level wrappers
+ */
+export function renderInlineMarkdownWithLatex(text) {
+    if (!text) return '';
+
+    try {
+        // Use parseInline for inline content to avoid wrapping in <p> tags
+        return marked.parseInline(text);
+    } catch (e) {
+        console.warn('Markdown inline parsing error:', e);
+        // Fallback to escaped HTML if markdown parsing fails
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+}
+
+/**
  * Render markdown with LaTeX support
  * @param {string} text - Markdown text to render
  * @returns {string} Rendered HTML
