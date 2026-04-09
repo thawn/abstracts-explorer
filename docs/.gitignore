@@ -1,7 +1,6 @@
 # Ignore build directory
 _build/
 _static/
-_templates/
 
 # Sphinx generated files
 *.doctree

@@ -98,6 +98,21 @@ html_theme_options = {
     "titles_only": False,
 }
 
+# Version selector for multi-version GitHub Pages deployment.
+# DOCS_VERSION is set by CI: 'stable' for the main branch, 'dev' for the develop branch.
+# DOCS_BASE_URL can be overridden for custom domains; defaults to the GitHub Pages URL.
+_docs_version = os.environ.get("DOCS_VERSION", "stable")
+_docs_base_url = os.environ.get("DOCS_BASE_URL", "https://thawn.github.io/abstracts-explorer")
+
+html_context = {
+    "display_version": True,
+    "current_version": _docs_version,
+    "versions": [
+        ("stable", f"{_docs_base_url}/"),
+        ("dev", f"{_docs_base_url}/dev/"),
+    ],
+}
+
 # Intersphinx mapping
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
