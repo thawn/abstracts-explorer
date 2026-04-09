@@ -608,7 +608,8 @@ def resolve_conference_from_url(url_path: str) -> Optional[str]:
     'NeurIPS'
     >>> resolve_conference_from_url("ICLR")  # matches conference name
     'ICLR'
-    >>> resolve_conference_from_url("unknown")
+    >>> resolve_conference_from_url("unknown") is None
+    True
     """
     lookup: Dict[str, str] = {}
     available = get_available_filters()
