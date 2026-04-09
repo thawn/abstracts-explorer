@@ -550,6 +550,42 @@ podman-compose restart chromadb
 podman unshare chown 1000:1000 /path/to/volume
 ```
 
+### nginx cannot read `key.pem` (Podman quadlet only)
+
+**Symptom:** nginx fails to start with an error similar to:
+
+```
+nginx: [emerg] cannot load certificate key "/etc/nginx/certs/key.pem":
+BIO_new_file() failed (SSL: error:…:Permission denied)
+```
+
+**Cause:** In rootless Podman, the host user's files appear as owned by UID 0 inside
+the container's user namespace.  The `nginx-unprivileged` image runs as UID 101, so a
+`key.pem` file with permissions `0600` (owner-only) cannot be read by nginx.
+
+**Fix (already applied in the current quadlet file):** The `abstracts-nginx.container`
+quadlet includes `UserNS=keep-id:uid=101,gid=101`, which maps the running host user to
+UID 101 inside the container (the nginx user).  This makes `key.pem` appear owned by
+the nginx user, so it can be read even with `0600` permissions.
+
+If you have an older copy of `abstracts-nginx.container` that is missing this line,
+re-run the install script or manually add the following line in the `[Container]`
+section:
+
+```ini
+UserNS=keep-id:uid=101,gid=101
+```
+
+Then reload and restart the service:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user restart abstracts-nginx
+```
+
+> **Note:** `UserNS=keep-id:uid=…,gid=…` requires Podman 4.3 or later.
+> Check your version with `podman --version`.
+
 ### Database Locked
 - PostgreSQL is now the default for Docker Compose (no locking issues)
 - For SQLite mode, ensure only one process accesses the database
