@@ -40,7 +40,8 @@ import {
     openChatSettings,
     closeSettings,
     handleYearChange,
-    handleConferenceChange
+    handleConferenceChange,
+    dismissConferenceError
 } from './modules/filters.js';
 import {
     switchTab,
@@ -143,6 +144,7 @@ function attachToWindow() {
     window.closeSettings = closeSettings;
     window.handleYearChange = handleYearChange;
     window.handleConferenceChange = handleConferenceChange;
+    window.dismissConferenceError = dismissConferenceError;
 
     // Tabs module
     window.switchTab = switchTab;

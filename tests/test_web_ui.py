@@ -319,6 +319,157 @@ class TestWebInterface:
         assert data["default_year"] == 2025
 
 
+class TestConferenceURLRoute:
+    """Test direct URL paths to conferences (e.g., /icml, /neurips)."""
+
+    def test_valid_conference_url_by_plugin_name(self, client):
+        """Test that navigating to /neurips selects the NeurIPS conference."""
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        mock_db = MagicMock()
+        mock_db.get_conference_years_from_db.return_value = {"NeurIPS": [2025, 2024]}
+
+        with patch.object(
+            app_module,
+            "get_available_filters",
+            return_value={
+                "conferences": ["NeurIPS", "ICLR"],
+                "years": [2024, 2025],
+                "conference_years": {"NeurIPS": [2024, 2025], "ICLR": [2024]},
+            },
+        ):
+            with patch.object(app_module, "get_database", return_value=mock_db):
+                response = client.get("/neurips")
+
+        assert response.status_code == 200
+        assert b"Abstracts Explorer" in response.data
+        # Check that urlConference is set in the page
+        assert b"window.urlConference" in response.data
+        assert b"NeurIPS" in response.data
+
+    def test_valid_conference_url_case_insensitive(self, client):
+        """Test that conference URLs are case-insensitive (e.g., /ICML, /icml, /Icml)."""
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        mock_db = MagicMock()
+        mock_db.get_conference_years_from_db.return_value = {"ICML": [2025]}
+
+        with patch.object(
+            app_module,
+            "get_available_filters",
+            return_value={
+                "conferences": ["ICML"],
+                "years": [2025],
+                "conference_years": {"ICML": [2025]},
+            },
+        ):
+            with patch.object(app_module, "get_database", return_value=mock_db):
+                response = client.get("/ICML")
+
+        assert response.status_code == 200
+        assert b"window.urlConference" in response.data
+
+    def test_valid_conference_url_by_conference_name(self, client):
+        """Test that navigating to the full conference name works (e.g., /NeurIPS)."""
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        mock_db = MagicMock()
+        mock_db.get_conference_years_from_db.return_value = {"NeurIPS": [2025]}
+
+        with patch.object(
+            app_module,
+            "get_available_filters",
+            return_value={
+                "conferences": ["NeurIPS"],
+                "years": [2025],
+                "conference_years": {"NeurIPS": [2025]},
+            },
+        ):
+            with patch.object(app_module, "get_database", return_value=mock_db):
+                response = client.get("/NeurIPS")
+
+        assert response.status_code == 200
+        assert b"window.urlConference" in response.data
+        assert b"NeurIPS" in response.data
+
+    def test_unknown_conference_url_shows_error(self, client):
+        """Test that an unknown conference path shows an error with available conferences."""
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        mock_db = MagicMock()
+        mock_db.get_conference_years_from_db.return_value = {"NeurIPS": [2025], "ICLR": [2024]}
+
+        with patch.object(
+            app_module,
+            "get_available_filters",
+            return_value={
+                "conferences": ["NeurIPS", "ICLR"],
+                "years": [2024, 2025],
+                "conference_years": {"NeurIPS": [2025], "ICLR": [2024]},
+            },
+        ):
+            with patch.object(app_module, "get_database", return_value=mock_db):
+                response = client.get("/unknownconf")
+
+        assert response.status_code == 200
+        assert b"Abstracts Explorer" in response.data
+        # Should contain error info
+        assert b"window.urlConferenceError" in response.data
+        assert b"unknownconf" in response.data
+        # Should NOT contain urlConference (valid conference)
+        assert b"window.urlConference =" not in response.data
+
+    def test_conference_with_no_data_shows_error(self, client):
+        """Test that a known plugin conference with no DB data shows a helpful error."""
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        mock_db = MagicMock()
+        # ICML is in plugins but has no data in DB
+        mock_db.get_conference_years_from_db.return_value = {"NeurIPS": [2025]}
+
+        with patch.object(
+            app_module,
+            "get_available_filters",
+            return_value={
+                "conferences": ["NeurIPS", "ICML"],
+                "years": [2024, 2025],
+                "conference_years": {"NeurIPS": [2025], "ICML": [2024, 2025]},
+            },
+        ):
+            with patch.object(app_module, "get_database", return_value=mock_db):
+                response = client.get("/icml")
+
+        assert response.status_code == 200
+        assert b"window.urlConferenceError" in response.data
+        assert b"No data available" in response.data
+
+    def test_conference_url_does_not_conflict_with_api(self, client):
+        """Test that /api paths still work and are not caught by the conference route."""
+        response = client.get("/api/stats")
+        # Should be handled by the stats endpoint, not the conference route
+        assert response.status_code in [200, 500]
+
+    def test_conference_url_does_not_conflict_with_health(self, client):
+        """Test that /health still works."""
+        response = client.get("/health")
+        # Should be handled by the health endpoint
+        assert response.status_code in [200, 503]
+
+    def test_root_still_works(self, client):
+        """Test that the root URL / still returns the main page without conference context."""
+        response = client.get("/")
+        assert response.status_code == 200
+        assert b"Abstracts Explorer" in response.data
+        # Should NOT contain conference URL overrides
+        assert b"window.urlConference" not in response.data
+        assert b"window.urlConferenceError" not in response.data
+
+
 class TestSearchEndpoint:
     """Test the search endpoint specifically."""
 
@@ -534,7 +685,7 @@ class TestErrorHandling:
 
     def test_404_handler(self, client):
         """Test 404 error handler."""
-        response = client.get("/nonexistent")
+        response = client.get("/api/nonexistent")
         assert response.status_code == 404
         data = json.loads(response.data)
         assert "error" in data

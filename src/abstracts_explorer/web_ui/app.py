@@ -147,7 +147,106 @@ def index():
     str
         Rendered HTML template
     """
-    return render_template("index.html", version=__version__, imprint_link=_config.imprint_link)
+    return render_template(
+        "index.html", version=__version__, imprint_link=_config.imprint_link, url_conference=None, url_conference_error=None
+    )
+
+
+@app.route("/<conference_name>")
+def conference_index(conference_name):
+    """
+    Render the main page with a specific conference pre-selected.
+
+    Resolves the conference name case-insensitively against known
+    conferences from plugins and the database. When no match is found,
+    renders the page with an error listing the available conferences.
+
+    Parameters
+    ----------
+    conference_name : str
+        Conference name from the URL path (case-insensitive).
+
+    Returns
+    -------
+    str
+        Rendered HTML template with conference context
+    """
+    try:
+        # Build case-insensitive lookup: lowercase key → canonical conference name
+        conference_lookup: dict[str, str] = {}
+
+        # Add plugin conference names and plugin names
+        available = get_available_filters()
+        plugin_conferences = available.get("conferences", [])
+        for conf in plugin_conferences:
+            conference_lookup[conf.lower()] = conf
+
+        from abstracts_explorer.plugin import list_plugins as _list_plugins
+
+        for meta in _list_plugins():
+            plugin_name = meta.get("name", "")
+            conf_name = meta.get("conference_name", "")
+            if plugin_name and conf_name:
+                conference_lookup[plugin_name.lower()] = conf_name
+
+        # Add DB conferences
+        db_conference_years: dict[str, list[int]] = {}
+        try:
+            database = get_database()
+            db_conference_years = database.get_conference_years_from_db()
+            for conf in db_conference_years:
+                conference_lookup[conf.lower()] = conf
+        except Exception:
+            pass
+
+        resolved = conference_lookup.get(conference_name.lower())
+
+        if resolved:
+            # Check that the resolved conference actually has data in the DB
+            if resolved in db_conference_years:
+                return render_template(
+                    "index.html",
+                    version=__version__,
+                    imprint_link=_config.imprint_link,
+                    url_conference=resolved,
+                    url_conference_error=None,
+                )
+            else:
+                # Plugin exists but no data downloaded yet
+                available_conferences = sorted(db_conference_years.keys())
+                return render_template(
+                    "index.html",
+                    version=__version__,
+                    imprint_link=_config.imprint_link,
+                    url_conference=None,
+                    url_conference_error={
+                        "message": f"No data available for conference '{resolved}'. Please download data first.",
+                        "available_conferences": available_conferences,
+                    },
+                )
+        else:
+            available_conferences = sorted(
+                set(list(db_conference_years.keys()) + plugin_conferences)
+            )
+            return render_template(
+                "index.html",
+                version=__version__,
+                imprint_link=_config.imprint_link,
+                url_conference=None,
+                url_conference_error={
+                    "message": f"Conference '{conference_name}' not found.",
+                    "available_conferences": available_conferences,
+                },
+            )
+    except Exception as e:
+        logger.error(f"Error in conference URL route: {e}", exc_info=True)
+        return render_template(
+            "index.html",
+            version=__version__,
+            imprint_link=_config.imprint_link,
+            url_conference=None,
+            url_conference_error=None,
+        )
 
 
 @app.route("/health")

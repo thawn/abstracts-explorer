@@ -5,7 +5,49 @@
  */
 
 import { API_BASE } from './utils/constants.js';
-import { getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
+import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
+
+/**
+ * Show the conference URL error banner if window.urlConferenceError is set.
+ * Clears the global after showing so it only appears once.
+ */
+function showConferenceErrorBanner() {
+    if (!window.urlConferenceError) return;
+
+    const error = window.urlConferenceError;
+    const banner = document.getElementById('conference-error-banner');
+    const messageEl = document.getElementById('conference-error-message');
+    const availableEl = document.getElementById('conference-error-available');
+
+    if (banner && messageEl) {
+        messageEl.textContent = error.message || 'Conference not found.';
+
+        if (availableEl && error.available_conferences && error.available_conferences.length > 0) {
+            const confLinks = error.available_conferences.map(conf => {
+                const safeName = escapeHtml(conf);
+                const safeHref = encodeURIComponent(conf);
+                return `<a href="/${safeHref}" class="underline hover:text-red-900">${safeName}</a>`;
+            });
+            availableEl.innerHTML = `<strong>Available conferences:</strong> ${confLinks.join(', ')}`;
+        } else if (availableEl) {
+            availableEl.innerHTML = '';
+        }
+
+        banner.classList.remove('hidden');
+    }
+
+    delete window.urlConferenceError;
+}
+
+/**
+ * Dismiss the conference error banner.
+ */
+export function dismissConferenceError() {
+    const banner = document.getElementById('conference-error-banner');
+    if (banner) {
+        banner.classList.add('hidden');
+    }
+}
 
 /**
  * Load filter options from API
@@ -13,6 +55,9 @@ import { getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
  */
 export async function loadFilterOptions() {
     try {
+        // Show conference URL error banner if present (only on first call)
+        showConferenceErrorBanner();
+
         // Get selected year and conference from header
         const yearSelect = document.getElementById('year-selector');
         const conferenceSelect = document.getElementById('conference-selector');
@@ -77,7 +122,21 @@ export async function loadFilterOptions() {
 
             // Apply defaults only on initial load (right after the selectors were populated)
             let defaultApplied = false;
-            if (conferencesJustPopulated && availableData.default_conference) {
+
+            // URL-specified conference takes highest priority
+            if (conferencesJustPopulated && window.urlConference) {
+                const urlConf = String(window.urlConference);
+                const confOption = Array.from(conferenceSelect.options).find(opt => opt.value === urlConf);
+                if (confOption) {
+                    conferenceSelect.value = urlConf;
+                    updateYearsForConference();
+                    defaultApplied = true;
+                }
+                // Clear so it's only applied once
+                delete window.urlConference;
+            }
+
+            if (!defaultApplied && conferencesJustPopulated && availableData.default_conference) {
                 const defaultConf = String(availableData.default_conference);
                 const confOption = Array.from(conferenceSelect.options).find(opt => opt.value === defaultConf);
                 if (confOption) {
@@ -90,7 +149,7 @@ export async function loadFilterOptions() {
                     updateYearsForConference();
                     defaultApplied = true;
                 }
-            } else if (conferencesJustPopulated && conferenceSelect && conferenceSelect.options.length > 0) {
+            } else if (!defaultApplied && conferencesJustPopulated && conferenceSelect && conferenceSelect.options.length > 0) {
                 // No specific default but conferences were just populated — select the first one
                 conferenceSelect.selectedIndex = 0;
                 updateYearsForConference();
