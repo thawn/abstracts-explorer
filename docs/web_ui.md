@@ -20,6 +20,8 @@ apply to every tab.
 
 ## Search Abstracts
 
+![Search tab](images/web-ui-search.png)
+
 The default tab. Type a query and press **Search** to find matching papers.
 
 **Features:**
@@ -42,6 +44,8 @@ The default tab. Type a query and press **Search** to find matching papers.
   see only that conference's results.
 
 ## AI Chat
+
+![AI Chat tab](images/web-ui-chat.png)
 
 An interactive RAG (Retrieval-Augmented Generation) assistant that answers
 questions about the loaded abstracts.
@@ -72,6 +76,8 @@ questions about the loaded abstracts.
 
 ## Interesting Papers
 
+![Interesting Papers tab](images/web-ui-interesting.png)
+
 A personal reading list of papers you have rated.
 
 **Features:**
@@ -97,6 +103,8 @@ A personal reading list of papers you have rated.
   colleagues.
 
 ## Clusters
+
+![Clusters tab](images/web-ui-clusters.png)
 
 Interactive 2-D visualization of paper embeddings grouped by topic.
 
