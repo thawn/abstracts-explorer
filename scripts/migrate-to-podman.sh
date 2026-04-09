@@ -160,11 +160,11 @@ get_uid_gid_for_volume() {
     mount_point=$(podman volume inspect "$volume_name" --format '{{ .Mountpoint }}' 2>/dev/null || true)
     if [ -n "$mount_point" ] && [ -d "$mount_point" ]; then
         local first_entry
-        first_entry=$(find "$mount_point" -maxdepth 1 -mindepth 1 2>/dev/null | head -1)
+        first_entry=$(sudo find "$mount_point" -maxdepth 1 -mindepth 1 2>/dev/null | head -1)
         if [ -n "$first_entry" ]; then
             local vol_uid vol_gid
-            vol_uid=$(stat -c '%u' "$first_entry" 2>/dev/null || true)
-            vol_gid=$(stat -c '%g' "$first_entry" 2>/dev/null || true)
+            vol_uid=$(sudo stat -c '%u' "$first_entry" 2>/dev/null || true)
+            vol_gid=$(sudo stat -c '%g' "$first_entry" 2>/dev/null || true)
             if [ -n "$vol_uid" ] && [ "$vol_uid" != "0" ]; then
                 echo "${vol_uid}:${vol_gid}"
                 return
@@ -216,18 +216,22 @@ copy_to_volume() {
 # ── migrate application data ─────────────────────────────────────────────────
 if [ -d "$SOURCE_DIR/data" ]; then
     APP_IMAGE="ghcr.io/thawn/abstracts-explorer:latest"
-    APP_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-data" "$APP_IMAGE" 1000 1000)
+    APP_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-data" "$APP_IMAGE" 1000:1000)
     info "abstracts-explorer data owner: $APP_OWNER"
     copy_to_volume "$SOURCE_DIR/data" "systemd-abstracts-data" "$APP_OWNER"
 fi
 
 # ── migrate ChromaDB data ────────────────────────────────────────────────────
-if [ -d "$SOURCE_DIR/chroma_db" ]; then
-    CHROMA_IMAGE="docker.io/chromadb/chroma:latest"
-    CHROMA_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-chromadb-data" "$CHROMA_IMAGE" 1000 1000)
-    info "ChromaDB data owner: $CHROMA_OWNER"
-    copy_to_volume "$SOURCE_DIR/chroma_db" "systemd-abstracts-chromadb-data" "$CHROMA_OWNER"
-fi
+CHR_DATA_DIRS=("$SOURCE_DIR/chroma_db" "$SOURCE_DIR/chromadb_data" "$SOURCE_DIR/chroma")
+for chr_dir in "${CHR_DATA_DIRS[@]}"; do
+    if [ -d "$chr_dir" ]; then
+        info "Found ChromaDB data at $chr_dir"
+        CHROMA_IMAGE="docker.io/chromadb/chroma:latest"
+        CHROMA_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-chromadb-data" "$CHROMA_IMAGE" 1000:1000)
+        info "ChromaDB data owner: $CHROMA_OWNER"
+        copy_to_volume "$chr_dir" "systemd-abstracts-chromadb-data" "$CHROMA_OWNER"
+    fi
+done
 
 # ── migrate PostgreSQL data (if available) ────────────────────────────────────
 # Docker Compose PostgreSQL data is usually in a Docker named volume.
@@ -238,7 +242,7 @@ for pg_dir in "${PG_DATA_DIRS[@]}"; do
     if [ -d "$pg_dir" ]; then
         info "Found PostgreSQL data at $pg_dir"
         PG_IMAGE="docker.io/postgres:16-alpine"
-        PG_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-postgres-data" "$PG_IMAGE" 999 999)
+        PG_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-postgres-data" "$PG_IMAGE" 1000:1000)
         info "PostgreSQL data owner: $PG_OWNER"
         copy_to_volume "$pg_dir" "systemd-abstracts-postgres-data" "$PG_OWNER"
         PG_MIGRATED=true
