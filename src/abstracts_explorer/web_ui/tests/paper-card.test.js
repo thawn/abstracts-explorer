@@ -8,7 +8,7 @@ global.fetch = jest.fn();
 global.marked = {
     parse: jest.fn((text) => `<p>${text}</p>`),
     parseInline: jest.fn((text) => {
-        // Simulate marked's HTML escaping behaviour for test purposes
+        // Simulate marked's HTML escaping behavior for test purposes
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
