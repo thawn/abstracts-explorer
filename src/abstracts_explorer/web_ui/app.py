@@ -148,7 +148,11 @@ def index():
         Rendered HTML template
     """
     return render_template(
-        "index.html", version=__version__, imprint_link=_config.imprint_link, url_conference=None, url_conference_error=None
+        "index.html",
+        version=__version__,
+        imprint_link=_config.imprint_link,
+        url_conference=None,
+        url_conference_error=None,
     )
 
 
@@ -225,9 +229,7 @@ def conference_index(conference_name):
                     },
                 )
         else:
-            available_conferences = sorted(
-                set(list(db_conference_years.keys()) + plugin_conferences)
-            )
+            available_conferences = sorted(set(list(db_conference_years.keys()) + plugin_conferences))
             return render_template(
                 "index.html",
                 version=__version__,
