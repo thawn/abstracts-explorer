@@ -183,8 +183,8 @@ class TestWebInterface:
         mock_db.get_conference_years_from_db.return_value = conferences_with_years
         # Delegate resolve_default_conference_year to the real implementation so
         # the business logic is exercised via database.py.
-        mock_db.resolve_default_conference_year.side_effect = lambda conf, year: DatabaseManager.resolve_default_conference_year(
-            mock_db, conf, year
+        mock_db.resolve_default_conference_year.side_effect = (
+            lambda conf, year: DatabaseManager.resolve_default_conference_year(mock_db, conf, year)
         )
         return mock_db
 

@@ -935,9 +935,33 @@ class TestGetConferenceYearsFromDb:
         from abstracts_explorer.plugin import LightweightPaper
 
         papers = [
-            LightweightPaper(title="P1", authors=["A"], abstract="a", session="s", poster_position="p", year=2024, conference="NeurIPS"),
-            LightweightPaper(title="P2", authors=["A"], abstract="a", session="s", poster_position="p", year=2025, conference="NeurIPS"),
-            LightweightPaper(title="P3", authors=["A"], abstract="a", session="s", poster_position="p", year=2024, conference="ICLR"),
+            LightweightPaper(
+                title="P1",
+                authors=["A"],
+                abstract="a",
+                session="s",
+                poster_position="p",
+                year=2024,
+                conference="NeurIPS",
+            ),
+            LightweightPaper(
+                title="P2",
+                authors=["A"],
+                abstract="a",
+                session="s",
+                poster_position="p",
+                year=2025,
+                conference="NeurIPS",
+            ),
+            LightweightPaper(
+                title="P3",
+                authors=["A"],
+                abstract="a",
+                session="s",
+                poster_position="p",
+                year=2024,
+                conference="ICLR",
+            ),
         ]
         for p in papers:
             connected_db.add_paper(p)
@@ -1007,4 +1031,3 @@ class TestResolveDefaultConferenceYear:
         conf, year = mock_db.resolve_default_conference_year("NeurIPS", 2024)
         assert conf == "NeurIPS"
         assert year == 2024
-
