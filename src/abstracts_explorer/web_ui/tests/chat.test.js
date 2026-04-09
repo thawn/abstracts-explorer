@@ -244,14 +244,16 @@ describe('Chat Module', () => {
         it('should render topic evolution chart', () => {
             const visualizations = [{
                 type: 'topic_evolution',
-                topic: 'transformers',
-                conferences: ['NeurIPS'],
-                conference_data: {
-                    'NeurIPS': {
-                        year_relative: { '2022': 2.5, '2023': 4.0, '2024': 5.0 },
-                        year_counts: { '2022': 5, '2023': 10, '2024': 15 }
+                topics: [{
+                    topic: 'transformers',
+                    conferences: ['NeurIPS'],
+                    conference_data: {
+                        'NeurIPS': {
+                            year_relative: { '2022': 2.5, '2023': 4.0, '2024': 5.0 },
+                            year_counts: { '2022': 5, '2023': 10, '2024': 15 }
+                        }
                     }
-                }
+                }]
             }];
 
             renderChatVisualizations(visualizations);
@@ -260,7 +262,7 @@ describe('Chat Module', () => {
             const [plotId, traces, layout] = global.Plotly.newPlot.mock.calls[0];
             expect(plotId).toMatch(/^chat-plot-/);
             expect(traces).toHaveLength(1);
-            expect(traces[0].x).toEqual(['2022', '2023', '2024']);
+            expect(traces[0].x).toEqual([2022, 2023, 2024]);
             expect(traces[0].y).toEqual([2.5, 4.0, 5.0]);
             expect(traces[0].type).toBe('scatter');
             expect(traces[0].mode).toBe('lines+markers');
@@ -268,7 +270,74 @@ describe('Chat Module', () => {
             expect(layout.title.text).toContain('transformers');
             expect(layout.title.text).toContain('NeurIPS');
             expect(layout.xaxis.title.text).toContain('Year');
+            expect(layout.xaxis.type).toBe('linear');
             expect(layout.yaxis.title.text).toContain('Percentage');
+        });
+
+        it('should render topic evolution chart with legacy single-topic format', () => {
+            const visualizations = [{
+                type: 'topic_evolution',
+                topic: 'transformers',
+                conferences: ['NeurIPS'],
+                conference_data: {
+                    'NeurIPS': {
+                        year_relative: { '2022': 2.5, '2023': 4.0 },
+                        year_counts: { '2022': 5, '2023': 10 }
+                    }
+                }
+            }];
+
+            renderChatVisualizations(visualizations);
+
+            expect(global.Plotly.newPlot).toHaveBeenCalledTimes(1);
+            const [plotId, traces, layout] = global.Plotly.newPlot.mock.calls[0];
+            expect(traces).toHaveLength(1);
+            expect(traces[0].x).toEqual([2022, 2023]);
+            expect(traces[0].name).toBe('NeurIPS');
+            expect(layout.title.text).toContain('transformers');
+        });
+
+        it('should render multiple topics in the same chart', () => {
+            const visualizations = [{
+                type: 'topic_evolution',
+                topics: [
+                    {
+                        topic: 'transformers',
+                        conferences: ['NeurIPS'],
+                        conference_data: {
+                            'NeurIPS': {
+                                year_relative: { '2022': 2.5, '2023': 4.0 },
+                                year_counts: { '2022': 5, '2023': 10 }
+                            }
+                        }
+                    },
+                    {
+                        topic: 'reinforcement learning',
+                        conferences: ['NeurIPS'],
+                        conference_data: {
+                            'NeurIPS': {
+                                year_relative: { '2022': 6.0, '2023': 3.2 },
+                                year_counts: { '2022': 12, '2023': 8 }
+                            }
+                        }
+                    }
+                ]
+            }];
+
+            renderChatVisualizations(visualizations);
+
+            expect(global.Plotly.newPlot).toHaveBeenCalledTimes(1);
+            const [plotId, traces, layout] = global.Plotly.newPlot.mock.calls[0];
+            expect(traces).toHaveLength(2);
+            expect(traces[0].name).toBe('transformers');
+            expect(traces[0].x).toEqual([2022, 2023]);
+            expect(traces[0].y).toEqual([2.5, 4.0]);
+            expect(traces[1].name).toBe('reinforcement learning');
+            expect(traces[1].x).toEqual([2022, 2023]);
+            expect(traces[1].y).toEqual([6.0, 3.2]);
+            expect(layout.title.text).toContain('transformers');
+            expect(layout.title.text).toContain('reinforcement learning');
+            expect(layout.showlegend).toBe(true);
         });
 
         it('should render cluster visualization chart', () => {
@@ -297,11 +366,13 @@ describe('Chat Module', () => {
             const visualizations = [
                 {
                     type: 'topic_evolution',
-                    topic: 'rl',
-                    conferences: ['ICML'],
-                    conference_data: {
-                        'ICML': { year_relative: { '2023': 3.0 }, year_counts: { '2023': 3 } }
-                    }
+                    topics: [{
+                        topic: 'rl',
+                        conferences: ['ICML'],
+                        conference_data: {
+                            'ICML': { year_relative: { '2023': 3.0 }, year_counts: { '2023': 3 } }
+                        }
+                    }]
                 },
                 { type: 'cluster_visualization', points: [{ x: 0, y: 0, cluster: 0 }], statistics: {} }
             ];
@@ -314,11 +385,13 @@ describe('Chat Module', () => {
         it('should add chart message elements to chat', () => {
             const visualizations = [{
                 type: 'topic_evolution',
-                topic: 'gnn',
-                conferences: ['NeurIPS'],
-                conference_data: {
-                    'NeurIPS': { year_relative: { '2023': 2.0 }, year_counts: { '2023': 2 } }
-                }
+                topics: [{
+                    topic: 'gnn',
+                    conferences: ['NeurIPS'],
+                    conference_data: {
+                        'NeurIPS': { year_relative: { '2023': 2.0 }, year_counts: { '2023': 2 } }
+                    }
+                }]
             }];
 
             renderChatVisualizations(visualizations);

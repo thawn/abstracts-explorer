@@ -846,14 +846,22 @@ class RAGChat:
             if tr["name"] == "get_topic_evolution":
                 conference_data = data.get("conference_data", {})
                 if conference_data:
-                    visualizations.append(
-                        {
-                            "type": "topic_evolution",
-                            "topic": data.get("topic", ""),
-                            "conferences": data.get("conferences", []),
-                            "conference_data": conference_data,
-                        }
-                    )
+                    topic_entry = {
+                        "topic": data.get("topic", ""),
+                        "conferences": data.get("conferences", []),
+                        "conference_data": conference_data,
+                    }
+                    # Merge into existing topic_evolution visualization if one exists
+                    existing = next((v for v in visualizations if v["type"] == "topic_evolution"), None)
+                    if existing is not None:
+                        existing["topics"].append(topic_entry)
+                    else:
+                        visualizations.append(
+                            {
+                                "type": "topic_evolution",
+                                "topics": [topic_entry],
+                            }
+                        )
 
             elif tr["name"] == "get_cluster_visualization":
                 points = data.get("points", [])
