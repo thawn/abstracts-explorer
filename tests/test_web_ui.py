@@ -328,19 +328,10 @@ class TestConferenceURLRoute:
 
         app_module = sys.modules["abstracts_explorer.web_ui.app"]
         mock_db = MagicMock()
-        mock_db.get_conference_years_from_db.return_value = {"NeurIPS": [2025, 2024]}
+        mock_db.resolve_conference_for_url.return_value = {"conference": "NeurIPS", "error": None}
 
-        with patch.object(
-            app_module,
-            "get_available_filters",
-            return_value={
-                "conferences": ["NeurIPS", "ICLR"],
-                "years": [2024, 2025],
-                "conference_years": {"NeurIPS": [2024, 2025], "ICLR": [2024]},
-            },
-        ):
-            with patch.object(app_module, "get_database", return_value=mock_db):
-                response = client.get("/neurips")
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            response = client.get("/neurips")
 
         assert response.status_code == 200
         assert b"Abstracts Explorer" in response.data
@@ -354,19 +345,10 @@ class TestConferenceURLRoute:
 
         app_module = sys.modules["abstracts_explorer.web_ui.app"]
         mock_db = MagicMock()
-        mock_db.get_conference_years_from_db.return_value = {"ICML": [2025]}
+        mock_db.resolve_conference_for_url.return_value = {"conference": "ICML", "error": None}
 
-        with patch.object(
-            app_module,
-            "get_available_filters",
-            return_value={
-                "conferences": ["ICML"],
-                "years": [2025],
-                "conference_years": {"ICML": [2025]},
-            },
-        ):
-            with patch.object(app_module, "get_database", return_value=mock_db):
-                response = client.get("/ICML")
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            response = client.get("/ICML")
 
         assert response.status_code == 200
         assert b"window.urlConference" in response.data
@@ -377,19 +359,10 @@ class TestConferenceURLRoute:
 
         app_module = sys.modules["abstracts_explorer.web_ui.app"]
         mock_db = MagicMock()
-        mock_db.get_conference_years_from_db.return_value = {"NeurIPS": [2025]}
+        mock_db.resolve_conference_for_url.return_value = {"conference": "NeurIPS", "error": None}
 
-        with patch.object(
-            app_module,
-            "get_available_filters",
-            return_value={
-                "conferences": ["NeurIPS"],
-                "years": [2025],
-                "conference_years": {"NeurIPS": [2025]},
-            },
-        ):
-            with patch.object(app_module, "get_database", return_value=mock_db):
-                response = client.get("/NeurIPS")
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            response = client.get("/NeurIPS")
 
         assert response.status_code == 200
         assert b"window.urlConference" in response.data
@@ -401,19 +374,16 @@ class TestConferenceURLRoute:
 
         app_module = sys.modules["abstracts_explorer.web_ui.app"]
         mock_db = MagicMock()
-        mock_db.get_conference_years_from_db.return_value = {"NeurIPS": [2025], "ICLR": [2024]}
-
-        with patch.object(
-            app_module,
-            "get_available_filters",
-            return_value={
-                "conferences": ["NeurIPS", "ICLR"],
-                "years": [2024, 2025],
-                "conference_years": {"NeurIPS": [2025], "ICLR": [2024]},
+        mock_db.resolve_conference_for_url.return_value = {
+            "conference": None,
+            "error": {
+                "message": "Conference 'unknownconf' not found.",
+                "available_conferences": ["ICLR", "NeurIPS"],
             },
-        ):
-            with patch.object(app_module, "get_database", return_value=mock_db):
-                response = client.get("/unknownconf")
+        }
+
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            response = client.get("/unknownconf")
 
         assert response.status_code == 200
         assert b"Abstracts Explorer" in response.data
@@ -429,20 +399,16 @@ class TestConferenceURLRoute:
 
         app_module = sys.modules["abstracts_explorer.web_ui.app"]
         mock_db = MagicMock()
-        # ICML is in plugins but has no data in DB
-        mock_db.get_conference_years_from_db.return_value = {"NeurIPS": [2025]}
-
-        with patch.object(
-            app_module,
-            "get_available_filters",
-            return_value={
-                "conferences": ["NeurIPS", "ICML"],
-                "years": [2024, 2025],
-                "conference_years": {"NeurIPS": [2025], "ICML": [2024, 2025]},
+        mock_db.resolve_conference_for_url.return_value = {
+            "conference": None,
+            "error": {
+                "message": "No data available for conference 'ICML'. Please download data first.",
+                "available_conferences": ["NeurIPS"],
             },
-        ):
-            with patch.object(app_module, "get_database", return_value=mock_db):
-                response = client.get("/icml")
+        }
+
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            response = client.get("/icml")
 
         assert response.status_code == 200
         assert b"window.urlConferenceError" in response.data
@@ -468,6 +434,11 @@ class TestConferenceURLRoute:
         # Should NOT contain conference URL overrides
         assert b"window.urlConference" not in response.data
         assert b"window.urlConferenceError" not in response.data
+
+    def test_well_known_path_returns_404(self, client):
+        """Test that /.well-known paths are not intercepted by the conference route."""
+        response = client.get("/.well-known")
+        assert response.status_code == 404
 
 
 class TestSearchEndpoint:

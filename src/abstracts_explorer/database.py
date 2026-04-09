@@ -1205,6 +1205,74 @@ class DatabaseManager:
             f"No match found in database or plugins. Available conferences in the database: {filters.get('conferences', [])}"
         )
 
+    def resolve_conference_for_url(self, url_path: str) -> dict:
+        """
+        Resolve a URL path segment to a conference, checking data availability.
+
+        Combines plugin-based name resolution with a database data check.
+        Returns a result dict describing the outcome:
+
+        - **found with data**: ``{"conference": "<name>", "error": None}``
+        - **found without data**: ``{"conference": None, "error": {"message": "...", "available_conferences": [...]}}``
+        - **not found**: ``{"conference": None, "error": {"message": "...", "available_conferences": [...]}}``
+
+        Parameters
+        ----------
+        url_path : str
+            URL path segment (e.g. ``"neurips"``, ``"ICLR"``).
+
+        Returns
+        -------
+        dict
+            Dictionary with keys ``"conference"`` (str or None) and
+            ``"error"`` (dict or None).
+
+        Examples
+        --------
+        >>> with DatabaseManager() as db:
+        ...     result = db.resolve_conference_for_url("neurips")
+        ...     if result["conference"]:
+        ...         print(f"Found: {result['conference']}")
+        """
+        from abstracts_explorer.plugin import get_available_filters, resolve_conference_from_url
+
+        db_conference_years: Dict[str, List[int]] = {}
+        try:
+            db_conference_years = self.get_conference_years_from_db()
+        except Exception:
+            pass
+
+        # Also check DB conferences directly (in case they don't have a plugin)
+        resolved = resolve_conference_from_url(url_path)
+        if resolved is None:
+            for conf in db_conference_years:
+                if conf.lower() == url_path.lower():
+                    resolved = conf
+                    break
+
+        if resolved:
+            if resolved in db_conference_years:
+                return {"conference": resolved, "error": None}
+            else:
+                available_conferences = sorted(db_conference_years.keys())
+                return {
+                    "conference": None,
+                    "error": {
+                        "message": f"No data available for conference '{resolved}'. Please download data first.",
+                        "available_conferences": available_conferences,
+                    },
+                }
+        else:
+            plugin_conferences = get_available_filters().get("conferences", [])
+            available_conferences = sorted(set(list(db_conference_years.keys()) + plugin_conferences))
+            return {
+                "conference": None,
+                "error": {
+                    "message": f"Conference '{url_path}' not found.",
+                    "available_conferences": available_conferences,
+                },
+            }
+
     def get_filter_options(self, year: Optional[int] = None, conference: Optional[str] = None) -> dict:
         """
         Get distinct values for filterable fields (lightweight schema).

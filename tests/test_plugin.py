@@ -21,6 +21,7 @@ from abstracts_explorer.plugin import (
     convert_to_lightweight_schema,
     validate_lightweight_paper,
     LightweightPaper,
+    resolve_conference_from_url,
 )
 from abstracts_explorer.plugins import (
     validate_lightweight_papers,
@@ -1471,3 +1472,27 @@ class TestPydanticValidation:
                     conference="NeurIPS",
                 )
             ]
+
+
+class TestResolveConferenceFromUrl:
+    """Tests for resolve_conference_from_url()."""
+
+    def test_match_by_conference_name(self):
+        """Exact conference name (case-insensitive) resolves correctly."""
+        result = resolve_conference_from_url("NeurIPS")
+        assert result == "NeurIPS"
+
+    def test_match_by_plugin_name(self):
+        """Plugin name (e.g. 'neurips') resolves to conference name."""
+        result = resolve_conference_from_url("neurips")
+        assert result == "NeurIPS"
+
+    def test_case_insensitive(self):
+        """Matching is case-insensitive."""
+        result = resolve_conference_from_url("NEURIPS")
+        assert result == "NeurIPS"
+
+    def test_unknown_returns_none(self):
+        """Unknown conference returns None."""
+        result = resolve_conference_from_url("unknownconf")
+        assert result is None
