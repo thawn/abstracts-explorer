@@ -6,10 +6,22 @@ This guide covers common usage patterns for Abstracts Explorer.
 
 ### 1. Download Papers
 
-Download papers for a specific year:
+Download papers for a specific conference and year:
 
 ```bash
+# Download from the default conference (NeurIPS)
 uv run abstracts-explorer download --year 2025
+
+# Download from a specific conference using a plugin
+uv run abstracts-explorer download --plugin iclr --year 2025
+```
+
+Alternatively, download pre-built data from a registry (no API access or LLM backend required):
+
+```bash
+uv run abstracts-explorer registry download \
+  -r ghcr.io/thawn/abstracts-data \
+  --conference neurips --year 2025
 ```
 
 Options:
@@ -91,11 +103,11 @@ from abstracts_explorer.plugins import get_plugin
 from abstracts_explorer import DatabaseManager
 from abstracts_explorer.plugin import LightweightPaper
 
-# Get the NeurIPS plugin
-neurips_plugin = get_plugin('neurips')
+# Get a conference plugin (e.g. neurips, iclr, icml, ml4ps)
+plugin = get_plugin('neurips')
 
-# Download papers for 2025
-papers_data = neurips_plugin.download(year=2025, output_path='neurips_2025.json')
+# Download papers for a specific year
+papers_data = plugin.download(year=2025, output_path='papers_2025.json')
 
 # Convert to LightweightPaper objects
 papers = [LightweightPaper(**paper) for paper in papers_data]
