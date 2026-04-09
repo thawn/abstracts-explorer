@@ -619,6 +619,9 @@ class TestSearchPapersAuthorFilter:
         """Test author matches but keyword doesn't."""
         results = db_with_papers.search_papers_keyword(query='author:"Vaswani" BERT', limit=10)
         assert len(results) == 0
+
+
+class TestEmbeddingModelMetadata:
     """Tests for embedding model metadata functionality."""
 
     def test_get_embedding_model_none_when_not_set(self, connected_db):
