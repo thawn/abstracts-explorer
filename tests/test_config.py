@@ -322,6 +322,31 @@ PAPER_DB=/absolute/path/to/papers.db
         # Falls back to the default SQLite path
         assert config.database_url.startswith("sqlite:///")
 
+    def test_config_postgres_env_overrides_paper_db_from_file(self, tmp_path, monkeypatch):
+        """POSTGRES_HOST in os.environ overrides PAPER_DB URL baked into a .env file.
+
+        This simulates the Podman quadlet scenario where the container image
+        ships a default /app/.env with PAPER_DB pointing to the Docker Compose
+        service name ('postgres'), but the quadlet EnvironmentFile injects
+        POSTGRES_HOST=abstracts-postgres (and friends) at runtime.  The runtime
+        env vars must win so the application connects to the correct host.
+        """
+        # Simulate the baked-in /app/.env that ships inside the container image.
+        env_file = tmp_path / ".env"
+        env_file.write_text("PAPER_DB=postgresql://abstracts:old_password@postgres:5432/abstracts\n")
+
+        # Simulate the quadlet EnvironmentFile injecting POSTGRES_* vars at runtime.
+        monkeypatch.setenv("POSTGRES_HOST", "abstracts-postgres")
+        monkeypatch.setenv("POSTGRES_USER", "abstracts")
+        monkeypatch.setenv("ABSTRACTS_DB_PASSWORD", "secret123")
+        monkeypatch.setenv("POSTGRES_PORT", "5432")
+        monkeypatch.setenv("POSTGRES_DB", "abstracts")
+
+        config = Config(env_path=env_file)
+
+        # Runtime POSTGRES_* vars must override the PAPER_DB baked into the image.
+        assert config.database_url == "postgresql://abstracts:secret123@abstracts-postgres:5432/abstracts"
+
     def test_config_default_conference_and_year(self, tmp_path):
         """Test that DEFAULT_CONFERENCE and DEFAULT_YEAR can be configured."""
         env_file = tmp_path / ".env"

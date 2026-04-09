@@ -189,7 +189,16 @@ class Config:
         # embedded in PAPER_DB.  If PAPER_DB is still a plain file path (i.e.
         # no URL scheme) and all PostgreSQL component variables are present,
         # assemble the full connection URL automatically.
-        if "://" not in paper_db:
+        #
+        # Additionally, if POSTGRES_HOST is explicitly set in the process
+        # environment (i.e., injected at runtime via a quadlet EnvironmentFile
+        # or similar mechanism, rather than read from a baked-in .env file),
+        # it takes precedence over any PAPER_DB value from a .env file.  This
+        # allows Podman quadlet deployments to override the default
+        # PAPER_DB embedded in the container image via individual POSTGRES_*
+        # variables without having to re-specify the full connection URL.
+        postgres_host_in_env = "POSTGRES_HOST" in os.environ
+        if "://" not in paper_db or postgres_host_in_env:
             pg_user = self._get_env("POSTGRES_USER", default="")
             pg_password = self._get_env("ABSTRACTS_DB_PASSWORD", default="")
             pg_host = self._get_env("POSTGRES_HOST", default="")
