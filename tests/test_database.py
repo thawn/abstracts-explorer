@@ -483,7 +483,142 @@ class TestAddPapers:
         assert total_count == 2
 
 
-class TestEmbeddingModelMetadata:
+class TestParseAuthorQuery:
+    """Tests for the parse_author_query static method."""
+
+    def test_no_author_filter(self):
+        """Test query without author filter returns None and original query."""
+        author, remaining = DatabaseManager.parse_author_query("transformers")
+        assert author is None
+        assert remaining == "transformers"
+
+    def test_author_filter_only(self):
+        """Test query with only author filter."""
+        author, remaining = DatabaseManager.parse_author_query('author:"John Smith"')
+        assert author == "John Smith"
+        assert remaining == ""
+
+    def test_author_filter_with_keyword(self):
+        """Test author filter combined with keyword."""
+        author, remaining = DatabaseManager.parse_author_query('author:"John Smith" transformers')
+        assert author == "John Smith"
+        assert remaining == "transformers"
+
+    def test_keyword_before_author_filter(self):
+        """Test keyword before author filter."""
+        author, remaining = DatabaseManager.parse_author_query('deep learning author:"Jane Doe"')
+        assert author == "Jane Doe"
+        assert remaining == "deep learning"
+
+    def test_author_filter_in_middle(self):
+        """Test author filter in the middle of query."""
+        author, remaining = DatabaseManager.parse_author_query('deep author:"Jane Doe" learning')
+        assert author == "Jane Doe"
+        assert remaining == "deep  learning"
+
+    def test_empty_query(self):
+        """Test empty query."""
+        author, remaining = DatabaseManager.parse_author_query("")
+        assert author is None
+        assert remaining == ""
+
+    def test_author_filter_single_name(self):
+        """Test author filter with a single name."""
+        author, remaining = DatabaseManager.parse_author_query('author:"Vaswani"')
+        assert author == "Vaswani"
+        assert remaining == ""
+
+
+class TestSearchPapersAuthorFilter:
+    """Tests for author filtering in search_papers and search_papers_keyword."""
+
+    @pytest.fixture
+    def db_with_papers(self, connected_db):
+        """Create a database with papers by different authors."""
+        papers = [
+            LightweightPaper(
+                title="Attention is All You Need",
+                authors=["Ashish Vaswani", "Noam Shazeer"],
+                abstract="We propose the Transformer architecture.",
+                session="Session 1",
+                poster_position="P1",
+                year=2017,
+                conference="NeurIPS",
+            ),
+            LightweightPaper(
+                title="BERT Paper",
+                authors=["Jacob Devlin", "Ming-Wei Chang"],
+                abstract="We introduce BERT for NLP.",
+                session="Session 2",
+                poster_position="P2",
+                year=2019,
+                conference="NeurIPS",
+            ),
+            LightweightPaper(
+                title="ResNet Paper",
+                authors=["Kaiming He", "Xiangyu Zhang"],
+                abstract="Deep residual learning for image recognition.",
+                session="Session 3",
+                poster_position="P3",
+                year=2016,
+                conference="NeurIPS",
+            ),
+        ]
+        for paper in papers:
+            connected_db.add_paper(paper)
+        return connected_db
+
+    def test_search_papers_by_author(self, db_with_papers):
+        """Test search_papers with author parameter."""
+        results = db_with_papers.search_papers(author="Vaswani")
+        assert len(results) == 1
+        assert results[0]["title"] == "Attention is All You Need"
+
+    def test_search_papers_by_author_case_insensitive(self, db_with_papers):
+        """Test that author search is case-insensitive."""
+        results = db_with_papers.search_papers(author="vaswani")
+        assert len(results) == 1
+        assert results[0]["title"] == "Attention is All You Need"
+
+    def test_search_papers_author_partial_match(self, db_with_papers):
+        """Test that author search matches partial names."""
+        results = db_with_papers.search_papers(author="Kaiming")
+        assert len(results) == 1
+        assert results[0]["title"] == "ResNet Paper"
+
+    def test_search_papers_author_no_match(self, db_with_papers):
+        """Test author search with no matches."""
+        results = db_with_papers.search_papers(author="Nonexistent Author")
+        assert len(results) == 0
+
+    def test_search_papers_author_and_keyword(self, db_with_papers):
+        """Test combining author and keyword search."""
+        # Author matches but keyword doesn't
+        results = db_with_papers.search_papers(author="Vaswani", keyword="BERT")
+        assert len(results) == 0
+
+        # Both author and keyword match
+        results = db_with_papers.search_papers(author="Vaswani", keyword="Transformer")
+        assert len(results) == 1
+
+    def test_search_papers_keyword_author_syntax(self, db_with_papers):
+        """Test search_papers_keyword with author:"Name" syntax."""
+        results = db_with_papers.search_papers_keyword(query='author:"Vaswani"', limit=10)
+        assert len(results) == 1
+        assert results[0]["title"] == "Attention is All You Need"
+        # Authors should be parsed into a list
+        assert isinstance(results[0]["authors"], list)
+
+    def test_search_papers_keyword_author_with_keyword(self, db_with_papers):
+        """Test search_papers_keyword with author and keyword combined."""
+        results = db_with_papers.search_papers_keyword(query='author:"Devlin" BERT', limit=10)
+        assert len(results) == 1
+        assert results[0]["title"] == "BERT Paper"
+
+    def test_search_papers_keyword_author_no_match_keyword(self, db_with_papers):
+        """Test author matches but keyword doesn't."""
+        results = db_with_papers.search_papers_keyword(query='author:"Vaswani" BERT', limit=10)
+        assert len(results) == 0
     """Tests for embedding model metadata functionality."""
 
     def test_get_embedding_model_none_when_not_set(self, connected_db):

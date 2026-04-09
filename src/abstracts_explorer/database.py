@@ -652,6 +652,7 @@ class DatabaseManager:
     def search_papers(
         self,
         keyword: Optional[str] = None,
+        author: Optional[str] = None,
         session: Optional[str] = None,
         sessions: Optional[List[str]] = None,
         year: Optional[int] = None,
@@ -667,6 +668,9 @@ class DatabaseManager:
         ----------
         keyword : str, optional
             Keyword to search in title, abstract, or keywords fields.
+        author : str, optional
+            Author name to search for (case-insensitive partial match
+            on the semicolon-separated authors field).
         session : str, optional
             Single session to filter by (deprecated, use sessions instead).
         sessions : list[str], optional
@@ -705,6 +709,9 @@ class DatabaseManager:
 
         >>> # Search with years
         >>> papers = db.search_papers(years=[2024, 2025])
+
+        >>> # Search by author
+        >>> papers = db.search_papers(author="John Smith")
         """
         if not self._session:
             raise DatabaseError("Not connected to database")
@@ -722,6 +729,10 @@ class DatabaseManager:
                         Paper.keywords.ilike(search_pattern),
                     )
                 )
+
+            if author:
+                author_pattern = f"%{author}%"
+                conditions.append(Paper.authors.ilike(author_pattern))
 
             # Handle sessions (prefer list form, fall back to single)
             session_list = sessions if sessions else ([session] if session else [])
@@ -754,6 +765,43 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Search failed: {str(e)}") from e
 
+    @staticmethod
+    def parse_author_query(query: str) -> tuple:
+        """
+        Parse author filter from a search query string.
+
+        Extracts ``author:"Name"`` patterns from the query and returns the
+        author name and the remaining keyword text.
+
+        Parameters
+        ----------
+        query : str
+            The raw search query, e.g. ``'author:"John Smith" transformers'``.
+
+        Returns
+        -------
+        tuple of (str or None, str)
+            A tuple ``(author, remaining_query)`` where *author* is the
+            extracted author name (or ``None`` if no author filter was found)
+            and *remaining_query* is the query with the author filter removed.
+
+        Examples
+        --------
+        >>> DatabaseManager.parse_author_query('author:"John Smith" transformers')
+        ('John Smith', 'transformers')
+        >>> DatabaseManager.parse_author_query('transformers')
+        (None, 'transformers')
+        >>> DatabaseManager.parse_author_query('author:"Jane Doe"')
+        ('Jane Doe', '')
+        """
+        match = re.search(r'author:"([^"]+)"', query)
+        if match:
+            author = match.group(1).strip()
+            remaining = query[: match.start()] + query[match.end() :]
+            remaining = remaining.strip()
+            return author, remaining
+        return None, query
+
     def search_papers_keyword(
         self,
         query: str,
@@ -768,10 +816,15 @@ class DatabaseManager:
         This is a convenience method that wraps search_papers and formats
         the results for web API consumption, including author parsing.
 
+        Supports ``author:"Name"`` syntax to filter by author name.
+        For example, ``'author:"John Smith" transformers'`` will search
+        for papers by John Smith containing "transformers".
+
         Parameters
         ----------
         query : str
-            Keyword to search in title, abstract, or keywords fields
+            Keyword to search in title, abstract, or keywords fields.
+            May include ``author:"Name"`` to filter by author.
         limit : int, optional
             Maximum number of results, by default 10
         sessions : list of str, optional
@@ -793,10 +846,15 @@ class DatabaseManager:
         ...     limit=5,
         ...     years=[2024, 2025]
         ... )
+        >>> papers = db.search_papers_keyword('author:"John Smith"')
         """
+        # Parse author filter from query
+        author, remaining_query = self.parse_author_query(query)
+
         # Keyword search in database with multiple filter support
         papers = self.search_papers(
-            keyword=query,
+            keyword=remaining_query if remaining_query else None,
+            author=author,
             sessions=sessions,
             years=years,
             conferences=conferences,
