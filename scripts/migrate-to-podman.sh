@@ -26,6 +26,14 @@ BACKUP_DIR=""
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 declare -A ORIGINAL_OWNERS  # tracks dirs whose ownership we temporarily changed
 
+for dir in "$SOURCE_DIR/chroma_db" "$SOURCE_DIR/chromadb_data" "$SOURCE_DIR/chroma"; do
+    [ -d "$dir" ] && CHR_DATA_DIR=$dir && echo "Found ChromaDB data at $dir"
+done
+for dir in "$SOURCE_DIR/postgres_data" "$SOURCE_DIR/pgdata" "$SOURCE_DIR/postgres"; do
+    [ -d "$dir" ] && PG_DATA_DIR=$dir && echo "Found PostgreSQL data at $dir"
+done
+
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 info()  { printf '\033[1;34m▸ %s\033[0m\n' "$*"; }
 ok()    { printf '\033[1;32m✔ %s\033[0m\n' "$*"; }
@@ -97,7 +105,8 @@ info "Migrating data from $SOURCE_DIR to Podman named volumes"
 # Check that at least one data source exists
 HAS_DATA=false
 [ -d "$SOURCE_DIR/data" ]      && HAS_DATA=true
-[ -d "$SOURCE_DIR/chroma_db" ] && HAS_DATA=true
+[ -d "$PG_DATA_DIR" ] && HAS_DATA=true
+[ -d "$CHR_DATA_DIR" ] && HAS_DATA=true
 
 if [ "$HAS_DATA" = false ]; then
     die "No data directories found in $SOURCE_DIR (expected data/ or chroma_db/)"
@@ -116,24 +125,26 @@ ok "Services stopped"
 # Docker Compose volumes are often owned by root; request elevated access now
 # so that both the backup (cp -a) and the Podman bind-mount can read them.
 [ -d "$SOURCE_DIR/data" ]      && ensure_accessible "$SOURCE_DIR/data"
-[ -d "$SOURCE_DIR/chroma_db" ] && ensure_accessible "$SOURCE_DIR/chroma_db"
-for _pg_dir in "$SOURCE_DIR/postgres_data" "$SOURCE_DIR/pgdata" "$SOURCE_DIR/postgres"; do
-    [ -d "$_pg_dir" ] && ensure_accessible "$_pg_dir"
-done
-unset _pg_dir
+[ -d "$CHR_DATA_DIR" ] && ensure_accessible "$CHR_DATA_DIR"
+[ -d "$PG_DATA_DIR" ] && ensure_accessible "$PG_DATA_DIR"
 
 # ── create backup ─────────────────────────────────────────────────────────────
 info "Creating backup at $BACKUP_DIR"
 mkdir -p "$BACKUP_DIR"
 
 if [ -d "$SOURCE_DIR/data" ]; then
-    cp -a "$SOURCE_DIR/data" "$BACKUP_DIR/data"
+    sudo cp -a "$SOURCE_DIR/data" "$BACKUP_DIR/data"
     ok "Backed up data/"
 fi
 
-if [ -d "$SOURCE_DIR/chroma_db" ]; then
-    cp -a "$SOURCE_DIR/chroma_db" "$BACKUP_DIR/chroma_db"
-    ok "Backed up chroma_db/"
+if [ -d "$PG_DATA_DIR" ]; then
+    sudo cp -a "$PG_DATA_DIR" "$BACKUP_DIR/$(basename "$PG_DATA_DIR")"
+    ok "Backed up PostgreSQL data from $PG_DATA_DIR"
+fi
+
+if [ -d "$CHR_DATA_DIR" ]; then
+    sudo cp -a "$CHR_DATA_DIR" "$BACKUP_DIR/$(basename "$CHR_DATA_DIR")"
+    ok "Backed up ChromaDB data from $CHR_DATA_DIR"
 fi
 ok "Backup complete: $BACKUP_DIR"
 
@@ -222,33 +233,26 @@ if [ -d "$SOURCE_DIR/data" ]; then
 fi
 
 # ── migrate ChromaDB data ────────────────────────────────────────────────────
-CHR_DATA_DIRS=("$SOURCE_DIR/chroma_db" "$SOURCE_DIR/chromadb_data" "$SOURCE_DIR/chroma")
-for chr_dir in "${CHR_DATA_DIRS[@]}"; do
-    if [ -d "$chr_dir" ]; then
-        info "Found ChromaDB data at $chr_dir"
-        CHROMA_IMAGE="docker.io/chromadb/chroma:latest"
-        CHROMA_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-chromadb-data" "$CHROMA_IMAGE" 1000:1000)
-        info "ChromaDB data owner: $CHROMA_OWNER"
-        copy_to_volume "$chr_dir" "systemd-abstracts-chromadb-data" "$CHROMA_OWNER"
-    fi
-done
+if [ -d "$CHR_DATA_DIR" ]; then
+    info "Found ChromaDB data at $CHR_DATA_DIR"
+    CHROMA_IMAGE="docker.io/chromadb/chroma:latest"
+    CHROMA_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-chromadb-data" "$CHROMA_IMAGE" 1000:1000)
+    info "ChromaDB data owner: $CHROMA_OWNER"
+        copy_to_volume "$CHR_DATA_DIR" "systemd-abstracts-chromadb-data" "$CHROMA_OWNER"
+fi
 
 # ── migrate PostgreSQL data (if available) ────────────────────────────────────
 # Docker Compose PostgreSQL data is usually in a Docker named volume.
 # If the user has extracted it to a local directory, handle it here.
 PG_MIGRATED=false
-PG_DATA_DIRS=("$SOURCE_DIR/postgres_data" "$SOURCE_DIR/pgdata" "$SOURCE_DIR/postgres")
-for pg_dir in "${PG_DATA_DIRS[@]}"; do
-    if [ -d "$pg_dir" ]; then
-        info "Found PostgreSQL data at $pg_dir"
-        PG_IMAGE="docker.io/postgres:16-alpine"
-        PG_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-postgres-data" "$PG_IMAGE" 1000:1000)
-        info "PostgreSQL data owner: $PG_OWNER"
-        copy_to_volume "$pg_dir" "systemd-abstracts-postgres-data" "$PG_OWNER"
-        PG_MIGRATED=true
-        break
-    fi
-done
+if [ -d "$PG_DATA_DIR" ]; then
+    info "Found PostgreSQL data at $PG_DATA_DIR"
+    PG_IMAGE="docker.io/postgres:16-alpine"
+    PG_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-postgres-data" "$PG_IMAGE" 1000:1000)
+    info "PostgreSQL data owner: $PG_OWNER"
+    copy_to_volume "$PG_DATA_DIR" "systemd-abstracts-postgres-data" "$PG_OWNER"
+    PG_MIGRATED=true
+fi
 
 # ── reset PostgreSQL password to match the Podman secret ─────────────────────
 # The Docker Compose deployment uses a hard-coded password; after migrating the
