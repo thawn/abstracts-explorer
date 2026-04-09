@@ -227,7 +227,7 @@ copy_to_volume() {
 # ── migrate application data ─────────────────────────────────────────────────
 if [ -d "$SOURCE_DIR/data" ]; then
     APP_IMAGE="ghcr.io/thawn/abstracts-explorer:latest"
-    APP_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-data" "$APP_IMAGE" 1000:1000)
+    APP_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-data" "$APP_IMAGE" 1000 1000)
     info "abstracts-explorer data owner: $APP_OWNER"
     copy_to_volume "$SOURCE_DIR/data" "systemd-abstracts-data" "$APP_OWNER"
 fi
@@ -236,7 +236,7 @@ fi
 if [ -d "$CHR_DATA_DIR" ]; then
     info "Found ChromaDB data at $CHR_DATA_DIR"
     CHROMA_IMAGE="docker.io/chromadb/chroma:latest"
-    CHROMA_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-chromadb-data" "$CHROMA_IMAGE" 1000:1000)
+    CHROMA_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-chromadb-data" "$CHROMA_IMAGE" 1000 1000)
     info "ChromaDB data owner: $CHROMA_OWNER"
         copy_to_volume "$CHR_DATA_DIR" "systemd-abstracts-chromadb-data" "$CHROMA_OWNER"
 fi
@@ -248,7 +248,7 @@ PG_MIGRATED=false
 if [ -d "$PG_DATA_DIR" ]; then
     info "Found PostgreSQL data at $PG_DATA_DIR"
     PG_IMAGE="docker.io/postgres:16-alpine"
-    PG_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-postgres-data" "$PG_IMAGE" 1000:1000)
+    PG_OWNER=$(get_uid_gid_for_volume "systemd-abstracts-postgres-data" "$PG_IMAGE" 1000 1000)
     info "PostgreSQL data owner: $PG_OWNER"
     copy_to_volume "$PG_DATA_DIR" "systemd-abstracts-postgres-data" "$PG_OWNER"
     PG_MIGRATED=true
