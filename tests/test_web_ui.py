@@ -178,8 +178,8 @@ class TestWebInterface:
             Configured mock database.
         """
         mock_db = MagicMock()
-        all_confs = list(conferences_with_years.keys())
-        mock_db.get_filter_options.return_value = {"sessions": [], "years": [], "conferences": all_confs}
+        all_conferences = list(conferences_with_years.keys())
+        mock_db.get_filter_options.return_value = {"sessions": [], "years": [], "conferences": all_conferences}
         mock_db.get_years_for_conference.side_effect = lambda conf: conferences_with_years.get(conf, [])
         return mock_db
 

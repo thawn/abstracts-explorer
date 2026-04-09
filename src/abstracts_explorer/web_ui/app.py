@@ -322,7 +322,7 @@ def get_available_filters_endpoint():
         db_filter_options = database.get_filter_options()
         db_conferences_in_db = db_filter_options.get("conferences", [])
 
-        db_conference_years: dict = {}
+        db_conference_years: dict[str, list[int]] = {}
         for conf in db_conferences_in_db:
             years = database.get_years_for_conference(conf)
             if years:
