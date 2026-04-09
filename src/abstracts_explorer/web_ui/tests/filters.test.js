@@ -17,7 +17,8 @@ import {
     syncFiltersFromModal,
     handleYearChange,
     handleConferenceChange,
-    updateYearsForConference
+    updateYearsForConference,
+    dismissConferenceError
 } from '../static/modules/filters.js';
 
 describe('Filters Module', () => {
@@ -42,8 +43,14 @@ describe('Filters Module', () => {
             <div id="search-settings-section"></div>
             <div id="chat-settings-section"></div>
             <select id="modal-session-filter" multiple></select>
+            <div id="conference-error-banner" class="hidden"></div>
+            <p id="conference-error-message"></p>
+            <div id="conference-error-available"></div>
         `;
         document.body.style.overflow = '';
+        // Clear URL conference globals
+        delete window.urlConference;
+        delete window.urlConferenceError;
     });
 
     describe('loadFilterOptions', () => {
@@ -460,6 +467,156 @@ describe('Filters Module', () => {
             handleConferenceChange();
             expect(window.resetClusters).toHaveBeenCalled();
             expect(window.loadClusters).toHaveBeenCalled();
+        });
+    });
+
+    describe('URL conference override', () => {
+        it('should select the URL-specified conference over the API default', async () => {
+            const mockLoadStats = jest.fn();
+            window.loadStats = mockLoadStats;
+            window.urlConference = 'ICLR';
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    conferences: ['NeurIPS', 'ICLR'],
+                    years: [2024, 2025],
+                    conference_years: { 'NeurIPS': [2024, 2025], 'ICLR': [2024] },
+                    default_conference: 'NeurIPS',
+                    default_year: 2025
+                })
+            });
+
+            await loadFilterOptions();
+
+            const conferenceSelect = document.getElementById('conference-selector');
+            expect(conferenceSelect.value).toBe('ICLR');
+            expect(mockLoadStats).toHaveBeenCalled();
+
+            delete window.loadStats;
+        });
+
+        it('should clear window.urlConference after applying it', async () => {
+            window.urlConference = 'NeurIPS';
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    conferences: ['NeurIPS'],
+                    years: [2025],
+                    conference_years: { 'NeurIPS': [2025] },
+                    default_conference: 'NeurIPS',
+                    default_year: 2025
+                })
+            });
+
+            await loadFilterOptions();
+
+            expect(window.urlConference).toBeUndefined();
+        });
+
+        it('should fall back to default when URL conference is not in options', async () => {
+            window.urlConference = 'UnknownConf';
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    conferences: ['NeurIPS'],
+                    years: [2025],
+                    conference_years: { 'NeurIPS': [2025] },
+                    default_conference: 'NeurIPS',
+                    default_year: 2025
+                })
+            });
+
+            await loadFilterOptions();
+
+            const conferenceSelect = document.getElementById('conference-selector');
+            // URL conference not found in options, so API default should be used
+            expect(conferenceSelect.value).toBe('NeurIPS');
+        });
+    });
+
+    describe('conference error banner', () => {
+        it('should show error banner when urlConferenceError is set', async () => {
+            window.urlConferenceError = {
+                message: "Conference 'xyz' not found.",
+                available_conferences: ['NeurIPS', 'ICLR']
+            };
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    conferences: ['NeurIPS'],
+                    years: [2025],
+                    conference_years: { 'NeurIPS': [2025] }
+                })
+            });
+
+            await loadFilterOptions();
+
+            const banner = document.getElementById('conference-error-banner');
+            expect(banner.classList.contains('hidden')).toBe(false);
+
+            const message = document.getElementById('conference-error-message');
+            expect(message.textContent).toContain('xyz');
+
+            const available = document.getElementById('conference-error-available');
+            expect(available.innerHTML).toContain('NeurIPS');
+            expect(available.innerHTML).toContain('ICLR');
+        });
+
+        it('should clear urlConferenceError after showing', async () => {
+            window.urlConferenceError = {
+                message: 'Test error',
+                available_conferences: []
+            };
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    conferences: [],
+                    years: [],
+                    conference_years: {}
+                })
+            });
+
+            await loadFilterOptions();
+
+            expect(window.urlConferenceError).toBeUndefined();
+        });
+    });
+
+    describe('dismissConferenceError', () => {
+        it('should hide the conference error banner', () => {
+            const banner = document.getElementById('conference-error-banner');
+            banner.classList.remove('hidden');
+
+            dismissConferenceError();
+
+            expect(banner.classList.contains('hidden')).toBe(true);
+        });
+
+        it('should do nothing when banner does not exist', () => {
+            document.getElementById('conference-error-banner').remove();
+
+            // Should not throw
+            expect(() => dismissConferenceError()).not.toThrow();
         });
     });
 });

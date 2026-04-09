@@ -9,6 +9,7 @@ using the new schema with integer IDs and proper author relationships.
 
 import pytest
 import sqlite3
+from unittest.mock import patch
 
 from abstracts_explorer.database import DatabaseManager, DatabaseError, normalize_model_name
 from abstracts_explorer.plugin import LightweightPaper
@@ -1031,3 +1032,68 @@ class TestResolveDefaultConferenceYear:
         conf, year = mock_db.resolve_default_conference_year("NeurIPS", 2024)
         assert conf == "NeurIPS"
         assert year == 2024
+
+
+class TestResolveConferenceForUrl:
+    """Tests for DatabaseManager.resolve_conference_for_url()."""
+
+    def _make_mock_db(self, db_conference_years):
+        """Return a partial mock that delegates resolve_conference_for_url to the real method."""
+        from unittest.mock import MagicMock
+
+        mock_db = MagicMock()
+        mock_db.get_conference_years_from_db.return_value = db_conference_years
+        mock_db.resolve_conference_for_url.side_effect = lambda url_path: DatabaseManager.resolve_conference_for_url(
+            mock_db, url_path
+        )
+        return mock_db
+
+    @patch("abstracts_explorer.plugin.resolve_conference_from_url", return_value="NeurIPS")
+    @patch(
+        "abstracts_explorer.plugin.get_available_filters",
+        return_value={"conferences": ["NeurIPS"], "years": [2025], "conference_years": {"NeurIPS": [2025]}},
+    )
+    def test_valid_conference_with_data(self, _mock_filters, _mock_resolve):
+        """Conference found and has data → returns conference name."""
+        mock_db = self._make_mock_db({"NeurIPS": [2025]})
+        result = mock_db.resolve_conference_for_url("neurips")
+        assert result["conference"] == "NeurIPS"
+        assert result["error"] is None
+
+    @patch("abstracts_explorer.plugin.resolve_conference_from_url", return_value="ICML")
+    @patch(
+        "abstracts_explorer.plugin.get_available_filters",
+        return_value={"conferences": ["ICML"], "years": [2025], "conference_years": {"ICML": [2025]}},
+    )
+    def test_known_conference_without_data(self, _mock_filters, _mock_resolve):
+        """Conference found in plugins but no data in DB → returns error."""
+        mock_db = self._make_mock_db({"NeurIPS": [2025]})
+        result = mock_db.resolve_conference_for_url("icml")
+        assert result["conference"] is None
+        assert "No data available" in result["error"]["message"]
+        assert "NeurIPS" in result["error"]["available_conferences"]
+
+    @patch("abstracts_explorer.plugin.resolve_conference_from_url", return_value=None)
+    @patch(
+        "abstracts_explorer.plugin.get_available_filters",
+        return_value={"conferences": ["NeurIPS"], "years": [2025], "conference_years": {"NeurIPS": [2025]}},
+    )
+    def test_unknown_conference(self, _mock_filters, _mock_resolve):
+        """Conference not found at all → returns error with available conferences."""
+        mock_db = self._make_mock_db({"NeurIPS": [2025]})
+        result = mock_db.resolve_conference_for_url("unknownconf")
+        assert result["conference"] is None
+        assert "not found" in result["error"]["message"]
+        assert "NeurIPS" in result["error"]["available_conferences"]
+
+    @patch("abstracts_explorer.plugin.resolve_conference_from_url", return_value=None)
+    @patch(
+        "abstracts_explorer.plugin.get_available_filters",
+        return_value={"conferences": [], "years": [], "conference_years": {}},
+    )
+    def test_db_conference_fallback(self, _mock_filters, _mock_resolve):
+        """Conference in DB but not in plugins → resolved via DB lookup."""
+        mock_db = self._make_mock_db({"CustomConf": [2025]})
+        result = mock_db.resolve_conference_for_url("customconf")
+        assert result["conference"] == "CustomConf"
+        assert result["error"] is None

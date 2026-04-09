@@ -584,6 +584,47 @@ def get_available_filters() -> Dict[str, Any]:
     return {"conferences": conferences, "years": all_years_sorted, "conference_years": conference_years}
 
 
+def resolve_conference_from_url(url_path: str) -> Optional[str]:
+    """
+    Resolve a URL path segment to a canonical conference name using plugins.
+
+    Performs case-insensitive matching against:
+    1. Plugin conference names (e.g. ``NeurIPS``, ``ICLR``)
+    2. Plugin names (e.g. ``neurips``, ``iclr``)
+
+    Parameters
+    ----------
+    url_path : str
+        URL path segment to resolve (e.g. ``"neurips"``, ``"ICLR"``).
+
+    Returns
+    -------
+    str or None
+        The canonical conference name if a match is found, ``None`` otherwise.
+
+    Examples
+    --------
+    >>> resolve_conference_from_url("neurips")  # matches plugin name
+    'NeurIPS'
+    >>> resolve_conference_from_url("ICLR")  # matches conference name
+    'ICLR'
+    >>> resolve_conference_from_url("unknown") is None
+    True
+    """
+    lookup: Dict[str, str] = {}
+    available = get_available_filters()
+    for conf in available.get("conferences", []):
+        lookup[conf.lower()] = conf
+
+    for meta in list_plugins():
+        plugin_name = meta.get("name", "")
+        conf_name = meta.get("conference_name", "")
+        if plugin_name and conf_name:
+            lookup[plugin_name.lower()] = conf_name
+
+    return lookup.get(url_path.lower())
+
+
 """
 Plugin Data Models
 ==================

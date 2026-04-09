@@ -11,7 +11,7 @@ import sys
 import logging
 import json
 from pathlib import Path
-from flask import Flask, render_template, request, jsonify, g, send_file
+from flask import Flask, render_template, request, jsonify, g, send_file, abort
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -147,7 +147,61 @@ def index():
     str
         Rendered HTML template
     """
-    return render_template("index.html", version=__version__, imprint_link=_config.imprint_link)
+    return render_template(
+        "index.html",
+        version=__version__,
+        imprint_link=_config.imprint_link,
+        url_conference=None,
+        url_conference_error=None,
+    )
+
+
+@app.route("/<conference_name>")
+def conference_index(conference_name):
+    """
+    Render the main page with a specific conference pre-selected.
+
+    Resolves the conference name case-insensitively against known
+    conferences from plugins and the database. When no match is found,
+    renders the page with an error listing the available conferences.
+
+    Paths starting with a dot (e.g. ``.well-known``) are excluded so
+    that ACME challenges and other hidden-path conventions are not
+    intercepted.
+
+    Parameters
+    ----------
+    conference_name : str
+        Conference name from the URL path (case-insensitive).
+
+    Returns
+    -------
+    str
+        Rendered HTML template with conference context
+    """
+    # Don't intercept hidden paths (e.g. .well-known used by Let's Encrypt)
+    if conference_name.startswith("."):
+        abort(404)
+
+    try:
+        database = get_database()
+        result = database.resolve_conference_for_url(conference_name)
+        return render_template(
+            "index.html",
+            version=__version__,
+            imprint_link=_config.imprint_link,
+            url_conference=result["conference"],
+            url_conference_error=result["error"],
+        )
+    except Exception as e:
+        logger.error(f"Error in conference URL route: {e}", exc_info=True)
+        return render_template(
+            "index.html",
+            version=__version__,
+            imprint_link=_config.imprint_link,
+            url_conference=None,
+            url_conference_error=None,
+        )
 
 
 @app.route("/health")
