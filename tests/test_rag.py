@@ -850,10 +850,9 @@ class TestRAGChatVisualizationExtraction:
         assert len(visualizations) == 1
         viz = visualizations[0]
         assert viz["type"] == "topic_evolution"
-        assert len(viz["topics"]) == 1
-        assert viz["topics"][0]["topic"] == "transformers"
-        assert viz["topics"][0]["conferences"] == ["NeurIPS"]
-        assert "NeurIPS" in viz["topics"][0]["conference_data"]
+        assert viz["topics"] == ["transformers"]
+        assert "transformers" in viz["conference_data"]
+        assert "NeurIPS" in viz["conference_data"]["transformers"]
 
     def test_extract_cluster_visualization(self):
         """Test extracting cluster visualization scatter data."""
@@ -1044,11 +1043,64 @@ class TestRAGChatVisualizationExtraction:
         assert len(visualizations) == 1
         viz = visualizations[0]
         assert viz["type"] == "topic_evolution"
-        assert len(viz["topics"]) == 2
-        assert viz["topics"][0]["topic"] == "transformers"
-        assert viz["topics"][1]["topic"] == "reinforcement learning"
-        assert "NeurIPS" in viz["topics"][0]["conference_data"]
-        assert "NeurIPS" in viz["topics"][1]["conference_data"]
+        assert viz["topics"] == ["transformers", "reinforcement learning"]
+        assert "transformers" in viz["conference_data"]
+        assert "reinforcement learning" in viz["conference_data"]
+        assert "NeurIPS" in viz["conference_data"]["transformers"]
+        assert "NeurIPS" in viz["conference_data"]["reinforcement learning"]
+
+    def test_extract_multiple_topics_multiple_conferences_merged(self):
+        """Test merging topic evolutions across different conferences."""
+        tool_results = [
+            {
+                "name": "get_topic_evolution",
+                "raw_result": json.dumps(
+                    {
+                        "topic": "transformers",
+                        "conferences": ["NeurIPS", "ICLR"],
+                        "conference_data": {
+                            "NeurIPS": {
+                                "year_counts": {"2022": 5},
+                                "year_relative": {"2022": 2.5},
+                            },
+                            "ICLR": {
+                                "year_counts": {"2022": 3},
+                                "year_relative": {"2022": 1.8},
+                            },
+                        },
+                    }
+                ),
+            },
+            {
+                "name": "get_topic_evolution",
+                "raw_result": json.dumps(
+                    {
+                        "topic": "reinforcement learning",
+                        "conferences": ["NeurIPS", "ICLR"],
+                        "conference_data": {
+                            "NeurIPS": {
+                                "year_counts": {"2022": 12},
+                                "year_relative": {"2022": 6.0},
+                            },
+                            "ICLR": {
+                                "year_counts": {"2022": 8},
+                                "year_relative": {"2022": 5.0},
+                            },
+                        },
+                    }
+                ),
+            },
+        ]
+
+        visualizations = RAGChat._extract_visualizations(tool_results)
+        assert len(visualizations) == 1
+        viz = visualizations[0]
+        assert viz["type"] == "topic_evolution"
+        assert viz["topics"] == ["transformers", "reinforcement learning"]
+        assert "NeurIPS" in viz["conference_data"]["transformers"]
+        assert "ICLR" in viz["conference_data"]["transformers"]
+        assert "NeurIPS" in viz["conference_data"]["reinforcement learning"]
+        assert "ICLR" in viz["conference_data"]["reinforcement learning"]
 
 
 class TestRAGChatIntegration:

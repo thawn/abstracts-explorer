@@ -354,26 +354,20 @@ const CONFERENCE_COLORS = ['#7c3aed', '#2563eb', '#059669', '#d97706', '#dc2626'
  * Render a topic evolution line chart using Plotly.
  * Supports multiple topics and multiple conferences as separate traces.
  * @param {string} plotId - DOM element id for the plot container
- * @param {Object} viz - Visualization data with topics array (each with conference_data, topic, conferences)
+ * @param {Object} viz - Visualization data with topics (list of topic name strings)
+ *     and conference_data keyed by topic name then conference name
  */
 function _renderTopicEvolutionChart(plotId, viz) {
-    // Normalize: support both new `topics` array and legacy single-topic format
-    const topics = viz.topics || [{
-        topic: viz.topic || '',
-        conferences: viz.conferences || [],
-        conference_data: viz.conference_data || {}
-    }];
+    const topics = viz.topics || [];
+    const topicConferenceData = viz.conference_data || {};
 
     const traces = [];
     let colorIdx = 0;
     const allConferences = new Set();
-    const allTopicNames = [];
 
-    for (const entry of topics) {
-        const conferenceData = entry.conference_data || {};
+    for (const topicName of topics) {
+        const conferenceData = topicConferenceData[topicName] || {};
         const conferences = Object.keys(conferenceData);
-        const topicName = entry.topic || '';
-        allTopicNames.push(topicName);
         conferences.forEach(c => allConferences.add(c));
 
         for (const conf of conferences) {
@@ -414,9 +408,9 @@ function _renderTopicEvolutionChart(plotId, viz) {
         : uniqueConfs.length > 1
             ? ` (${uniqueConfs.join(', ')})`
             : '';
-    const topicLabel = allTopicNames.length === 1
-        ? allTopicNames[0]
-        : allTopicNames.join(', ');
+    const topicLabel = topics.length === 1
+        ? topics[0]
+        : topics.join(', ');
 
     const layout = {
         title: { text: `Topic Evolution: ${topicLabel}${confLabel}` },
