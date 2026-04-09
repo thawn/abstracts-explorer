@@ -26,10 +26,8 @@ The default tab. Type a query and press **Search** to find matching papers.
 
 **Features:**
 
-- **Keyword search** — matches titles and abstracts by default.
-- **Semantic search** — when embeddings are available, results are ranked by
-  AI-powered similarity rather than simple keyword matching. Toggle this in
-  the settings (gear icon).
+- **Semantic search** — results are ranked by AI-powered similarity using
+  embeddings.
 - **Filters** — open the settings modal to narrow results by session/track.
   You can also use the global conference and year selectors in the header.
 - **Results per page** — choose 10, 25, 50, or 100 results in settings.
@@ -58,7 +56,8 @@ questions about the loaded abstracts.
   displayed in a side panel (desktop) or accessible via a button (mobile).
 - **MCP tool integration** — when clustering data is available, the assistant
   can automatically call clustering tools to answer questions about topics,
-  trends, and developments across conferences.
+  trends, and developments across conferences (see [MCP tools](#mcp-tools-available-in-chat)
+  below).
 - **Settings** — adjust the number of abstracts used as context (3–50) and
   filter by session/track via the gear icon.
 - **Feedback** — give thumbs-up/down on individual answers. You can
@@ -73,6 +72,89 @@ questions about the loaded abstracts.
   subtopic.
 - Ask *"How has research on diffusion models evolved from 2022 to 2025?"* to
   trigger a trend-analysis tool call.
+
+### MCP tools available in Chat
+
+The AI Chat assistant can call several specialized tools behind the scenes.
+You do not need to invoke them explicitly — just ask a natural-language
+question and the assistant decides which tool to use.
+
+#### analyze_topic_relevance
+
+Measures how important a topic is by counting papers semantically close to it
+in embedding space.  Returns a relevance score (percentage) and sample papers.
+
+> **Prompt:** *"How important is uncertainty quantification?"*
+>
+> **Answer (excerpt):** Based on my analysis, uncertainty quantification (UQ)
+> is a moderately important and growing research topic …
+>
+> - NeurIPS: 6.2 / 100 (311 papers out of 5 000)
+> - ICLR: 3.5 / 100 (174 papers)
+> - ICML: 3.7 / 100 (185 papers)
+>
+> *(see [Chat Example](chat_example.md) for the full conversation)*
+
+#### get_topic_evolution
+
+Tracks how a topic's prevalence changes year over year across one or more
+conferences.
+
+> **Prompt:** *"How has research on diffusion models evolved from 2020 to 2025?"*
+>
+> **Answer (excerpt):** The number of diffusion-model papers at NeurIPS grew
+> from 12 in 2020 to 158 in 2025 …
+
+#### search_papers
+
+Finds the most relevant papers for a topic, ranked by semantic similarity.
+
+> **Prompt:** *"Show me the top papers on uncertainty quantification at NeurIPS, ICLR, and ICML."*
+>
+> **Answer (excerpt):**
+>
+> 🔝 NeurIPS — *Single Model Uncertainty Estimation via Stochastic Data
+> Centering* (2022), *PICProp: Physics-Informed Confidence Propagation* (2023) …
+>
+> 🔝 ICLR — *ValUES: Systematic Validation of Uncertainty Estimation in
+> Semantic Segmentation* (2024) …
+>
+> 🔝 ICML — *SDE-Net: Equipping Deep Neural Networks with Uncertainty
+> Estimates* (2020) …
+>
+> *(see [Chat Example](chat_example.md) for the full list)*
+
+#### get_paper_details
+
+Retrieves full metadata (authors, abstract, URL, PDF link, session, keywords,
+award) for a paper looked up by title or identifier.
+
+> **Prompt:** *"Give me details about the paper 'PICProp'."*
+>
+> **Answer (excerpt):** *PICProp: Physics-Informed Confidence Propagation for
+> Uncertainty Quantification* — NeurIPS 2023, authors: …, session: Poster
+> Session 4 …
+
+#### get_conference_topics
+
+Lists the main research clusters at a conference with representative keywords
+and example paper titles.
+
+> **Prompt:** *"What are the main topics at ICLR 2025?"*
+>
+> **Answer (excerpt):** The main clusters are: (1) Large Language Models &
+> Alignment, (2) Diffusion & Generative Models, (3) Graph Neural Networks …
+
+#### get_cluster_visualization
+
+Returns pre-computed 2-D cluster coordinates suitable for plotting.  This is
+used internally by the Clusters tab but the chat can also describe
+visualization data on request.
+
+> **Prompt:** *"Describe the cluster layout for NeurIPS 2024."*
+>
+> **Answer (excerpt):** The visualization contains 3 200 papers in 12
+> clusters.  The largest cluster (18 %) is *Optimization & Training* …
 
 ## Interesting Papers
 
@@ -145,5 +227,5 @@ abstracts-explorer web-ui [OPTIONS]
 
 ### Docker / Podman
 
-When running via Docker Compose the web UI is exposed on port 5000 by default.
+When running via Docker Compose the web UI is exposed on port 443 (https) by default.
 See the [Docker Guide](docker.md) for details.
