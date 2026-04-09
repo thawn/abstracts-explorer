@@ -831,6 +831,7 @@ class RAGChat:
             data needed to draw the chart.
         """
         visualizations: List[Dict[str, Any]] = []
+        topic_evolution_viz: Optional[Dict[str, Any]] = None
         for tr in tool_results:
             try:
                 data = json.loads(tr["raw_result"])
@@ -845,15 +846,19 @@ class RAGChat:
 
             if tr["name"] == "get_topic_evolution":
                 conference_data = data.get("conference_data", {})
-                if conference_data:
-                    visualizations.append(
-                        {
+                topic_name = data.get("topic", "")
+                if conference_data and topic_name:
+                    # Merge into existing topic_evolution visualization if one exists
+                    if topic_evolution_viz is not None:
+                        topic_evolution_viz["topics"].append(topic_name)
+                        topic_evolution_viz["conference_data"][topic_name] = conference_data
+                    else:
+                        topic_evolution_viz = {
                             "type": "topic_evolution",
-                            "topic": data.get("topic", ""),
-                            "conferences": data.get("conferences", []),
-                            "conference_data": conference_data,
+                            "topics": [topic_name],
+                            "conference_data": {topic_name: conference_data},
                         }
-                    )
+                        visualizations.append(topic_evolution_viz)
 
             elif tr["name"] == "get_cluster_visualization":
                 points = data.get("points", [])
