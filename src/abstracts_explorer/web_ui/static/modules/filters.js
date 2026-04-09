@@ -43,6 +43,7 @@ export async function loadFilterOptions() {
             // Store conference_years mapping and all years for future use
             window.conferenceYearsMap = availableData.conference_years || {};
             window.allYears = availableData.years || [];
+            window.dbConferenceYearsMap = availableData.db_conference_years || {};
 
             // Populate year selector in header (only on initial load when just "All Years" is present)
             // Track if we just populated it to apply defaults afterward.
@@ -343,7 +344,9 @@ export function updateYearsForConference() {
     yearSelect.innerHTML = '<option value="">All Years</option>';
 
     if (selectedConference) {
-        const yearsForConference = window.conferenceYearsMap[selectedConference] || [];
+        // Prefer DB-based years (actual downloaded data) over plugin-based years (theoretical)
+        const dbYears = window.dbConferenceYearsMap && window.dbConferenceYearsMap[selectedConference];
+        const yearsForConference = dbYears || window.conferenceYearsMap[selectedConference] || [];
         yearsForConference.forEach(year => {
             const option = document.createElement('option');
             option.value = year;

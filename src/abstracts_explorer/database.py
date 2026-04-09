@@ -1025,6 +1025,122 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Failed to get years for conference: {str(e)}") from e
 
+    def get_conference_years_from_db(self) -> Dict[str, List[int]]:
+        """
+        Return a mapping of each conference to the years that have papers in the database.
+
+        Years are sorted in descending order (most recent first).
+
+        Returns
+        -------
+        dict[str, list[int]]
+            Mapping of conference name to list of years (descending) that have
+            at least one paper in the database.  Returns an empty dict when the
+            database is empty or not connected.
+
+        Raises
+        ------
+        DatabaseError
+            If the query fails.
+
+        Examples
+        --------
+        >>> db = DatabaseManager()
+        >>> with db:
+        ...     mapping = db.get_conference_years_from_db()
+        >>> print(mapping)
+        {'NeurIPS': [2025, 2024], 'ICLR': [2024]}
+        """
+        if not self._session:
+            return {}
+
+        try:
+            filter_options = self.get_filter_options()
+            conferences_in_db = filter_options.get("conferences", [])
+            result: Dict[str, List[int]] = {}
+            for conf in conferences_in_db:
+                years = self.get_years_for_conference(conf)
+                if years:
+                    result[conf] = sorted(years, reverse=True)
+            return result
+        except Exception as e:
+            raise DatabaseError(f"Failed to get conference years from DB: {str(e)}") from e
+
+    def resolve_default_conference_year(
+        self,
+        configured_conference: str,
+        configured_year: Optional[int],
+    ) -> tuple[str, Optional[int]]:
+        """
+        Resolve the effective default conference and year, guaranteeing they have data.
+
+        The configured values are used when they point at a conference/year that
+        actually has papers in the database.  When they do not, the method falls
+        back to the most recent conference/year combination present in the database.
+
+        Parameters
+        ----------
+        configured_conference : str
+            Conference name from the application configuration.  May be empty
+            or may not match any downloaded conference.
+        configured_year : int or None
+            Year from the application configuration.  May be ``None`` or may
+            not have data for the matched conference.
+
+        Returns
+        -------
+        tuple[str, int | None]
+            A ``(conference, year)`` pair that is guaranteed to have data in the
+            database, or the original configured values if the database is empty.
+
+        Examples
+        --------
+        >>> db = DatabaseManager()
+        >>> with db:
+        ...     conf, year = db.resolve_default_conference_year("NeurIPS", 2024)
+        >>> print(conf, year)
+        NeurIPS 2024
+        """
+        db_conference_years = self.get_conference_years_from_db()
+
+        if not db_conference_years:
+            # DB is empty – return configured values unchanged
+            return configured_conference, configured_year
+
+        # Try case-insensitive match of the configured conference against DB conferences
+        conf_matched = None
+        if configured_conference:
+            for db_conf in db_conference_years:
+                if db_conf.lower() == configured_conference.lower():
+                    conf_matched = db_conf
+                    break
+
+        if conf_matched:
+            effective_conf = conf_matched
+            years_for_conf = db_conference_years[conf_matched]
+            if configured_year and configured_year in years_for_conf:
+                effective_year: Optional[int] = configured_year
+            elif years_for_conf:
+                # Configured year not in DB for this conference – use the most recent one
+                effective_year = years_for_conf[0]
+            else:
+                effective_year = configured_year
+        else:
+            # Configured default has no data (or was not set) – fall back to the
+            # conference/year combination with the most recent year in the database.
+            best_conf: Optional[str] = None
+            best_year: Optional[int] = None
+            for conf, years in db_conference_years.items():
+                if years:
+                    most_recent = years[0]  # already sorted descending
+                    if best_year is None or most_recent > best_year:
+                        best_year = most_recent
+                        best_conf = conf
+            effective_conf = best_conf or configured_conference
+            effective_year = best_year if best_conf else configured_year
+
+        return effective_conf, effective_year
+
     def resolve_conference_name(self, conference: str) -> str:
         """
         Resolve a conference name to the canonical form stored in the database.

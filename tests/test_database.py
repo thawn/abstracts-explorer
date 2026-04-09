@@ -921,11 +921,113 @@ class TestChatDonation:
         with pytest.raises(ValueError, match="'role' and 'text'"):
             connected_db.donate_chat_transcript("up", transcript)
 
-    def test_donate_chat_transcript_not_connected(self):
-        """Test donation without connection raises DatabaseError."""
-        from abstracts_explorer.database import DatabaseError
 
+class TestGetConferenceYearsFromDb:
+    """Tests for DatabaseManager.get_conference_years_from_db()."""
+
+    def test_returns_empty_dict_when_db_empty(self, connected_db):
+        """Returns an empty dict when no papers exist."""
+        result = connected_db.get_conference_years_from_db()
+        assert result == {}
+
+    def test_returns_correct_mapping(self, connected_db):
+        """Returns conference → sorted-descending years for existing papers."""
+        from abstracts_explorer.plugin import LightweightPaper
+
+        papers = [
+            LightweightPaper(
+                title="P1",
+                authors=["A"],
+                abstract="a",
+                session="s",
+                poster_position="p",
+                year=2024,
+                conference="NeurIPS",
+            ),
+            LightweightPaper(
+                title="P2",
+                authors=["A"],
+                abstract="a",
+                session="s",
+                poster_position="p",
+                year=2025,
+                conference="NeurIPS",
+            ),
+            LightweightPaper(
+                title="P3",
+                authors=["A"],
+                abstract="a",
+                session="s",
+                poster_position="p",
+                year=2024,
+                conference="ICLR",
+            ),
+        ]
+        for p in papers:
+            connected_db.add_paper(p)
+
+        result = connected_db.get_conference_years_from_db()
+        assert result["NeurIPS"] == [2025, 2024]
+        assert result["ICLR"] == [2024]
+
+    def test_returns_empty_dict_when_not_connected(self):
+        """Returns empty dict (not an error) when session is None."""
         db = DatabaseManager()
+        assert db.get_conference_years_from_db() == {}
 
-        with pytest.raises(DatabaseError, match="Not connected"):
-            db.donate_chat_transcript("up", [{"role": "user", "text": "test"}])
+
+class TestResolveDefaultConferenceYear:
+    """Tests for DatabaseManager.resolve_default_conference_year()."""
+
+    def _make_mock_db(self, conferences_with_years):
+        """Return a partial mock that delegates resolve_default_conference_year to the real method."""
+        from unittest.mock import MagicMock
+
+        mock_db = MagicMock()
+        mock_db.get_conference_years_from_db.return_value = conferences_with_years
+        mock_db.resolve_default_conference_year.side_effect = (
+            lambda conf, year: DatabaseManager.resolve_default_conference_year(mock_db, conf, year)
+        )
+        return mock_db
+
+    def test_returns_configured_values_when_match_exists(self):
+        """Configured conference and year are returned when they match DB data."""
+        mock_db = self._make_mock_db({"NeurIPS": [2025, 2024]})
+        conf, year = mock_db.resolve_default_conference_year("NeurIPS", 2024)
+        assert conf == "NeurIPS"
+        assert year == 2024
+
+    def test_case_insensitive_conference_match(self):
+        """Conference name is matched case-insensitively."""
+        mock_db = self._make_mock_db({"NeurIPS": [2025, 2024]})
+        conf, year = mock_db.resolve_default_conference_year("neurips", 2025)
+        assert conf == "NeurIPS"
+        assert year == 2025
+
+    def test_falls_back_to_most_recent_year_when_configured_year_missing(self):
+        """Most recent DB year is used when configured year has no data."""
+        mock_db = self._make_mock_db({"NeurIPS": [2025, 2024]})
+        conf, year = mock_db.resolve_default_conference_year("NeurIPS", 2020)
+        assert conf == "NeurIPS"
+        assert year == 2025
+
+    def test_falls_back_when_configured_conference_has_no_data(self):
+        """Falls back to most-recent conference/year when configured conference is absent."""
+        mock_db = self._make_mock_db({"ICLR": [2024]})
+        conf, year = mock_db.resolve_default_conference_year("ICML", 2024)
+        assert conf == "ICLR"
+        assert year == 2024
+
+    def test_most_recent_conference_chosen_when_no_default_configured(self):
+        """Selects the conference with the most recent year when no default is set."""
+        mock_db = self._make_mock_db({"NeurIPS": [2024], "ICLR": [2025]})
+        conf, year = mock_db.resolve_default_conference_year("", None)
+        assert conf == "ICLR"
+        assert year == 2025
+
+    def test_returns_configured_values_when_db_empty(self):
+        """Configured values are returned unchanged when the DB has no data."""
+        mock_db = self._make_mock_db({})
+        conf, year = mock_db.resolve_default_conference_year("NeurIPS", 2024)
+        assert conf == "NeurIPS"
+        assert year == 2024

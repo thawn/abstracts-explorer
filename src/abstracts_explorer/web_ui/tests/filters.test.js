@@ -16,7 +16,8 @@ import {
     syncFiltersToModal,
     syncFiltersFromModal,
     handleYearChange,
-    handleConferenceChange
+    handleConferenceChange,
+    updateYearsForConference
 } from '../static/modules/filters.js';
 
 describe('Filters Module', () => {
@@ -198,6 +199,67 @@ describe('Filters Module', () => {
             expect(mockLoadStats).toHaveBeenCalled();
 
             delete window.loadStats;
+        });
+
+        it('should store db_conference_years in window.dbConferenceYearsMap', async () => {
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    conferences: ['NeurIPS', 'ICLR'],
+                    years: [2024, 2025],
+                    conference_years: { 'NeurIPS': [2024, 2025], 'ICLR': [2024] },
+                    db_conference_years: { 'NeurIPS': [2025], 'ICLR': [2024] },
+                    default_conference: 'NeurIPS',
+                    default_year: 2025
+                })
+            });
+
+            await loadFilterOptions();
+
+            expect(window.dbConferenceYearsMap).toEqual({ 'NeurIPS': [2025], 'ICLR': [2024] });
+        });
+    });
+
+    describe('updateYearsForConference', () => {
+        beforeEach(() => {
+            window.conferenceYearsMap = { 'NeurIPS': [2023, 2024, 2025], 'ICLR': [2024] };
+            window.allYears = [2023, 2024, 2025];
+
+            const conferenceSelect = document.getElementById('conference-selector');
+            const option = document.createElement('option');
+            option.value = 'NeurIPS';
+            option.textContent = 'NeurIPS';
+            conferenceSelect.appendChild(option);
+            conferenceSelect.value = 'NeurIPS';
+        });
+
+        it('should use db_conference_years years when available for the selected conference', () => {
+            window.dbConferenceYearsMap = { 'NeurIPS': [2025] };
+
+            updateYearsForConference();
+
+            const yearSelect = document.getElementById('year-selector');
+            const yearValues = Array.from(yearSelect.options).map(o => o.value);
+            // db_conference_years only has 2025 for NeurIPS; plugin has 2023, 2024, 2025
+            expect(yearValues).toContain('2025');
+            expect(yearValues).not.toContain('2023');
+            expect(yearValues).not.toContain('2024');
+        });
+
+        it('should fall back to conference_years when db_conference_years has no entry for the selected conference', () => {
+            window.dbConferenceYearsMap = {};  // no DB data for NeurIPS
+
+            updateYearsForConference();
+
+            const yearSelect = document.getElementById('year-selector');
+            const yearValues = Array.from(yearSelect.options).map(o => o.value);
+            // falls back to plugin-based years: 2023, 2024, 2025
+            expect(yearValues).toContain('2025');
+            expect(yearValues).toContain('2024');
+            expect(yearValues).toContain('2023');
         });
     });
 
