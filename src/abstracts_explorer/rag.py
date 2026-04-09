@@ -364,8 +364,6 @@ def _tool_get_paper_details(
     return format_tool_result_for_llm("get_paper_details", raw)
 
 
-
-
 class RAGChat:
     """
     RAG chat interface for querying conference papers.
