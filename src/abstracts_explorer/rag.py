@@ -26,6 +26,7 @@ from abstracts_explorer.mcp_server import (
     get_topic_evolution as mcp_get_topic_evolution,
     analyze_topic_relevance as mcp_analyze_topic_relevance,
     get_cluster_visualization as mcp_get_cluster_visualization,
+    get_paper_details as mcp_get_paper_details,
 )
 from abstracts_explorer.mcp_tools import format_tool_result_for_llm, _abbreviate_result
 
@@ -85,6 +86,8 @@ def _tool_search_papers(
 
     A conference must be specified. If not provided by the user, the
     currently selected conference from the web UI is used automatically.
+    The currently selected year is also applied automatically when not
+    explicitly provided.
 
     Parameters
     ----------
@@ -96,13 +99,18 @@ def _tool_search_papers(
         Number of papers to return (default: 5).
     years : list of int, optional
         Filter by publication years (e.g. [2024, 2025]).
+        When omitted, the default year(s) from the current session are used.
     conference : str, optional
         Filter by conference name (e.g. "NeurIPS", "ICLR").
         When omitted, the default conference from the current session is used.
     """
     kwargs: Dict[str, Any] = {"topic_keywords": topic_keywords, "n_results": n_results}
+
+    # Determine years: explicit param > deps default
     if years is not None:
         kwargs["years"] = years
+    elif ctx.deps.years:
+        kwargs["years"] = ctx.deps.years
 
     # Determine conference: explicit param > deps default
     if conference:
@@ -220,6 +228,8 @@ def _tool_analyze_topic_relevance(
 
     A conference must be specified. If not provided by the user, the
     currently selected conference from the web UI is used automatically.
+    The currently selected year is also applied automatically when not
+    explicitly provided.
 
     Parameters
     ----------
@@ -234,6 +244,7 @@ def _tool_analyze_topic_relevance(
         When omitted, the default conference from the current session is used.
     years : list of int, optional
         Filter results to specific years.
+        When omitted, the default year(s) from the current session are used.
     """
     kwargs: Dict[str, Any] = {"topic": topic, "distance_threshold": distance_threshold}
 
@@ -243,8 +254,11 @@ def _tool_analyze_topic_relevance(
     elif ctx.deps.conferences:
         kwargs["conferences"] = ctx.deps.conferences
 
+    # Determine years: explicit param > deps default
     if years is not None:
         kwargs["years"] = years
+    elif ctx.deps.years:
+        kwargs["years"] = ctx.deps.years
 
     logger.info("Tool call: analyze_topic_relevance(%s)", kwargs)
     raw = mcp_analyze_topic_relevance(**kwargs)
@@ -290,9 +304,66 @@ def _tool_get_cluster_visualization(
     return format_tool_result_for_llm("get_cluster_visualization", raw)
 
 
-# ---------------------------------------------------------------------------
-# RAGChat
-# ---------------------------------------------------------------------------
+def _tool_get_paper_details(
+    ctx: RunContext[RAGDeps],
+    title: Optional[str] = None,
+    paper_id: Optional[str] = None,
+    conference: Optional[str] = None,
+    year: Optional[int] = None,
+    limit: int = 5,
+) -> str:
+    """Get detailed metadata for specific papers from the database.
+
+    Use this tool when the user asks about: who wrote a paper, paper authors,
+    where to find a paper, PDF or poster links, session or room details,
+    paper awards, or any other metadata about a specific paper.
+
+    At least one of title or paper_id must be provided. A conference filter
+    is applied automatically from the current web UI selection when not
+    explicitly provided.
+
+    Parameters
+    ----------
+    ctx : RunContext[RAGDeps]
+        Agent context with dependencies.
+    title : str, optional
+        Title or partial title to search for (case-insensitive).
+    paper_id : str, optional
+        Unique paper identifier (uid or original conference/OpenReview ID).
+    conference : str, optional
+        Filter by conference name (e.g. "NeurIPS", "ICLR").
+        When omitted, the default conference from the current session is used.
+    year : int, optional
+        Filter by publication year.
+        When omitted, the default year from the current session is used.
+    limit : int
+        Maximum number of papers to return when searching by title (default: 5).
+    """
+    kwargs: Dict[str, Any] = {"limit": limit}
+    if title:
+        kwargs["title"] = title
+    if paper_id:
+        kwargs["paper_id"] = paper_id
+
+    # Determine conference: explicit param > deps default
+    if conference:
+        kwargs["conference"] = conference
+    elif ctx.deps.conferences:
+        kwargs["conference"] = ctx.deps.conferences[0]
+
+    # Determine year: explicit param > deps default
+    if year is not None:
+        kwargs["year"] = year
+    elif ctx.deps.years:
+        kwargs["year"] = ctx.deps.years[0]
+
+    logger.info("Tool call: get_paper_details(%s)", kwargs)
+    raw = mcp_get_paper_details(**kwargs)
+    logger.info("Tool result: get_paper_details → %s", _abbreviate_result(raw))
+    ctx.deps.tool_results.append({"name": "get_paper_details", "raw_result": raw})
+    return format_tool_result_for_llm("get_paper_details", raw)
+
+
 
 
 class RAGChat:
@@ -456,6 +527,7 @@ class RAGChat:
         # Build tool list
         tools: List[Tool[RAGDeps]] = [
             Tool(_tool_search_papers, takes_ctx=True, name="search_papers"),
+            Tool(_tool_get_paper_details, takes_ctx=True, name="get_paper_details"),
         ]
         if self.enable_mcp_tools:
             tools.extend(
