@@ -350,6 +350,6 @@ Analyze specific conferences:
 ## See Also
 
 - [CLI Reference](cli_reference.md) - Command-line interface documentation
-- [Clustering Guide](clustering.md) - Clustering and visualization guide
-- [RAG Chat](rag.md) - Using RAG chat with MCP tools
+- [Clustering Guide](api/clustering.md) - Clustering and visualization guide
+- [RAG Chat](api/rag.md) - Using RAG chat with MCP tools
 - [Configuration](configuration.md) - Environment configuration options

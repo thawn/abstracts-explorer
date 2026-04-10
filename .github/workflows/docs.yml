@@ -32,6 +32,9 @@ concurrency:
     group: "pages"
     cancel-in-progress: true
 
+env:
+    SPHINXOPTS: "-W --keep-going"
+
 jobs:
     build-docs:
         runs-on: ubuntu-latest

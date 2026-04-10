@@ -45,4 +45,5 @@ with Session(engine) as session:
    :members:
    :undoc-members:
    :show-inheritance:
+   :exclude-members: metadata, registry
 ```
