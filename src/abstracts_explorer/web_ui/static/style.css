@@ -44,6 +44,32 @@ select:focus {
     opacity: 0.6;
 }
 
+/* Feedback highlight animation – runs once on the first assistant message */
+@keyframes feedbackHighlight {
+    0% { background-color: transparent; }
+    30% { background-color: rgba(139, 92, 246, 0.10); }
+    100% { background-color: transparent; }
+}
+
+.feedback-highlight {
+    animation: feedbackHighlight 2s ease-out;
+    border-radius: 4px;
+}
+
+/* MCP Tools hint bubble */
+.mcp-tools-hint {
+    animation: fadeIn 0.4s ease;
+}
+
+@keyframes mcpHintHide {
+    from { opacity: 1; transform: translateY(0); }
+    to   { opacity: 0; transform: translateY(-8px); }
+}
+
+.mcp-tools-hint-hide {
+    animation: mcpHintHide 0.3s ease forwards;
+}
+
 /* Code blocks in chat (if LLM returns code) */
 .chat-message code {
     background-color: rgba(0, 0, 0, 0.05);

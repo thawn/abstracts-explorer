@@ -432,6 +432,8 @@ MCP_TOOLS_SCHEMA = [
                 "Use this tool when the user asks about: who wrote a paper, paper authors, "
                 "where to find a paper, PDF or poster links, session or room details, "
                 "paper awards, or any other metadata about a specific paper."
+                "Do not use for searching for papers on a topic; use the 'search_papers' tool for that instead. "
+                "This tool is useful for specific follow-up questions after searching for papers using semantic search."
             ),
             "parameters": {
                 "type": "object",

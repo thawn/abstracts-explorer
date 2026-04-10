@@ -9,13 +9,14 @@ global.fetch = jest.fn();
 global.marked = { parse: jest.fn((text) => text), use: jest.fn() };
 global.Plotly = { newPlot: jest.fn() };
 
-import { sendChatMessage, displayChatPapers, addChatMessage, resetChat, renderChatVisualizations, openPapersModal, closePapersModal, handleChatFeedback } from '../static/modules/chat.js';
+import { sendChatMessage, displayChatPapers, addChatMessage, resetChat, renderChatVisualizations, openPapersModal, closePapersModal, handleChatFeedback, buildMcpToolsHintHtml, removeMcpToolsHint, initMcpToolsHint, _resetChatState } from '../static/modules/chat.js';
 import * as State from '../static/modules/state.js';
 
 describe('Chat Module', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         localStorage.clear();
+        _resetChatState();
         document.body.innerHTML = `
             <input id="chat-input" value="test message" />
             <select id="n-papers"><option value="3" selected>3</option></select>
@@ -718,6 +719,121 @@ describe('Chat Module', () => {
             await handleChatFeedback(messageId2, 'down');
 
             expect(global.confirm).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('MCP tools hint bubble', () => {
+        it('buildMcpToolsHintHtml should return HTML with mcp-tools-hint id', () => {
+            const html = buildMcpToolsHintHtml();
+            expect(html).toContain('id="mcp-tools-hint"');
+            expect(html).toContain('specialized tools');
+        });
+
+        it('should contain example queries for each MCP tool', () => {
+            const html = buildMcpToolsHintHtml();
+            // Conference topics
+            expect(html).toContain('main topics');
+            // Topic evolution
+            expect(html).toContain('evolved over the years');
+            // Search papers
+            expect(html).toContain('reinforcement learning');
+            // Topic relevance
+            expect(html).toContain('uncertainty quantification');
+            // Paper details
+            expect(html).toContain('Who wrote');
+        });
+
+        it('removeMcpToolsHint should add hide class when hint exists', () => {
+            document.getElementById('chat-messages').innerHTML = buildMcpToolsHintHtml();
+
+            removeMcpToolsHint();
+
+            const hint = document.getElementById('mcp-tools-hint');
+            expect(hint.classList.contains('mcp-tools-hint-hide')).toBe(true);
+        });
+
+        it('removeMcpToolsHint should do nothing when hint does not exist', () => {
+            // Should not throw
+            removeMcpToolsHint();
+        });
+
+        it('sendChatMessage should remove hint on first user message', async () => {
+            document.getElementById('chat-messages').innerHTML = buildMcpToolsHintHtml();
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    response: { response: 'reply', papers: [], metadata: {} }
+                })
+            });
+
+            await sendChatMessage();
+
+            const hint = document.getElementById('mcp-tools-hint');
+            // Hint should have the hide class (animation pending removal)
+            expect(hint.classList.contains('mcp-tools-hint-hide')).toBe(true);
+        });
+
+        it('resetChat should re-show the hint', async () => {
+            // First remove hint via a chat message
+            document.getElementById('chat-messages').innerHTML = buildMcpToolsHintHtml();
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    response: { response: 'reply', papers: [], metadata: {} }
+                })
+            });
+            await sendChatMessage();
+
+            // Now reset
+            global.fetch.mockResolvedValueOnce({ ok: true });
+            await resetChat();
+
+            const hint = document.getElementById('mcp-tools-hint');
+            expect(hint).not.toBeNull();
+            // Should NOT have hide class
+            expect(hint.classList.contains('mcp-tools-hint-hide')).toBe(false);
+        });
+
+        it('initMcpToolsHint should insert hint into chat-messages', () => {
+            initMcpToolsHint();
+
+            const hint = document.getElementById('mcp-tools-hint');
+            expect(hint).not.toBeNull();
+            expect(hint.closest('#chat-messages')).not.toBeNull();
+        });
+
+        it('initMcpToolsHint should not duplicate hint if already present', () => {
+            initMcpToolsHint();
+            initMcpToolsHint();
+
+            const hints = document.querySelectorAll('#mcp-tools-hint');
+            expect(hints.length).toBe(1);
+        });
+    });
+
+    describe('feedback highlight animation', () => {
+        it('should add feedback-highlight class on first assistant message', () => {
+            addChatMessage('First response', 'assistant');
+
+            const feedbackDiv = document.querySelector('.chat-feedback-buttons');
+            expect(feedbackDiv.classList.contains('feedback-highlight')).toBe(true);
+        });
+
+        it('should not add feedback-highlight class on second assistant message', () => {
+            addChatMessage('First response', 'assistant');
+            addChatMessage('Second response', 'assistant');
+
+            const feedbackDivs = document.querySelectorAll('.chat-feedback-buttons');
+            expect(feedbackDivs[0].classList.contains('feedback-highlight')).toBe(true);
+            expect(feedbackDivs[1].classList.contains('feedback-highlight')).toBe(false);
+        });
+
+        it('should not add feedback-highlight on user messages', () => {
+            addChatMessage('User message', 'user');
+
+            const feedbackDiv = document.querySelector('.feedback-highlight');
+            expect(feedbackDiv).toBeNull();
         });
     });
 });
