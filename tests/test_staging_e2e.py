@@ -223,11 +223,7 @@ def _assert_llm_judgment(query: str, response: str) -> None:
     passed, explanation = _judge_with_llm(query, response)
     if passed is None:
         pytest.skip(f"LLM judgment skipped: {explanation}")
-    assert passed, (
-        f"LLM judged the response as inadequate.\n"
-        f"Explanation: {explanation}\n"
-        f"Response: {response}"
-    )
+    assert passed, f"LLM judged the response as inadequate.\n" f"Explanation: {explanation}\n" f"Response: {response}"
 
 
 # ---------------------------------------------------------------------------
