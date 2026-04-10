@@ -1,7 +1,4 @@
 """
-Clustering Module
-=================
-
 This module provides functionality to cluster and visualize paper embeddings
 using dimensionality reduction and clustering algorithms from scikit-learn.
 

@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 # Plugin API Quick Reference
 
 Quick reference for the Abstracts Explorer plugin APIs.
@@ -286,5 +290,5 @@ print(f"Papers: {data['count']}")
 ## See Also
 
 - [Full Plugin Documentation](plugins.md)
-- [Plugin Technical Guide](../src/abstracts_explorer/plugins/README.md)
+- [Plugin Technical Guide](https://github.com/thawn/abstracts-explorer/blob/main/src/abstracts_explorer/plugins/README.md)
 - [CLI Reference](cli_reference.md)

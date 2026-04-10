@@ -1,7 +1,4 @@
 """
-Database Module
-===============
-
 This module provides functionality to load JSON data into a SQL database.
 Supports both SQLite and PostgreSQL backends via SQLAlchemy.
 """

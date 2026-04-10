@@ -794,10 +794,8 @@ def search_papers(
         Custom ChromaDB WHERE clause for filtering results by metadata.
         Supports ChromaDB query operators like $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin.
         Logical operators $and, $or are also supported.
-        Examples:
-          {"year": 2025}  # Filter by specific year
-          {"session": {"$in": ["Oral Session 1", "Oral Session 2"]}}  # Multiple sessions
-          {"$and": [{"year": {"$gte": 2024}}, {"conference": "NeurIPS"}]}  # Multiple conditions
+        Examples: ``{"year": 2025}``, ``{"session": {"$in": ["Oral Session 1", "Oral Session 2"]}}``,
+        ``{"$and": [{"year": {"$gte": 2024}}, {"conference": "NeurIPS"}]}``.
         Note: If 'conference' parameter is provided, it will be merged with this WHERE clause.
     collection_name : str, optional
         Name of ChromaDB collection

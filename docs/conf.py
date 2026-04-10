@@ -39,7 +39,7 @@ napoleon_include_special_with_doc = True
 napoleon_use_admonition_for_examples = True
 napoleon_use_admonition_for_notes = True
 napoleon_use_admonition_for_references = True
-napoleon_use_ivar = False
+napoleon_use_ivar = True
 napoleon_use_param = True
 napoleon_use_rtype = True
 napoleon_preprocess_types = False
@@ -73,6 +73,7 @@ myst_enable_extensions = [
     "tasklist",  # Task lists
     "linkify",  # Auto-detect URLs
 ]
+myst_heading_anchors = 4  # Auto-generate anchors for h1-h4 headings
 
 # Source suffix
 source_suffix = {
@@ -81,13 +82,13 @@ source_suffix = {
 }
 
 templates_path = ["_templates"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "README.md", "mcp_integration_notes.md"]
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
 html_theme = "sphinx_rtd_theme"
-html_static_path = ["_static"]
+html_static_path = []
 
 # Theme options
 html_theme_options = {
@@ -120,4 +121,4 @@ intersphinx_mapping = {
 
 # Configure intersphinx to not fail on network errors
 intersphinx_timeout = 5  # Timeout after 5 seconds instead of hanging
-suppress_warnings = ['app.add_node']  # Suppress node warnings
+suppress_warnings = ["app.add_node"]  # Suppress node warnings

@@ -618,7 +618,7 @@ Two TLS variants are provided:
 
 ### Architecture
 
-```mermaid
+```{mermaid}
 flowchart TD
     Internet["Internet"]
     socket["systemd socket<br/>:80 / :443 (root)"]
@@ -799,7 +799,7 @@ migrating.
 ## Further Reading
 
 - [Podman Documentation](https://docs.podman.io/)
-- [Main README](../README.md)
+- [Main README](https://github.com/thawn/abstracts-explorer/blob/main/README.md)
 - [Configuration Guide](configuration.md)
 
 ## Support

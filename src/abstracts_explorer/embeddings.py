@@ -1,7 +1,4 @@
 """
-Embeddings Module
-=================
-
 This module provides functionality to generate text embeddings for paper abstracts
 and store them in a vector database with paper metadata.
 
@@ -1032,6 +1029,7 @@ class EmbeddingsManager:
         -------
         dict
             Dictionary containing:
+
             - query: str - The search query
             - query_embedding: list[float] - The generated embedding for the query
             - distance: float - The distance threshold used

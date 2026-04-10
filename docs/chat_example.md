@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 # Chat Example: Uncertainty Quantification in Conference Abstracts
 
 Here is an example of a conversation with the AI research assistant about uncertainty quantification in conference abstracts. The assistant provides insights based on analysis of papers from NeurIPS, ICLR, and ICML, highlighting trends, key papers, and the importance of UQ in machine learning research.
