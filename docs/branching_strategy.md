@@ -39,7 +39,7 @@ staging environment until it is ready, then merged into `main` with a version ta
 |---|---|
 | Branch off from | `develop` |
 | Merge back into | `develop` |
-| Naming convention | anything except `main`, `develop`, or `hotfix-*` |
+| Naming convention | author/brief-description |
 
 Feature branches are used for all new features, enhancements, and major refactoring.
 They exist as long as the work is in progress and are deleted after merging.
