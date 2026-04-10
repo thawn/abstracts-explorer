@@ -897,9 +897,10 @@ class EmbeddingsManager:
         and retrieves complete paper information from the database.
 
         Supports ``field:"value"`` syntax in the query for filtering by any
-        Paper model column.  Recognised filters are extracted and applied as
-        case-insensitive Python post-filters after the ChromaDB similarity
-        search; the remaining text is used as the semantic query.
+        Paper model column.  Recognised filters are resolved against the SQL
+        database (using ILIKE substring matching), and only the matching paper
+        UIDs are forwarded to ChromaDB as a ``{"uid": {"$in": …}}`` condition.
+        The remaining query text is used for the semantic similarity search.
 
         Parameters
         ----------
@@ -946,13 +947,25 @@ class EmbeddingsManager:
         field_filters, remaining_query = DatabaseManager.parse_field_filters(query)
         semantic_query = remaining_query if remaining_query else query
 
-        # Build metadata filter for embeddings search
-        # NOTE: All metadata is stored as strings in ChromaDB (see add_paper method, line 445)
-        # so we must convert filter values to strings for matching.
+        # Build metadata filter for embeddings search.
+        # NOTE: All metadata is stored as strings in ChromaDB (see add_paper, line 445).
         # ChromaDB only supports $eq, $ne, $in, $nin, $gt, $gte, $lt, $lte operators on
-        # metadata fields — substring/$contains is NOT supported.  Field filters from the
-        # query are therefore applied as a Python post-filter after retrieval.
+        # metadata fields — substring matching is NOT supported.
+        #
+        # For field filters parsed from the query (which require ILIKE/substring matching)
+        # we therefore query the SQL database first and pass only the matching paper UIDs
+        # to ChromaDB as a {"uid": {"$in": [...]}} condition.
         filter_conditions: List[Dict[str, Any]] = []
+
+        if field_filters:
+            # Use the SQL database for substring-capable ILIKE filtering
+            matching_papers = database.search_papers(field_filters=field_filters, limit=0)
+            if not matching_papers:
+                # No papers satisfy the field filters — no results possible
+                return []
+            matching_uids = [p["uid"] for p in matching_papers]
+            filter_conditions.append({"uid": {"$in": matching_uids}})
+
         if sessions:
             filter_conditions.append({"session": {"$in": sessions}})
         if years:
@@ -975,9 +988,7 @@ class EmbeddingsManager:
         )
         logger.info(f"Where filter: {where_filter}")
 
-        # Fetch extra results to give the Python post-filter enough candidates
-        fetch_limit = limit * max(5, len(field_filters) + 1) if field_filters else limit * 2
-        results = self.search_similar(semantic_query, n_results=fetch_limit, where=where_filter)
+        results = self.search_similar(semantic_query, n_results=limit * 2, where=where_filter)
 
         logger.info(f"Search results count: {len(results.get('ids', [[]])[0]) if results else 0}")
 
@@ -987,30 +998,6 @@ class EmbeddingsManager:
         except PaperFormattingError:
             # No valid papers found
             return []
-
-        # Post-filter by field filters (substring match, case-insensitive).
-        # authors is returned as a list; join it for substring matching.
-        # All other fields are plain strings or numbers.
-        if field_filters:
-            filtered = []
-            for paper in papers:
-                match = True
-                for field_name, value in field_filters.items():
-                    field_val = paper.get(field_name)
-                    if field_val is None:
-                        match = False
-                        break
-                    # Normalise to a searchable string
-                    if isinstance(field_val, list):
-                        haystack = "; ".join(str(v) for v in field_val)
-                    else:
-                        haystack = str(field_val)
-                    if value.lower() not in haystack.lower():
-                        match = False
-                        break
-                if match:
-                    filtered.append(paper)
-            papers = filtered
 
         return papers[:limit]
 

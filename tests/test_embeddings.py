@@ -748,7 +748,8 @@ def test_search_papers_semantic_field_filter_partial_match(embeddings_manager, t
         Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq,
         $in, $nin, got $contains in query.
 
-    The fix post-filters the results in Python so that:
+    The fix pre-filters using the SQL database (ILIKE substring match) and passes
+    the resulting paper UIDs to ChromaDB as a ``{"uid": {"$in": [...]}}`` condition so:
     * partial author name matches work  (e.g. ``author:"Vaswani"`` matches the
       paper whose authors string contains "Vaswani")
     * the search does not raise an exception
@@ -813,6 +814,9 @@ def test_search_papers_semantic_field_filter_partial_match(embeddings_manager, t
     assert len(no_results) == 0, f"Expected 0 results for unknown author, got {len(no_results)}"
 
     embeddings_manager.close()
+
+
+class TestParseChromaDBMetadata:
     """Tests for EmbeddingsManager.parse_chromadb_metadata."""
 
     def _make_raw_metadata(self, **overrides):
