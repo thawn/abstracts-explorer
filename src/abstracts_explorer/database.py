@@ -649,7 +649,9 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Failed to count papers: {str(e)}") from e
 
-    #: Paper model column names that can be used as field filters in search queries.
+    #: Paper model column names that can be used as ``field:"value"`` filters
+    #: in search queries.  Internal columns (``uid``, ``created_at``) are
+    #: excluded because they are not meaningful search targets for users.
     SEARCHABLE_FIELDS: set = {c.name for c in Paper.__table__.columns if c.name not in ("uid", "created_at")}
 
     def search_papers(
@@ -805,6 +807,8 @@ class DatabaseManager:
         field_filters: Dict[str, str] = {}
         remaining = query
 
+        # Iterate in reverse so that removing matched spans does not
+        # invalidate the start/end offsets of earlier matches.
         for match in reversed(list(re.finditer(r'(\w+):"([^"]+)"', query))):
             field_name = match.group(1)
             value = match.group(2).strip()
