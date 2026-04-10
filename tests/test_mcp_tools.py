@@ -736,7 +736,7 @@ class TestExecuteMCPToolE2E:
         """get_topic_evolution executes end-to-end with mocked EmbeddingsManager."""
         mock_em = Mock()
 
-        def _find_papers(database, query, distance_threshold, conferences=None, years=None):
+        def _find_papers(database, query, distance_threshold, conferences=None, years=None, query_embedding=None):
             year = years[0] if years else None
             if year == 2022:
                 return {
