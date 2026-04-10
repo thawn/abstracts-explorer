@@ -896,10 +896,16 @@ class EmbeddingsManager:
         This function combines embedding-based similarity search with metadata filtering
         and retrieves complete paper information from the database.
 
+        Supports ``field:"value"`` syntax in the query for filtering by any
+        Paper model column.  Recognised filters are resolved against the SQL
+        database (using ILIKE substring matching), and only the matching paper
+        UIDs are forwarded to ChromaDB as a ``{"uid": {"$in": …}}`` condition.
+        The remaining query text is used for the semantic similarity search.
+
         Parameters
         ----------
         query : str
-            Search query text
+            Search query text.  May include ``field:"value"`` filters.
         database : DatabaseManager
             Database manager for retrieving full paper details
         limit : int, optional
@@ -929,13 +935,37 @@ class EmbeddingsManager:
         ...     limit=5,
         ...     years=[2024, 2025]
         ... )
+        >>> papers = em.search_papers_semantic(
+        ...     'authors:"Vaswani" attention',
+        ...     database=db,
+        ... )
         """
         from abstracts_explorer.paper_utils import format_search_results, PaperFormattingError
+        from abstracts_explorer.database import DatabaseManager
 
-        # Build metadata filter for embeddings search
-        # NOTE: All metadata is stored as strings in ChromaDB (see add_paper method, line 445)
-        # so we must convert filter values to strings for matching
+        # Parse field-specific filters from query
+        field_filters, remaining_query = DatabaseManager.parse_field_filters(query)
+        semantic_query = remaining_query if remaining_query else query
+
+        # Build metadata filter for embeddings search.
+        # NOTE: All metadata is stored as strings in ChromaDB (see add_paper, line 445).
+        # ChromaDB only supports $eq, $ne, $in, $nin, $gt, $gte, $lt, $lte operators on
+        # metadata fields — substring matching is NOT supported.
+        #
+        # For field filters parsed from the query (which require ILIKE/substring matching)
+        # we therefore query the SQL database first and pass only the matching paper UIDs
+        # to ChromaDB as a {"uid": {"$in": [...]}} condition.
         filter_conditions: List[Dict[str, Any]] = []
+
+        if field_filters:
+            # Use the SQL database for substring-capable ILIKE filtering
+            matching_papers = database.search_papers(field_filters=field_filters, limit=0)
+            if not matching_papers:
+                # No papers satisfy the field filters — no results possible
+                return []
+            matching_uids = [p["uid"] for p in matching_papers]
+            filter_conditions.append({"uid": {"$in": matching_uids}})
+
         if sessions:
             filter_conditions.append({"session": {"$in": sessions}})
         if years:
@@ -953,12 +983,12 @@ class EmbeddingsManager:
             where_filter = filter_conditions[0]
 
         logger.info(
-            f"Semantic search - query: {query}, filter: sessions={sessions}, years={years}, conferences={conferences}"
+            f"Semantic search - query: {semantic_query}, filter: sessions={sessions}, "
+            f"years={years}, conferences={conferences}, field_filters={field_filters}"
         )
         logger.info(f"Where filter: {where_filter}")
 
-        # Get more results initially to account for filtering
-        results = self.search_similar(query, n_results=limit * 2, where=where_filter)
+        results = self.search_similar(semantic_query, n_results=limit * 2, where=where_filter)
 
         logger.info(f"Search results count: {len(results.get('ids', [[]])[0]) if results else 0}")
 
@@ -969,7 +999,6 @@ class EmbeddingsManager:
             # No valid papers found
             return []
 
-        # Limit results (filtering already done at database level)
         return papers[:limit]
 
     def find_papers_within_distance(

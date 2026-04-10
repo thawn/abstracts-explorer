@@ -483,6 +483,227 @@ class TestAddPapers:
         assert total_count == 2
 
 
+class TestParseFieldFilters:
+    """Tests for the parse_field_filters static method."""
+
+    def test_no_filter(self):
+        """Test query without any field filter returns empty dict and original query."""
+        filters, remaining = DatabaseManager.parse_field_filters("transformers")
+        assert filters == {}
+        assert remaining == "transformers"
+
+    def test_authors_filter_only(self):
+        """Test query with only authors filter."""
+        filters, remaining = DatabaseManager.parse_field_filters('authors:"John Smith"')
+        assert filters == {"authors": "John Smith"}
+        assert remaining == ""
+
+    def test_authors_filter_with_keyword(self):
+        """Test authors filter combined with keyword."""
+        filters, remaining = DatabaseManager.parse_field_filters('authors:"John Smith" transformers')
+        assert filters == {"authors": "John Smith"}
+        assert remaining == "transformers"
+
+    def test_keyword_before_filter(self):
+        """Test keyword before field filter."""
+        filters, remaining = DatabaseManager.parse_field_filters('deep learning authors:"Jane Doe"')
+        assert filters == {"authors": "Jane Doe"}
+        assert remaining == "deep learning"
+
+    def test_filter_in_middle(self):
+        """Test field filter in the middle of query."""
+        filters, remaining = DatabaseManager.parse_field_filters('deep authors:"Jane Doe" learning')
+        assert filters == {"authors": "Jane Doe"}
+        assert remaining == "deep learning"
+
+    def test_empty_query(self):
+        """Test empty query."""
+        filters, remaining = DatabaseManager.parse_field_filters("")
+        assert filters == {}
+        assert remaining == ""
+
+    def test_multiple_filters(self):
+        """Test multiple field filters in one query."""
+        filters, remaining = DatabaseManager.parse_field_filters('authors:"Doe" award:"Best Paper" transformers')
+        assert filters == {"authors": "Doe", "award": "Best Paper"}
+        assert remaining == "transformers"
+
+    def test_conference_filter(self):
+        """Test conference field filter."""
+        filters, remaining = DatabaseManager.parse_field_filters('conference:"NeurIPS"')
+        assert filters == {"conference": "NeurIPS"}
+        assert remaining == ""
+
+    def test_session_filter(self):
+        """Test session field filter."""
+        filters, remaining = DatabaseManager.parse_field_filters('session:"Oral Session" attention')
+        assert filters == {"session": "Oral Session"}
+        assert remaining == "attention"
+
+    def test_title_filter(self):
+        """Test title field filter."""
+        filters, remaining = DatabaseManager.parse_field_filters('title:"Transformer"')
+        assert filters == {"title": "Transformer"}
+        assert remaining == ""
+
+    def test_year_filter(self):
+        """Test year field filter."""
+        filters, remaining = DatabaseManager.parse_field_filters('year:"2025"')
+        assert filters == {"year": "2025"}
+        assert remaining == ""
+
+    def test_unknown_field_left_in_query(self):
+        """Test that unrecognised field names are left in the query."""
+        filters, remaining = DatabaseManager.parse_field_filters('foo:"bar" transformers')
+        assert filters == {}
+        assert remaining == 'foo:"bar" transformers'
+
+    def test_keywords_filter(self):
+        """Test keywords field filter."""
+        filters, remaining = DatabaseManager.parse_field_filters('keywords:"deep learning"')
+        assert filters == {"keywords": "deep learning"}
+        assert remaining == ""
+
+    def test_author_alias_only(self):
+        """Test that 'author' is accepted as an alias for 'authors'."""
+        filters, remaining = DatabaseManager.parse_field_filters('author:"John Smith"')
+        assert filters == {"authors": "John Smith"}
+        assert remaining == ""
+
+    def test_author_alias_with_keyword(self):
+        """Test 'author' alias combined with keyword."""
+        filters, remaining = DatabaseManager.parse_field_filters('author:"Vaswani" transformer')
+        assert filters == {"authors": "Vaswani"}
+        assert remaining == "transformer"
+
+
+class TestSearchPapersFieldFilters:
+    """Tests for field filtering in search_papers and search_papers_keyword."""
+
+    @pytest.fixture
+    def db_with_papers(self, connected_db):
+        """Create a database with papers by different authors."""
+        papers = [
+            LightweightPaper(
+                title="Attention is All You Need",
+                authors=["Ashish Vaswani", "Noam Shazeer"],
+                abstract="We propose the Transformer architecture.",
+                session="Session 1",
+                poster_position="P1",
+                year=2017,
+                conference="NeurIPS",
+                award="Best Paper",
+                keywords=["attention", "transformer"],
+            ),
+            LightweightPaper(
+                title="BERT Paper",
+                authors=["Jacob Devlin", "Ming-Wei Chang"],
+                abstract="We introduce BERT for NLP.",
+                session="Session 2",
+                poster_position="P2",
+                year=2019,
+                conference="NeurIPS",
+                keywords=["bert", "pretraining"],
+            ),
+            LightweightPaper(
+                title="ResNet Paper",
+                authors=["Kaiming He", "Xiangyu Zhang"],
+                abstract="Deep residual learning for image recognition.",
+                session="Session 3",
+                poster_position="P3",
+                year=2016,
+                conference="ICLR",
+                keywords=["resnet", "computer vision"],
+            ),
+        ]
+        for paper in papers:
+            connected_db.add_paper(paper)
+        return connected_db
+
+    def test_search_papers_by_author(self, db_with_papers):
+        """Test search_papers with authors field filter."""
+        results = db_with_papers.search_papers(field_filters={"authors": "Vaswani"})
+        assert len(results) == 1
+        assert results[0]["title"] == "Attention is All You Need"
+
+    def test_search_papers_by_author_case_insensitive(self, db_with_papers):
+        """Test that field filter search is case-insensitive."""
+        results = db_with_papers.search_papers(field_filters={"authors": "vaswani"})
+        assert len(results) == 1
+        assert results[0]["title"] == "Attention is All You Need"
+
+    def test_search_papers_author_partial_match(self, db_with_papers):
+        """Test that field filter matches partial values."""
+        results = db_with_papers.search_papers(field_filters={"authors": "Kaiming"})
+        assert len(results) == 1
+        assert results[0]["title"] == "ResNet Paper"
+
+    def test_search_papers_author_no_match(self, db_with_papers):
+        """Test field filter with no matches."""
+        results = db_with_papers.search_papers(field_filters={"authors": "Nonexistent Author"})
+        assert len(results) == 0
+
+    def test_search_papers_field_filter_and_keyword(self, db_with_papers):
+        """Test combining field filter and keyword search."""
+        # Author matches but keyword doesn't
+        results = db_with_papers.search_papers(field_filters={"authors": "Vaswani"}, keyword="BERT")
+        assert len(results) == 0
+
+        # Both author and keyword match
+        results = db_with_papers.search_papers(field_filters={"authors": "Vaswani"}, keyword="Transformer")
+        assert len(results) == 1
+
+    def test_search_papers_keyword_author_syntax(self, db_with_papers):
+        """Test search_papers_keyword with authors:"Name" syntax."""
+        results = db_with_papers.search_papers_keyword(query='authors:"Vaswani"', limit=10)
+        assert len(results) == 1
+        assert results[0]["title"] == "Attention is All You Need"
+        # Authors should be parsed into a list
+        assert isinstance(results[0]["authors"], list)
+
+    def test_search_papers_keyword_author_with_keyword(self, db_with_papers):
+        """Test search_papers_keyword with authors and keyword combined."""
+        results = db_with_papers.search_papers_keyword(query='authors:"Devlin" BERT', limit=10)
+        assert len(results) == 1
+        assert results[0]["title"] == "BERT Paper"
+
+    def test_search_papers_keyword_author_no_match_keyword(self, db_with_papers):
+        """Test authors matches but keyword doesn't."""
+        results = db_with_papers.search_papers_keyword(query='authors:"Vaswani" BERT', limit=10)
+        assert len(results) == 0
+
+    def test_search_by_award(self, db_with_papers):
+        """Test search_papers_keyword with award field filter."""
+        results = db_with_papers.search_papers_keyword(query='award:"Best Paper"', limit=10)
+        assert len(results) == 1
+        assert results[0]["title"] == "Attention is All You Need"
+
+    def test_search_by_conference(self, db_with_papers):
+        """Test search_papers_keyword with conference field filter."""
+        results = db_with_papers.search_papers_keyword(query='conference:"ICLR"', limit=10)
+        assert len(results) == 1
+        assert results[0]["title"] == "ResNet Paper"
+
+    def test_search_by_multiple_fields(self, db_with_papers):
+        """Test search_papers_keyword with multiple field filters."""
+        results = db_with_papers.search_papers_keyword(query='authors:"Vaswani" conference:"NeurIPS"', limit=10)
+        assert len(results) == 1
+        assert results[0]["title"] == "Attention is All You Need"
+
+    def test_search_by_keywords_field(self, db_with_papers):
+        """Test search_papers_keyword with keywords field filter."""
+        results = db_with_papers.search_papers_keyword(query='keywords:"computer vision"', limit=10)
+        assert len(results) == 1
+        assert results[0]["title"] == "ResNet Paper"
+
+    def test_author_alias_in_keyword_search(self, db_with_papers):
+        """Test that 'author' alias works the same as 'authors'."""
+        results = db_with_papers.search_papers_keyword(query='author:"Vaswani"', limit=10)
+        assert len(results) == 1
+        assert results[0]["title"] == "Attention is All You Need"
+        assert isinstance(results[0]["authors"], list)
+
+
 class TestEmbeddingModelMetadata:
     """Tests for embedding model metadata functionality."""
 
