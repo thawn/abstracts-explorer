@@ -330,7 +330,8 @@ MCP_TOOLS_SCHEMA = [
                 "Analyze how specific topics have evolved over the years. "
                 "Use this tool when the user asks about: trends over time, historical development, how a topic has developed,"
                 "how a topic has changed, or evolution of research areas. At least one conference must be specified. "
-                "Multiple conferences can be compared in the same analysis."
+                "If requested, multiple conferences can be compared in the same analysis."
+                "The chat frontend can use the returned data to generate a plot with plotly.js showing the topic evolution over time."
             ),
             "parameters": {
                 "type": "object",
@@ -401,6 +402,7 @@ MCP_TOOLS_SCHEMA = [
                 "Retrieve pre-computed visualization data for clustered embeddings. "
                 "Use this tool when the user asks for: a visual representation, graphical view, "
                 "or wants to see clusters displayed. A conference must be specified."
+                "The chat frontend can use the returned data to generate a plot with plotly.js showing the clusters."
             ),
             "parameters": {
                 "type": "object",
@@ -432,6 +434,8 @@ MCP_TOOLS_SCHEMA = [
                 "Use this tool when the user asks about: who wrote a paper, paper authors, "
                 "where to find a paper, PDF or poster links, session or room details, "
                 "paper awards, or any other metadata about a specific paper."
+                "must specify either paper_id or title to identify the paper."
+                "Conference + year are optional but can help disambiguate papers with similar titles or multiple versions. "
                 "Do not use for searching for papers on a topic; use the 'search_papers' tool for that instead. "
                 "This tool is useful for specific follow-up questions after searching for papers using semantic search."
             ),

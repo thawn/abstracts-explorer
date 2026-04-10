@@ -610,6 +610,9 @@ def get_topic_evolution(
     the total number of papers for that conference and year.
     At least one conference must be specified.
 
+    The chat frontend can use the returned data to generate a plot with
+    plotly.js showing the topic evolution over time.
+
     Parameters
     ----------
     topic_keywords : str
@@ -1165,6 +1168,9 @@ def get_cluster_visualization(
 
     When multiple conferences are provided, each conference is looked up
     individually and results are combined.
+
+    The chat frontend can use the returned data to generate a plot with
+    plotly.js showing the clusters.
 
     Parameters
     ----------
