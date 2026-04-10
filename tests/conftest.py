@@ -80,6 +80,32 @@ def staging_url(request):
     return url.rstrip("/")
 
 
+@pytest.fixture(scope="module")
+def browser():
+    """
+    Create a module-scoped Selenium WebDriver instance for staging e2e tests.
+
+    A single browser instance is shared across all tests in a module to avoid
+    the overhead of launching a new browser for every test.  The fixture is
+    defined here (``conftest.py``) so it is available to any test module; test
+    files that need a *function*-scoped browser (e.g. ``test_web_e2e.py``) can
+    override it with a local fixture of the same name.
+
+    Browser selection follows the ``E2E_BROWSER`` environment variable
+    (``chrome``, ``firefox``, or ``auto``).
+
+    Yields
+    ------
+    webdriver.Chrome or webdriver.Firefox
+        A headless WebDriver instance.  Automatically quit after the module.
+    """
+    from tests.helpers import create_webdriver
+
+    driver = create_webdriver()
+    yield driver
+    driver.quit()
+
+
 @pytest.fixture(scope="session")
 def monkeypatch_session():
     """
