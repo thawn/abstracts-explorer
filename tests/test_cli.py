@@ -871,9 +871,7 @@ class TestCLI:
         # Verify create_collection was called with reset=True
         mock_em.create_collection.assert_called_once_with(reset=True)
 
-    def test_create_embeddings_force_with_conference_does_not_reset_collection(
-        self, tmp_path, capsys, monkeypatch
-    ):
+    def test_create_embeddings_force_with_conference_does_not_reset_collection(self, tmp_path, capsys, monkeypatch):
         """--force --conference should delete only matching embeddings, not reset whole collection."""
         from abstracts_explorer import DatabaseManager
 
@@ -933,9 +931,7 @@ class TestCLI:
         # delete_embeddings_by_filter must be called with the conference
         mock_em.delete_embeddings_by_filter.assert_called_once_with(conference="NeurIPS", year=None)
 
-    def test_create_embeddings_force_with_year_does_not_reset_collection(
-        self, tmp_path, capsys, monkeypatch
-    ):
+    def test_create_embeddings_force_with_year_does_not_reset_collection(self, tmp_path, capsys, monkeypatch):
         """--force --year should delete only matching embeddings, not reset whole collection."""
         from abstracts_explorer import DatabaseManager
 
@@ -993,9 +989,7 @@ class TestCLI:
         mock_em.create_collection.assert_called_once_with(reset=False)
         mock_em.delete_embeddings_by_filter.assert_called_once_with(conference=None, year=2024)
 
-    def test_create_embeddings_force_with_conference_and_year(
-        self, tmp_path, capsys, monkeypatch
-    ):
+    def test_create_embeddings_force_with_conference_and_year(self, tmp_path, capsys, monkeypatch):
         """--force --conference X --year Y deletes only that conference+year slice."""
         from abstracts_explorer import DatabaseManager
 
@@ -1053,7 +1047,6 @@ class TestCLI:
 
         mock_em.create_collection.assert_called_once_with(reset=False)
         mock_em.delete_embeddings_by_filter.assert_called_once_with(conference="NeurIPS", year=2024)
-
 
         """Test create-embeddings with --requests-per-minute flag."""
         from abstracts_explorer import DatabaseManager

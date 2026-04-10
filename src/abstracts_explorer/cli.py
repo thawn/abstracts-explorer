@@ -309,7 +309,9 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
                 scope_parts.append(f"conference={conference}")
             if year is not None:
                 scope_parts.append(f"year={year}")
-            print(f"🔄 Removing existing embeddings for {', '.join(scope_parts)} from collection '{args.collection}'...")
+            print(
+                f"🔄 Removing existing embeddings for {', '.join(scope_parts)} from collection '{args.collection}'..."
+            )
         else:
             print(f"📁 Creating collection '{args.collection}'...")
 
