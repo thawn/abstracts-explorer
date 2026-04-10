@@ -550,11 +550,11 @@ def merge_where_clause_with_years(
         return deepcopy(where) if where else None
 
     # convert years to string because ChromaDB metadata is stored as strings
-    years = [str(y) for y in years]
+    years_str: List[str] = [str(y) for y in years]
 
     # If no WHERE clause, just return years filter
     if not where:
-        return {"year": {"$in": years}}
+        return {"year": {"$in": years_str}}
 
     # Check if year filter already exists anywhere in WHERE clause
     def has_year_filter(obj: Any) -> bool:
@@ -579,7 +579,7 @@ def merge_where_clause_with_years(
     # Need to merge years with WHERE clause - use deep copy to prevent mutations
     where_filter = deepcopy(where)
 
-    year_filter = {"year": {"$in": years}}
+    year_filter = {"year": {"$in": years_str}}
 
     # If WHERE already has $and, append to it
     if "$and" in where_filter:
