@@ -9,7 +9,7 @@ global.fetch = jest.fn();
 global.marked = { parse: jest.fn((text) => text), use: jest.fn() };
 global.Plotly = { newPlot: jest.fn() };
 
-import { sendChatMessage, displayChatPapers, addChatMessage, resetChat, renderChatVisualizations, openPapersModal, closePapersModal, handleChatFeedback, buildMcpToolsHintHtml, removeMcpToolsHint, _resetChatState } from '../static/modules/chat.js';
+import { sendChatMessage, displayChatPapers, addChatMessage, resetChat, renderChatVisualizations, openPapersModal, closePapersModal, handleChatFeedback, buildMcpToolsHintHtml, removeMcpToolsHint, initMcpToolsHint, _resetChatState } from '../static/modules/chat.js';
 import * as State from '../static/modules/state.js';
 
 describe('Chat Module', () => {
@@ -793,6 +793,22 @@ describe('Chat Module', () => {
             expect(hint).not.toBeNull();
             // Should NOT have hide class
             expect(hint.classList.contains('mcp-tools-hint-hide')).toBe(false);
+        });
+
+        it('initMcpToolsHint should insert hint into chat-messages', () => {
+            initMcpToolsHint();
+
+            const hint = document.getElementById('mcp-tools-hint');
+            expect(hint).not.toBeNull();
+            expect(hint.closest('#chat-messages')).not.toBeNull();
+        });
+
+        it('initMcpToolsHint should not duplicate hint if already present', () => {
+            initMcpToolsHint();
+            initMcpToolsHint();
+
+            const hints = document.querySelectorAll('#mcp-tools-hint');
+            expect(hints.length).toBe(1);
         });
     });
 

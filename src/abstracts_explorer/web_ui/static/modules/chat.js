@@ -71,7 +71,21 @@ export function removeMcpToolsHint() {
     const hint = document.getElementById('mcp-tools-hint');
     if (hint) {
         hint.classList.add('mcp-tools-hint-hide');
-        hint.addEventListener('animationend', () => hint.remove(), { once: true });
+        // Remove after animation; fall back to a timeout in case animationend never fires
+        const remove = () => hint.remove();
+        hint.addEventListener('animationend', remove, { once: true });
+        setTimeout(remove, 500);
+    }
+}
+
+/**
+ * Insert the MCP tools hint bubble into the chat messages area.
+ * Called once on page load so the hint HTML lives in a single place (buildMcpToolsHintHtml).
+ */
+export function initMcpToolsHint() {
+    const messagesDiv = document.getElementById('chat-messages');
+    if (messagesDiv && !document.getElementById('mcp-tools-hint')) {
+        messagesDiv.insertAdjacentHTML('beforeend', buildMcpToolsHintHtml());
     }
 }
 

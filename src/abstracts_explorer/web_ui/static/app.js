@@ -13,7 +13,7 @@ import { loadPriorities } from './modules/state.js';
 
 // Import feature modules
 import { searchPapers } from './modules/search.js';
-import { sendChatMessage, resetChat, openPapersModal, closePapersModal, handleChatFeedback } from './modules/chat.js';
+import { sendChatMessage, resetChat, openPapersModal, closePapersModal, handleChatFeedback, initMcpToolsHint } from './modules/chat.js';
 import {
     loadInterestingPapers,
     saveInterestingPapersAsMarkdown,
@@ -72,6 +72,9 @@ function initializeApp() {
 
     // Update interesting papers count
     updateInterestingPapersCount();
+
+    // Show MCP tools hint in chat area
+    initMcpToolsHint();
 
     // Setup modal event listeners
     setupModalEventListeners();
