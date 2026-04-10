@@ -11,6 +11,12 @@ import { renderEmptyState } from './utils/ui-utils.js';
 import { setCurrentSearchTerm } from './state.js';
 import { formatPaperCard } from './paper-card.js';
 
+/** Whether the user has sent at least one chat message in this session. */
+let _hasUserSentMessage = false;
+
+/** Whether the feedback highlight animation has already been triggered. */
+let _feedbackHighlightShown = false;
+
 /**
  * Get the current chat donation consent status from localStorage.
  * @returns {boolean|null} true if accepted, false if declined, null if not yet asked
@@ -23,6 +29,75 @@ function getChatDonationConsent() {
 }
 
 /**
+ * Build HTML for the MCP tools hint bubble.
+ * @returns {string} HTML string
+ */
+export function buildMcpToolsHintHtml() {
+    return `
+        <div id="mcp-tools-hint" class="mcp-tools-hint bg-gradient-to-br from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-4 shadow-sm max-w-2xl mx-auto">
+            <div class="flex items-start gap-2 mb-3">
+                <i class="fas fa-lightbulb text-purple-500 mt-0.5"></i>
+                <p class="text-sm font-semibold text-gray-700">I can use specialized tools to help answer your questions. Try asking:</p>
+            </div>
+            <ul class="space-y-2 text-sm text-gray-600 ml-6">
+                <li class="flex items-start gap-2">
+                    <i class="fas fa-chart-pie text-purple-400 mt-0.5 flex-shrink-0"></i>
+                    <span><em>"What are the main topics?"</em></span>
+                </li>
+                <li class="flex items-start gap-2">
+                    <i class="fas fa-chart-line text-blue-400 mt-0.5 flex-shrink-0"></i>
+                    <span><em>"How has the topic of large language models evolved over the years?"</em></span>
+                </li>
+                <li class="flex items-start gap-2">
+                    <i class="fas fa-search text-green-400 mt-0.5 flex-shrink-0"></i>
+                    <span><em>"Find papers about reinforcement learning at ICLR"</em></span>
+                </li>
+                <li class="flex items-start gap-2">
+                    <i class="fas fa-fire text-orange-400 mt-0.5 flex-shrink-0"></i>
+                    <span><em>"How relevant is uncertainty quantification at NeurIPS?"</em></span>
+                </li>
+                <!-- Disabled for now since get_paper_details is not working properly right now, but we can re-enable once it's fixed
+                <li class="flex items-start gap-2">
+                    <i class="fas fa-info-circle text-indigo-400 mt-0.5 flex-shrink-0"></i>
+                    <span><em>"Who wrote the paper 'Language Models are Few-Shot Learners'?"</em></span>
+                </li> -->
+            </ul>
+        </div>`;
+}
+
+/**
+ * Remove the MCP tools hint bubble from the chat area (if present).
+ */
+export function removeMcpToolsHint() {
+    const hint = document.getElementById('mcp-tools-hint');
+    if (hint) {
+        hint.classList.add('mcp-tools-hint-hide');
+        // Remove after animation; fall back to a timeout in case animationend never fires.
+        // Guard against double invocation since both paths could fire.
+        let removed = false;
+        const remove = () => {
+            if (!removed) {
+                removed = true;
+                hint.remove();
+            }
+        };
+        hint.addEventListener('animationend', remove, { once: true });
+        setTimeout(remove, 500);
+    }
+}
+
+/**
+ * Insert the MCP tools hint bubble into the chat messages area.
+ * Called once on page load so the hint HTML lives in a single place (buildMcpToolsHintHtml).
+ */
+export function initMcpToolsHint() {
+    const messagesDiv = document.getElementById('chat-messages');
+    if (messagesDiv && !document.getElementById('mcp-tools-hint')) {
+        messagesDiv.insertAdjacentHTML('beforeend', buildMcpToolsHintHtml());
+    }
+}
+
+/**
  * Send chat message
  * @async
  */
@@ -31,6 +106,12 @@ export async function sendChatMessage() {
     const message = input.value.trim();
 
     if (!message) return;
+
+    // Remove the MCP tools hint on first user message
+    if (!_hasUserSentMessage) {
+        _hasUserSentMessage = true;
+        removeMcpToolsHint();
+    }
 
     // Store the current search term for rating papers from chat
     setCurrentSearchTerm(message);
@@ -238,12 +319,12 @@ export function addChatMessage(text, role, isLoading = false) {
                 ${isLoading ? '<div class="spinner mt-2" style="width: 20px; height: 20px; border-width: 2px;"></div>' : ''}
                 ${!isUser && !isLoading ? `
                 <div class="chat-feedback-buttons flex items-center gap-2 mt-3 pt-2 border-t border-gray-100">
-                    <span class="text-xs text-gray-400 mr-1">Helpful?</span>
-                    <button class="chat-feedback-btn text-gray-300 hover:text-green-500 transition-colors p-1"
+                    <span class="text-xs text-gray-500 mr-1">Helpful?</span>
+                    <button class="chat-feedback-btn text-gray-400 hover:text-green-600 transition-colors p-1"
                         data-rating="up" data-msg-id="${messageId}" title="Thumbs up">
                         <i class="fas fa-thumbs-up text-sm"></i>
                     </button>
-                    <button class="chat-feedback-btn text-gray-300 hover:text-red-500 transition-colors p-1"
+                    <button class="chat-feedback-btn text-gray-400 hover:text-red-600 transition-colors p-1"
                         data-rating="down" data-msg-id="${messageId}" title="Thumbs down">
                         <i class="fas fa-thumbs-down text-sm"></i>
                     </button>
@@ -271,6 +352,15 @@ export function addChatMessage(text, role, isLoading = false) {
     messagesDiv.appendChild(messageDiv);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
 
+    // Trigger a brief highlight animation on feedback buttons the first time they appear
+    if (!isUser && !isLoading && !_feedbackHighlightShown) {
+        _feedbackHighlightShown = true;
+        const feedbackDiv = messageDiv.querySelector('.chat-feedback-buttons');
+        if (feedbackDiv) {
+            feedbackDiv.classList.add('feedback-highlight');
+        }
+    }
+
     return messageId;
 }
 
@@ -287,6 +377,10 @@ export async function resetChat() {
         const messagesDiv = document.getElementById('chat-messages');
         messagesDiv.innerHTML = '';
         addChatMessage('Conversation reset. How can I help you explore NeurIPS abstracts?', 'assistant');
+
+        // Re-show the MCP tools hint
+        _hasUserSentMessage = false;
+        initMcpToolsHint();
 
         // Clear papers panel and modal
         const emptyHtml = renderEmptyState(
@@ -560,8 +654,8 @@ export async function handleChatFeedback(messageId, rating) {
             // Highlight the selected rating button
             const selectedBtn = feedbackDiv.querySelector(`[data-rating="${rating}"]`);
             if (selectedBtn) {
-                selectedBtn.classList.remove('text-gray-300');
-                selectedBtn.classList.add(rating === 'up' ? 'text-green-500' : 'text-red-500');
+                selectedBtn.classList.remove('text-gray-400');
+                selectedBtn.classList.add(rating === 'up' ? 'text-green-600' : 'text-red-600');
             }
         }
     }
@@ -621,4 +715,12 @@ export function closePapersModal() {
         modal.classList.add('hidden');
         modal.classList.remove('flex');
     }
+}
+
+/**
+ * Reset internal module state. Intended for use in tests only.
+ */
+export function _resetChatState() {
+    _hasUserSentMessage = false;
+    _feedbackHighlightShown = false;
 }
