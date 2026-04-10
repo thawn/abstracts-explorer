@@ -90,9 +90,12 @@ def _select_conference_and_year(
     """
     wait = WebDriverWait(driver, timeout)
 
-    # Wait until the conference selector has at least one meaningful option
+    # Wait until the specific conference option is available in the selector
     wait.until(
-        lambda d: len(d.find_element(By.ID, "conference-selector").find_elements(By.TAG_NAME, "option")) > 0
+        lambda d: any(
+            opt.get_attribute("value") == conference
+            for opt in d.find_element(By.ID, "conference-selector").find_elements(By.TAG_NAME, "option")
+        )
     )
 
     conf_select_el = driver.find_element(By.ID, "conference-selector")
