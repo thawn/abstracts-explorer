@@ -32,6 +32,9 @@ concurrency:
     group: "pages"
     cancel-in-progress: true
 
+env:
+    SPHINXOPTS: "-W --keep-going"
+
 jobs:
     build-docs:
         runs-on: ubuntu-latest
@@ -68,7 +71,7 @@ jobs:
                   DOCS_VERSION: ${{ steps.pr_version.outputs.version }}
               run: |
                   cd docs
-                  SPHINXOPTS="-W --keep-going" uv run make html
+                  uv run make html
 
             - name: Check PR docs build
               if: github.event_name == 'pull_request'
@@ -101,7 +104,7 @@ jobs:
                   uv sync --extra docs --quiet
                   cd docs
                   git clean -fdx _build/
-                  DOCS_VERSION=stable SPHINXOPTS="-W --keep-going" uv run make html
+                  DOCS_VERSION=stable uv run make html
                   mkdir -p /tmp/site
                   cp -r _build/html/. /tmp/site/
 
@@ -112,7 +115,7 @@ jobs:
                   uv sync --extra docs --quiet
                   cd docs
                   git clean -fdx _build/
-                  DOCS_VERSION=dev SPHINXOPTS="-W --keep-going" uv run make html
+                  DOCS_VERSION=dev uv run make html
                   mkdir -p /tmp/site/dev
                   cp -r _build/html/. /tmp/site/dev/
 
