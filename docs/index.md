@@ -83,7 +83,6 @@ uv run abstracts-explorer chat
 
 installation
 web_ui
-chat_example
 docker
 configuration
 usage
