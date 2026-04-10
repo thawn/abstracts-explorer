@@ -549,6 +549,9 @@ def merge_where_clause_with_years(
     if not years:
         return deepcopy(where) if where else None
 
+    # convert years to string because ChromaDB metadata is stored as strings
+    years = [str(y) for y in years]
+
     # If no WHERE clause, just return years filter
     if not where:
         return {"year": {"$in": years}}
