@@ -42,7 +42,7 @@ export function buildMcpToolsHintHtml() {
             <ul class="space-y-2 text-sm text-gray-600 ml-6">
                 <li class="flex items-start gap-2">
                     <i class="fas fa-chart-pie text-purple-400 mt-0.5 flex-shrink-0"></i>
-                    <span><em>"What are the main topics at NeurIPS 2025?"</em></span>
+                    <span><em>"What are the main topics?"</em></span>
                 </li>
                 <li class="flex items-start gap-2">
                     <i class="fas fa-chart-line text-blue-400 mt-0.5 flex-shrink-0"></i>
