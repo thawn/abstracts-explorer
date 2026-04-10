@@ -1005,6 +1005,7 @@ class EmbeddingsManager:
         distance_threshold: float = 1.1,
         conferences: Optional[List[str]] = None,
         years: Optional[List[int]] = None,
+        query_embedding: Optional[List[float]] = None,
     ) -> Dict[str, Any]:
         """
         Find papers within a specified distance from a custom search query.
@@ -1024,6 +1025,11 @@ class EmbeddingsManager:
             Filter results to only include papers from these conferences
         years : list[int], optional
             Filter results to only include papers from these years
+        query_embedding : list[float], optional
+            Pre-computed embedding for the query.  When provided, the
+            embedding generation step is skipped, which avoids redundant
+            LLM API calls when calling this method repeatedly with the
+            same query (e.g. once per year in topic-evolution analysis).
 
         Returns
         -------
@@ -1066,8 +1072,9 @@ class EmbeddingsManager:
             raise EmbeddingsError("Query cannot be empty")
 
         try:
-            # Generate embedding for the query
-            query_embedding = self.generate_embedding(query)
+            # Use the pre-computed embedding if provided, otherwise generate one
+            if query_embedding is None:
+                query_embedding = self.generate_embedding(query)
 
             # Get total count of papers in collection
             total_count = self.collection.count()

@@ -668,6 +668,10 @@ def get_topic_evolution(
         logger.info(f"Conferences: {conferences}")
         logger.info(f"Distance threshold: {distance_threshold}")
 
+        # Embed the query once here and reuse for every (conference, year) pair
+        # to avoid redundant LLM API calls.
+        query_embedding = em.generate_embedding(topic_keywords)
+
         conference_data: Dict[str, Dict[str, Any]] = {}
         total_papers = 0
         all_years: set[int] = set()
@@ -694,6 +698,7 @@ def get_topic_evolution(
                     distance_threshold=distance_threshold,
                     conferences=[conference],
                     years=[year],
+                    query_embedding=query_embedding,
                 )
 
                 count = result_data["count"]
