@@ -27,10 +27,11 @@ Notes
 * The browser is selected via the ``E2E_BROWSER`` environment variable
   (``chrome``, ``firefox``, or ``auto``), reusing the same logic as the
   existing e2e suite.
-* Chat test correctness is evaluated by calling the configured LLM backend
-  (``LLM_BACKEND_URL`` / ``LLM_BACKEND_AUTH_TOKEN`` env vars).  If the backend
-  is unavailable, the judgment step is skipped and the test still passes when a
-  non-empty response is received.
+* Chat test correctness is evaluated by calling the Blablador LLM API
+  (override via ``LLM_BACKEND_URL`` / ``CHAT_MODEL`` env vars).  Set
+  ``LLM_BACKEND_AUTH_TOKEN`` to authenticate.  If the backend is unavailable,
+  the judgment step is skipped and the test still passes when a non-empty
+  response is received.
 * Chat histories are always printed to stdout so they are visible with ``-s``
   and are included in the captured output shown on test failure.
 """
@@ -56,6 +57,10 @@ _CSS_CHAT_PLOT_CONTAINER = "div[id^='chat-plot-']"
 # Default conference and year selected in chat-related tests
 _DEFAULT_CONFERENCE = "NeurIPS"
 _DEFAULT_YEAR = "2025"
+
+# Blablador LLM backend used for the judge step in MCP tool smoke tests
+_DEFAULT_LLM_BACKEND_URL = "https://api.helmholtz-blablador.fz-juelich.de"
+_DEFAULT_JUDGE_MODEL = "alias-code"
 
 # ---------------------------------------------------------------------------
 # Conference / year selection helper
@@ -127,8 +132,10 @@ def _judge_with_llm(query: str, response: str, criteria: str | None = None) -> t
     Ask the configured LLM backend whether *response* adequately answers *query*.
 
     Uses the ``LLM_BACKEND_URL``, ``LLM_BACKEND_AUTH_TOKEN``, and ``CHAT_MODEL``
-    environment variables to reach the backend, mirroring the application
-    configuration.
+    environment variables to reach the backend.  Defaults to the public
+    `Blablador <https://helmholtz-blablador.fz-juelich.de/>`_ API with the
+    ``alias-code`` model so that CI environments work out of the box (only
+    ``LLM_BACKEND_AUTH_TOKEN`` must be set).
 
     Parameters
     ----------
@@ -149,9 +156,9 @@ def _judge_with_llm(query: str, response: str, criteria: str | None = None) -> t
         was unreachable or the call failed.  *explanation* contains either the
         LLM's reasoning text or the error message.
     """
-    llm_url = os.environ.get("LLM_BACKEND_URL", "http://localhost:1234")
+    llm_url = os.environ.get("LLM_BACKEND_URL", _DEFAULT_LLM_BACKEND_URL)
     auth_token = os.environ.get("LLM_BACKEND_AUTH_TOKEN", "")
-    chat_model = os.environ.get("CHAT_MODEL", "")
+    chat_model = os.environ.get("CHAT_MODEL", _DEFAULT_JUDGE_MODEL)
 
     headers = {"Content-Type": "application/json"}
     if auth_token:
