@@ -27,15 +27,15 @@ Notes
 * The browser is selected via the ``E2E_BROWSER`` environment variable
   (``chrome``, ``firefox``, or ``auto``), reusing the same logic as the
   existing e2e suite.
-* Chat test correctness is evaluated by calling the configured LLM backend
-  (``LLM_BACKEND_URL`` / ``LLM_BACKEND_AUTH_TOKEN`` env vars).  If the backend
-  is unavailable, the judgment step is skipped and the test still passes when a
-  non-empty response is received.
+* Chat test correctness is evaluated by calling the LLM backend configured
+  in ``.env.tests`` (``LLM_BACKEND_URL`` / ``CHAT_MODEL``).  Set
+  ``LLM_BACKEND_AUTH_TOKEN`` to authenticate.  If the backend is unavailable,
+  the judgment step is skipped and the test still passes when a non-empty
+  response is received.
 * Chat histories are always printed to stdout so they are visible with ``-s``
   and are included in the captured output shown on test failure.
 """
 
-import os
 import time
 from warnings import warn
 
@@ -44,14 +44,81 @@ import requests as _requests
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.ui import Select, WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.remote.webdriver import WebDriver
 
+from abstracts_explorer.config import get_config
+from tests.conftest import get_env_test_path
+
 # CSS selectors used for chart detection in the chat area
 _CSS_PLOTLY_RENDERED = "#chat-messages .js-plotly-plot"
 _CSS_CHAT_PLOT_CONTAINER = "div[id^='chat-plot-']"
+
+# Default conference and year selected in chat-related tests
+_DEFAULT_CONFERENCE = "NeurIPS"
+_DEFAULT_YEAR = "2025"
+
+# ---------------------------------------------------------------------------
+# Conference / year selection helper
+# ---------------------------------------------------------------------------
+
+
+def _select_conference_and_year(
+    driver: WebDriver,
+    conference: str = _DEFAULT_CONFERENCE,
+    year: str = _DEFAULT_YEAR,
+    timeout: int = 15,
+) -> None:
+    """
+    Select *conference* and *year* from the header dropdowns.
+
+    Waits until the conference selector is populated (has at least one
+    option besides the empty placeholder), then picks *conference* from it.
+    After the conference is selected the year dropdown is updated by the
+    ``handleConferenceChange`` JS handler, so this function then waits for
+    the target *year* option to appear and selects it.
+
+    Parameters
+    ----------
+    driver : WebDriver
+        The Selenium WebDriver instance.
+    conference : str, optional
+        Conference name to select (default: ``"NeurIPS"``).
+    year : str, optional
+        Year to select as a string (default: ``"2025"``).
+    timeout : int, optional
+        Maximum seconds to wait for the dropdowns to be populated (default: 15).
+    """
+    wait = WebDriverWait(driver, timeout)
+
+    # Wait until the specific conference option is available in the selector
+    wait.until(
+        lambda d: any(
+            opt.get_attribute("value") == conference
+            for opt in d.find_element(By.ID, "conference-selector").find_elements(By.TAG_NAME, "option")
+        )
+    )
+
+    conf_select_el = driver.find_element(By.ID, "conference-selector")
+    Select(conf_select_el).select_by_value(conference)
+    # Trigger the JS change handler so the year dropdown is updated
+    driver.execute_script("handleConferenceChange()")
+
+    # Wait until the target year option is available in the year selector
+    wait.until(
+        lambda d: any(
+            opt.get_attribute("value") == year
+            for opt in d.find_element(By.ID, "year-selector").find_elements(By.TAG_NAME, "option")
+        )
+    )
+
+    year_select_el = driver.find_element(By.ID, "year-selector")
+    Select(year_select_el).select_by_value(year)
+    # Trigger the JS change handler so filters are refreshed
+    driver.execute_script("handleYearChange()")
+
 
 # ---------------------------------------------------------------------------
 # LLM judgment helper
@@ -62,9 +129,8 @@ def _judge_with_llm(query: str, response: str, criteria: str | None = None) -> t
     """
     Ask the configured LLM backend whether *response* adequately answers *query*.
 
-    Uses the ``LLM_BACKEND_URL``, ``LLM_BACKEND_AUTH_TOKEN``, and ``CHAT_MODEL``
-    environment variables to reach the backend, mirroring the application
-    configuration.
+    Reads ``LLM_BACKEND_URL``, ``LLM_BACKEND_AUTH_TOKEN``, and ``CHAT_MODEL``
+    from the project configuration (loaded from ``.env.tests``).
 
     Parameters
     ----------
@@ -85,9 +151,10 @@ def _judge_with_llm(query: str, response: str, criteria: str | None = None) -> t
         was unreachable or the call failed.  *explanation* contains either the
         LLM's reasoning text or the error message.
     """
-    llm_url = os.environ.get("LLM_BACKEND_URL", "http://localhost:1234")
-    auth_token = os.environ.get("LLM_BACKEND_AUTH_TOKEN", "")
-    chat_model = os.environ.get("CHAT_MODEL", "")
+    config = get_config(reload=True, env_path=get_env_test_path())
+    llm_url = config.llm_backend_url
+    auth_token = config.llm_backend_auth_token
+    chat_model = config.chat_model
 
     headers = {"Content-Type": "application/json"}
     if auth_token:
@@ -95,7 +162,10 @@ def _judge_with_llm(query: str, response: str, criteria: str | None = None) -> t
 
     criteria_clause = f"\n\nSpecifically, look for: {criteria}" if criteria else ""
     prompt = (
-        f"You are evaluating the quality of a response to a query. Note that today is {time.strftime('%Y-%m-%d')}. Specific, quantitative information contained in the response is generated by a clustering tool and should be judged as accurate.\n\n"
+        f"You are evaluating the quality of a response to a query. Note that the current date is {time.strftime('year: %Y month: %m day: %d')}. "
+        f"The response was generated by a tool that searches a real database of published conference papers. "
+        f"All paper titles, authors, and statistics mentioned in the response come from actual database records and should be treated as factual. "
+        f"Specific, quantitative information contained in the response is generated by a clustering tool and should be judged as accurate.\n\n"
         f"Query: {query}\n\n"
         f"Response: {response}{criteria_clause}\n\n"
         f"Does this response adequately answer the query? "
@@ -154,19 +224,22 @@ def _has_complete_response(driver: WebDriver) -> bool:
     return len(last.find_elements(By.CSS_SELECTOR, ".spinner")) == 0
 
 
-def _check_chart_rendered(driver: WebDriver) -> tuple:
+def _check_chart_rendered(driver: WebDriver, timeout: int = 15) -> tuple:
     """
     Check whether a Plotly chart has been rendered inside the chat.
 
     After the server returns visualisation data the front-end calls
     ``Plotly.newPlot`` which adds a ``js-plotly-plot`` class to the container
-    ``<div id="chat-plot-…">`` element.  This helper looks for that class as
-    the signal that at least one chart is present in the chat area.
+    ``<div id="chat-plot-…">`` element.  This helper polls for up to *timeout*
+    seconds before giving up, because Plotly rendering is asynchronous and may
+    lag behind the assistant text.
 
     Parameters
     ----------
     driver : WebDriver
         The Selenium WebDriver instance.
+    timeout : int, optional
+        Maximum seconds to wait for a chart to appear (default: 15).
 
     Returns
     -------
@@ -176,10 +249,20 @@ def _check_chart_rendered(driver: WebDriver) -> tuple:
         human-readable summary suitable for passing to the LLM judge as part of
         the evaluation criteria.
     """
+    try:
+        WebDriverWait(driver, timeout).until(
+            lambda d: d.find_elements(By.CSS_SELECTOR, _CSS_PLOTLY_RENDERED)
+            or any(
+                c.find_elements(By.CSS_SELECTOR, "svg")
+                for c in d.find_elements(By.CSS_SELECTOR, _CSS_CHAT_PLOT_CONTAINER)
+            )
+        )
+    except TimeoutException:
+        return False, "No chart was rendered in the chat."
+
     plotly_charts = driver.find_elements(By.CSS_SELECTOR, _CSS_PLOTLY_RENDERED)
     if plotly_charts:
         return True, f"A chart was rendered in the chat ({len(plotly_charts)} Plotly chart(s) detected)."
-    # Fallback: check for chat-plot divs with children (chart container populated)
     chart_containers = driver.find_elements(By.CSS_SELECTOR, _CSS_CHAT_PLOT_CONTAINER)
     populated = [c for c in chart_containers if c.find_elements(By.CSS_SELECTOR, "svg")]
     if populated:
@@ -537,6 +620,8 @@ class TestChatInterface:
         """
         browser.get(staging_url)
 
+        _select_conference_and_year(browser)
+
         # Switch to the chat tab
         browser.find_element(By.ID, "tab-chat").click()
         time.sleep(0.5)
@@ -566,6 +651,8 @@ class TestChatInterface:
         """
         query = "What papers are about machine learning?"
         browser.get(staging_url)
+
+        _select_conference_and_year(browser)
 
         browser.find_element(By.ID, "tab-chat").click()
         time.sleep(0.5)
@@ -647,8 +734,18 @@ class TestMCPToolSmokeTests:
         """
         browser.get(staging_url)
 
+        _select_conference_and_year(browser)
+
         browser.find_element(By.ID, "tab-chat").click()
         time.sleep(0.5)
+
+        # Reset server-side conversation so previous test results don't
+        # prevent the LLM from calling MCP tools (it might skip tool calls
+        # when it already has cached context from an earlier exchange).
+        reset_buttons = browser.find_elements(By.CSS_SELECTOR, "button[onclick*='resetChat']")
+        if reset_buttons:
+            reset_buttons[0].click()
+            time.sleep(0.5)
 
         chat_input = browser.find_element(By.ID, "chat-input")
         chat_input.send_keys(query)
