@@ -564,6 +564,18 @@ class TestParseFieldFilters:
         assert filters == {"keywords": "deep learning"}
         assert remaining == ""
 
+    def test_author_alias_only(self):
+        """Test that 'author' is accepted as an alias for 'authors'."""
+        filters, remaining = DatabaseManager.parse_field_filters('author:"John Smith"')
+        assert filters == {"authors": "John Smith"}
+        assert remaining == ""
+
+    def test_author_alias_with_keyword(self):
+        """Test 'author' alias combined with keyword."""
+        filters, remaining = DatabaseManager.parse_field_filters('author:"Vaswani" transformer')
+        assert filters == {"authors": "Vaswani"}
+        assert remaining == "transformer"
+
 
 class TestSearchPapersFieldFilters:
     """Tests for field filtering in search_papers and search_papers_keyword."""
@@ -683,6 +695,13 @@ class TestSearchPapersFieldFilters:
         results = db_with_papers.search_papers_keyword(query='keywords:"computer vision"', limit=10)
         assert len(results) == 1
         assert results[0]["title"] == "ResNet Paper"
+
+    def test_author_alias_in_keyword_search(self, db_with_papers):
+        """Test that 'author' alias works the same as 'authors'."""
+        results = db_with_papers.search_papers_keyword(query='author:"Vaswani"', limit=10)
+        assert len(results) == 1
+        assert results[0]["title"] == "Attention is All You Need"
+        assert isinstance(results[0]["authors"], list)
 
 
 class TestEmbeddingModelMetadata:

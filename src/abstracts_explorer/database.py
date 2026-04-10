@@ -654,6 +654,10 @@ class DatabaseManager:
     #: excluded because they are not meaningful search targets for users.
     SEARCHABLE_FIELDS: set = {c.name for c in Paper.__table__.columns if c.name not in ("uid", "created_at")}
 
+    #: Aliases for field names in search queries.  An alias is transparently
+    #: resolved to the canonical column name before applying the filter.
+    FIELD_ALIASES: Dict[str, str] = {"author": "authors"}
+
     def search_papers(
         self,
         keyword: Optional[str] = None,
@@ -780,7 +784,8 @@ class DatabaseManager:
 
         Extracts all ``field:"value"`` patterns from the query where *field*
         is a column name of the :class:`~abstracts_explorer.db_models.Paper`
-        model.  Unrecognised field names are left in the query text as-is.
+        model (or a recognised alias; see :attr:`FIELD_ALIASES`).
+        Unrecognised field names are left in the query text as-is.
 
         Parameters
         ----------
@@ -792,12 +797,14 @@ class DatabaseManager:
         -------
         tuple of (dict, str)
             A tuple ``(field_filters, remaining_query)`` where
-            *field_filters* maps column names to their search values and
-            *remaining_query* is the query with recognised filters removed.
+            *field_filters* maps canonical column names to their search values
+            and *remaining_query* is the query with recognised filters removed.
 
         Examples
         --------
         >>> DatabaseManager.parse_field_filters('authors:"John Smith" transformers')
+        ({'authors': 'John Smith'}, 'transformers')
+        >>> DatabaseManager.parse_field_filters('author:"John Smith" transformers')
         ({'authors': 'John Smith'}, 'transformers')
         >>> DatabaseManager.parse_field_filters('transformers')
         ({}, 'transformers')
@@ -810,7 +817,9 @@ class DatabaseManager:
         # Iterate in reverse so that removing matched spans does not
         # invalidate the start/end offsets of earlier matches.
         for match in reversed(list(re.finditer(r'(\w+):"([^"]+)"', query))):
-            field_name = match.group(1)
+            raw_field = match.group(1)
+            # Resolve alias (e.g. "author" → "authors") if applicable
+            field_name = DatabaseManager.FIELD_ALIASES.get(raw_field, raw_field)
             value = match.group(2).strip()
             if field_name in DatabaseManager.SEARCHABLE_FIELDS:
                 field_filters[field_name] = value
