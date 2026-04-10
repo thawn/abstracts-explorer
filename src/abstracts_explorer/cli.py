@@ -296,13 +296,29 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         # Connect to ChromaDB
         em.connect()
 
-        # Create or reset collection
-        if args.force:
+        # Create or reset collection.
+        # When --force is combined with --conference / --year, only delete the
+        # embeddings for the matching subset rather than wiping the entire
+        # collection (which would lose embeddings for other conferences/years).
+        filtered_force = args.force and (conference is not None or year is not None)
+        if args.force and not filtered_force:
             print(f"🔄 Resetting existing collection '{args.collection}'...")
+        elif filtered_force:
+            scope_parts = []
+            if conference:
+                scope_parts.append(f"conference={conference}")
+            if year is not None:
+                scope_parts.append(f"year={year}")
+            print(f"🔄 Removing existing embeddings for {', '.join(scope_parts)} from collection '{args.collection}'...")
         else:
             print(f"📁 Creating collection '{args.collection}'...")
 
-        em.create_collection(reset=args.force)
+        em.create_collection(reset=args.force and not filtered_force)
+
+        if filtered_force:
+            deleted = em.delete_embeddings_by_filter(conference=conference, year=year)
+            if deleted:
+                print(f"   Removed {deleted:,} existing embeddings")
 
         # Generate embeddings with progress bar
         print("\n🚀 Generating embeddings...")

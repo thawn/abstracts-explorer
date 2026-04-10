@@ -105,6 +105,94 @@ class TestEmbeddingsManager:
         assert embeddings_manager.collection is not None
         embeddings_manager.close()
 
+    def test_delete_embeddings_by_filter_no_filter_raises(self, embeddings_manager):
+        """delete_embeddings_by_filter with no args raises ValueError."""
+        embeddings_manager.connect()
+        embeddings_manager.create_collection()
+        with pytest.raises(ValueError):
+            embeddings_manager.delete_embeddings_by_filter()
+        embeddings_manager.close()
+
+    def test_delete_embeddings_by_filter_conference(self, embeddings_manager, mock_lm_studio):
+        """delete_embeddings_by_filter(conference=...) removes only matching papers."""
+        embeddings_manager.connect()
+        embeddings_manager.create_collection()
+
+        papers = [
+            {"uid": "p1", "title": "NeurIPS Paper 1", "abstract": "A", "conference": "NeurIPS", "year": 2024},
+            {"uid": "p2", "title": "NeurIPS Paper 2", "abstract": "B", "conference": "NeurIPS", "year": 2024},
+            {"uid": "p3", "title": "ICLR Paper", "abstract": "C", "conference": "ICLR", "year": 2024},
+        ]
+        for paper in papers:
+            embeddings_manager.add_paper(paper)
+
+        assert embeddings_manager.collection.count() == 3
+
+        deleted = embeddings_manager.delete_embeddings_by_filter(conference="NeurIPS")
+        assert deleted == 2
+        assert embeddings_manager.collection.count() == 1
+
+        # Remaining paper should be the ICLR one
+        remaining = embeddings_manager.collection.get()
+        assert remaining["ids"] == ["p3"]
+        embeddings_manager.close()
+
+    def test_delete_embeddings_by_filter_year(self, embeddings_manager, mock_lm_studio):
+        """delete_embeddings_by_filter(year=...) removes only papers from that year."""
+        embeddings_manager.connect()
+        embeddings_manager.create_collection()
+
+        papers = [
+            {"uid": "p1", "title": "Paper 2024", "abstract": "A", "conference": "NeurIPS", "year": 2024},
+            {"uid": "p2", "title": "Paper 2025", "abstract": "B", "conference": "NeurIPS", "year": 2025},
+        ]
+        for paper in papers:
+            embeddings_manager.add_paper(paper)
+
+        deleted = embeddings_manager.delete_embeddings_by_filter(year=2024)
+        assert deleted == 1
+        assert embeddings_manager.collection.count() == 1
+        remaining = embeddings_manager.collection.get()
+        assert remaining["ids"] == ["p2"]
+        embeddings_manager.close()
+
+    def test_delete_embeddings_by_filter_conference_and_year(self, embeddings_manager, mock_lm_studio):
+        """delete_embeddings_by_filter(conference=..., year=...) scopes to exact slice."""
+        embeddings_manager.connect()
+        embeddings_manager.create_collection()
+
+        papers = [
+            {"uid": "p1", "title": "NeurIPS 2024", "abstract": "A", "conference": "NeurIPS", "year": 2024},
+            {"uid": "p2", "title": "NeurIPS 2025", "abstract": "B", "conference": "NeurIPS", "year": 2025},
+            {"uid": "p3", "title": "ICLR 2024", "abstract": "C", "conference": "ICLR", "year": 2024},
+        ]
+        for paper in papers:
+            embeddings_manager.add_paper(paper)
+
+        deleted = embeddings_manager.delete_embeddings_by_filter(conference="NeurIPS", year=2024)
+        assert deleted == 1
+        assert embeddings_manager.collection.count() == 2
+        remaining_ids = set(embeddings_manager.collection.get()["ids"])
+        assert "p1" not in remaining_ids
+        assert {"p2", "p3"} == remaining_ids
+        embeddings_manager.close()
+
+    def test_delete_embeddings_by_filter_nothing_to_delete(self, embeddings_manager, mock_lm_studio):
+        """delete_embeddings_by_filter returns 0 when no matching embeddings exist."""
+        embeddings_manager.connect()
+        embeddings_manager.create_collection()
+
+        papers = [
+            {"uid": "p1", "title": "NeurIPS Paper", "abstract": "A", "conference": "NeurIPS", "year": 2024},
+        ]
+        for paper in papers:
+            embeddings_manager.add_paper(paper)
+
+        deleted = embeddings_manager.delete_embeddings_by_filter(conference="ICLR")
+        assert deleted == 0
+        assert embeddings_manager.collection.count() == 1
+        embeddings_manager.close()
+
     def test_add_paper(self, embeddings_manager, mock_lm_studio):
         """Test adding a paper."""
         embeddings_manager.connect()

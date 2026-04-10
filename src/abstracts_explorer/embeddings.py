@@ -1160,6 +1160,75 @@ class EmbeddingsManager:
             logger.error(f"Error finding papers within distance: {e}", exc_info=True)
             raise EmbeddingsError(f"Failed to find papers within distance: {str(e)}") from e
 
+    def delete_embeddings_by_filter(
+        self,
+        conference: Optional[str] = None,
+        year: Optional[int] = None,
+    ) -> int:
+        """
+        Delete embeddings that match the given conference and/or year filter.
+
+        Only embeddings whose metadata matches **all** supplied criteria are
+        removed.  At least one of *conference* or *year* must be provided;
+        calling this method with both set to ``None`` raises ``ValueError`` to
+        prevent accidental deletion of the entire collection.
+
+        Parameters
+        ----------
+        conference : str, optional
+            Conference name to match (exact, case-sensitive, as stored in
+            ChromaDB metadata).
+        year : int, optional
+            Publication year to match.
+
+        Returns
+        -------
+        int
+            Number of embeddings deleted.
+
+        Raises
+        ------
+        ValueError
+            If both *conference* and *year* are ``None``.
+        EmbeddingsError
+            If the deletion fails.
+
+        Examples
+        --------
+        >>> em = EmbeddingsManager()
+        >>> em.connect()
+        >>> em.create_collection()
+        >>> deleted = em.delete_embeddings_by_filter(conference="NeurIPS", year=2024)
+        >>> print(f"Deleted {deleted} embeddings")
+        """
+        if conference is None and year is None:
+            raise ValueError("At least one of 'conference' or 'year' must be provided.")
+
+        try:
+            filter_conditions: List[Dict[str, Any]] = []
+            if conference is not None:
+                filter_conditions.append({"conference": conference})
+            if year is not None:
+                filter_conditions.append({"year": str(year)})
+
+            where_filter: Dict[str, Any]
+            if len(filter_conditions) > 1:
+                where_filter = {"$and": filter_conditions}
+            else:
+                where_filter = filter_conditions[0]
+
+            existing = self.collection.get(where=where_filter)
+            ids_to_delete = existing.get("ids", [])
+            if ids_to_delete:
+                self.collection.delete(ids=ids_to_delete)
+                logger.info(f"Deleted {len(ids_to_delete)} embeddings matching filter {where_filter}")
+            return len(ids_to_delete)
+
+        except (ValueError, EmbeddingsError):
+            raise
+        except Exception as e:
+            raise EmbeddingsError(f"Failed to delete embeddings by filter: {str(e)}") from e
+
     # ------------------------------------------------------------------
     # Registry export / import helpers
     # ------------------------------------------------------------------
