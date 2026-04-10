@@ -16,6 +16,10 @@ Or set the ``STAGING_URL`` environment variable::
 
     STAGING_URL=http://localhost:5000 uv run pytest tests/test_staging_e2e.py -m staging
 
+Add ``-s`` (``--capture=no``) to see chat history output in real time::
+
+    uv run pytest tests/test_staging_e2e.py -m staging --staging-url http://localhost:5000 -s
+
 Notes
 -----
 * All tests are marked with ``@pytest.mark.staging`` **and**
@@ -23,11 +27,19 @@ Notes
 * The browser is selected via the ``E2E_BROWSER`` environment variable
   (``chrome``, ``firefox``, or ``auto``), reusing the same logic as the
   existing e2e suite.
+* Chat test correctness is evaluated by calling the configured LLM backend
+  (``LLM_BACKEND_URL`` / ``LLM_BACKEND_AUTH_TOKEN`` env vars).  If the backend
+  is unavailable, the judgment step is skipped and the test still passes when a
+  non-empty response is received.
+* Chat histories are always printed to stdout so they are visible with ``-s``
+  and are included in the captured output shown on test failure.
 """
 
+import os
 import time
 
 import pytest
+import requests as _requests
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -45,6 +57,178 @@ from tests.test_web_e2e import (
     _create_firefox_driver,
     _get_browser_preference,
 )
+
+# ---------------------------------------------------------------------------
+# LLM judgment helper
+# ---------------------------------------------------------------------------
+
+
+def _judge_with_llm(query: str, response: str) -> tuple:
+    """
+    Ask the configured LLM backend whether *response* adequately answers *query*.
+
+    Uses the ``LLM_BACKEND_URL``, ``LLM_BACKEND_AUTH_TOKEN``, and ``CHAT_MODEL``
+    environment variables to reach the backend, mirroring the application
+    configuration.
+
+    Parameters
+    ----------
+    query : str
+        The original chat query.
+    response : str
+        The assistant's response to evaluate.
+
+    Returns
+    -------
+    tuple[bool | None, str]
+        ``(passed, explanation)`` where *passed* is ``True`` if the LLM judged
+        the response as adequate, ``False`` if not, and ``None`` if the backend
+        was unreachable or the call failed.  *explanation* contains either the
+        LLM's reasoning text or the error message.
+    """
+    llm_url = os.environ.get("LLM_BACKEND_URL", "http://localhost:1234")
+    auth_token = os.environ.get("LLM_BACKEND_AUTH_TOKEN", "")
+    chat_model = os.environ.get("CHAT_MODEL", "")
+
+    headers = {"Content-Type": "application/json"}
+    if auth_token:
+        headers["Authorization"] = f"Bearer {auth_token}"
+
+    prompt = (
+        f"You are evaluating the quality of an AI assistant's response.\n\n"
+        f"Query: {query}\n\n"
+        f"Response: {response}\n\n"
+        f"Does this response adequately answer the query? "
+        f"Respond with 'YES' or 'NO' followed by a brief explanation (one sentence)."
+    )
+
+    payload: dict = {
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.1,
+        "max_tokens": 200,
+    }
+    if chat_model:
+        payload["model"] = chat_model
+
+    try:
+        resp = _requests.post(
+            f"{llm_url}/v1/chat/completions",
+            json=payload,
+            headers=headers,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        content = resp.json()["choices"][0]["message"]["content"]
+        passed = content.strip().upper().startswith("YES")
+        return passed, content
+    except _requests.exceptions.RequestException as exc:
+        return None, f"LLM judgment unavailable (network/HTTP error): {exc}"
+    except (KeyError, IndexError, ValueError) as exc:
+        return None, f"LLM judgment unavailable (unexpected response format): {exc}"
+
+
+# ---------------------------------------------------------------------------
+# Chat DOM helpers
+# ---------------------------------------------------------------------------
+
+
+def _has_complete_response(driver) -> bool:
+    """
+    Return ``True`` once there is at least one complete (non-loading) assistant
+    message in the chat.
+
+    The chat module first inserts a *loading* message that contains a
+    ``.spinner`` element and then replaces it with the final response.  This
+    helper waits until the last ``[data-role='assistant']`` message has no
+    spinner, indicating the response is complete.
+
+    Parameters
+    ----------
+    driver : WebDriver
+        The Selenium WebDriver instance.
+    """
+    assistant_msgs = driver.find_elements(By.CSS_SELECTOR, ".chat-message[data-role='assistant']")
+    if not assistant_msgs:
+        return False
+    last = assistant_msgs[-1]
+    return len(last.find_elements(By.CSS_SELECTOR, ".spinner")) == 0
+
+
+def _extract_chat_history(driver) -> list:
+    """
+    Return all visible chat messages as a list of ``(role, text)`` tuples.
+
+    Parameters
+    ----------
+    driver : WebDriver
+        The Selenium WebDriver instance.
+
+    Returns
+    -------
+    list of tuple[str, str]
+        Each tuple is ``(role, text)`` where *role* is ``'user'``,
+        ``'assistant'``, or ``'unknown'``.
+    """
+    messages = driver.find_elements(By.CSS_SELECTOR, ".chat-message[data-role]")
+    history = []
+    for msg in messages:
+        role = msg.get_attribute("data-role") or "unknown"
+        history.append((role, msg.text))
+    return history
+
+
+def _print_chat_history(history: list, query: str, max_message_length: int = 500) -> None:
+    """
+    Print *history* to stdout so it is visible when pytest is run with ``-s``
+    and is included in captured output shown on test failure.
+
+    Long messages are truncated to *max_message_length* characters to keep the
+    output readable; the full text is still stored in *history* for programmatic
+    use.
+
+    Parameters
+    ----------
+    history : list of tuple[str, str]
+        Chat history as returned by :func:`_extract_chat_history`.
+    query : str
+        The original chat query (used as a header label).
+    max_message_length : int, optional
+        Maximum characters to print per message (default: 500).
+    """
+    print(f"\n{'='*60}")
+    print(f"Chat history for query: {query!r}")
+    print("=" * 60)
+    for role, text in history:
+        label = role.upper()
+        display = text if len(text) <= max_message_length else text[:max_message_length] + "…"
+        print(f"[{label}] {display}")
+    print("=" * 60)
+
+
+def _assert_llm_judgment(query: str, response: str) -> None:
+    """
+    Assert that the LLM judges *response* as an adequate answer to *query*.
+
+    Calls :func:`_judge_with_llm` and either asserts success, skips when the
+    backend is unreachable, or fails with a descriptive message that includes
+    the LLM's reasoning and the full response text.
+
+    Parameters
+    ----------
+    query : str
+        The original chat query.
+    response : str
+        The assistant's response to evaluate.
+    """
+    passed, explanation = _judge_with_llm(query, response)
+    if passed is None:
+        pytest.skip(f"LLM judgment skipped: {explanation}")
+    assert passed, (
+        f"LLM judged the response as inadequate.\n"
+        f"Explanation: {explanation}\n"
+        f"Response: {response}"
+    )
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -327,21 +511,24 @@ class TestPaperDisplay:
         wait = WebDriverWait(browser, 15)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")))
 
-        toggle_buttons = browser.find_elements(By.CSS_SELECTOR, ".toggle-abstract")
-        if len(toggle_buttons) == 0:
-            pytest.skip("No toggle-abstract buttons found (compact mode may be off)")
+        # Paper cards use native <details>/<summary> for collapsible abstracts
+        # when the abstract is longer than ~300 characters.
+        detail_elements = browser.find_elements(By.CSS_SELECTOR, "#search-results details")
+        if len(detail_elements) == 0:
+            pytest.skip("No collapsible abstracts found (all abstracts may be short)")
 
-        toggle_buttons[0].click()
+        details = detail_elements[0]
+        summary = details.find_element(By.TAG_NAME, "summary")
+
+        # Abstracts start collapsed – expand by clicking summary
+        summary.click()
         time.sleep(0.3)
-
-        abstract_divs = browser.find_elements(By.CSS_SELECTOR, ".abstract-content")
-        assert len(abstract_divs) > 0, "Abstract div should exist after toggle"
-        assert abstract_divs[0].is_displayed(), "Abstract should be visible after expanding"
+        assert details.get_attribute("open") is not None, "Abstract details element should be open after click"
 
         # Collapse again
-        toggle_buttons[0].click()
+        summary.click()
         time.sleep(0.3)
-        assert not abstract_divs[0].is_displayed(), "Abstract should be hidden after collapsing"
+        assert details.get_attribute("open") is None, "Abstract details element should be closed after second click"
 
 
 # ---------------------------------------------------------------------------
@@ -384,8 +571,10 @@ class TestChatInterface:
         """
         Send a chat message.
 
-        Typing a question and clicking send returns a response (or a
-        graceful error if the LLM backend is unavailable).
+        Typing a question and clicking send returns a complete response (or a
+        graceful error if the LLM backend is unavailable).  The test waits
+        until the loading spinner disappears from the last assistant message so
+        that it does not mistake the "Thinking..." placeholder for the answer.
 
         Parameters
         ----------
@@ -394,21 +583,28 @@ class TestChatInterface:
         browser : WebDriver
             Selenium WebDriver instance.
         """
+        query = "What papers are about machine learning?"
         browser.get(staging_url)
 
         browser.find_element(By.ID, "tab-chat").click()
         time.sleep(0.5)
 
         chat_input = browser.find_element(By.ID, "chat-input")
-        chat_input.send_keys("What papers are about machine learning?")
+        chat_input.send_keys(query)
         chat_input.send_keys(Keys.RETURN)
 
-        wait = WebDriverWait(browser, 30)
+        wait = WebDriverWait(browser, 120)
         try:
-            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".chat-message")))
-            messages = browser.find_elements(By.CSS_SELECTOR, ".chat-message")
-            assert len(messages) >= 1, "Chat should display at least one message"
+            # Wait until there is a complete (non-loading) assistant response
+            wait.until(_has_complete_response)
+            history = _extract_chat_history(browser)
+            _print_chat_history(history, query)
+            assistant_msgs = browser.find_elements(By.CSS_SELECTOR, ".chat-message[data-role='assistant']")
+            assert len(assistant_msgs) >= 1, "Chat should display at least one assistant message"
+            assert assistant_msgs[-1].text.strip() != "", "Assistant response should not be empty"
         except TimeoutException:
+            history = _extract_chat_history(browser)
+            _print_chat_history(history, query)
             # LLM backend may not be available – verify input was cleared
             val = browser.find_element(By.ID, "chat-input").get_attribute("value")
             assert val == "", "Chat input should be cleared after sending"
@@ -425,14 +621,32 @@ class TestMCPToolSmokeTests:
     """
     Exercise each MCP tool via the chat interface.
 
-    Each test sends a representative query and verifies the response
-    contains expected content.  If the LLM backend is unavailable the test
-    is skipped rather than failed.
+    Each test:
+
+    1. Sends a representative query via the chat interface.
+    2. Waits for the complete response (spinner-free, no "Thinking…" placeholder).
+    3. **Always prints the full chat history** so the tester can inspect the
+       actual exchange (visible with ``-s`` / ``--capture=no`` and always shown
+       in captured output on failure).
+    4. Judges correctness by calling the configured LLM backend via
+       ``_judge_with_llm``.  If the backend is unreachable the judgment step is
+       skipped and the test passes as long as a non-empty response was received.
     """
 
-    def _send_chat_query(self, staging_url, browser, query, timeout=60):
+    # Default timeout (seconds) to wait for the LLM response
+    _TIMEOUT = 120
+
+    def _send_chat_query(self, staging_url, browser, query):
         """
-        Send a chat query and return the last assistant message text.
+        Send *query* via the chat UI and return ``(response_text, history)``.
+
+        Navigates to *staging_url*, switches to the chat tab, types *query*,
+        presses Enter, then waits until the loading spinner disappears from the
+        last assistant message before returning.
+
+        The chat history is **always** printed to stdout via
+        :func:`_print_chat_history` so it is visible when running with ``-s``
+        and is included in the captured output shown on test failure.
 
         Parameters
         ----------
@@ -442,14 +656,13 @@ class TestMCPToolSmokeTests:
             Selenium WebDriver instance.
         query : str
             The chat query to send.
-        timeout : int
-            Seconds to wait for a response (default: 60).
 
         Returns
         -------
-        str
-            Text of the last ``.chat-message`` element, or empty string on
-            timeout.
+        tuple[str, list]
+            ``(response_text, history)`` where *response_text* is the text of
+            the last assistant message (empty string on timeout) and *history*
+            is a list of ``(role, text)`` tuples for all visible messages.
         """
         browser.get(staging_url)
 
@@ -460,16 +673,22 @@ class TestMCPToolSmokeTests:
         chat_input.send_keys(query)
         chat_input.send_keys(Keys.RETURN)
 
-        wait = WebDriverWait(browser, timeout)
+        wait = WebDriverWait(browser, self._TIMEOUT)
         try:
-            # Wait for at least two messages (user + assistant)
-            wait.until(lambda d: len(d.find_elements(By.CSS_SELECTOR, ".chat-message")) >= 2)
-            # Allow the response to finish streaming
-            time.sleep(2)
-            messages = browser.find_elements(By.CSS_SELECTOR, ".chat-message")
-            return messages[-1].text if messages else ""
+            # Wait until the last assistant message has no spinner (response complete)
+            wait.until(_has_complete_response)
+            assistant_msgs = browser.find_elements(By.CSS_SELECTOR, ".chat-message[data-role='assistant']")
+            response_text = assistant_msgs[-1].text if assistant_msgs else ""
         except TimeoutException:
-            return ""
+            response_text = ""
+
+        history = _extract_chat_history(browser)
+        _print_chat_history(history, query)
+        return response_text, history
+
+    # ------------------------------------------------------------------
+    # Individual MCP tool tests
+    # ------------------------------------------------------------------
 
     def test_get_conference_topics(self, staging_url, browser):
         """
@@ -477,8 +696,8 @@ class TestMCPToolSmokeTests:
 
         Example query: *"What are the main topics at NeurIPS 2025?"*
 
-        Success criteria: response lists topic names with keywords and
-        paper counts.
+        Success criteria (LLM-judged): the response lists topic names with
+        keywords or paper counts.
 
         Parameters
         ----------
@@ -487,24 +706,21 @@ class TestMCPToolSmokeTests:
         browser : WebDriver
             Selenium WebDriver instance.
         """
-        response = self._send_chat_query(staging_url, browser, "What are the main topics at NeurIPS 2025?")
+        query = "What are the main topics at NeurIPS 2025?"
+        response, _ = self._send_chat_query(staging_url, browser, query)
         if not response:
             pytest.skip("LLM backend unavailable – no response received")
-        # The response should mention at least one topic-like term
-        lower = response.lower()
-        assert any(
-            kw in lower for kw in ["topic", "cluster", "papers", "keywords", "theme"]
-        ), f"Expected topic-related content, got: {response[:300]}"
+        _assert_llm_judgment(query, response)
 
     def test_get_topic_evolution(self, staging_url, browser):
         """
         MCP tool: ``get_topic_evolution``.
 
-        Example query: *"How has research on transformers evolved at
-        NeurIPS over the years?"*
+        Example query: *"How has research on transformers evolved at NeurIPS
+        over the years?"*
 
-        Success criteria: response includes a year-by-year breakdown of
-        paper counts or trend description.
+        Success criteria (LLM-judged): the response includes a year-by-year
+        breakdown of paper counts or a trend description.
 
         Parameters
         ----------
@@ -513,25 +729,21 @@ class TestMCPToolSmokeTests:
         browser : WebDriver
             Selenium WebDriver instance.
         """
-        response = self._send_chat_query(
-            staging_url, browser, "How has research on transformers evolved at NeurIPS over the years?"
-        )
+        query = "How has research on transformers evolved at NeurIPS over the years?"
+        response, _ = self._send_chat_query(staging_url, browser, query)
         if not response:
             pytest.skip("LLM backend unavailable – no response received")
-        lower = response.lower()
-        assert any(
-            kw in lower for kw in ["year", "trend", "evolution", "over time", "papers", "20"]
-        ), f"Expected trend-related content, got: {response[:300]}"
+        _assert_llm_judgment(query, response)
 
     def test_search_papers(self, staging_url, browser):
         """
         MCP tool: ``search_papers``.
 
-        Example query: *"Find papers about reinforcement learning at
-        NeurIPS 2025."*
+        Example query: *"Find papers about reinforcement learning at NeurIPS
+        2025."*
 
-        Success criteria: response returns paper titles with authors and
-        abstracts.
+        Success criteria (LLM-judged): the response returns paper titles with
+        authors and/or abstracts.
 
         Parameters
         ----------
@@ -540,25 +752,20 @@ class TestMCPToolSmokeTests:
         browser : WebDriver
             Selenium WebDriver instance.
         """
-        response = self._send_chat_query(
-            staging_url, browser, "Find papers about reinforcement learning at NeurIPS 2025."
-        )
+        query = "Find papers about reinforcement learning at NeurIPS 2025."
+        response, _ = self._send_chat_query(staging_url, browser, query)
         if not response:
             pytest.skip("LLM backend unavailable – no response received")
-        lower = response.lower()
-        assert any(
-            kw in lower for kw in ["paper", "title", "author", "abstract", "reinforcement"]
-        ), f"Expected paper-related content, got: {response[:300]}"
+        _assert_llm_judgment(query, response)
 
     def test_get_paper_details(self, staging_url, browser):
         """
         MCP tool: ``get_paper_details``.
 
-        Example query: *"Who are the authors of 'Attention is All You
-        Need'?"*
+        Example query: *"Who are the authors of 'Attention is All You Need'?"*
 
-        Success criteria: response includes author names, URL/PDF links,
-        and session info (if available).
+        Success criteria (LLM-judged): the response includes author names,
+        URL/PDF links, and session info (where available).
 
         Parameters
         ----------
@@ -567,23 +774,21 @@ class TestMCPToolSmokeTests:
         browser : WebDriver
             Selenium WebDriver instance.
         """
-        response = self._send_chat_query(staging_url, browser, "Who are the authors of 'Attention is All You Need'?")
+        query = "Who are the authors of 'Attention is All You Need'?"
+        response, _ = self._send_chat_query(staging_url, browser, query)
         if not response:
             pytest.skip("LLM backend unavailable – no response received")
-        lower = response.lower()
-        assert any(
-            kw in lower for kw in ["author", "vaswani", "paper", "attention"]
-        ), f"Expected author-related content, got: {response[:300]}"
+        _assert_llm_judgment(query, response)
 
     def test_analyze_topic_relevance(self, staging_url, browser):
         """
         MCP tool: ``analyze_topic_relevance``.
 
-        Example query: *"How relevant is uncertainty quantification at
-        NeurIPS 2025?"*
+        Example query: *"How relevant is uncertainty quantification at NeurIPS
+        2025?"*
 
-        Success criteria: response contains a relevance score or paper
-        count within the embedding distance threshold.
+        Success criteria (LLM-judged): the response contains a relevance score
+        or paper count within the embedding distance threshold.
 
         Parameters
         ----------
@@ -592,25 +797,20 @@ class TestMCPToolSmokeTests:
         browser : WebDriver
             Selenium WebDriver instance.
         """
-        response = self._send_chat_query(
-            staging_url, browser, "How relevant is uncertainty quantification at NeurIPS 2025?"
-        )
+        query = "How relevant is uncertainty quantification at NeurIPS 2025?"
+        response, _ = self._send_chat_query(staging_url, browser, query)
         if not response:
             pytest.skip("LLM backend unavailable – no response received")
-        lower = response.lower()
-        assert any(
-            kw in lower for kw in ["relev", "paper", "count", "distance", "topic", "uncertainty"]
-        ), f"Expected relevance-related content, got: {response[:300]}"
+        _assert_llm_judgment(query, response)
 
     def test_get_cluster_visualization(self, staging_url, browser):
         """
         MCP tool: ``get_cluster_visualization``.
 
-        Example query: *"Show me a visual overview of NeurIPS 2025
-        clusters."*
+        Example query: *"Show me a visual overview of NeurIPS 2025 clusters."*
 
-        Success criteria: response returns or references visualization
-        data (Plotly JSON or a rendered plot).
+        Success criteria (LLM-judged): the response returns or references
+        visualization data (Plotly JSON or a rendered plot).
 
         Parameters
         ----------
@@ -619,13 +819,11 @@ class TestMCPToolSmokeTests:
         browser : WebDriver
             Selenium WebDriver instance.
         """
-        response = self._send_chat_query(staging_url, browser, "Show me a visual overview of NeurIPS 2025 clusters.")
+        query = "Show me a visual overview of NeurIPS 2025 clusters."
+        response, _ = self._send_chat_query(staging_url, browser, query)
         if not response:
             pytest.skip("LLM backend unavailable – no response received")
-        lower = response.lower()
-        assert any(
-            kw in lower for kw in ["visual", "cluster", "plot", "chart", "graph", "overview"]
-        ), f"Expected visualization-related content, got: {response[:300]}"
+        _assert_llm_judgment(query, response)
 
 
 # ---------------------------------------------------------------------------
