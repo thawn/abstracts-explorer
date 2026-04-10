@@ -44,7 +44,7 @@ import requests as _requests
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.ui import Select, WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -52,6 +52,67 @@ from selenium.webdriver.remote.webdriver import WebDriver
 # CSS selectors used for chart detection in the chat area
 _CSS_PLOTLY_RENDERED = "#chat-messages .js-plotly-plot"
 _CSS_CHAT_PLOT_CONTAINER = "div[id^='chat-plot-']"
+
+# Default conference and year selected in chat-related tests
+_DEFAULT_CONFERENCE = "NeurIPS"
+_DEFAULT_YEAR = "2025"
+
+# ---------------------------------------------------------------------------
+# Conference / year selection helper
+# ---------------------------------------------------------------------------
+
+
+def _select_conference_and_year(
+    driver: WebDriver,
+    conference: str = _DEFAULT_CONFERENCE,
+    year: str = _DEFAULT_YEAR,
+    timeout: int = 15,
+) -> None:
+    """
+    Select *conference* and *year* from the header dropdowns.
+
+    Waits until the conference selector is populated (has at least one
+    option besides the empty placeholder), then picks *conference* from it.
+    After the conference is selected the year dropdown is updated by the
+    ``handleConferenceChange`` JS handler, so this function then waits for
+    the target *year* option to appear and selects it.
+
+    Parameters
+    ----------
+    driver : WebDriver
+        The Selenium WebDriver instance.
+    conference : str, optional
+        Conference name to select (default: ``"NeurIPS"``).
+    year : str, optional
+        Year to select as a string (default: ``"2025"``).
+    timeout : int, optional
+        Maximum seconds to wait for the dropdowns to be populated (default: 15).
+    """
+    wait = WebDriverWait(driver, timeout)
+
+    # Wait until the conference selector has at least one meaningful option
+    wait.until(
+        lambda d: len(d.find_element(By.ID, "conference-selector").find_elements(By.TAG_NAME, "option")) > 0
+    )
+
+    conf_select_el = driver.find_element(By.ID, "conference-selector")
+    Select(conf_select_el).select_by_value(conference)
+    # Trigger the JS change handler so the year dropdown is updated
+    driver.execute_script("handleConferenceChange()")
+
+    # Wait until the target year option is available in the year selector
+    wait.until(
+        lambda d: any(
+            opt.get_attribute("value") == year
+            for opt in d.find_element(By.ID, "year-selector").find_elements(By.TAG_NAME, "option")
+        )
+    )
+
+    year_select_el = driver.find_element(By.ID, "year-selector")
+    Select(year_select_el).select_by_value(year)
+    # Trigger the JS change handler so filters are refreshed
+    driver.execute_script("handleYearChange()")
+
 
 # ---------------------------------------------------------------------------
 # LLM judgment helper
@@ -537,6 +598,8 @@ class TestChatInterface:
         """
         browser.get(staging_url)
 
+        _select_conference_and_year(browser)
+
         # Switch to the chat tab
         browser.find_element(By.ID, "tab-chat").click()
         time.sleep(0.5)
@@ -566,6 +629,8 @@ class TestChatInterface:
         """
         query = "What papers are about machine learning?"
         browser.get(staging_url)
+
+        _select_conference_and_year(browser)
 
         browser.find_element(By.ID, "tab-chat").click()
         time.sleep(0.5)
@@ -646,6 +711,8 @@ class TestMCPToolSmokeTests:
             is a list of ``(role, text)`` tuples for all visible messages.
         """
         browser.get(staging_url)
+
+        _select_conference_and_year(browser)
 
         browser.find_element(By.ID, "tab-chat").click()
         time.sleep(0.5)
