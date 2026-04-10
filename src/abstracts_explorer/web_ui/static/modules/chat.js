@@ -71,8 +71,15 @@ export function removeMcpToolsHint() {
     const hint = document.getElementById('mcp-tools-hint');
     if (hint) {
         hint.classList.add('mcp-tools-hint-hide');
-        // Remove after animation; fall back to a timeout in case animationend never fires
-        const remove = () => hint.remove();
+        // Remove after animation; fall back to a timeout in case animationend never fires.
+        // Guard against double invocation since both paths could fire.
+        let removed = false;
+        const remove = () => {
+            if (!removed) {
+                removed = true;
+                hint.remove();
+            }
+        };
         hint.addEventListener('animationend', remove, { once: true });
         setTimeout(remove, 500);
     }
@@ -372,7 +379,7 @@ export async function resetChat() {
 
         // Re-show the MCP tools hint
         _hasUserSentMessage = false;
-        messagesDiv.insertAdjacentHTML('beforeend', buildMcpToolsHintHtml());
+        initMcpToolsHint();
 
         // Clear papers panel and modal
         const emptyHtml = renderEmptyState(
