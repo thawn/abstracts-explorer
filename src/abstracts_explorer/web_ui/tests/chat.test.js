@@ -740,7 +740,7 @@ describe('Chat Module', () => {
             // Topic relevance
             expect(html).toContain('uncertainty quantification');
             // Paper details
-            expect(html).toContain('Who wrote');
+            expect(html).toContain('Who are the authors');
         });
 
         it('removeMcpToolsHint should add hide class when hint exists', () => {
