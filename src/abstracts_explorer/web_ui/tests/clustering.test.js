@@ -213,8 +213,10 @@ describe('Clustering Module', () => {
 
             await loadClusters();
 
-            // Hierarchy mode should remain disabled after loading (default is false)
-            expect(global.alert).not.toHaveBeenCalled();
+            // Hierarchy mode should remain disabled after loading (default is false).
+            // Verify by attempting to load a hierarchy level — this warns when not in hierarchy mode.
+            await loadHierarchyLevel(0);
+            expect(global.console.warn).toHaveBeenCalledWith('Not in hierarchy mode');
             // Normal visualization should have been called, not hierarchy visualization
             expect(global.Plotly.newPlot).toHaveBeenCalled();
         });
