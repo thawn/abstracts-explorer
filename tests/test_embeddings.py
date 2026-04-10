@@ -738,7 +738,81 @@ def test_search_papers_semantic_with_year_filter(embeddings_manager, tmp_path, m
     embeddings_manager.close()
 
 
-class TestParseChromaDBMetadata:
+def test_search_papers_semantic_field_filter_partial_match(embeddings_manager, tmp_path, mock_lm_studio):
+    """Regression test: field:"value" filters in semantic search must use partial matching.
+
+    ChromaDB does not support a $contains operator on metadata fields.  An earlier
+    implementation tried to use ``{field: {"$contains": value}}`` as a ChromaDB
+    where-clause which raised::
+
+        Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq,
+        $in, $nin, got $contains in query.
+
+    The fix post-filters the results in Python so that:
+    * partial author name matches work  (e.g. ``author:"Vaswani"`` matches the
+      paper whose authors string contains "Vaswani")
+    * the search does not raise an exception
+    """
+    from abstracts_explorer.database import DatabaseManager
+    from abstracts_explorer.plugin import LightweightPaper
+
+    db_path = tmp_path / "test_field_filter.db"
+    set_test_db(db_path)
+
+    with DatabaseManager() as db:
+        db.create_tables()
+        papers = [
+            LightweightPaper(
+                uid="paper_vaswani",
+                title="Attention is All You Need",
+                abstract="Transformer architecture paper.",
+                authors=["Vaswani", "Shazeer"],
+                session="Session 1",
+                poster_position="A1",
+                year=2017,
+                conference="NeurIPS",
+            ),
+            LightweightPaper(
+                uid="paper_devlin",
+                title="BERT Paper",
+                abstract="BERT language model paper.",
+                authors=["Devlin", "Chang"],
+                session="Session 2",
+                poster_position="A2",
+                year=2019,
+                conference="NeurIPS",
+            ),
+        ]
+        for paper in papers:
+            db.add_paper(paper)
+
+    embeddings_manager.connect()
+    embeddings_manager.create_collection()
+    embeddings_manager.embed_from_database()
+
+    # This query previously triggered:
+    #   "Expected where operator … got $contains in query."
+    with DatabaseManager() as db:
+        results = embeddings_manager.search_papers_semantic(
+            'authors:"Vaswani" attention',
+            database=db,
+            limit=10,
+        )
+
+    # Should match exactly the Vaswani paper (partial author match)
+    assert len(results) == 1, f"Expected 1 result, got {len(results)}: {[r.get('title') for r in results]}"
+    assert results[0]["title"] == "Attention is All You Need"
+
+    # Confirm the non-matching paper is excluded
+    with DatabaseManager() as db:
+        no_results = embeddings_manager.search_papers_semantic(
+            'authors:"Lecun" attention',
+            database=db,
+            limit=10,
+        )
+    assert len(no_results) == 0, f"Expected 0 results for unknown author, got {len(no_results)}"
+
+    embeddings_manager.close()
     """Tests for EmbeddingsManager.parse_chromadb_metadata."""
 
     def _make_raw_metadata(self, **overrides):

@@ -897,9 +897,9 @@ class EmbeddingsManager:
         and retrieves complete paper information from the database.
 
         Supports ``field:"value"`` syntax in the query for filtering by any
-        Paper model column.  Recognised filters are extracted, converted to
-        ChromaDB ``$contains`` where-clauses, and the remaining text is used
-        as the semantic query.
+        Paper model column.  Recognised filters are extracted and applied as
+        case-insensitive Python post-filters after the ChromaDB similarity
+        search; the remaining text is used as the semantic query.
 
         Parameters
         ----------
@@ -948,7 +948,10 @@ class EmbeddingsManager:
 
         # Build metadata filter for embeddings search
         # NOTE: All metadata is stored as strings in ChromaDB (see add_paper method, line 445)
-        # so we must convert filter values to strings for matching
+        # so we must convert filter values to strings for matching.
+        # ChromaDB only supports $eq, $ne, $in, $nin, $gt, $gte, $lt, $lte operators on
+        # metadata fields — substring/$contains is NOT supported.  Field filters from the
+        # query are therefore applied as a Python post-filter after retrieval.
         filter_conditions: List[Dict[str, Any]] = []
         if sessions:
             filter_conditions.append({"session": {"$in": sessions}})
@@ -958,10 +961,6 @@ class EmbeddingsManager:
             filter_conditions.append({"year": {"$in": year_strs}})
         if conferences:
             filter_conditions.append({"conference": {"$in": conferences}})
-
-        # Add field filters parsed from query as $contains conditions
-        for field_name, value in field_filters.items():
-            filter_conditions.append({field_name: {"$contains": value}})
 
         # Use $and operator if multiple conditions, otherwise use single condition
         where_filter: Optional[Dict[str, Any]] = None
@@ -976,8 +975,9 @@ class EmbeddingsManager:
         )
         logger.info(f"Where filter: {where_filter}")
 
-        # Get more results initially to account for filtering
-        results = self.search_similar(semantic_query, n_results=limit * 2, where=where_filter)
+        # Fetch extra results to give the Python post-filter enough candidates
+        fetch_limit = limit * max(5, len(field_filters) + 1) if field_filters else limit * 2
+        results = self.search_similar(semantic_query, n_results=fetch_limit, where=where_filter)
 
         logger.info(f"Search results count: {len(results.get('ids', [[]])[0]) if results else 0}")
 
@@ -988,7 +988,30 @@ class EmbeddingsManager:
             # No valid papers found
             return []
 
-        # Limit results (filtering already done at database level)
+        # Post-filter by field filters (substring match, case-insensitive).
+        # authors is returned as a list; join it for substring matching.
+        # All other fields are plain strings or numbers.
+        if field_filters:
+            filtered = []
+            for paper in papers:
+                match = True
+                for field_name, value in field_filters.items():
+                    field_val = paper.get(field_name)
+                    if field_val is None:
+                        match = False
+                        break
+                    # Normalise to a searchable string
+                    if isinstance(field_val, list):
+                        haystack = "; ".join(str(v) for v in field_val)
+                    else:
+                        haystack = str(field_val)
+                    if value.lower() not in haystack.lower():
+                        match = False
+                        break
+                if match:
+                    filtered.append(paper)
+            papers = filtered
+
         return papers[:limit]
 
     def find_papers_within_distance(
