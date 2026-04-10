@@ -355,12 +355,17 @@ export function addChatMessage(text, role, isLoading = false) {
     messagesDiv.appendChild(messageDiv);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
 
-    // Trigger a brief highlight animation on feedback buttons the first time they appear
+    // Trigger a brief highlight + bounce animation on feedback buttons the first time they appear
     if (!isUser && !isLoading && !_feedbackHighlightShown) {
         _feedbackHighlightShown = true;
         const feedbackDiv = messageDiv.querySelector('.chat-feedback-buttons');
         if (feedbackDiv) {
             feedbackDiv.classList.add('feedback-highlight');
+            const buttons = feedbackDiv.querySelectorAll('.chat-feedback-btn');
+            buttons.forEach((btn, index) => {
+                btn.style.animationDelay = `${index * 0.15}s`;
+                btn.classList.add('feedback-bounce');
+            });
         }
     }
 

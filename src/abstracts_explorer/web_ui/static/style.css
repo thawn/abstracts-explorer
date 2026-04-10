@@ -56,6 +56,19 @@ select:focus {
     border-radius: 4px;
 }
 
+/* Feedback bounce animation – makes rating buttons jump once on first appearance */
+@keyframes feedbackBounce {
+    0%   { transform: translateY(0); }
+    25%  { transform: translateY(-6px); }
+    50%  { transform: translateY(0); }
+    75%  { transform: translateY(-3px); }
+    100% { transform: translateY(0); }
+}
+
+.feedback-bounce {
+    animation: feedbackBounce 0.7s ease;
+}
+
 /* MCP Tools hint bubble */
 .mcp-tools-hint {
     animation: fadeIn 0.4s ease;

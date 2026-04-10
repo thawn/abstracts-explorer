@@ -835,5 +835,40 @@ describe('Chat Module', () => {
             const feedbackDiv = document.querySelector('.feedback-highlight');
             expect(feedbackDiv).toBeNull();
         });
+
+        it('should add feedback-bounce class to buttons on first assistant message', () => {
+            addChatMessage('First response', 'assistant');
+
+            const buttons = document.querySelectorAll('.chat-feedback-btn');
+            buttons.forEach(btn => {
+                expect(btn.classList.contains('feedback-bounce')).toBe(true);
+            });
+        });
+
+        it('should not add feedback-bounce class to buttons on second assistant message', () => {
+            addChatMessage('First response', 'assistant');
+            addChatMessage('Second response', 'assistant');
+
+            const allFeedbackDivs = document.querySelectorAll('.chat-feedback-buttons');
+            const secondMsgButtons = allFeedbackDivs[1].querySelectorAll('.chat-feedback-btn');
+            secondMsgButtons.forEach(btn => {
+                expect(btn.classList.contains('feedback-bounce')).toBe(false);
+            });
+        });
+
+        it('should set staggered animation delay on buttons', () => {
+            addChatMessage('First response', 'assistant');
+
+            const buttons = document.querySelectorAll('.chat-feedback-btn');
+            expect(buttons[0].style.animationDelay).toBe('0s');
+            expect(buttons[1].style.animationDelay).toBe('0.15s');
+        });
+
+        it('should not add feedback-bounce on user messages', () => {
+            addChatMessage('User message', 'user');
+
+            const bounceBtn = document.querySelector('.feedback-bounce');
+            expect(bounceBtn).toBeNull();
+        });
     });
 });
