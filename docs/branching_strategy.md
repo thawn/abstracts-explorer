@@ -171,21 +171,14 @@ error when the LLM backend is unavailable).
 | **Responsive layout** | The page renders without horizontal overflow at a narrow viewport width (e.g. 768 px). |
 
 ```{note}
-This list is a **first draft** and should evolve as the project matures. Tests should
-be automated using the existing Selenium-based e2e infrastructure in
-`tests/test_web_e2e.py`. The corresponding test functions are:
+This list is a **first draft** and should evolve as the project matures. The staging
+tests are implemented as Selenium tests in
+[`tests/test_staging_e2e.py`](https://github.com/thawn/abstracts-explorer/blob/main/tests/test_staging_e2e.py)
+and can be run against any deployment URL::
 
-- `test_page_loads`
-- `test_page_no_javascript_errors`
-- `test_keyword_search_interaction`
-- `test_empty_search_shows_message`
-- `test_search_no_results`
-- `test_paper_detail_view`
-- `test_collapsible_abstract`
-- `test_chat_interface_elements`
-- `test_chat_send_message`
-- `test_clustering_tab_exists`
-- `test_clustering_plot_loads`
-- `test_keyboard_navigation`
-- `test_responsive_layout`
+    uv run pytest tests/test_staging_e2e.py -m staging --staging-url http://localhost:5000
+
+Alternatively, set the ``STAGING_URL`` environment variable::
+
+    STAGING_URL=https://staging.example.com uv run pytest tests/test_staging_e2e.py -m staging
 ```

@@ -36,6 +36,50 @@ def get_env_test_path() -> Path:
     return repo_root / ".env.tests"
 
 
+def pytest_addoption(parser):
+    """
+    Register custom command-line options for pytest.
+
+    Parameters
+    ----------
+    parser : argparse.Parser
+        The pytest argument parser.
+    """
+    parser.addoption(
+        "--staging-url",
+        action="store",
+        default=None,
+        help="Base URL of the staging deployment to run staging e2e tests against (e.g. http://localhost:5000)",
+    )
+
+
+@pytest.fixture(scope="session")
+def staging_url(request):
+    """
+    Resolve the staging deployment URL from CLI option or environment variable.
+
+    The URL is taken from ``--staging-url`` first, falling back to the
+    ``STAGING_URL`` environment variable.  Tests that depend on this fixture
+    are skipped when neither source provides a value.
+
+    Parameters
+    ----------
+    request : FixtureRequest
+        Pytest request object (provides access to CLI options).
+
+    Returns
+    -------
+    str
+        The base URL of the staging deployment (without trailing slash).
+    """
+    import os
+
+    url = request.config.getoption("--staging-url") or os.environ.get("STAGING_URL")
+    if not url:
+        pytest.skip("Staging URL not provided. Use --staging-url or set STAGING_URL env var.")
+    return url.rstrip("/")
+
+
 @pytest.fixture(scope="session")
 def monkeypatch_session():
     """
