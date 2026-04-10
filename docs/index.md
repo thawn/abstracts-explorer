@@ -117,6 +117,7 @@ api/evaluation
 :caption: Development
 
 contributing
+branching_strategy
 ```
 
 ## Indices and tables

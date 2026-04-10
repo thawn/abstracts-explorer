@@ -36,6 +36,76 @@ def get_env_test_path() -> Path:
     return repo_root / ".env.tests"
 
 
+def pytest_addoption(parser):
+    """
+    Register custom command-line options for pytest.
+
+    Parameters
+    ----------
+    parser : argparse.Parser
+        The pytest argument parser.
+    """
+    parser.addoption(
+        "--staging-url",
+        action="store",
+        default=None,
+        help="Base URL of the staging deployment to run staging e2e tests against (e.g. http://localhost:5000)",
+    )
+
+
+@pytest.fixture(scope="session")
+def staging_url(request):
+    """
+    Resolve the staging deployment URL from CLI option or environment variable.
+
+    The URL is taken from ``--staging-url`` first, falling back to the
+    ``STAGING_URL`` environment variable.  Tests that depend on this fixture
+    are skipped when neither source provides a value.
+
+    Parameters
+    ----------
+    request : FixtureRequest
+        Pytest request object (provides access to CLI options).
+
+    Returns
+    -------
+    str
+        The base URL of the staging deployment (without trailing slash).
+    """
+    import os
+
+    url = request.config.getoption("--staging-url") or os.environ.get("STAGING_URL")
+    if not url:
+        pytest.skip("Staging URL not provided. Use --staging-url or set STAGING_URL env var.")
+    return url.rstrip("/")
+
+
+@pytest.fixture(scope="module")
+def browser():
+    """
+    Create a module-scoped Selenium WebDriver instance for staging e2e tests.
+
+    A single browser instance is shared across all tests in a module to avoid
+    the overhead of launching a new browser for every test.  The fixture is
+    defined here (``conftest.py``) so it is available to any test module; test
+    files that need a *function*-scoped browser (e.g. ``test_web_e2e.py``) can
+    override it with a local fixture of the same name.
+
+    Browser selection follows the ``E2E_BROWSER`` environment variable
+    (``chrome``, ``firefox``, or ``auto``).
+
+    Yields
+    ------
+    webdriver.Chrome or webdriver.Firefox
+        A headless WebDriver instance.  Automatically quit after the module.
+    """
+    from tests.helpers import create_webdriver
+
+    driver = create_webdriver()
+    yield driver
+    driver.quit()
+
+
 @pytest.fixture(scope="session")
 def monkeypatch_session():
     """

@@ -49,6 +49,10 @@ export function buildMcpToolsHintHtml() {
                     <span><em>"How has the topic of large language models evolved over the years?"</em></span>
                 </li>
                 <li class="flex items-start gap-2">
+                    <i class="fas fa-hexagon-nodes text-yellow-400 mt-0.5 flex-shrink-0"></i>
+                    <span><em>"Show me a visual overview of how topics are clustered."</em></span>
+                </li>
+                <li class="flex items-start gap-2">
                     <i class="fas fa-search text-green-400 mt-0.5 flex-shrink-0"></i>
                     <span><em>"Find papers about reinforcement learning at ICLR"</em></span>
                 </li>
@@ -56,11 +60,10 @@ export function buildMcpToolsHintHtml() {
                     <i class="fas fa-fire text-orange-400 mt-0.5 flex-shrink-0"></i>
                     <span><em>"How relevant is uncertainty quantification at NeurIPS?"</em></span>
                 </li>
-                <!-- Disabled for now since get_paper_details is not working properly right now, but we can re-enable once it's fixed
                 <li class="flex items-start gap-2">
                     <i class="fas fa-info-circle text-indigo-400 mt-0.5 flex-shrink-0"></i>
-                    <span><em>"Who wrote the paper 'Language Models are Few-Shot Learners'?"</em></span>
-                </li> -->
+                    <span><em>"Who are the authors of the paper titled 'Large Language Diffusion Models'?"</em></span>
+                </li>
             </ul>
         </div>`;
 }
