@@ -71,6 +71,8 @@ In the chat interface:
 - Get AI-generated responses with paper references
 - Type `exit` or `quit` to leave
 
+[here is an example chat](chat_example.md)
+
 ## Python API
 
 ### Database Operations
