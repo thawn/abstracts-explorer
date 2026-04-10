@@ -2780,5 +2780,3 @@ class DatabaseManager:
         except Exception as e:
             self._session.rollback()
             raise DatabaseError(f"Failed to import clustering cache: {str(e)}") from e
-
-
