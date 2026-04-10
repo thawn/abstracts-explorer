@@ -258,10 +258,10 @@ def _lookup_clustering_cache(
     clustering_params: Dict[str, Any] = {
         "linkage": "ward",
         "distance_threshold": 150.0,
-        "conferences": sorted([conference]),
     }
-    if years:
-        clustering_params["years"] = sorted([int(y) for y in years])
+
+    # Determine single year for column-based lookup
+    cache_year = years[0] if years and len(years) == 1 else None
 
     cached = db.get_clustering_cache(
         embedding_model=config.embedding_model,
@@ -270,18 +270,21 @@ def _lookup_clustering_cache(
         clustering_method="agglomerative",
         n_clusters=None,
         clustering_params=clustering_params,
+        conference=conference,
+        year=cache_year,
     )
 
     # Fallback: if per-year cache not found, try the all-years cache
     if not cached and years:
-        fallback_params = {k: v for k, v in clustering_params.items() if k != "years"}
         cached = db.get_clustering_cache(
             embedding_model=config.embedding_model,
             reduction_method="tsne",
             n_components=2,
             clustering_method="agglomerative",
             n_clusters=None,
-            clustering_params=fallback_params,
+            clustering_params=clustering_params,
+            conference=conference,
+            year=None,
         )
 
     return cached

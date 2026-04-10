@@ -94,7 +94,8 @@ def _populate_test_db_with_cache(db_path):
                 n_components=2,
                 clustering_method="kmeans",
                 n_clusters=2,
-                clustering_params=json.dumps({"conferences": [conf], "years": [yr]}),
+                conference=conf,
+                year=yr,
                 results_json=json.dumps({"points": []}),
             )
         )
@@ -694,7 +695,6 @@ class TestDatabaseExportImport:
         db = _populate_test_db(tmp_path / "db.db")
         try:
             # Add clustering cache: one for neurips/2024, one for iclr/2024
-            import json as _json
 
             db._session.add(
                 ClusteringCache(
@@ -703,7 +703,8 @@ class TestDatabaseExportImport:
                     n_components=2,
                     clustering_method="kmeans",
                     n_clusters=5,
-                    clustering_params=_json.dumps({"conferences": ["neurips"], "years": [2024]}),
+                    conference="neurips",
+                    year=2024,
                     results_json="{}",
                 )
             )
@@ -714,7 +715,8 @@ class TestDatabaseExportImport:
                     n_components=2,
                     clustering_method="kmeans",
                     n_clusters=5,
-                    clustering_params=_json.dumps({"conferences": ["iclr"], "years": [2024]}),
+                    conference="iclr",
+                    year=2024,
                     results_json="{}",
                 )
             )
@@ -728,9 +730,8 @@ class TestDatabaseExportImport:
             db.import_papers_from_sqlite(export_path, "neurips", 2024)
 
             remaining = db._session.query(ClusteringCache).all()
-            # iclr entry should survive, neurips entry replaced by imported one
-            params_list = [_json.loads(e.clustering_params) for e in remaining if e.clustering_params]
-            iclr_found = any(p.get("conferences") == ["iclr"] for p in params_list)
+            # iclr entry should survive
+            iclr_found = any(e.conference == "iclr" for e in remaining)
             assert iclr_found, "The iclr clustering cache entry should be preserved"
         finally:
             db.close()
@@ -749,6 +750,8 @@ class TestDatabaseExportImport:
                     n_components=2,
                     clustering_method="kmeans",
                     n_clusters=5,
+                    conference=None,
+                    year=None,
                     clustering_params=None,
                     results_json="{}",
                 )
@@ -761,7 +764,7 @@ class TestDatabaseExportImport:
 
             remaining = db._session.query(ClusteringCache).all()
             # Global entry should survive (no conference/year match)
-            unscoped = [e for e in remaining if e.clustering_params is None]
+            unscoped = [e for e in remaining if e.conference is None and e.year is None]
             assert len(unscoped) == 1, "Global clustering cache entry should be preserved"
         finally:
             db.close()
@@ -781,7 +784,8 @@ class TestDatabaseExportImport:
                     n_components=2,
                     clustering_method="kmeans",
                     n_clusters=5,
-                    clustering_params=_json.dumps({"conferences": ["neurips"], "years": [2024]}),
+                    conference="neurips",
+                    year=2024,
                     results_json=_json.dumps({"points": [{"id": "p1", "cluster": 0}]}),
                 )
             )
@@ -792,7 +796,8 @@ class TestDatabaseExportImport:
                     n_components=2,
                     clustering_method="kmeans",
                     n_clusters=5,
-                    clustering_params=_json.dumps({"conferences": ["iclr"], "years": [2024]}),
+                    conference="iclr",
+                    year=2024,
                     results_json=_json.dumps({"points": []}),
                 )
             )
@@ -803,8 +808,9 @@ class TestDatabaseExportImport:
             entry = data["entries"][0]
             assert entry["embedding_model"] == "test-model"
             assert entry["clustering_method"] == "kmeans"
+            assert entry["conference"] == "neurips"
+            assert entry["year"] == 2024
             # JSON fields should be parsed objects, not strings
-            assert entry["clustering_params"]["conferences"] == ["neurips"]
             assert entry["results_json"]["points"] == [{"id": "p1", "cluster": 0}]
             # id should not be in the export
             assert "id" not in entry
@@ -834,7 +840,8 @@ class TestDatabaseExportImport:
                         "n_components": 2,
                         "clustering_method": "dbscan",
                         "n_clusters": None,
-                        "clustering_params": {"conferences": ["neurips"], "years": [2024]},
+                        "conference": "neurips",
+                        "year": 2024,
                         "results_json": {"points": [{"id": "p1"}]},
                         "created_at": "2025-01-01T00:00:00+00:00",
                     }
@@ -847,6 +854,8 @@ class TestDatabaseExportImport:
             assert len(entries) == 1
             assert entries[0].clustering_method == "dbscan"
             assert entries[0].embedding_model == "test-model"
+            assert entries[0].conference == "neurips"
+            assert entries[0].year == 2024
         finally:
             db.close()
 
@@ -870,7 +879,8 @@ class TestDatabaseExportImport:
                         "n_components": 2,
                         "clustering_method": "kmeans",
                         "n_clusters": 3,
-                        "clustering_params": {"conferences": ["neurips"], "years": [2024]},
+                        "conference": "neurips",
+                        "year": 2024,
                         "results_json": {"points": []},
                         "created_at": "2025-01-01T00:00:00+00:00",
                     },
@@ -880,7 +890,8 @@ class TestDatabaseExportImport:
                         "n_components": 2,
                         "clustering_method": "kmeans",
                         "n_clusters": 5,
-                        "clustering_params": {"conferences": ["neurips"], "years": [2024]},
+                        "conference": "neurips",
+                        "year": 2024,
                         "results_json": {"points": []},
                         "created_at": "2025-01-01T00:00:00+00:00",
                     },
@@ -903,8 +914,6 @@ class TestDatabaseExportImport:
 
     def test_import_clustering_cache_replaces_existing(self, tmp_path):
         """Import replaces existing matching cache entries."""
-        import json as _json
-
         from abstracts_explorer.db_models import ClusteringCache
 
         db = _populate_test_db(tmp_path / "db.db")
@@ -917,7 +926,8 @@ class TestDatabaseExportImport:
                     n_components=2,
                     clustering_method="kmeans",
                     n_clusters=3,
-                    clustering_params=_json.dumps({"conferences": ["neurips"], "years": [2024]}),
+                    conference="neurips",
+                    year=2024,
                     results_json="{}",
                 )
             )
@@ -933,7 +943,8 @@ class TestDatabaseExportImport:
                         "n_components": 3,
                         "clustering_method": "kmeans",
                         "n_clusters": 5,
-                        "clustering_params": {"conferences": ["neurips"], "years": [2024]},
+                        "conference": "neurips",
+                        "year": 2024,
                         "results_json": {"points": []},
                         "created_at": "2025-06-01T00:00:00+00:00",
                     }
@@ -964,7 +975,8 @@ class TestDatabaseExportImport:
                     n_components=2,
                     clustering_method="kmeans",
                     n_clusters=5,
-                    clustering_params=_json.dumps({"conferences": ["neurips"], "years": [2024]}),
+                    conference="neurips",
+                    year=2024,
                     results_json=_json.dumps({"points": [{"id": "p1", "cluster": 0}], "labels": {"0": "topic"}}),
                 )
             )
@@ -985,6 +997,8 @@ class TestDatabaseExportImport:
 
             entries = db._session.query(ClusteringCache).all()
             assert len(entries) == 1
+            assert entries[0].conference == "neurips"
+            assert entries[0].year == 2024
             results = _json.loads(entries[0].results_json)
             assert results["points"] == [{"id": "p1", "cluster": 0}]
             assert results["labels"] == {"0": "topic"}
@@ -1001,8 +1015,6 @@ class TestDatabaseExportImport:
         causing a UniqueViolation on PostgreSQL.  The fix resets the sequence so that
         new inserts always receive a safe, non-conflicting ID.
         """
-        import json as _json
-
         from sqlalchemy import text as sa_text
 
         from abstracts_explorer.db_models import ClusteringCache
@@ -1020,13 +1032,14 @@ class TestDatabaseExportImport:
                 db._session.execute(
                     sa_text(
                         "INSERT INTO clustering_cache "
-                        "(id, embedding_model, reduction_method, n_components, "
-                        "clustering_method, clustering_params, results_json, created_at) "
-                        "VALUES (:id, 'model', 'pca', 2, 'kmeans', :params, '{}', '2024-01-01')"
+                        "(id, embedding_model, conference, year, reduction_method, n_components, "
+                        "clustering_method, results_json, created_at) "
+                        "VALUES (:id, 'model', :conf, :yr, 'pca', 2, 'kmeans', '{}', '2024-01-01')"
                     ),
                     {
                         "id": row_id,
-                        "params": _json.dumps({"conferences": [conf], "years": [yr]}),
+                        "conf": conf,
+                        "yr": yr,
                     },
                 )
             db._session.commit()
@@ -1042,7 +1055,8 @@ class TestDatabaseExportImport:
                         "n_components": 2,
                         "clustering_method": "kmeans",
                         "n_clusters": 5,
-                        "clustering_params": {"conferences": ["TestConf"], "years": [2024]},
+                        "conference": "TestConf",
+                        "year": 2024,
                         "results_json": {"points": []},
                         "created_at": "2025-06-01T00:00:00+00:00",
                     },
@@ -1052,7 +1066,8 @@ class TestDatabaseExportImport:
                         "n_components": 2,
                         "clustering_method": "kmeans",
                         "n_clusters": 3,
-                        "clustering_params": {"conferences": ["TestConf"], "years": [2024]},
+                        "conference": "TestConf",
+                        "year": 2024,
                         "results_json": {"points": []},
                         "created_at": "2025-06-01T00:00:00+00:00",
                     },
@@ -1065,10 +1080,10 @@ class TestDatabaseExportImport:
             # Row 3 (OtherConf/2025) must still be present; the 2 new rows must exist.
             assert len(all_entries) == 3
 
-            other_entries = [e for e in all_entries if "OtherConf" in (e.clustering_params or "")]
+            other_entries = [e for e in all_entries if e.conference == "OtherConf"]
             assert len(other_entries) == 1, "OtherConf/2025 entry should not have been deleted"
 
-            test_entries = [e for e in all_entries if "TestConf" in (e.clustering_params or "")]
+            test_entries = [e for e in all_entries if e.conference == "TestConf"]
             assert len(test_entries) == 2, "Two new TestConf/2024 entries should exist"
             reduction_methods = {e.reduction_method for e in test_entries}
             assert reduction_methods == {"tsne", "umap"}, "New entries should have updated reduction methods"
@@ -1468,7 +1483,8 @@ class TestUploadDownload:
                 n_components=2,
                 clustering_method="kmeans",
                 n_clusters=2,
-                clustering_params=_json.dumps({"conferences": ["NeurIPS"], "years": [2024]}),
+                conference="NeurIPS",
+                year=2024,
                 results_json=_json.dumps({"points": []}),
             )
         )
@@ -1624,7 +1640,8 @@ class TestUploadDownload:
                     "n_components": 2,
                     "clustering_method": "kmeans",
                     "n_clusters": 5,
-                    "clustering_params": {"conferences": ["neurips"], "years": [2024]},
+                    "conference": "neurips",
+                    "year": 2024,
                     "results_json": {"points": [{"id": "p1", "cluster": 0}]},
                     "created_at": "2025-01-01T00:00:00+00:00",
                 }
