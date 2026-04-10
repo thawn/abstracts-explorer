@@ -27,6 +27,7 @@ extensions = [
     "sphinx.ext.coverage",  # Check documentation coverage
     "myst_parser",  # Markdown support
     "sphinx_autodoc_typehints",  # Type hints support
+    "sphinxcontrib.mermaid",  # Mermaid diagram support
 ]
 
 # Napoleon settings for NumPy-style docstrings
@@ -38,7 +39,7 @@ napoleon_include_special_with_doc = True
 napoleon_use_admonition_for_examples = True
 napoleon_use_admonition_for_notes = True
 napoleon_use_admonition_for_references = True
-napoleon_use_ivar = False
+napoleon_use_ivar = True
 napoleon_use_param = True
 napoleon_use_rtype = True
 napoleon_preprocess_types = False
@@ -72,6 +73,7 @@ myst_enable_extensions = [
     "tasklist",  # Task lists
     "linkify",  # Auto-detect URLs
 ]
+myst_heading_anchors = 4  # Auto-generate anchors for h1-h4 headings
 
 # Source suffix
 source_suffix = {
@@ -80,13 +82,13 @@ source_suffix = {
 }
 
 templates_path = ["_templates"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "README.md"]
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
 html_theme = "sphinx_rtd_theme"
-html_static_path = ["_static"]
+html_static_path = []
 
 # Theme options
 html_theme_options = {
@@ -97,6 +99,21 @@ html_theme_options = {
     "titles_only": False,
 }
 
+# Version selector for multi-version GitHub Pages deployment.
+# DOCS_VERSION is set by CI: 'stable' for the main branch, 'dev' for the develop branch.
+# DOCS_BASE_URL can be overridden for custom domains; defaults to the GitHub Pages URL.
+_docs_version = os.environ.get("DOCS_VERSION", "stable")
+_docs_base_url = os.environ.get("DOCS_BASE_URL", "https://thawn.github.io/abstracts-explorer")
+
+html_context = {
+    "display_version": True,
+    "current_version": _docs_version,
+    "versions": [
+        ("stable", f"{_docs_base_url}/"),
+        ("dev", f"{_docs_base_url}/dev/"),
+    ],
+}
+
 # Intersphinx mapping
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
@@ -104,4 +121,4 @@ intersphinx_mapping = {
 
 # Configure intersphinx to not fail on network errors
 intersphinx_timeout = 5  # Timeout after 5 seconds instead of hanging
-suppress_warnings = ['app.add_node']  # Suppress node warnings
+suppress_warnings = ["app.add_node"]  # Suppress node warnings

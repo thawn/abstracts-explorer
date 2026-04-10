@@ -1,7 +1,4 @@
 """
-Database Module
-===============
-
 This module provides functionality to load JSON data into a SQL database.
 Supports both SQLite and PostgreSQL backends via SQLAlchemy.
 """
@@ -649,9 +646,19 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Failed to count papers: {str(e)}") from e
 
+    #: Paper model column names that can be used as ``field:"value"`` filters
+    #: in search queries.  Internal columns (``uid``, ``created_at``) are
+    #: excluded because they are not meaningful search targets for users.
+    SEARCHABLE_FIELDS: set = {c.name for c in Paper.__table__.columns if c.name not in ("uid", "created_at")}
+
+    #: Aliases for field names in search queries.  An alias is transparently
+    #: resolved to the canonical column name before applying the filter.
+    FIELD_ALIASES: Dict[str, str] = {"author": "authors"}
+
     def search_papers(
         self,
         keyword: Optional[str] = None,
+        field_filters: Optional[Dict[str, str]] = None,
         session: Optional[str] = None,
         sessions: Optional[List[str]] = None,
         year: Optional[int] = None,
@@ -667,6 +674,10 @@ class DatabaseManager:
         ----------
         keyword : str, optional
             Keyword to search in title, abstract, or keywords fields.
+        field_filters : dict of str to str, optional
+            Mapping of Paper column names to search values.  Each entry adds
+            a case-insensitive ILIKE ``%value%`` condition on the corresponding
+            column (e.g. ``{"authors": "Smith", "award": "Best Paper"}``).
         session : str, optional
             Single session to filter by (deprecated, use sessions instead).
         sessions : list[str], optional
@@ -705,6 +716,9 @@ class DatabaseManager:
 
         >>> # Search with years
         >>> papers = db.search_papers(years=[2024, 2025])
+
+        >>> # Search by field filter
+        >>> papers = db.search_papers(field_filters={"authors": "John Smith"})
         """
         if not self._session:
             raise DatabaseError("Not connected to database")
@@ -722,6 +736,12 @@ class DatabaseManager:
                         Paper.keywords.ilike(search_pattern),
                     )
                 )
+
+            if field_filters:
+                for field_name, value in field_filters.items():
+                    col = getattr(Paper, field_name, None)
+                    if col is not None:
+                        conditions.append(col.ilike(f"%{value}%"))
 
             # Handle sessions (prefer list form, fall back to single)
             session_list = sessions if sessions else ([session] if session else [])
@@ -754,6 +774,57 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Search failed: {str(e)}") from e
 
+    @staticmethod
+    def parse_field_filters(query: str) -> tuple:
+        """
+        Parse field-specific filters from a search query string.
+
+        Extracts all ``field:"value"`` patterns from the query where *field*
+        is a column name of the :class:`~abstracts_explorer.db_models.Paper`
+        model (or a recognised alias; see :attr:`FIELD_ALIASES`).
+        Unrecognised field names are left in the query text as-is.
+
+        Parameters
+        ----------
+        query : str
+            The raw search query, e.g.
+            ``'authors:"John Smith" award:"Best Paper" transformers'``.
+
+        Returns
+        -------
+        tuple of (dict, str)
+            A tuple ``(field_filters, remaining_query)`` where
+            *field_filters* maps canonical column names to their search values
+            and *remaining_query* is the query with recognised filters removed.
+
+        Examples
+        --------
+        >>> DatabaseManager.parse_field_filters('authors:"John Smith" transformers')
+        ({'authors': 'John Smith'}, 'transformers')
+        >>> DatabaseManager.parse_field_filters('author:"John Smith" transformers')
+        ({'authors': 'John Smith'}, 'transformers')
+        >>> DatabaseManager.parse_field_filters('transformers')
+        ({}, 'transformers')
+        >>> DatabaseManager.parse_field_filters('award:"Best Paper" authors:"Doe"')
+        ({'award': 'Best Paper', 'authors': 'Doe'}, '')
+        """
+        field_filters: Dict[str, str] = {}
+        remaining = query
+
+        # Iterate in reverse so that removing matched spans does not
+        # invalidate the start/end offsets of earlier matches.
+        for match in reversed(list(re.finditer(r'(\w+):"([^"]+)"', query))):
+            raw_field = match.group(1)
+            # Resolve alias (e.g. "author" → "authors") if applicable
+            field_name = DatabaseManager.FIELD_ALIASES.get(raw_field, raw_field)
+            value = match.group(2).strip()
+            if field_name in DatabaseManager.SEARCHABLE_FIELDS:
+                field_filters[field_name] = value
+                remaining = remaining[: match.start()] + remaining[match.end() :]
+
+        remaining = " ".join(remaining.split())  # normalise whitespace
+        return field_filters, remaining
+
     def search_papers_keyword(
         self,
         query: str,
@@ -763,15 +834,19 @@ class DatabaseManager:
         conferences: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Perform keyword-based search with filtering and author parsing.
+        Perform keyword-based search with filtering and field filter parsing.
 
         This is a convenience method that wraps search_papers and formats
         the results for web API consumption, including author parsing.
 
+        Supports ``field:"value"`` syntax for any Paper model column, e.g.
+        ``'authors:"John Smith" transformers'`` or ``'award:"Best Paper"'``.
+
         Parameters
         ----------
         query : str
-            Keyword to search in title, abstract, or keywords fields
+            Keyword to search in title, abstract, or keywords fields.
+            May include ``field:"value"`` filters for any Paper column.
         limit : int, optional
             Maximum number of results, by default 10
         sessions : list of str, optional
@@ -793,10 +868,16 @@ class DatabaseManager:
         ...     limit=5,
         ...     years=[2024, 2025]
         ... )
+        >>> papers = db.search_papers_keyword('authors:"John Smith"')
+        >>> papers = db.search_papers_keyword('award:"Best Paper" transformers')
         """
+        # Parse field filters from query
+        field_filters, remaining_query = self.parse_field_filters(query)
+
         # Keyword search in database with multiple filter support
         papers = self.search_papers(
-            keyword=query,
+            keyword=remaining_query if remaining_query else None,
+            field_filters=field_filters if field_filters else None,
             sessions=sessions,
             years=years,
             conferences=conferences,
@@ -1025,6 +1106,122 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Failed to get years for conference: {str(e)}") from e
 
+    def get_conference_years_from_db(self) -> Dict[str, List[int]]:
+        """
+        Return a mapping of each conference to the years that have papers in the database.
+
+        Years are sorted in descending order (most recent first).
+
+        Returns
+        -------
+        dict[str, list[int]]
+            Mapping of conference name to list of years (descending) that have
+            at least one paper in the database.  Returns an empty dict when the
+            database is empty or not connected.
+
+        Raises
+        ------
+        DatabaseError
+            If the query fails.
+
+        Examples
+        --------
+        >>> db = DatabaseManager()
+        >>> with db:
+        ...     mapping = db.get_conference_years_from_db()
+        >>> print(mapping)
+        {'NeurIPS': [2025, 2024], 'ICLR': [2024]}
+        """
+        if not self._session:
+            return {}
+
+        try:
+            filter_options = self.get_filter_options()
+            conferences_in_db = filter_options.get("conferences", [])
+            result: Dict[str, List[int]] = {}
+            for conf in conferences_in_db:
+                years = self.get_years_for_conference(conf)
+                if years:
+                    result[conf] = sorted(years, reverse=True)
+            return result
+        except Exception as e:
+            raise DatabaseError(f"Failed to get conference years from DB: {str(e)}") from e
+
+    def resolve_default_conference_year(
+        self,
+        configured_conference: str,
+        configured_year: Optional[int],
+    ) -> tuple[str, Optional[int]]:
+        """
+        Resolve the effective default conference and year, guaranteeing they have data.
+
+        The configured values are used when they point at a conference/year that
+        actually has papers in the database.  When they do not, the method falls
+        back to the most recent conference/year combination present in the database.
+
+        Parameters
+        ----------
+        configured_conference : str
+            Conference name from the application configuration.  May be empty
+            or may not match any downloaded conference.
+        configured_year : int or None
+            Year from the application configuration.  May be ``None`` or may
+            not have data for the matched conference.
+
+        Returns
+        -------
+        tuple[str, int | None]
+            A ``(conference, year)`` pair that is guaranteed to have data in the
+            database, or the original configured values if the database is empty.
+
+        Examples
+        --------
+        >>> db = DatabaseManager()
+        >>> with db:
+        ...     conf, year = db.resolve_default_conference_year("NeurIPS", 2024)
+        >>> print(conf, year)
+        NeurIPS 2024
+        """
+        db_conference_years = self.get_conference_years_from_db()
+
+        if not db_conference_years:
+            # DB is empty – return configured values unchanged
+            return configured_conference, configured_year
+
+        # Try case-insensitive match of the configured conference against DB conferences
+        conf_matched = None
+        if configured_conference:
+            for db_conf in db_conference_years:
+                if db_conf.lower() == configured_conference.lower():
+                    conf_matched = db_conf
+                    break
+
+        if conf_matched:
+            effective_conf = conf_matched
+            years_for_conf = db_conference_years[conf_matched]
+            if configured_year and configured_year in years_for_conf:
+                effective_year: Optional[int] = configured_year
+            elif years_for_conf:
+                # Configured year not in DB for this conference – use the most recent one
+                effective_year = years_for_conf[0]
+            else:
+                effective_year = configured_year
+        else:
+            # Configured default has no data (or was not set) – fall back to the
+            # conference/year combination with the most recent year in the database.
+            best_conf: Optional[str] = None
+            best_year: Optional[int] = None
+            for conf, years in db_conference_years.items():
+                if years:
+                    most_recent = years[0]  # already sorted descending
+                    if best_year is None or most_recent > best_year:
+                        best_year = most_recent
+                        best_conf = conf
+            effective_conf = best_conf or configured_conference
+            effective_year = best_year if best_conf else configured_year
+
+        return effective_conf, effective_year
+
     def resolve_conference_name(self, conference: str) -> str:
         """
         Resolve a conference name to the canonical form stored in the database.
@@ -1088,6 +1285,74 @@ class DatabaseManager:
             f"Failed to resolve conference name: {conference}.\n"
             f"No match found in database or plugins. Available conferences in the database: {filters.get('conferences', [])}"
         )
+
+    def resolve_conference_for_url(self, url_path: str) -> dict:
+        """
+        Resolve a URL path segment to a conference, checking data availability.
+
+        Combines plugin-based name resolution with a database data check.
+        Returns a result dict describing the outcome:
+
+        - **found with data**: ``{"conference": "<name>", "error": None}``
+        - **found without data**: ``{"conference": None, "error": {"message": "...", "available_conferences": [...]}}``
+        - **not found**: ``{"conference": None, "error": {"message": "...", "available_conferences": [...]}}``
+
+        Parameters
+        ----------
+        url_path : str
+            URL path segment (e.g. ``"neurips"``, ``"ICLR"``).
+
+        Returns
+        -------
+        dict
+            Dictionary with keys ``"conference"`` (str or None) and
+            ``"error"`` (dict or None).
+
+        Examples
+        --------
+        >>> with DatabaseManager() as db:
+        ...     result = db.resolve_conference_for_url("neurips")
+        ...     if result["conference"]:
+        ...         print(f"Found: {result['conference']}")
+        """
+        from abstracts_explorer.plugin import get_available_filters, resolve_conference_from_url
+
+        db_conference_years: Dict[str, List[int]] = {}
+        try:
+            db_conference_years = self.get_conference_years_from_db()
+        except Exception:
+            pass
+
+        # Also check DB conferences directly (in case they don't have a plugin)
+        resolved = resolve_conference_from_url(url_path)
+        if resolved is None:
+            for conf in db_conference_years:
+                if conf.lower() == url_path.lower():
+                    resolved = conf
+                    break
+
+        if resolved:
+            if resolved in db_conference_years:
+                return {"conference": resolved, "error": None}
+            else:
+                available_conferences = sorted(db_conference_years.keys())
+                return {
+                    "conference": None,
+                    "error": {
+                        "message": f"No data available for conference '{resolved}'. Please download data first.",
+                        "available_conferences": available_conferences,
+                    },
+                }
+        else:
+            plugin_conferences = get_available_filters().get("conferences", [])
+            available_conferences = sorted(set(list(db_conference_years.keys()) + plugin_conferences))
+            return {
+                "conference": None,
+                "error": {
+                    "message": f"Conference '{url_path}' not found.",
+                    "available_conferences": available_conferences,
+                },
+            }
 
     def get_filter_options(self, year: Optional[int] = None, conference: Optional[str] = None) -> dict:
         """
@@ -1260,6 +1525,8 @@ class DatabaseManager:
         clustering_params: Optional[Dict[str, Any]] = None,
         reduction_method: Optional[str] = None,
         n_components: Optional[int] = None,
+        conference: Optional[str] = None,
+        year: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Get cached clustering results matching the parameters.
@@ -1277,7 +1544,8 @@ class DatabaseManager:
         clustering_method : str
             Clustering algorithm used.
         n_clusters : int, optional
-            Number of clusters (for kmeans/agglomerative).
+            Number of clusters to match.  When ``None`` the query does
+            **not** filter by this column.
         clustering_params : dict, optional
             Additional clustering parameters (e.g., distance_threshold, eps).
         reduction_method : str, optional
@@ -1286,6 +1554,12 @@ class DatabaseManager:
         n_components : int, optional
             Number of components after reduction.  When provided, the query
             requires an exact match on this column.
+        conference : str, optional
+            Conference name to filter by.  ``None`` matches entries that
+            have no conference set.
+        year : int, optional
+            Conference year to filter by.  ``None`` matches entries that
+            have no year set.
 
         Returns
         -------
@@ -1320,6 +1594,17 @@ class DatabaseManager:
             # Add n_clusters condition if provided
             if n_clusters is not None:
                 stmt = stmt.where(ClusteringCache.n_clusters == n_clusters)
+
+            # Filter by conference/year columns
+            if conference is not None:
+                stmt = stmt.where(ClusteringCache.conference == conference)
+            else:
+                stmt = stmt.where(ClusteringCache.conference.is_(None))
+
+            if year is not None:
+                stmt = stmt.where(ClusteringCache.year == year)
+            else:
+                stmt = stmt.where(ClusteringCache.year.is_(None))
 
             # Get all matching results (we'll filter by params in Python)
             stmt = stmt.order_by(ClusteringCache.created_at.desc())
@@ -1364,6 +1649,8 @@ class DatabaseManager:
         results: Dict[str, Any],
         n_clusters: Optional[int] = None,
         clustering_params: Optional[Dict[str, Any]] = None,
+        conference: Optional[str] = None,
+        year: Optional[int] = None,
     ) -> None:
         """
         Save clustering results to cache.
@@ -1387,9 +1674,14 @@ class DatabaseManager:
         results : dict
             Clustering results to cache (full results including points).
         n_clusters : int, optional
-            Number of clusters (for kmeans/agglomerative).
+            Number of clusters.  When ``None``, the actual count is
+            extracted from ``results["statistics"]["n_clusters"]``.
         clustering_params : dict, optional
             Additional clustering parameters.
+        conference : str, optional
+            Conference name this entry is scoped to.
+        year : int, optional
+            Conference year this entry is scoped to.
 
         Raises
         ------
@@ -1402,6 +1694,13 @@ class DatabaseManager:
         try:
             import json
 
+            # Always try to fill n_clusters from the results statistics
+            if n_clusters is None:
+                stats = results.get("statistics", {})
+                actual = stats.get("n_clusters")
+                if actual is not None:
+                    n_clusters = int(actual)
+
             # Serialize results and params to JSON
             results_json = json.dumps(results)
             params_json = json.dumps(clustering_params) if clustering_params else None
@@ -1409,6 +1708,8 @@ class DatabaseManager:
             # Create new cache entry
             cache_entry = ClusteringCache(
                 embedding_model=embedding_model,
+                conference=conference,
+                year=year,
                 reduction_method=reduction_method,
                 n_components=n_components,
                 clustering_method=clustering_method,
@@ -1422,7 +1723,8 @@ class DatabaseManager:
 
             logger.info(
                 f"Saved clustering cache: {clustering_method} with {n_clusters} clusters, "
-                f"model={embedding_model}, reduction={reduction_method}"
+                f"model={embedding_model}, reduction={reduction_method}, "
+                f"conference={conference}, year={year}"
             )
 
         except Exception as e:
@@ -2177,42 +2479,6 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Failed to export papers: {str(e)}") from e
 
-    @staticmethod
-    def _clustering_cache_matches_conference_year(entry: ClusteringCache, conference: str, year: int) -> bool:
-        """
-        Check whether a ClusteringCache entry is scoped to a specific conference and year.
-
-        An entry matches if its ``clustering_params`` JSON contains a
-        ``conferences`` list that includes *conference* **and** a ``years``
-        list that includes *year*.
-
-        Parameters
-        ----------
-        entry : ClusteringCache
-            The cache entry to check.
-        conference : str
-            Conference name.
-        year : int
-            Conference year.
-
-        Returns
-        -------
-        bool
-            ``True`` if the entry matches the given conference and year.
-        """
-        import json as _json
-
-        if not entry.clustering_params:
-            return False
-        try:
-            params = _json.loads(entry.clustering_params)
-        except (ValueError, TypeError):
-            return False
-
-        conferences = params.get("conferences", [])
-        years = params.get("years", [])
-        return conference in conferences and year in years
-
     def import_papers_from_sqlite(
         self,
         sqlite_path: "Path",
@@ -2223,9 +2489,9 @@ class DatabaseManager:
         Import papers for a given conference and year from a SQLite file.
 
         Existing papers for the given conference/year are **replaced** (not
-        merged).  Clustering cache and hierarchical label cache entries that
-        match the conference and year are replaced.  Embeddings metadata is
-        validated for consistency (the embedding model must match).
+        merged).  Hierarchical label cache entries that match the conference
+        and year are replaced.  Embeddings metadata is validated for
+        consistency (the embedding model must match).
 
         Parameters
         ----------
@@ -2356,19 +2622,24 @@ class DatabaseManager:
 
         try:
             entries: List[Dict[str, Any]] = []
-            for entry in self._session.execute(select(ClusteringCache)).scalars():
-                if self._clustering_cache_matches_conference_year(entry, conference, year):
-                    row: Dict[str, Any] = {}
-                    for col in ClusteringCache.__table__.columns:
-                        if col.name == "id":
-                            continue  # skip PK; it will be auto-generated on import
-                        val = getattr(entry, col.name)
-                        if col.name in ("clustering_params", "results_json") and isinstance(val, str):
-                            val = _json.loads(val)
-                        elif col.name == "created_at" and val is not None:
-                            val = val.isoformat()
-                        row[col.name] = val
-                    entries.append(row)
+            stmt = select(ClusteringCache).where(
+                and_(
+                    ClusteringCache.conference == conference,
+                    ClusteringCache.year == year,
+                )
+            )
+            for entry in self._session.execute(stmt).scalars():
+                row: Dict[str, Any] = {}
+                for col in ClusteringCache.__table__.columns:
+                    if col.name == "id":
+                        continue  # skip PK; it will be auto-generated on import
+                    val = getattr(entry, col.name)
+                    if col.name in ("clustering_params", "results_json") and isinstance(val, str):
+                        val = _json.loads(val)
+                    elif col.name == "created_at" and val is not None:
+                        val = val.isoformat()
+                    row[col.name] = val
+                entries.append(row)
 
             return {"entries": entries}
 
@@ -2423,11 +2694,15 @@ class DatabaseManager:
             raise DatabaseError("Not connected to database")
 
         try:
-            # Delete existing matching entries and flush immediately so PostgreSQL
-            # processes the DELETEs before the subsequent INSERTs.
-            for entry in self._session.execute(select(ClusteringCache)).scalars().all():
-                if self._clustering_cache_matches_conference_year(entry, conference, year):
-                    self._session.delete(entry)
+            # Delete existing matching entries using column-based filtering.
+            self._session.execute(
+                delete(ClusteringCache).where(
+                    and_(
+                        ClusteringCache.conference == conference,
+                        ClusteringCache.year == year,
+                    )
+                )
+            )
             self._session.flush()
 
             # For PostgreSQL the auto-increment sequence can fall out of sync when rows
@@ -2473,6 +2748,23 @@ class DatabaseManager:
                 # Replace embedding_model when instructed (e.g. mismatch ignored)
                 if overwrite_embedding_model is not None:
                     row["embedding_model"] = overwrite_embedding_model
+
+                # Ensure conference/year columns are set from the import scope
+                row["conference"] = conference
+                row["year"] = year
+
+                # Fill n_clusters from results statistics if not set
+                if row.get("n_clusters") is None:
+                    results = row.get("results_json")
+                    if isinstance(results, str):
+                        try:
+                            results = _json.loads(results)
+                        except (ValueError, TypeError):
+                            results = {}
+                    if isinstance(results, dict):
+                        actual = results.get("statistics", {}).get("n_clusters")
+                        if actual is not None:
+                            row["n_clusters"] = int(actual)
 
                 self._session.add(ClusteringCache(**row))
                 count += 1

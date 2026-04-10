@@ -53,6 +53,7 @@ docs = [
     "myst-parser>=2.0.0",
     "sphinx-autodoc-typehints>=1.25.0",
     "linkify-it-py>=2.0.0",
+    "sphinxcontrib-mermaid>=2.0.1",
 ]
 web = [
     "flask>=3.0.0",
@@ -87,6 +88,7 @@ markers = [
     "slow: marks tests as slow (deselected by default)",
     "integration: marks tests as integration tests (require real data)",
     "e2e: marks tests as end-to-end tests (require browser automation)",
+    "staging: marks tests as staging end-to-end tests (run against a live deployment)",
 ]
 addopts = [
     "--verbose",

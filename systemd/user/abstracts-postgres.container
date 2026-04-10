@@ -1,0 +1,31 @@
+[Unit]
+Description=PostgreSQL database for Abstracts Explorer
+After=abstracts-postgres-data-volume.service
+Requires=abstracts-postgres-data-volume.service
+
+[Container]
+Image=docker.io/postgres:16-alpine
+ContainerName=abstracts-postgres
+Network=abstracts.network
+
+Volume=abstracts-postgres-data.volume:/var/lib/postgresql/data
+
+Environment=POSTGRES_DB=abstracts
+Environment=POSTGRES_USER=abstracts
+
+# The database password is injected via a Podman secret created by the
+# install script (scripts/install-podman.sh).
+Secret=postgres-password,type=env,target=POSTGRES_PASSWORD
+
+HealthCmd=pg_isready -U abstracts
+HealthInterval=10s
+HealthTimeout=5s
+HealthRetries=5
+HealthStartPeriod=10s
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=120
+
+[Install]
+WantedBy=default.target

@@ -2,7 +2,7 @@ name: Documentation
 
 on:
     push:
-        branches: [main]
+        branches: [main, develop]
         paths:
             - 'docs/**'
             - 'src/**/*.py'
@@ -11,7 +11,7 @@ on:
             - '.github/workflows/docs.yml'
             - '.github/actions/setup-environment/**'
     pull_request:
-        branches: [main]
+        branches: [main, develop]
         paths:
             - 'docs/**'
             - 'src/**/*.py'
@@ -32,12 +32,15 @@ concurrency:
     group: "pages"
     cancel-in-progress: true
 
+env:
+    SPHINXOPTS: "-W --keep-going"
+
 jobs:
     build-docs:
         runs-on: ubuntu-latest
 
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v6
               with:
                   fetch-depth: 0 # Needed for hatch-vcs to determine version
 
@@ -48,12 +51,30 @@ jobs:
                   install-node: 'false'
                   extras: '--extra docs'
 
-            - name: Build documentation
+            # ---------------------------------------------------------------
+            # PR check: build only the current branch to verify docs compile
+            # ---------------------------------------------------------------
+            - name: Determine version label for PR build
+              if: github.event_name == 'pull_request'
+              id: pr_version
+              run: |
+                  # Use base_ref to determine which version this PR targets
+                  if [[ "${{ github.base_ref }}" == "develop" ]]; then
+                      echo "version=dev" >> "$GITHUB_OUTPUT"
+                  else
+                      echo "version=stable" >> "$GITHUB_OUTPUT"
+                  fi
+
+            - name: Build documentation (PR check)
+              if: github.event_name == 'pull_request'
+              env:
+                  DOCS_VERSION: ${{ steps.pr_version.outputs.version }}
               run: |
                   cd docs
                   uv run make html
 
-            - name: Check for build errors
+            - name: Check PR docs build
+              if: github.event_name == 'pull_request'
               run: |
                   if [ -f docs/_build/html/index.html ]; then
                       echo "Documentation built successfully"
@@ -62,14 +83,62 @@ jobs:
                       exit 1
                   fi
 
+            # ---------------------------------------------------------------
+            # Deployment build: build both stable (main) and dev (develop)
+            # and combine into a single artifact for GitHub Pages.
+            #
+            # Layout:
+            #   /          → stable docs (from main branch)
+            #   /dev/      → development docs (from develop branch)
+            # ---------------------------------------------------------------
+            - name: Fetch main and develop branches
+              if: github.event_name != 'pull_request'
+              run: |
+                  git fetch origin main || echo "::warning::Could not fetch main branch"
+                  git fetch origin develop || echo "::warning::Could not fetch develop branch"
+
+            - name: Build stable docs from main branch
+              if: github.event_name != 'pull_request'
+              run: |
+                  git checkout main
+                  uv sync --extra docs --quiet
+                  cd docs
+                  git clean -fdx _build/
+                  DOCS_VERSION=stable uv run make html
+                  mkdir -p /tmp/site
+                  cp -r _build/html/. /tmp/site/
+
+            - name: Build dev docs from develop branch
+              if: github.event_name != 'pull_request'
+              run: |
+                  git checkout develop
+                  uv sync --extra docs --quiet
+                  cd docs
+                  git clean -fdx _build/
+                  DOCS_VERSION=dev uv run make html
+                  mkdir -p /tmp/site/dev
+                  cp -r _build/html/. /tmp/site/dev/
+
+            - name: Check deployment build
+              if: github.event_name != 'pull_request'
+              run: |
+                  if [ -f /tmp/site/index.html ] && [ -f /tmp/site/dev/index.html ]; then
+                      echo "Both stable and dev documentation built successfully"
+                  else
+                      echo "Documentation build failed"
+                      ls -la /tmp/site/ || true
+                      exit 1
+                  fi
+
             - name: Upload artifact
-              uses: actions/upload-pages-artifact@v3
+              if: github.event_name != 'pull_request'
+              uses: actions/upload-pages-artifact@v4
               with:
-                  path: docs/_build/html
+                  path: /tmp/site
 
     deploy-docs:
-        # Only deploy on pushes to main branch (not PRs)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        # Deploy on pushes to main or develop, and on manual triggers
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         needs: build-docs
         runs-on: ubuntu-latest
 
@@ -80,4 +149,4 @@ jobs:
         steps:
             - name: Deploy to GitHub Pages
               id: deployment
-              uses: actions/deploy-pages@v4
+              uses: actions/deploy-pages@v5

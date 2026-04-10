@@ -850,9 +850,9 @@ class TestRAGChatVisualizationExtraction:
         assert len(visualizations) == 1
         viz = visualizations[0]
         assert viz["type"] == "topic_evolution"
-        assert viz["topic"] == "transformers"
-        assert viz["conferences"] == ["NeurIPS"]
-        assert "NeurIPS" in viz["conference_data"]
+        assert viz["topics"] == ["transformers"]
+        assert "transformers" in viz["conference_data"]
+        assert "NeurIPS" in viz["conference_data"]["transformers"]
 
     def test_extract_cluster_visualization(self):
         """Test extracting cluster visualization scatter data."""
@@ -1003,6 +1003,104 @@ class TestRAGChatVisualizationExtraction:
         assert len(visualizations) == 2
         assert visualizations[0]["type"] == "topic_evolution"
         assert visualizations[1]["type"] == "cluster_visualization"
+
+    def test_extract_multiple_topic_evolutions_merged(self):
+        """Test that multiple get_topic_evolution results are merged into one visualization."""
+        tool_results = [
+            {
+                "name": "get_topic_evolution",
+                "raw_result": json.dumps(
+                    {
+                        "topic": "transformers",
+                        "conferences": ["NeurIPS"],
+                        "conference_data": {
+                            "NeurIPS": {
+                                "year_counts": {"2022": 5, "2023": 10},
+                                "year_relative": {"2022": 2.5, "2023": 4.0},
+                            }
+                        },
+                    }
+                ),
+            },
+            {
+                "name": "get_topic_evolution",
+                "raw_result": json.dumps(
+                    {
+                        "topic": "reinforcement learning",
+                        "conferences": ["NeurIPS"],
+                        "conference_data": {
+                            "NeurIPS": {
+                                "year_counts": {"2022": 12, "2023": 8},
+                                "year_relative": {"2022": 6.0, "2023": 3.2},
+                            }
+                        },
+                    }
+                ),
+            },
+        ]
+
+        visualizations = RAGChat._extract_visualizations(tool_results)
+        assert len(visualizations) == 1
+        viz = visualizations[0]
+        assert viz["type"] == "topic_evolution"
+        assert viz["topics"] == ["transformers", "reinforcement learning"]
+        assert "transformers" in viz["conference_data"]
+        assert "reinforcement learning" in viz["conference_data"]
+        assert "NeurIPS" in viz["conference_data"]["transformers"]
+        assert "NeurIPS" in viz["conference_data"]["reinforcement learning"]
+
+    def test_extract_multiple_topics_multiple_conferences_merged(self):
+        """Test merging topic evolutions across different conferences."""
+        tool_results = [
+            {
+                "name": "get_topic_evolution",
+                "raw_result": json.dumps(
+                    {
+                        "topic": "transformers",
+                        "conferences": ["NeurIPS", "ICLR"],
+                        "conference_data": {
+                            "NeurIPS": {
+                                "year_counts": {"2022": 5},
+                                "year_relative": {"2022": 2.5},
+                            },
+                            "ICLR": {
+                                "year_counts": {"2022": 3},
+                                "year_relative": {"2022": 1.8},
+                            },
+                        },
+                    }
+                ),
+            },
+            {
+                "name": "get_topic_evolution",
+                "raw_result": json.dumps(
+                    {
+                        "topic": "reinforcement learning",
+                        "conferences": ["NeurIPS", "ICLR"],
+                        "conference_data": {
+                            "NeurIPS": {
+                                "year_counts": {"2022": 12},
+                                "year_relative": {"2022": 6.0},
+                            },
+                            "ICLR": {
+                                "year_counts": {"2022": 8},
+                                "year_relative": {"2022": 5.0},
+                            },
+                        },
+                    }
+                ),
+            },
+        ]
+
+        visualizations = RAGChat._extract_visualizations(tool_results)
+        assert len(visualizations) == 1
+        viz = visualizations[0]
+        assert viz["type"] == "topic_evolution"
+        assert viz["topics"] == ["transformers", "reinforcement learning"]
+        assert "NeurIPS" in viz["conference_data"]["transformers"]
+        assert "ICLR" in viz["conference_data"]["transformers"]
+        assert "NeurIPS" in viz["conference_data"]["reinforcement learning"]
+        assert "ICLR" in viz["conference_data"]["reinforcement learning"]
 
 
 class TestRAGChatIntegration:
@@ -1287,3 +1385,284 @@ class TestRAGToolLogging:
 
         assert "Tool call: get_cluster_visualization" in caplog.text
         assert "Tool result: get_cluster_visualization" in caplog.text
+
+
+class TestRAGToolConferenceDefaults:
+    """Test that RAG tool wrappers use ctx.deps.conferences and ctx.deps.years as defaults."""
+
+    def test_search_papers_uses_deps_conference_when_not_specified(self, mock_search_papers):
+        """_tool_search_papers uses ctx.deps.conferences[0] when no conference provided."""
+        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        ctx.deps.conferences = ["NeurIPS"]
+        ctx.deps.years = []
+
+        _tool_search_papers(ctx, topic_keywords="transformers")
+
+        call_kwargs = mock_search_papers.call_args[1]
+        assert call_kwargs.get("conference") == "NeurIPS"
+
+    def test_search_papers_explicit_conference_overrides_deps(self, mock_search_papers):
+        """_tool_search_papers uses the explicitly provided conference over deps."""
+        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        ctx.deps.conferences = ["NeurIPS"]
+        ctx.deps.years = []
+
+        _tool_search_papers(ctx, topic_keywords="transformers", conference="ICLR")
+
+        call_kwargs = mock_search_papers.call_args[1]
+        assert call_kwargs.get("conference") == "ICLR"
+
+    def test_search_papers_uses_deps_years_when_not_specified(self, mock_search_papers):
+        """_tool_search_papers uses ctx.deps.years when no years provided."""
+        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        ctx.deps.conferences = ["NeurIPS"]
+        ctx.deps.years = [2024]
+
+        _tool_search_papers(ctx, topic_keywords="transformers")
+
+        call_kwargs = mock_search_papers.call_args[1]
+        assert call_kwargs.get("years") == [2024]
+
+    def test_search_papers_explicit_years_overrides_deps(self, mock_search_papers):
+        """_tool_search_papers uses explicitly provided years over deps."""
+        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        ctx.deps.conferences = ["NeurIPS"]
+        ctx.deps.years = [2024]
+
+        _tool_search_papers(ctx, topic_keywords="transformers", years=[2025])
+
+        call_kwargs = mock_search_papers.call_args[1]
+        assert call_kwargs.get("years") == [2025]
+
+    def test_search_papers_no_years_when_deps_empty(self, mock_search_papers):
+        """_tool_search_papers does not filter by years when deps.years is empty."""
+        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        ctx.deps.conferences = ["NeurIPS"]
+        ctx.deps.years = []
+
+        _tool_search_papers(ctx, topic_keywords="transformers")
+
+        call_kwargs = mock_search_papers.call_args[1]
+        assert "years" not in call_kwargs
+
+    def test_analyze_topic_relevance_uses_deps_conference_when_not_specified(self, mock_analyze_topic):
+        """_tool_analyze_topic_relevance uses ctx.deps.conferences when no conference provided."""
+        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        ctx.deps.conferences = ["ICLR"]
+        ctx.deps.years = []
+
+        _tool_analyze_topic_relevance(ctx, topic="diffusion models")
+
+        call_kwargs = mock_analyze_topic.call_args[1]
+        assert call_kwargs.get("conferences") == ["ICLR"]
+
+    def test_analyze_topic_relevance_explicit_conference_overrides_deps(self, mock_analyze_topic):
+        """_tool_analyze_topic_relevance uses explicitly provided conference over deps."""
+        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        ctx.deps.conferences = ["ICLR"]
+        ctx.deps.years = []
+
+        _tool_analyze_topic_relevance(ctx, topic="diffusion models", conference="NeurIPS")
+
+        call_kwargs = mock_analyze_topic.call_args[1]
+        assert call_kwargs.get("conferences") == ["NeurIPS"]
+
+    def test_analyze_topic_relevance_uses_deps_years_when_not_specified(self, mock_analyze_topic):
+        """_tool_analyze_topic_relevance uses ctx.deps.years when no years provided."""
+        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        ctx.deps.conferences = ["NeurIPS"]
+        ctx.deps.years = [2024]
+
+        _tool_analyze_topic_relevance(ctx, topic="diffusion models")
+
+        call_kwargs = mock_analyze_topic.call_args[1]
+        assert call_kwargs.get("years") == [2024]
+
+    def test_analyze_topic_relevance_explicit_years_overrides_deps(self, mock_analyze_topic):
+        """_tool_analyze_topic_relevance uses explicitly provided years over deps."""
+        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        ctx.deps.conferences = ["NeurIPS"]
+        ctx.deps.years = [2024]
+
+        _tool_analyze_topic_relevance(ctx, topic="diffusion models", years=[2025])
+
+        call_kwargs = mock_analyze_topic.call_args[1]
+        assert call_kwargs.get("years") == [2025]
+
+    def test_analyze_topic_relevance_no_years_when_deps_empty(self, mock_analyze_topic):
+        """_tool_analyze_topic_relevance does not filter by years when deps.years is empty."""
+        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        ctx.deps.conferences = ["NeurIPS"]
+        ctx.deps.years = []
+
+        _tool_analyze_topic_relevance(ctx, topic="diffusion models")
+
+        call_kwargs = mock_analyze_topic.call_args[1]
+        assert "years" not in call_kwargs
+
+
+class TestRAGToolGetPaperDetails:
+    """Test the _tool_get_paper_details wrapper and its conference/year defaults."""
+
+    @pytest.fixture
+    def mock_paper_details(self):
+        """Mock mcp_server.get_paper_details to return test data."""
+        with patch("abstracts_explorer.rag.mcp_get_paper_details") as mock_gpd:
+            mock_gpd.return_value = json.dumps(
+                {
+                    "papers_found": 1,
+                    "papers": [
+                        {
+                            "uid": "abc123",
+                            "title": "Attention Is All You Need",
+                            "authors": ["Vaswani et al."],
+                            "abstract": "We propose the Transformer...",
+                            "year": 2024,
+                            "conference": "NeurIPS",
+                            "url": "https://example.com/paper",
+                        }
+                    ],
+                },
+                indent=2,
+            )
+            yield mock_gpd
+
+    def test_get_paper_details_uses_deps_conference_when_not_specified(self, mock_paper_details):
+        """_tool_get_paper_details uses ctx.deps.conferences[0] when no conference provided."""
+        from abstracts_explorer.rag import _tool_get_paper_details, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        ctx.deps.conferences = ["NeurIPS"]
+        ctx.deps.years = []
+
+        _tool_get_paper_details(ctx, title="Attention")
+
+        call_kwargs = mock_paper_details.call_args[1]
+        assert call_kwargs.get("conference") == "NeurIPS"
+
+    def test_get_paper_details_explicit_conference_overrides_deps(self, mock_paper_details):
+        """_tool_get_paper_details uses explicitly provided conference over deps."""
+        from abstracts_explorer.rag import _tool_get_paper_details, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        ctx.deps.conferences = ["NeurIPS"]
+        ctx.deps.years = []
+
+        _tool_get_paper_details(ctx, title="Attention", conference="ICLR")
+
+        call_kwargs = mock_paper_details.call_args[1]
+        assert call_kwargs.get("conference") == "ICLR"
+
+    def test_get_paper_details_uses_deps_year_when_not_specified(self, mock_paper_details):
+        """_tool_get_paper_details uses ctx.deps.years[0] when no year provided."""
+        from abstracts_explorer.rag import _tool_get_paper_details, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        ctx.deps.conferences = ["NeurIPS"]
+        ctx.deps.years = [2024]
+
+        _tool_get_paper_details(ctx, title="Attention")
+
+        call_kwargs = mock_paper_details.call_args[1]
+        assert call_kwargs.get("year") == 2024
+
+    def test_get_paper_details_explicit_year_overrides_deps(self, mock_paper_details):
+        """_tool_get_paper_details uses explicitly provided year over deps."""
+        from abstracts_explorer.rag import _tool_get_paper_details, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        ctx.deps.conferences = ["NeurIPS"]
+        ctx.deps.years = [2024]
+
+        _tool_get_paper_details(ctx, title="Attention", year=2025)
+
+        call_kwargs = mock_paper_details.call_args[1]
+        assert call_kwargs.get("year") == 2025
+
+    def test_get_paper_details_no_year_when_deps_empty(self, mock_paper_details):
+        """_tool_get_paper_details does not filter by year when deps.years is empty."""
+        from abstracts_explorer.rag import _tool_get_paper_details, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        ctx.deps.conferences = ["NeurIPS"]
+        ctx.deps.years = []
+
+        _tool_get_paper_details(ctx, title="Attention")
+
+        call_kwargs = mock_paper_details.call_args[1]
+        assert "year" not in call_kwargs
+
+    def test_get_paper_details_no_conference_when_deps_empty(self, mock_paper_details):
+        """_tool_get_paper_details does not filter by conference when deps.conferences is empty."""
+        from abstracts_explorer.rag import _tool_get_paper_details, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        ctx.deps.conferences = []
+        ctx.deps.years = []
+
+        _tool_get_paper_details(ctx, title="Attention")
+
+        call_kwargs = mock_paper_details.call_args[1]
+        assert "conference" not in call_kwargs
+
+    def test_get_paper_details_stores_tool_result(self, mock_paper_details):
+        """_tool_get_paper_details appends result to ctx.deps.tool_results."""
+        from abstracts_explorer.rag import _tool_get_paper_details, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        ctx.deps.conferences = ["NeurIPS"]
+        ctx.deps.years = []
+
+        _tool_get_paper_details(ctx, title="Attention")
+
+        assert len(ctx.deps.tool_results) == 1
+        assert ctx.deps.tool_results[0]["name"] == "get_paper_details"
+
+    def test_get_paper_details_in_agent_tools(self, mock_embeddings_manager, mock_database):
+        """_tool_get_paper_details is registered in the Pydantic AI agent."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        tool_names = list(chat.agent._function_toolset.tools.keys())
+        assert "get_paper_details" in tool_names
+
+    def test_get_paper_details_in_agent_tools_with_mcp_disabled(self, mock_embeddings_manager, mock_database):
+        """_tool_get_paper_details is available even when MCP tools are disabled."""
+        chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=False)
+        tool_names = list(chat.agent._function_toolset.tools.keys())
+        assert "get_paper_details" in tool_names

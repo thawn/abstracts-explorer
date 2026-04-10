@@ -529,4 +529,4 @@ def _scrape_papers(self, year, delay=1.0):
 
 - [CLI Reference](cli_reference.md) - Command-line interface documentation
 - [Usage Guide](usage.md) - General package usage
-- [Plugin README](../src/abstracts_explorer/plugins/README.md) - Technical plugin guide
+- [Plugin README](https://github.com/thawn/abstracts-explorer/blob/main/src/abstracts_explorer/plugins/README.md) - Technical plugin guide

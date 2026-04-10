@@ -10,6 +10,7 @@ import { sortClustersBySizeDesc } from './utils/sort-utils.js';
 import { getClusterLabelWithCount } from './utils/cluster-utils.js';
 import { getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
 import { formatPaperCard } from './paper-card.js';
+import { renderInlineMarkdownWithLatex } from './utils/markdown-utils.js';
 
 // Cluster state
 let clusterData = null;
@@ -90,15 +91,6 @@ export async function loadClusters() {
         
         // Create visualization
         visualizeClusters();
-        
-        // Auto-enable hierarchy mode for agglomerative clustering
-        if (clusterData.cluster_hierarchy && 
-            clusterData.cluster_hierarchy.tree) {
-            // Small delay to ensure visualization is rendered first
-            setTimeout(() => {
-                enableHierarchyMode();
-            }, 100);
-        }
         
     } catch (error) {
         console.error('Error loading clusters:', error);
@@ -1209,7 +1201,7 @@ export async function showClusterPaperDetails(paperId, basicInfo) {
         console.error('Error formatting loading state:', error);
         contentDiv.innerHTML = `
             <div class="bg-white rounded-lg shadow-md p-6">
-                <h4 class="text-lg font-semibold text-gray-800">${basicInfo.title}</h4>
+                <h4 class="text-lg font-semibold text-gray-800">${renderInlineMarkdownWithLatex(basicInfo.title)}</h4>
                 <p class="text-sm text-gray-500 mt-2">Loading full details...</p>
             </div>
         `;

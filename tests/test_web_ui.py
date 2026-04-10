@@ -160,21 +160,49 @@ class TestWebInterface:
         # Should return error if DB doesn't exist
         assert response.status_code in [200, 500]
 
-    def test_available_filters_includes_defaults(self, client):
-        """Test that /api/available-filters includes default_conference and default_year."""
-        from unittest.mock import patch
+    def _mock_db_for_available_filters(self, app_module, conferences_with_years):
+        """
+        Helper to create a mock database for available-filters tests.
 
+        Parameters
+        ----------
+        app_module : module
+            The web_ui.app module.
+        conferences_with_years : dict
+            Mapping of conference name to list of years (descending), e.g.
+            {"NeurIPS": [2025, 2024], "ICLR": [2024]}.
+
+        Returns
+        -------
+        MagicMock
+            Configured mock database.
+        """
+        from abstracts_explorer.database import DatabaseManager
+
+        mock_db = MagicMock()
+        mock_db.get_conference_years_from_db.return_value = conferences_with_years
+        # Delegate resolve_default_conference_year to the real implementation so
+        # the business logic is exercised via database.py.
+        mock_db.resolve_default_conference_year.side_effect = (
+            lambda conf, year: DatabaseManager.resolve_default_conference_year(mock_db, conf, year)
+        )
+        return mock_db
+
+    def test_available_filters_includes_defaults(self, client):
+        """Test that /api/available-filters honours configured defaults when DB has matching data."""
         import sys
 
         app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        mock_db = self._mock_db_for_available_filters(app_module, {"NeurIPS": [2025, 2024]})
 
         with patch.object(
             app_module, "get_available_filters", return_value={"conferences": [], "years": [], "conference_years": {}}
         ):
-            with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
-                mock_cfg.return_value.default_conference = "NeurIPS"
-                mock_cfg.return_value.default_year = 2024
-                response = client.get("/api/available-filters")
+            with patch.object(app_module, "get_database", return_value=mock_db):
+                with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
+                    mock_cfg.return_value.default_conference = "NeurIPS"
+                    mock_cfg.return_value.default_year = 2024
+                    response = client.get("/api/available-filters")
 
         assert response.status_code == 200
         data = json.loads(response.data)
@@ -182,25 +210,235 @@ class TestWebInterface:
         assert data["default_year"] == 2024
 
     def test_available_filters_empty_defaults(self, client):
-        """Test that /api/available-filters returns null default_year when not set."""
-        from unittest.mock import patch
-
+        """Test that /api/available-filters returns empty defaults when DB is empty and nothing is configured."""
         import sys
 
         app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        mock_db = self._mock_db_for_available_filters(app_module, {})
 
         with patch.object(
             app_module, "get_available_filters", return_value={"conferences": [], "years": [], "conference_years": {}}
         ):
-            with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
-                mock_cfg.return_value.default_conference = ""
-                mock_cfg.return_value.default_year = 0
-                response = client.get("/api/available-filters")
+            with patch.object(app_module, "get_database", return_value=mock_db):
+                with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
+                    mock_cfg.return_value.default_conference = ""
+                    mock_cfg.return_value.default_year = 0
+                    response = client.get("/api/available-filters")
 
         assert response.status_code == 200
         data = json.loads(response.data)
         assert data["default_conference"] == ""
         assert data["default_year"] is None
+
+    def test_available_filters_includes_db_conference_years(self, client):
+        """Test that /api/available-filters includes db_conference_years reflecting actual DB data."""
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        mock_db = self._mock_db_for_available_filters(app_module, {"NeurIPS": [2025, 2024], "ICLR": [2024]})
+
+        with patch.object(
+            app_module, "get_available_filters", return_value={"conferences": [], "years": [], "conference_years": {}}
+        ):
+            with patch.object(app_module, "get_database", return_value=mock_db):
+                with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
+                    mock_cfg.return_value.default_conference = ""
+                    mock_cfg.return_value.default_year = 0
+                    response = client.get("/api/available-filters")
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert "db_conference_years" in data
+        assert data["db_conference_years"]["NeurIPS"] == [2025, 2024]
+        assert data["db_conference_years"]["ICLR"] == [2024]
+
+    def test_available_filters_fallback_when_default_conf_no_data(self, client):
+        """Test that default_conference falls back to most recent DB entry when configured default has no data."""
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        # DB only has ICLR/2024 – configured default "ICML" has no data
+        mock_db = self._mock_db_for_available_filters(app_module, {"ICLR": [2024]})
+
+        with patch.object(
+            app_module, "get_available_filters", return_value={"conferences": [], "years": [], "conference_years": {}}
+        ):
+            with patch.object(app_module, "get_database", return_value=mock_db):
+                with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
+                    mock_cfg.return_value.default_conference = "ICML"
+                    mock_cfg.return_value.default_year = 2024
+                    response = client.get("/api/available-filters")
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["default_conference"] == "ICLR"
+        assert data["default_year"] == 2024
+
+    def test_available_filters_fallback_when_no_default_configured(self, client):
+        """Test that the most recent conference/year from DB is returned when no default is configured."""
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        # DB has NeurIPS/2024 and ICLR/2025 – ICLR/2025 is the most recent
+        mock_db = self._mock_db_for_available_filters(app_module, {"NeurIPS": [2024], "ICLR": [2025]})
+
+        with patch.object(
+            app_module, "get_available_filters", return_value={"conferences": [], "years": [], "conference_years": {}}
+        ):
+            with patch.object(app_module, "get_database", return_value=mock_db):
+                with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
+                    mock_cfg.return_value.default_conference = ""
+                    mock_cfg.return_value.default_year = 0
+                    response = client.get("/api/available-filters")
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["default_conference"] == "ICLR"
+        assert data["default_year"] == 2025
+
+    def test_available_filters_fallback_year_for_default_conf(self, client):
+        """Test that default_year falls back to the most recent DB year when configured year has no data."""
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        # DB has NeurIPS 2024 and 2025 but not 2020
+        mock_db = self._mock_db_for_available_filters(app_module, {"NeurIPS": [2025, 2024]})
+
+        with patch.object(
+            app_module, "get_available_filters", return_value={"conferences": [], "years": [], "conference_years": {}}
+        ):
+            with patch.object(app_module, "get_database", return_value=mock_db):
+                with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
+                    mock_cfg.return_value.default_conference = "NeurIPS"
+                    mock_cfg.return_value.default_year = 2020
+                    response = client.get("/api/available-filters")
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["default_conference"] == "NeurIPS"
+        assert data["default_year"] == 2025
+
+
+class TestConferenceURLRoute:
+    """Test direct URL paths to conferences (e.g., /icml, /neurips)."""
+
+    def test_valid_conference_url_by_plugin_name(self, client):
+        """Test that navigating to /neurips selects the NeurIPS conference."""
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        mock_db = MagicMock()
+        mock_db.resolve_conference_for_url.return_value = {"conference": "NeurIPS", "error": None}
+
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            response = client.get("/neurips")
+
+        assert response.status_code == 200
+        assert b"Abstracts Explorer" in response.data
+        # Check that urlConference is set in the page
+        assert b"window.urlConference" in response.data
+        assert b"NeurIPS" in response.data
+
+    def test_valid_conference_url_case_insensitive(self, client):
+        """Test that conference URLs are case-insensitive (e.g., /ICML, /icml, /Icml)."""
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        mock_db = MagicMock()
+        mock_db.resolve_conference_for_url.return_value = {"conference": "ICML", "error": None}
+
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            response = client.get("/ICML")
+
+        assert response.status_code == 200
+        assert b"window.urlConference" in response.data
+
+    def test_valid_conference_url_by_conference_name(self, client):
+        """Test that navigating to the full conference name works (e.g., /NeurIPS)."""
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        mock_db = MagicMock()
+        mock_db.resolve_conference_for_url.return_value = {"conference": "NeurIPS", "error": None}
+
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            response = client.get("/NeurIPS")
+
+        assert response.status_code == 200
+        assert b"window.urlConference" in response.data
+        assert b"NeurIPS" in response.data
+
+    def test_unknown_conference_url_shows_error(self, client):
+        """Test that an unknown conference path shows an error with available conferences."""
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        mock_db = MagicMock()
+        mock_db.resolve_conference_for_url.return_value = {
+            "conference": None,
+            "error": {
+                "message": "Conference 'unknownconf' not found.",
+                "available_conferences": ["ICLR", "NeurIPS"],
+            },
+        }
+
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            response = client.get("/unknownconf")
+
+        assert response.status_code == 200
+        assert b"Abstracts Explorer" in response.data
+        # Should contain error info
+        assert b"window.urlConferenceError" in response.data
+        assert b"unknownconf" in response.data
+        # Should NOT contain urlConference (valid conference)
+        assert b"window.urlConference =" not in response.data
+
+    def test_conference_with_no_data_shows_error(self, client):
+        """Test that a known plugin conference with no DB data shows a helpful error."""
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        mock_db = MagicMock()
+        mock_db.resolve_conference_for_url.return_value = {
+            "conference": None,
+            "error": {
+                "message": "No data available for conference 'ICML'. Please download data first.",
+                "available_conferences": ["NeurIPS"],
+            },
+        }
+
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            response = client.get("/icml")
+
+        assert response.status_code == 200
+        assert b"window.urlConferenceError" in response.data
+        assert b"No data available" in response.data
+
+    def test_conference_url_does_not_conflict_with_api(self, client):
+        """Test that /api paths still work and are not caught by the conference route."""
+        response = client.get("/api/stats")
+        # Should be handled by the stats endpoint, not the conference route
+        assert response.status_code in [200, 500]
+
+    def test_conference_url_does_not_conflict_with_health(self, client):
+        """Test that /health still works."""
+        response = client.get("/health")
+        # Should be handled by the health endpoint
+        assert response.status_code in [200, 503]
+
+    def test_root_still_works(self, client):
+        """Test that the root URL / still returns the main page without conference context."""
+        response = client.get("/")
+        assert response.status_code == 200
+        assert b"Abstracts Explorer" in response.data
+        # Should NOT contain conference URL overrides
+        assert b"window.urlConference" not in response.data
+        assert b"window.urlConferenceError" not in response.data
+
+    def test_well_known_path_returns_404(self, client):
+        """Test that /.well-known paths are not intercepted by the conference route."""
+        response = client.get("/.well-known")
+        assert response.status_code == 404
 
 
 class TestSearchEndpoint:
@@ -330,6 +568,34 @@ class TestSearchEndpoint:
         else:
             assert "error" in data
 
+    def test_search_keyword_field_filter(self, client):
+        """Test that keyword search supports field:"value" syntax."""
+        from unittest.mock import MagicMock, patch
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+
+        mock_db = MagicMock()
+        mock_papers = [
+            {"id": 1, "name": "Test Paper", "abstract": "Test abstract", "uid": "test1", "authors": ["John Smith"]}
+        ]
+        mock_db.search_papers_keyword.return_value = mock_papers
+
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            response = client.post(
+                "/api/search",
+                data=json.dumps({"query": 'authors:"John Smith"', "use_embeddings": False, "limit": 10}),
+                content_type="application/json",
+            )
+
+        mock_db.search_papers_keyword.assert_called_once()
+        call_args = mock_db.search_papers_keyword.call_args
+        assert call_args.kwargs["query"] == 'authors:"John Smith"'
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["count"] == 1
+
 
 class TestChatEndpoint:
     """Test the chat endpoint."""
@@ -418,7 +684,7 @@ class TestErrorHandling:
 
     def test_404_handler(self, client):
         """Test 404 error handler."""
-        response = client.get("/nonexistent")
+        response = client.get("/api/nonexistent")
         assert response.status_code == 404
         data = json.loads(response.data)
         assert "error" in data
@@ -1504,6 +1770,8 @@ class TestServerInitialization:
                     assert call_kwargs["reduction_method"] == "tsne"
                     assert call_kwargs["n_components"] == 2
                     assert call_kwargs["n_clusters"] is None
+                    assert call_kwargs["conference"] is None
+                    assert call_kwargs["year"] is None
 
     def test_compute_clusters_returns_404_when_no_cache(self, tmp_path):
         """Test that compute_clusters returns 404 when no cached data is available."""
@@ -1554,8 +1822,11 @@ class TestServerInitialization:
 
                     assert response.status_code == 200
                     call_kwargs = mock_db.get_clustering_cache.call_args[1]
-                    assert call_kwargs["clustering_params"]["conferences"] == ["NeurIPS"]
-                    assert call_kwargs["clustering_params"]["years"] == [2024]
+                    assert call_kwargs["conference"] == "NeurIPS"
+                    assert call_kwargs["year"] == 2024
+                    # conferences/years should NOT be in clustering_params
+                    assert "conferences" not in call_kwargs["clustering_params"]
+                    assert "years" not in call_kwargs["clustering_params"]
 
     def test_get_default_cluster_count(self):
         """Test getting default cluster count based on embeddings."""

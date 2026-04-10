@@ -1,0 +1,31 @@
+# System-level socket that opens ports 80 and 443 on behalf of the rootless
+# Podman stack.
+#
+# Why a system socket?
+#   Binding to ports below 1024 normally requires root.  Instead of lowering
+#   the kernel's unprivileged-port limit (a system-wide change), this socket
+#   unit lets systemd hold ports 80 and 443 and forward every accepted
+#   connection to the proxy container (nginx or Caddy) listening on
+#   127.0.0.1:8080 as a normal user.
+#
+# The install script (scripts/install-podman.sh) copies this file to
+# /etc/systemd/system/ and adjusts SocketUser to the installing user.
+
+[Unit]
+Description=HTTP/HTTPS sockets for Abstracts Explorer (ports 80 and 443)
+Documentation=https://abstracts-explorer.readthedocs.io/en/latest/docker.html
+
+[Socket]
+ListenStream=0.0.0.0:80
+ListenStream=0.0.0.0:443
+# SocketUser is set to the uid of the user running the install script.
+# This allows the proxy service to run without root privileges.
+SocketUser=1000
+SocketMode=0600
+Accept=no
+# Explicitly name the service to activate — without this systemd defaults to
+# abstracts-web.service (same prefix) which does not exist.
+Service=abstracts-web-proxy.service
+
+[Install]
+WantedBy=sockets.target

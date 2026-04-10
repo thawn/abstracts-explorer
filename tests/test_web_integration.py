@@ -360,16 +360,6 @@ class TestWebUIIntegration:
         # Should return 200 or 500 (if LM Studio not running)
         assert response.status_code in [200, 500]
 
-    def test_404_handling(self, web_server):
-        """Test 404 error handling."""
-        host, port, base_url = web_server
-
-        response = requests.get(f"{base_url}/nonexistent", timeout=5)
-        assert response.status_code == 404
-
-        data = response.json()
-        assert "error" in data
-
     def test_concurrent_requests(self, web_server):
         """Test that the server handles concurrent requests."""
         host, port, base_url = web_server

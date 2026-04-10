@@ -316,6 +316,30 @@
         </div>
     </div>
 
+    <!-- Conference URL Error Banner -->
+    <div id="conference-error-banner" class="hidden bg-red-50 border-l-4 border-red-400">
+        <div class="container mx-auto px-4 py-4">
+            <div class="flex items-start">
+                <div class="flex-shrink-0">
+                    <i class="fas fa-exclamation-circle text-red-400 text-2xl"></i>
+                </div>
+                <div class="ml-3 flex-1">
+                    <h3 class="text-sm font-medium text-red-800">
+                        Conference Not Available
+                    </h3>
+                    <div class="mt-2 text-sm text-red-700">
+                        <p id="conference-error-message"></p>
+                    </div>
+                    <div id="conference-error-available" class="mt-2 text-sm text-red-600"></div>
+                </div>
+                <button onclick="dismissConferenceError()"
+                    class="flex-shrink-0 ml-3 text-red-400 hover:text-red-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Main Content -->
     <main class="container mx-auto px-4 py-8">
         <!-- Tab Navigation -->
@@ -346,7 +370,7 @@
             <div class="bg-white rounded-lg shadow-md p-6 mb-6">
                 <div class="flex gap-4">
                     <div class="flex-1">
-                        <input type="text" id="search-input" placeholder="Search for abstracts by keywords..."
+                        <input type="text" id="search-input" placeholder="Search by keywords or field:&quot;value&quot; (e.g. authors:&quot;Name&quot;)..."
                             class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-600 focus:border-transparent"
                             onkeypress="if(event.key === 'Enter') searchPapers()">
                     </div>
@@ -409,6 +433,7 @@
                                 </div>
                             </div>
                         </div>
+                        <!-- MCP Tools Hint Bubble – injected by chat.js initMcpToolsHint() -->
                     </div>
 
                     <!-- Mobile: View Papers button (shown after papers are loaded) -->
@@ -729,6 +754,16 @@
     </div>
 
     <!-- JavaScript -->
+    {% if url_conference or url_conference_error %}
+    <script>
+        {% if url_conference %}
+        window.urlConference = {{ url_conference|tojson }};
+        {% endif %}
+        {% if url_conference_error %}
+        window.urlConferenceError = {{ url_conference_error|tojson }};
+        {% endif %}
+    </script>
+    {% endif %}
     <script type="module" src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 

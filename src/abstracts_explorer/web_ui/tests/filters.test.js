@@ -16,7 +16,9 @@ import {
     syncFiltersToModal,
     syncFiltersFromModal,
     handleYearChange,
-    handleConferenceChange
+    handleConferenceChange,
+    updateYearsForConference,
+    dismissConferenceError
 } from '../static/modules/filters.js';
 
 describe('Filters Module', () => {
@@ -41,8 +43,14 @@ describe('Filters Module', () => {
             <div id="search-settings-section"></div>
             <div id="chat-settings-section"></div>
             <select id="modal-session-filter" multiple></select>
+            <div id="conference-error-banner" class="hidden"></div>
+            <p id="conference-error-message"></p>
+            <div id="conference-error-available"></div>
         `;
         document.body.style.overflow = '';
+        // Clear URL conference globals
+        delete window.urlConference;
+        delete window.urlConferenceError;
     });
 
     describe('loadFilterOptions', () => {
@@ -198,6 +206,67 @@ describe('Filters Module', () => {
             expect(mockLoadStats).toHaveBeenCalled();
 
             delete window.loadStats;
+        });
+
+        it('should store db_conference_years in window.dbConferenceYearsMap', async () => {
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    conferences: ['NeurIPS', 'ICLR'],
+                    years: [2024, 2025],
+                    conference_years: { 'NeurIPS': [2024, 2025], 'ICLR': [2024] },
+                    db_conference_years: { 'NeurIPS': [2025], 'ICLR': [2024] },
+                    default_conference: 'NeurIPS',
+                    default_year: 2025
+                })
+            });
+
+            await loadFilterOptions();
+
+            expect(window.dbConferenceYearsMap).toEqual({ 'NeurIPS': [2025], 'ICLR': [2024] });
+        });
+    });
+
+    describe('updateYearsForConference', () => {
+        beforeEach(() => {
+            window.conferenceYearsMap = { 'NeurIPS': [2023, 2024, 2025], 'ICLR': [2024] };
+            window.allYears = [2023, 2024, 2025];
+
+            const conferenceSelect = document.getElementById('conference-selector');
+            const option = document.createElement('option');
+            option.value = 'NeurIPS';
+            option.textContent = 'NeurIPS';
+            conferenceSelect.appendChild(option);
+            conferenceSelect.value = 'NeurIPS';
+        });
+
+        it('should use db_conference_years years when available for the selected conference', () => {
+            window.dbConferenceYearsMap = { 'NeurIPS': [2025] };
+
+            updateYearsForConference();
+
+            const yearSelect = document.getElementById('year-selector');
+            const yearValues = Array.from(yearSelect.options).map(o => o.value);
+            // db_conference_years only has 2025 for NeurIPS; plugin has 2023, 2024, 2025
+            expect(yearValues).toContain('2025');
+            expect(yearValues).not.toContain('2023');
+            expect(yearValues).not.toContain('2024');
+        });
+
+        it('should fall back to conference_years when db_conference_years has no entry for the selected conference', () => {
+            window.dbConferenceYearsMap = {};  // no DB data for NeurIPS
+
+            updateYearsForConference();
+
+            const yearSelect = document.getElementById('year-selector');
+            const yearValues = Array.from(yearSelect.options).map(o => o.value);
+            // falls back to plugin-based years: 2023, 2024, 2025
+            expect(yearValues).toContain('2025');
+            expect(yearValues).toContain('2024');
+            expect(yearValues).toContain('2023');
         });
     });
 
@@ -398,6 +467,156 @@ describe('Filters Module', () => {
             handleConferenceChange();
             expect(window.resetClusters).toHaveBeenCalled();
             expect(window.loadClusters).toHaveBeenCalled();
+        });
+    });
+
+    describe('URL conference override', () => {
+        it('should select the URL-specified conference over the API default', async () => {
+            const mockLoadStats = jest.fn();
+            window.loadStats = mockLoadStats;
+            window.urlConference = 'ICLR';
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    conferences: ['NeurIPS', 'ICLR'],
+                    years: [2024, 2025],
+                    conference_years: { 'NeurIPS': [2024, 2025], 'ICLR': [2024] },
+                    default_conference: 'NeurIPS',
+                    default_year: 2025
+                })
+            });
+
+            await loadFilterOptions();
+
+            const conferenceSelect = document.getElementById('conference-selector');
+            expect(conferenceSelect.value).toBe('ICLR');
+            expect(mockLoadStats).toHaveBeenCalled();
+
+            delete window.loadStats;
+        });
+
+        it('should clear window.urlConference after applying it', async () => {
+            window.urlConference = 'NeurIPS';
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    conferences: ['NeurIPS'],
+                    years: [2025],
+                    conference_years: { 'NeurIPS': [2025] },
+                    default_conference: 'NeurIPS',
+                    default_year: 2025
+                })
+            });
+
+            await loadFilterOptions();
+
+            expect(window.urlConference).toBeUndefined();
+        });
+
+        it('should fall back to default when URL conference is not in options', async () => {
+            window.urlConference = 'UnknownConf';
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    conferences: ['NeurIPS'],
+                    years: [2025],
+                    conference_years: { 'NeurIPS': [2025] },
+                    default_conference: 'NeurIPS',
+                    default_year: 2025
+                })
+            });
+
+            await loadFilterOptions();
+
+            const conferenceSelect = document.getElementById('conference-selector');
+            // URL conference not found in options, so API default should be used
+            expect(conferenceSelect.value).toBe('NeurIPS');
+        });
+    });
+
+    describe('conference error banner', () => {
+        it('should show error banner when urlConferenceError is set', async () => {
+            window.urlConferenceError = {
+                message: "Conference 'xyz' not found.",
+                available_conferences: ['NeurIPS', 'ICLR']
+            };
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    conferences: ['NeurIPS'],
+                    years: [2025],
+                    conference_years: { 'NeurIPS': [2025] }
+                })
+            });
+
+            await loadFilterOptions();
+
+            const banner = document.getElementById('conference-error-banner');
+            expect(banner.classList.contains('hidden')).toBe(false);
+
+            const message = document.getElementById('conference-error-message');
+            expect(message.textContent).toContain('xyz');
+
+            const available = document.getElementById('conference-error-available');
+            expect(available.innerHTML).toContain('NeurIPS');
+            expect(available.innerHTML).toContain('ICLR');
+        });
+
+        it('should clear urlConferenceError after showing', async () => {
+            window.urlConferenceError = {
+                message: 'Test error',
+                available_conferences: []
+            };
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    conferences: [],
+                    years: [],
+                    conference_years: {}
+                })
+            });
+
+            await loadFilterOptions();
+
+            expect(window.urlConferenceError).toBeUndefined();
+        });
+    });
+
+    describe('dismissConferenceError', () => {
+        it('should hide the conference error banner', () => {
+            const banner = document.getElementById('conference-error-banner');
+            banner.classList.remove('hidden');
+
+            dismissConferenceError();
+
+            expect(banner.classList.contains('hidden')).toBe(true);
+        });
+
+        it('should do nothing when banner does not exist', () => {
+            document.getElementById('conference-error-banner').remove();
+
+            // Should not throw
+            expect(() => dismissConferenceError()).not.toThrow();
         });
     });
 });

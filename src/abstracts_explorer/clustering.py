@@ -1,7 +1,4 @@
 """
-Clustering Module
-=================
-
 This module provides functionality to cluster and visualize paper embeddings
 using dimensionality reduction and clustering algorithms from scikit-learn.
 
@@ -1887,12 +1884,9 @@ def compute_clusters_with_cache(
         cache_n_clusters: Optional[int] = n_clusters
         cache_params = clustering_kwargs.copy() if clustering_kwargs else {}
 
-        # Include conference/year filters in the cache key so different
-        # subsets are cached separately.
-        if conferences:
-            cache_params["conferences"] = sorted(conferences)
-        if years:
-            cache_params["years"] = sorted([int(y) for y in years])
+        # Determine conference/year for cache lookup (single values only)
+        cache_conference = conferences[0] if conferences and len(conferences) == 1 else None
+        cache_year = years[0] if years and len(years) == 1 else None
 
         # Special handling for agglomerative with distance_threshold
         if clustering_method.lower() == "agglomerative" and "distance_threshold" in cache_params:
@@ -1908,6 +1902,8 @@ def compute_clusters_with_cache(
             clustering_method=clustering_method,
             n_clusters=cache_n_clusters,
             clustering_params=cache_params if cache_params else None,
+            conference=cache_conference,
+            year=cache_year,
         )
 
         if exact_cached:
@@ -1920,6 +1916,8 @@ def compute_clusters_with_cache(
             clustering_method=clustering_method,
             n_clusters=cache_n_clusters,
             clustering_params=cache_params if cache_params else None,
+            conference=cache_conference,
+            year=cache_year,
         )
 
         if clustering_cached:
@@ -1969,16 +1967,7 @@ def compute_clusters_with_cache(
 
             # Save the new result (with new reduction method) to cache
             try:
-                save_n_clusters: Optional[int] = n_clusters
                 save_params = clustering_kwargs.copy() if clustering_kwargs else {}
-                if conferences:
-                    save_params["conferences"] = sorted(conferences)
-                if years:
-                    save_params["years"] = sorted([int(y) for y in years])
-                if clustering_method.lower() == "agglomerative" and "distance_threshold" in save_params:
-                    save_n_clusters = None
-                elif clustering_method.lower() == "dbscan":
-                    save_n_clusters = None
 
                 database.save_clustering_cache(
                     embedding_model=embedding_model,
@@ -1986,8 +1975,10 @@ def compute_clusters_with_cache(
                     n_components=n_components,
                     clustering_method=clustering_method,
                     results=results,
-                    n_clusters=save_n_clusters,
+                    n_clusters=n_clusters,
                     clustering_params=save_params if save_params else None,
+                    conference=cache_conference,
+                    year=cache_year,
                 )
             except Exception as e:
                 logger.warning(f"Failed to save clustering cache: {e}")
@@ -2080,20 +2071,11 @@ def compute_clusters_with_cache(
     # Save to cache if no limit was applied
     if not limit:
         try:
-            save_n_clusters = n_clusters
             save_params = clustering_kwargs.copy() if clustering_kwargs else {}
 
-            # Include conference/year filters in cache params
-            if conferences:
-                save_params["conferences"] = sorted(conferences)
-            if years:
-                save_params["years"] = sorted([int(y) for y in years])
-
-            # Special handling for agglomerative with distance_threshold
-            if clustering_method.lower() == "agglomerative" and "distance_threshold" in save_params:
-                save_n_clusters = None  # Don't use n_clusters as cache key when using distance_threshold
-            elif clustering_method.lower() == "dbscan":
-                save_n_clusters = None  # DBSCAN doesn't use n_clusters
+            # Determine conference/year for cache storage
+            save_conference = conferences[0] if conferences and len(conferences) == 1 else None
+            save_year = years[0] if years and len(years) == 1 else None
 
             database.save_clustering_cache(
                 embedding_model=embedding_model,
@@ -2101,8 +2083,10 @@ def compute_clusters_with_cache(
                 n_components=n_components,
                 clustering_method=clustering_method,
                 results=results,
-                n_clusters=save_n_clusters,
+                n_clusters=n_clusters,
                 clustering_params=save_params if save_params else None,
+                conference=save_conference,
+                year=save_year,
             )
         except Exception as e:
             logger.warning(f"Failed to save clustering cache: {e}")

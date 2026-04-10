@@ -1,0 +1,7 @@
+# Internal bridge network for all Abstracts Explorer containers.
+# No ports are exposed to the host directly; ingress is handled by the
+# reverse-proxy container (nginx or Caddy) which publishes 127.0.0.1:8080
+# only — the system-level socket proxy then makes it reachable on port 80/443.
+
+[Network]
+Driver=bridge

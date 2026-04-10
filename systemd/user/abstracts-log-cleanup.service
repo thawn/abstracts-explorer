@@ -1,0 +1,9 @@
+[Unit]
+Description=Delete Abstracts Explorer logs older than 7 days (GDPR)
+Documentation=https://abstracts-explorer.readthedocs.io/en/latest/docker.html
+
+[Service]
+Type=oneshot
+# Vacuums the entire user journal to 7 days.  On a dedicated server running
+# only Abstracts Explorer this is equivalent to per-service retention.
+ExecStart=journalctl --user --vacuum-time=7d

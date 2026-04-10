@@ -1,12 +1,23 @@
 # Abstracts Explorer Documentation
 
-Welcome to the documentation for Abstracts Explorer! This package provides tools for downloading, storing, and analyzing NeurIPS conference paper abstracts.
+Welcome to the documentation for Abstracts Explorer! This package provides tools for downloading, storing, and analyzing conference paper abstracts using LLM-based semantic search.
+
+## Web Interface
+
+Abstracts Explorer includes a browser-based UI for searching, chatting, rating,
+and visualizing conference abstracts.
+
+![Web UI Screenshot](images/screenshot.png)
+
+The interface provides four tabs — **Search**, **AI Chat**, **Interesting Papers**,
+and **Clusters** — described in detail in the [Web Interface guide](web_ui.md).
+A live demo is available at [abstracts.hzdr.de](https://abstracts.hzdr.de).
 
 ## Features
 
-- **Download NeurIPS abstracts** from the official OpenReview API
+- **Download conference abstracts** from multiple sources (NeurIPS, ICLR, ICML, and more via plugins)
 - **Plugin system** for downloading from workshops and other conferences
-- **Store abstracts** in a SQLite database with full metadata
+- **Store abstracts** in a SQL database (SQLite or PostgreSQL) with full metadata
 - **Create vector embeddings** for semantic search
 - **Cluster and visualize** paper embeddings with multiple algorithms
 - **MCP server** for LLM-based cluster analysis and topic exploration
@@ -28,16 +39,22 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync --all-extras
 ```
 
-Download abstracts for NeurIPS 2025:
+Download conference abstracts:
 
 ```bash
+# Download abstracts for a specific conference and year
 uv run abstracts-explorer download --year 2025
+
+# Or download from a workshop using plugins
+uv run abstracts-explorer download --plugin ml4ps --year 2025
 ```
 
-Or download from a workshop using plugins:
+Alternatively, download pre-built data from an OCI registry (no LLM backend required):
 
 ```bash
-uv run abstracts-explorer download --plugin ml4ps --year 2025
+uv run abstracts-explorer registry download \
+  -r ghcr.io/thawn/abstracts-data \
+  --conference neurips --year 2025
 ```
 
 Create embeddings for semantic search:
@@ -65,6 +82,7 @@ uv run abstracts-explorer chat
 :caption: User Guide
 
 installation
+web_ui
 docker
 configuration
 usage
@@ -81,8 +99,17 @@ mcp_server
 api/modules
 api/database
 api/embeddings
+api/clustering
 api/rag
 api/config
+api/plugin
+api/registry
+api/mcp_server
+api/mcp_tools
+api/export_utils
+api/paper_utils
+api/db_models
+api/evaluation
 ```
 
 ```{toctree}
@@ -90,6 +117,7 @@ api/config
 :caption: Development
 
 contributing
+branching_strategy
 ```
 
 ## Indices and tables

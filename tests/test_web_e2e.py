@@ -11,21 +11,16 @@ import threading
 import sys
 import os
 from pathlib import Path
-from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.service import Service as ChromeService
-from selenium.webdriver.chrome.options import Options as ChromeOptions
-from selenium.webdriver.firefox.service import Service as FirefoxService
-from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from selenium.common.exceptions import TimeoutException
-from webdriver_manager.chrome import ChromeDriverManager
-from webdriver_manager.firefox import GeckoDriverManager
-from webdriver_manager.core.os_manager import ChromeType
 from abstracts_explorer.database import DatabaseManager
-from tests.helpers import find_free_port
+from tests.helpers import (
+    find_free_port,
+    create_webdriver,
+)
 from tests.conftest import set_test_db
 
 # Add src to path for imports
@@ -33,19 +28,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 # Constants for E2E tests
 MOCK_EMBEDDING_DIMENSION = 4096  # Standard dimension for test embeddings
-
-# Module-level cache for driver paths to ensure single installation per session
-# This prevents redundant downloads and installations when running multiple E2E tests
-# The driver is only installed when:
-# 1. Tests with @pytest.mark.e2e are actually executed (not skipped)
-# 2. The browser fixture is requested by a test
-# 3. The driver hasn't been installed yet in this test session
-_driver_cache = {
-    "chrome": None,
-    "firefox": None,
-    "chrome_available": None,
-    "firefox_available": None,
-}
 
 
 @pytest.fixture(scope="module")
@@ -462,148 +444,6 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
         del os.environ["COLLECTION_NAME"]
 
 
-def _check_chrome_available():
-    """
-    Check if Chrome browser is available for testing.
-
-    This check does NOT install the driver - it only verifies the browser exists.
-
-    Returns
-    -------
-    bool
-        True if Chrome is available, False otherwise
-    """
-    # Use cached result if available
-    if _driver_cache["chrome_available"] is not None:
-        return _driver_cache["chrome_available"]
-
-    try:
-        # Just check if Chrome binary exists
-        import shutil
-
-        chrome_binary = shutil.which("chromium") or shutil.which("chrome") or shutil.which("google-chrome")
-        result = chrome_binary is not None
-        _driver_cache["chrome_available"] = result
-        return result
-    except Exception:
-        _driver_cache["chrome_available"] = False
-        return False
-
-
-def _check_firefox_available():
-    """
-    Check if Firefox browser is available for testing.
-
-    This check does NOT install the driver - it only verifies the browser exists.
-
-    Returns
-    -------
-    bool
-        True if Firefox is available, False otherwise
-    """
-    # Use cached result if available
-    if _driver_cache["firefox_available"] is not None:
-        return _driver_cache["firefox_available"]
-
-    try:
-        # Just check if Firefox binary exists
-        import shutil
-
-        firefox_binary = shutil.which("firefox")
-        result = firefox_binary is not None
-        _driver_cache["firefox_available"] = result
-        return result
-    except Exception:
-        _driver_cache["firefox_available"] = False
-        return False
-
-
-def _get_browser_preference():
-    """
-    Get browser preference from environment variable.
-
-    Returns
-    -------
-    str
-        Browser preference: 'chrome', 'firefox', or 'auto'
-    """
-    return os.environ.get("E2E_BROWSER", "auto").lower()
-
-
-def _create_chrome_driver():
-    """
-    Create a Chrome WebDriver instance.
-
-    Installs the driver only once per test session using a cache.
-
-    Returns
-    -------
-    webdriver.Chrome
-        Chrome WebDriver instance
-
-    Raises
-    ------
-    Exception
-        If driver installation or browser creation fails
-    """
-    chrome_options = ChromeOptions()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--window-size=1920,1080")
-
-    # Install driver only once per session
-    if _driver_cache["chrome"] is None:
-        try:
-            _driver_cache["chrome"] = ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install()
-        except Exception as e:
-            # If driver installation fails (e.g., network issues), mark as unavailable
-            _driver_cache["chrome_available"] = False
-            raise Exception(f"Failed to install ChromeDriver: {e}")
-
-    service = ChromeService(_driver_cache["chrome"])
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-    driver.implicitly_wait(10)
-    return driver
-
-
-def _create_firefox_driver():
-    """
-    Create a Firefox WebDriver instance.
-
-    Installs the driver only once per test session using a cache.
-
-    Returns
-    -------
-    webdriver.Firefox
-        Firefox WebDriver instance
-
-    Raises
-    ------
-    Exception
-        If driver installation or browser creation fails
-    """
-    firefox_options = FirefoxOptions()
-    firefox_options.add_argument("--headless")
-    firefox_options.add_argument("--width=1920")
-    firefox_options.add_argument("--height=1080")
-
-    # Install driver only once per session
-    if _driver_cache["firefox"] is None:
-        try:
-            _driver_cache["firefox"] = GeckoDriverManager().install()
-        except Exception as e:
-            # If driver installation fails (e.g., network issues), mark as unavailable
-            _driver_cache["firefox_available"] = False
-            raise Exception(f"Failed to install GeckoDriver: {e}")
-
-    service = FirefoxService(_driver_cache["firefox"])
-    driver = webdriver.Firefox(service=service, options=firefox_options)
-    driver.implicitly_wait(10)
-    return driver
-
-
 @pytest.fixture
 def browser():
     """
@@ -630,52 +470,8 @@ def browser():
     # Use Firefox instead of Chrome
     E2E_BROWSER=firefox pytest tests/test_web_e2e.py -m e2e
     """
-    browser_pref = _get_browser_preference()
-    driver = None
-
-    if browser_pref == "chrome":
-        # User explicitly wants Chrome
-        if not _check_chrome_available():
-            pytest.skip("Chrome browser not available for E2E testing")
-        try:
-            driver = _create_chrome_driver()
-        except Exception as e:
-            pytest.skip(f"Failed to create Chrome driver: {e}")
-    elif browser_pref == "firefox":
-        # User explicitly wants Firefox
-        if not _check_firefox_available():
-            pytest.skip("Firefox browser not available for E2E testing")
-        try:
-            driver = _create_firefox_driver()
-        except Exception as e:
-            pytest.skip(f"Failed to create Firefox driver: {e}")
-    else:
-        # Auto mode: try Chrome first, then Firefox
-        if _check_chrome_available():
-            try:
-                driver = _create_chrome_driver()
-            except Exception:
-                # Try Firefox as fallback
-                if _check_firefox_available():
-                    try:
-                        driver = _create_firefox_driver()
-                    except Exception as e:
-                        pytest.skip(
-                            f"Failed to create browser drivers: Chrome and Firefox both failed. Last error: {e}"
-                        )
-                else:
-                    pytest.skip("Chrome driver installation failed and Firefox not available")
-        elif _check_firefox_available():
-            try:
-                driver = _create_firefox_driver()
-            except Exception as e:
-                pytest.skip(f"Failed to create Firefox driver: {e}")
-        else:
-            pytest.skip("Neither Chrome nor Firefox browser available for E2E testing")
-
+    driver = create_webdriver()
     yield driver
-
-    # Cleanup
     driver.quit()
 
 

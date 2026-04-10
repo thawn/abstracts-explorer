@@ -188,3 +188,32 @@ Ensure you're using Python 3.11 or higher:
 ```bash
 python --version
 ```
+
+## Quick Start: Download Pre-Built Data from a Registry
+
+Instead of downloading conference data from source APIs and generating embeddings locally, you can download pre-built paper databases, embeddings, and clustering caches from an OCI-compatible container registry. This is the fastest way to get started with a fully populated instance.
+
+```bash
+# Download all available conference data (e.g. NeurIPS, ICLR, ICML)
+uv run abstracts-explorer registry download \
+  -r ghcr.io/thawn/abstracts-data \
+  --conference all \
+  --embedding-model text-embedding-qwen3-embedding-4b
+
+# Or download a specific conference and year
+uv run abstracts-explorer registry download \
+  -r ghcr.io/thawn/abstracts-data \
+  --conference neurips --year 2025
+
+# List available data in the registry
+uv run abstracts-explorer registry list \
+  -r ghcr.io/thawn/abstracts-data
+```
+
+Authentication may be required depending on the registry. Set your token via the `.env` file or environment variable:
+
+```bash
+export GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+```
+
+See the [Registry documentation](registry.md) for full details on downloading and uploading data.

@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily log cleanup for Abstracts Explorer (GDPR 7-day retention)
+Documentation=https://abstracts-explorer.readthedocs.io/en/latest/docker.html
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+Unit=abstracts-log-cleanup.service
+
+[Install]
+WantedBy=timers.target

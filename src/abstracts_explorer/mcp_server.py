@@ -258,10 +258,10 @@ def _lookup_clustering_cache(
     clustering_params: Dict[str, Any] = {
         "linkage": "ward",
         "distance_threshold": 150.0,
-        "conferences": sorted([conference]),
     }
-    if years:
-        clustering_params["years"] = sorted([int(y) for y in years])
+
+    # Determine single year for column-based lookup
+    cache_year = years[0] if years and len(years) == 1 else None
 
     cached = db.get_clustering_cache(
         embedding_model=config.embedding_model,
@@ -270,18 +270,21 @@ def _lookup_clustering_cache(
         clustering_method="agglomerative",
         n_clusters=None,
         clustering_params=clustering_params,
+        conference=conference,
+        year=cache_year,
     )
 
     # Fallback: if per-year cache not found, try the all-years cache
     if not cached and years:
-        fallback_params = {k: v for k, v in clustering_params.items() if k != "years"}
         cached = db.get_clustering_cache(
             embedding_model=config.embedding_model,
             reduction_method="tsne",
             n_components=2,
             clustering_method="agglomerative",
             n_clusters=None,
-            clustering_params=fallback_params,
+            clustering_params=clustering_params,
+            conference=conference,
+            year=None,
         )
 
     return cached
@@ -514,6 +517,83 @@ def merge_where_clause_with_conference(
     return where_filter
 
 
+def merge_where_clause_with_years(
+    where: Optional[Dict[str, Any]],
+    years: Optional[List[int]],
+) -> Optional[Dict[str, Any]]:
+    """
+    Merge a WHERE clause with a years filter.
+
+    This helper function properly combines custom WHERE clauses with a years
+    filter, avoiding duplicates and handling nested operators correctly.
+
+    Parameters
+    ----------
+    where : dict, optional
+        Custom WHERE clause from user
+    years : list of int, optional
+        List of years to filter by
+
+    Returns
+    -------
+    dict or None
+        Merged WHERE clause, or None if both inputs are None
+
+    Raises
+    ------
+    ValueError
+        If WHERE clause is not a dict
+    """
+    # Validate where parameter
+    if where is not None and not isinstance(where, dict):
+        raise ValueError(f"WHERE clause must be a dict, got {type(where).__name__}")
+
+    # If no years, just return a deep copy of WHERE clause (or None)
+    if not years:
+        return deepcopy(where) if where else None
+
+    # convert years to string because ChromaDB metadata is stored as strings
+    years_str: List[str] = [str(y) for y in years]
+
+    # If no WHERE clause, just return years filter
+    if not where:
+        return {"year": {"$in": years_str}}
+
+    # Check if year filter already exists anywhere in WHERE clause
+    def has_year_filter(obj: Any) -> bool:
+        """Recursively check if year filter exists in nested structure."""
+        if isinstance(obj, dict):
+            if "year" in obj:
+                return True
+            # Check nested values
+            for value in obj.values():
+                if has_year_filter(value):
+                    return True
+        elif isinstance(obj, list):
+            for item in obj:
+                if has_year_filter(item):
+                    return True
+        return False
+
+    # If year filter already in WHERE clause, don't add again - return deep copy
+    if has_year_filter(where):
+        return deepcopy(where)
+
+    # Need to merge years with WHERE clause - use deep copy to prevent mutations
+    where_filter = deepcopy(where)
+
+    year_filter = {"year": {"$in": years_str}}
+
+    # If WHERE already has $and, append to it
+    if "$and" in where_filter:
+        where_filter["$and"].append(year_filter)
+    else:
+        # Create new $and with existing filter and year filter
+        where_filter = {"$and": [where_filter, year_filter]}
+
+    return where_filter
+
+
 @mcp.tool()
 def get_topic_evolution(
     topic_keywords: str,
@@ -532,6 +612,9 @@ def get_topic_evolution(
     computes the relative percentage of matching papers with respect to
     the total number of papers for that conference and year.
     At least one conference must be specified.
+
+    The chat frontend can use the returned data to generate a plot with
+    plotly.js showing the topic evolution over time.
 
     Parameters
     ----------
@@ -714,10 +797,8 @@ def search_papers(
         Custom ChromaDB WHERE clause for filtering results by metadata.
         Supports ChromaDB query operators like $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin.
         Logical operators $and, $or are also supported.
-        Examples:
-          {"year": 2025}  # Filter by specific year
-          {"session": {"$in": ["Oral Session 1", "Oral Session 2"]}}  # Multiple sessions
-          {"$and": [{"year": {"$gte": 2024}}, {"conference": "NeurIPS"}]}  # Multiple conditions
+        Examples: ``{"year": 2025}``, ``{"session": {"$in": ["Oral Session 1", "Oral Session 2"]}}``,
+        ``{"$and": [{"year": {"$gte": 2024}}, {"conference": "NeurIPS"}]}``.
         Note: If 'conference' parameter is provided, it will be merged with this WHERE clause.
     collection_name : str, optional
         Name of ChromaDB collection
@@ -754,6 +835,7 @@ def search_papers(
         # Build metadata filter using helper function
         try:
             where_filter = merge_where_clause_with_conference(where, conference)
+            where_filter = merge_where_clause_with_years(where_filter, years)
         except ValueError as e:
             logger.error(f"Invalid WHERE clause: {str(e)}")
             return json.dumps({"error": f"Invalid WHERE clause: {str(e)}"}, indent=2)
@@ -768,7 +850,7 @@ def search_papers(
 
         results = em.search_similar(
             query=topic_keywords,
-            n_results=n_results * 3 if years else n_results,  # Get more if filtering by year
+            n_results=n_results,
             where=where_filter,
         )
 
@@ -777,29 +859,24 @@ def search_papers(
         if results["ids"] and results["ids"][0]:
             for idx, paper_id in enumerate(results["ids"][0]):
                 metadata = results["metadatas"][0][idx]
-                year = metadata.get("year")
 
-                # Filter by years list if provided
-                if years is None or (year and year in years):
-                    papers.append(
-                        {
-                            "uid": paper_id,
-                            "title": metadata.get("title", ""),
-                            "authors": metadata.get("authors", []),
-                            "year": year,
-                            "conference": metadata.get("conference", ""),
-                            "session": metadata.get("session", ""),
-                            "abstract": (
-                                results["documents"][0][idx]
-                                if "documents" in results and results["documents"][0]
-                                else ""
-                            ),
-                            "relevance_score": 1.0 - results["distances"][0][idx] if "distances" in results else None,
-                        }
-                    )
+                papers.append(
+                    {
+                        "uid": paper_id,
+                        "title": metadata.get("title", ""),
+                        "authors": metadata.get("authors", []),
+                        "year": metadata.get("year"),
+                        "conference": metadata.get("conference", ""),
+                        "session": metadata.get("session", ""),
+                        "abstract": (
+                            results["documents"][0][idx] if "documents" in results and results["documents"][0] else ""
+                        ),
+                        "relevance_score": 1.0 - results["distances"][0][idx] if "distances" in results else None,
+                    }
+                )
 
-                    if len(papers) >= n_results:
-                        break
+                if len(papers) >= n_results:
+                    break
 
         result = {
             "topic": topic_keywords,
@@ -829,7 +906,7 @@ def get_paper_details(
     limit: int = 5,
 ) -> str:
     """
-    Get detailed information about papers from the database.
+    Get detailed information about papers from the database. Use for folow-up questions after searching for papers using semantic search.
 
     Returns full paper metadata including authors, URLs, PDF links, session info,
     keywords, awards, and other details stored in the database.
@@ -1092,6 +1169,9 @@ def get_cluster_visualization(
 
     When multiple conferences are provided, each conference is looked up
     individually and results are combined.
+
+    The chat frontend can use the returned data to generate a plot with
+    plotly.js showing the clusters.
 
     Parameters
     ----------

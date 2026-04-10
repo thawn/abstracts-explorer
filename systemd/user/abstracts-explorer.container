@@ -1,0 +1,48 @@
+# Abstracts Explorer application container.
+# Documentation: https://abstracts-explorer.readthedocs.io/en/latest/docker.html
+#
+# Shared by both the nginx and Caddy TLS variants.  Configuration is loaded
+# from the environment file ~/abstracts-explorer/abstracts-explorer.env.
+# Secrets (API tokens, database password) are injected at runtime via Podman
+# secrets — see the install script or docs for setup.
+
+[Unit]
+Description=Abstracts Explorer application
+After=abstracts-postgres.service abstracts-chromadb.service abstracts-data-volume.service
+Requires=abstracts-postgres.service abstracts-chromadb.service abstracts-data-volume.service
+
+[Container]
+Image=ghcr.io/thawn/abstracts-explorer:latest
+ContainerName=abstracts-explorer
+Network=abstracts.network
+
+Volume=abstracts-data.volume:/app/data
+
+# Load all configurable environment variables from a single file.
+EnvironmentFile=%h/abstracts-explorer/abstracts-explorer.env
+
+# Database password injected via Podman secret.  The application assembles
+# the full PostgreSQL connection string at startup from the POSTGRES_* env
+# vars in the env file and the ABSTRACTS_DB_PASSWORD secret (see config.py).
+Secret=postgres-password,type=env,target=ABSTRACTS_DB_PASSWORD
+
+# LLM backend API token injected via Podman secret (never stored in plain text).
+Secret=llm-backend-auth-token,type=env,target=LLM_BACKEND_AUTH_TOKEN
+
+# Optional: uncomment after creating the secret with
+#   printf '%s' 'YOUR_GITHUB_TOKEN' | podman secret create github-token -
+# See https://abstracts-explorer.readthedocs.io/en/latest/docker.html
+# Secret=github-token,type=env,target=GITHUB_TOKEN
+
+HealthCmd=curl -sf http://localhost:5000/health
+HealthInterval=30s
+HealthTimeout=10s
+HealthRetries=3
+HealthStartPeriod=15s
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=120
+
+[Install]
+WantedBy=default.target

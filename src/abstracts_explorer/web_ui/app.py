@@ -11,7 +11,7 @@ import sys
 import logging
 import json
 from pathlib import Path
-from flask import Flask, render_template, request, jsonify, g, send_file
+from flask import Flask, render_template, request, jsonify, g, send_file, abort
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -147,7 +147,61 @@ def index():
     str
         Rendered HTML template
     """
-    return render_template("index.html", version=__version__, imprint_link=_config.imprint_link)
+    return render_template(
+        "index.html",
+        version=__version__,
+        imprint_link=_config.imprint_link,
+        url_conference=None,
+        url_conference_error=None,
+    )
+
+
+@app.route("/<conference_name>")
+def conference_index(conference_name):
+    """
+    Render the main page with a specific conference pre-selected.
+
+    Resolves the conference name case-insensitively against known
+    conferences from plugins and the database. When no match is found,
+    renders the page with an error listing the available conferences.
+
+    Paths starting with a dot (e.g. ``.well-known``) are excluded so
+    that ACME challenges and other hidden-path conventions are not
+    intercepted.
+
+    Parameters
+    ----------
+    conference_name : str
+        Conference name from the URL path (case-insensitive).
+
+    Returns
+    -------
+    str
+        Rendered HTML template with conference context
+    """
+    # Don't intercept hidden paths (e.g. .well-known used by Let's Encrypt)
+    if conference_name.startswith("."):
+        abort(404)
+
+    try:
+        database = get_database()
+        result = database.resolve_conference_for_url(conference_name)
+        return render_template(
+            "index.html",
+            version=__version__,
+            imprint_link=_config.imprint_link,
+            url_conference=result["conference"],
+            url_conference_error=result["error"],
+        )
+    except Exception as e:
+        logger.error(f"Error in conference URL route: {e}", exc_info=True)
+        return render_template(
+            "index.html",
+            version=__version__,
+            imprint_link=_config.imprint_link,
+            url_conference=None,
+            url_conference_error=None,
+        )
 
 
 @app.route("/health")
@@ -294,24 +348,38 @@ def get_filters():
 @app.route("/api/available-filters")
 def get_available_filters_endpoint():
     """
-    Get available conferences and years from registered plugins.
+    Get available conferences and years from registered plugins and the database.
 
     Returns a mapping of conferences to their supported years based on
-    the registered downloader plugins.
+    the registered downloader plugins, plus a db_conference_years mapping that
+    reflects what is actually stored in the database. Defaults are chosen so that
+    the selected conference/year always contains data.
 
     Returns
     -------
     dict
         Dictionary with:
-        - conferences: list of conference names
+        - conferences: list of conference names (from plugins)
         - years: list of all unique years across all plugins
-        - conference_years: dict mapping conference names to their supported years
+        - conference_years: dict mapping conference names to their supported years (from plugins)
+        - db_conference_years: dict mapping conference names to years that have data in the DB
+        - default_conference: conference to pre-select (guaranteed to have DB data, if any exists)
+        - default_year: year to pre-select (guaranteed to have DB data for the default conference)
     """
     try:
         filters = get_available_filters()
         config = get_config()
-        filters["default_conference"] = config.default_conference
-        filters["default_year"] = config.default_year if config.default_year else None
+        database = get_database()
+
+        db_conference_years = database.get_conference_years_from_db()
+        filters["db_conference_years"] = db_conference_years
+
+        configured_conf = config.default_conference or ""
+        configured_year = config.default_year if config.default_year else None
+        effective_conf, effective_year = database.resolve_default_conference_year(configured_conf, configured_year)
+
+        filters["default_conference"] = effective_conf
+        filters["default_year"] = effective_year
         return jsonify(filters)
     except Exception as e:
         logger.error(f"Error in available-filters endpoint: {e}", exc_info=True)
@@ -575,12 +643,12 @@ def compute_clusters():
         # Get current embedding model
         current_model = config.embedding_model
 
-        # Fixed clustering parameters
+        # Fixed clustering parameters (only true clustering params, not conference/year)
         clustering_params = {"linkage": "ward", "distance_threshold": 150.0}
-        if conferences:
-            clustering_params["conferences"] = sorted(conferences)
-        if years:
-            clustering_params["years"] = sorted([int(y) for y in years])
+
+        # Determine single conference/year for cache lookup
+        cache_conference = conferences[0] if conferences and len(conferences) == 1 else None
+        cache_year = years[0] if years and len(years) == 1 else None
 
         # Look up pre-computed results from the cache
         cached = database.get_clustering_cache(
@@ -590,6 +658,8 @@ def compute_clusters():
             clustering_method="agglomerative",
             n_clusters=None,
             clustering_params=clustering_params if clustering_params else None,
+            conference=cache_conference,
+            year=cache_year,
         )
 
         if cached:

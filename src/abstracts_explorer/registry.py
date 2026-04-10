@@ -44,12 +44,14 @@ import shutil
 import sqlite3
 import tempfile
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import oras.client
 import oras.defaults
 import oras.oci
 import oras.provider
+import requests
+from packaging.version import InvalidVersion, Version
 
 from abstracts_explorer._version import __version__
 from abstracts_explorer.config import get_config
@@ -159,6 +161,55 @@ def _build_tag(
         tag = safe_name
     tag = f"{tag}_{_sanitize_str_for_oci_tag(embedding_model)}_{_sanitize_str_for_oci_tag(version)}"
     return tag
+
+
+def _parse_version_from_tag(tag: str) -> Optional[Version]:
+    """
+    Extract and parse the version component from an OCI tag.
+
+    OCI tags in this project have the format
+    ``{conference}[-{year}]_{model}_{version}``.  The version is always the
+    last ``_``-separated component.  Dots are preserved by the sanitization
+    step so a normal semantic-version string (e.g. ``0.4.1``) round-trips
+    unchanged.
+
+    OCI sanitization (``_sanitize_str_for_oci_tag``) replaces the ``+``
+    PEP 440 local-version separator with ``-``, so dev versions such as
+    ``0.4.6.dev16+g7005b7837`` appear in tags as ``0.4.6.dev16-g7005b7837``.
+    This function recovers the original version by trying all ``-`` → ``+``
+    substitution positions until one produces a valid PEP 440 version.
+
+    Parameters
+    ----------
+    tag : str
+        OCI tag string (without repository prefix), e.g.
+        ``neurips-2024_text-embedding-ada-002_0.4.1`` or
+        ``ml4ps-neurips-2022_model_0.4.6.dev16-g7005b7837``.
+
+    Returns
+    -------
+    packaging.version.Version or None
+        Parsed version, or ``None`` if the tag contains no ``_`` separator
+        or the version component cannot be parsed.
+    """
+    if "_" not in tag:
+        return None
+    raw = tag.rsplit("_", 1)[-1]
+    # Fast path: standard release or pre-release without a local segment.
+    try:
+        return Version(raw)
+    except InvalidVersion:
+        pass
+    # OCI sanitization replaces '+' (PEP 440 local-version separator) with '-'.
+    # Try restoring '+' at each '-' position until we find a valid version.
+    parts = raw.split("-")
+    for i in range(1, len(parts)):
+        candidate = "-".join(parts[:i]) + "+" + "-".join(parts[i:])
+        try:
+            return Version(candidate)
+        except InvalidVersion:
+            continue
+    return None
 
 
 class RegistryClient:
@@ -1362,3 +1413,252 @@ class RegistryClient:
 
         except Exception as e:
             raise RegistryError(f"Failed to get artifact info for '{tag}': {e}") from e
+
+    # ------------------------------------------------------------------
+    # GitHub Packages API helpers (deletion)
+    # ------------------------------------------------------------------
+
+    def _github_api_headers(self) -> Dict[str, str]:
+        """Return HTTP headers for authenticated GitHub API requests."""
+        headers: Dict[str, str] = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        return headers
+
+    def _list_github_package_versions(self) -> List[Dict[str, Any]]:
+        """
+        List all versions of the GHCR package via the GitHub Packages API.
+
+        Returns
+        -------
+        list of dict
+            Each entry contains at minimum ``id``, ``name`` (digest), and
+            ``metadata.container.tags`` (list of OCI tags for that version).
+
+        Raises
+        ------
+        RegistryError
+            If the API call fails or the registry is not hosted on ``ghcr.io``.
+        """
+        if not self.registry.lower() == "ghcr.io":
+            raise RegistryError(
+                f"Deletion via the GitHub Packages API is only supported for 'ghcr.io' registries, "
+                f"not '{self.registry}'."
+            )
+
+        # self.name is "{owner}/{package_name}" (everything after "ghcr.io/")
+        name_parts = self.name.split("/", 1)
+        if len(name_parts) != 2 or not name_parts[0] or not name_parts[1]:
+            raise RegistryError(
+                f"Cannot determine owner and package name from repository '{self.repository}'. "
+                "Expected format: 'ghcr.io/{{owner}}/{{package-name}}'."
+            )
+        owner, package_name = name_parts
+        # URL-encode the package name (slashes → %2F)
+        package_name_encoded = package_name.replace("/", "%2F")
+
+        headers = self._github_api_headers()
+        all_versions: List[Dict[str, Any]] = []
+        page = 1
+        while True:
+            url = (
+                f"https://api.github.com/users/{owner}/packages/container"
+                f"/{package_name_encoded}/versions?per_page=100&page={page}"
+            )
+            try:
+                response = requests.get(url, headers=headers, timeout=30)
+            except requests.RequestException as e:
+                raise RegistryError(f"GitHub API request failed: {e}") from e
+
+            if response.status_code == 401:
+                raise RegistryError("GitHub API authentication failed. Check that your token is valid.")
+            if response.status_code == 403:
+                raise RegistryError("GitHub API access forbidden. Ensure your token has the 'delete:packages' scope.")
+            if response.status_code == 404:
+                # Try org-level endpoint as fallback
+                url_org = (
+                    f"https://api.github.com/orgs/{owner}/packages/container"
+                    f"/{package_name_encoded}/versions?per_page=100&page={page}"
+                )
+                try:
+                    response = requests.get(url_org, headers=headers, timeout=30)
+                except requests.RequestException as e:
+                    raise RegistryError(f"GitHub API request failed: {e}") from e
+                if response.status_code != 200:
+                    raise RegistryError(
+                        f"GitHub API returned HTTP {response.status_code} for package '{package_name}' "
+                        f"under owner/org '{owner}'. Verify the repository path and token permissions."
+                    )
+
+            if response.status_code != 200:
+                raise RegistryError(f"GitHub API returned HTTP {response.status_code}: {response.text[:200]}")
+
+            page_data = response.json()
+            if not page_data:
+                break
+            all_versions.extend(page_data)
+            if len(page_data) < 100:
+                break
+            page += 1
+
+        return all_versions
+
+    def _delete_github_package_version(self, owner: str, package_name: str, version_id: int) -> None:
+        """
+        Delete a single package version via the GitHub Packages API.
+
+        Parameters
+        ----------
+        owner : str
+            GitHub username or organisation name.
+        package_name : str
+            Package name (e.g. ``abstracts-data``).
+        version_id : int
+            Numeric version ID returned by the list-versions endpoint.
+
+        Raises
+        ------
+        RegistryError
+            If the deletion API call fails.
+        """
+        package_name_encoded = package_name.replace("/", "%2F")
+        headers = self._github_api_headers()
+
+        # Try user endpoint first, fall back to org endpoint on 404.
+        for endpoint in ("users", "orgs"):
+            url = (
+                f"https://api.github.com/{endpoint}/{owner}/packages/container"
+                f"/{package_name_encoded}/versions/{version_id}"
+            )
+            try:
+                response = requests.delete(url, headers=headers, timeout=30)
+            except requests.RequestException as e:
+                raise RegistryError(f"GitHub API request failed: {e}") from e
+
+            if response.status_code == 404 and endpoint == "users":
+                # Package might be org-owned — try org endpoint
+                continue
+            if response.status_code in (204, 200):
+                return
+            raise RegistryError(
+                f"Failed to delete package version {version_id}: "
+                f"HTTP {response.status_code} — {response.text[:200]}"
+            )
+
+    def delete_old_versions(
+        self,
+        below_version: str,
+        conference: Optional[str] = None,
+        dry_run: bool = False,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Delete registry package versions whose tag version is older than *below_version*.
+
+        Uses the `GitHub Packages API
+        <https://docs.github.com/en/rest/packages/packages>`_ to list and
+        delete container image versions.  Only versions that carry at least
+        one OCI tag matching the abstracts-explorer tag format
+        (``{conference}[-{year}]_{model}_{version}``) are considered;
+        untagged (dangling) versions are left untouched.
+
+        Parameters
+        ----------
+        below_version : str
+            Threshold version string (PEP 440). Versions **strictly older**
+            than this value are deleted.  Example: ``"0.4.0"`` deletes all
+            versions tagged with a version < 0.4.0.
+        conference : str, optional
+            When provided, only tags whose base component starts with
+            *conference* (case-insensitive) are examined.  Tags for other
+            conferences are ignored.
+        dry_run : bool, optional
+            When ``True``, log which versions *would* be deleted but perform
+            no actual deletions (default: ``False``).
+        progress_callback : callable, optional
+            Function called with status messages during the operation.
+
+        Returns
+        -------
+        list of dict
+            One entry per deleted (or, in dry-run mode, would-be-deleted)
+            version.  Each dict contains ``version_id``, ``tags``, and
+            ``version``.
+
+        Raises
+        ------
+        RegistryError
+            If the registry is not hosted on ``ghcr.io``, if the GitHub API
+            call fails, or if *below_version* cannot be parsed.
+        ValueError
+            If *below_version* is not a valid PEP 440 version string.
+        """
+        try:
+            threshold = Version(below_version)
+        except InvalidVersion as e:
+            raise ValueError(f"Invalid version string '{below_version}': {e}") from e
+
+        def _progress(msg: str) -> None:
+            if progress_callback:
+                progress_callback(msg)
+            logger.info(msg)
+
+        _progress(f"Fetching package versions from GitHub Packages API ({self.repository}) …")
+        all_versions = self._list_github_package_versions()
+        _progress(f"Found {len(all_versions)} package version(s) in registry.")
+
+        # Determine owner / package name for deletion calls
+        name_parts = self.name.split("/", 1)
+        owner, package_name = name_parts[0], name_parts[1]
+
+        deleted: List[Dict[str, Any]] = []
+
+        for pkg_version in all_versions:
+            version_id: int = pkg_version["id"]
+            tags: List[str] = pkg_version.get("metadata", {}).get("container", {}).get("tags", [])
+
+            if not tags:
+                # Skip untagged (dangling) versions
+                continue
+
+            # A package version may carry multiple tags; check whether *any*
+            # of them belongs to the requested conference and is old enough.
+            should_delete = False
+            matched_tags: List[Tuple[str, Version]] = []
+            for tag in tags:
+                # Optional conference filter
+                if conference is not None:
+                    base = tag.split("_", 1)[0]
+                    conf_prefix = _sanitize_str_for_oci_tag(conference)
+                    # Accept both exact match (e.g. "neurips") and year-specific
+                    # (e.g. "neurips-2024").
+                    if not (base == conf_prefix or base.startswith(conf_prefix + "-")):
+                        continue
+
+                tag_version = _parse_version_from_tag(tag)
+                if tag_version is not None and tag_version < threshold:
+                    matched_tags.append((tag, tag_version))
+                    should_delete = True
+
+            if not should_delete:
+                continue
+
+            tag_summary = ", ".join(f"{t} (v{v})" for t, v in matched_tags)
+            if dry_run:
+                _progress(f"  [dry-run] Would delete version {version_id}: {tag_summary}")
+            else:
+                _progress(f"  Deleting version {version_id}: {tag_summary} …")
+                self._delete_github_package_version(owner, package_name, version_id)
+                _progress(f"  ✓ Deleted version {version_id}.")
+
+            deleted.append(
+                {
+                    "version_id": version_id,
+                    "tags": tags,
+                    "version": str(matched_tags[0][1]) if matched_tags else None,
+                }
+            )
+
+        action = "would be deleted" if dry_run else "deleted"
+        _progress(f"\nDone. {len(deleted)} version(s) {action}.")
+        return deleted

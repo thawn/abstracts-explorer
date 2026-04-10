@@ -1,0 +1,4 @@
+# Persistent volume for Caddy's ACME certificate storage and configuration state.
+# Caddy stores its Let's Encrypt certificates and ACME account information here.
+
+[Volume]
