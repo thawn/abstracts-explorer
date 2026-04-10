@@ -46,7 +46,7 @@ export function buildMcpToolsHintHtml() {
                 </li>
                 <li class="flex items-start gap-2">
                     <i class="fas fa-chart-line text-blue-400 mt-0.5 flex-shrink-0"></i>
-                    <span><em>"How has research on transformers evolved over the years?"</em></span>
+                    <span><em>"How has the topic of large language models evolved over the years?"</em></span>
                 </li>
                 <li class="flex items-start gap-2">
                     <i class="fas fa-search text-green-400 mt-0.5 flex-shrink-0"></i>
@@ -56,10 +56,11 @@ export function buildMcpToolsHintHtml() {
                     <i class="fas fa-fire text-orange-400 mt-0.5 flex-shrink-0"></i>
                     <span><em>"How relevant is uncertainty quantification at NeurIPS?"</em></span>
                 </li>
+                <!-- Disabled for now since get_paper_details is not working properly right now, but we can re-enable once it's fixed
                 <li class="flex items-start gap-2">
                     <i class="fas fa-info-circle text-indigo-400 mt-0.5 flex-shrink-0"></i>
-                    <span><em>"Who wrote the paper 'Attention Is All You Need'?"</em></span>
-                </li>
+                    <span><em>"Who wrote the paper 'Language Models are Few-Shot Learners'?"</em></span>
+                </li> -->
             </ul>
         </div>`;
 }
