@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Migrate existing clustering cache entries to the new table structure.
 
-This one-time migration script fills the new ``conference``, ``year``, and
-``n_clusters`` columns on existing :class:`ClusteringCache` rows.
+This one-time migration script:
+
+1. Adds the ``conference``, ``year``, and ``n_clusters`` columns to the
+   ``clustering_cache`` table if they are missing (schema migration).
+2. Fills the new columns from existing data in ``clustering_params`` and
+   ``results_json`` (data migration).
 
 It reads ``conferences`` and ``years`` from the ``clustering_params`` JSON
 and copies them into the dedicated columns.  It also fills ``n_clusters``
@@ -23,7 +27,7 @@ import json
 import os
 import sys
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select, text
 
 from abstracts_explorer.database import DatabaseError, DatabaseManager
 from abstracts_explorer.db_models import ClusteringCache
@@ -48,6 +52,59 @@ def parse_args() -> argparse.Namespace:
         help="Override PAPER_DB for this command only. Accepts a SQLite path or full database URL.",
     )
     return parser.parse_args()
+
+
+def add_missing_columns(db: DatabaseManager) -> list[str]:
+    """Add missing columns to the clustering_cache table.
+
+    Uses ``ALTER TABLE`` to add ``conference`` (TEXT), ``year`` (INTEGER),
+    and ``n_clusters`` (INTEGER) columns when they are absent.  This handles
+    databases that were created before this schema change.
+
+    Parameters
+    ----------
+    db : DatabaseManager
+        Open database connection.
+
+    Returns
+    -------
+    list[str]
+        Names of columns that were added.
+
+    Raises
+    ------
+    DatabaseError
+        If a column cannot be added.
+    """
+    if not db.engine:
+        raise DatabaseError("Not connected to database")
+
+    inspector = inspect(db.engine)
+
+    # If the table doesn't exist at all, create it via the ORM metadata
+    if "clustering_cache" not in inspector.get_table_names():
+        db.create_tables()
+        return []
+
+    existing = {col["name"] for col in inspector.get_columns("clustering_cache")}
+    added: list[str] = []
+
+    column_ddl = {
+        "conference": "ALTER TABLE clustering_cache ADD COLUMN conference TEXT",
+        "year": "ALTER TABLE clustering_cache ADD COLUMN year INTEGER",
+        "n_clusters": "ALTER TABLE clustering_cache ADD COLUMN n_clusters INTEGER",
+    }
+
+    try:
+        with db.engine.begin() as conn:
+            for col_name, ddl in column_ddl.items():
+                if col_name not in existing:
+                    conn.execute(text(ddl))
+                    added.append(col_name)
+    except Exception as e:
+        raise DatabaseError(f"Failed to add missing columns: {e}") from e
+
+    return added
 
 
 def migrate_clustering_cache(db: DatabaseManager) -> int:
@@ -147,7 +204,11 @@ def main() -> int:
 
     try:
         with DatabaseManager() as db:
-            db.create_tables()
+            added = add_missing_columns(db)
+            if added:
+                print(f"Added missing columns: {', '.join(added)}")
+            # Expire all ORM state so SQLAlchemy re-reads the updated schema
+            db._session.expire_all()
             count = migrate_clustering_cache(db)
             if count == 0:
                 print("✅ No cache entries needed migration.")
@@ -162,3 +223,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
