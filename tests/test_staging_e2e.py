@@ -754,14 +754,14 @@ class TestMCPToolSmokeTests:
         _assert_llm_judgment(
             query,
             response,
-            criteria="the response should return at least one paper title, ideally with author names and/or a brief abstract excerpt",
+            criteria="the response should briefly summarize or list multiple papers related to reinforcement learning",
         )
 
     def test_get_paper_details(self, staging_url, browser):
         """
         MCP tool: ``get_paper_details``.
 
-        Example query: *"Who are the authors of 'Attention is All You Need'?"*
+        Example query: *"Who are the authors of the paper titled 'Large Language Diffusion Models'?"*
 
         Success criteria (LLM-judged): the response includes author names,
         URL/PDF links, and session info (where available).
@@ -773,14 +773,14 @@ class TestMCPToolSmokeTests:
         browser : WebDriver
             Selenium WebDriver instance.
         """
-        query = "Who are the authors of 'Attention is All You Need'?"
+        query = "Who are the authors of the paper titled 'Large Language Diffusion Models'?"
         response, _ = self._send_chat_query(staging_url, browser, query)
         if not response:
             pytest.skip("LLM backend unavailable – no response received")
         _assert_llm_judgment(
             query,
             response,
-            criteria="the response should name at least one author of the paper; ideally it also includes a URL or session information",
+            criteria="the response should name several authors of the paper and give a brief description.",
         )
 
     def test_analyze_topic_relevance(self, staging_url, browser):
@@ -814,7 +814,7 @@ class TestMCPToolSmokeTests:
         """
         MCP tool: ``get_cluster_visualization``.
 
-        Example query: *"Show me a visual overview of NeurIPS 2025 clusters."*
+        Example query: *"Show me a visual overview of how topics are clustered at NeurIPS."*
 
         Success criteria (LLM-judged): the response references the visualization
         and a Plotly chart should be rendered in the chat area.
@@ -826,19 +826,16 @@ class TestMCPToolSmokeTests:
         browser : WebDriver
             Selenium WebDriver instance.
         """
-        query = "Show me a visual overview of NeurIPS 2025 clusters."
+        query = "Show me a visual overview of how topics are clustered at NeurIPS."
         response, _ = self._send_chat_query(staging_url, browser, query)
         if not response:
             pytest.skip("LLM backend unavailable – no response received")
-        chart_found, chart_description = _check_chart_rendered(browser)
-        assert chart_found, f"Expected a cluster scatter plot to be rendered in chat. {chart_description}"
+        chart_found, formatted_answer = _check_chart_rendered(browser)
+        assert chart_found, f"Expected a cluster scatter plot to be rendered in chat. {formatted_answer}"
         _assert_llm_judgment(
             query,
             response,
-            criteria=(
-                "the response should describe or reference a cluster visualization. "
-                f"Additionally: {chart_description}"
-            ),
+            criteria=("the response should describe or reference a cluster visualization. Note: " + formatted_answer),
         )
 
 
