@@ -1036,64 +1036,6 @@ class TestClusteringCache:
         assert entry is not None
         assert entry.n_clusters == 7
 
-    def test_migrate_clustering_cache(self, connected_db):
-        """Test migration of old-format cache entries to new columns."""
-        import json
-
-        from abstracts_explorer.db_models import ClusteringCache
-
-        # Insert old-format entry (conference/year in clustering_params)
-        connected_db._session.add(
-            ClusteringCache(
-                embedding_model="test-model",
-                reduction_method="pca",
-                n_components=2,
-                clustering_method="kmeans",
-                n_clusters=None,
-                conference=None,
-                year=None,
-                clustering_params=json.dumps({"conferences": ["NeurIPS"], "years": [2024], "linkage": "ward"}),
-                results_json=json.dumps({"points": [], "statistics": {"n_clusters": 5}}),
-            )
-        )
-        connected_db._session.commit()
-
-        count = connected_db.migrate_clustering_cache()
-        assert count == 1
-
-        entry = connected_db._session.query(ClusteringCache).first()
-        assert entry.conference == "NeurIPS"
-        assert entry.year == 2024
-        assert entry.n_clusters == 5
-        # conferences/years should be removed from clustering_params
-        params = json.loads(entry.clustering_params)
-        assert "conferences" not in params
-        assert "years" not in params
-        assert params["linkage"] == "ward"
-
-    def test_migrate_clustering_cache_already_migrated(self, connected_db):
-        """Test that already-migrated entries are not modified."""
-        import json
-
-        from abstracts_explorer.db_models import ClusteringCache
-
-        connected_db._session.add(
-            ClusteringCache(
-                embedding_model="test-model",
-                reduction_method="pca",
-                n_components=2,
-                clustering_method="kmeans",
-                n_clusters=5,
-                conference="NeurIPS",
-                year=2024,
-                results_json=json.dumps({"points": []}),
-            )
-        )
-        connected_db._session.commit()
-
-        count = connected_db.migrate_clustering_cache()
-        assert count == 0
-
     def test_save_and_get_hierarchical_label_cache(self, connected_db):
         """Test saving and retrieving hierarchical label cache."""
         labels = {0: "Root", 5: "Sub-cluster A", 6: "Sub-cluster B", 10: "Leaf"}

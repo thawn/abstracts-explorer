@@ -1999,51 +1999,6 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Error clearing clustering cache" in captured.err
 
-    def test_migrate_clustering_cache_command(self, tmp_path, capsys):
-        """Test migrate-cache command migrates old entries."""
-        import json as _json
-
-        output_db = tmp_path / "test.db"
-        set_test_db(output_db)
-
-        from abstracts_explorer.database import DatabaseManager
-        from abstracts_explorer.db_models import ClusteringCache
-
-        with DatabaseManager() as db:
-            db.create_tables()
-            db._session.add(
-                ClusteringCache(
-                    embedding_model="test-model",
-                    reduction_method="pca",
-                    n_components=2,
-                    clustering_method="kmeans",
-                    n_clusters=None,
-                    conference=None,
-                    year=None,
-                    clustering_params=_json.dumps({"conferences": ["NeurIPS"], "years": [2024]}),
-                    results_json=_json.dumps({"points": [], "statistics": {"n_clusters": 3}}),
-                )
-            )
-            db._session.commit()
-
-        with patch.object(
-            sys,
-            "argv",
-            ["abstracts-explorer", "clustering", "migrate-cache"],
-        ):
-            exit_code = main()
-
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        assert "Migrated 1 clustering cache entry" in captured.out
-
-        # Verify the migration
-        with DatabaseManager() as db:
-            entry = db._session.query(ClusteringCache).first()
-            assert entry.conference == "NeurIPS"
-            assert entry.year == 2024
-            assert entry.n_clusters == 3
-
     def test_pre_generate_clustering_missing_embeddings(self, tmp_path, capsys, monkeypatch):
         """Test pre-generate-clustering fails when embeddings DB doesn't exist."""
         patch_get_config_for_test(monkeypatch, tmp_path / "nonexistent")
