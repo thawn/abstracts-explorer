@@ -568,8 +568,8 @@ class TestSearchEndpoint:
         else:
             assert "error" in data
 
-    def test_search_keyword_author_filter(self, client):
-        """Test that keyword search supports author:"Name" syntax."""
+    def test_search_keyword_field_filter(self, client):
+        """Test that keyword search supports field:"value" syntax."""
         from unittest.mock import MagicMock, patch
         import sys
 
@@ -584,13 +584,13 @@ class TestSearchEndpoint:
         with patch.object(app_module, "get_database", return_value=mock_db):
             response = client.post(
                 "/api/search",
-                data=json.dumps({"query": 'author:"John Smith"', "use_embeddings": False, "limit": 10}),
+                data=json.dumps({"query": 'authors:"John Smith"', "use_embeddings": False, "limit": 10}),
                 content_type="application/json",
             )
 
         mock_db.search_papers_keyword.assert_called_once()
         call_args = mock_db.search_papers_keyword.call_args
-        assert call_args.kwargs["query"] == 'author:"John Smith"'
+        assert call_args.kwargs["query"] == 'authors:"John Smith"'
 
         assert response.status_code == 200
         data = json.loads(response.data)

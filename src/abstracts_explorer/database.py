@@ -649,10 +649,13 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Failed to count papers: {str(e)}") from e
 
+    #: Paper model column names that can be used as field filters in search queries.
+    SEARCHABLE_FIELDS: set = {c.name for c in Paper.__table__.columns if c.name not in ("uid", "created_at")}
+
     def search_papers(
         self,
         keyword: Optional[str] = None,
-        author: Optional[str] = None,
+        field_filters: Optional[Dict[str, str]] = None,
         session: Optional[str] = None,
         sessions: Optional[List[str]] = None,
         year: Optional[int] = None,
@@ -668,9 +671,10 @@ class DatabaseManager:
         ----------
         keyword : str, optional
             Keyword to search in title, abstract, or keywords fields.
-        author : str, optional
-            Author name to search for (case-insensitive partial match
-            on the semicolon-separated authors field).
+        field_filters : dict of str to str, optional
+            Mapping of Paper column names to search values.  Each entry adds
+            a case-insensitive ILIKE ``%value%`` condition on the corresponding
+            column (e.g. ``{"authors": "Smith", "award": "Best Paper"}``).
         session : str, optional
             Single session to filter by (deprecated, use sessions instead).
         sessions : list[str], optional
@@ -710,8 +714,8 @@ class DatabaseManager:
         >>> # Search with years
         >>> papers = db.search_papers(years=[2024, 2025])
 
-        >>> # Search by author
-        >>> papers = db.search_papers(author="John Smith")
+        >>> # Search by field filter
+        >>> papers = db.search_papers(field_filters={"authors": "John Smith"})
         """
         if not self._session:
             raise DatabaseError("Not connected to database")
@@ -730,9 +734,11 @@ class DatabaseManager:
                     )
                 )
 
-            if author:
-                author_pattern = f"%{author}%"
-                conditions.append(Paper.authors.ilike(author_pattern))
+            if field_filters:
+                for field_name, value in field_filters.items():
+                    col = getattr(Paper, field_name, None)
+                    if col is not None:
+                        conditions.append(col.ilike(f"%{value}%"))
 
             # Handle sessions (prefer list form, fall back to single)
             session_list = sessions if sessions else ([session] if session else [])
@@ -766,41 +772,48 @@ class DatabaseManager:
             raise DatabaseError(f"Search failed: {str(e)}") from e
 
     @staticmethod
-    def parse_author_query(query: str) -> tuple:
+    def parse_field_filters(query: str) -> tuple:
         """
-        Parse author filter from a search query string.
+        Parse field-specific filters from a search query string.
 
-        Extracts ``author:"Name"`` patterns from the query and returns the
-        author name and the remaining keyword text.
+        Extracts all ``field:"value"`` patterns from the query where *field*
+        is a column name of the :class:`~abstracts_explorer.db_models.Paper`
+        model.  Unrecognised field names are left in the query text as-is.
 
         Parameters
         ----------
         query : str
-            The raw search query, e.g. ``'author:"John Smith" transformers'``.
+            The raw search query, e.g.
+            ``'authors:"John Smith" award:"Best Paper" transformers'``.
 
         Returns
         -------
-        tuple of (str or None, str)
-            A tuple ``(author, remaining_query)`` where *author* is the
-            extracted author name (or ``None`` if no author filter was found)
-            and *remaining_query* is the query with the author filter removed.
+        tuple of (dict, str)
+            A tuple ``(field_filters, remaining_query)`` where
+            *field_filters* maps column names to their search values and
+            *remaining_query* is the query with recognised filters removed.
 
         Examples
         --------
-        >>> DatabaseManager.parse_author_query('author:"John Smith" transformers')
-        ('John Smith', 'transformers')
-        >>> DatabaseManager.parse_author_query('transformers')
-        (None, 'transformers')
-        >>> DatabaseManager.parse_author_query('author:"Jane Doe"')
-        ('Jane Doe', '')
+        >>> DatabaseManager.parse_field_filters('authors:"John Smith" transformers')
+        ({'authors': 'John Smith'}, 'transformers')
+        >>> DatabaseManager.parse_field_filters('transformers')
+        ({}, 'transformers')
+        >>> DatabaseManager.parse_field_filters('award:"Best Paper" authors:"Doe"')
+        ({'award': 'Best Paper', 'authors': 'Doe'}, '')
         """
-        match = re.search(r'author:"([^"]+)"', query)
-        if match:
-            author = match.group(1).strip()
-            remaining = query[: match.start()] + query[match.end() :]
-            remaining = remaining.strip()
-            return author, remaining
-        return None, query
+        field_filters: Dict[str, str] = {}
+        remaining = query
+
+        for match in reversed(list(re.finditer(r'(\w+):"([^"]+)"', query))):
+            field_name = match.group(1)
+            value = match.group(2).strip()
+            if field_name in DatabaseManager.SEARCHABLE_FIELDS:
+                field_filters[field_name] = value
+                remaining = remaining[: match.start()] + remaining[match.end() :]
+
+        remaining = " ".join(remaining.split())  # normalise whitespace
+        return field_filters, remaining
 
     def search_papers_keyword(
         self,
@@ -811,20 +824,19 @@ class DatabaseManager:
         conferences: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Perform keyword-based search with filtering and author parsing.
+        Perform keyword-based search with filtering and field filter parsing.
 
         This is a convenience method that wraps search_papers and formats
         the results for web API consumption, including author parsing.
 
-        Supports ``author:"Name"`` syntax to filter by author name.
-        For example, ``'author:"John Smith" transformers'`` will search
-        for papers by John Smith containing "transformers".
+        Supports ``field:"value"`` syntax for any Paper model column, e.g.
+        ``'authors:"John Smith" transformers'`` or ``'award:"Best Paper"'``.
 
         Parameters
         ----------
         query : str
             Keyword to search in title, abstract, or keywords fields.
-            May include ``author:"Name"`` to filter by author.
+            May include ``field:"value"`` filters for any Paper column.
         limit : int, optional
             Maximum number of results, by default 10
         sessions : list of str, optional
@@ -846,15 +858,16 @@ class DatabaseManager:
         ...     limit=5,
         ...     years=[2024, 2025]
         ... )
-        >>> papers = db.search_papers_keyword('author:"John Smith"')
+        >>> papers = db.search_papers_keyword('authors:"John Smith"')
+        >>> papers = db.search_papers_keyword('award:"Best Paper" transformers')
         """
-        # Parse author filter from query
-        author, remaining_query = self.parse_author_query(query)
+        # Parse field filters from query
+        field_filters, remaining_query = self.parse_field_filters(query)
 
         # Keyword search in database with multiple filter support
         papers = self.search_papers(
             keyword=remaining_query if remaining_query else None,
-            author=author,
+            field_filters=field_filters if field_filters else None,
             sessions=sessions,
             years=years,
             conferences=conferences,

@@ -896,10 +896,15 @@ class EmbeddingsManager:
         This function combines embedding-based similarity search with metadata filtering
         and retrieves complete paper information from the database.
 
+        Supports ``field:"value"`` syntax in the query for filtering by any
+        Paper model column.  Recognised filters are extracted, converted to
+        ChromaDB ``$contains`` where-clauses, and the remaining text is used
+        as the semantic query.
+
         Parameters
         ----------
         query : str
-            Search query text
+            Search query text.  May include ``field:"value"`` filters.
         database : DatabaseManager
             Database manager for retrieving full paper details
         limit : int, optional
@@ -929,8 +934,17 @@ class EmbeddingsManager:
         ...     limit=5,
         ...     years=[2024, 2025]
         ... )
+        >>> papers = em.search_papers_semantic(
+        ...     'authors:"Vaswani" attention',
+        ...     database=db,
+        ... )
         """
         from abstracts_explorer.paper_utils import format_search_results, PaperFormattingError
+        from abstracts_explorer.database import DatabaseManager
+
+        # Parse field-specific filters from query
+        field_filters, remaining_query = DatabaseManager.parse_field_filters(query)
+        semantic_query = remaining_query if remaining_query else query
 
         # Build metadata filter for embeddings search
         # NOTE: All metadata is stored as strings in ChromaDB (see add_paper method, line 445)
@@ -945,6 +959,10 @@ class EmbeddingsManager:
         if conferences:
             filter_conditions.append({"conference": {"$in": conferences}})
 
+        # Add field filters parsed from query as $contains conditions
+        for field_name, value in field_filters.items():
+            filter_conditions.append({field_name: {"$contains": value}})
+
         # Use $and operator if multiple conditions, otherwise use single condition
         where_filter: Optional[Dict[str, Any]] = None
         if len(filter_conditions) > 1:
@@ -953,12 +971,13 @@ class EmbeddingsManager:
             where_filter = filter_conditions[0]
 
         logger.info(
-            f"Semantic search - query: {query}, filter: sessions={sessions}, years={years}, conferences={conferences}"
+            f"Semantic search - query: {semantic_query}, filter: sessions={sessions}, "
+            f"years={years}, conferences={conferences}, field_filters={field_filters}"
         )
         logger.info(f"Where filter: {where_filter}")
 
         # Get more results initially to account for filtering
-        results = self.search_similar(query, n_results=limit * 2, where=where_filter)
+        results = self.search_similar(semantic_query, n_results=limit * 2, where=where_filter)
 
         logger.info(f"Search results count: {len(results.get('ids', [[]])[0]) if results else 0}")
 
