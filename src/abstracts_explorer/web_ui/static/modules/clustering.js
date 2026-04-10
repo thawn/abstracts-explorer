@@ -92,15 +92,6 @@ export async function loadClusters() {
         // Create visualization
         visualizeClusters();
         
-        // Auto-enable hierarchy mode for agglomerative clustering
-        if (clusterData.cluster_hierarchy && 
-            clusterData.cluster_hierarchy.tree) {
-            // Small delay to ensure visualization is rendered first
-            setTimeout(() => {
-                enableHierarchyMode();
-            }, 100);
-        }
-        
     } catch (error) {
         console.error('Error loading clusters:', error);
         showErrorInElement('cluster-plot', `Failed to load clusters: ${error.message}`);

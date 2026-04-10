@@ -191,9 +191,7 @@ describe('Clustering Module', () => {
             );
         });
 
-        it('should enable hierarchy mode for agglomerative clustering', async () => {
-            jest.useFakeTimers();
-            
+        it('should not auto-enable hierarchy mode for agglomerative clustering', async () => {
             const mockHierarchyData = {
                 ...mockClusterData,
                 cluster_hierarchy: {
@@ -214,11 +212,13 @@ describe('Clustering Module', () => {
             });
 
             await loadClusters();
-            
-            // Fast-forward past the setTimeout
-            jest.advanceTimersByTime(200);
-            
-            jest.useRealTimers();
+
+            // Hierarchy mode should remain disabled after loading (default is false).
+            // Verify by attempting to load a hierarchy level — this warns when not in hierarchy mode.
+            await loadHierarchyLevel(0);
+            expect(global.console.warn).toHaveBeenCalledWith('Not in hierarchy mode');
+            // Normal visualization should have been called, not hierarchy visualization
+            expect(global.Plotly.newPlot).toHaveBeenCalled();
         });
 
         it('should visualize clusters after loading', async () => {
