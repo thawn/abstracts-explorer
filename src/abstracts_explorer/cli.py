@@ -1061,6 +1061,50 @@ def clear_clustering_cache_command(args: argparse.Namespace) -> int:
         return 1
 
 
+def migrate_clustering_cache_command(args: argparse.Namespace) -> int:
+    """
+    Migrate existing clustering cache entries to fill the new columns.
+
+    Reads ``conferences`` and ``years`` from the ``clustering_params`` JSON
+    and copies them into the dedicated ``conference`` and ``year`` columns.
+    Also fills ``n_clusters`` from ``results_json`` statistics when it is
+    currently ``NULL``.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments (unused beyond standard config).
+
+    Returns
+    -------
+    int
+        Exit code (0 for success, non-zero for failure)
+    """
+    config = get_config()
+
+    print("Abstracts Explorer - Migrate Clustering Cache")
+    print("=" * 70)
+    print(f"Database: {config.database_url}")
+    print("=" * 70)
+
+    try:
+        with DatabaseManager() as db:
+            count = db.migrate_clustering_cache()
+            if count == 0:
+                print("\n✅ No cache entries needed migration.")
+            else:
+                entry_word = "entry" if count == 1 else "entries"
+                print(f"\n✅ Migrated {count} clustering cache {entry_word}.")
+        return 0
+
+    except Exception as e:
+        print(f"\n❌ Error migrating clustering cache: {e}", file=sys.stderr)
+        import traceback
+
+        traceback.print_exc()
+        return 1
+
+
 def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     """
     Pre-generate clustering results for one or all conference/year combinations.
@@ -2738,6 +2782,24 @@ Examples:
         help=f"Maximum number of API requests per minute, 0 to disable rate limiting (default: {config.requests_per_minute})",
     )
 
+    # clustering migrate-cache
+    clustering_subparsers.add_parser(
+        "migrate-cache",
+        help="Migrate existing clustering cache entries to the new table structure",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+Migrate existing clustering cache entries to fill the new conference,
+year, and n_clusters columns.
+
+This reads conferences and years from the clustering_params JSON and
+copies them into the dedicated columns.  It also fills n_clusters from
+the results statistics when it is currently NULL.
+
+Examples:
+  abstracts-explorer clustering migrate-cache
+        """,
+    )
+
     # MCP Server command
     mcp_parser = subparsers.add_parser(
         "mcp-server",
@@ -3259,6 +3321,8 @@ Examples:
             return clear_clustering_cache_command(args)
         elif args.clustering_command == "pre-generate":
             return pre_generate_clustering_command(args)
+        elif args.clustering_command == "migrate-cache":
+            return migrate_clustering_cache_command(args)
         else:
             clustering_parser.print_help()
             return 1

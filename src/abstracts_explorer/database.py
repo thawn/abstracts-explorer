@@ -1528,6 +1528,8 @@ class DatabaseManager:
         clustering_params: Optional[Dict[str, Any]] = None,
         reduction_method: Optional[str] = None,
         n_components: Optional[int] = None,
+        conference: Optional[str] = None,
+        year: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Get cached clustering results matching the parameters.
@@ -1545,7 +1547,8 @@ class DatabaseManager:
         clustering_method : str
             Clustering algorithm used.
         n_clusters : int, optional
-            Number of clusters (for kmeans/agglomerative).
+            Number of clusters to match.  When ``None`` the query does
+            **not** filter by this column.
         clustering_params : dict, optional
             Additional clustering parameters (e.g., distance_threshold, eps).
         reduction_method : str, optional
@@ -1554,6 +1557,12 @@ class DatabaseManager:
         n_components : int, optional
             Number of components after reduction.  When provided, the query
             requires an exact match on this column.
+        conference : str, optional
+            Conference name to filter by.  ``None`` matches entries that
+            have no conference set.
+        year : int, optional
+            Conference year to filter by.  ``None`` matches entries that
+            have no year set.
 
         Returns
         -------
@@ -1588,6 +1597,17 @@ class DatabaseManager:
             # Add n_clusters condition if provided
             if n_clusters is not None:
                 stmt = stmt.where(ClusteringCache.n_clusters == n_clusters)
+
+            # Filter by conference/year columns
+            if conference is not None:
+                stmt = stmt.where(ClusteringCache.conference == conference)
+            else:
+                stmt = stmt.where(ClusteringCache.conference.is_(None))
+
+            if year is not None:
+                stmt = stmt.where(ClusteringCache.year == year)
+            else:
+                stmt = stmt.where(ClusteringCache.year.is_(None))
 
             # Get all matching results (we'll filter by params in Python)
             stmt = stmt.order_by(ClusteringCache.created_at.desc())
@@ -1632,6 +1652,8 @@ class DatabaseManager:
         results: Dict[str, Any],
         n_clusters: Optional[int] = None,
         clustering_params: Optional[Dict[str, Any]] = None,
+        conference: Optional[str] = None,
+        year: Optional[int] = None,
     ) -> None:
         """
         Save clustering results to cache.
@@ -1655,9 +1677,14 @@ class DatabaseManager:
         results : dict
             Clustering results to cache (full results including points).
         n_clusters : int, optional
-            Number of clusters (for kmeans/agglomerative).
+            Number of clusters.  When ``None``, the actual count is
+            extracted from ``results["statistics"]["n_clusters"]``.
         clustering_params : dict, optional
             Additional clustering parameters.
+        conference : str, optional
+            Conference name this entry is scoped to.
+        year : int, optional
+            Conference year this entry is scoped to.
 
         Raises
         ------
@@ -1670,6 +1697,13 @@ class DatabaseManager:
         try:
             import json
 
+            # Always try to fill n_clusters from the results statistics
+            if n_clusters is None:
+                stats = results.get("statistics", {})
+                actual = stats.get("n_clusters")
+                if actual is not None:
+                    n_clusters = int(actual)
+
             # Serialize results and params to JSON
             results_json = json.dumps(results)
             params_json = json.dumps(clustering_params) if clustering_params else None
@@ -1677,6 +1711,8 @@ class DatabaseManager:
             # Create new cache entry
             cache_entry = ClusteringCache(
                 embedding_model=embedding_model,
+                conference=conference,
+                year=year,
                 reduction_method=reduction_method,
                 n_components=n_components,
                 clustering_method=clustering_method,
@@ -1690,7 +1726,8 @@ class DatabaseManager:
 
             logger.info(
                 f"Saved clustering cache: {clustering_method} with {n_clusters} clusters, "
-                f"model={embedding_model}, reduction={reduction_method}"
+                f"model={embedding_model}, reduction={reduction_method}, "
+                f"conference={conference}, year={year}"
             )
 
         except Exception as e:
@@ -2445,42 +2482,6 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Failed to export papers: {str(e)}") from e
 
-    @staticmethod
-    def _clustering_cache_matches_conference_year(entry: ClusteringCache, conference: str, year: int) -> bool:
-        """
-        Check whether a ClusteringCache entry is scoped to a specific conference and year.
-
-        An entry matches if its ``clustering_params`` JSON contains a
-        ``conferences`` list that includes *conference* **and** a ``years``
-        list that includes *year*.
-
-        Parameters
-        ----------
-        entry : ClusteringCache
-            The cache entry to check.
-        conference : str
-            Conference name.
-        year : int
-            Conference year.
-
-        Returns
-        -------
-        bool
-            ``True`` if the entry matches the given conference and year.
-        """
-        import json as _json
-
-        if not entry.clustering_params:
-            return False
-        try:
-            params = _json.loads(entry.clustering_params)
-        except (ValueError, TypeError):
-            return False
-
-        conferences = params.get("conferences", [])
-        years = params.get("years", [])
-        return conference in conferences and year in years
-
     def import_papers_from_sqlite(
         self,
         sqlite_path: "Path",
@@ -2491,9 +2492,9 @@ class DatabaseManager:
         Import papers for a given conference and year from a SQLite file.
 
         Existing papers for the given conference/year are **replaced** (not
-        merged).  Clustering cache and hierarchical label cache entries that
-        match the conference and year are replaced.  Embeddings metadata is
-        validated for consistency (the embedding model must match).
+        merged).  Hierarchical label cache entries that match the conference
+        and year are replaced.  Embeddings metadata is validated for
+        consistency (the embedding model must match).
 
         Parameters
         ----------
@@ -2624,19 +2625,24 @@ class DatabaseManager:
 
         try:
             entries: List[Dict[str, Any]] = []
-            for entry in self._session.execute(select(ClusteringCache)).scalars():
-                if self._clustering_cache_matches_conference_year(entry, conference, year):
-                    row: Dict[str, Any] = {}
-                    for col in ClusteringCache.__table__.columns:
-                        if col.name == "id":
-                            continue  # skip PK; it will be auto-generated on import
-                        val = getattr(entry, col.name)
-                        if col.name in ("clustering_params", "results_json") and isinstance(val, str):
-                            val = _json.loads(val)
-                        elif col.name == "created_at" and val is not None:
-                            val = val.isoformat()
-                        row[col.name] = val
-                    entries.append(row)
+            stmt = select(ClusteringCache).where(
+                and_(
+                    ClusteringCache.conference == conference,
+                    ClusteringCache.year == year,
+                )
+            )
+            for entry in self._session.execute(stmt).scalars():
+                row: Dict[str, Any] = {}
+                for col in ClusteringCache.__table__.columns:
+                    if col.name == "id":
+                        continue  # skip PK; it will be auto-generated on import
+                    val = getattr(entry, col.name)
+                    if col.name in ("clustering_params", "results_json") and isinstance(val, str):
+                        val = _json.loads(val)
+                    elif col.name == "created_at" and val is not None:
+                        val = val.isoformat()
+                    row[col.name] = val
+                entries.append(row)
 
             return {"entries": entries}
 
@@ -2691,11 +2697,15 @@ class DatabaseManager:
             raise DatabaseError("Not connected to database")
 
         try:
-            # Delete existing matching entries and flush immediately so PostgreSQL
-            # processes the DELETEs before the subsequent INSERTs.
-            for entry in self._session.execute(select(ClusteringCache)).scalars().all():
-                if self._clustering_cache_matches_conference_year(entry, conference, year):
-                    self._session.delete(entry)
+            # Delete existing matching entries using column-based filtering.
+            self._session.execute(
+                delete(ClusteringCache).where(
+                    and_(
+                        ClusteringCache.conference == conference,
+                        ClusteringCache.year == year,
+                    )
+                )
+            )
             self._session.flush()
 
             # For PostgreSQL the auto-increment sequence can fall out of sync when rows
@@ -2742,6 +2752,23 @@ class DatabaseManager:
                 if overwrite_embedding_model is not None:
                     row["embedding_model"] = overwrite_embedding_model
 
+                # Ensure conference/year columns are set from the import scope
+                row["conference"] = conference
+                row["year"] = year
+
+                # Fill n_clusters from results statistics if not set
+                if row.get("n_clusters") is None:
+                    results = row.get("results_json")
+                    if isinstance(results, str):
+                        try:
+                            results = _json.loads(results)
+                        except (ValueError, TypeError):
+                            results = {}
+                    if isinstance(results, dict):
+                        actual = results.get("statistics", {}).get("n_clusters")
+                        if actual is not None:
+                            row["n_clusters"] = int(actual)
+
                 self._session.add(ClusteringCache(**row))
                 count += 1
 
@@ -2753,3 +2780,78 @@ class DatabaseManager:
         except Exception as e:
             self._session.rollback()
             raise DatabaseError(f"Failed to import clustering cache: {str(e)}") from e
+
+    def migrate_clustering_cache(self) -> int:
+        """
+        Migrate existing clustering cache entries to fill conference, year, and n_clusters columns.
+
+        Reads ``conferences`` and ``years`` from the ``clustering_params`` JSON
+        and copies them into the dedicated ``conference`` and ``year`` columns.
+        Also fills ``n_clusters`` from ``results_json["statistics"]["n_clusters"]``
+        when it is currently ``NULL``.  After migration the ``conferences`` and
+        ``years`` keys are removed from ``clustering_params``.
+
+        Returns
+        -------
+        int
+            Number of cache entries migrated.
+
+        Raises
+        ------
+        DatabaseError
+            If the migration fails.
+        """
+        import json as _json
+
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            entries = self._session.execute(select(ClusteringCache)).scalars().all()
+            migrated = 0
+            for entry in entries:
+                changed = False
+
+                # --- Migrate conference/year from clustering_params ---
+                if entry.conference is None and entry.clustering_params:
+                    try:
+                        params = _json.loads(entry.clustering_params)
+                    except (ValueError, TypeError):
+                        params = {}
+                    conferences = params.get("conferences", [])
+                    years = params.get("years", [])
+                    if len(conferences) == 1:
+                        entry.conference = conferences[0]
+                        changed = True
+                    if len(years) == 1:
+                        entry.year = years[0]
+                        changed = True
+                    # Remove conferences/years keys from clustering_params
+                    if "conferences" in params or "years" in params:
+                        params.pop("conferences", None)
+                        params.pop("years", None)
+                        entry.clustering_params = _json.dumps(params) if params else None
+                        changed = True
+
+                # --- Fill n_clusters from results_json ---
+                if entry.n_clusters is None and entry.results_json:
+                    try:
+                        results = _json.loads(entry.results_json)
+                    except (ValueError, TypeError):
+                        results = {}
+                    actual = results.get("statistics", {}).get("n_clusters")
+                    if actual is not None:
+                        entry.n_clusters = int(actual)
+                        changed = True
+
+                if changed:
+                    migrated += 1
+
+            self._session.commit()
+            return migrated
+
+        except DatabaseError:
+            raise
+        except Exception as e:
+            self._session.rollback()
+            raise DatabaseError(f"Failed to migrate clustering cache: {str(e)}") from e

@@ -490,9 +490,8 @@ class TestMCPTools:
 
         # Verify the cache was looked up with the parsed conference name (not "NeurIPS 2025")
         call_args = mock_db.get_clustering_cache.call_args_list[0]
-        params = call_args[1]["clustering_params"]
-        assert params["conferences"] == ["NeurIPS"]
-        assert params["years"] == [2025]
+        assert call_args[1]["conference"] == "NeurIPS"
+        assert call_args[1]["year"] == 2025
 
 
 class TestParseConferenceYear:

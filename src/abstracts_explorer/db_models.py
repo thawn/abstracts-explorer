@@ -153,6 +153,10 @@ class ClusteringCache(Base):
         Auto-incrementing primary key.
     embedding_model : str
         Name of the embedding model used.
+    conference : str, optional
+        Conference name this cache entry is scoped to (e.g., 'NeurIPS').
+    year : int, optional
+        Conference year this cache entry is scoped to.
     reduction_method : str
         Dimensionality reduction method used (e.g., 'pca', 'tsne').
     n_components : int
@@ -160,7 +164,7 @@ class ClusteringCache(Base):
     clustering_method : str
         Clustering algorithm used (e.g., 'kmeans', 'dbscan').
     n_clusters : int, optional
-        Number of clusters (for kmeans/agglomerative).
+        Actual number of clusters in the cached results.
     clustering_params : str
         JSON string of additional clustering parameters.
     results_json : str
@@ -174,6 +178,8 @@ class ClusteringCache(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     embedding_model = Column(String, nullable=False, index=True)
+    conference = Column(String, nullable=True, index=True)
+    year = Column(Integer, nullable=True, index=True)
     reduction_method = Column(String, nullable=False)
     n_components = Column(Integer, nullable=False)
     clustering_method = Column(String, nullable=False, index=True)
@@ -186,7 +192,10 @@ class ClusteringCache(Base):
 
     def __repr__(self) -> str:
         """String representation of ClusteringCache."""
-        return f"<ClusteringCache(id={self.id}, method='{self.clustering_method}', n_clusters={self.n_clusters})>"
+        return (
+            f"<ClusteringCache(id={self.id}, conference='{self.conference}', "
+            f"year={self.year}, method='{self.clustering_method}', n_clusters={self.n_clusters})>"
+        )
 
 
 class HierarchicalLabelCache(Base):

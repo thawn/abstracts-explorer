@@ -1770,6 +1770,8 @@ class TestServerInitialization:
                     assert call_kwargs["reduction_method"] == "tsne"
                     assert call_kwargs["n_components"] == 2
                     assert call_kwargs["n_clusters"] is None
+                    assert call_kwargs["conference"] is None
+                    assert call_kwargs["year"] is None
 
     def test_compute_clusters_returns_404_when_no_cache(self, tmp_path):
         """Test that compute_clusters returns 404 when no cached data is available."""
@@ -1820,8 +1822,11 @@ class TestServerInitialization:
 
                     assert response.status_code == 200
                     call_kwargs = mock_db.get_clustering_cache.call_args[1]
-                    assert call_kwargs["clustering_params"]["conferences"] == ["NeurIPS"]
-                    assert call_kwargs["clustering_params"]["years"] == [2024]
+                    assert call_kwargs["conference"] == "NeurIPS"
+                    assert call_kwargs["year"] == 2024
+                    # conferences/years should NOT be in clustering_params
+                    assert "conferences" not in call_kwargs["clustering_params"]
+                    assert "years" not in call_kwargs["clustering_params"]
 
     def test_get_default_cluster_count(self):
         """Test getting default cluster count based on embeddings."""

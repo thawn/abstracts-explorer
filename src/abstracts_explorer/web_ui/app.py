@@ -643,12 +643,12 @@ def compute_clusters():
         # Get current embedding model
         current_model = config.embedding_model
 
-        # Fixed clustering parameters
+        # Fixed clustering parameters (only true clustering params, not conference/year)
         clustering_params = {"linkage": "ward", "distance_threshold": 150.0}
-        if conferences:
-            clustering_params["conferences"] = sorted(conferences)
-        if years:
-            clustering_params["years"] = sorted([int(y) for y in years])
+
+        # Determine single conference/year for cache lookup
+        cache_conference = conferences[0] if conferences and len(conferences) == 1 else None
+        cache_year = years[0] if years and len(years) == 1 else None
 
         # Look up pre-computed results from the cache
         cached = database.get_clustering_cache(
@@ -658,6 +658,8 @@ def compute_clusters():
             clustering_method="agglomerative",
             n_clusters=None,
             clustering_params=clustering_params if clustering_params else None,
+            conference=cache_conference,
+            year=cache_year,
         )
 
         if cached:
