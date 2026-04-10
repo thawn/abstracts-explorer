@@ -141,6 +141,21 @@ designed to catch show-stopping regressions quickly.
 | **Chat UI elements present** | The chat input, send button, and reset button are visible. |
 | **Send a chat message** | Typing a question and clicking send returns a response (or a graceful error if the LLM backend is unavailable). |
 
+#### MCP tool smoke tests
+
+Each MCP tool should be exercised via the chat interface with a representative query.
+The test passes when the response contains the listed success criteria (or a graceful
+error when the LLM backend is unavailable).
+
+| MCP tool | Example query | Success criteria |
+|---|---|---|
+| `get_conference_topics` | *"What are the main topics at NeurIPS 2025?"* | Response lists topic names with keywords and paper counts. |
+| `get_topic_evolution` | *"How has research on transformers evolved at NeurIPS over the years?"* | Response includes a year-by-year breakdown of paper counts or trend description. |
+| `search_papers` | *"Find papers about reinforcement learning at NeurIPS 2025."* | Response returns paper titles with authors and abstracts. |
+| `get_paper_details` | *"Who are the authors of 'Attention is All You Need'?"* | Response includes author names, URL/PDF links, and session info (if available). |
+| `analyze_topic_relevance` | *"How relevant is uncertainty quantification at NeurIPS 2025?"* | Response contains a relevance score or paper count within the embedding distance threshold. |
+| `get_cluster_visualization` | *"Show me a visual overview of NeurIPS 2025 clusters."* | Response returns or references visualization data (Plotly JSON or a rendered plot). |
+
 ### 5. Clustering tab
 
 | Test | What it verifies |
