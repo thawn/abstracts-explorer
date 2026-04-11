@@ -183,9 +183,9 @@ class TestWebInterface:
         mock_db.get_conference_years_from_db.return_value = conferences_with_years
         mock_db.get_conferences.return_value = sorted(conferences_with_years.keys())
         mock_db.get_years.side_effect = lambda conference=None: (
-            conferences_with_years.get(conference, []) if conference else sorted(
-                {y for years in conferences_with_years.values() for y in years}, reverse=True
-            )
+            conferences_with_years.get(conference, [])
+            if conference
+            else sorted({y for years in conferences_with_years.values() for y in years}, reverse=True)
         )
         # Delegate resolve_default_conference_year to the real implementation so
         # the business logic is exercised via database.py.

@@ -22,7 +22,6 @@ from abstracts_explorer.config import get_config
 from abstracts_explorer.paper_utils import get_paper_with_authors, PaperFormattingError
 from abstracts_explorer.export_utils import export_papers_to_zip
 
-
 # Import version
 try:
     from abstracts_explorer._version import __version__

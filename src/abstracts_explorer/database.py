@@ -1281,8 +1281,7 @@ class DatabaseManager:
             pass
 
         raise DatabaseError(
-            f"Failed to resolve conference name: {conference}.\n"
-            f"No match found in database or plugins."
+            f"Failed to resolve conference name: {conference}.\n" f"No match found in database or plugins."
         )
 
     def resolve_conference_for_url(self, url_path: str) -> dict:
@@ -1353,9 +1352,7 @@ class DatabaseManager:
                 },
             }
 
-    def get_sessions(
-        self, conference: Optional[str] = None, year: Optional[int] = None
-    ) -> List[str]:
+    def get_sessions(self, conference: Optional[str] = None, year: Optional[int] = None) -> List[str]:
         """
         Get distinct session names from the database.
 
@@ -1437,9 +1434,7 @@ class DatabaseManager:
 
         try:
             stmt = (
-                select(Paper.conference)
-                .distinct()
-                .where(and_(Paper.conference.isnot(None), Paper.conference != ""))
+                select(Paper.conference).distinct().where(and_(Paper.conference.isnot(None), Paper.conference != ""))
             )
             if year is not None:
                 stmt = stmt.where(Paper.year == year)
