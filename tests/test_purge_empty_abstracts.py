@@ -2,7 +2,7 @@
 Tests for the purge_empty_abstracts script.
 """
 
-import sys
+import importlib.util
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -13,29 +13,14 @@ from abstracts_explorer.db_models import Paper
 from abstracts_explorer.plugin import LightweightPaper
 from tests.conftest import set_test_db
 
-# Make the scripts directory importable
-_SCRIPTS_DIR = Path(__file__).parent.parent / "scripts"
-sys.path.insert(0, str(_SCRIPTS_DIR))
-
-from purge_empty_abstracts import (  # noqa: E402
-    delete_embeddings_by_uids,
-    delete_papers_by_uids,
-    find_papers_without_abstract,
-)
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _add_paper(db: DatabaseManager, paper: LightweightPaper) -> str:
-    """Insert a LightweightPaper into *db* and return its UID."""
-    db.add_paper(paper)
-    # Re-query to get the UID that was assigned
-    results = db.search_papers(query=paper.title, limit=1)
-    assert results, f"Paper '{paper.title}' was not found after insert"
-    return results[0]["uid"]
-
+# Import functions from the scripts directory without mutating sys.path.
+_SCRIPT_PATH = Path(__file__).parent.parent / "scripts" / "purge_empty_abstracts.py"
+_spec = importlib.util.spec_from_file_location("purge_empty_abstracts", _SCRIPT_PATH)
+_module = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_module)
+find_papers_without_abstract = _module.find_papers_without_abstract
+delete_papers_by_uids = _module.delete_papers_by_uids
+delete_embeddings_by_uids = _module.delete_embeddings_by_uids
 
 # ---------------------------------------------------------------------------
 # find_papers_without_abstract
