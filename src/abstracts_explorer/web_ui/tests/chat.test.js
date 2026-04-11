@@ -860,8 +860,8 @@ describe('Chat Module', () => {
             addChatMessage('First response', 'assistant');
 
             const buttons = document.querySelectorAll('.chat-feedback-btn');
-            expect(buttons[0].style.animationDelay).toBe('0s');
-            expect(buttons[1].style.animationDelay).toBe('0.15s');
+            expect(buttons[0].style.animationDelay).toBe('0.5s');
+            expect(buttons[1].style.animationDelay).toBe('0.65s');
         });
 
         it('should not add feedback-bounce on user messages', () => {
