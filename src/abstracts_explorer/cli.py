@@ -152,7 +152,10 @@ def _resolve_conference_arg(conference: Optional[str]) -> Optional[str]:
         return conference
     with DatabaseManager() as db:
         db.create_tables()
-        return db.resolve_conference_name(conference)
+        resolved_conference = db.resolve_conference_name(conference)
+    if resolved_conference is not None and resolved_conference != conference:
+        print(f"ℹ️  Resolved conference '{conference}' → '{resolved_conference}'")
+    return resolved_conference
 
 
 def _build_embeddings_where_clause(args: argparse.Namespace) -> Optional[str]:
@@ -218,7 +221,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     config = get_config()
 
     # Resolve conference name once to canonical form
-    args.conference = _resolve_conference_arg(args.conference)
+    conference = _resolve_conference_arg(getattr(args, "conference", None))
 
     # Build combined WHERE clause from --conference, --year, and --where
     where_clause = _build_embeddings_where_clause(args)
@@ -232,7 +235,6 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     print(f"API URL: {args.lm_studio_url}")
     rate_limit_str = f"{args.requests_per_minute} req/min" if args.requests_per_minute > 0 else "disabled"
     print(f"Rate limit: {rate_limit_str}")
-    conference = getattr(args, "conference", None)
     year = getattr(args, "year", None)
     if conference:
         print(f"Conference: {conference}")
@@ -1258,10 +1260,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
             return 1
 
     # Resolve conference name once to canonical form
-    raw_conference: Optional[str] = getattr(args, "conference", None) or None
-    resolved_conference = _resolve_conference_arg(raw_conference)
-    if resolved_conference is not None and resolved_conference != raw_conference:
-        print(f"ℹ️  Resolved conference '{raw_conference}' → '{resolved_conference}'")
+    resolved_conference = _resolve_conference_arg(getattr(args, "conference", None))
     year_arg: Optional[int] = getattr(args, "year", None)
 
     # Discover available conference × year combinations from the DB
@@ -1295,8 +1294,6 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
             plugin_years = plugin_years_map.get(conf)
             if plugin_years is not None:
                 conf_years = [y for y in conf_years if y in plugin_years]
-            # conference + all years combined
-            combos.append((conf, None))
             # conference + each individual year
             for y in conf_years:
                 combos.append((conf, y))
@@ -1317,8 +1314,6 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
         plugin_years = plugin_years_map.get(resolved_conference)
         if plugin_years is not None:
             conf_years_for_single = [y for y in conf_years_for_single if y in plugin_years]
-        # conference + all years combined
-        combos.append((resolved_conference, None))
         # conference + each individual year
         for y in conf_years_for_single:
             combos.append((resolved_conference, y))
@@ -1326,9 +1321,6 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
         # Both conference and year specified: single combo
         if resolved_conference is not None:
             combos.append((resolved_conference, year_arg))
-        else:
-            # year only, no conference
-            combos.append((None, year_arg))
 
     print("Abstracts Explorer - Pre-generate Clustering")
     print("=" * 70)
@@ -1367,7 +1359,9 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
             if yr is not None:
                 label += f" {yr}"
             else:
-                label += " (all years)"
+                raise ValueError(
+                    "Year must be specified for clustering pre-generation to ensure manageable computation"
+                )
 
             print(f"\n🚀 Clustering {label}...")
 
@@ -1945,7 +1939,7 @@ def registry_upload_command(args: argparse.Namespace) -> int:
     repository = args.repository or config.registry_repository
     token = args.token or config.github_token
     # Resolve conference name to canonical form; treat None/"all" as "all"
-    raw_conf = args.conference or None
+    raw_conf = getattr(args, "conference", None)
     if raw_conf and raw_conf.lower() != "all":
         conference = _resolve_conference_arg(raw_conf) or raw_conf
     else:
@@ -2044,7 +2038,7 @@ def registry_download_command(args: argparse.Namespace) -> int:
     repository = args.repository or config.registry_repository
     token = args.token or config.github_token
     # Resolve conference name to canonical form; treat None/"all" as "all"
-    raw_conf = args.conference or None
+    raw_conf = getattr(args, "conference", None)
     if raw_conf and raw_conf.lower() != "all":
         conference = _resolve_conference_arg(raw_conf) or raw_conf
     else:
