@@ -732,6 +732,14 @@ class LightweightPaper(BaseModel):
                 raise ValueError("Author names cannot contain semicolons")
         return filtered
 
+    @field_validator("abstract")
+    @classmethod
+    def validate_abstract(cls, v: str) -> str:
+        """Ensure abstract is not empty."""
+        if not v or not v.strip():
+            raise ValueError("Paper abstract cannot be empty")
+        return v.strip()
+
     @field_validator("session")
     @classmethod
     def validate_session(cls, v: str) -> str:
