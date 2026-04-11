@@ -871,7 +871,183 @@ class TestCLI:
         # Verify create_collection was called with reset=True
         mock_em.create_collection.assert_called_once_with(reset=True)
 
-    def test_create_embeddings_requests_per_minute(self, tmp_path, capsys, monkeypatch):
+    def test_create_embeddings_force_with_conference_does_not_reset_collection(self, tmp_path, capsys, monkeypatch):
+        """--force --conference should delete only matching embeddings, not reset whole collection."""
+        from abstracts_explorer import DatabaseManager
+
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
+        with DatabaseManager() as db:
+            db.create_tables()
+            papers = [
+                LightweightPaper(
+                    title="NeurIPS Paper",
+                    abstract="Abstract 1",
+                    authors=["Author"],
+                    session="S1",
+                    poster_position="P1",
+                    year=2025,
+                    conference="NeurIPS",
+                ),
+            ]
+            db.add_papers(papers)
+
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+            mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
+            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.embed_from_database.return_value = 1
+            mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
+            mock_em.delete_embeddings_by_filter.return_value = 0
+            mock_em.__enter__ = Mock(return_value=mock_em)
+            mock_em.__exit__ = Mock(return_value=False)
+            MockEM.return_value = mock_em
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "neurips-abstracts",
+                    "create-embeddings",
+                    "--force",
+                    "--conference",
+                    "NeurIPS",
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        # Should NOT say "Resetting existing collection" (that implies full reset)
+        assert "Resetting existing collection" not in captured.out
+        # Should print scoped removal message
+        assert "Removing existing embeddings" in captured.out
+        assert "conference=NeurIPS" in captured.out
+
+        # create_collection must be called with reset=False (not wipe the collection)
+        mock_em.create_collection.assert_called_once_with(reset=False)
+        # delete_embeddings_by_filter must be called with the conference
+        mock_em.delete_embeddings_by_filter.assert_called_once_with(conference="NeurIPS", year=None)
+
+    def test_create_embeddings_force_with_year_does_not_reset_collection(self, tmp_path, capsys, monkeypatch):
+        """--force --year should delete only matching embeddings, not reset whole collection."""
+        from abstracts_explorer import DatabaseManager
+
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
+        with DatabaseManager() as db:
+            db.create_tables()
+            papers = [
+                LightweightPaper(
+                    title="Paper 2024",
+                    abstract="Abstract",
+                    authors=["Author"],
+                    session="S1",
+                    poster_position="P1",
+                    year=2024,
+                    conference="NeurIPS",
+                ),
+            ]
+            db.add_papers(papers)
+
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+            mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
+            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.embed_from_database.return_value = 1
+            mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
+            mock_em.delete_embeddings_by_filter.return_value = 2
+            mock_em.__enter__ = Mock(return_value=mock_em)
+            mock_em.__exit__ = Mock(return_value=False)
+            MockEM.return_value = mock_em
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "neurips-abstracts",
+                    "create-embeddings",
+                    "--force",
+                    "--year",
+                    "2024",
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Resetting existing collection" not in captured.out
+        assert "Removing existing embeddings" in captured.out
+        assert "year=2024" in captured.out
+        # Reports the number removed
+        assert "Removed 2" in captured.out
+
+        mock_em.create_collection.assert_called_once_with(reset=False)
+        mock_em.delete_embeddings_by_filter.assert_called_once_with(conference=None, year=2024)
+
+    def test_create_embeddings_force_with_conference_and_year(self, tmp_path, capsys, monkeypatch):
+        """--force --conference X --year Y deletes only that conference+year slice."""
+        from abstracts_explorer import DatabaseManager
+
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
+        with DatabaseManager() as db:
+            db.create_tables()
+            papers = [
+                LightweightPaper(
+                    title="NeurIPS 2024",
+                    abstract="Abstract",
+                    authors=["Author"],
+                    session="S1",
+                    poster_position="P1",
+                    year=2024,
+                    conference="NeurIPS",
+                ),
+            ]
+            db.add_papers(papers)
+
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+            mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
+            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.embed_from_database.return_value = 1
+            mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
+            mock_em.delete_embeddings_by_filter.return_value = 5
+            mock_em.__enter__ = Mock(return_value=mock_em)
+            mock_em.__exit__ = Mock(return_value=False)
+            MockEM.return_value = mock_em
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "neurips-abstracts",
+                    "create-embeddings",
+                    "--force",
+                    "--conference",
+                    "NeurIPS",
+                    "--year",
+                    "2024",
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Resetting existing collection" not in captured.out
+        assert "Removing existing embeddings" in captured.out
+        assert "conference=NeurIPS" in captured.out
+        assert "year=2024" in captured.out
+
+        mock_em.create_collection.assert_called_once_with(reset=False)
+        mock_em.delete_embeddings_by_filter.assert_called_once_with(conference="NeurIPS", year=2024)
+
         """Test create-embeddings with --requests-per-minute flag."""
         from abstracts_explorer import DatabaseManager
 
