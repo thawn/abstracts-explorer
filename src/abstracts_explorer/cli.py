@@ -1149,7 +1149,8 @@ def delete_data_command(args: argparse.Namespace) -> int:
         existing = em.collection.get(where={"$and": [{"conference": conference}, {"year": str(year)}]})
         embedding_count = len(existing.get("ids", []))
         em.close()
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Could not count ChromaDB embeddings (will still attempt deletion): {e}")
         embedding_count = 0
 
     print("\nThe following data will be permanently deleted:")

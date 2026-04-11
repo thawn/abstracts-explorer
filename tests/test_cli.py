@@ -3639,6 +3639,9 @@ class TestDeleteDataCommand:
         assert "Deleted" in captured.out
         assert "paper" in captured.out.lower()
 
+        # Verify delete_embeddings_by_filter was called with correct parameters
+        mock_em.delete_embeddings_by_filter.assert_called_once_with(conference="NeurIPS", year=2024)
+
         # Verify papers deleted from DB
         with DatabaseManager() as db:
             papers = db.search_papers(conference="NeurIPS", year=2024, limit=0)
