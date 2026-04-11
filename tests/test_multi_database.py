@@ -13,7 +13,6 @@ from abstracts_explorer.plugin import LightweightPaper
 from abstracts_explorer.config import get_config
 from tests.conftest import set_test_db
 
-
 # Check if PostgreSQL is available via environment variable
 # Set POSTGRES_TEST_URL to test PostgreSQL backend
 # Example: POSTGRES_TEST_URL=postgresql://user:password@localhost/test_db
@@ -22,8 +21,7 @@ HAS_POSTGRES = POSTGRES_TEST_URL is not None
 
 # Skip marker for PostgreSQL tests
 skip_without_postgres = pytest.mark.skipif(
-    not HAS_POSTGRES,
-    reason="PostgreSQL not available (set POSTGRES_TEST_URL to test)"
+    not HAS_POSTGRES, reason="PostgreSQL not available (set POSTGRES_TEST_URL to test)"
 )
 
 
@@ -34,11 +32,11 @@ class TestMultiDatabaseBackend:
         """Test using SQLite via PAPER_DB environment variable (path)."""
         db_path = tmp_path / "test.db"
         set_test_db(db_path)
-        
+
         db = DatabaseManager()
         with db:
             db.create_tables()
-            
+
             # Test basic operations
             paper = LightweightPaper(
                 title="Test Paper",
@@ -49,10 +47,10 @@ class TestMultiDatabaseBackend:
                 year=2025,
                 conference="TestConf",
             )
-            
+
             paper_uid = db.add_paper(paper)
             assert paper_uid is not None
-            
+
             count = db.get_paper_count()
             assert count == 1
 
@@ -61,11 +59,11 @@ class TestMultiDatabaseBackend:
         db_path = tmp_path / "test.db"
         database_url = f"sqlite:///{db_path}"
         set_test_db(database_url)
-        
+
         db = DatabaseManager()
         with db:
             db.create_tables()
-            
+
             # Test basic operations
             paper = LightweightPaper(
                 title="Test Paper",
@@ -76,10 +74,10 @@ class TestMultiDatabaseBackend:
                 year=2025,
                 conference="TestConf",
             )
-            
+
             paper_uid = db.add_paper(paper)
             assert paper_uid is not None
-            
+
             count = db.get_paper_count()
             assert count == 1
 
@@ -89,11 +87,11 @@ class TestMultiDatabaseBackend:
         # This test requires PostgreSQL to be available
         set_test_db(POSTGRES_TEST_URL)
         db = DatabaseManager()
-        
+
         with db:
             # Create tables
             db.create_tables()
-            
+
             # Test adding a paper
             paper = LightweightPaper(
                 title="PostgreSQL Test Paper",
@@ -105,34 +103,36 @@ class TestMultiDatabaseBackend:
                 conference="TestConf",
                 keywords=["test", "postgresql"],
             )
-            
+
             paper_uid = db.add_paper(paper)
             assert paper_uid is not None
-            
+
             # Test retrieving count
             count = db.get_paper_count()
             assert count >= 1  # Might have papers from previous tests
-            
+
             # Test search
             results = db.search_papers(keyword="PostgreSQL", limit=10)
             assert len(results) > 0
             assert any("PostgreSQL" in r["title"] for r in results)
-            
+
             # Test filter options
-            filters = db.get_filter_options()
-            assert "sessions" in filters
-            assert "years" in filters
-            assert "conferences" in filters
+            sessions = db.get_sessions()
+            assert isinstance(sessions, list)
+            conferences = db.get_conferences()
+            assert isinstance(conferences, list)
+            years = db.get_years()
+            assert isinstance(years, list)
 
     @skip_without_postgres
     def test_postgresql_multiple_papers(self):
         """Test adding multiple papers with PostgreSQL."""
         set_test_db(POSTGRES_TEST_URL)
         db = DatabaseManager()
-        
+
         with db:
             db.create_tables()
-            
+
             papers = [
                 LightweightPaper(
                     title=f"Paper {i}",
@@ -145,10 +145,10 @@ class TestMultiDatabaseBackend:
                 )
                 for i in range(5)
             ]
-            
+
             count = db.add_papers(papers)
             assert count == 5
-            
+
             total = db.get_paper_count()
             assert total >= 5
 
@@ -157,22 +157,22 @@ class TestMultiDatabaseBackend:
         """Test embedding model metadata with PostgreSQL."""
         set_test_db(POSTGRES_TEST_URL)
         db = DatabaseManager()
-        
+
         with db:
             db.create_tables()
-            
+
             # Set embedding model
             model_name = "test-embedding-model"
             db.set_embedding_model(model_name)
-            
+
             # Retrieve embedding model
             retrieved_model = db.get_embedding_model()
             assert retrieved_model == model_name
-            
+
             # Update embedding model
             new_model = "updated-embedding-model"
             db.set_embedding_model(new_model)
-            
+
             retrieved_model = db.get_embedding_model()
             assert retrieved_model == new_model
 
@@ -181,13 +181,13 @@ class TestMultiDatabaseBackend:
         """Test that create_tables can be called multiple times without error."""
         set_test_db(POSTGRES_TEST_URL)
         db = DatabaseManager()
-        
+
         with db:
             # Call create_tables multiple times - should not raise errors
             db.create_tables()
             db.create_tables()
             db.create_tables()
-            
+
             # Verify tables still work
             paper = LightweightPaper(
                 title="Idempotent Test Paper",
@@ -198,7 +198,7 @@ class TestMultiDatabaseBackend:
                 year=2025,
                 conference="TestConf",
             )
-            
+
             paper_uid = db.add_paper(paper)
             assert paper_uid is not None
 

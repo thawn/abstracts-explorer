@@ -47,13 +47,28 @@ select:focus {
 /* Feedback highlight animation – runs once on the first assistant message */
 @keyframes feedbackHighlight {
     0% { background-color: transparent; }
-    30% { background-color: rgba(139, 92, 246, 0.10); }
+        30% {
+            background-color: rgba(135, 255, 95, 0.522);
+        }
     100% { background-color: transparent; }
 }
 
 .feedback-highlight {
     animation: feedbackHighlight 2s ease-out;
     border-radius: 4px;
+}
+
+/* Feedback bounce animation – makes rating buttons jump once on first appearance */
+@keyframes feedbackBounce {
+    0%   { transform: translateY(0); }
+    25%  { transform: translateY(-6px); }
+    50%  { transform: translateY(0); }
+    75%  { transform: translateY(-3px); }
+    100% { transform: translateY(0); }
+}
+
+.feedback-bounce {
+    animation: feedbackBounce 0.7s ease;
 }
 
 /* MCP Tools hint bubble */

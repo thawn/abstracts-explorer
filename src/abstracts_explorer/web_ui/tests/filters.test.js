@@ -34,7 +34,6 @@ describe('Filters Module', () => {
                 <option value="Session 2">Session 2</option>
             </select>
             <select id="year-selector" multiple>
-                <option value="">All Years</option>
             </select>
             <select id="conference-selector">
             </select>
@@ -151,37 +150,6 @@ describe('Filters Module', () => {
             delete window.loadStats;
         });
 
-        it('should NOT override "All Years" selection with default_year when user explicitly selected All Years', async () => {
-            // Simulate: dropdown already populated (more than 1 option), user selected "All Years"
-            const yearSelect = document.getElementById('year-selector');
-            const opt2024 = document.createElement('option');
-            opt2024.value = '2024'; opt2024.textContent = '2024';
-            const opt2025 = document.createElement('option');
-            opt2025.value = '2025'; opt2025.textContent = '2025';
-            yearSelect.appendChild(opt2024);
-            yearSelect.appendChild(opt2025);
-            yearSelect.value = '';  // User selected "All Years"
-
-            global.fetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({ sessions: [] })
-            }).mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({
-                    conferences: [],
-                    years: [2024, 2025],
-                    conference_years: {},
-                    default_conference: '',
-                    default_year: 2025
-                })
-            });
-
-            await loadFilterOptions();
-
-            // The year should remain "All Years" (empty string), not jump to 2025
-            expect(yearSelect.value).toBe('');
-        });
-
         it('should select the first conference and call window.loadStats even when no default_conference is configured', async () => {
             const mockLoadStats = jest.fn();
             window.loadStats = mockLoadStats;
@@ -208,7 +176,7 @@ describe('Filters Module', () => {
             delete window.loadStats;
         });
 
-        it('should store db_conference_years in window.dbConferenceYearsMap', async () => {
+        it('should populate conferences and years from conference_years', async () => {
             global.fetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({ sessions: [] })
@@ -217,8 +185,7 @@ describe('Filters Module', () => {
                 json: async () => ({
                     conferences: ['NeurIPS', 'ICLR'],
                     years: [2024, 2025],
-                    conference_years: { 'NeurIPS': [2024, 2025], 'ICLR': [2024] },
-                    db_conference_years: { 'NeurIPS': [2025], 'ICLR': [2024] },
+                    conference_years: { 'NeurIPS': [2025], 'ICLR': [2024] },
                     default_conference: 'NeurIPS',
                     default_year: 2025
                 })
@@ -226,7 +193,7 @@ describe('Filters Module', () => {
 
             await loadFilterOptions();
 
-            expect(window.dbConferenceYearsMap).toEqual({ 'NeurIPS': [2025], 'ICLR': [2024] });
+            expect(window.conferenceYearsMap).toEqual({ 'NeurIPS': [2025], 'ICLR': [2024] });
         });
     });
 
@@ -243,30 +210,24 @@ describe('Filters Module', () => {
             conferenceSelect.value = 'NeurIPS';
         });
 
-        it('should use db_conference_years years when available for the selected conference', () => {
-            window.dbConferenceYearsMap = { 'NeurIPS': [2025] };
-
+        it('should use conference_years for the selected conference', () => {
             updateYearsForConference();
 
             const yearSelect = document.getElementById('year-selector');
             const yearValues = Array.from(yearSelect.options).map(o => o.value);
-            // db_conference_years only has 2025 for NeurIPS; plugin has 2023, 2024, 2025
+            expect(yearValues).toContain('2023');
+            expect(yearValues).toContain('2024');
             expect(yearValues).toContain('2025');
-            expect(yearValues).not.toContain('2023');
-            expect(yearValues).not.toContain('2024');
         });
 
-        it('should fall back to conference_years when db_conference_years has no entry for the selected conference', () => {
-            window.dbConferenceYearsMap = {};  // no DB data for NeurIPS
+        it('should show empty years when conference has no entry in conference_years', () => {
+            window.conferenceYearsMap = {};
 
             updateYearsForConference();
 
             const yearSelect = document.getElementById('year-selector');
             const yearValues = Array.from(yearSelect.options).map(o => o.value);
-            // falls back to plugin-based years: 2023, 2024, 2025
-            expect(yearValues).toContain('2025');
-            expect(yearValues).toContain('2024');
-            expect(yearValues).toContain('2023');
+            expect(yearValues).toEqual([]);
         });
     });
 
@@ -386,7 +347,6 @@ describe('Filters Module', () => {
         beforeEach(() => {
             document.body.innerHTML = `
                 <select id="year-selector" multiple>
-                    <option value="">All Years</option>
                 </select>
                 <select id="conference-selector"></select>
                 <select id="session-filter" multiple></select>
@@ -430,7 +390,6 @@ describe('Filters Module', () => {
         beforeEach(() => {
             document.body.innerHTML = `
                 <select id="year-selector" multiple>
-                    <option value="">All Years</option>
                 </select>
                 <select id="conference-selector"></select>
                 <select id="session-filter" multiple></select>

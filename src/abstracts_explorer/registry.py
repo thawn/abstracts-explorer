@@ -1255,8 +1255,8 @@ class RegistryClient:
 
         with DatabaseManager() as db:
             db.create_tables()
-            filters = db.get_filter_options()
-            conferences = sorted(filters.get("conferences", []))
+            filters = db.get_conferences()
+            conferences = sorted(filters)
         if not conferences:
             raise RegistryError("No conference data found in local database.")
 

@@ -29,7 +29,6 @@ from abstracts_explorer.plugins import (
     list_plugins,
     list_plugin_names,
 )
-from abstracts_explorer.plugin import get_available_filters
 from abstracts_explorer.mcp_server import run_mcp_server
 from abstracts_explorer.evaluation import (
     EvaluationError,
@@ -152,7 +151,10 @@ def _resolve_conference_arg(conference: Optional[str]) -> Optional[str]:
         return conference
     with DatabaseManager() as db:
         db.create_tables()
-        return db.resolve_conference_name(conference)
+        resolved_conference = db.resolve_conference_name(conference)
+    if resolved_conference is not None and resolved_conference != conference:
+        print(f"ℹ️  Resolved conference '{conference}' → '{resolved_conference}'")
+    return resolved_conference
 
 
 def _build_embeddings_where_clause(args: argparse.Namespace) -> Optional[str]:
@@ -218,7 +220,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     config = get_config()
 
     # Resolve conference name once to canonical form
-    args.conference = _resolve_conference_arg(args.conference)
+    conference = _resolve_conference_arg(getattr(args, "conference", None))
 
     # Build combined WHERE clause from --conference, --year, and --where
     where_clause = _build_embeddings_where_clause(args)
@@ -232,7 +234,6 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     print(f"API URL: {args.lm_studio_url}")
     rate_limit_str = f"{args.requests_per_minute} req/min" if args.requests_per_minute > 0 else "disabled"
     print(f"Rate limit: {rate_limit_str}")
-    conference = getattr(args, "conference", None)
     year = getattr(args, "year", None)
     if conference:
         print(f"Conference: {conference}")
@@ -296,13 +297,31 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         # Connect to ChromaDB
         em.connect()
 
-        # Create or reset collection
-        if args.force:
+        # Create or reset collection.
+        # When --force is combined with --conference / --year, only delete the
+        # embeddings for the matching subset rather than wiping the entire
+        # collection (which would lose embeddings for other conferences/years).
+        filtered_force = args.force and (conference is not None or year is not None)
+        if args.force and not filtered_force:
             print(f"🔄 Resetting existing collection '{args.collection}'...")
+        elif filtered_force:
+            scope_parts = []
+            if conference:
+                scope_parts.append(f"conference={conference}")
+            if year is not None:
+                scope_parts.append(f"year={year}")
+            print(
+                f"🔄 Removing existing embeddings for {', '.join(scope_parts)} from collection '{args.collection}'..."
+            )
         else:
             print(f"📁 Creating collection '{args.collection}'...")
 
-        em.create_collection(reset=args.force)
+        em.create_collection(reset=args.force and not filtered_force)
+
+        if filtered_force:
+            deleted = em.delete_embeddings_by_filter(conference=conference, year=year)
+            if deleted:
+                print(f"   Removed {deleted:,} existing embeddings")
 
         # Generate embeddings with progress bar
         print("\n🚀 Generating embeddings...")
@@ -1061,6 +1080,139 @@ def clear_clustering_cache_command(args: argparse.Namespace) -> int:
         return 1
 
 
+def delete_data_command(args: argparse.Namespace) -> int:
+    """
+    Delete all data for a specific conference and year from every database.
+
+    Removes papers from the paper database, embeddings from ChromaDB, and
+    clustering cache entries from the database.  Both ``--conference`` and
+    ``--year`` are required.  The user must type ``yes`` to confirm.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments containing:
+        - conference: Conference name (required)
+        - year: Year of conference (required)
+        - yes: If True, skip the interactive confirmation prompt
+
+    Returns
+    -------
+    int
+        Exit code (0 for success, non-zero for failure)
+    """
+    config = get_config()
+
+    conference = getattr(args, "conference", None)
+    year = getattr(args, "year", None)
+
+    if not conference:
+        print("❌ --conference is required for the delete-data command.", file=sys.stderr)
+        return 1
+    if year is None:
+        print("❌ --year is required for the delete-data command.", file=sys.stderr)
+        return 1
+
+    # Resolve conference name to canonical form
+    try:
+        conference = _resolve_conference_arg(conference)
+    except Exception:
+        # If resolution fails, use the raw value (might still be valid)
+        pass
+
+    print("Abstracts Explorer - Delete Conference/Year Data")
+    print("=" * 70)
+    print(f"Database:     {config.database_url}")
+    print(f"Embedding DB: {config.embedding_db}")
+    print(f"Conference:   {conference}")
+    print(f"Year:         {year}")
+    print("=" * 70)
+
+    # Count what will be deleted
+    paper_count = 0
+    cache_count = 0
+    try:
+        with DatabaseManager() as db:
+            db.create_tables()
+            papers = db.search_papers(conference=conference, year=year, limit=0)
+            paper_count = len(papers)
+            cache_count = db.count_clustering_cache_by_conference_year(conference, year)
+    except Exception as e:
+        print(f"\n❌ Error accessing database: {e}", file=sys.stderr)
+        return 1
+
+    # Count ChromaDB embeddings
+    embedding_count = 0
+    try:
+        em = EmbeddingsManager()
+        em.connect()
+        em.create_collection(reset=False)
+        existing = em.collection.get(where={"$and": [{"conference": conference}, {"year": str(year)}]})
+        embedding_count = len(existing.get("ids", []))
+        em.close()
+    except Exception as e:
+        logger.warning(f"Could not count ChromaDB embeddings (will still attempt deletion): {e}")
+        embedding_count = 0
+
+    print("\nThe following data will be permanently deleted:")
+    print(f"  📄 Papers:            {paper_count:,}")
+    print(f"  🔢 Embeddings:        {embedding_count:,}")
+    print(f"  🗂️  Clustering cache:  {cache_count:,}")
+
+    if paper_count == 0 and embedding_count == 0 and cache_count == 0:
+        print("\n✅ Nothing to delete — no data found for this conference/year combination.")
+        return 0
+
+    if not getattr(args, "yes", False):
+        print(f"\n⚠️  This will permanently delete all data for {conference} {year} from all databases.")
+        confirm = input("Type 'yes' to confirm: ")
+        if confirm.strip().lower() != "yes":
+            print("Aborted.")
+            return 1
+
+    errors: List[str] = []
+
+    # 1. Delete papers from paper database
+    try:
+        with DatabaseManager() as db:
+            deleted_papers = db.delete_papers_by_conference_year(conference, year)
+        print(f"\n✅ Deleted {deleted_papers:,} paper(s) from paper database.")
+    except Exception as e:
+        msg = f"Failed to delete papers: {e}"
+        print(f"\n❌ {msg}", file=sys.stderr)
+        errors.append(msg)
+
+    # 2. Delete embeddings from ChromaDB
+    try:
+        em = EmbeddingsManager()
+        em.connect()
+        em.create_collection(reset=False)
+        deleted_embeddings = em.delete_embeddings_by_filter(conference=conference, year=year)
+        em.close()
+        print(f"✅ Deleted {deleted_embeddings:,} embedding(s) from ChromaDB.")
+    except Exception as e:
+        msg = f"Failed to delete embeddings: {e}"
+        print(f"\n❌ {msg}", file=sys.stderr)
+        errors.append(msg)
+
+    # 3. Delete clustering cache
+    try:
+        with DatabaseManager() as db:
+            deleted_cache = db.delete_clustering_cache_by_conference_year(conference, year)
+        print(f"✅ Deleted {deleted_cache:,} clustering cache entry/entries.")
+    except Exception as e:
+        msg = f"Failed to delete clustering cache: {e}"
+        print(f"\n❌ {msg}", file=sys.stderr)
+        errors.append(msg)
+
+    if errors:
+        print(f"\n⚠️  Completed with {len(errors)} error(s).")
+        return 1
+
+    print(f"\n✅ All data for {conference} {year} has been deleted.")
+    return 0
+
+
 def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     """
     Pre-generate clustering results for one or all conference/year combinations.
@@ -1070,11 +1222,9 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     cache so that the web UI can serve them instantly.
 
     Without ``--conference`` or ``--year``, generates clustering for every
-    conference in the database combined with each individual year and with
-    all years.
+    conference in the database combined with each individual year.
 
-    With ``--conference`` only, generates for that conference with all years
-    combined AND each individual year.
+    With ``--conference`` only, generates for that conference for each individual year.
 
     With both ``--conference`` and ``--year``, generates for that specific
     conference + year only.
@@ -1107,77 +1257,27 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
             return 1
 
     # Resolve conference name once to canonical form
-    raw_conference: Optional[str] = getattr(args, "conference", None) or None
-    resolved_conference = _resolve_conference_arg(raw_conference)
-    if resolved_conference is not None and resolved_conference != raw_conference:
-        print(f"ℹ️  Resolved conference '{raw_conference}' → '{resolved_conference}'")
+    resolved_conference = _resolve_conference_arg(getattr(args, "conference", None))
     year_arg: Optional[int] = getattr(args, "year", None)
 
-    # Discover available conference × year combinations from the DB
-    stored_conferences: list = []
-    try:
-        with DatabaseManager() as _db_resolve:
-            opts = _db_resolve.get_filter_options()
-            stored_conferences = opts.get("conferences", [])
-    except Exception:
-        pass
-
+    # Build the list of (conference, year) combinations from the database
     combos: list = []
-
-    # Get plugin-supported years for each conference
-    plugin_filters = get_available_filters()
-    plugin_conf_years = plugin_filters.get("conference_years", {})
-    # Build lookup for plugin supported years (keyed by canonical conference name)
-    plugin_years_map = {k: set(v) for k, v in plugin_conf_years.items()}
-
-    if resolved_conference is None and year_arg is None:
-        # No filters: generate all conference × year combinations
-        for conf in stored_conferences:
-            conf_opts = None
-            try:
-                with DatabaseManager() as _db_years:
-                    conf_opts = _db_years.get_filter_options(conference=conf)
-            except Exception:
-                pass
-            conf_years = conf_opts.get("years", []) if conf_opts else []
-            # Filter years to only those supported by the plugin
-            plugin_years = plugin_years_map.get(conf)
-            if plugin_years is not None:
-                conf_years = [y for y in conf_years if y in plugin_years]
-            # conference + all years combined
-            combos.append((conf, None))
-            # conference + each individual year
-            for y in conf_years:
-                combos.append((conf, y))
-        if not combos:
-            print("❌ No conferences found in the database.", file=sys.stderr)
-            return 1
-    elif resolved_conference is not None and year_arg is None:
-        # Conference specified, no year: generate for that conference with all years
-        # and each individual year
-        conf_years_for_single: list = []
+    if resolved_conference is not None and year_arg is not None:
+        # Both specified: single combo, no DB lookup needed
+        combos = [(resolved_conference, year_arg)]
+    else:
         try:
-            with DatabaseManager() as _db_conf_years:
-                conf_opts = _db_conf_years.get_filter_options(conference=resolved_conference)
-                conf_years_for_single = conf_opts.get("years", [])
+            with DatabaseManager() as db:
+                conferences = [resolved_conference] if resolved_conference else db.get_conferences()
+                for conf in conferences:
+                    for year in db.get_years(conference=conf):
+                        combos.append((conf, year))
         except Exception:
             pass
-        # Filter years to only those supported by the plugin
-        plugin_years = plugin_years_map.get(resolved_conference)
-        if plugin_years is not None:
-            conf_years_for_single = [y for y in conf_years_for_single if y in plugin_years]
-        # conference + all years combined
-        combos.append((resolved_conference, None))
-        # conference + each individual year
-        for y in conf_years_for_single:
-            combos.append((resolved_conference, y))
-    else:
-        # Both conference and year specified: single combo
-        if resolved_conference is not None:
-            combos.append((resolved_conference, year_arg))
-        else:
-            # year only, no conference
-            combos.append((None, year_arg))
+
+    if not combos:
+        print("❌ No conferences found in the database.", file=sys.stderr)
+        return 1
 
     print("Abstracts Explorer - Pre-generate Clustering")
     print("=" * 70)
@@ -1216,7 +1316,9 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
             if yr is not None:
                 label += f" {yr}"
             else:
-                label += " (all years)"
+                raise ValueError(
+                    "Year must be specified for clustering pre-generation to ensure manageable computation"
+                )
 
             print(f"\n🚀 Clustering {label}...")
 
@@ -1794,7 +1896,7 @@ def registry_upload_command(args: argparse.Namespace) -> int:
     repository = args.repository or config.registry_repository
     token = args.token or config.github_token
     # Resolve conference name to canonical form; treat None/"all" as "all"
-    raw_conf = args.conference or None
+    raw_conf = getattr(args, "conference", None)
     if raw_conf and raw_conf.lower() != "all":
         conference = _resolve_conference_arg(raw_conf) or raw_conf
     else:
@@ -1893,7 +1995,7 @@ def registry_download_command(args: argparse.Namespace) -> int:
     repository = args.repository or config.registry_repository
     token = args.token or config.github_token
     # Resolve conference name to canonical form; treat None/"all" as "all"
-    raw_conf = args.conference or None
+    raw_conf = getattr(args, "conference", None)
     if raw_conf and raw_conf.lower() != "all":
         conference = _resolve_conference_arg(raw_conf) or raw_conf
     else:
@@ -1902,13 +2004,6 @@ def registry_download_command(args: argparse.Namespace) -> int:
     if not repository:
         print(
             "❌ Repository not specified. Use --repository or set REGISTRY_REPOSITORY env var.",
-            file=sys.stderr,
-        )
-        return 1
-
-    if not token:
-        print(
-            "❌ Authentication token not specified. Use --token or set GITHUB_TOKEN env var.",
             file=sys.stderr,
         )
         return 1
@@ -3192,6 +3287,50 @@ Examples:
         help="Skip confirmation prompt.",
     )
 
+    # Delete-data command
+    delete_data_parser = subparsers.add_parser(
+        "delete-data",
+        help="Delete all data for a specific conference/year from all databases",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+Delete all data for a specific conference and year from every database.
+
+Both --conference and --year are required. The following data will be removed:
+  - Papers from the paper database
+  - Embeddings from ChromaDB
+  - Clustering cache entries
+
+The command shows a summary of what will be deleted and requires the user
+to type 'yes' to confirm the operation.
+
+Examples:
+  # Delete all NeurIPS 2024 data
+  abstracts-explorer delete-data --conference neurips --year 2024
+
+  # Delete without interactive confirmation
+  abstracts-explorer delete-data --conference iclr --year 2023 --yes
+        """,
+    )
+    delete_data_parser.add_argument(
+        "--conference",
+        "-c",
+        type=str,
+        required=True,
+        help="Conference to delete (required). Case-insensitive.",
+    )
+    delete_data_parser.add_argument(
+        "--year",
+        "-y",
+        type=int,
+        required=True,
+        help="Year of conference/workshop to delete (required).",
+    )
+    delete_data_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the interactive confirmation prompt.",
+    )
+
     # Pre-process command
     pre_process_parser = subparsers.add_parser(
         "pre-process",
@@ -3281,6 +3420,8 @@ Examples:
         else:
             eval_parser.print_help()
             return 1
+    elif args.command == "delete-data":
+        return delete_data_command(args)
     elif args.command == "registry":
         if not hasattr(args, "registry_command") or not args.registry_command:
             registry_parser.print_help()

@@ -395,7 +395,7 @@ def test_database(tmp_path, monkeypatch):
             LightweightPaper(
                 original_id=3,
                 title="Computer Vision Paper",
-                abstract="",  # Empty abstract to test edge case
+                abstract="This paper explores computer vision with CNNs.",
                 authors=["Bob Wilson"],
                 keywords=["vision", "CNN"],
                 session="CV Session 3",

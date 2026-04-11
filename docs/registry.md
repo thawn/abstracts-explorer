@@ -20,7 +20,9 @@ Data for all years of a conference is bundled into a single tag (e.g. `neurips_m
 
 ## Authentication
 
-Registry operations require a GitHub Personal Access Token (PAT) with `read:packages` (for download) and `write:packages` (for upload) scopes.
+Downloading from a public registry requires **no authentication**. You can run `registry download` and `registry list` without a token.
+
+Uploading and deleting data requires a GitHub Personal Access Token (PAT) with the `write:packages` scope.
 
 You can provide the token in three ways:
 
@@ -254,6 +256,6 @@ The registry feature is designed for safe, conflict-free imports:
 
 ## Docker / Container Usage
 
-When running Abstracts Explorer in Docker, you can pre-populate the databases by running a one-off download container before starting the main service, or by adding the registry credentials to your `.env` file and running the download inside the running container.
+When running Abstracts Explorer in Docker, you can pre-populate the databases by running a one-off download command inside the container.
 
-See [Docker Setup](docker.md#sharing-data-via-registry) for details.
+See [Docker Setup](docker.md#get-pre-computed-data-from-the-registry) for details.

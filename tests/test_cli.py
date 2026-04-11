@@ -871,7 +871,183 @@ class TestCLI:
         # Verify create_collection was called with reset=True
         mock_em.create_collection.assert_called_once_with(reset=True)
 
-    def test_create_embeddings_requests_per_minute(self, tmp_path, capsys, monkeypatch):
+    def test_create_embeddings_force_with_conference_does_not_reset_collection(self, tmp_path, capsys, monkeypatch):
+        """--force --conference should delete only matching embeddings, not reset whole collection."""
+        from abstracts_explorer import DatabaseManager
+
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
+        with DatabaseManager() as db:
+            db.create_tables()
+            papers = [
+                LightweightPaper(
+                    title="NeurIPS Paper",
+                    abstract="Abstract 1",
+                    authors=["Author"],
+                    session="S1",
+                    poster_position="P1",
+                    year=2025,
+                    conference="NeurIPS",
+                ),
+            ]
+            db.add_papers(papers)
+
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+            mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
+            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.embed_from_database.return_value = 1
+            mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
+            mock_em.delete_embeddings_by_filter.return_value = 0
+            mock_em.__enter__ = Mock(return_value=mock_em)
+            mock_em.__exit__ = Mock(return_value=False)
+            MockEM.return_value = mock_em
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "neurips-abstracts",
+                    "create-embeddings",
+                    "--force",
+                    "--conference",
+                    "NeurIPS",
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        # Should NOT say "Resetting existing collection" (that implies full reset)
+        assert "Resetting existing collection" not in captured.out
+        # Should print scoped removal message
+        assert "Removing existing embeddings" in captured.out
+        assert "conference=NeurIPS" in captured.out
+
+        # create_collection must be called with reset=False (not wipe the collection)
+        mock_em.create_collection.assert_called_once_with(reset=False)
+        # delete_embeddings_by_filter must be called with the conference
+        mock_em.delete_embeddings_by_filter.assert_called_once_with(conference="NeurIPS", year=None)
+
+    def test_create_embeddings_force_with_year_does_not_reset_collection(self, tmp_path, capsys, monkeypatch):
+        """--force --year should delete only matching embeddings, not reset whole collection."""
+        from abstracts_explorer import DatabaseManager
+
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
+        with DatabaseManager() as db:
+            db.create_tables()
+            papers = [
+                LightweightPaper(
+                    title="Paper 2024",
+                    abstract="Abstract",
+                    authors=["Author"],
+                    session="S1",
+                    poster_position="P1",
+                    year=2024,
+                    conference="NeurIPS",
+                ),
+            ]
+            db.add_papers(papers)
+
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+            mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
+            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.embed_from_database.return_value = 1
+            mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
+            mock_em.delete_embeddings_by_filter.return_value = 2
+            mock_em.__enter__ = Mock(return_value=mock_em)
+            mock_em.__exit__ = Mock(return_value=False)
+            MockEM.return_value = mock_em
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "neurips-abstracts",
+                    "create-embeddings",
+                    "--force",
+                    "--year",
+                    "2024",
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Resetting existing collection" not in captured.out
+        assert "Removing existing embeddings" in captured.out
+        assert "year=2024" in captured.out
+        # Reports the number removed
+        assert "Removed 2" in captured.out
+
+        mock_em.create_collection.assert_called_once_with(reset=False)
+        mock_em.delete_embeddings_by_filter.assert_called_once_with(conference=None, year=2024)
+
+    def test_create_embeddings_force_with_conference_and_year(self, tmp_path, capsys, monkeypatch):
+        """--force --conference X --year Y deletes only that conference+year slice."""
+        from abstracts_explorer import DatabaseManager
+
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
+        with DatabaseManager() as db:
+            db.create_tables()
+            papers = [
+                LightweightPaper(
+                    title="NeurIPS 2024",
+                    abstract="Abstract",
+                    authors=["Author"],
+                    session="S1",
+                    poster_position="P1",
+                    year=2024,
+                    conference="NeurIPS",
+                ),
+            ]
+            db.add_papers(papers)
+
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+            mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
+            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.embed_from_database.return_value = 1
+            mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
+            mock_em.delete_embeddings_by_filter.return_value = 5
+            mock_em.__enter__ = Mock(return_value=mock_em)
+            mock_em.__exit__ = Mock(return_value=False)
+            MockEM.return_value = mock_em
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "neurips-abstracts",
+                    "create-embeddings",
+                    "--force",
+                    "--conference",
+                    "NeurIPS",
+                    "--year",
+                    "2024",
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Resetting existing collection" not in captured.out
+        assert "Removing existing embeddings" in captured.out
+        assert "conference=NeurIPS" in captured.out
+        assert "year=2024" in captured.out
+
+        mock_em.create_collection.assert_called_once_with(reset=False)
+        mock_em.delete_embeddings_by_filter.assert_called_once_with(conference="NeurIPS", year=2024)
+
         """Test create-embeddings with --requests-per-minute flag."""
         from abstracts_explorer import DatabaseManager
 
@@ -2029,11 +2205,6 @@ class TestCLI:
 
         call_order = []
 
-        def mock_get_filter_options(conference=None):
-            if conference is None:
-                return {"conferences": ["NeurIPS"], "years": [], "sessions": []}
-            return {"conferences": [], "years": [], "sessions": []}
-
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
@@ -2056,7 +2227,8 @@ class TestCLI:
             }
 
             mock_db_instance = Mock()
-            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.get_conferences.return_value = ["NeurIPS"]
+            mock_db_instance.get_years.side_effect = lambda conference=None: [2023]
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
@@ -2087,11 +2259,6 @@ class TestCLI:
         }
 
         # DB returns one conference with two years
-        def mock_get_filter_options(conference=None):
-            if conference is None:
-                return {"conferences": ["NeurIPS"], "years": [], "sessions": []}
-            return {"conferences": [], "years": [2023, 2024], "sessions": []}
-
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
@@ -2102,7 +2269,8 @@ class TestCLI:
             mock_compute.return_value = mock_results
 
             mock_db_instance = Mock()
-            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.get_conferences.return_value = ["NeurIPS"]
+            mock_db_instance.get_years.side_effect = lambda conference=None: [2023, 2024]
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
@@ -2117,8 +2285,8 @@ class TestCLI:
         assert exit_code == 0
         captured = capsys.readouterr()
         assert "Pre-generation complete" in captured.out
-        # 3 combos: NeurIPS (all years) + NeurIPS 2023 + NeurIPS 2024
-        assert mock_compute.call_count == 3
+        # 2 combos: NeurIPS 2023 + NeurIPS 2024
+        assert mock_compute.call_count == 2
         # Verify fixed agglomerative/t-SNE parameters on all calls
         for call in mock_compute.call_args_list:
             kw = call[1]
@@ -2143,7 +2311,8 @@ class TestCLI:
             mock_em_class.return_value = Mock()
 
             mock_db_instance = Mock()
-            mock_db_instance.get_filter_options.return_value = {"conferences": [], "years": [], "sessions": []}
+            mock_db_instance.get_conferences.return_value = []
+            mock_db_instance.get_years.return_value = []
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
@@ -2172,11 +2341,6 @@ class TestCLI:
             "statistics": {"total_papers": 5, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
         }
 
-        def mock_get_filter_options(conference=None):
-            if conference is None:
-                return {"conferences": ["NeurIPS"], "years": [], "sessions": []}
-            return {"conferences": [], "years": [], "sessions": []}
-
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
@@ -2187,7 +2351,8 @@ class TestCLI:
             mock_compute.return_value = mock_results
 
             mock_db_instance = Mock()
-            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.get_conferences.return_value = ["NeurIPS"]
+            mock_db_instance.get_years.side_effect = lambda conference=None: [2024, 2025]
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
@@ -2221,11 +2386,6 @@ class TestCLI:
             "statistics": {"total_papers": 5, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
         }
 
-        def mock_get_filter_options(conference=None):
-            if conference is None:
-                return {"conferences": ["NeurIPS"], "years": [], "sessions": []}
-            return {"conferences": [], "years": [], "sessions": []}
-
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
@@ -2236,7 +2396,8 @@ class TestCLI:
             mock_compute.return_value = mock_results
 
             mock_db_instance = Mock()
-            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.get_conferences.return_value = ["NeurIPS"]
+            mock_db_instance.get_years.side_effect = lambda conference=None: [2024, 2025]
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
@@ -2276,11 +2437,6 @@ class TestCLI:
             "statistics": {"total_papers": 5, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
         }
 
-        def mock_get_filter_options(conference=None):
-            if conference is None:
-                return {"conferences": ["NeurIPS"], "years": [], "sessions": []}
-            return {"conferences": [], "years": [], "sessions": []}
-
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
@@ -2291,7 +2447,8 @@ class TestCLI:
             mock_compute.return_value = mock_results
 
             mock_db_instance = Mock()
-            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.get_conferences.return_value = ["NeurIPS"]
+            mock_db_instance.get_years.side_effect = lambda conference=None: [2024, 2025]
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
@@ -2325,11 +2482,6 @@ class TestCLI:
 
         set_test_db(tmp_path / "test.db")
 
-        def mock_get_filter_options(conference=None):
-            if conference is None:
-                return {"conferences": ["NeurIPS"], "years": [], "sessions": []}
-            return {"conferences": [], "years": [], "sessions": []}
-
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
@@ -2339,7 +2491,8 @@ class TestCLI:
             mock_compute.side_effect = Exception("Clustering failed")
 
             mock_db_instance = Mock()
-            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.get_conferences.return_value = ["NeurIPS"]
+            mock_db_instance.get_years.side_effect = lambda conference=None: [2025]
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
@@ -2367,31 +2520,18 @@ class TestCLI:
             "statistics": {"total_papers": 50, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
         }
 
-        def mock_get_filter_options(conference=None):
-            if conference is None:
-                return {"conferences": ["ML4PS@NeurIPS"], "years": [], "sessions": []}
-            # years for ML4PS@NeurIPS
-            return {"conferences": [], "years": [2023, 2024], "sessions": []}
-
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
-            patch(
-                "abstracts_explorer.cli.get_available_filters",
-                return_value={
-                    "conferences": ["ML4PS@NeurIPS"],
-                    "years": [2023, 2024],
-                    "conference_years": {"ML4PS@NeurIPS": [2023, 2024]},
-                },
-            ),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
             mock_compute.return_value = mock_results
 
             mock_db_instance = Mock()
-            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.get_conferences.return_value = ["ML4PS@NeurIPS"]
+            mock_db_instance.get_years.side_effect = lambda conference=None: [2023, 2024]
             mock_db_instance.resolve_conference_name.return_value = "ML4PS@NeurIPS"
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
@@ -2405,17 +2545,16 @@ class TestCLI:
                 exit_code = main()
 
         assert exit_code == 0
-        # 3 combos: all years + 2023 + 2024
-        assert mock_compute.call_count == 3
+        # 2 combos: 2023 + 2024
+        assert mock_compute.call_count == 2
         all_calls = [(c[1]["conferences"], c[1]["years"]) for c in mock_compute.call_args_list]
-        assert (["ML4PS@NeurIPS"], None) in all_calls
         assert (["ML4PS@NeurIPS"], [2023]) in all_calls
         assert (["ML4PS@NeurIPS"], [2024]) in all_calls
         captured = capsys.readouterr()
         assert "ML4PS@NeurIPS" in captured.out
 
-    def test_pre_generate_clustering_filters_unsupported_years(self, tmp_path, capsys, monkeypatch):
-        """Test pre-generate-clustering filters out years not in plugin supported_years."""
+    def test_pre_generate_clustering_all_db_years_used(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering uses all years from the database (no plugin filtering)."""
         embeddings_path = tmp_path / "chroma_db"
         embeddings_path.mkdir()
         patch_get_config_for_test(monkeypatch, embeddings_path)
@@ -2426,31 +2565,18 @@ class TestCLI:
             "statistics": {"total_papers": 50, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
         }
 
-        # DB has years 2022-2025, but plugin only supports 2024-2025
-        def mock_get_filter_options(conference=None):
-            if conference is None:
-                return {"conferences": ["TestConf"], "years": [], "sessions": []}
-            return {"conferences": [], "years": [2022, 2023, 2024, 2025], "sessions": []}
-
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
-            patch(
-                "abstracts_explorer.cli.get_available_filters",
-                return_value={
-                    "conferences": ["TestConf"],
-                    "years": [2024, 2025],
-                    "conference_years": {"TestConf": [2024, 2025]},
-                },
-            ),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
             mock_compute.return_value = mock_results
 
             mock_db_instance = Mock()
-            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.get_conferences.return_value = ["TestConf"]
+            mock_db_instance.get_years.side_effect = lambda conference=None: [2022, 2023, 2024, 2025]
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
@@ -2463,15 +2589,13 @@ class TestCLI:
                 exit_code = main()
 
         assert exit_code == 0
-        # 3 combos: all years + 2024 + 2025 (2022 and 2023 filtered out)
-        assert mock_compute.call_count == 3
+        # All 4 DB years are used (no plugin filtering)
+        assert mock_compute.call_count == 4
         all_calls = [(c[1]["conferences"], c[1]["years"]) for c in mock_compute.call_args_list]
-        assert (["TestConf"], None) in all_calls
+        assert (["TestConf"], [2022]) in all_calls
+        assert (["TestConf"], [2023]) in all_calls
         assert (["TestConf"], [2024]) in all_calls
         assert (["TestConf"], [2025]) in all_calls
-        # Unsupported years should NOT be in the calls
-        assert (["TestConf"], [2022]) not in all_calls
-        assert (["TestConf"], [2023]) not in all_calls
 
     def test_pre_generate_clustering_with_year(self, tmp_path, capsys, monkeypatch):
         """Test pre-generate-clustering with --conference and --year (single combo)."""
@@ -2529,13 +2653,7 @@ class TestCLI:
             "statistics": {"total_papers": 50, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
         }
 
-        # DatabaseManager.get_filter_options returns the canonical spelling
-        def mock_get_filter_options(conference=None):
-            if conference is None:
-                return {"conferences": ["ML4PS@NeurIPS", "NeurIPS"], "years": [2024], "sessions": []}
-            # years for any conference
-            return {"conferences": [], "years": [2024], "sessions": []}
-
+        # DatabaseManager methods return the canonical spelling
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
@@ -2547,7 +2665,8 @@ class TestCLI:
 
             # DatabaseManager used as context manager for conference resolution
             mock_db_instance = Mock()
-            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.get_conferences.return_value = ["ML4PS@NeurIPS", "NeurIPS"]
+            mock_db_instance.get_years.side_effect = lambda conference=None: [2024]
             # resolve_conference_name returns the canonical form for "ml4ps@neurips"
             mock_db_instance.resolve_conference_name.return_value = "ML4PS@NeurIPS"
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
@@ -3348,6 +3467,278 @@ class TestCLIChatInteractiveLoop:
         assert exit_code == 0
         captured = capsys.readouterr()
         assert "Goodbye" in captured.out
+
+
+class TestDeleteDataCommand:
+    """Tests for the delete-data command."""
+
+    def _create_paper(self, conference: str, year: int) -> LightweightPaper:
+        return LightweightPaper(
+            title=f"{conference} {year} Paper",
+            authors=["Author"],
+            abstract="Test abstract",
+            session="s",
+            poster_position="p",
+            year=year,
+            conference=conference,
+        )
+
+    def test_requires_conference(self, tmp_path, capsys):
+        """delete-data exits with error when --conference is missing."""
+        set_test_db(tmp_path / "test.db")
+
+        with patch.object(sys, "argv", ["abstracts-explorer", "delete-data", "--year", "2024"]):
+            # argparse will error because --conference is required
+            with pytest.raises(SystemExit):
+                main()
+
+    def test_requires_year(self, tmp_path, capsys):
+        """delete-data exits with error when --year is missing."""
+        set_test_db(tmp_path / "test.db")
+
+        with patch.object(sys, "argv", ["abstracts-explorer", "delete-data", "--conference", "NeurIPS"]):
+            with pytest.raises(SystemExit):
+                main()
+
+    def test_aborts_on_no_confirmation(self, tmp_path, capsys):
+        """delete-data aborts when user does not type 'yes'."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        from abstracts_explorer.database import DatabaseManager
+
+        with DatabaseManager() as db:
+            db.create_tables()
+            db.add_paper(self._create_paper("NeurIPS", 2024))
+
+        with (
+            patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "delete-data", "--conference", "NeurIPS", "--year", "2024"],
+            ),
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("builtins.input", return_value="no"),
+        ):
+            mock_em = Mock()
+            mock_em.collection.get.return_value = {"ids": []}
+            mock_em_class.return_value = mock_em
+
+            exit_code = main()
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert "Aborted" in captured.out
+
+    def test_deletes_data_with_yes_flag(self, tmp_path, capsys):
+        """delete-data --yes removes papers, embeddings, and clustering cache."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        from abstracts_explorer.database import DatabaseManager
+
+        with DatabaseManager() as db:
+            db.create_tables()
+            db.add_paper(self._create_paper("NeurIPS", 2024))
+            db.save_clustering_cache(
+                embedding_model="model",
+                reduction_method="pca",
+                n_components=2,
+                clustering_method="kmeans",
+                n_clusters=3,
+                results={
+                    "points": [{"id": "p1", "x": 1, "y": 2, "cluster": 0}],
+                    "statistics": {"total_papers": 1, "n_clusters": 3},
+                },
+                conference="NeurIPS",
+                year=2024,
+            )
+
+        with (
+            patch.object(
+                sys,
+                "argv",
+                [
+                    "abstracts-explorer",
+                    "delete-data",
+                    "--conference",
+                    "NeurIPS",
+                    "--year",
+                    "2024",
+                    "--yes",
+                ],
+            ),
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+        ):
+            mock_em = Mock()
+            mock_em.collection.get.return_value = {"ids": ["emb1", "emb2"]}
+            mock_em.delete_embeddings_by_filter.return_value = 2
+            mock_em_class.return_value = mock_em
+
+            exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Deleted" in captured.out
+        assert "paper" in captured.out.lower()
+
+        # Verify delete_embeddings_by_filter was called with correct parameters
+        mock_em.delete_embeddings_by_filter.assert_called_once_with(conference="NeurIPS", year=2024)
+
+        # Verify papers deleted from DB
+        with DatabaseManager() as db:
+            papers = db.search_papers(conference="NeurIPS", year=2024, limit=0)
+            assert len(papers) == 0
+
+            # Verify clustering cache deleted
+            count = db.count_clustering_cache_by_conference_year("NeurIPS", 2024)
+            assert count == 0
+
+    def test_nothing_to_delete(self, tmp_path, capsys):
+        """delete-data reports nothing to delete when no data exists."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        from abstracts_explorer.database import DatabaseManager
+
+        with DatabaseManager() as db:
+            db.create_tables()
+
+        with (
+            patch.object(
+                sys,
+                "argv",
+                [
+                    "abstracts-explorer",
+                    "delete-data",
+                    "--conference",
+                    "NeurIPS",
+                    "--year",
+                    "2024",
+                    "--yes",
+                ],
+            ),
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+        ):
+            mock_em = Mock()
+            mock_em.collection.get.return_value = {"ids": []}
+            mock_em_class.return_value = mock_em
+
+            exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Nothing to delete" in captured.out
+
+    def test_confirms_with_yes_input(self, tmp_path, capsys):
+        """delete-data proceeds when user types 'yes' interactively."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        from abstracts_explorer.database import DatabaseManager
+
+        with DatabaseManager() as db:
+            db.create_tables()
+            db.add_paper(self._create_paper("ICLR", 2023))
+
+        with (
+            patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "delete-data", "--conference", "ICLR", "--year", "2023"],
+            ),
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("builtins.input", return_value="yes"),
+        ):
+            mock_em = Mock()
+            mock_em.collection.get.return_value = {"ids": []}
+            mock_em.delete_embeddings_by_filter.return_value = 0
+            mock_em_class.return_value = mock_em
+
+            exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "deleted" in captured.out.lower()
+
+    def test_shows_counts_before_confirmation(self, tmp_path, capsys):
+        """delete-data shows what will be deleted before asking for confirmation."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        from abstracts_explorer.database import DatabaseManager
+
+        with DatabaseManager() as db:
+            db.create_tables()
+            db.add_paper(self._create_paper("NeurIPS", 2025))
+            db.add_paper(self._create_paper("NeurIPS", 2025))
+
+        with (
+            patch.object(
+                sys,
+                "argv",
+                [
+                    "abstracts-explorer",
+                    "delete-data",
+                    "--conference",
+                    "NeurIPS",
+                    "--year",
+                    "2025",
+                ],
+            ),
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("builtins.input", return_value="no"),
+        ):
+            mock_em = Mock()
+            mock_em.collection.get.return_value = {"ids": ["e1", "e2", "e3"]}
+            mock_em_class.return_value = mock_em
+
+            exit_code = main()
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        # Should show paper count (2), embedding count (3), cache count (0)
+        assert "2" in captured.out
+        assert "3" in captured.out
+        assert "permanently" in captured.out.lower() or "⚠️" in captured.out
+
+    def test_partial_failure_returns_nonzero(self, tmp_path, capsys):
+        """delete-data returns exit code 1 when one step fails."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        from abstracts_explorer.database import DatabaseManager
+
+        with DatabaseManager() as db:
+            db.create_tables()
+            db.add_paper(self._create_paper("NeurIPS", 2024))
+
+        with (
+            patch.object(
+                sys,
+                "argv",
+                [
+                    "abstracts-explorer",
+                    "delete-data",
+                    "--conference",
+                    "NeurIPS",
+                    "--year",
+                    "2024",
+                    "--yes",
+                ],
+            ),
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+        ):
+            mock_em = Mock()
+            mock_em.collection.get.return_value = {"ids": ["e1"]}
+            mock_em.delete_embeddings_by_filter.side_effect = Exception("ChromaDB failure")
+            mock_em_class.return_value = mock_em
+
+            exit_code = main()
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert "ChromaDB failure" in captured.err
 
 
 class TestLogging:

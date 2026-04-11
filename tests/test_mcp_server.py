@@ -585,7 +585,7 @@ class TestTopicEvolutionAndRelevance:
         mock_em = Mock()
         mock_em_class.return_value = mock_em
 
-        def _find_papers(database, query, distance_threshold, conferences=None, years=None):
+        def _find_papers(database, query, distance_threshold, conferences=None, years=None, query_embedding=None):
             year = years[0] if years else None
             if year == 2023:
                 return {
@@ -639,6 +639,9 @@ class TestTopicEvolutionAndRelevance:
         mock_em.close.assert_called_once()
         mock_db.close.assert_called_once()
 
+        # Verify query was embedded only once, not once per year
+        mock_em.generate_embedding.assert_called_once_with("transformers")
+
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
     @patch("abstracts_explorer.mcp_server.DatabaseManager")
     @patch("abstracts_explorer.mcp_server.get_config")
@@ -655,7 +658,7 @@ class TestTopicEvolutionAndRelevance:
         mock_em = Mock()
         mock_em_class.return_value = mock_em
 
-        def _find_papers(database, query, distance_threshold, conferences=None, years=None):
+        def _find_papers(database, query, distance_threshold, conferences=None, years=None, query_embedding=None):
             year = years[0] if years else None
             return {
                 "count": 1,
@@ -743,6 +746,7 @@ class TestTopicEvolutionAndRelevance:
             distance_threshold=0.8,
             conferences=["NeurIPS"],
             years=[2024],
+            query_embedding=mock_em.generate_embedding.return_value,
         )
 
         # Verify cleanup
@@ -763,7 +767,7 @@ class TestTopicEvolutionAndRelevance:
         mock_em = Mock()
         mock_em_class.return_value = mock_em
 
-        def _find_papers(database, query, distance_threshold, conferences=None, years=None):
+        def _find_papers(database, query, distance_threshold, conferences=None, years=None, query_embedding=None):
             conf = conferences[0] if conferences else None
             year = years[0] if years else None
             if conf == "NeurIPS" and year == 2023:

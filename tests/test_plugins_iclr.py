@@ -107,7 +107,14 @@ class TestICLRPlugin:
             "count": 1,
             "next": None,
             "previous": None,
-            "results": [{"id": 1, "name": "Test Paper", "authors": [{"fullname": "Test Author"}]}],
+            "results": [
+                {
+                    "id": 1,
+                    "name": "Test Paper",
+                    "abstract": "A non-empty test abstract.",
+                    "authors": [{"fullname": "Test Author"}],
+                }
+            ],
         }
         mock_get.return_value = mock_response
 
@@ -197,7 +204,14 @@ class TestICLRPlugin:
             "count": 1,
             "next": None,
             "previous": None,
-            "results": [{"id": 1, "name": "Fresh Paper", "authors": [{"fullname": "Test Author"}]}],
+            "results": [
+                {
+                    "id": 1,
+                    "name": "Fresh Paper",
+                    "abstract": "A fresh test abstract.",
+                    "authors": [{"fullname": "Test Author"}],
+                }
+            ],
         }
         mock_get.return_value = mock_response
 

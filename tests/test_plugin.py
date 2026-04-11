@@ -1084,6 +1084,32 @@ class TestLightweightPaper:
                 conference="NeurIPS",
             )
 
+    def test_empty_abstract_raises_error(self):
+        """Test that empty abstract raises validation error."""
+        with pytest.raises(ValidationError, match="Paper abstract cannot be empty"):
+            LightweightPaper(
+                title="Test Paper",
+                authors=["John Doe"],
+                abstract="",
+                session="Session",
+                poster_position="A1",
+                year=2025,
+                conference="NeurIPS",
+            )
+
+    def test_whitespace_only_abstract_raises_error(self):
+        """Test that whitespace-only abstract raises validation error."""
+        with pytest.raises(ValidationError, match="Paper abstract cannot be empty"):
+            LightweightPaper(
+                title="Test Paper",
+                authors=["John Doe"],
+                abstract="   ",
+                session="Session",
+                poster_position="A1",
+                year=2025,
+                conference="NeurIPS",
+            )
+
     def test_year_and_conference_required(self):
         """Test that year and conference fields are required."""
         with pytest.raises(ValidationError, match="Field required"):

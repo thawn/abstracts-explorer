@@ -105,6 +105,94 @@ class TestEmbeddingsManager:
         assert embeddings_manager.collection is not None
         embeddings_manager.close()
 
+    def test_delete_embeddings_by_filter_no_filter_raises(self, embeddings_manager):
+        """delete_embeddings_by_filter with no args raises ValueError."""
+        embeddings_manager.connect()
+        embeddings_manager.create_collection()
+        with pytest.raises(ValueError):
+            embeddings_manager.delete_embeddings_by_filter()
+        embeddings_manager.close()
+
+    def test_delete_embeddings_by_filter_conference(self, embeddings_manager, mock_lm_studio):
+        """delete_embeddings_by_filter(conference=...) removes only matching papers."""
+        embeddings_manager.connect()
+        embeddings_manager.create_collection()
+
+        papers = [
+            {"uid": "p1", "title": "NeurIPS Paper 1", "abstract": "A", "conference": "NeurIPS", "year": 2024},
+            {"uid": "p2", "title": "NeurIPS Paper 2", "abstract": "B", "conference": "NeurIPS", "year": 2024},
+            {"uid": "p3", "title": "ICLR Paper", "abstract": "C", "conference": "ICLR", "year": 2024},
+        ]
+        for paper in papers:
+            embeddings_manager.add_paper(paper)
+
+        assert embeddings_manager.collection.count() == 3
+
+        deleted = embeddings_manager.delete_embeddings_by_filter(conference="NeurIPS")
+        assert deleted == 2
+        assert embeddings_manager.collection.count() == 1
+
+        # Remaining paper should be the ICLR one
+        remaining = embeddings_manager.collection.get()
+        assert remaining["ids"] == ["p3"]
+        embeddings_manager.close()
+
+    def test_delete_embeddings_by_filter_year(self, embeddings_manager, mock_lm_studio):
+        """delete_embeddings_by_filter(year=...) removes only papers from that year."""
+        embeddings_manager.connect()
+        embeddings_manager.create_collection()
+
+        papers = [
+            {"uid": "p1", "title": "Paper 2024", "abstract": "A", "conference": "NeurIPS", "year": 2024},
+            {"uid": "p2", "title": "Paper 2025", "abstract": "B", "conference": "NeurIPS", "year": 2025},
+        ]
+        for paper in papers:
+            embeddings_manager.add_paper(paper)
+
+        deleted = embeddings_manager.delete_embeddings_by_filter(year=2024)
+        assert deleted == 1
+        assert embeddings_manager.collection.count() == 1
+        remaining = embeddings_manager.collection.get()
+        assert remaining["ids"] == ["p2"]
+        embeddings_manager.close()
+
+    def test_delete_embeddings_by_filter_conference_and_year(self, embeddings_manager, mock_lm_studio):
+        """delete_embeddings_by_filter(conference=..., year=...) scopes to exact slice."""
+        embeddings_manager.connect()
+        embeddings_manager.create_collection()
+
+        papers = [
+            {"uid": "p1", "title": "NeurIPS 2024", "abstract": "A", "conference": "NeurIPS", "year": 2024},
+            {"uid": "p2", "title": "NeurIPS 2025", "abstract": "B", "conference": "NeurIPS", "year": 2025},
+            {"uid": "p3", "title": "ICLR 2024", "abstract": "C", "conference": "ICLR", "year": 2024},
+        ]
+        for paper in papers:
+            embeddings_manager.add_paper(paper)
+
+        deleted = embeddings_manager.delete_embeddings_by_filter(conference="NeurIPS", year=2024)
+        assert deleted == 1
+        assert embeddings_manager.collection.count() == 2
+        remaining_ids = set(embeddings_manager.collection.get()["ids"])
+        assert "p1" not in remaining_ids
+        assert {"p2", "p3"} == remaining_ids
+        embeddings_manager.close()
+
+    def test_delete_embeddings_by_filter_nothing_to_delete(self, embeddings_manager, mock_lm_studio):
+        """delete_embeddings_by_filter returns 0 when no matching embeddings exist."""
+        embeddings_manager.connect()
+        embeddings_manager.create_collection()
+
+        papers = [
+            {"uid": "p1", "title": "NeurIPS Paper", "abstract": "A", "conference": "NeurIPS", "year": 2024},
+        ]
+        for paper in papers:
+            embeddings_manager.add_paper(paper)
+
+        deleted = embeddings_manager.delete_embeddings_by_filter(conference="ICLR")
+        assert deleted == 0
+        assert embeddings_manager.collection.count() == 1
+        embeddings_manager.close()
+
     def test_add_paper(self, embeddings_manager, mock_lm_studio):
         """Test adding a paper."""
         embeddings_manager.connect()
@@ -373,27 +461,36 @@ class TestEmbeddingsManager:
         embeddings_manager.close()
 
     def test_embed_from_database_all_empty_abstracts(self, embeddings_manager, tmp_path, mock_lm_studio):
-        """Test embedding from database where all papers have empty abstracts."""
+        """Test embedding from database where all papers have empty abstracts.
+
+        Empty-abstract papers are rejected by LightweightPaper validation but may
+        still exist in legacy databases before the purge script has been run.  The
+        embeddings manager must handle them gracefully (title is used as fallback).
+        """
         from abstracts_explorer.database import DatabaseManager
-        from abstracts_explorer.plugin import LightweightPaper
+        from abstracts_explorer.db_models import Paper
+        from sqlalchemy import insert as sa_insert
 
         db_path = tmp_path / "test.db"
         set_test_db(db_path)
         with DatabaseManager() as db:
             db.create_tables()
-            # Add papers with titles but empty abstracts
+            # Directly insert papers with empty abstracts (bypassing LightweightPaper
+            # validation to simulate legacy data that predates the abstract check).
             for i in range(3):
-                paper = LightweightPaper(
-                    uid=f"paper{i}",
-                    title=f"Paper {i+1}",  # Valid title
-                    abstract="",  # Empty abstract
-                    authors=["Author"],
-                    session="Session",
-                    poster_position=f"P{i}",
-                    year=2025,
-                    conference="NeurIPS",
+                db._session.execute(
+                    sa_insert(Paper).values(
+                        uid=f"emptyabs{i:04d}",
+                        title=f"Paper {i + 1}",
+                        abstract="",
+                        authors="Author",
+                        session="Session",
+                        poster_position=f"P{i}",
+                        year=2025,
+                        conference="NeurIPS",
+                    )
                 )
-                db.add_paper(paper)
+            db._session.commit()
 
         embeddings_manager.connect()
         embeddings_manager.create_collection()
