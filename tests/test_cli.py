@@ -2205,11 +2205,6 @@ class TestCLI:
 
         call_order = []
 
-        def mock_get_filter_options(conference=None):
-            if conference is None:
-                return {"conferences": ["NeurIPS"], "years": [2023], "sessions": []}
-            return {"conferences": [], "years": [2023], "sessions": []}
-
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
@@ -2232,7 +2227,8 @@ class TestCLI:
             }
 
             mock_db_instance = Mock()
-            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.get_conferences.return_value = ["NeurIPS"]
+            mock_db_instance.get_years.side_effect = lambda conference=None: [2023]
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
@@ -2263,11 +2259,6 @@ class TestCLI:
         }
 
         # DB returns one conference with two years
-        def mock_get_filter_options(conference=None):
-            if conference is None:
-                return {"conferences": ["NeurIPS"], "years": [2023, 2024], "sessions": []}
-            return {"conferences": [], "years": [2023, 2024], "sessions": []}
-
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
@@ -2278,7 +2269,8 @@ class TestCLI:
             mock_compute.return_value = mock_results
 
             mock_db_instance = Mock()
-            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.get_conferences.return_value = ["NeurIPS"]
+            mock_db_instance.get_years.side_effect = lambda conference=None: [2023, 2024]
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
@@ -2319,7 +2311,8 @@ class TestCLI:
             mock_em_class.return_value = Mock()
 
             mock_db_instance = Mock()
-            mock_db_instance.get_filter_options.return_value = {"conferences": [], "years": [], "sessions": []}
+            mock_db_instance.get_conferences.return_value = []
+            mock_db_instance.get_years.return_value = []
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
@@ -2348,11 +2341,6 @@ class TestCLI:
             "statistics": {"total_papers": 5, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
         }
 
-        def mock_get_filter_options(conference=None):
-            if conference is None:
-                return {"conferences": ["NeurIPS"], "years": [2024, 2025], "sessions": []}
-            return {"conferences": [], "years": [2024, 2025], "sessions": []}
-
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
@@ -2363,7 +2351,8 @@ class TestCLI:
             mock_compute.return_value = mock_results
 
             mock_db_instance = Mock()
-            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.get_conferences.return_value = ["NeurIPS"]
+            mock_db_instance.get_years.side_effect = lambda conference=None: [2024, 2025]
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
@@ -2397,11 +2386,6 @@ class TestCLI:
             "statistics": {"total_papers": 5, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
         }
 
-        def mock_get_filter_options(conference=None):
-            if conference is None:
-                return {"conferences": ["NeurIPS"], "years": [2024, 2025], "sessions": []}
-            return {"conferences": [], "years": [2024, 2025], "sessions": []}
-
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
@@ -2412,7 +2396,8 @@ class TestCLI:
             mock_compute.return_value = mock_results
 
             mock_db_instance = Mock()
-            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.get_conferences.return_value = ["NeurIPS"]
+            mock_db_instance.get_years.side_effect = lambda conference=None: [2024, 2025]
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
@@ -2452,11 +2437,6 @@ class TestCLI:
             "statistics": {"total_papers": 5, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
         }
 
-        def mock_get_filter_options(conference=None):
-            if conference is None:
-                return {"conferences": ["NeurIPS"], "years": [2024, 2025], "sessions": []}
-            return {"conferences": [], "years": [2024, 2025], "sessions": []}
-
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
@@ -2467,7 +2447,8 @@ class TestCLI:
             mock_compute.return_value = mock_results
 
             mock_db_instance = Mock()
-            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.get_conferences.return_value = ["NeurIPS"]
+            mock_db_instance.get_years.side_effect = lambda conference=None: [2024, 2025]
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
@@ -2501,11 +2482,6 @@ class TestCLI:
 
         set_test_db(tmp_path / "test.db")
 
-        def mock_get_filter_options(conference=None):
-            if conference is None:
-                return {"conferences": ["NeurIPS"], "years": [2025], "sessions": []}
-            return {"conferences": [], "years": [2025], "sessions": []}
-
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
@@ -2515,7 +2491,8 @@ class TestCLI:
             mock_compute.side_effect = Exception("Clustering failed")
 
             mock_db_instance = Mock()
-            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.get_conferences.return_value = ["NeurIPS"]
+            mock_db_instance.get_years.side_effect = lambda conference=None: [2025]
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
@@ -2543,12 +2520,6 @@ class TestCLI:
             "statistics": {"total_papers": 50, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
         }
 
-        def mock_get_filter_options(conference=None):
-            if conference is None:
-                return {"conferences": ["ML4PS@NeurIPS"], "years": [], "sessions": []}
-            # years for ML4PS@NeurIPS
-            return {"conferences": [], "years": [2023, 2024], "sessions": []}
-
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
@@ -2567,7 +2538,8 @@ class TestCLI:
             mock_compute.return_value = mock_results
 
             mock_db_instance = Mock()
-            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.get_conferences.return_value = ["ML4PS@NeurIPS"]
+            mock_db_instance.get_years.side_effect = lambda conference=None: [2023, 2024]
             mock_db_instance.resolve_conference_name.return_value = "ML4PS@NeurIPS"
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
@@ -2602,11 +2574,6 @@ class TestCLI:
         }
 
         # DB has years 2022-2025, but plugin only supports 2024-2025
-        def mock_get_filter_options(conference=None):
-            if conference is None:
-                return {"conferences": ["TestConf"], "years": [], "sessions": []}
-            return {"conferences": [], "years": [2022, 2023, 2024, 2025], "sessions": []}
-
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
@@ -2625,7 +2592,8 @@ class TestCLI:
             mock_compute.return_value = mock_results
 
             mock_db_instance = Mock()
-            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.get_conferences.return_value = ["TestConf"]
+            mock_db_instance.get_years.side_effect = lambda conference=None: [2022, 2023, 2024, 2025]
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
@@ -2703,13 +2671,7 @@ class TestCLI:
             "statistics": {"total_papers": 50, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
         }
 
-        # DatabaseManager.get_filter_options returns the canonical spelling
-        def mock_get_filter_options(conference=None):
-            if conference is None:
-                return {"conferences": ["ML4PS@NeurIPS", "NeurIPS"], "years": [2024], "sessions": []}
-            # years for any conference
-            return {"conferences": [], "years": [2024], "sessions": []}
-
+        # DatabaseManager methods return the canonical spelling
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
@@ -2721,7 +2683,8 @@ class TestCLI:
 
             # DatabaseManager used as context manager for conference resolution
             mock_db_instance = Mock()
-            mock_db_instance.get_filter_options.side_effect = mock_get_filter_options
+            mock_db_instance.get_conferences.return_value = ["ML4PS@NeurIPS", "NeurIPS"]
+            mock_db_instance.get_years.side_effect = lambda conference=None: [2024]
             # resolve_conference_name returns the canonical form for "ml4ps@neurips"
             mock_db_instance.resolve_conference_name.return_value = "ML4PS@NeurIPS"
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)

@@ -181,6 +181,12 @@ class TestWebInterface:
 
         mock_db = MagicMock()
         mock_db.get_conference_years_from_db.return_value = conferences_with_years
+        mock_db.get_conferences.return_value = sorted(conferences_with_years.keys())
+        mock_db.get_years.side_effect = lambda conference=None: (
+            conferences_with_years.get(conference, []) if conference else sorted(
+                {y for years in conferences_with_years.values() for y in years}, reverse=True
+            )
+        )
         # Delegate resolve_default_conference_year to the real implementation so
         # the business logic is exercised via database.py.
         mock_db.resolve_default_conference_year.side_effect = (
@@ -195,14 +201,11 @@ class TestWebInterface:
         app_module = sys.modules["abstracts_explorer.web_ui.app"]
         mock_db = self._mock_db_for_available_filters(app_module, {"NeurIPS": [2025, 2024]})
 
-        with patch.object(
-            app_module, "get_available_filters", return_value={"conferences": [], "years": [], "conference_years": {}}
-        ):
-            with patch.object(app_module, "get_database", return_value=mock_db):
-                with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
-                    mock_cfg.return_value.default_conference = "NeurIPS"
-                    mock_cfg.return_value.default_year = 2024
-                    response = client.get("/api/available-filters")
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
+                mock_cfg.return_value.default_conference = "NeurIPS"
+                mock_cfg.return_value.default_year = 2024
+                response = client.get("/api/available-filters")
 
         assert response.status_code == 200
         data = json.loads(response.data)
@@ -216,41 +219,37 @@ class TestWebInterface:
         app_module = sys.modules["abstracts_explorer.web_ui.app"]
         mock_db = self._mock_db_for_available_filters(app_module, {})
 
-        with patch.object(
-            app_module, "get_available_filters", return_value={"conferences": [], "years": [], "conference_years": {}}
-        ):
-            with patch.object(app_module, "get_database", return_value=mock_db):
-                with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
-                    mock_cfg.return_value.default_conference = ""
-                    mock_cfg.return_value.default_year = 0
-                    response = client.get("/api/available-filters")
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
+                mock_cfg.return_value.default_conference = ""
+                mock_cfg.return_value.default_year = 0
+                response = client.get("/api/available-filters")
 
         assert response.status_code == 200
         data = json.loads(response.data)
         assert data["default_conference"] == ""
         assert data["default_year"] is None
 
-    def test_available_filters_includes_db_conference_years(self, client):
-        """Test that /api/available-filters includes db_conference_years reflecting actual DB data."""
+    def test_available_filters_includes_conference_years(self, client):
+        """Test that /api/available-filters includes conference_years reflecting actual DB data."""
         import sys
 
         app_module = sys.modules["abstracts_explorer.web_ui.app"]
         mock_db = self._mock_db_for_available_filters(app_module, {"NeurIPS": [2025, 2024], "ICLR": [2024]})
 
-        with patch.object(
-            app_module, "get_available_filters", return_value={"conferences": [], "years": [], "conference_years": {}}
-        ):
-            with patch.object(app_module, "get_database", return_value=mock_db):
-                with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
-                    mock_cfg.return_value.default_conference = ""
-                    mock_cfg.return_value.default_year = 0
-                    response = client.get("/api/available-filters")
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
+                mock_cfg.return_value.default_conference = ""
+                mock_cfg.return_value.default_year = 0
+                response = client.get("/api/available-filters")
 
         assert response.status_code == 200
         data = json.loads(response.data)
-        assert "db_conference_years" in data
-        assert data["db_conference_years"]["NeurIPS"] == [2025, 2024]
-        assert data["db_conference_years"]["ICLR"] == [2024]
+        assert "conference_years" in data
+        assert data["conference_years"]["NeurIPS"] == [2025, 2024]
+        assert data["conference_years"]["ICLR"] == [2024]
+        assert sorted(data["conferences"]) == ["ICLR", "NeurIPS"]
+        assert data["years"] == [2025, 2024]
 
     def test_available_filters_fallback_when_default_conf_no_data(self, client):
         """Test that default_conference falls back to most recent DB entry when configured default has no data."""
@@ -260,14 +259,11 @@ class TestWebInterface:
         # DB only has ICLR/2024 – configured default "ICML" has no data
         mock_db = self._mock_db_for_available_filters(app_module, {"ICLR": [2024]})
 
-        with patch.object(
-            app_module, "get_available_filters", return_value={"conferences": [], "years": [], "conference_years": {}}
-        ):
-            with patch.object(app_module, "get_database", return_value=mock_db):
-                with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
-                    mock_cfg.return_value.default_conference = "ICML"
-                    mock_cfg.return_value.default_year = 2024
-                    response = client.get("/api/available-filters")
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
+                mock_cfg.return_value.default_conference = "ICML"
+                mock_cfg.return_value.default_year = 2024
+                response = client.get("/api/available-filters")
 
         assert response.status_code == 200
         data = json.loads(response.data)
@@ -282,14 +278,11 @@ class TestWebInterface:
         # DB has NeurIPS/2024 and ICLR/2025 – ICLR/2025 is the most recent
         mock_db = self._mock_db_for_available_filters(app_module, {"NeurIPS": [2024], "ICLR": [2025]})
 
-        with patch.object(
-            app_module, "get_available_filters", return_value={"conferences": [], "years": [], "conference_years": {}}
-        ):
-            with patch.object(app_module, "get_database", return_value=mock_db):
-                with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
-                    mock_cfg.return_value.default_conference = ""
-                    mock_cfg.return_value.default_year = 0
-                    response = client.get("/api/available-filters")
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
+                mock_cfg.return_value.default_conference = ""
+                mock_cfg.return_value.default_year = 0
+                response = client.get("/api/available-filters")
 
         assert response.status_code == 200
         data = json.loads(response.data)
@@ -304,14 +297,11 @@ class TestWebInterface:
         # DB has NeurIPS 2024 and 2025 but not 2020
         mock_db = self._mock_db_for_available_filters(app_module, {"NeurIPS": [2025, 2024]})
 
-        with patch.object(
-            app_module, "get_available_filters", return_value={"conferences": [], "years": [], "conference_years": {}}
-        ):
-            with patch.object(app_module, "get_database", return_value=mock_db):
-                with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
-                    mock_cfg.return_value.default_conference = "NeurIPS"
-                    mock_cfg.return_value.default_year = 2020
-                    response = client.get("/api/available-filters")
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
+                mock_cfg.return_value.default_conference = "NeurIPS"
+                mock_cfg.return_value.default_year = 2020
+                response = client.get("/api/available-filters")
 
         assert response.status_code == 200
         data = json.loads(response.data)

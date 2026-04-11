@@ -119,10 +119,12 @@ class TestMultiDatabaseBackend:
             assert any("PostgreSQL" in r["title"] for r in results)
             
             # Test filter options
-            filters = db.get_filter_options()
-            assert "sessions" in filters
-            assert "years" in filters
-            assert "conferences" in filters
+            sessions = db.get_sessions()
+            assert isinstance(sessions, list)
+            conferences = db.get_conferences()
+            assert isinstance(conferences, list)
+            years = db.get_years()
+            assert isinstance(years, list)
 
     @skip_without_postgres
     def test_postgresql_multiple_papers(self):

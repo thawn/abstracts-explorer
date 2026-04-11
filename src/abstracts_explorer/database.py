@@ -1136,13 +1136,12 @@ class DatabaseManager:
             return {}
 
         try:
-            filter_options = self.get_filter_options()
-            conferences_in_db = filter_options.get("conferences", [])
+            conferences_in_db = self.get_conferences()
             result: Dict[str, List[int]] = {}
             for conf in conferences_in_db:
-                years = self.get_years_for_conference(conf)
+                years = self.get_years(conference=conf)
                 if years:
-                    result[conf] = sorted(years, reverse=True)
+                    result[conf] = years  # already sorted descending
             return result
         except Exception as e:
             raise DatabaseError(f"Failed to get conference years from DB: {str(e)}") from e
@@ -1182,23 +1181,23 @@ class DatabaseManager:
         >>> print(conf, year)
         NeurIPS 2024
         """
-        db_conference_years = self.get_conference_years_from_db()
+        db_conferences = self.get_conferences()
 
-        if not db_conference_years:
+        if not db_conferences:
             # DB is empty – return configured values unchanged
             return configured_conference, configured_year
 
         # Try case-insensitive match of the configured conference against DB conferences
         conf_matched = None
         if configured_conference:
-            for db_conf in db_conference_years:
+            for db_conf in db_conferences:
                 if db_conf.lower() == configured_conference.lower():
                     conf_matched = db_conf
                     break
 
         if conf_matched:
             effective_conf = conf_matched
-            years_for_conf = db_conference_years[conf_matched]
+            years_for_conf = self.get_years(conference=conf_matched)
             if configured_year and configured_year in years_for_conf:
                 effective_year: Optional[int] = configured_year
             elif years_for_conf:
@@ -1211,7 +1210,8 @@ class DatabaseManager:
             # conference/year combination with the most recent year in the database.
             best_conf: Optional[str] = None
             best_year: Optional[int] = None
-            for conf, years in db_conference_years.items():
+            for conf in db_conferences:
+                years = self.get_years(conference=conf)
                 if years:
                     most_recent = years[0]  # already sorted descending
                     if best_year is None or most_recent > best_year:
@@ -1263,8 +1263,7 @@ class DatabaseManager:
 
         # 1. Try case-insensitive match against conferences already in the DB
         try:
-            filters = self.get_filter_options()
-            for conf in filters.get("conferences", []):
+            for conf in self.get_conferences():
                 if conf.lower() == conference.lower():
                     return conf
         except Exception:
@@ -1283,7 +1282,7 @@ class DatabaseManager:
 
         raise DatabaseError(
             f"Failed to resolve conference name: {conference}.\n"
-            f"No match found in database or plugins. Available conferences in the database: {filters.get('conferences', [])}"
+            f"No match found in database or plugins."
         )
 
     def resolve_conference_for_url(self, url_path: str) -> dict:
@@ -1354,86 +1353,142 @@ class DatabaseManager:
                 },
             }
 
-    def get_filter_options(self, year: Optional[int] = None, conference: Optional[str] = None) -> dict:
+    def get_sessions(
+        self, conference: Optional[str] = None, year: Optional[int] = None
+    ) -> List[str]:
         """
-        Get distinct values for filterable fields (lightweight schema).
-
-        Returns a dictionary with lists of distinct values for session, year,
-        and conference fields that can be used to populate filter dropdowns.
-        Optionally filters by year and/or conference.
+        Get distinct session names from the database.
 
         Parameters
         ----------
-        year : int, optional
-            Filter results to only show options for this year
         conference : str, optional
-            Filter results to only show options for this conference
+            Filter sessions to only those belonging to this conference.
+        year : int, optional
+            Filter sessions to only those belonging to this year.
 
         Returns
         -------
-        dict
-            Dictionary with keys 'sessions', 'years', 'conferences' containing
-            lists of distinct non-null values sorted alphabetically (or numerically for years).
+        list of str
+            Sorted list of distinct non-empty session names.
 
         Raises
         ------
         DatabaseError
-            If query fails.
+            If query fails or not connected.
 
         Examples
         --------
         >>> db = DatabaseManager()
         >>> with db:
-        ...     filters = db.get_filter_options()
-        >>> print(filters['sessions'])
+        ...     sessions = db.get_sessions()
+        >>> print(sessions)
         ['Session 1', 'Session 2', ...]
-        >>> print(filters['years'])
-        [2023, 2024, 2025]
-        >>> # Get filters for specific year
-        >>> filters = db.get_filter_options(year=2025)
+        >>> sessions = db.get_sessions(conference="NeurIPS", year=2025)
         """
         if not self._session:
             raise DatabaseError("Not connected to database")
 
         try:
-            # Build WHERE conditions
-            conditions = []
-            if year is not None:
-                conditions.append(Paper.year == year)
+            conditions: list = []
             if conference is not None:
                 conditions.append(Paper.conference == conference)
+            if year is not None:
+                conditions.append(Paper.year == year)
 
-            # Get distinct sessions (with filters)
             stmt = select(Paper.session).distinct()
             if conditions:
                 stmt = stmt.where(and_(*conditions))
             stmt = stmt.where(and_(Paper.session.isnot(None), Paper.session != "")).order_by(Paper.session)
 
-            sessions_result = self._session.execute(stmt).scalars().all()
-            sessions = list(sessions_result)
+            return list(self._session.execute(stmt).scalars().all())
+        except Exception as e:
+            raise DatabaseError(f"Failed to get sessions: {str(e)}") from e
 
-            # Get distinct years (not filtered)
-            years_stmt = select(Paper.year).distinct().where(Paper.year.isnot(None)).order_by(Paper.year.desc())
-            years_result = self._session.execute(years_stmt).scalars().all()
-            years = list(years_result)
+    def get_conferences(self, year: Optional[int] = None) -> List[str]:
+        """
+        Get distinct conference names from the database.
 
-            # Get distinct conferences (not filtered)
-            conferences_stmt = (
+        Parameters
+        ----------
+        year : int, optional
+            Filter conferences to only those that have papers for this year.
+
+        Returns
+        -------
+        list of str
+            Sorted list of distinct non-empty conference names.
+
+        Raises
+        ------
+        DatabaseError
+            If query fails or not connected.
+
+        Examples
+        --------
+        >>> db = DatabaseManager()
+        >>> with db:
+        ...     conferences = db.get_conferences()
+        >>> print(conferences)
+        ['ICLR', 'NeurIPS']
+        >>> conferences = db.get_conferences(year=2025)
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            stmt = (
                 select(Paper.conference)
                 .distinct()
                 .where(and_(Paper.conference.isnot(None), Paper.conference != ""))
-                .order_by(Paper.conference)
             )
-            conferences_result = self._session.execute(conferences_stmt).scalars().all()
-            conferences = list(conferences_result)
+            if year is not None:
+                stmt = stmt.where(Paper.year == year)
+            stmt = stmt.order_by(Paper.conference)
 
-            return {
-                "sessions": sessions,
-                "years": years,
-                "conferences": conferences,
-            }
+            return list(self._session.execute(stmt).scalars().all())
         except Exception as e:
-            raise DatabaseError(f"Failed to get filter options: {str(e)}") from e
+            raise DatabaseError(f"Failed to get conferences: {str(e)}") from e
+
+    def get_years(self, conference: Optional[str] = None) -> List[int]:
+        """
+        Get distinct years from the database, sorted descending (most recent first).
+
+        Parameters
+        ----------
+        conference : str, optional
+            Filter years to only those that have papers for this conference.
+
+        Returns
+        -------
+        list of int
+            Sorted list (descending) of distinct years.
+
+        Raises
+        ------
+        DatabaseError
+            If query fails or not connected.
+
+        Examples
+        --------
+        >>> db = DatabaseManager()
+        >>> with db:
+        ...     years = db.get_years()
+        >>> print(years)
+        [2025, 2024, 2023]
+        >>> years = db.get_years(conference="NeurIPS")
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            stmt = select(Paper.year).distinct().where(Paper.year.isnot(None))
+            if conference is not None:
+                stmt = stmt.where(Paper.conference == conference)
+            stmt = stmt.order_by(Paper.year.desc())
+
+            return list(self._session.execute(stmt).scalars().all())
+        except Exception as e:
+            raise DatabaseError(f"Failed to get years: {str(e)}") from e
 
     def get_embedding_model(self) -> Optional[str]:
         """

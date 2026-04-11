@@ -1265,8 +1265,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     stored_conferences: list = []
     try:
         with DatabaseManager() as _db_resolve:
-            opts = _db_resolve.get_filter_options()
-            stored_conferences = opts.get("conferences", [])
+            stored_conferences = _db_resolve.get_conferences()
     except Exception:
         pass
 
@@ -1281,13 +1280,12 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     if resolved_conference is None and year_arg is None:
         # No filters: generate all conference × year combinations
         for conf in stored_conferences:
-            conf_opts = None
+            conf_years: list = []
             try:
                 with DatabaseManager() as _db_years:
-                    conf_opts = _db_years.get_filter_options(conference=conf)
+                    conf_years = _db_years.get_years(conference=conf)
             except Exception:
                 pass
-            conf_years = conf_opts.get("years", []) if conf_opts else []
             # Filter years to only those supported by the plugin
             plugin_years = plugin_years_map.get(conf)
             if plugin_years is not None:
@@ -1304,8 +1302,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
         conf_years_for_single: list = []
         try:
             with DatabaseManager() as _db_conf_years:
-                conf_opts = _db_conf_years.get_filter_options(conference=resolved_conference)
-                conf_years_for_single = conf_opts.get("years", [])
+                conf_years_for_single = _db_conf_years.get_years(conference=resolved_conference)
         except Exception:
             pass
         # Filter years to only those supported by the plugin

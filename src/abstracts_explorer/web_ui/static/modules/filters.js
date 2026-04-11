@@ -78,7 +78,7 @@ export async function loadFilterOptions() {
             return;
         }
 
-        // Load available conferences and years from plugins
+        // Load available conferences and years from database
         const availableResponse = await fetch(`${API_BASE}/api/available-filters`);
         const availableData = await availableResponse.json();
 
@@ -88,7 +88,6 @@ export async function loadFilterOptions() {
             // Store conference_years mapping and all years for future use
             window.conferenceYearsMap = availableData.conference_years || {};
             window.allYears = availableData.years || [];
-            window.dbConferenceYearsMap = availableData.db_conference_years || {};
 
             // Populate year selector in header (only on initial load when empty)
             // Track if we just populated it to apply defaults afterward.
@@ -403,9 +402,7 @@ export function updateYearsForConference() {
     yearSelect.innerHTML = '';
 
     if (selectedConference) {
-        // Prefer DB-based years (actual downloaded data) over plugin-based years (theoretical)
-        const dbYears = window.dbConferenceYearsMap && window.dbConferenceYearsMap[selectedConference];
-        const yearsForConference = dbYears || window.conferenceYearsMap[selectedConference] || [];
+        const yearsForConference = window.conferenceYearsMap[selectedConference] || [];
         yearsForConference.forEach(year => {
             const option = document.createElement('option');
             option.value = year;
