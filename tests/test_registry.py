@@ -2217,6 +2217,45 @@ class TestCLICommands:
         captured = capsys.readouterr()
         assert "Repository not specified" in captured.err
 
+    def test_registry_download_no_token_succeeds(self, capsys, monkeypatch):
+        """Download succeeds without a token (public registries require no auth for reads)."""
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        get_config(reload=True, env_path=get_env_test_path())
+
+        from abstracts_explorer.cli import registry_download_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token=None,
+            conference="neurips",
+            year=2024,
+            tag=None,
+            yes=True,
+            embedding_model=None,
+            ignore_embedding_model_mismatch=False,
+        )
+
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.download.return_value = {
+                "tag": "neurips-2024",
+                "paper_count": 3,
+                "embedding_count": 3,
+                "clustering_cache_count": 2,
+                "years": [2024],
+            }
+
+            result = registry_download_command(args)
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "Download complete" in captured.out
+        # RegistryClient should have been called without a real token
+        MockClient.assert_called_once()
+        call_kwargs = MockClient.call_args.kwargs
+        assert call_kwargs["repository"] == "ghcr.io/thawn/abstracts-data"
+        assert call_kwargs.get("token") in (None, "")  # token is None or empty string
+
     def test_registry_list_no_repository(self, capsys, monkeypatch):
         """List fails when no repository is specified."""
         monkeypatch.delenv("REGISTRY_REPOSITORY", raising=False)

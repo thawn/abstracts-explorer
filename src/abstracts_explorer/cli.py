@@ -2008,13 +2008,6 @@ def registry_download_command(args: argparse.Namespace) -> int:
         )
         return 1
 
-    if not token:
-        print(
-            "❌ Authentication token not specified. Use --token or set GITHUB_TOKEN env var.",
-            file=sys.stderr,
-        )
-        return 1
-
     year_display = str(args.year) if args.year else "all"
     print("Abstracts Explorer - Registry Download")
     print("=" * 70)

@@ -20,7 +20,9 @@ Data for all years of a conference is bundled into a single tag (e.g. `neurips_m
 
 ## Authentication
 
-Registry operations require a GitHub Personal Access Token (PAT) with `read:packages` (for download) and `write:packages` (for upload) scopes.
+Downloading from a public registry requires **no authentication**. You can run `registry download` and `registry list` without a token.
+
+Uploading and deleting data requires a GitHub Personal Access Token (PAT) with the `write:packages` scope.
 
 You can provide the token in three ways:
 
