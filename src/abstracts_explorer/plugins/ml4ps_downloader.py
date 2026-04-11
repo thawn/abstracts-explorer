@@ -35,11 +35,18 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
 
     This plugin scrapes papers from the ML4PS workshop website and fetches abstracts
     from the NeurIPS virtual conference pages. Uses the lightweight plugin API.
+
+    Notes
+    -----
+    Only years 2022 and later are supported. For years before 2022, the NeurIPS
+    virtual conference pages (which are the only source for full abstracts) are
+    not available, so those papers would have empty abstracts and are therefore
+    excluded from the supported years.
     """
 
     plugin_name = "ml4ps"
     plugin_description = "ML4PS (Machine Learning for Physical Sciences) workshop downloader"
-    _start_year = 2019
+    _start_year = 2022
     conference_name = "ML4PS@Neurips"
 
     # NeurIPS virtual page base URL for fetching abstracts (years >= 2022 only)

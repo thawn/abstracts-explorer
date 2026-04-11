@@ -51,6 +51,11 @@ class IGARSSDownloaderPlugin(LightweightDownloaderPlugin):
     The IEEE Xplore REST API returns up to 100 records per page. The plugin
     automatically paginates through all results and includes a configurable
     delay between pages to be respectful of the API.
+
+    Year 2005 is excluded from the supported years because the IEEE Xplore
+    records for IGARSS 2005 do not include abstracts.  Entries without
+    abstracts match too well against arbitrary short queries and would
+    produce misleading search results.
     """
 
     plugin_name = "igarss"
@@ -60,6 +65,27 @@ class IGARSSDownloaderPlugin(LightweightDownloaderPlugin):
     )
     _start_year = 1994
     conference_name = "IGARSS"
+
+    #: Years that are excluded from the supported years because their records
+    #: do not include abstracts.
+    _excluded_years: List[int] = [2005]
+
+    @property
+    def supported_years(self) -> List[int]:
+        """
+        Dynamically computed supported years, excluding years without abstracts.
+
+        Returns
+        -------
+        list of int
+            Supported conference years (excludes years listed in ``_excluded_years``).
+        """
+        all_years = super().supported_years
+        return [y for y in all_years if y not in self._excluded_years]
+
+    @supported_years.setter
+    def supported_years(self, value: List[int]) -> None:
+        self._supported_years_cache = value
 
     #: IEEE Xplore REST search API endpoint.
     _API_URL = "https://ieeexplore.ieee.org/rest/search"

@@ -461,27 +461,36 @@ class TestEmbeddingsManager:
         embeddings_manager.close()
 
     def test_embed_from_database_all_empty_abstracts(self, embeddings_manager, tmp_path, mock_lm_studio):
-        """Test embedding from database where all papers have empty abstracts."""
+        """Test embedding from database where all papers have empty abstracts.
+
+        Empty-abstract papers are rejected by LightweightPaper validation but may
+        still exist in legacy databases before the purge script has been run.  The
+        embeddings manager must handle them gracefully (title is used as fallback).
+        """
         from abstracts_explorer.database import DatabaseManager
-        from abstracts_explorer.plugin import LightweightPaper
+        from abstracts_explorer.db_models import Paper
+        from sqlalchemy import insert as sa_insert
 
         db_path = tmp_path / "test.db"
         set_test_db(db_path)
         with DatabaseManager() as db:
             db.create_tables()
-            # Add papers with titles but empty abstracts
+            # Directly insert papers with empty abstracts (bypassing LightweightPaper
+            # validation to simulate legacy data that predates the abstract check).
             for i in range(3):
-                paper = LightweightPaper(
-                    uid=f"paper{i}",
-                    title=f"Paper {i+1}",  # Valid title
-                    abstract="",  # Empty abstract
-                    authors=["Author"],
-                    session="Session",
-                    poster_position=f"P{i}",
-                    year=2025,
-                    conference="NeurIPS",
+                db._session.execute(
+                    sa_insert(Paper).values(
+                        uid=f"emptyabs{i:04d}",
+                        title=f"Paper {i + 1}",
+                        abstract="",
+                        authors="Author",
+                        session="Session",
+                        poster_position=f"P{i}",
+                        year=2025,
+                        conference="NeurIPS",
+                    )
                 )
-                db.add_paper(paper)
+            db._session.commit()
 
         embeddings_manager.connect()
         embeddings_manager.create_collection()

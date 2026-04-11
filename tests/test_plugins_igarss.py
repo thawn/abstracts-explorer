@@ -156,10 +156,21 @@ class TestIGARSSPluginMetadata:
 
     def test_supported_years_range(self):
         plugin = IGARSSDownloaderPlugin()
-        # _start_year is 2000 so years from 2000 onward should be included
+        # _start_year is 1994 so years from 1994 onward should be included
         assert 1994 in plugin.supported_years
         assert 2024 in plugin.supported_years
         assert 1993 not in plugin.supported_years
+
+    def test_year_2005_excluded(self):
+        """Year 2005 is excluded because IGARSS 2005 records lack abstracts."""
+        plugin = IGARSSDownloaderPlugin()
+        assert 2005 not in plugin.supported_years
+
+    def test_validate_year_2005_raises(self):
+        """validate_year should reject 2005 because it is excluded."""
+        plugin = IGARSSDownloaderPlugin()
+        with pytest.raises(ValueError, match="not supported"):
+            plugin.validate_year(2005)
 
     def test_get_metadata(self):
         plugin = IGARSSDownloaderPlugin()

@@ -195,10 +195,11 @@ class TestML4PSPluginProperties:
         assert ml4ps_plugin.plugin_name == "ml4ps"
 
     def test_plugin_supported_years(self, ml4ps_plugin):
-        """Test supported years include expected range starting from 2019."""
-        assert 2019 in ml4ps_plugin.supported_years
+        """Test supported years include expected range starting from 2022 (years < 2022 have no abstracts)."""
+        assert 2022 in ml4ps_plugin.supported_years
         assert 2025 in ml4ps_plugin.supported_years
-        assert all(y >= 2019 for y in ml4ps_plugin.supported_years)
+        assert 2019 not in ml4ps_plugin.supported_years
+        assert all(y >= 2022 for y in ml4ps_plugin.supported_years)
 
     def test_plugin_base_url(self, ml4ps_plugin):
         """Test base URL construction for different years."""
@@ -229,11 +230,11 @@ class TestML4PSPluginValidation:
     def test_validate_year_invalid(self, ml4ps_plugin):
         """Test validation with invalid year."""
         with pytest.raises(ValueError, match="not supported"):
-            ml4ps_plugin.validate_year(2018)
+            ml4ps_plugin.validate_year(2021)
 
     def test_validate_year_all_supported(self, ml4ps_plugin):
         """Test validation with all supported years."""
-        for year in range(2019, 2026):
+        for year in range(2022, 2026):
             ml4ps_plugin.validate_year(year)  # Should not raise
 
     def test_validate_year_none(self, ml4ps_plugin):
@@ -409,7 +410,7 @@ class TestML4PSLightweightConversion:
         assert lightweight[0]["year"] == 2022
 
     def test_convert_paper_with_no_abstract(self, ml4ps_plugin):
-        """Test conversion with paper having no abstract (e.g., early years)."""
+        """Test conversion with paper having no abstract produces empty-abstract dict."""
         papers = [
             {
                 "id": 1,
@@ -423,9 +424,15 @@ class TestML4PSLightweightConversion:
         ]
         lightweight = ml4ps_plugin._convert_to_lightweight_format(papers)
 
-        # Abstract should be empty string, not removed
+        # The intermediate lightweight dict should have abstract="" (empty string)
         assert "abstract" in lightweight[0]
         assert lightweight[0]["abstract"] == ""
+
+        # But validate_lightweight_papers should filter it out because abstract is empty
+        from abstracts_explorer.plugin import validate_lightweight_papers
+
+        validated = validate_lightweight_papers(lightweight)
+        assert len(validated) == 0
 
     def test_convert_filters_semicolons_from_authors(self, ml4ps_plugin):
         """Test that semicolons are filtered out of author names during conversion."""
@@ -1360,31 +1367,9 @@ class TestML4PSDownloadIntegration:
     @patch.object(ML4PSDownloaderPlugin, "_scrape_papers")
     @patch.object(ML4PSDownloaderPlugin, "_fetch_abstracts_for_papers")
     def test_download_older_year(self, mock_fetch, mock_scrape, ml4ps_plugin):
-        """Test download with an older year (2019)."""
-        mock_scrape.return_value = [
-            {
-                "id": 1,
-                "title": "Old Year Paper",
-                "authors_str": "John Doe",
-                "paper_url": "https://ml4physicalsciences.github.io/2019/files/paper1.pdf",
-                "poster_url": None,
-                "video_url": None,
-                "awards": [],
-                "abstract": None,
-                "neurips_paper_id": None,
-                "eventtype": "Poster",
-                "decision": "Accept (poster)",
-            }
-        ]
-
-        result = ml4ps_plugin.download(year=2019)
-
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert result[0].year == 2019
-        assert result[0].session == "ML4PhysicalSciences 2019 Workshop"
-        mock_scrape.assert_called_once()
-        mock_fetch.assert_called_once()
+        """Test that year 2019 (no abstracts available) is rejected as unsupported."""
+        with pytest.raises(ValueError, match="not supported"):
+            ml4ps_plugin.download(year=2019)
 
 
 # ============================================================================
