@@ -2524,14 +2524,6 @@ class TestCLI:
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
-            patch(
-                "abstracts_explorer.cli.get_available_filters",
-                return_value={
-                    "conferences": ["ML4PS@NeurIPS"],
-                    "years": [2023, 2024],
-                    "conference_years": {"ML4PS@NeurIPS": [2023, 2024]},
-                },
-            ),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -2561,8 +2553,8 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "ML4PS@NeurIPS" in captured.out
 
-    def test_pre_generate_clustering_filters_unsupported_years(self, tmp_path, capsys, monkeypatch):
-        """Test pre-generate-clustering filters out years not in plugin supported_years."""
+    def test_pre_generate_clustering_all_db_years_used(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering uses all years from the database (no plugin filtering)."""
         embeddings_path = tmp_path / "chroma_db"
         embeddings_path.mkdir()
         patch_get_config_for_test(monkeypatch, embeddings_path)
@@ -2573,19 +2565,10 @@ class TestCLI:
             "statistics": {"total_papers": 50, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
         }
 
-        # DB has years 2022-2025, but plugin only supports 2024-2025
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
-            patch(
-                "abstracts_explorer.cli.get_available_filters",
-                return_value={
-                    "conferences": ["TestConf"],
-                    "years": [2024, 2025],
-                    "conference_years": {"TestConf": [2024, 2025]},
-                },
-            ),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -2606,14 +2589,13 @@ class TestCLI:
                 exit_code = main()
 
         assert exit_code == 0
-        # 2 combos: 2024 + 2025 (2022 and 2023 filtered out)
-        assert mock_compute.call_count == 2
+        # All 4 DB years are used (no plugin filtering)
+        assert mock_compute.call_count == 4
         all_calls = [(c[1]["conferences"], c[1]["years"]) for c in mock_compute.call_args_list]
+        assert (["TestConf"], [2022]) in all_calls
+        assert (["TestConf"], [2023]) in all_calls
         assert (["TestConf"], [2024]) in all_calls
         assert (["TestConf"], [2025]) in all_calls
-        # Unsupported years should NOT be in the calls
-        assert (["TestConf"], [2022]) not in all_calls
-        assert (["TestConf"], [2023]) not in all_calls
 
     def test_pre_generate_clustering_with_year(self, tmp_path, capsys, monkeypatch):
         """Test pre-generate-clustering with --conference and --year (single combo)."""
