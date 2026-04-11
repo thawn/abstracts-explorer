@@ -27,13 +27,13 @@ export function getSelectedConference() {
 
 /**
  * Get the currently selected year from the header dropdown.
- * "All Years" (value="") is treated as no filter (returns empty array).
- * @returns {number[]} Array with one selected year, or [] for all years
+ * Returns an empty array when no year is selected (empty dropdown).
+ * @returns {number[]} Array with one selected year, or [] when no year is available
  */
 export function getSelectedYears() {
     const yearSelect = document.getElementById('year-selector');
     if (!yearSelect) return [];
     const value = yearSelect.value;
-    if (!value) return [];  // "All Years" sentinel
+    if (!value) return [];  // no year selected / empty dropdown
     return [Number(value)];
 }
