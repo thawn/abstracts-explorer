@@ -979,7 +979,7 @@ def donate_chat():
             return jsonify(
                 {
                     "success": True,
-                    "message": "Thank you for your feedback!",
+                    "message": "Thank you for your feedback! 🎉❤️",
                     "id": donation_id,
                 }
             )
