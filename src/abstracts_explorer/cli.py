@@ -1223,11 +1223,9 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     cache so that the web UI can serve them instantly.
 
     Without ``--conference`` or ``--year``, generates clustering for every
-    conference in the database combined with each individual year and with
-    all years.
+    conference in the database combined with each individual year.
 
-    With ``--conference`` only, generates for that conference with all years
-    combined AND each individual year.
+    With ``--conference`` only, generates for that conference for each individual year.
 
     With both ``--conference`` and ``--year``, generates for that specific
     conference + year only.
