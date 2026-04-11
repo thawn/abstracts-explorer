@@ -254,6 +254,6 @@ The registry feature is designed for safe, conflict-free imports:
 
 ## Docker / Container Usage
 
-When running Abstracts Explorer in Docker, you can pre-populate the databases by running a one-off download container before starting the main service, or by adding the registry credentials to your `.env` file and running the download inside the running container.
+When running Abstracts Explorer in Docker, you can pre-populate the databases by running a one-off download command inside the container.
 
-See [Docker Setup](docker.md#sharing-data-via-registry) for details.
+See [Docker Setup](docker.md#get-pre-computed-data-from-the-registry) for details.

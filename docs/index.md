@@ -81,13 +81,13 @@ uv run abstracts-explorer chat
 :maxdepth: 2
 :caption: User Guide
 
-installation
 web_ui
-docker
-configuration
 usage
-plugins
+docker
+installation
+configuration
 registry
+plugins
 cli_reference
 mcp_server
 ```
