@@ -90,10 +90,10 @@ export async function loadFilterOptions() {
             window.allYears = availableData.years || [];
             window.dbConferenceYearsMap = availableData.db_conference_years || {};
 
-            // Populate year selector in header (only on initial load when just "All Years" is present)
+            // Populate year selector in header (only on initial load when empty)
             // Track if we just populated it to apply defaults afterward.
             let yearsJustPopulated = false;
-            if (yearSelect && yearSelect.options.length === 1) {
+            if (yearSelect && yearSelect.options.length === 0) {
                 if (availableData.years && availableData.years.length > 0) {
                     availableData.years.forEach(year => {
                         const option = document.createElement('option');
@@ -400,7 +400,7 @@ export function updateYearsForConference() {
     // Preserve currently selected year (single-select)
     const currentYear = yearSelect.value;
 
-    yearSelect.innerHTML = '<option value="">All Years</option>';
+    yearSelect.innerHTML = '';
 
     if (selectedConference) {
         // Prefer DB-based years (actual downloaded data) over plugin-based years (theoretical)
@@ -423,12 +423,11 @@ export function updateYearsForConference() {
         }
     }
 
-    // Restore previous selection if still available; fall back to "All Years"
+    // Restore previous selection if still available; fall back to first year
     const availableYears = Array.from(yearSelect.options).map(opt => opt.value);
     if (currentYear && availableYears.includes(currentYear)) {
         yearSelect.value = currentYear;
-    } else {
-        // Select "All Years" sentinel
-        yearSelect.value = '';
+    } else if (availableYears.length > 0) {
+        yearSelect.value = availableYears[0];
     }
 }
