@@ -1079,6 +1079,138 @@ def clear_clustering_cache_command(args: argparse.Namespace) -> int:
         return 1
 
 
+def delete_data_command(args: argparse.Namespace) -> int:
+    """
+    Delete all data for a specific conference and year from every database.
+
+    Removes papers from the paper database, embeddings from ChromaDB, and
+    clustering cache entries from the database.  Both ``--conference`` and
+    ``--year`` are required.  The user must type ``yes`` to confirm.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments containing:
+        - conference: Conference name (required)
+        - year: Year of conference (required)
+        - yes: If True, skip the interactive confirmation prompt
+
+    Returns
+    -------
+    int
+        Exit code (0 for success, non-zero for failure)
+    """
+    config = get_config()
+
+    conference = getattr(args, "conference", None)
+    year = getattr(args, "year", None)
+
+    if not conference:
+        print("❌ --conference is required for the delete-data command.", file=sys.stderr)
+        return 1
+    if year is None:
+        print("❌ --year is required for the delete-data command.", file=sys.stderr)
+        return 1
+
+    # Resolve conference name to canonical form
+    try:
+        conference = _resolve_conference_arg(conference)
+    except Exception:
+        # If resolution fails, use the raw value (might still be valid)
+        pass
+
+    print("Abstracts Explorer - Delete Conference/Year Data")
+    print("=" * 70)
+    print(f"Database:     {config.database_url}")
+    print(f"Embedding DB: {config.embedding_db}")
+    print(f"Conference:   {conference}")
+    print(f"Year:         {year}")
+    print("=" * 70)
+
+    # Count what will be deleted
+    paper_count = 0
+    cache_count = 0
+    try:
+        with DatabaseManager() as db:
+            db.create_tables()
+            papers = db.search_papers(conference=conference, year=year, limit=0)
+            paper_count = len(papers)
+            cache_count = db.count_clustering_cache_by_conference_year(conference, year)
+    except Exception as e:
+        print(f"\n❌ Error accessing database: {e}", file=sys.stderr)
+        return 1
+
+    # Count ChromaDB embeddings
+    embedding_count = 0
+    try:
+        em = EmbeddingsManager()
+        em.connect()
+        em.create_collection(reset=False)
+        existing = em.collection.get(where={"$and": [{"conference": conference}, {"year": str(year)}]})
+        embedding_count = len(existing.get("ids", []))
+        em.close()
+    except Exception:
+        embedding_count = 0
+
+    print("\nThe following data will be permanently deleted:")
+    print(f"  📄 Papers:            {paper_count:,}")
+    print(f"  🔢 Embeddings:        {embedding_count:,}")
+    print(f"  🗂️  Clustering cache:  {cache_count:,}")
+
+    if paper_count == 0 and embedding_count == 0 and cache_count == 0:
+        print("\n✅ Nothing to delete — no data found for this conference/year combination.")
+        return 0
+
+    if not getattr(args, "yes", False):
+        print(f"\n⚠️  This will permanently delete all data for {conference} {year} from all databases.")
+        confirm = input("Type 'yes' to confirm: ")
+        if confirm.strip().lower() != "yes":
+            print("Aborted.")
+            return 1
+
+    errors: List[str] = []
+
+    # 1. Delete papers from paper database
+    try:
+        with DatabaseManager() as db:
+            deleted_papers = db.delete_papers_by_conference_year(conference, year)
+        print(f"\n✅ Deleted {deleted_papers:,} paper(s) from paper database.")
+    except Exception as e:
+        msg = f"Failed to delete papers: {e}"
+        print(f"\n❌ {msg}", file=sys.stderr)
+        errors.append(msg)
+
+    # 2. Delete embeddings from ChromaDB
+    try:
+        em = EmbeddingsManager()
+        em.connect()
+        em.create_collection(reset=False)
+        deleted_embeddings = em.delete_embeddings_by_filter(conference=conference, year=year)
+        em.close()
+        print(f"✅ Deleted {deleted_embeddings:,} embedding(s) from ChromaDB.")
+    except Exception as e:
+        msg = f"Failed to delete embeddings: {e}"
+        print(f"\n❌ {msg}", file=sys.stderr)
+        errors.append(msg)
+
+    # 3. Delete clustering cache
+    try:
+        with DatabaseManager() as db:
+            deleted_cache = db.delete_clustering_cache_by_conference_year(conference, year)
+        print(f"✅ Deleted {deleted_cache:,} clustering cache entry/entries.")
+    except Exception as e:
+        msg = f"Failed to delete clustering cache: {e}"
+        print(f"\n❌ {msg}", file=sys.stderr)
+        errors.append(msg)
+
+    if errors:
+        print(f"\n⚠️  Completed with {len(errors)} error(s).")
+        return 1
+
+    print(f"\n✅ All data for {conference} {year} has been deleted.")
+    return 0
+
+
 def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     """
     Pre-generate clustering results for one or all conference/year combinations.
@@ -3210,6 +3342,50 @@ Examples:
         help="Skip confirmation prompt.",
     )
 
+    # Delete-data command
+    delete_data_parser = subparsers.add_parser(
+        "delete-data",
+        help="Delete all data for a specific conference/year from all databases",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+Delete all data for a specific conference and year from every database.
+
+Both --conference and --year are required. The following data will be removed:
+  - Papers from the paper database
+  - Embeddings from ChromaDB
+  - Clustering cache entries
+
+The command shows a summary of what will be deleted and requires the user
+to type 'yes' to confirm the operation.
+
+Examples:
+  # Delete all NeurIPS 2024 data
+  abstracts-explorer delete-data --conference neurips --year 2024
+
+  # Delete without interactive confirmation
+  abstracts-explorer delete-data --conference iclr --year 2023 --yes
+        """,
+    )
+    delete_data_parser.add_argument(
+        "--conference",
+        "-c",
+        type=str,
+        required=True,
+        help="Conference to delete (required). Case-insensitive.",
+    )
+    delete_data_parser.add_argument(
+        "--year",
+        "-y",
+        type=int,
+        required=True,
+        help="Year of conference/workshop to delete (required).",
+    )
+    delete_data_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the interactive confirmation prompt.",
+    )
+
     # Pre-process command
     pre_process_parser = subparsers.add_parser(
         "pre-process",
@@ -3299,6 +3475,8 @@ Examples:
         else:
             eval_parser.print_help()
             return 1
+    elif args.command == "delete-data":
+        return delete_data_command(args)
     elif args.command == "registry":
         if not hasattr(args, "registry_command") or not args.registry_command:
             registry_parser.print_help()
