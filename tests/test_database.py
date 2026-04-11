@@ -189,19 +189,23 @@ class TestDatabaseManager:
         """Test getting paper count on empty database."""
         assert connected_db.get_paper_count() == 0
 
-    def test_get_filter_options_empty(self, connected_db):
-        """Test getting filter options on empty database."""
-        filters = connected_db.get_filter_options()
-        assert isinstance(filters, dict)
-        assert "sessions" in filters
-        assert "years" in filters
-        assert "conferences" in filters
-        assert filters["sessions"] == []
-        assert filters["years"] == []
-        assert filters["conferences"] == []
+    def test_get_sessions_empty(self, connected_db):
+        """Test getting sessions on empty database."""
+        sessions = connected_db.get_sessions()
+        assert sessions == []
 
-    def test_get_filter_options_with_data(self, connected_db):
-        """Test getting filter options with sample data."""
+    def test_get_conferences_empty(self, connected_db):
+        """Test getting conferences on empty database."""
+        conferences = connected_db.get_conferences()
+        assert conferences == []
+
+    def test_get_years_empty(self, connected_db):
+        """Test getting years on empty database."""
+        years = connected_db.get_years()
+        assert years == []
+
+    def test_get_sessions_with_data(self, connected_db):
+        """Test getting sessions with sample data."""
         # Use add_paper method to insert test data
         paper1 = LightweightPaper(
             title="Paper 1",
@@ -235,11 +239,103 @@ class TestDatabaseManager:
         connected_db.add_paper(paper2)
         connected_db.add_paper(paper3)
 
-        filters = connected_db.get_filter_options()
-        assert isinstance(filters, dict)
-        assert sorted(filters["sessions"]) == ["Session A", "Session B"]
-        assert sorted(filters["years"]) == [2024, 2025]
-        assert sorted(filters["conferences"]) == ["ICLR", "NeurIPS"]
+        sessions = connected_db.get_sessions()
+        assert sorted(sessions) == ["Session A", "Session B"]
+
+        conferences = connected_db.get_conferences()
+        assert sorted(conferences) == ["ICLR", "NeurIPS"]
+
+        years = connected_db.get_years()
+        assert years == [2025, 2024]
+
+    def test_get_sessions_filtered(self, connected_db):
+        """Test getting sessions filtered by conference and year."""
+        paper1 = LightweightPaper(
+            title="Paper 1",
+            authors=["Author 1"],
+            abstract="Abstract 1",
+            session="Session A",
+            poster_position="P1",
+            year=2025,
+            conference="NeurIPS",
+        )
+        paper2 = LightweightPaper(
+            title="Paper 2",
+            authors=["Author 2"],
+            abstract="Abstract 2",
+            session="Session B",
+            poster_position="P2",
+            year=2024,
+            conference="ICLR",
+        )
+        connected_db.add_paper(paper1)
+        connected_db.add_paper(paper2)
+
+        # Filter by conference
+        sessions = connected_db.get_sessions(conference="NeurIPS")
+        assert sessions == ["Session A"]
+
+        # Filter by year
+        sessions = connected_db.get_sessions(year=2024)
+        assert sessions == ["Session B"]
+
+    def test_get_conferences_filtered_by_year(self, connected_db):
+        """Test getting conferences filtered by year."""
+        paper1 = LightweightPaper(
+            title="Paper 1",
+            authors=["Author 1"],
+            abstract="Abstract 1",
+            session="Session A",
+            poster_position="P1",
+            year=2025,
+            conference="NeurIPS",
+        )
+        paper2 = LightweightPaper(
+            title="Paper 2",
+            authors=["Author 2"],
+            abstract="Abstract 2",
+            session="Session B",
+            poster_position="P2",
+            year=2024,
+            conference="ICLR",
+        )
+        connected_db.add_paper(paper1)
+        connected_db.add_paper(paper2)
+
+        conferences = connected_db.get_conferences(year=2025)
+        assert conferences == ["NeurIPS"]
+
+        conferences = connected_db.get_conferences(year=2024)
+        assert conferences == ["ICLR"]
+
+    def test_get_years_filtered_by_conference(self, connected_db):
+        """Test getting years filtered by conference."""
+        paper1 = LightweightPaper(
+            title="Paper 1",
+            authors=["Author 1"],
+            abstract="Abstract 1",
+            session="Session A",
+            poster_position="P1",
+            year=2025,
+            conference="NeurIPS",
+        )
+        paper2 = LightweightPaper(
+            title="Paper 2",
+            authors=["Author 2"],
+            abstract="Abstract 2",
+            session="Session B",
+            poster_position="P2",
+            year=2024,
+            conference="ICLR",
+        )
+        connected_db.add_paper(paper1)
+        connected_db.add_paper(paper2)
+
+        years = connected_db.get_years(conference="NeurIPS")
+        assert years == [2025]
+
+        years = connected_db.get_years(conference="ICLR")
+        assert years == [2024]
 
 
 class TestAddPaper:
@@ -1285,6 +1381,12 @@ class TestResolveDefaultConferenceYear:
         from unittest.mock import MagicMock
 
         mock_db = MagicMock()
+        mock_db.get_conferences.return_value = sorted(conferences_with_years.keys())
+        mock_db.get_years.side_effect = lambda conference=None: (
+            conferences_with_years.get(conference, [])
+            if conference
+            else sorted({y for years in conferences_with_years.values() for y in years}, reverse=True)
+        )
         mock_db.get_conference_years_from_db.return_value = conferences_with_years
         mock_db.resolve_default_conference_year.side_effect = (
             lambda conf, year: DatabaseManager.resolve_default_conference_year(mock_db, conf, year)

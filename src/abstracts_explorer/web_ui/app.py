@@ -22,8 +22,6 @@ from abstracts_explorer.config import get_config
 from abstracts_explorer.paper_utils import get_paper_with_authors, PaperFormattingError
 from abstracts_explorer.export_utils import export_papers_to_zip
 
-from abstracts_explorer.plugin import get_available_filters
-
 # Import version
 try:
     from abstracts_explorer._version import __version__
@@ -325,7 +323,7 @@ def get_filters():
     Returns
     -------
     dict
-        Dictionary with sessions, years, and conferences lists
+        Dictionary with sessions list filtered by the given conference/year
     """
     try:
         # Get optional query parameters
@@ -337,8 +335,8 @@ def get_filters():
         conference = conference_param if conference_param else None
 
         database = get_database()
-        filters = database.get_filter_options(year=year, conference=conference)
-        return jsonify(filters)
+        sessions = database.get_sessions(conference=conference, year=year)
+        return jsonify({"sessions": sessions})
     except ValueError as e:
         return jsonify({"error": f"Invalid year parameter: {str(e)}"}), 400
     except Exception as e:
@@ -348,39 +346,46 @@ def get_filters():
 @app.route("/api/available-filters")
 def get_available_filters_endpoint():
     """
-    Get available conferences and years from registered plugins and the database.
+    Get available conferences and years from the database.
 
-    Returns a mapping of conferences to their supported years based on
-    the registered downloader plugins, plus a db_conference_years mapping that
-    reflects what is actually stored in the database. Defaults are chosen so that
-    the selected conference/year always contains data.
+    Returns conferences and years that actually have data in the database,
+    along with sensible defaults.
 
     Returns
     -------
     dict
         Dictionary with:
-        - conferences: list of conference names (from plugins)
-        - years: list of all unique years across all plugins
-        - conference_years: dict mapping conference names to their supported years (from plugins)
-        - db_conference_years: dict mapping conference names to years that have data in the DB
+        - conferences: list of conference names available in the DB
+        - years: list of all unique years in the DB (descending)
+        - conference_years: dict mapping conference names to years with data in the DB
         - default_conference: conference to pre-select (guaranteed to have DB data, if any exists)
         - default_year: year to pre-select (guaranteed to have DB data for the default conference)
     """
     try:
-        filters = get_available_filters()
         config = get_config()
         database = get_database()
 
         db_conference_years = database.get_conference_years_from_db()
-        filters["db_conference_years"] = db_conference_years
+
+        conferences = sorted(db_conference_years.keys())
+        all_years: set = set()
+        for years in db_conference_years.values():
+            all_years.update(years)
+        years_sorted = sorted(all_years, reverse=True)
 
         configured_conf = config.default_conference or ""
         configured_year = config.default_year if config.default_year else None
         effective_conf, effective_year = database.resolve_default_conference_year(configured_conf, configured_year)
 
-        filters["default_conference"] = effective_conf
-        filters["default_year"] = effective_year
-        return jsonify(filters)
+        return jsonify(
+            {
+                "conferences": conferences,
+                "years": years_sorted,
+                "conference_years": db_conference_years,
+                "default_conference": effective_conf,
+                "default_year": effective_year,
+            }
+        )
     except Exception as e:
         logger.error(f"Error in available-filters endpoint: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
@@ -569,8 +574,8 @@ def chat():
             metadata_filter = filter_conditions[0]
 
         # Get response with filters
-        available_filter_data = get_available_filters()
-        available_conferences = available_filter_data.get("conferences", [])
+        database = get_database()
+        available_conferences = database.get_conferences()
         response = rag.query(
             message,
             n_results=n_papers,
