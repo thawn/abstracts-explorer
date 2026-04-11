@@ -47,7 +47,9 @@ select:focus {
 /* Feedback highlight animation – runs once on the first assistant message */
 @keyframes feedbackHighlight {
     0% { background-color: transparent; }
-    30% { background-color: rgba(139, 92, 246, 0.10); }
+        30% {
+            background-color: rgba(135, 255, 95, 0.522);
+        }
     100% { background-color: transparent; }
 }
 

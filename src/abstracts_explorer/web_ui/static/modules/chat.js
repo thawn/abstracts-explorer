@@ -322,14 +322,14 @@ export function addChatMessage(text, role, isLoading = false) {
                 ${isLoading ? '<div class="spinner mt-2" style="width: 20px; height: 20px; border-width: 2px;"></div>' : ''}
                 ${!isUser && !isLoading ? `
                 <div class="chat-feedback-buttons flex items-center gap-2 mt-3 pt-2 border-t border-gray-100">
-                    <span class="text-xs text-gray-500 mr-1">Helpful?</span>
+                    <span class="text-s text-gray-500 mr-1">Helpful?</span>
                     <button class="chat-feedback-btn text-gray-400 hover:text-green-600 transition-colors p-1"
                         data-rating="up" data-msg-id="${messageId}" title="Thumbs up">
-                        <i class="fas fa-thumbs-up text-sm"></i>
+                        <i class="fas fa-thumbs-up text-s"></i>
                     </button>
                     <button class="chat-feedback-btn text-gray-400 hover:text-red-600 transition-colors p-1"
                         data-rating="down" data-msg-id="${messageId}" title="Thumbs down">
-                        <i class="fas fa-thumbs-down text-sm"></i>
+                        <i class="fas fa-thumbs-down text-s"></i>
                     </button>
                 </div>
                 ` : ''}
@@ -363,7 +363,7 @@ export function addChatMessage(text, role, isLoading = false) {
             feedbackDiv.classList.add('feedback-highlight');
             const buttons = feedbackDiv.querySelectorAll('.chat-feedback-btn');
             buttons.forEach((btn, index) => {
-                btn.style.animationDelay = `${index * 0.15}s`;
+                btn.style.animationDelay = `${index * 0.15 + 0.5}s`;
                 btn.classList.add('feedback-bounce');
             });
         }
@@ -624,7 +624,7 @@ export async function handleChatFeedback(messageId, rating) {
     // If consent has not been asked yet, show the consent popup
     if (consent === null) {
         const accepted = confirm(
-            'Thank you for your feedback! 🎉\n\n' +
+            'Thank you for your feedback! 🎉❤️\n\n' +
             'To help us improve, clicking this button will upload your current chat conversation.\n\n' +
             '✓ Your data will be fully anonymized\n' +
             '✓ No personal information will be collected\n' +
@@ -687,7 +687,7 @@ export async function handleChatFeedback(messageId, rating) {
         if (messageDiv) {
             const feedbackDiv = messageDiv.querySelector('.chat-feedback-buttons');
             if (feedbackDiv) {
-                feedbackDiv.innerHTML = '<span class="text-xs text-gray-400">Thanks for your feedback!</span>';
+                feedbackDiv.innerHTML = '<span class="text-s text-gray-500">Thanks for your feedback!  🎉❤️</span>';
             }
         }
     } catch (error) {
