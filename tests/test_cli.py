@@ -2207,8 +2207,8 @@ class TestCLI:
 
         def mock_get_filter_options(conference=None):
             if conference is None:
-                return {"conferences": ["NeurIPS"], "years": [], "sessions": []}
-            return {"conferences": [], "years": [], "sessions": []}
+                return {"conferences": ["NeurIPS"], "years": [2023], "sessions": []}
+            return {"conferences": [], "years": [2023], "sessions": []}
 
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
@@ -2265,7 +2265,7 @@ class TestCLI:
         # DB returns one conference with two years
         def mock_get_filter_options(conference=None):
             if conference is None:
-                return {"conferences": ["NeurIPS"], "years": [], "sessions": []}
+                return {"conferences": ["NeurIPS"], "years": [2023, 2024], "sessions": []}
             return {"conferences": [], "years": [2023, 2024], "sessions": []}
 
         with (
@@ -2293,8 +2293,8 @@ class TestCLI:
         assert exit_code == 0
         captured = capsys.readouterr()
         assert "Pre-generation complete" in captured.out
-        # 3 combos: NeurIPS (all years) + NeurIPS 2023 + NeurIPS 2024
-        assert mock_compute.call_count == 3
+        # 2 combos: NeurIPS 2023 + NeurIPS 2024
+        assert mock_compute.call_count == 2
         # Verify fixed agglomerative/t-SNE parameters on all calls
         for call in mock_compute.call_args_list:
             kw = call[1]
@@ -2350,8 +2350,8 @@ class TestCLI:
 
         def mock_get_filter_options(conference=None):
             if conference is None:
-                return {"conferences": ["NeurIPS"], "years": [], "sessions": []}
-            return {"conferences": [], "years": [], "sessions": []}
+                return {"conferences": ["NeurIPS"], "years": [2024, 2025], "sessions": []}
+            return {"conferences": [], "years": [2024, 2025], "sessions": []}
 
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
@@ -2399,8 +2399,8 @@ class TestCLI:
 
         def mock_get_filter_options(conference=None):
             if conference is None:
-                return {"conferences": ["NeurIPS"], "years": [], "sessions": []}
-            return {"conferences": [], "years": [], "sessions": []}
+                return {"conferences": ["NeurIPS"], "years": [2024, 2025], "sessions": []}
+            return {"conferences": [], "years": [2024, 2025], "sessions": []}
 
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
@@ -2454,8 +2454,8 @@ class TestCLI:
 
         def mock_get_filter_options(conference=None):
             if conference is None:
-                return {"conferences": ["NeurIPS"], "years": [], "sessions": []}
-            return {"conferences": [], "years": [], "sessions": []}
+                return {"conferences": ["NeurIPS"], "years": [2024, 2025], "sessions": []}
+            return {"conferences": [], "years": [2024, 2025], "sessions": []}
 
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
@@ -2503,8 +2503,8 @@ class TestCLI:
 
         def mock_get_filter_options(conference=None):
             if conference is None:
-                return {"conferences": ["NeurIPS"], "years": [], "sessions": []}
-            return {"conferences": [], "years": [], "sessions": []}
+                return {"conferences": ["NeurIPS"], "years": [2025], "sessions": []}
+            return {"conferences": [], "years": [2025], "sessions": []}
 
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
@@ -2581,10 +2581,9 @@ class TestCLI:
                 exit_code = main()
 
         assert exit_code == 0
-        # 3 combos: all years + 2023 + 2024
-        assert mock_compute.call_count == 3
+        # 2 combos: 2023 + 2024
+        assert mock_compute.call_count == 2
         all_calls = [(c[1]["conferences"], c[1]["years"]) for c in mock_compute.call_args_list]
-        assert (["ML4PS@NeurIPS"], None) in all_calls
         assert (["ML4PS@NeurIPS"], [2023]) in all_calls
         assert (["ML4PS@NeurIPS"], [2024]) in all_calls
         captured = capsys.readouterr()
@@ -2639,10 +2638,9 @@ class TestCLI:
                 exit_code = main()
 
         assert exit_code == 0
-        # 3 combos: all years + 2024 + 2025 (2022 and 2023 filtered out)
-        assert mock_compute.call_count == 3
+        # 2 combos: 2024 + 2025 (2022 and 2023 filtered out)
+        assert mock_compute.call_count == 2
         all_calls = [(c[1]["conferences"], c[1]["years"]) for c in mock_compute.call_args_list]
-        assert (["TestConf"], None) in all_calls
         assert (["TestConf"], [2024]) in all_calls
         assert (["TestConf"], [2025]) in all_calls
         # Unsupported years should NOT be in the calls
