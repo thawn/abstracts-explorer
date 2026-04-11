@@ -3526,6 +3526,278 @@ class TestCLIChatInteractiveLoop:
         assert "Goodbye" in captured.out
 
 
+class TestDeleteDataCommand:
+    """Tests for the delete-data command."""
+
+    def _create_paper(self, conference: str, year: int) -> LightweightPaper:
+        return LightweightPaper(
+            title=f"{conference} {year} Paper",
+            authors=["Author"],
+            abstract="Test abstract",
+            session="s",
+            poster_position="p",
+            year=year,
+            conference=conference,
+        )
+
+    def test_requires_conference(self, tmp_path, capsys):
+        """delete-data exits with error when --conference is missing."""
+        set_test_db(tmp_path / "test.db")
+
+        with patch.object(sys, "argv", ["abstracts-explorer", "delete-data", "--year", "2024"]):
+            # argparse will error because --conference is required
+            with pytest.raises(SystemExit):
+                main()
+
+    def test_requires_year(self, tmp_path, capsys):
+        """delete-data exits with error when --year is missing."""
+        set_test_db(tmp_path / "test.db")
+
+        with patch.object(sys, "argv", ["abstracts-explorer", "delete-data", "--conference", "NeurIPS"]):
+            with pytest.raises(SystemExit):
+                main()
+
+    def test_aborts_on_no_confirmation(self, tmp_path, capsys):
+        """delete-data aborts when user does not type 'yes'."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        from abstracts_explorer.database import DatabaseManager
+
+        with DatabaseManager() as db:
+            db.create_tables()
+            db.add_paper(self._create_paper("NeurIPS", 2024))
+
+        with (
+            patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "delete-data", "--conference", "NeurIPS", "--year", "2024"],
+            ),
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("builtins.input", return_value="no"),
+        ):
+            mock_em = Mock()
+            mock_em.collection.get.return_value = {"ids": []}
+            mock_em_class.return_value = mock_em
+
+            exit_code = main()
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert "Aborted" in captured.out
+
+    def test_deletes_data_with_yes_flag(self, tmp_path, capsys):
+        """delete-data --yes removes papers, embeddings, and clustering cache."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        from abstracts_explorer.database import DatabaseManager
+
+        with DatabaseManager() as db:
+            db.create_tables()
+            db.add_paper(self._create_paper("NeurIPS", 2024))
+            db.save_clustering_cache(
+                embedding_model="model",
+                reduction_method="pca",
+                n_components=2,
+                clustering_method="kmeans",
+                n_clusters=3,
+                results={
+                    "points": [{"id": "p1", "x": 1, "y": 2, "cluster": 0}],
+                    "statistics": {"total_papers": 1, "n_clusters": 3},
+                },
+                conference="NeurIPS",
+                year=2024,
+            )
+
+        with (
+            patch.object(
+                sys,
+                "argv",
+                [
+                    "abstracts-explorer",
+                    "delete-data",
+                    "--conference",
+                    "NeurIPS",
+                    "--year",
+                    "2024",
+                    "--yes",
+                ],
+            ),
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+        ):
+            mock_em = Mock()
+            mock_em.collection.get.return_value = {"ids": ["emb1", "emb2"]}
+            mock_em.delete_embeddings_by_filter.return_value = 2
+            mock_em_class.return_value = mock_em
+
+            exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Deleted" in captured.out
+        assert "paper" in captured.out.lower()
+
+        # Verify delete_embeddings_by_filter was called with correct parameters
+        mock_em.delete_embeddings_by_filter.assert_called_once_with(conference="NeurIPS", year=2024)
+
+        # Verify papers deleted from DB
+        with DatabaseManager() as db:
+            papers = db.search_papers(conference="NeurIPS", year=2024, limit=0)
+            assert len(papers) == 0
+
+            # Verify clustering cache deleted
+            count = db.count_clustering_cache_by_conference_year("NeurIPS", 2024)
+            assert count == 0
+
+    def test_nothing_to_delete(self, tmp_path, capsys):
+        """delete-data reports nothing to delete when no data exists."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        from abstracts_explorer.database import DatabaseManager
+
+        with DatabaseManager() as db:
+            db.create_tables()
+
+        with (
+            patch.object(
+                sys,
+                "argv",
+                [
+                    "abstracts-explorer",
+                    "delete-data",
+                    "--conference",
+                    "NeurIPS",
+                    "--year",
+                    "2024",
+                    "--yes",
+                ],
+            ),
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+        ):
+            mock_em = Mock()
+            mock_em.collection.get.return_value = {"ids": []}
+            mock_em_class.return_value = mock_em
+
+            exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Nothing to delete" in captured.out
+
+    def test_confirms_with_yes_input(self, tmp_path, capsys):
+        """delete-data proceeds when user types 'yes' interactively."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        from abstracts_explorer.database import DatabaseManager
+
+        with DatabaseManager() as db:
+            db.create_tables()
+            db.add_paper(self._create_paper("ICLR", 2023))
+
+        with (
+            patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "delete-data", "--conference", "ICLR", "--year", "2023"],
+            ),
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("builtins.input", return_value="yes"),
+        ):
+            mock_em = Mock()
+            mock_em.collection.get.return_value = {"ids": []}
+            mock_em.delete_embeddings_by_filter.return_value = 0
+            mock_em_class.return_value = mock_em
+
+            exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "deleted" in captured.out.lower()
+
+    def test_shows_counts_before_confirmation(self, tmp_path, capsys):
+        """delete-data shows what will be deleted before asking for confirmation."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        from abstracts_explorer.database import DatabaseManager
+
+        with DatabaseManager() as db:
+            db.create_tables()
+            db.add_paper(self._create_paper("NeurIPS", 2025))
+            db.add_paper(self._create_paper("NeurIPS", 2025))
+
+        with (
+            patch.object(
+                sys,
+                "argv",
+                [
+                    "abstracts-explorer",
+                    "delete-data",
+                    "--conference",
+                    "NeurIPS",
+                    "--year",
+                    "2025",
+                ],
+            ),
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("builtins.input", return_value="no"),
+        ):
+            mock_em = Mock()
+            mock_em.collection.get.return_value = {"ids": ["e1", "e2", "e3"]}
+            mock_em_class.return_value = mock_em
+
+            exit_code = main()
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        # Should show paper count (2), embedding count (3), cache count (0)
+        assert "2" in captured.out
+        assert "3" in captured.out
+        assert "permanently" in captured.out.lower() or "⚠️" in captured.out
+
+    def test_partial_failure_returns_nonzero(self, tmp_path, capsys):
+        """delete-data returns exit code 1 when one step fails."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        from abstracts_explorer.database import DatabaseManager
+
+        with DatabaseManager() as db:
+            db.create_tables()
+            db.add_paper(self._create_paper("NeurIPS", 2024))
+
+        with (
+            patch.object(
+                sys,
+                "argv",
+                [
+                    "abstracts-explorer",
+                    "delete-data",
+                    "--conference",
+                    "NeurIPS",
+                    "--year",
+                    "2024",
+                    "--yes",
+                ],
+            ),
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+        ):
+            mock_em = Mock()
+            mock_em.collection.get.return_value = {"ids": ["e1"]}
+            mock_em.delete_embeddings_by_filter.side_effect = Exception("ChromaDB failure")
+            mock_em_class.return_value = mock_em
+
+            exit_code = main()
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert "ChromaDB failure" in captured.err
+
+
 class TestLogging:
     """Test cases for logging configuration."""
 

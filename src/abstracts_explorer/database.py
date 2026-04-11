@@ -1731,6 +1731,120 @@ class DatabaseManager:
             self._session.rollback()
             raise DatabaseError(f"Failed to save clustering cache: {str(e)}") from e
 
+    def delete_papers_by_conference_year(self, conference: str, year: int) -> int:
+        """
+        Delete all papers for a specific conference and year combination.
+
+        Parameters
+        ----------
+        conference : str
+            Conference name (exact, as stored in the database).
+        year : int
+            Conference year.
+
+        Returns
+        -------
+        int
+            Number of papers deleted.
+
+        Raises
+        ------
+        DatabaseError
+            If deletion fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            result = self._session.execute(
+                delete(Paper).where(and_(Paper.conference == conference, Paper.year == year))
+            )
+            self._session.commit()
+            count = result.rowcount if result.rowcount is not None else 0
+            logger.info(f"Deleted {count} papers for {conference}/{year}")
+            return count
+
+        except Exception as e:
+            self._session.rollback()
+            raise DatabaseError(f"Failed to delete papers for {conference}/{year}: {str(e)}") from e
+
+    def delete_clustering_cache_by_conference_year(self, conference: str, year: int) -> int:
+        """
+        Delete all clustering cache entries for a specific conference and year.
+
+        Parameters
+        ----------
+        conference : str
+            Conference name (exact, as stored in the database).
+        year : int
+            Conference year.
+
+        Returns
+        -------
+        int
+            Number of cache entries deleted.
+
+        Raises
+        ------
+        DatabaseError
+            If deletion fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            stmt = select(ClusteringCache).where(
+                and_(ClusteringCache.conference == conference, ClusteringCache.year == year)
+            )
+            entries = self._session.execute(stmt).scalars().all()
+            count = len(entries)
+
+            for entry in entries:
+                self._session.delete(entry)
+
+            self._session.commit()
+            logger.info(f"Deleted {count} clustering cache entries for {conference}/{year}")
+            return count
+
+        except Exception as e:
+            self._session.rollback()
+            raise DatabaseError(f"Failed to delete clustering cache for {conference}/{year}: {str(e)}") from e
+
+    def count_clustering_cache_by_conference_year(self, conference: str, year: int) -> int:
+        """
+        Count clustering cache entries for a specific conference and year.
+
+        Parameters
+        ----------
+        conference : str
+            Conference name (exact, as stored in the database).
+        year : int
+            Conference year.
+
+        Returns
+        -------
+        int
+            Number of cache entries found.
+
+        Raises
+        ------
+        DatabaseError
+            If the query fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            result = self._session.execute(
+                select(func.count())
+                .select_from(ClusteringCache)
+                .where(and_(ClusteringCache.conference == conference, ClusteringCache.year == year))
+            )
+            return result.scalar() or 0
+
+        except Exception as e:
+            raise DatabaseError(f"Failed to count clustering cache for {conference}/{year}: {str(e)}") from e
+
     def clear_clustering_cache(self, embedding_model: Optional[str] = None) -> int:
         """
         Clear clustering cache, optionally filtered by embedding model.
