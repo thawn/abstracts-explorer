@@ -119,6 +119,7 @@ api/evaluation
 contributing
 branching_strategy
 architecture
+refactoring_plan
 ```
 
 ## Indices and tables
