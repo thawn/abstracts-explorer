@@ -31,6 +31,10 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Distance threshold for counting similar papers in embedding space.
+# Matches the default radius used on the clustering page's custom query.
+_SIMILAR_DISTANCE_THRESHOLD = 1.1
+
 # Get the directory where this file is located
 PACKAGE_DIR = Path(__file__).parent
 
@@ -439,7 +443,7 @@ def search():
             try:
                 total_similar = em.count_papers_within_distance(
                     query=query,
-                    distance_threshold=1.1,
+                    distance_threshold=_SIMILAR_DISTANCE_THRESHOLD,
                     conferences=conferences if conferences else None,
                     years=years if years else None,
                 )
