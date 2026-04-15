@@ -19,6 +19,10 @@ export async function searchPapers() {
     const query = document.getElementById('search-input').value.trim();
     const limit = parseInt(document.getElementById('limit-select').value);
 
+    // Get search distance threshold from settings
+    const distanceInput = document.getElementById('search-distance');
+    const distanceThreshold = distanceInput ? parseFloat(distanceInput.value) : 1.1;
+
     // Get multiple selected values from multi-select dropdowns
     const sessionSelect = document.getElementById('session-filter');
     const sessions = Array.from(sessionSelect.selectedOptions).map(opt => opt.value);
@@ -47,7 +51,8 @@ export async function searchPapers() {
         const requestBody = {
             query,
             use_embeddings: true,
-            limit
+            limit,
+            distance_threshold: distanceThreshold
         };
 
         // Add filters only if NOT all options are selected (all selected = no filter)
@@ -104,12 +109,21 @@ export function displaySearchResults(data) {
     }
 
     // Display results header
+    const totalSimilar = data.total_similar;
+    const showingCount = data.papers.length;
+    let headerText;
+    if (data.use_embeddings && totalSimilar !== undefined) {
+        headerText = `Showing the <strong>${showingCount}</strong> best match${showingCount !== 1 ? 'es' : ''} out of <strong>${totalSimilar}</strong> similar paper${totalSimilar !== 1 ? 's' : ''}`;
+    } else {
+        headerText = `Found <strong>${data.count}</strong> paper${data.count !== 1 ? 's' : ''}`;
+    }
+
     let html = `
         <div class="bg-white rounded-lg shadow-md p-4 mb-4">
             <div class="flex items-center justify-between">
                 <div>
-                    <span class="text-sm text-gray-600">Found <strong>${data.count}</strong> papers</span>
-                    ${data.use_embeddings ? '<span class="ml-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">AI-Powered</span>' : ''}
+                    <span class="text-sm text-gray-600">${headerText}</span>
+                    ${data.use_embeddings ? '<span class="ml-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">LLM-Powered</span>' : ''}
                 </div>
             </div>
         </div>

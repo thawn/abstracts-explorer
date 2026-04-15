@@ -694,7 +694,8 @@ class TestIntegration:
 
             # Test 1: Search without filters - should return all papers
             with DatabaseManager() as db:
-                results_all = em.search_papers_semantic("neural networks learning", database=db, limit=10)
+                result_all = em.search_papers_semantic("neural networks learning", database=db, limit=10)
+                results_all = result_all["papers"]
                 assert len(results_all) > 0, "Search without filters should return results"
                 # Verify similarity scores are included
                 for paper in results_all:
@@ -703,7 +704,8 @@ class TestIntegration:
 
             # Test 2: Search with year filter [2024] - should return only 2024 paper
             with DatabaseManager() as db:
-                results_2024 = em.search_papers_semantic("learning", database=db, limit=10, years=[2024])
+                result_2024 = em.search_papers_semantic("learning", database=db, limit=10, years=[2024])
+                results_2024 = result_2024["papers"]
                 assert len(results_2024) > 0, "Search with year=2024 filter should return results"
                 for paper in results_2024:
                     assert paper["year"] == 2024, f"All results should be from 2024, got {paper['year']}"
@@ -711,7 +713,8 @@ class TestIntegration:
 
             # Test 3: Search with year filter [2025] - should return only 2025 papers
             with DatabaseManager() as db:
-                results_2025 = em.search_papers_semantic("learning", database=db, limit=10, years=[2025])
+                result_2025 = em.search_papers_semantic("learning", database=db, limit=10, years=[2025])
+                results_2025 = result_2025["papers"]
                 assert len(results_2025) > 0, "Search with year=2025 filter should return results"
                 for paper in results_2025:
                     assert paper["year"] == 2025, f"All results should be from 2025, got {paper['year']}"
@@ -719,9 +722,10 @@ class TestIntegration:
 
             # Test 4: Search with session filter
             with DatabaseManager() as db:
-                results_oral = em.search_papers_semantic(
+                result_oral = em.search_papers_semantic(
                     "learning", database=db, limit=10, sessions=["Oral Session 1"]
                 )
+                results_oral = result_oral["papers"]
                 assert len(results_oral) > 0, "Search with session filter should return results"
                 for paper in results_oral:
                     assert paper["session"] == "Oral Session 1", f"Expected Oral Session 1, got {paper['session']}"

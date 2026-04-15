@@ -886,7 +886,8 @@ class EmbeddingsManager:
         sessions: Optional[List[str]] = None,
         years: Optional[List[int]] = None,
         conferences: Optional[List[str]] = None,
-    ) -> List[Dict[str, Any]]:
+        distance_threshold: float = 1.1,
+    ) -> Dict[str, Any]:
         """
         Perform semantic search for papers using embeddings.
 
@@ -913,11 +914,18 @@ class EmbeddingsManager:
             Filter by publication years
         conferences : list of str, optional
             Filter by conference names
+        distance_threshold : float, optional
+            Maximum Euclidean distance to consider a paper similar, by default 1.1.
+            Used to count the total number of similar papers (``total_similar``
+            in the returned dictionary).
 
         Returns
         -------
-        list of dict
-            List of paper dictionaries with complete information
+        dict
+            Dictionary containing:
+
+            - papers: list of dict – The top *limit* paper dictionaries
+            - total_similar: int – Number of papers within *distance_threshold*
 
         Raises
         ------
@@ -926,13 +934,15 @@ class EmbeddingsManager:
 
         Examples
         --------
-        >>> papers = em.search_papers_semantic(
+        >>> result = em.search_papers_semantic(
         ...     "transformers in vision",
         ...     database=db,
         ...     limit=5,
         ...     years=[2024, 2025]
         ... )
-        >>> papers = em.search_papers_semantic(
+        >>> result["papers"]  # up to 5 papers
+        >>> result["total_similar"]  # papers within distance_threshold
+        >>> result = em.search_papers_semantic(
         ...     'authors:"Vaswani" attention',
         ...     database=db,
         ... )
@@ -959,7 +969,7 @@ class EmbeddingsManager:
             matching_papers = database.search_papers(field_filters=field_filters, limit=0)
             if not matching_papers:
                 # No papers satisfy the field filters — no results possible
-                return []
+                return {"papers": [], "total_similar": 0}
             matching_uids = [p["uid"] for p in matching_papers]
             filter_conditions.append({"uid": {"$in": matching_uids}})
 
@@ -989,14 +999,24 @@ class EmbeddingsManager:
 
         logger.info(f"Search results count: {len(results.get('ids', [[]])[0]) if results else 0}")
 
+        # Count papers within distance_threshold for the total_similar metric
+        total_similar = 0
+        distances = results.get("distances", [[]])[0] if results else []
+        for d in distances:
+            if d <= distance_threshold:
+                total_similar += 1
+            else:
+                # Distances are sorted ascending, so we can break early
+                break
+
         # Transform ChromaDB results to paper format using shared utility
         try:
             papers = format_search_results(results, database, include_documents=False)
         except PaperFormattingError:
             # No valid papers found
-            return []
+            return {"papers": [], "total_similar": 0}
 
-        return papers[:limit]
+        return {"papers": papers[:limit], "total_similar": total_similar}
 
     def find_papers_within_distance(
         self,

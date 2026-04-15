@@ -729,7 +729,10 @@ class TestWebUISemanticSearchDetails:
                             "distance": 0.2,
                         },
                     ]
-                    mock_em.search_papers_semantic.return_value = mock_papers
+                    mock_em.search_papers_semantic.return_value = {
+                        "papers": mock_papers,
+                        "total_similar": 2,
+                    }
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
 
@@ -767,7 +770,10 @@ class TestWebUISemanticSearchDetails:
                 with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                     mock_em = Mock()
                     mock_db = Mock()
-                    mock_em.search_papers_semantic.return_value = []
+                    mock_em.search_papers_semantic.return_value = {
+                        "papers": [],
+                        "total_similar": 0,
+                    }
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
 

@@ -19,6 +19,7 @@ describe('Search Module', () => {
         document.body.innerHTML = `
             <input id="search-input" value="machine learning" />
             <select id="limit-select"><option value="10" selected>10</option></select>
+            <input id="search-distance" type="number" value="1.1" />
             <select id="session-filter" multiple>
                 <option value="Session 1" selected>Session 1</option>
                 <option value="Session 2" selected>Session 2</option>
@@ -67,7 +68,8 @@ describe('Search Module', () => {
                 json: async () => ({
                     papers: [],
                     count: 0,
-                    use_embeddings: true
+                    use_embeddings: true,
+                    total_similar: 0
                 })
             });
 
@@ -76,6 +78,7 @@ describe('Search Module', () => {
             const callArgs = JSON.parse(global.fetch.mock.calls[0][1].body);
             expect(callArgs.query).toBe('machine learning');
             expect(callArgs.limit).toBe(10);
+            expect(callArgs.distance_threshold).toBe(1.1);
             expect(callArgs.years).toEqual([2025]);
             expect(callArgs.conferences).toEqual(['NeurIPS']);
         });
@@ -140,15 +143,18 @@ describe('Search Module', () => {
                     }
                 ],
                 count: 1,
-                use_embeddings: true
+                use_embeddings: true,
+                total_similar: 5
             };
 
             displaySearchResults(data);
 
             const results = document.getElementById('search-results');
-            expect(results.innerHTML).toContain('Found <strong>1</strong> papers');
+            expect(results.innerHTML).toContain('best match');
+            expect(results.innerHTML).toContain('5');
+            expect(results.innerHTML).toContain('similar paper');
             expect(results.innerHTML).toContain('Test Paper');
-            expect(results.innerHTML).toContain('AI-Powered');
+            expect(results.innerHTML).toContain('LLM-Powered');
         });
 
         it('should display multiple papers', () => {

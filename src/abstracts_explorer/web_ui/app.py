@@ -403,11 +403,14 @@ def search():
     - sessions: list[str] - Filter by sessions (optional)
     - years: list[int] - Filter by years (optional)
     - conferences: list[str] - Filter by conferences (optional)
+    - distance_threshold: float - Max distance for similar papers count (default: 1.1)
 
     Returns
     -------
     dict
-        Search results with papers
+        Search results with papers, count, query, use_embeddings, and
+        total_similar (number of papers within distance_threshold, only
+        present for embedding searches).
     """
     try:
         data = request.get_json()
@@ -417,6 +420,7 @@ def search():
         sessions = data.get("sessions", [])
         years = data.get("years", [])
         conferences = data.get("conferences", [])
+        distance_threshold = data.get("distance_threshold", 1.1)
 
         if not query:
             return jsonify({"error": "Query is required"}), 400
@@ -426,14 +430,17 @@ def search():
             em = get_embeddings_manager()
             database = get_database()
 
-            papers = em.search_papers_semantic(
+            result = em.search_papers_semantic(
                 query=query,
                 database=database,
                 limit=limit,
                 sessions=sessions,
                 years=years,
                 conferences=conferences,
+                distance_threshold=distance_threshold,
             )
+            papers = result["papers"]
+            total_similar = result["total_similar"]
         else:
             # Keyword search in database
             database = get_database()
@@ -444,8 +451,12 @@ def search():
                 years=years,
                 conferences=conferences,
             )
+            total_similar = None
 
-        return jsonify({"papers": papers, "count": len(papers), "query": query, "use_embeddings": use_embeddings})
+        response = {"papers": papers, "count": len(papers), "query": query, "use_embeddings": use_embeddings}
+        if total_similar is not None:
+            response["total_similar"] = total_similar
+        return jsonify(response)
     except Exception as e:
         logger.error(f"Error in search endpoint: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500

@@ -812,24 +812,28 @@ def test_search_papers_semantic_with_year_filter(embeddings_manager, tmp_path, m
 
     # Test search without filter - should return both papers
     with DatabaseManager() as db:
-        results_all = embeddings_manager.search_papers_semantic("paper", database=db, limit=10)
+        result_all = embeddings_manager.search_papers_semantic("paper", database=db, limit=10)
+        results_all = result_all["papers"]
         assert len(results_all) == 2, f"Expected 2 papers without filter, got {len(results_all)}"
 
     # Test search with year filter [2024] - should return only 2024 paper
     with DatabaseManager() as db:
-        results_2024 = embeddings_manager.search_papers_semantic("paper", database=db, limit=10, years=[2024])
+        result_2024 = embeddings_manager.search_papers_semantic("paper", database=db, limit=10, years=[2024])
+        results_2024 = result_2024["papers"]
         assert len(results_2024) == 1, f"Expected 1 paper with year=2024 filter, got {len(results_2024)}"
         assert results_2024[0]["year"] == 2024, f"Expected year 2024, got {results_2024[0]['year']}"
 
     # Test search with year filter [2025] - should return only 2025 paper
     with DatabaseManager() as db:
-        results_2025 = embeddings_manager.search_papers_semantic("paper", database=db, limit=10, years=[2025])
+        result_2025 = embeddings_manager.search_papers_semantic("paper", database=db, limit=10, years=[2025])
+        results_2025 = result_2025["papers"]
         assert len(results_2025) == 1, f"Expected 1 paper with year=2025 filter, got {len(results_2025)}"
         assert results_2025[0]["year"] == 2025, f"Expected year 2025, got {results_2025[0]['year']}"
 
     # Test search with multiple year filters - should return both papers
     with DatabaseManager() as db:
-        results_both = embeddings_manager.search_papers_semantic("paper", database=db, limit=10, years=[2024, 2025])
+        result_both = embeddings_manager.search_papers_semantic("paper", database=db, limit=10, years=[2024, 2025])
+        results_both = result_both["papers"]
         assert len(results_both) == 2, f"Expected 2 papers with years=[2024, 2025] filter, got {len(results_both)}"
 
     embeddings_manager.close()
@@ -891,11 +895,12 @@ def test_search_papers_semantic_field_filter_partial_match(embeddings_manager, t
     # This query previously triggered:
     #   "Expected where operator … got $contains in query."
     with DatabaseManager() as db:
-        results = embeddings_manager.search_papers_semantic(
+        result = embeddings_manager.search_papers_semantic(
             'authors:"Vaswani" attention',
             database=db,
             limit=10,
         )
+        results = result["papers"]
 
     # Should match exactly the Vaswani paper (partial author match)
     assert len(results) == 1, f"Expected 1 result, got {len(results)}: {[r.get('title') for r in results]}"
@@ -903,11 +908,12 @@ def test_search_papers_semantic_field_filter_partial_match(embeddings_manager, t
 
     # Confirm the non-matching paper is excluded
     with DatabaseManager() as db:
-        no_results = embeddings_manager.search_papers_semantic(
+        no_result = embeddings_manager.search_papers_semantic(
             'authors:"Lecun" attention',
             database=db,
             limit=10,
         )
+        no_results = no_result["papers"]
     assert len(no_results) == 0, f"Expected 0 results for unknown author, got {len(no_results)}"
 
     embeddings_manager.close()
