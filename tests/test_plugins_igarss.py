@@ -495,10 +495,13 @@ class TestIGARSSDownload:
         }
 
         plugin = IGARSSDownloaderPlugin()
+        # Pin supported years so the test is independent of the current date
+        plugin.supported_years = [2024, 2025]
         papers = plugin.download()  # No year specified
 
+        expected_year = max(plugin.supported_years)
         assert len(papers) == 1
-        assert papers[0].year == 2025
+        assert papers[0].year == expected_year
 
     @patch.object(IGARSSDownloaderPlugin, "_fetch_page")
     def test_download_saves_to_file(self, mock_fetch):
