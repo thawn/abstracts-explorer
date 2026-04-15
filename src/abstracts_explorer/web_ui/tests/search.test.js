@@ -140,15 +140,19 @@ describe('Search Module', () => {
                     }
                 ],
                 count: 1,
-                use_embeddings: true
+                use_embeddings: true,
+                total_similar: 42
             };
 
             displaySearchResults(data);
 
             const results = document.getElementById('search-results');
-            expect(results.innerHTML).toContain('Found <strong>1</strong> papers');
+            expect(results.innerHTML).toContain('best matches');
+            expect(results.innerHTML).toContain('<strong>1</strong>');
+            expect(results.innerHTML).toContain('<strong>42</strong>');
+            expect(results.innerHTML).toContain('similar papers');
             expect(results.innerHTML).toContain('Test Paper');
-            expect(results.innerHTML).toContain('AI-Powered');
+            expect(results.innerHTML).toContain('LLM-Powered');
         });
 
         it('should display multiple papers', () => {
@@ -175,6 +179,7 @@ describe('Search Module', () => {
             displaySearchResults(data);
 
             const results = document.getElementById('search-results');
+            expect(results.innerHTML).toContain('Found <strong>2</strong> papers');
             expect(results.innerHTML).toContain('Paper 1');
             expect(results.innerHTML).toContain('Paper 2');
         });

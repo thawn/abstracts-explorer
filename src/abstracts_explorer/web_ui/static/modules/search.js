@@ -108,8 +108,8 @@ export function displaySearchResults(data) {
         <div class="bg-white rounded-lg shadow-md p-4 mb-4">
             <div class="flex items-center justify-between">
                 <div>
-                    <span class="text-sm text-gray-600">Found <strong>${data.count}</strong> papers</span>
-                    ${data.use_embeddings ? '<span class="ml-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">AI-Powered</span>' : ''}
+                    <span class="text-sm text-gray-600">${data.total_similar != null ? `Showing the <strong>${data.count}</strong> best matches out of <strong>${data.total_similar}</strong> similar papers` : `Found <strong>${data.count}</strong> papers`}</span>
+                    ${data.use_embeddings ? '<span class="ml-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">LLM-Powered</span>' : ''}
                 </div>
             </div>
         </div>
