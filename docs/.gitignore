@@ -10,3 +10,4 @@ environment.pickle
 # Python cache
 __pycache__/
 *.pyc
+_build/
