@@ -105,12 +105,18 @@ export function displaySearchResults(data) {
     }
 
     // Display results header
+    const distanceText = data.use_embeddings && data.distance != null
+        ? ` within distance <strong>${data.distance}</strong>`
+        : '';
+    const llmBadge = data.use_embeddings
+        ? '<span class="ml-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">LLM-Powered</span>'
+        : '';
     let html = `
         <div class="bg-white rounded-lg shadow-md p-4 mb-4">
             <div class="flex items-center justify-between">
                 <div>
-                    <span class="text-sm text-gray-600">Found <strong>${data.count}</strong> papers${data.use_embeddings && data.distance != null ? ` within distance <strong>${data.distance}</strong>` : ''}</span>
-                    ${data.use_embeddings ? '<span class="ml-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">LLM-Powered</span>' : ''}
+                    <span class="text-sm text-gray-600">Found <strong>${data.count}</strong> papers${distanceText}</span>
+                    ${llmBadge}
                 </div>
             </div>
         </div>

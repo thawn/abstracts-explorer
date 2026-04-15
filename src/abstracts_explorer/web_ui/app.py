@@ -432,9 +432,9 @@ def search():
                 database=database,
                 query=query,
                 distance_threshold=distance,
-                sessions=sessions if sessions else None,
-                years=years if years else None,
-                conferences=conferences if conferences else None,
+                sessions=sessions or None,
+                years=years or None,
+                conferences=conferences or None,
             )
             papers = results["papers"]
             return jsonify(
