@@ -998,6 +998,52 @@ class EmbeddingsManager:
 
         return papers[:limit]
 
+    def count_papers_within_distance(
+        self,
+        database,
+        query: str,
+        distance_threshold: float = 1.1,
+        conferences: Optional[List[str]] = None,
+        years: Optional[List[int]] = None,
+    ) -> int:
+        """
+        Count papers within a distance threshold.
+
+        Delegates to :meth:`find_papers_within_distance` and returns only the
+        count of matching papers.
+
+        Parameters
+        ----------
+        database : DatabaseManager
+            Database manager instance for retrieving paper details.
+        query : str
+            The search query text.
+        distance_threshold : float, optional
+            Euclidean distance radius, by default 1.1.
+        conferences : list[str], optional
+            Filter results to only include papers from these conferences.
+        years : list[int], optional
+            Filter results to only include papers from these years.
+
+        Returns
+        -------
+        int
+            Number of papers within the distance threshold.
+
+        Raises
+        ------
+        EmbeddingsError
+            If embeddings collection is empty or operation fails.
+        """
+        result = self.find_papers_within_distance(
+            database=database,
+            query=query,
+            distance_threshold=distance_threshold,
+            conferences=conferences,
+            years=years,
+        )
+        return result["count"]
+
     def find_papers_within_distance(
         self,
         database,

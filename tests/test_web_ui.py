@@ -730,6 +730,7 @@ class TestWebUISemanticSearchDetails:
                         },
                     ]
                     mock_em.search_papers_semantic.return_value = mock_papers
+                    mock_em.count_papers_within_distance.return_value = 25
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
 
@@ -768,6 +769,7 @@ class TestWebUISemanticSearchDetails:
                     mock_em = Mock()
                     mock_db = Mock()
                     mock_em.search_papers_semantic.return_value = []
+                    mock_em.count_papers_within_distance.return_value = 0
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
 

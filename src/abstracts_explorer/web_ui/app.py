@@ -31,6 +31,10 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Distance threshold for counting similar papers in embedding space.
+# Matches the default radius used on the clustering page's custom query.
+_SIMILAR_DISTANCE_THRESHOLD = 1.1
+
 # Get the directory where this file is located
 PACKAGE_DIR = Path(__file__).parent
 
@@ -434,6 +438,18 @@ def search():
                 years=years,
                 conferences=conferences,
             )
+
+            # Count total similar papers within distance threshold
+            try:
+                total_similar = em.count_papers_within_distance(
+                    database=database,
+                    query=query,
+                    distance_threshold=_SIMILAR_DISTANCE_THRESHOLD,
+                    conferences=conferences if conferences else None,
+                    years=years if years else None,
+                )
+            except Exception:
+                total_similar = None
         else:
             # Keyword search in database
             database = get_database()
@@ -444,8 +460,18 @@ def search():
                 years=years,
                 conferences=conferences,
             )
+            total_similar = None
 
-        return jsonify({"papers": papers, "count": len(papers), "query": query, "use_embeddings": use_embeddings})
+        response_data = {
+            "papers": papers,
+            "count": len(papers),
+            "query": query,
+            "use_embeddings": use_embeddings,
+        }
+        if total_similar is not None:
+            response_data["total_similar"] = total_similar
+
+        return jsonify(response_data)
     except Exception as e:
         logger.error(f"Error in search endpoint: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
