@@ -628,13 +628,13 @@ class TestIntegration:
     def test_search_papers_semantic_e2e(self, tmp_path):
         """
         End-to-end test for search_papers_semantic with real API backend.
-        
+
         This test verifies that search_papers_semantic correctly:
         1. Performs semantic search with real embeddings
         2. Returns results with similarity scores
         3. Filters by year metadata correctly (regression test for bug)
         4. Works with both LM Studio and blablador API backends
-        
+
         Note: This test requires an OpenAI-compatible API backend (LM Studio or blablador)
         to be running and is marked as slow. The test will be skipped by default unless
         running with -m slow.

@@ -6,6 +6,7 @@ The module uses an OpenAI-compatible API (such as LM Studio or blablador) to gen
 embeddings and stores them in ChromaDB for efficient similarity search.
 """
 
+import bisect
 import logging
 import time
 from pathlib import Path
@@ -999,15 +1000,10 @@ class EmbeddingsManager:
 
         logger.info(f"Search results count: {len(results.get('ids', [[]])[0]) if results else 0}")
 
-        # Count papers within distance_threshold for the total_similar metric
-        total_similar = 0
+        # Count papers within distance_threshold for the total_similar metric.
+        # Distances are sorted ascending, so bisect gives the count directly.
         distances = results.get("distances", [[]])[0] if results else []
-        for d in distances:
-            if d <= distance_threshold:
-                total_similar += 1
-            else:
-                # Distances are sorted ascending, so we can break early
-                break
+        total_similar = bisect.bisect_right(distances, distance_threshold)
 
         # Transform ChromaDB results to paper format using shared utility
         try:
