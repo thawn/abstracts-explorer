@@ -337,6 +337,8 @@ def convert_to_lightweight_schema(papers: List[Dict[str, Any]]) -> List[Dict[str
 
         if paper.get("paper_pdf_url"):
             lightweight_paper["paper_pdf_url"] = paper["paper_pdf_url"]
+        elif paper.get("paper_url"):
+            lightweight_paper["paper_pdf_url"] = paper["paper_url"]
 
         if paper.get("poster_image_url"):
             lightweight_paper["poster_image_url"] = paper["poster_image_url"]
