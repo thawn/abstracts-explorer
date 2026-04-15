@@ -442,6 +442,7 @@ def search():
             # Count total similar papers within distance threshold
             try:
                 total_similar = em.count_papers_within_distance(
+                    database=database,
                     query=query,
                     distance_threshold=_SIMILAR_DISTANCE_THRESHOLD,
                     conferences=conferences if conferences else None,

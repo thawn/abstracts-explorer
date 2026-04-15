@@ -1000,20 +1000,22 @@ class EmbeddingsManager:
 
     def count_papers_within_distance(
         self,
+        database,
         query: str,
         distance_threshold: float = 1.1,
         conferences: Optional[List[str]] = None,
         years: Optional[List[int]] = None,
     ) -> int:
         """
-        Count papers within a distance threshold without fetching full details.
+        Count papers within a distance threshold.
 
-        This is a lightweight alternative to :meth:`find_papers_within_distance`
-        that only returns the count of matching papers, avoiding the overhead of
-        fetching full paper records from the database.
+        Delegates to :meth:`find_papers_within_distance` and returns only the
+        count of matching papers.
 
         Parameters
         ----------
+        database : DatabaseManager
+            Database manager instance for retrieving paper details.
         query : str
             The search query text.
         distance_threshold : float, optional
@@ -1033,53 +1035,14 @@ class EmbeddingsManager:
         EmbeddingsError
             If embeddings collection is empty or operation fails.
         """
-        if not query or not query.strip():
-            raise EmbeddingsError("Query cannot be empty")
-
-        try:
-            query_embedding = self.generate_embedding(query)
-
-            total_count = self.collection.count()
-            if total_count == 0:
-                return 0
-
-            # Build where clause for filtering (same logic as find_papers_within_distance)
-            where_clause: Optional[Dict[str, Any]] = None
-            if conferences or years:
-                filters: list[Dict[str, Any]] = []
-                if conferences:
-                    if len(conferences) == 1:
-                        filters.append({"conference": conferences[0]})
-                    else:
-                        filters.append({"conference": {"$in": conferences}})
-                if years:
-                    year_strs: List[str] = [str(y) for y in years]
-                    if len(year_strs) == 1:
-                        filters.append({"year": year_strs[0]})
-                    else:
-                        filters.append({"year": {"$in": year_strs}})
-                if len(filters) == 1:
-                    where_clause = filters[0]
-                else:
-                    where_clause = {"$and": filters}
-
-            n_results_query = min(total_count, _MAX_QUERY_RESULTS)
-
-            results = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=n_results_query,
-                include=["distances"],
-                where=where_clause,
-            )
-
-            distances = results["distances"][0] if results.get("distances") else []
-            return sum(1 for d in distances if d <= distance_threshold)
-
-        except EmbeddingsError:
-            raise
-        except Exception as e:
-            logger.error(f"Error counting papers within distance: {e}", exc_info=True)
-            raise EmbeddingsError(f"Failed to count papers within distance: {str(e)}") from e
+        result = self.find_papers_within_distance(
+            database=database,
+            query=query,
+            distance_threshold=distance_threshold,
+            conferences=conferences,
+            years=years,
+        )
+        return result["count"]
 
     def find_papers_within_distance(
         self,
