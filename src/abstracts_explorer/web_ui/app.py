@@ -399,7 +399,8 @@ def search():
     Expected JSON body:
     - query: str - Search query
     - use_embeddings: bool - Use semantic search
-    - limit: int - Maximum results (default: 10)
+    - distance: float - Distance threshold for semantic search (default: 1.1)
+    - limit: int - Maximum results for keyword search (default: 10)
     - sessions: list[str] - Filter by sessions (optional)
     - years: list[int] - Filter by years (optional)
     - conferences: list[str] - Filter by conferences (optional)
@@ -413,6 +414,7 @@ def search():
         data = request.get_json()
         query = data.get("query", "")
         use_embeddings = data.get("use_embeddings", False)
+        distance = data.get("distance", 1.1)
         limit = data.get("limit", 10)
         sessions = data.get("sessions", [])
         years = data.get("years", [])
@@ -422,17 +424,27 @@ def search():
             return jsonify({"error": "Query is required"}), 400
 
         if use_embeddings:
-            # Semantic search using embeddings
+            # Semantic search using distance-based embeddings search
             em = get_embeddings_manager()
             database = get_database()
 
-            papers = em.search_papers_semantic(
-                query=query,
+            results = em.find_papers_within_distance(
                 database=database,
-                limit=limit,
-                sessions=sessions,
-                years=years,
-                conferences=conferences,
+                query=query,
+                distance_threshold=distance,
+                sessions=sessions if sessions else None,
+                years=years if years else None,
+                conferences=conferences if conferences else None,
+            )
+            papers = results["papers"]
+            return jsonify(
+                {
+                    "papers": papers,
+                    "count": results["count"],
+                    "query": query,
+                    "use_embeddings": use_embeddings,
+                    "distance": results["distance"],
+                }
             )
         else:
             # Keyword search in database

@@ -17,7 +17,8 @@ import { formatPaperCard } from './paper-card.js';
  */
 export async function searchPapers() {
     const query = document.getElementById('search-input').value.trim();
-    const limit = parseInt(document.getElementById('limit-select').value);
+    const distanceInput = document.getElementById('distance-input');
+    const distance = distanceInput ? parseFloat(distanceInput.value) : 1.1;
 
     // Get multiple selected values from multi-select dropdowns
     const sessionSelect = document.getElementById('session-filter');
@@ -47,7 +48,7 @@ export async function searchPapers() {
         const requestBody = {
             query,
             use_embeddings: true,
-            limit
+            distance
         };
 
         // Add filters only if NOT all options are selected (all selected = no filter)
@@ -108,8 +109,8 @@ export function displaySearchResults(data) {
         <div class="bg-white rounded-lg shadow-md p-4 mb-4">
             <div class="flex items-center justify-between">
                 <div>
-                    <span class="text-sm text-gray-600">Found <strong>${data.count}</strong> papers</span>
-                    ${data.use_embeddings ? '<span class="ml-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">AI-Powered</span>' : ''}
+                    <span class="text-sm text-gray-600">Found <strong>${data.count}</strong> papers${data.use_embeddings && data.distance != null ? ` within distance <strong>${data.distance}</strong>` : ''}</span>
+                    ${data.use_embeddings ? '<span class="ml-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">LLM-Powered</span>' : ''}
                 </div>
             </div>
         </div>

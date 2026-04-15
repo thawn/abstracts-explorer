@@ -710,7 +710,7 @@ class TestWebUISemanticSearchDetails:
                     mock_em = Mock()
                     mock_db = Mock()
 
-                    # Mock the search_papers_semantic method to return proper papers
+                    # Mock the find_papers_within_distance method to return proper papers
                     mock_papers = [
                         {
                             "uid": "uid_123",
@@ -729,14 +729,20 @@ class TestWebUISemanticSearchDetails:
                             "distance": 0.2,
                         },
                     ]
-                    mock_em.search_papers_semantic.return_value = mock_papers
+                    mock_em.find_papers_within_distance.return_value = {
+                        "papers": mock_papers,
+                        "count": 2,
+                        "query": "test query",
+                        "query_embedding": [0.1] * 10,
+                        "distance": 1.1,
+                    }
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
 
                     # Make request
                     response = client.post(
                         "/api/search",
-                        json={"query": "test query", "use_embeddings": True, "limit": 5},
+                        json={"query": "test query", "use_embeddings": True, "distance": 1.1},
                     )
 
                     assert response.status_code == 200
@@ -746,17 +752,16 @@ class TestWebUISemanticSearchDetails:
                     assert "papers" in data
                     assert len(data["papers"]) == 2
 
-                    # Check similarity scores were added
-                    assert "similarity" in data["papers"][0]
-                    assert "similarity" in data["papers"][1]
-
-                    # Verify similarity calculation (1 - distance)
-                    assert data["papers"][0]["similarity"] == pytest.approx(0.9, 0.01)
-                    assert data["papers"][1]["similarity"] == pytest.approx(0.8, 0.01)
+                    # Check distance scores are present
+                    assert "distance" in data["papers"][0]
+                    assert "distance" in data["papers"][1]
 
                     # Verify 'uid' field is present
                     assert data["papers"][0]["uid"] == "uid_123"
                     assert data["papers"][1]["uid"] == "uid_456"
+
+                    # Verify distance is returned in response
+                    assert data["distance"] == pytest.approx(1.1, 0.01)
 
     def test_semantic_search_handles_empty_results(self):
         """Test semantic search with no results."""
@@ -767,13 +772,19 @@ class TestWebUISemanticSearchDetails:
                 with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                     mock_em = Mock()
                     mock_db = Mock()
-                    mock_em.search_papers_semantic.return_value = []
+                    mock_em.find_papers_within_distance.return_value = {
+                        "papers": [],
+                        "count": 0,
+                        "query": "nonexistent",
+                        "query_embedding": [0.1] * 10,
+                        "distance": 1.1,
+                    }
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
 
                     response = client.post(
                         "/api/search",
-                        json={"query": "nonexistent", "use_embeddings": True, "limit": 5},
+                        json={"query": "nonexistent", "use_embeddings": True, "distance": 1.1},
                     )
 
                     assert response.status_code == 200
@@ -1014,12 +1025,12 @@ class TestWebUISearchExceptionHandling:
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
                 mock_em = Mock()
-                mock_em.search_similar.side_effect = Exception("Embeddings error")
+                mock_em.find_papers_within_distance.side_effect = Exception("Embeddings error")
                 mock_get_em.return_value = mock_em
 
                 response = client.post(
                     "/api/search",
-                    json={"query": "test", "use_embeddings": True, "limit": 10},
+                    json={"query": "test", "use_embeddings": True, "distance": 1.1},
                 )
 
                 assert response.status_code == 500

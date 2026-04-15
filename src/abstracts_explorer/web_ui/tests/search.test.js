@@ -18,7 +18,7 @@ describe('Search Module', () => {
         localStorage.clear();
         document.body.innerHTML = `
             <input id="search-input" value="machine learning" />
-            <select id="limit-select"><option value="10" selected>10</option></select>
+            <input id="distance-input" type="number" value="1.1" />
             <select id="session-filter" multiple>
                 <option value="Session 1" selected>Session 1</option>
                 <option value="Session 2" selected>Session 2</option>
@@ -75,7 +75,7 @@ describe('Search Module', () => {
 
             const callArgs = JSON.parse(global.fetch.mock.calls[0][1].body);
             expect(callArgs.query).toBe('machine learning');
-            expect(callArgs.limit).toBe(10);
+            expect(callArgs.distance).toBe(1.1);
             expect(callArgs.years).toEqual([2025]);
             expect(callArgs.conferences).toEqual(['NeurIPS']);
         });
@@ -140,7 +140,8 @@ describe('Search Module', () => {
                     }
                 ],
                 count: 1,
-                use_embeddings: true
+                use_embeddings: true,
+                distance: 1.1
             };
 
             displaySearchResults(data);
@@ -148,7 +149,8 @@ describe('Search Module', () => {
             const results = document.getElementById('search-results');
             expect(results.innerHTML).toContain('Found <strong>1</strong> papers');
             expect(results.innerHTML).toContain('Test Paper');
-            expect(results.innerHTML).toContain('AI-Powered');
+            expect(results.innerHTML).toContain('LLM-Powered');
+            expect(results.innerHTML).toContain('within distance');
         });
 
         it('should display multiple papers', () => {

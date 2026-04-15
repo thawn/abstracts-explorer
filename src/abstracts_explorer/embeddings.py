@@ -1005,6 +1005,7 @@ class EmbeddingsManager:
         distance_threshold: float = 1.1,
         conferences: Optional[List[str]] = None,
         years: Optional[List[int]] = None,
+        sessions: Optional[List[str]] = None,
         query_embedding: Optional[List[float]] = None,
     ) -> Dict[str, Any]:
         """
@@ -1025,6 +1026,8 @@ class EmbeddingsManager:
             Filter results to only include papers from these conferences
         years : list[int], optional
             Filter results to only include papers from these years
+        sessions : list[str], optional
+            Filter results to only include papers from these sessions
         query_embedding : list[float], optional
             Pre-computed embedding for the query.  When provided, the
             embedding generation step is skipped, which avoids redundant
@@ -1085,7 +1088,7 @@ class EmbeddingsManager:
             # NOTE: All metadata is stored as strings in ChromaDB (see add_paper method),
             # so we must convert filter values to strings for matching.
             where_clause: Optional[Dict[str, Any]] = None
-            if conferences or years:
+            if conferences or years or sessions:
                 filters: list[Dict[str, Any]] = []
                 if conferences:
                     if len(conferences) == 1:
@@ -1100,6 +1103,9 @@ class EmbeddingsManager:
                         filters.append({"year": year_strs[0]})
                     else:
                         filters.append({"year": {"$in": year_strs}})
+
+                if sessions:
+                    filters.append({"session": {"$in": sessions}})
 
                 # Combine filters with $and if multiple
                 if len(filters) == 1:
