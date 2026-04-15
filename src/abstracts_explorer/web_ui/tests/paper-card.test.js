@@ -99,6 +99,11 @@ describe('Paper Card Module', () => {
             // Check for details and summary elements (with attributes)
             expect(html).toMatch(/<details/);
             expect(html).toMatch(/<summary/);
+            expect(html).toContain('abstract-details');
+            expect(html).toContain('abstract-preview');
+            expect(html).toContain('abstract-full');
+            expect(html).toContain('Show more');
+            expect(html).toContain('Show less');
         });
 
         it('should handle missing PDF URL', () => {
