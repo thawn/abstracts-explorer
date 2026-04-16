@@ -586,6 +586,36 @@ class TestSearchEndpoint:
         data = json.loads(response.data)
         assert data["count"] == 1
 
+    def test_search_semantic_field_filter_only(self, client):
+        """Test semantic search with field-filter-only query bypasses embeddings."""
+        from unittest.mock import MagicMock, patch
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+
+        mock_em = MagicMock()
+        mock_db = MagicMock()
+        mock_papers = [
+            {"uid": "test1", "title": "Test Paper", "abstract": "Test", "authors": ["John Smith"]}
+        ]
+        mock_em.search_papers_semantic.return_value = mock_papers
+
+        with patch.object(app_module, "get_embeddings_manager", return_value=mock_em):
+            with patch.object(app_module, "get_database", return_value=mock_db):
+                response = client.post(
+                    "/api/search",
+                    data=json.dumps({"query": 'authors:"John Smith"', "use_embeddings": True, "limit": 10}),
+                    content_type="application/json",
+                )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["count"] == 1
+        # Field-filter-only query should not trigger count_papers_within_distance
+        mock_em.count_papers_within_distance.assert_not_called()
+        # total_similar should not be in response for field-filter-only queries
+        assert "total_similar" not in data
+
 
 class TestChatEndpoint:
     """Test the chat endpoint."""

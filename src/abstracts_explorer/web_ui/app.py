@@ -439,16 +439,23 @@ def search():
                 conferences=conferences,
             )
 
-            # Count total similar papers within distance threshold
-            try:
-                total_similar = em.count_papers_within_distance(
-                    database=database,
-                    query=query,
-                    distance_threshold=_SIMILAR_DISTANCE_THRESHOLD,
-                    conferences=conferences if conferences else None,
-                    years=years if years else None,
-                )
-            except Exception:
+            # Count total similar papers within distance threshold.
+            # Parse field filters to determine the semantic portion of the query;
+            # when the query consists only of field filters there is no meaningful
+            # embedding to compare against, so skip the count.
+            _, remaining_query = DatabaseManager.parse_field_filters(query)
+            if remaining_query:
+                try:
+                    total_similar = em.count_papers_within_distance(
+                        database=database,
+                        query=remaining_query,
+                        distance_threshold=_SIMILAR_DISTANCE_THRESHOLD,
+                        conferences=conferences if conferences else None,
+                        years=years if years else None,
+                    )
+                except Exception:
+                    total_similar = None
+            else:
                 total_similar = None
         else:
             # Keyword search in database

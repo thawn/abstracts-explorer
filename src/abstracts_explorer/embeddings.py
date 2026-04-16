@@ -942,6 +942,30 @@ class EmbeddingsManager:
 
         # Parse field-specific filters from query
         field_filters, remaining_query = DatabaseManager.parse_field_filters(query)
+
+        # When the query consists only of field filters (no remaining keywords),
+        # bypass the embedding search entirely and return SQL results directly.
+        # This avoids generating a meaningless embedding for the raw filter syntax
+        # and allows field-filter searches to work without an LLM backend.
+        if field_filters and not remaining_query:
+            papers = database.search_papers(
+                field_filters=field_filters,
+                sessions=sessions,
+                years=years,
+                conferences=conferences,
+                limit=limit,
+            )
+            # Format results consistently: convert ORM dicts and parse authors
+            formatted = []
+            for paper in papers:
+                p = dict(paper)
+                if "authors" in p and p["authors"]:
+                    p["authors"] = [a.strip() for a in p["authors"].split(";")]
+                else:
+                    p["authors"] = []
+                formatted.append(p)
+            return formatted
+
         semantic_query = remaining_query if remaining_query else query
 
         # Build metadata filter for embeddings search.
