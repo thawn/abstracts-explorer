@@ -20,7 +20,6 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import hashlib
 import logging
 import os
 import sys
@@ -124,29 +123,6 @@ def get_conference_years_in_db(db: DatabaseManager) -> Dict[str, List[int]]:
         raise DatabaseError(f"Failed to query conference/year pairs: {e}") from e
 
 
-def compute_uid(title: str, original_id: str | None, conference: str, year: int) -> str:
-    """Compute the paper UID the same way DatabaseManager.add_paper does.
-
-    Parameters
-    ----------
-    title : str
-        Paper title.
-    original_id : str or None
-        Original paper ID from the source.
-    conference : str
-        Conference name.
-    year : int
-        Conference year.
-
-    Returns
-    -------
-    str
-        16-character hex UID.
-    """
-    uid_source = f"{title}:{original_id}:{conference}:{year}"
-    return hashlib.sha256(uid_source.encode("utf-8")).hexdigest()[:16]
-
-
 def download_and_build_url_map(conference: str, year: int) -> Dict[str, Dict[str, str | None]]:
     """Download conference data and build a UID → URL mapping.
 
@@ -172,7 +148,7 @@ def download_and_build_url_map(conference: str, year: int) -> Dict[str, Dict[str
     url_map: Dict[str, Dict[str, str | None]] = {}
     for paper in papers:
         original_id = str(paper.original_id) if paper.original_id else None
-        uid = compute_uid(paper.title, original_id, paper.conference, paper.year)
+        uid = DatabaseManager.compute_uid(paper.title, original_id, paper.conference, paper.year)
         url_map[uid] = {
             "paper_pdf_url": paper.paper_pdf_url,
             "poster_image_url": paper.poster_image_url,
