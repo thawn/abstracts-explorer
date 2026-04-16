@@ -595,9 +595,7 @@ class TestSearchEndpoint:
 
         mock_em = MagicMock()
         mock_db = MagicMock()
-        mock_papers = [
-            {"uid": "test1", "title": "Test Paper", "abstract": "Test", "authors": ["John Smith"]}
-        ]
+        mock_papers = [{"uid": "test1", "title": "Test Paper", "abstract": "Test", "authors": ["John Smith"]}]
         mock_em.search_papers_semantic.return_value = mock_papers
 
         with patch.object(app_module, "get_embeddings_manager", return_value=mock_em):
