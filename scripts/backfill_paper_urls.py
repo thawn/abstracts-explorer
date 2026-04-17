@@ -207,13 +207,66 @@ def find_papers_missing_urls(db: DatabaseManager, conference: str, year: int) ->
         raise DatabaseError(f"Failed to query papers with missing URLs: {e}") from e
 
 
+def get_url_updates_from_db(db: DatabaseManager, conference: str, year: int) -> Dict[str, Dict[str, str | None]]:
+    """Build a UID → URL-fields mapping from papers already stored in the SQL database.
+
+    Returns all papers for the given conference/year that have a non-NULL
+    ``paper_pdf_url``.  The result can be passed directly to
+    :func:`backfill_embedding_metadata` so that ChromaDB metadata is
+    synchronised from SQL even when no SQL rows needed updating.
+
+    Parameters
+    ----------
+    db : DatabaseManager
+        Open database connection.
+    conference : str
+        Conference name.
+    year : int
+        Conference year.
+
+    Returns
+    -------
+    dict
+        Mapping of paper UID → dict with ``paper_pdf_url``, ``poster_image_url``,
+        and ``url`` fields (values may be ``None`` for optional fields).
+
+    Raises
+    ------
+    DatabaseError
+        If the query fails.
+    """
+    if not db._session:
+        raise DatabaseError("Not connected to database")
+
+    try:
+        stmt = (
+            select(Paper)
+            .where(Paper.conference == conference)
+            .where(Paper.year == year)
+            .where(Paper.paper_pdf_url.isnot(None))
+        )
+        papers = db._session.execute(stmt).scalars().all()
+        return {
+            p.uid: {
+                "paper_pdf_url": p.paper_pdf_url,
+                "poster_image_url": p.poster_image_url,
+                "url": p.url,
+            }
+            for p in papers
+        }
+    except DatabaseError:
+        raise
+    except Exception as e:
+        raise DatabaseError(f"Failed to query papers with URLs: {e}") from e
+
+
 def backfill_urls(
     db: DatabaseManager,
     conference: str,
     year: int,
     dry_run: bool = False,
-) -> Tuple[int, int, Dict[str, Dict[str, str | None]]]:
-    """Download data and update papers with missing URLs.
+) -> Tuple[int, int]:
+    """Download data and update papers with missing URLs in the SQL database.
 
     Parameters
     ----------
@@ -228,11 +281,9 @@ def backfill_urls(
 
     Returns
     -------
-    tuple of (int, int, dict)
+    tuple of (int, int)
         - Number of papers updated in the SQL database.
-        - Number of papers that still have no URL.
-        - Mapping of UID → URL field updates applied (empty on dry run), for
-          use with :func:`backfill_embedding_metadata`.
+        - Number of papers that still have no URL in the source data.
 
     Raises
     ------
@@ -243,7 +294,7 @@ def backfill_urls(
     """
     papers_missing = find_papers_missing_urls(db, conference, year)
     if not papers_missing:
-        return 0, 0, {}
+        return 0, 0
 
     print(f"  Found {len(papers_missing)} paper(s) with missing URLs")
 
@@ -253,23 +304,17 @@ def backfill_urls(
 
     updated = 0
     still_missing = 0
-    # Track which URL fields we actually set, keyed by UID.
-    embedding_updates: Dict[str, Dict[str, str | None]] = {}
 
     for paper in papers_missing:
         urls = url_map.get(paper.uid)
         if urls and urls.get("paper_pdf_url"):
-            field_updates: Dict[str, str | None] = {"paper_pdf_url": urls["paper_pdf_url"]}
             if not dry_run:
                 paper.paper_pdf_url = urls["paper_pdf_url"]
                 # Also backfill poster_image_url and url if missing
                 if not paper.poster_image_url and urls.get("poster_image_url"):
                     paper.poster_image_url = urls["poster_image_url"]
-                    field_updates["poster_image_url"] = urls["poster_image_url"]
                 if not paper.url and urls.get("url"):
                     paper.url = urls["url"]
-                    field_updates["url"] = urls["url"]
-                embedding_updates[paper.uid] = field_updates
             updated += 1
         else:
             still_missing += 1
@@ -281,7 +326,7 @@ def backfill_urls(
             db._session.rollback()
             raise DatabaseError(f"Failed to commit URL updates: {e}") from e
 
-    return updated, still_missing, embedding_updates
+    return updated, still_missing
 
 
 def backfill_embedding_metadata(
@@ -290,14 +335,16 @@ def backfill_embedding_metadata(
 ) -> int:
     """Update URL metadata for the given papers in the ChromaDB embeddings database.
 
-    Only updates fields whose new value is non-empty; papers not present in the
-    collection are silently skipped.  No re-embedding is performed.
+    Fetches current ChromaDB metadata for the supplied UIDs and only updates
+    papers whose ``paper_pdf_url`` field is currently empty or absent.  Papers
+    not present in the collection are silently skipped.  No re-embedding is
+    performed.
 
     Parameters
     ----------
     updates : dict
-        Mapping of paper UID → dict of URL field → new value, as returned by
-        :func:`backfill_urls`.
+        Mapping of paper UID → dict of URL field → new value (e.g. from
+        :func:`get_url_updates_from_db`).
     dry_run : bool
         If True, report what would be updated without making changes.
 
@@ -311,8 +358,31 @@ def backfill_embedding_metadata(
 
     try:
         em = EmbeddingsManager()
-        count = em.update_paper_metadata(updates)
+
+        # Fetch current ChromaDB metadata so we only write papers that are
+        # actually missing the URL (avoids unnecessary writes on re-runs).
+        ids = list(updates.keys())
+        existing = em.collection.get(ids=ids, include=["metadatas"])
+        existing_by_id: Dict[str, dict] = {}
+        for uid, meta in zip(existing.get("ids", []), existing.get("metadatas") or []):
+            existing_by_id[uid] = meta
+
+        # Filter to papers that need an update.
+        needs_update: Dict[str, Dict[str, str | None]] = {}
+        for uid, url_fields in updates.items():
+            if uid not in existing_by_id:
+                continue  # not in ChromaDB — skip
+            current_meta = existing_by_id[uid]
+            # Update if paper_pdf_url is absent or empty in ChromaDB.
+            if not current_meta.get("paper_pdf_url"):
+                needs_update[uid] = url_fields
+
+        if not needs_update:
+            return 0
+
+        count = em.update_paper_metadata(needs_update)
         return count
+
     except EmbeddingsError as exc:
         # ChromaDB may not be populated or reachable — warn but don't abort.
         print(f"  ⚠️  Could not update embeddings metadata: {exc}", file=sys.stderr)
@@ -394,23 +464,25 @@ def main() -> int:
                 for year in years:
                     print(f"\nProcessing {conference} {year}...")
                     try:
-                        updated, still_missing, embedding_updates = backfill_urls(
-                            db, conference, year, dry_run=args.dry_run
-                        )
+                        updated, still_missing = backfill_urls(db, conference, year, dry_run=args.dry_run)
                         total_updated += updated
                         total_still_missing += still_missing
                         if updated > 0:
                             action = "Would update" if args.dry_run else "Updated"
                             print(f"  ✅ {action} {updated} paper(s) in SQL database")
-                            # Also update ChromaDB metadata for the same papers.
-                            emb_count = backfill_embedding_metadata(embedding_updates, dry_run=args.dry_run)
-                            total_embeddings_updated += emb_count
-                            if emb_count > 0:
-                                print(f"  ✅ Updated {emb_count} paper(s) in embeddings database")
                         else:
-                            print("  ✅ No updates needed")
+                            print("  ✅ No SQL updates needed")
                         if still_missing > 0:
                             print(f"  ⚠️  {still_missing} paper(s) still have no URL in source data")
+
+                        # Always sync URL metadata to ChromaDB from the SQL database,
+                        # so that a re-run after SQL was already backfilled still
+                        # updates papers that were missed in a previous run.
+                        url_updates_from_db = get_url_updates_from_db(db, conference, year)
+                        emb_count = backfill_embedding_metadata(url_updates_from_db, dry_run=args.dry_run)
+                        total_embeddings_updated += emb_count
+                        if emb_count > 0:
+                            print(f"  ✅ Updated {emb_count} paper(s) in embeddings database")
                     except RuntimeError as exc:
                         msg = f"{conference} {year}: download failed — {exc}"
                         print(f"  ❌ {msg}", file=sys.stderr)
