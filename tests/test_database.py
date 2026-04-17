@@ -799,6 +799,40 @@ class TestSearchPapersFieldFilters:
         assert results[0]["title"] == "Attention is All You Need"
         assert isinstance(results[0]["authors"], list)
 
+    def test_case_insensitive_field_name_parsing(self, db_with_papers):
+        """Test that field names in field:\"value\" syntax are case-insensitive."""
+        # Uppercase
+        results = db_with_papers.search_papers_keyword(query='AUTHOR:"Vaswani"', limit=10)
+        assert len(results) == 1
+        assert results[0]["title"] == "Attention is All You Need"
+
+        # Title case
+        results = db_with_papers.search_papers_keyword(query='Author:"Vaswani"', limit=10)
+        assert len(results) == 1
+        assert results[0]["title"] == "Attention is All You Need"
+
+        # Mixed case field with keyword
+        results = db_with_papers.search_papers_keyword(query='Authors:"Devlin" BERT', limit=10)
+        assert len(results) == 1
+        assert results[0]["title"] == "BERT Paper"
+
+    def test_case_insensitive_parse_field_filters(self):
+        """Test parse_field_filters with various case combinations."""
+        # Uppercase alias
+        filters, remaining = DatabaseManager.parse_field_filters('AUTHOR:"Smith" topic')
+        assert filters == {"authors": "Smith"}
+        assert remaining == "topic"
+
+        # Title-case canonical field
+        filters, remaining = DatabaseManager.parse_field_filters('Title:"Transformer"')
+        assert filters == {"title": "Transformer"}
+        assert remaining == ""
+
+        # Mixed-case award field
+        filters, remaining = DatabaseManager.parse_field_filters('Award:"Best Paper" deep learning')
+        assert filters == {"award": "Best Paper"}
+        assert remaining == "deep learning"
+
 
 class TestEmbeddingModelMetadata:
     """Tests for embedding model metadata functionality."""

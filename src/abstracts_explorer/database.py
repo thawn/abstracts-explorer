@@ -803,6 +803,8 @@ class DatabaseManager:
         ({'authors': 'John Smith'}, 'transformers')
         >>> DatabaseManager.parse_field_filters('author:"John Smith" transformers')
         ({'authors': 'John Smith'}, 'transformers')
+        >>> DatabaseManager.parse_field_filters('Author:"John Smith" transformers')
+        ({'authors': 'John Smith'}, 'transformers')
         >>> DatabaseManager.parse_field_filters('transformers')
         ({}, 'transformers')
         >>> DatabaseManager.parse_field_filters('award:"Best Paper" authors:"Doe"')
@@ -811,15 +813,20 @@ class DatabaseManager:
         field_filters: Dict[str, str] = {}
         remaining = query
 
+        # Build a lower-cased lookup for aliases and searchable fields so
+        # that user input is matched case-insensitively (e.g. Author, AUTHOR).
+        alias_lower = {k.lower(): v for k, v in DatabaseManager.FIELD_ALIASES.items()}
+        fields_lower = {f.lower(): f for f in DatabaseManager.SEARCHABLE_FIELDS}
+
         # Iterate in reverse so that removing matched spans does not
         # invalidate the start/end offsets of earlier matches.
         for match in reversed(list(re.finditer(r'(\w+):"([^"]+)"', query))):
-            raw_field = match.group(1)
+            raw_field = match.group(1).lower()
             # Resolve alias (e.g. "author" → "authors") if applicable
-            field_name = DatabaseManager.FIELD_ALIASES.get(raw_field, raw_field)
+            field_name = alias_lower.get(raw_field, raw_field)
             value = match.group(2).strip()
-            if field_name in DatabaseManager.SEARCHABLE_FIELDS:
-                field_filters[field_name] = value
+            if field_name in fields_lower:
+                field_filters[fields_lower[field_name]] = value
                 remaining = remaining[: match.start()] + remaining[match.end() :]
 
         remaining = " ".join(remaining.split())  # normalise whitespace
