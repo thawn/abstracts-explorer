@@ -107,12 +107,27 @@ describe('Paper Card Module', () => {
                 title: 'Paper',
                 authors: [],
                 abstract: 'Abstract',
-                pdf_url: null
+                paper_pdf_url: null
             };
 
             const html = formatPaperCard(paper);
 
             expect(html).not.toContain('PDF');
+        });
+
+        it('should show paper url link when url is present', () => {
+            const paper = {
+                uid: 'p1',
+                title: 'Paper',
+                authors: [],
+                abstract: 'Abstract',
+                url: 'https://example.com/paper-page'
+            };
+
+            const html = formatPaperCard(paper);
+
+            expect(html).toContain('https://example.com/paper-page');
+            expect(html).toContain('View Paper Details');
         });
 
         it('should escape HTML in paper data', () => {
@@ -177,7 +192,7 @@ describe('Paper Card Module', () => {
                     abstract: 'Full abstract text',
                     year: 2025,
                     conference: 'NeurIPS',
-                    pdf_url: 'https://example.com/paper.pdf'
+                    paper_pdf_url: 'https://example.com/paper.pdf'
                 })
             });
 
@@ -195,6 +210,92 @@ describe('Paper Card Module', () => {
             expect(modalHtml).toContain('fa-university');
         });
 
+        it('should show PDF link when paper_pdf_url is present', async () => {
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    uid: 'p1',
+                    title: 'Paper with PDF',
+                    authors: [],
+                    abstract: 'Abstract',
+                    paper_pdf_url: 'https://example.com/paper.pdf'
+                })
+            });
+
+            await showPaperDetails('p1');
+
+            const modals = document.querySelectorAll('.fixed.inset-0');
+            const modalHtml = modals[0].innerHTML;
+            expect(modalHtml).toContain('https://example.com/paper.pdf');
+            expect(modalHtml).toContain('fa-file-pdf');
+            expect(modalHtml).toContain('View PDF');
+        });
+
+        it('should show general url link when url is present', async () => {
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    uid: 'p1',
+                    title: 'Paper with URL',
+                    authors: [],
+                    abstract: 'Abstract',
+                    url: 'https://example.com/paper-page'
+                })
+            });
+
+            await showPaperDetails('p1');
+
+            const modals = document.querySelectorAll('.fixed.inset-0');
+            const modalHtml = modals[0].innerHTML;
+            expect(modalHtml).toContain('https://example.com/paper-page');
+            expect(modalHtml).toContain('fa-external-link-alt');
+            expect(modalHtml).toContain('View Paper Details');
+        });
+
+        it('should show poster link when poster_image_url is present', async () => {
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    uid: 'p1',
+                    title: 'Paper with Poster',
+                    authors: [],
+                    abstract: 'Abstract',
+                    poster_image_url: 'https://example.com/poster.jpg'
+                })
+            });
+
+            await showPaperDetails('p1');
+
+            const modals = document.querySelectorAll('.fixed.inset-0');
+            const modalHtml = modals[0].innerHTML;
+            expect(modalHtml).toContain('https://example.com/poster.jpg');
+            expect(modalHtml).toContain('fa-image');
+            expect(modalHtml).toContain('View Poster');
+        });
+
+        it('should show all url buttons when all url fields are present', async () => {
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    uid: 'p1',
+                    title: 'Paper with All URLs',
+                    authors: [],
+                    abstract: 'Abstract',
+                    url: 'https://example.com/page',
+                    paper_pdf_url: 'https://example.com/paper.pdf',
+                    poster_image_url: 'https://example.com/poster.jpg'
+                })
+            });
+
+            await showPaperDetails('p1');
+
+            const modals = document.querySelectorAll('.fixed.inset-0');
+            const modalHtml = modals[0].innerHTML;
+            expect(modalHtml).toContain('View Paper Details');
+            expect(modalHtml).toContain('View PDF');
+            expect(modalHtml).toContain('View Poster');
+        });
+
         it('should handle missing PDF URL', async () => {
             global.fetch.mockResolvedValueOnce({
                 ok: true,
@@ -203,7 +304,7 @@ describe('Paper Card Module', () => {
                     title: 'Paper',
                     authors: [],
                     abstract: 'Abstract',
-                    pdf_url: null
+                    paper_pdf_url: null
                 })
             });
 
@@ -212,6 +313,8 @@ describe('Paper Card Module', () => {
             // Modal should still be created
             const modals = document.querySelectorAll('.fixed.inset-0');
             expect(modals.length).toBeGreaterThan(0);
+            // No PDF button when paper_pdf_url is null
+            expect(modals[0].innerHTML).not.toContain('View PDF');
         });
 
         it('should handle API errors', async () => {

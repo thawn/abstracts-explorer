@@ -111,8 +111,8 @@ export function formatPaperCard(paper, options = {}) {
             ${showNumber !== null ? `
                 <div class="flex items-start justify-between mb-1">
                     <span class="text-xs font-semibold text-purple-600">#${showNumber}</span>
-                    ${paper.paper_url ? `
-                        <a href="${escapeHtml(paper.paper_url)}" target="_blank" class="text-purple-600 hover:text-purple-800 text-xs" onclick="event.stopPropagation()">
+                    ${paper.url ? `
+                        <a href="${escapeHtml(paper.url)}" target="_blank" class="text-purple-600 hover:text-purple-800 text-xs" onclick="event.stopPropagation()">
                             <i class="fas fa-external-link-alt"></i>
                         </a>
                     ` : ''}
@@ -127,9 +127,9 @@ export function formatPaperCard(paper, options = {}) {
             </p>
             ${metadata ? `<div class="${compact ? 'mb-2' : 'mb-3'}">${metadata}</div>` : ''}
             ${abstractHtml}
-            ${!compact && paper.paper_url ? `
+            ${!compact && paper.url ? `
                 <div class="mt-3">
-                    <a href="${escapeHtml(paper.paper_url)}" target="_blank" class="text-purple-600 hover:text-purple-800 text-sm" onclick="event.stopPropagation()">
+                    <a href="${escapeHtml(paper.url)}" target="_blank" class="text-purple-600 hover:text-purple-800 text-sm" onclick="event.stopPropagation()">
                         <i class="fas fa-external-link-alt mr-1"></i>View Paper Details
                     </a>
                 </div>
@@ -228,14 +228,14 @@ export async function showPaperDetails(paperId) {
                             <i class="fas fa-external-link-alt mr-2"></i>View Paper Details
                         </a>
                     ` : ''}
-                    ${paper.pdf_url ? `
-                        <a href="${escapeHtml(paper.pdf_url)}" target="_blank" class="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                    ${paper.paper_pdf_url ? `
+                        <a href="${escapeHtml(paper.paper_pdf_url)}" target="_blank" class="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                             <i class="fas fa-file-pdf mr-2"></i>View PDF
                         </a>
                     ` : ''}
-                    ${paper.paper_url ? `
-                        <a href="${escapeHtml(paper.paper_url)}" target="_blank" class="inline-block px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
-                            <i class="fas fa-link mr-2"></i>Paper Link
+                    ${paper.poster_image_url ? `
+                        <a href="${escapeHtml(paper.poster_image_url)}" target="_blank" class="inline-block px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                            <i class="fas fa-image mr-2"></i>View Poster
                         </a>
                     ` : ''}
                 </div>
