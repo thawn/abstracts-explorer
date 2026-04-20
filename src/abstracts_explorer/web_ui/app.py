@@ -897,7 +897,7 @@ def topic_evolution():
 
     except Exception as e:
         logger.error(f"Error in topic evolution endpoint: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Failed to compute topic evolution"}), 500
 
 
 @app.route("/api/papers-per-year")
@@ -922,10 +922,7 @@ def papers_per_year():
         if conference:
             years = database.get_years_for_conference(conference)
         else:
-            years_rows = database.query(
-                "SELECT DISTINCT year FROM papers WHERE year IS NOT NULL ORDER BY year"
-            )
-            years = [r["year"] for r in years_rows]
+            years = sorted(database.get_years())
 
         year_counts = {}
         for year in years:
@@ -936,7 +933,7 @@ def papers_per_year():
 
     except Exception as e:
         logger.error(f"Error in papers-per-year endpoint: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Failed to load papers per year data"}), 500
 
 
 @app.route("/api/years")

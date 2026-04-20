@@ -2617,7 +2617,7 @@ class TestPapersPerYearEndpoint:
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 mock_db = Mock()
-                mock_db.query.return_value = [{"year": 2023}, {"year": 2024}]
+                mock_db.get_years.return_value = [2024, 2023]
                 mock_db.get_stats.side_effect = [
                     {"total_papers": 200, "year": 2023, "conference": None},
                     {"total_papers": 300, "year": 2024, "conference": None},
@@ -2701,9 +2701,7 @@ class TestTopicEvolutionEndpoint:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch(
-                "abstracts_explorer.web_ui.app.json"
-            ) as mock_json:
+            with patch("abstracts_explorer.web_ui.app.json") as mock_json:
                 mock_json.loads.side_effect = Exception("Parse error")
                 with patch(
                     "abstracts_explorer.mcp_server.get_topic_evolution",

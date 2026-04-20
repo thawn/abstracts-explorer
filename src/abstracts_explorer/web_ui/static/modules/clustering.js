@@ -8,7 +8,7 @@ import { API_BASE, PLOTLY_COLORS } from './utils/constants.js';
 import { showLoading, showErrorInElement } from './utils/ui-utils.js';
 import { sortClustersBySizeDesc } from './utils/sort-utils.js';
 import { getClusterLabelWithCount } from './utils/cluster-utils.js';
-import { getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
+import { getSelectedConference, getSelectedYears, escapeHtml } from './utils/dom-utils.js';
 import { formatPaperCard } from './paper-card.js';
 import { renderInlineMarkdownWithLatex } from './utils/markdown-utils.js';
 
@@ -1647,17 +1647,6 @@ function displayCustomQueryStats(customCluster) {
  */
 function updateVisualizationWithCustomCluster(customCluster) {
     // No longer used - replaced by visualizeClustersWithCustomQueries
-}
-
-/**
- * Escape HTML to prevent XSS attacks
- * @param {string} text - Text to escape
- * @returns {string} Escaped text
- */
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
 }
 
 /**
