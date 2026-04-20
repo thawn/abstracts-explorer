@@ -970,6 +970,8 @@ class EmbeddingsManager:
         # to ChromaDB as a {"uid": {"$in": [...]}} condition.
         filter_conditions: List[Dict[str, Any]] = []
 
+        matching_uids: Optional[List[str]] = None
+
         if field_filters:
             # Use the SQL database for substring-capable ILIKE filtering
             matching_papers = database.search_papers(field_filters=field_filters, limit=0)
@@ -977,7 +979,6 @@ class EmbeddingsManager:
                 # No papers satisfy the field filters — no results possible
                 return []
             matching_uids = [p["uid"] for p in matching_papers]
-            filter_conditions.append({"uid": {"$in": matching_uids}})
 
         if sessions:
             filter_conditions.append({"session": {"$in": sessions}})
@@ -1000,8 +1001,9 @@ class EmbeddingsManager:
             f"years={years}, conferences={conferences}, field_filters={field_filters}"
         )
         logger.info(f"Where filter: {where_filter}")
+        logger.info(f"Matching UIDs from SQL filter: {matching_uids}")
 
-        results = self.search_similar(semantic_query, n_results=limit * 2, where=where_filter)
+        results = self.search_similar(semantic_query, n_results=limit * 2, where=where_filter, ids=matching_uids)
 
         logger.info(f"Search results count: {len(results.get('ids', [[]])[0]) if results else 0}")
 
@@ -1195,7 +1197,7 @@ class EmbeddingsManager:
                 if distance <= distance_threshold:
                     # Get full paper details from database using uid
                     try:
-                        paper_dict = database.get_paper_by_id(paper_id)
+                        paper_dict = database.get_paper_by_uid(paper_id)
                         paper_dict["distance"] = float(distance)
                         matching_papers.append(paper_dict)
                     except PaperFormattingError:
