@@ -16,7 +16,7 @@ global.marked = {
     use: jest.fn()
 };
 
-import { formatPaperCard, showPaperDetails, updateStarDisplay, updateInterestingPapersCount, setPaperPriority } from '../static/modules/paper-card.js';
+import { formatPaperCard, showPaperDetails, buildUrlBadges, updateStarDisplay, updateInterestingPapersCount, setPaperPriority } from '../static/modules/paper-card.js';
 import * as State from '../static/modules/state.js';
 
 describe('Paper Card Module', () => {
@@ -127,7 +127,7 @@ describe('Paper Card Module', () => {
             const html = formatPaperCard(paper);
 
             expect(html).toContain('https://example.com/paper-page');
-            expect(html).toContain('View Paper Details');
+            expect(html).toContain('Paper Page');
         });
 
         it('should escape HTML in paper data', () => {
@@ -228,7 +228,7 @@ describe('Paper Card Module', () => {
             const modalHtml = modals[0].innerHTML;
             expect(modalHtml).toContain('https://example.com/paper.pdf');
             expect(modalHtml).toContain('fa-file-pdf');
-            expect(modalHtml).toContain('View PDF');
+            expect(modalHtml).toContain('PDF');
         });
 
         it('should show general url link when url is present', async () => {
@@ -249,7 +249,7 @@ describe('Paper Card Module', () => {
             const modalHtml = modals[0].innerHTML;
             expect(modalHtml).toContain('https://example.com/paper-page');
             expect(modalHtml).toContain('fa-external-link-alt');
-            expect(modalHtml).toContain('View Paper Details');
+            expect(modalHtml).toContain('Paper Page');
         });
 
         it('should show poster link when poster_image_url is present', async () => {
@@ -270,10 +270,10 @@ describe('Paper Card Module', () => {
             const modalHtml = modals[0].innerHTML;
             expect(modalHtml).toContain('https://example.com/poster.jpg');
             expect(modalHtml).toContain('fa-image');
-            expect(modalHtml).toContain('View Poster');
+            expect(modalHtml).toContain('Poster');
         });
 
-        it('should show all url buttons when all url fields are present', async () => {
+        it('should show all url badges when all url fields are present', async () => {
             global.fetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({
@@ -291,9 +291,9 @@ describe('Paper Card Module', () => {
 
             const modals = document.querySelectorAll('.fixed.inset-0');
             const modalHtml = modals[0].innerHTML;
-            expect(modalHtml).toContain('View Paper Details');
-            expect(modalHtml).toContain('View PDF');
-            expect(modalHtml).toContain('View Poster');
+            expect(modalHtml).toContain('Paper Page');
+            expect(modalHtml).toContain('PDF');
+            expect(modalHtml).toContain('Poster');
         });
 
         it('should handle missing PDF URL', async () => {
@@ -329,6 +329,70 @@ describe('Paper Card Module', () => {
 
             // Should show error but not crash
             expect(global.fetch).toHaveBeenCalled();
+        });
+    });
+
+    describe('buildUrlBadges', () => {
+        it('should return empty string when no URLs present', () => {
+            const paper = { uid: 'p1', title: 'Paper', authors: [] };
+            expect(buildUrlBadges(paper)).toBe('');
+        });
+
+        it('should render url as Paper Page badge', () => {
+            const paper = { url: 'https://example.com/page' };
+            const html = buildUrlBadges(paper);
+            expect(html).toContain('https://example.com/page');
+            expect(html).toContain('Paper Page');
+            expect(html).toContain('fa-external-link-alt');
+        });
+
+        it('should render paper_pdf_url as PDF badge', () => {
+            const paper = { paper_pdf_url: 'https://example.com/paper.pdf' };
+            const html = buildUrlBadges(paper);
+            expect(html).toContain('https://example.com/paper.pdf');
+            expect(html).toContain('PDF');
+            expect(html).toContain('fa-file-pdf');
+        });
+
+        it('should render poster_image_url as Poster badge', () => {
+            const paper = { poster_image_url: 'https://example.com/poster.jpg' };
+            const html = buildUrlBadges(paper);
+            expect(html).toContain('https://example.com/poster.jpg');
+            expect(html).toContain('Poster');
+            expect(html).toContain('fa-image');
+        });
+
+        it('should render all three badges when all URLs present', () => {
+            const paper = {
+                url: 'https://example.com/page',
+                paper_pdf_url: 'https://example.com/paper.pdf',
+                poster_image_url: 'https://example.com/poster.jpg'
+            };
+            const html = buildUrlBadges(paper);
+            expect(html).toContain('Paper Page');
+            expect(html).toContain('PDF');
+            expect(html).toContain('Poster');
+        });
+
+        it('should include event.stopPropagation by default', () => {
+            const paper = { url: 'https://example.com/page' };
+            const html = buildUrlBadges(paper);
+            expect(html).toContain('event.stopPropagation');
+        });
+
+        it('should omit event.stopPropagation when stopPropagation=false', () => {
+            const paper = { url: 'https://example.com/page' };
+            const html = buildUrlBadges(paper, false, false);
+            expect(html).not.toContain('event.stopPropagation');
+        });
+
+        it('should use compact styling when compact=true', () => {
+            const paper = { url: 'https://example.com/page' };
+            const compactHtml = buildUrlBadges(paper, true);
+            const normalHtml = buildUrlBadges(paper, false);
+            // compact uses mb-2, normal uses mb-3
+            expect(compactHtml).toContain('mb-2');
+            expect(normalHtml).toContain('mb-3');
         });
     });
 
