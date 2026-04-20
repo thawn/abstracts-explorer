@@ -18,6 +18,29 @@ import {
 } from './state.js';
 
 /**
+ * Build URL badges HTML for a paper
+ * @param {Object} paper - Paper object with optional url, paper_pdf_url, poster_image_url
+ * @param {boolean} compact - Whether to use compact styling
+ * @param {boolean} stopPropagation - Whether to include onclick="event.stopPropagation()"
+ * @returns {string} HTML string (empty string if no URLs available)
+ */
+export function buildUrlBadges(paper, compact = false, stopPropagation = true) {
+    const stop = stopPropagation ? ' onclick="event.stopPropagation()"' : '';
+    const size = compact ? 'px-2 py-0.5 text-xs' : 'px-2 py-1 text-xs';
+    let badges = '';
+    if (paper.url) {
+        badges += `<a href="${escapeHtml(paper.url)}" target="_blank"${stop} class="${size} bg-purple-100 text-purple-700 rounded-full hover:bg-purple-200 inline-flex items-center gap-1"><i class="fas fa-external-link-alt"></i>Paper Page</a>`;
+    }
+    if (paper.paper_pdf_url) {
+        badges += `<a href="${escapeHtml(paper.paper_pdf_url)}" target="_blank"${stop} class="${size} bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 inline-flex items-center gap-1"><i class="fas fa-file-pdf"></i>PDF</a>`;
+    }
+    if (paper.poster_image_url) {
+        badges += `<a href="${escapeHtml(paper.poster_image_url)}" target="_blank"${stop} class="${size} bg-green-100 text-green-700 rounded-full hover:bg-green-200 inline-flex items-center gap-1"><i class="fas fa-image"></i>Poster</a>`;
+    }
+    return badges ? `<div class="flex flex-wrap gap-1 ${compact ? 'mb-2' : 'mb-3'}">${badges}</div>` : '';
+}
+
+/**
  * Format a single paper card
  * @param {Object} paper - Paper object
  * @param {Object} options - Display options
@@ -111,29 +134,18 @@ export function formatPaperCard(paper, options = {}) {
             ${showNumber !== null ? `
                 <div class="flex items-start justify-between mb-1">
                     <span class="text-xs font-semibold text-purple-600">#${showNumber}</span>
-                    ${paper.paper_url ? `
-                        <a href="${escapeHtml(paper.paper_url)}" target="_blank" class="text-purple-600 hover:text-purple-800 text-xs" onclick="event.stopPropagation()">
-                            <i class="fas fa-external-link-alt"></i>
-                        </a>
-                    ` : ''}
                 </div>
             ` : ''}
             <div class="flex items-start justify-between ${compact ? 'mb-1' : 'mb-2'}">
                 <h${compact ? '4' : '3'} class="${compact ? 'text-sm' : 'text-lg'} font-semibold text-gray-800 flex-1 ${compact ? 'leading-tight pr-2' : 'pr-2'}">${renderInlineMarkdownWithLatex(title)}</h${compact ? '4' : '3'}>
                 ${starsHtml}
             </div>
-            <p class="${compact ? 'text-xs' : 'text-sm'} text-gray-600 ${compact ? 'mb-2 truncate' : 'mb-3'}">
+            <p class="${compact ? 'text-xs' : 'text-sm'} text-gray-600 ${compact ? 'mb-1 truncate' : 'mb-2'}">
                 <i class="fas fa-users mr-1"></i>${escapeHtml(authors)}
             </p>
+            ${buildUrlBadges(paper, compact)}
             ${metadata ? `<div class="${compact ? 'mb-2' : 'mb-3'}">${metadata}</div>` : ''}
             ${abstractHtml}
-            ${!compact && paper.paper_url ? `
-                <div class="mt-3">
-                    <a href="${escapeHtml(paper.paper_url)}" target="_blank" class="text-purple-600 hover:text-purple-800 text-sm" onclick="event.stopPropagation()">
-                        <i class="fas fa-external-link-alt mr-1"></i>View Paper Details
-                    </a>
-                </div>
-            ` : ''}
             ${!compact && paper.distance !== undefined && !metadata.includes('chart-line') ? `
                 <div class="mt-3 pt-3 border-t">
                     <span class="text-xs text-gray-500">
@@ -212,7 +224,8 @@ export async function showPaperDetails(paperId) {
                     <h3 class="text-sm font-semibold text-gray-700 mb-2">
                         <i class="fas fa-users mr-2"></i>Authors
                     </h3>
-                    <p class="text-gray-700">${escapeHtml(authors)}</p>
+                    <p class="text-gray-700 mb-3">${escapeHtml(authors)}</p>
+                    ${buildUrlBadges(paper, false, false)}
                 </div>
                 
                 <div class="mb-6">
@@ -220,24 +233,6 @@ export async function showPaperDetails(paperId) {
                         <i class="fas fa-file-alt mr-2"></i>Abstract
                     </h3>
                     <div class="text-gray-700 leading-relaxed markdown-content">${paper.abstract ? renderMarkdownWithLatex(paper.abstract) : 'No abstract available'}</div>
-                </div>
-                
-                <div class="flex gap-3">
-                    ${paper.url ? `
-                        <a href="${escapeHtml(paper.url)}" target="_blank" class="inline-block px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
-                            <i class="fas fa-external-link-alt mr-2"></i>View Paper Details
-                        </a>
-                    ` : ''}
-                    ${paper.pdf_url ? `
-                        <a href="${escapeHtml(paper.pdf_url)}" target="_blank" class="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                            <i class="fas fa-file-pdf mr-2"></i>View PDF
-                        </a>
-                    ` : ''}
-                    ${paper.paper_url ? `
-                        <a href="${escapeHtml(paper.paper_url)}" target="_blank" class="inline-block px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
-                            <i class="fas fa-link mr-2"></i>Paper Link
-                        </a>
-                    ` : ''}
                 </div>
             </div>
         `;
