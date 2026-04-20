@@ -27,9 +27,9 @@ class TestFormatSearchResults:
         }
 
         mock_db = Mock()
-        mock_db.query.side_effect = [
-            [{"uid": "abc123", "title": "Paper 1", "abstract": "Abstract 1", "authors": "Author 1"}],
-            [{"uid": "def456", "title": "Paper 2", "abstract": "Abstract 2", "authors": "Author 2"}],
+        mock_db.get_paper_by_uid.side_effect = [
+            {"uid": "abc123", "title": "Paper 1", "abstract": "Abstract 1", "authors": ["Author 1"]},
+            {"uid": "def456", "title": "Paper 2", "abstract": "Abstract 2", "authors": ["Author 2"]},
         ]
 
         papers = format_search_results(search_results, mock_db)
@@ -51,7 +51,7 @@ class TestFormatSearchResults:
         papers = format_search_results(search_results, mock_db)
 
         assert papers == []
-        mock_db.query.assert_not_called()
+        mock_db.get_paper_by_uid.assert_not_called()
 
     def test_format_search_results_invalid_input(self):
         """Test invalid search results structure."""
@@ -93,10 +93,10 @@ class TestFormatSearchResults:
         }
 
         mock_db = Mock()
-        mock_db.query.side_effect = [
-            [{"uid": "abc123", "title": "Paper 1", "authors": "Author 1"}],
-            [],  # Paper nonexist not found
-            [{"uid": "def456", "title": "Paper 2", "authors": "Author 2"}],
+        mock_db.get_paper_by_uid.side_effect = [
+            {"uid": "abc123", "title": "Paper 1", "authors": ["Author 1"]},
+            None,  # Paper nonexist not found
+            {"uid": "def456", "title": "Paper 2", "authors": ["Author 2"]},
         ]
 
         papers = format_search_results(search_results, mock_db)
@@ -111,7 +111,7 @@ class TestFormatSearchResults:
         search_results = {"ids": [["nonexist1", "nonexist2"]]}
 
         mock_db = Mock()
-        mock_db.query.return_value = []  # No papers found
+        mock_db.get_paper_by_uid.return_value = None  # No papers found
 
         with pytest.raises(PaperFormattingError, match="No valid papers could be formatted"):
             format_search_results(search_results, mock_db)
@@ -124,9 +124,12 @@ class TestFormatSearchResults:
         }
 
         mock_db = Mock()
-        mock_db.query.return_value = [
-            {"uid": "abc123", "title": "Paper 1", "abstract": "From DB", "authors": "Author 1"}
-        ]
+        mock_db.get_paper_by_uid.return_value = {
+            "uid": "abc123",
+            "title": "Paper 1",
+            "abstract": "From DB",
+            "authors": ["Author 1"],
+        }
 
         papers = format_search_results(search_results, mock_db, include_documents=False)
 
@@ -141,7 +144,12 @@ class TestFormatSearchResults:
         }
 
         mock_db = Mock()
-        mock_db.query.return_value = [{"uid": "abc123", "title": "Paper 1", "authors": ""}]  # No abstract
+        mock_db.get_paper_by_uid.return_value = {
+            "uid": "abc123",
+            "title": "Paper 1",
+            "authors": [],
+            "abstract": None,
+        }  # No abstract
 
         papers = format_search_results(search_results, mock_db, include_documents=True)
 

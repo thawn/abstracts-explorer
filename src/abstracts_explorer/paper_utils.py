@@ -89,7 +89,9 @@ def format_search_results(
                 continue
 
             # Get complete paper from database (this validates paper exists)
-            paper = database.get_paper_by_id(paper_uid)
+            paper = database.get_paper_by_uid(paper_uid)
+            if paper is None:
+                raise PaperFormattingError(f"Paper with uid={paper_uid} not found in database.")
 
             # Add similarity/distance scores if available
             if "distances" in search_results and search_results["distances"][0]:

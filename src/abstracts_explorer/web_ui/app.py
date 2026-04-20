@@ -502,6 +502,8 @@ def get_paper(paper_uid):
     try:
         database = get_database()
         paper = database.get_paper_by_uid(paper_uid)
+        if paper is None:
+            return jsonify({"error": f"Paper with uid={paper_uid} not found"}), 404
         return jsonify(paper)
     except PaperFormattingError as e:
         return jsonify({"error": str(e)}), 404
@@ -539,7 +541,10 @@ def get_papers_batch():
                 # Convert to string if needed (JavaScript might send as string or int)
                 paper_uid_str = str(paper_uid)
                 paper = database.get_paper_by_uid(paper_uid_str)
-                papers.append(paper)
+                if paper is not None:
+                    papers.append(paper)
+                else:
+                    logger.warning(f"Paper {paper_uid} not found in database")
             except PaperFormattingError as e:
                 logger.warning(f"Paper {paper_uid} not found: {e}")
                 continue
@@ -905,6 +910,9 @@ def export_interesting_papers():
         for paper_id in paper_ids:
             try:
                 paper = database.get_paper_by_uid(str(paper_id))
+                if paper is None:
+                    logger.warning(f"Paper {paper_id} not found")
+                    continue
                 priority_data = priorities.get(str(paper_id), {})
 
                 # Handle both old format (int) and new format (dict with priority and searchTerm)

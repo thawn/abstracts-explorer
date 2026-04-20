@@ -915,7 +915,7 @@ class TestExecuteMCPToolE2E:
                 "uid": "abc123",
                 "original_id": "neurips2023/abc",
                 "title": "A Test Paper",
-                "authors": "Smith, John; Doe, Jane",
+                "authors": ["Smith, John", "Doe, Jane"],
                 "abstract": "This is the abstract.",
                 "session": "Poster Session 1",
                 "poster_position": "P01",
@@ -946,30 +946,28 @@ class TestExecuteMCPToolE2E:
         assert paper["keywords"] == "deep learning, transformers"
 
     def test_get_paper_details_real_execution_by_id(self):
-        """get_paper_details executes exact UID lookup end-to-end."""
+        """get_paper_details executes exact UID/original_id lookup end-to-end."""
         mock_db = Mock()
-        mock_db.query.return_value = [
-            {
-                "uid": "abc123",
-                "original_id": "neurips2023/abc",
-                "title": "Exact Paper",
-                "authors": "Smith, John",
-                "abstract": "Abstract here.",
-                "session": "Oral",
-                "poster_position": None,
-                "paper_pdf_url": "https://example.com/pdf",
-                "poster_image_url": None,
-                "url": "https://example.com",
-                "room_name": "Room 1",
-                "keywords": "ml",
-                "starttime": None,
-                "endtime": None,
-                "award": "Best Paper",
-                "year": 2023,
-                "conference": "NeurIPS",
-                "created_at": "2024-01-01",
-            }
-        ]
+        mock_db.get_paper_by_original_id_or_uid.return_value = {
+            "uid": "abc123",
+            "original_id": "neurips2023/abc",
+            "title": "Exact Paper",
+            "authors": ["Smith, John"],
+            "abstract": "Abstract here.",
+            "session": "Oral",
+            "poster_position": None,
+            "paper_pdf_url": "https://example.com/pdf",
+            "poster_image_url": None,
+            "url": "https://example.com",
+            "room_name": "Room 1",
+            "keywords": "ml",
+            "starttime": None,
+            "endtime": None,
+            "award": "Best Paper",
+            "year": 2023,
+            "conference": "NeurIPS",
+            "created_at": "2024-01-01",
+        }
 
         with (patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),):
             result = execute_mcp_tool("get_paper_details", {"paper_id": "abc123"})

@@ -680,6 +680,40 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Failed to retrieve paper by UID: {str(e)}") from e
 
+    def get_paper_by_original_id_or_uid(self, paper_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a paper by its UID or original_id (whichever matches first).
+
+        Tries uid first, then falls back to original_id. All formatting
+        (e.g. author deserialization) is performed inside this method so that
+        callers always receive a fully formatted paper dictionary.
+
+        Parameters
+        ----------
+        paper_id : str
+            Value to match against the ``uid`` or ``original_id`` column.
+
+        Returns
+        -------
+        dict or None
+            Fully formatted paper data dictionary, or None if not found.
+
+        Raises
+        ------
+        DatabaseError
+            If the database query fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            paper = self._session.execute(
+                select(Paper).where((Paper.uid == paper_id) | (Paper.original_id == paper_id)).limit(1)
+            ).scalar_one_or_none()
+            return self._paper_to_dict(paper) if paper else None
+        except Exception as e:
+            raise DatabaseError(f"Failed to retrieve paper by id/uid: {str(e)}") from e
+
     #: Paper model column names that can be used as ``field:"value"`` filters
     #: in search queries.  Internal columns (``uid``, ``created_at``) are
     #: excluded because they are not meaningful search targets for users.

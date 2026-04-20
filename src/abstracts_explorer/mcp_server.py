@@ -955,11 +955,13 @@ def get_paper_details(
         db = DatabaseManager()
         db.connect()
 
-        raw_papers: List[Dict[str, Any]] = []
+        result_papers: List[Dict[str, Any]] = []
 
         if paper_id:
             # Exact lookup by uid or original_id (returns at most one paper)
-            result_papers = db.get_papers_by_id(paper_id)
+            paper = db.get_paper_by_original_id_or_uid(paper_id)
+            if paper is not None:
+                result_papers = [paper]
 
         if not result_papers and title:
             # Keyword search on title with optional conference/year filters
