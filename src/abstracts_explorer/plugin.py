@@ -842,6 +842,31 @@ def serialize_authors_to_string(authors: List[str]) -> str:
     return "; ".join(str(a).strip() for a in authors)
 
 
+def deserialize_authors_from_string(authors_str: str) -> List[str]:
+    """
+    Deserialize a semicolon-separated authors string to a list of author names.
+
+    Used when loading paper metadata from ChromaDB to convert the stored
+    semicolon-separated string back into a list format for validation and use in
+    the application.
+
+    Parameters
+    ----------
+    authors_str : str
+        Semicolon-separated authors string, e.g. ``"Alice; Bob; Charlie"``.
+        An empty string returns an empty list.
+
+    Returns
+    -------
+    list of str
+        List of author names, e.g. ``["Alice", "Bob", "Charlie"]``.
+        Returns an empty list if *authors_str* is empty or only contains whitespace.
+    """
+    if not authors_str or not authors_str.strip():
+        return []
+    return [a.strip() for a in authors_str.split(";") if a.strip()]
+
+
 def serialize_keywords_to_string(keywords: List[str]) -> str:
     """
     Serialize a list of keywords to a comma-separated string.
@@ -865,6 +890,31 @@ def serialize_keywords_to_string(keywords: List[str]) -> str:
     if not keywords:
         return ""
     return ", ".join(str(k).strip() for k in keywords)
+
+
+def deserialize_keywords_from_string(keywords_str: str) -> List[str]:
+    """
+    Deserialize a comma-separated keywords string to a list of keywords.
+
+    Used when loading paper metadata from ChromaDB to convert the stored
+    comma-separated string back into a list format for validation and use in
+    the application.
+
+    Parameters
+    ----------
+    keywords_str : str
+        Comma-separated keywords string, e.g. ``"machine learning, deep learning"``.
+        An empty string returns an empty list.
+
+    Returns
+    -------
+    list of str
+        List of keywords, e.g. ``["machine learning", "deep learning"]``.
+        Returns an empty list if *keywords_str* is empty or only contains whitespace.
+    """
+    if not keywords_str or not keywords_str.strip():
+        return []
+    return [k.strip() for k in keywords_str.split(",") if k.strip()]
 
 
 def prepare_chroma_db_paper_data(paper: Dict[str, Any]) -> Dict[str, Any]:

@@ -19,7 +19,6 @@ from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.rag import RAGChat
 from abstracts_explorer.config import get_config
-from abstracts_explorer.paper_utils import get_paper_with_authors, PaperFormattingError
 from abstracts_explorer.export_utils import export_papers_to_zip
 
 # Import version
@@ -439,16 +438,23 @@ def search():
                 conferences=conferences,
             )
 
-            # Count total similar papers within distance threshold
-            try:
-                total_similar = em.count_papers_within_distance(
-                    database=database,
-                    query=query,
-                    distance_threshold=_SIMILAR_DISTANCE_THRESHOLD,
-                    conferences=conferences if conferences else None,
-                    years=years if years else None,
-                )
-            except Exception:
+            # Count total similar papers within distance threshold.
+            # Parse field filters to determine the semantic portion of the query;
+            # when the query consists only of field filters there is no meaningful
+            # embedding to compare against, so skip the count.
+            _, remaining_query = DatabaseManager.parse_field_filters(query)
+            if remaining_query:
+                try:
+                    total_similar = em.count_papers_within_distance(
+                        database=database,
+                        query=remaining_query,
+                        distance_threshold=_SIMILAR_DISTANCE_THRESHOLD,
+                        conferences=conferences if conferences else None,
+                        years=years if years else None,
+                    )
+                except Exception:
+                    total_similar = None
+            else:
                 total_similar = None
         else:
             # Keyword search in database
@@ -494,10 +500,10 @@ def get_paper(paper_uid):
     """
     try:
         database = get_database()
-        paper = get_paper_with_authors(database, paper_uid)
+        paper = database.get_paper_by_uid(paper_uid)
+        if paper is None:
+            return jsonify({"error": f"Paper with uid={paper_uid} not found"}), 404
         return jsonify(paper)
-    except PaperFormattingError as e:
-        return jsonify({"error": str(e)}), 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -531,10 +537,13 @@ def get_papers_batch():
             try:
                 # Convert to string if needed (JavaScript might send as string or int)
                 paper_uid_str = str(paper_uid)
-                paper = get_paper_with_authors(database, paper_uid_str)
-                papers.append(paper)
-            except PaperFormattingError as e:
-                logger.warning(f"Paper {paper_uid} not found: {e}")
+                paper = database.get_paper_by_uid(paper_uid_str)
+                if paper is not None:
+                    papers.append(paper)
+                else:
+                    logger.warning(f"Paper {paper_uid} not found in database")
+            except Exception as e:
+                logger.warning(f"Error fetching paper {paper_uid}: {e}")
                 continue
 
         return jsonify({"papers": papers})
@@ -897,7 +906,10 @@ def export_interesting_papers():
         papers = []
         for paper_id in paper_ids:
             try:
-                paper = get_paper_with_authors(database, paper_id)
+                paper = database.get_paper_by_uid(str(paper_id))
+                if paper is None:
+                    logger.warning(f"Paper {paper_id} not found")
+                    continue
                 priority_data = priorities.get(str(paper_id), {})
 
                 # Handle both old format (int) and new format (dict with priority and searchTerm)
@@ -910,7 +922,7 @@ def export_interesting_papers():
                     paper["searchTerm"] = search_query or "Unknown"
 
                 papers.append(paper)
-            except PaperFormattingError:
+            except Exception:
                 logger.warning(f"Paper {paper_id} not found")
                 continue
 

@@ -128,3 +128,104 @@ export function displaySearchResults(data) {
 
     resultsDiv.innerHTML = html;
 }
+
+/**
+ * Advanced search field definitions.
+ * Each entry maps a DOM input id to the field:"value" syntax name.
+ * @type {Array<{id: string, field: string}>}
+ */
+const ADVANCED_FIELDS = [
+    { id: 'adv-authors', field: 'authors' },
+    { id: 'adv-title', field: 'title' },
+    { id: 'adv-keywords', field: 'keywords' },
+    { id: 'adv-abstract', field: 'abstract' },
+    { id: 'adv-award', field: 'award' },
+];
+
+/**
+ * Open the advanced search modal.
+ * Parses the current search input to pre-populate modal fields.
+ */
+export function openAdvancedSearch() {
+    const searchInput = document.getElementById('search-input');
+    const query = searchInput ? searchInput.value.trim() : '';
+
+    // Parse existing query into topic + field filters
+    let remaining = query;
+    for (const { id, field } of ADVANCED_FIELDS) {
+        const input = document.getElementById(id);
+        if (!input) continue;
+        // Match field:"value" (case-insensitive field name)
+        const regex = new RegExp(`${field}:"([^"]+)"`, 'i');
+        const match = remaining.match(regex);
+        if (match) {
+            input.value = match[1];
+            remaining = remaining.replace(match[0], '');
+        } else {
+            input.value = '';
+        }
+    }
+    // Also try the "author" alias
+    const authorsInput = document.getElementById('adv-authors');
+    if (authorsInput && !authorsInput.value) {
+        const aliasMatch = remaining.match(/author:"([^"]+)"/i);
+        if (aliasMatch) {
+            authorsInput.value = aliasMatch[1];
+            remaining = remaining.replace(aliasMatch[0], '');
+        }
+    }
+
+    const topicInput = document.getElementById('adv-topic');
+    if (topicInput) {
+        topicInput.value = remaining.replace(/\s+/g, ' ').trim();
+    }
+
+    const modal = document.getElementById('advanced-search-modal');
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+
+    // Focus the topic field
+    if (topicInput) topicInput.focus();
+}
+
+/**
+ * Close the advanced search modal without applying changes.
+ */
+export function closeAdvancedSearch() {
+    const modal = document.getElementById('advanced-search-modal');
+    modal.classList.add('hidden');
+    document.body.style.overflow = '';
+}
+
+/**
+ * Build the search query from advanced search fields and trigger a search.
+ */
+export function applyAdvancedSearch() {
+    const parts = [];
+
+    // Collect field filters
+    for (const { id, field } of ADVANCED_FIELDS) {
+        const input = document.getElementById(id);
+        if (input && input.value.trim()) {
+            parts.push(`${field}:"${input.value.trim()}"`);
+        }
+    }
+
+    // Append the free-text topic at the end
+    const topicInput = document.getElementById('adv-topic');
+    if (topicInput && topicInput.value.trim()) {
+        parts.push(topicInput.value.trim());
+    }
+
+    const query = parts.join(' ');
+    const searchInput = document.getElementById('search-input');
+    if (searchInput) {
+        searchInput.value = query;
+    }
+
+    closeAdvancedSearch();
+
+    if (query) {
+        searchPapers();
+    }
+}

@@ -955,36 +955,22 @@ def get_paper_details(
         db = DatabaseManager()
         db.connect()
 
-        raw_papers: List[Dict[str, Any]] = []
+        result_papers: List[Dict[str, Any]] = []
 
         if paper_id:
             # Exact lookup by uid or original_id (returns at most one paper)
-            rows = db.query(
-                "SELECT * FROM papers WHERE uid = ? OR original_id = ? LIMIT 1",
-                (paper_id, paper_id),
-            )
-            raw_papers = rows
+            paper = db.get_paper_by_original_id_or_uid(paper_id)
+            if paper is not None:
+                result_papers = [paper]
 
-        if not raw_papers and title:
+        if not result_papers and title:
             # Keyword search on title with optional conference/year filters
-            raw_papers = db.search_papers(
+            result_papers = db.search_papers(
                 keyword=title,
                 conference=conference,
                 year=year,
                 limit=limit,
             )
-
-        # Format each paper: parse authors into a list and serialize timestamps
-        result_papers = []
-        for paper in raw_papers:
-            p = dict(paper)
-            # Parse semicolon-separated authors into a list
-            authors_raw = p.get("authors") or ""
-            p["authors"] = [a.strip() for a in authors_raw.split(";") if a.strip()]
-            # Ensure created_at is JSON-serializable
-            if "created_at" in p and p["created_at"] is not None:
-                p["created_at"] = str(p["created_at"])
-            result_papers.append(p)
 
         result = {
             "papers_found": len(result_papers),

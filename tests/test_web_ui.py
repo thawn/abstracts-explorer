@@ -23,7 +23,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from abstracts_explorer.web_ui import app as flask_app
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.config import get_config
-from abstracts_explorer.paper_utils import PaperFormattingError
 
 # ============================================================
 # Tests from test_web.py
@@ -586,6 +585,34 @@ class TestSearchEndpoint:
         data = json.loads(response.data)
         assert data["count"] == 1
 
+    def test_search_semantic_field_filter_only(self, client):
+        """Test semantic search with field-filter-only query bypasses embeddings."""
+        from unittest.mock import MagicMock, patch
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+
+        mock_em = MagicMock()
+        mock_db = MagicMock()
+        mock_papers = [{"uid": "test1", "title": "Test Paper", "abstract": "Test", "authors": ["John Smith"]}]
+        mock_em.search_papers_semantic.return_value = mock_papers
+
+        with patch.object(app_module, "get_embeddings_manager", return_value=mock_em):
+            with patch.object(app_module, "get_database", return_value=mock_db):
+                response = client.post(
+                    "/api/search",
+                    data=json.dumps({"query": 'authors:"John Smith"', "use_embeddings": True, "limit": 10}),
+                    content_type="application/json",
+                )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["count"] == 1
+        # Field-filter-only query should not trigger count_papers_within_distance
+        mock_em.count_papers_within_distance.assert_not_called()
+        # total_similar should not be in response for field-filter-only queries
+        assert "total_similar" not in data
+
 
 class TestChatEndpoint:
     """Test the chat endpoint."""
@@ -928,23 +955,27 @@ class TestWebUIGetPaperDetails:
     """Test get_paper endpoint (lines 219-227)."""
 
     def test_get_paper_with_authors_list(self):
-        """Test that paper details include authors as list."""
+        """Test that paper details include authors as list.
+
+        DatabaseManager.get_paper_by_uid() already returns authors as a list
+        (via _paper_to_dict), so the endpoint returns them as-is.
+        """
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 mock_db = Mock()
 
-                # Mock paper data with lightweight schema (authors as semicolon-separated string)
+                # DatabaseManager.get_paper_by_uid returns authors already as a list
                 paper_row = {
                     "uid": "test_uid_123",
                     "title": "Test Paper",
                     "abstract": "Test abstract",
-                    "authors": "Author 1; Author 2",  # Semicolon-separated string
+                    "authors": ["Author 1", "Author 2"],
                     "session": "Poster Session 1",
                     "poster_position": "123",
                 }
-                mock_db.query.return_value = [paper_row]
+                mock_db.get_paper_by_uid.return_value = paper_row
                 mock_get_db.return_value = mock_db
 
                 # Use string UID (not integer ID)
@@ -953,7 +984,7 @@ class TestWebUIGetPaperDetails:
                 assert response.status_code == 200
                 data = response.get_json()
 
-                # Verify authors are included as list (parsed from semicolon-separated string)
+                # Verify authors are included as list (formatting done by DatabaseManager)
                 assert "authors" in data
                 assert data["authors"] == ["Author 1", "Author 2"]
                 # Verify 'uid' field is present
@@ -1215,7 +1246,7 @@ class TestWebUIGetPaperException:
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 mock_db = Mock()
-                mock_db.query.return_value = []  # No paper found
+                mock_db.get_paper_by_uid.return_value = None  # Paper not found
                 mock_get_db.return_value = mock_db
 
                 response = client.get("/api/paper/999")
@@ -1225,28 +1256,22 @@ class TestWebUIGetPaperException:
                 assert "error" in data
                 assert "not found" in data["error"].lower()
 
-    def test_get_paper_database_error_returns_404(self):
-        """Test that database exceptions are wrapped as PaperFormattingError and return 404.
-
-        This is by design - our new API fails early and converts all database errors
-        to PaperFormattingError which returns 404 (not found).
-        """
+    def test_get_paper_database_error_returns_500(self):
+        """Test that database exceptions return 500."""
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 mock_db = Mock()
-                # Simulate a database exception - gets wrapped as PaperFormattingError
-                mock_db.query.side_effect = RuntimeError("Database connection lost")
+                # Simulate a database exception
+                mock_db.get_paper_by_uid.side_effect = RuntimeError("Database connection lost")
                 mock_get_db.return_value = mock_db
 
                 response = client.get("/api/paper/1")
 
-                # Database errors are wrapped as PaperFormattingError, which returns 404
-                assert response.status_code == 404
+                assert response.status_code == 500
                 data = response.get_json()
                 assert "error" in data
-                assert "Failed to retrieve paper" in data["error"]
 
 
 class TestWebUIStatsExceptionHandling:
@@ -2463,11 +2488,12 @@ class TestPaperCardDisplayFieldsUnit:
             "url": "https://papers.nips.cc/paper/detail",
         }
 
-        with patch("abstracts_explorer.web_ui.app.get_paper_with_authors") as mock_get_paper:
-            with patch.object(app_module, "get_database"):
-                mock_get_paper.return_value = expected_paper
+        with patch.object(app_module, "get_database") as mock_get_db:
+            mock_db = Mock()
+            mock_db.get_paper_by_uid.return_value = expected_paper
+            mock_get_db.return_value = mock_db
 
-                response = client.get("/api/paper/detail-uid-1")
+            response = client.get("/api/paper/detail-uid-1")
 
         assert response.status_code == 200
         paper = response.get_json()
@@ -2492,11 +2518,12 @@ class TestPaperCardDisplayFieldsUnit:
             "year": 2025,
         }
 
-        with patch("abstracts_explorer.web_ui.app.get_paper_with_authors") as mock_get_paper:
-            with patch.object(app_module, "get_database"):
-                mock_get_paper.return_value = expected_paper
+        with patch.object(app_module, "get_database") as mock_get_db:
+            mock_db = Mock()
+            mock_db.get_paper_by_uid.return_value = expected_paper
+            mock_get_db.return_value = mock_db
 
-                response = client.get("/api/paper/detail-uid-2")
+            response = client.get("/api/paper/detail-uid-2")
 
         assert response.status_code == 200
         paper = response.get_json()
@@ -2533,20 +2560,17 @@ class TestPaperCardDisplayFieldsUnit:
             },
         ]
 
-        def mock_get_paper_side_effect(database, paper_uid):
-            for p in batch_papers:
-                if p["uid"] == paper_uid:
-                    return p
-            raise PaperFormattingError(f"Paper {paper_uid} not found")
+        paper_map = {p["uid"]: p for p in batch_papers}
 
-        with patch("abstracts_explorer.web_ui.app.get_paper_with_authors") as mock_get_paper:
-            with patch.object(app_module, "get_database"):
-                mock_get_paper.side_effect = mock_get_paper_side_effect
+        with patch.object(app_module, "get_database") as mock_get_db:
+            mock_db = Mock()
+            mock_db.get_paper_by_uid.side_effect = lambda uid: paper_map.get(uid)
+            mock_get_db.return_value = mock_db
 
-                response = client.post(
-                    "/api/papers/batch",
-                    json={"paper_ids": ["batch-uid-1", "batch-uid-2"]},
-                )
+            response = client.post(
+                "/api/papers/batch",
+                json={"paper_ids": ["batch-uid-1", "batch-uid-2"]},
+            )
 
         assert response.status_code == 200
         data = response.get_json()
