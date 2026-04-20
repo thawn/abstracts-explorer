@@ -19,7 +19,6 @@ from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.rag import RAGChat
 from abstracts_explorer.config import get_config
-from abstracts_explorer.paper_utils import PaperFormattingError
 from abstracts_explorer.export_utils import export_papers_to_zip
 
 # Import version
@@ -505,8 +504,6 @@ def get_paper(paper_uid):
         if paper is None:
             return jsonify({"error": f"Paper with uid={paper_uid} not found"}), 404
         return jsonify(paper)
-    except PaperFormattingError as e:
-        return jsonify({"error": str(e)}), 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -545,8 +542,8 @@ def get_papers_batch():
                     papers.append(paper)
                 else:
                     logger.warning(f"Paper {paper_uid} not found in database")
-            except PaperFormattingError as e:
-                logger.warning(f"Paper {paper_uid} not found: {e}")
+            except Exception as e:
+                logger.warning(f"Error fetching paper {paper_uid}: {e}")
                 continue
 
         return jsonify({"papers": papers})
@@ -925,7 +922,7 @@ def export_interesting_papers():
                     paper["searchTerm"] = search_query or "Unknown"
 
                 papers.append(paper)
-            except PaperFormattingError:
+            except Exception:
                 logger.warning(f"Paper {paper_id} not found")
                 continue
 
