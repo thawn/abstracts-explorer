@@ -1416,3 +1416,63 @@ class EmbeddingsManager:
             raise
         except Exception as e:
             raise EmbeddingsError(f"Failed to import embeddings: {str(e)}") from e
+
+    def update_paper_metadata(self, updates: Dict[str, Dict[str, Any]]) -> int:
+        """
+        Update metadata fields for existing papers without changing their embeddings.
+
+        Fetches the current metadata for each UID, merges the supplied field
+        updates, re-serialises the result and calls ``collection.update``.
+        Papers whose UIDs are not found in the collection are silently skipped.
+
+        Parameters
+        ----------
+        updates : dict
+            Mapping of paper UID → dict of metadata field → new value.
+            Only the keys present in each inner dict are modified; all other
+            metadata fields are preserved.
+
+        Returns
+        -------
+        int
+            Number of papers whose metadata was actually updated.
+
+        Raises
+        ------
+        EmbeddingsError
+            If fetching or updating the collection fails.
+
+        Examples
+        --------
+        >>> em = EmbeddingsManager()
+        >>> em.update_paper_metadata({
+        ...     "abc123": {"paper_pdf_url": "https://example.com/paper.pdf"}
+        ... })
+        1
+        """
+        if not updates:
+            return 0
+
+        try:
+            ids = list(updates.keys())
+            existing = self.collection.get(ids=ids, include=["metadatas"])
+
+            updated_ids = []
+            updated_metadatas = []
+            for uid, raw_meta in zip(existing["ids"], existing.get("metadatas") or []):
+                # raw_meta contains already-serialised string values from ChromaDB.
+                # Merge new values and re-serialise so None → "" and lists are handled.
+                merged = dict(raw_meta)
+                merged.update(updates[uid])
+                updated_ids.append(uid)
+                updated_metadatas.append(self._serialize_metadata_for_chromadb(merged))
+
+            if updated_ids:
+                self.collection.update(ids=updated_ids, metadatas=updated_metadatas)
+
+            return len(updated_ids)
+
+        except EmbeddingsError:
+            raise
+        except Exception as e:
+            raise EmbeddingsError(f"Failed to update paper metadata: {str(e)}") from e
