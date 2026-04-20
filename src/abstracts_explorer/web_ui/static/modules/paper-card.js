@@ -71,13 +71,16 @@ export function formatPaperCard(paper, options = {}) {
     if (paper.abstract) {
         if (paper.abstract.length > abstractLength) {
             const preview = paper.abstract.substring(0, abstractLength);
-            const remaining = paper.abstract.substring(abstractLength);
             abstractHtml = `
-                <details class="text-gray-700 ${compact ? 'text-xs' : 'text-sm'} leading-relaxed ${compact ? 'mt-2' : ''} markdown-content" onclick="event.stopPropagation()">
-                    <summary class="cursor-pointer hover:text-purple-600">
-                        ${renderMarkdownWithLatex(preview)}... <span class="text-purple-600 font-medium">Show more</span>
+                <details class="abstract-details text-gray-700 ${compact ? 'text-xs' : 'text-sm'} leading-relaxed ${compact ? 'mt-2' : ''} markdown-content" onclick="event.stopPropagation()">
+                    <summary class="cursor-pointer">
+                        <span class="abstract-preview">
+                            ${renderMarkdownWithLatex(preview)}... <span class="text-purple-600 font-medium hover:text-purple-800">Show more</span>
+                        </span>
+                        <span class="abstract-full">
+                            ${renderMarkdownWithLatex(paper.abstract)} <span class="text-purple-600 font-medium hover:text-purple-800">Show less</span>
+                        </span>
                     </summary>
-                    <div class="mt-2">${renderMarkdownWithLatex(remaining)}</div>
                 </details>
             `;
         } else {
