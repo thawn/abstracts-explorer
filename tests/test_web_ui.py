@@ -2491,11 +2491,10 @@ class TestPaperCardDisplayFieldsUnit:
             "url": "https://papers.nips.cc/paper/detail",
         }
 
-        with patch("abstracts_explorer.web_ui.app.get_paper_with_authors") as mock_get_paper:
-            with patch.object(app_module, "get_database"):
-                mock_get_paper.return_value = expected_paper
+        with patch.object(app_module, "get_database") as mock_db:
+            mock_db.get_paper_by_uid.return_value = expected_paper
 
-                response = client.get("/api/paper/detail-uid-1")
+            response = client.get("/api/paper/detail-uid-1")
 
         assert response.status_code == 200
         paper = response.get_json()
@@ -2520,11 +2519,10 @@ class TestPaperCardDisplayFieldsUnit:
             "year": 2025,
         }
 
-        with patch("abstracts_explorer.web_ui.app.get_paper_with_authors") as mock_get_paper:
-            with patch.object(app_module, "get_database"):
-                mock_get_paper.return_value = expected_paper
+        with patch.object(app_module, "get_database") as mock_db:
+            mock_db.get_paper_by_uid.return_value = expected_paper
 
-                response = client.get("/api/paper/detail-uid-2")
+            response = client.get("/api/paper/detail-uid-2")
 
         assert response.status_code == 200
         paper = response.get_json()
@@ -2567,14 +2565,13 @@ class TestPaperCardDisplayFieldsUnit:
                     return p
             raise PaperFormattingError(f"Paper {paper_uid} not found")
 
-        with patch("abstracts_explorer.web_ui.app.get_paper_with_authors") as mock_get_paper:
-            with patch.object(app_module, "get_database"):
-                mock_get_paper.side_effect = mock_get_paper_side_effect
+        with patch.object(app_module, "get_database") as mock_db:
+            mock_db.get_paper_by_uid.side_effect = mock_get_paper_side_effect
 
-                response = client.post(
-                    "/api/papers/batch",
-                    json={"paper_ids": ["batch-uid-1", "batch-uid-2"]},
-                )
+            response = client.post(
+                "/api/papers/batch",
+                json={"paper_ids": ["batch-uid-1", "batch-uid-2"]},
+            )
 
         assert response.status_code == 200
         data = response.get_json()

@@ -19,7 +19,7 @@ from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.rag import RAGChat
 from abstracts_explorer.config import get_config
-from abstracts_explorer.paper_utils import get_paper_with_authors, PaperFormattingError
+from abstracts_explorer.paper_utils import PaperFormattingError
 from abstracts_explorer.export_utils import export_papers_to_zip
 
 # Import version
@@ -501,7 +501,7 @@ def get_paper(paper_uid):
     """
     try:
         database = get_database()
-        paper = get_paper_with_authors(database, paper_uid)
+        paper = database.get_paper_by_uid(paper_uid)
         return jsonify(paper)
     except PaperFormattingError as e:
         return jsonify({"error": str(e)}), 404
@@ -538,7 +538,7 @@ def get_papers_batch():
             try:
                 # Convert to string if needed (JavaScript might send as string or int)
                 paper_uid_str = str(paper_uid)
-                paper = get_paper_with_authors(database, paper_uid_str)
+                paper = database.get_paper_by_uid(paper_uid_str)
                 papers.append(paper)
             except PaperFormattingError as e:
                 logger.warning(f"Paper {paper_uid} not found: {e}")
@@ -904,7 +904,7 @@ def export_interesting_papers():
         papers = []
         for paper_id in paper_ids:
             try:
-                paper = get_paper_with_authors(database, paper_id)
+                paper = database.get_paper_by_uid(str(paper_id))
                 priority_data = priorities.get(str(paper_id), {})
 
                 # Handle both old format (int) and new format (dict with priority and searchTerm)

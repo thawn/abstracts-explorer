@@ -8,82 +8,10 @@ import pytest
 from unittest.mock import Mock
 
 from abstracts_explorer.paper_utils import (
-    get_paper_with_authors,
     format_search_results,
     build_context_from_papers,
     PaperFormattingError,
 )
-
-
-class TestGetPaperWithAuthors:
-    """Tests for get_paper_with_authors function."""
-
-    def test_get_paper_with_authors_success(self):
-        """Test successful paper retrieval with authors."""
-        # Mock database
-        mock_db = Mock()
-        mock_db.query.return_value = [
-            {
-                "uid": "abc123",
-                "title": "Test Paper",
-                "abstract": "Test abstract",
-                "authors": "John Doe; Jane Smith",
-                "session": "ML",
-            }
-        ]
-
-        paper = get_paper_with_authors(mock_db, "abc123")
-
-        assert paper["uid"] == "abc123"
-        assert paper["title"] == "Test Paper"
-        assert paper["authors"] == ["John Doe", "Jane Smith"]
-        mock_db.query.assert_called_once_with("SELECT * FROM papers WHERE uid = ?", ("abc123",))
-
-    def test_get_paper_with_authors_invalid_id(self):
-        """Test that invalid paper UIDs raise error."""
-        mock_db = Mock()
-
-        # Test empty string
-        with pytest.raises(PaperFormattingError, match="Invalid paper_uid"):
-            get_paper_with_authors(mock_db, "")
-
-        # Test whitespace only
-        with pytest.raises(PaperFormattingError, match="Invalid paper_uid"):
-            get_paper_with_authors(mock_db, "   ")
-
-        # Test non-string
-        with pytest.raises(PaperFormattingError, match="Invalid paper_uid"):
-            get_paper_with_authors(mock_db, 123)
-
-    def test_get_paper_with_authors_no_database(self):
-        """Test that missing database raises error."""
-        with pytest.raises(PaperFormattingError, match="Database connection is required"):
-            get_paper_with_authors(None, "abc123")
-
-    def test_get_paper_with_authors_not_found(self):
-        """Test that missing paper raises error."""
-        mock_db = Mock()
-        mock_db.query.return_value = []
-
-        with pytest.raises(PaperFormattingError, match="not found in database"):
-            get_paper_with_authors(mock_db, "nonexistent")
-
-    def test_get_paper_with_authors_no_authors(self):
-        """Test paper with no authors."""
-        mock_db = Mock()
-        mock_db.query.return_value = [{"uid": "abc123", "title": "Test Paper", "authors": None}]
-
-        paper = get_paper_with_authors(mock_db, "abc123")
-
-        assert paper["authors"] == []
-
-    def test_get_paper_with_authors_database_error(self):
-        """Test database error handling."""
-        mock_db = Mock()
-        mock_db.query.side_effect = Exception("Database connection lost")
-
-        with pytest.raises(PaperFormattingError, match="Failed to retrieve paper"):
-            get_paper_with_authors(mock_db, "abc123")
 
 
 class TestFormatSearchResults:

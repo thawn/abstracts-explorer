@@ -16,7 +16,13 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError, ProgrammingError, IntegrityError
 
 # Import Pydantic models from plugin framework
-from abstracts_explorer.plugin import LightweightPaper, serialize_authors_to_string, serialize_keywords_to_string
+from abstracts_explorer.plugin import (
+    LightweightPaper,
+    serialize_authors_to_string,
+    serialize_keywords_to_string,
+    deserialize_authors_from_string,
+    deserialize_keywords_from_string,
+)
 
 # Import SQLAlchemy models
 from abstracts_explorer.db_models import (
@@ -646,6 +652,34 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Failed to count papers: {str(e)}") from e
 
+    def get_paper_by_uid(self, uid: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a paper by its UID.
+
+        Parameters
+        ----------
+        uid : str
+            UID of the paper to retrieve.
+
+        Returns
+        -------
+        dict or None
+            Paper data as a dictionary, or None if not found.
+
+        Raises
+        ------
+        DatabaseError
+            If query fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            paper = self._session.execute(select(Paper).where(Paper.uid == uid)).scalar_one_or_none()
+            return self._paper_to_dict(paper) if paper else None
+        except Exception as e:
+            raise DatabaseError(f"Failed to retrieve paper by UID: {str(e)}") from e
+
     #: Paper model column names that can be used as ``field:"value"`` filters
     #: in search queries.  Internal columns (``uid``, ``created_at``) are
     #: excluded because they are not meaningful search targets for users.
@@ -891,16 +925,6 @@ class DatabaseManager:
             limit=limit,
         )
 
-        # Convert to list of dicts for JSON serialization
-        papers = [dict(p) for p in papers]
-
-        # Parse authors from comma-separated string for each paper
-        for paper in papers:
-            if "authors" in paper and paper["authors"]:
-                paper["authors"] = [a.strip() for a in paper["authors"].split(";")]
-            else:
-                paper["authors"] = []
-
         return papers
 
     def get_stats(self, year: Optional[int] = None, conference: Optional[str] = None) -> Dict[str, Any]:
@@ -961,7 +985,7 @@ class DatabaseManager:
             "uid": paper.uid,
             "original_id": paper.original_id,
             "title": paper.title,
-            "authors": paper.authors,
+            "authors": deserialize_authors_from_string(paper.authors),
             "abstract": paper.abstract,
             "session": paper.session,
             "poster_position": paper.poster_position,
@@ -969,80 +993,14 @@ class DatabaseManager:
             "poster_image_url": paper.poster_image_url,
             "url": paper.url,
             "room_name": paper.room_name,
-            "keywords": paper.keywords,
-            "starttime": paper.starttime,
-            "endtime": paper.endtime,
+            "keywords": deserialize_keywords_from_string(paper.keywords),
+            "starttime": str(paper.starttime),  # Convert datetime to string for JSON serialization
+            "endtime": str(paper.endtime),  # Convert datetime to string for JSON serialization
             "award": paper.award,
             "year": paper.year,
             "conference": paper.conference,
-            "created_at": paper.created_at,
+            "created_at": str(paper.created_at),  # Convert datetime to string for JSON serialization
         }
-
-    def search_authors_in_papers(
-        self,
-        name: Optional[str] = None,
-        limit: int = 100,
-    ) -> List[Dict[str, Any]]:
-        """
-        Search for authors by name within the papers' authors field.
-
-        Parameters
-        ----------
-        name : str, optional
-            Name to search for (partial match).
-        limit : int, default=100
-            Maximum number of results to return.
-
-        Returns
-        -------
-        list of dict
-            Unique authors found in papers with fields: name.
-
-        Raises
-        ------
-        DatabaseError
-            If search fails.
-
-        Examples
-        --------
-        >>> db = DatabaseManager()
-        >>> with db:
-        ...     authors = db.search_authors_in_papers(name="Huang")
-        >>> for author in authors:
-        ...     print(author['name'])
-        """
-        if not name or not self._session:
-            return []
-
-        try:
-            # Search for authors in the semicolon-separated authors field
-            search_pattern = f"%{name}%"
-            stmt = (
-                select(Paper.authors)
-                .where(Paper.authors.ilike(search_pattern))
-                .distinct()
-                .limit(limit * 10)  # Get more papers to extract unique authors
-            )
-
-            results = self._session.execute(stmt).scalars().all()
-
-            # Extract unique author names
-            author_names = set()
-            for authors_str in results:
-                if authors_str:
-                    # Split semicolon-separated authors
-                    for author in authors_str.split(";"):
-                        author = author.strip()
-                        if name.lower() in author.lower():
-                            author_names.add(author)
-                            if len(author_names) >= limit:
-                                break
-                if len(author_names) >= limit:
-                    break
-
-            return [{"name": name} for name in sorted(author_names)[:limit]]
-        except Exception as e:
-            raise DatabaseError(f"Author search failed: {str(e)}") from e
 
     def get_author_count(self) -> int:
         """

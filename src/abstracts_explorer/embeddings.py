@@ -649,6 +649,7 @@ class EmbeddingsManager:
         query: str,
         n_results: int = 10,
         where: Optional[Dict[str, Any]] = None,
+        ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Search for similar papers using semantic similarity.
@@ -693,6 +694,7 @@ class EmbeddingsManager:
                 query_embeddings=[query_embedding],
                 n_results=n_results,
                 where=where,
+                ids=ids,
             )
 
             logger.info(f"Found {len(results['ids'][0])} similar papers")
@@ -948,23 +950,13 @@ class EmbeddingsManager:
         # This avoids generating a meaningless embedding for the raw filter syntax
         # and allows field-filter searches to work without an LLM backend.
         if field_filters and not remaining_query:
-            papers = database.search_papers(
+            return database.search_papers(
                 field_filters=field_filters,
                 sessions=sessions,
                 years=years,
                 conferences=conferences,
                 limit=limit,
             )
-            # Format results consistently: convert ORM dicts and parse authors
-            formatted = []
-            for paper in papers:
-                p = dict(paper)
-                if "authors" in p and p["authors"]:
-                    p["authors"] = [a.strip() for a in p["authors"].split(";")]
-                else:
-                    p["authors"] = []
-                formatted.append(p)
-            return formatted
 
         semantic_query = remaining_query if remaining_query else query
 
@@ -1136,7 +1128,7 @@ class EmbeddingsManager:
         ...     years=[2023, 2024]
         ... )
         """
-        from abstracts_explorer.paper_utils import get_paper_with_authors, PaperFormattingError
+        from abstracts_explorer.paper_utils import PaperFormattingError
 
         if not query or not query.strip():
             raise EmbeddingsError("Query cannot be empty")
@@ -1203,7 +1195,7 @@ class EmbeddingsManager:
                 if distance <= distance_threshold:
                     # Get full paper details from database using uid
                     try:
-                        paper_dict = get_paper_with_authors(database, paper_id)
+                        paper_dict = database.get_paper_by_id(paper_id)
                         paper_dict["distance"] = float(distance)
                         matching_papers.append(paper_dict)
                     except PaperFormattingError:

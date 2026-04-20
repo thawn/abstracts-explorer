@@ -8,16 +8,12 @@ structure and error handling.
 
 ```python
 from abstracts_explorer.paper_utils import (
-    get_paper_with_authors,
     format_search_results,
     build_context_from_papers,
 )
 from abstracts_explorer.database import DatabaseManager
 
 db = DatabaseManager()
-
-# Get a paper with its authors
-paper = get_paper_with_authors(db, paper_uid="abc123")
 
 # Format search results for display
 formatted = format_search_results(search_results, db)

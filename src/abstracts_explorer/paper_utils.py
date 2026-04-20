@@ -17,63 +17,6 @@ class PaperFormattingError(Exception):
     pass
 
 
-def get_paper_with_authors(database, paper_uid: str) -> Dict[str, Any]:
-    """
-    Get a complete paper record with authors from database.
-
-    This function enforces that papers MUST come from the database with full details.
-    No fallbacks or partial data allowed - fail early if paper doesn't exist.
-
-    Parameters
-    ----------
-    database : DatabaseManager
-        Database instance to query.
-    paper_uid : str
-        Paper UID (unique identifier) to retrieve.
-
-    Returns
-    -------
-    dict
-        Complete paper dictionary with all fields including authors list.
-
-    Raises
-    ------
-    PaperFormattingError
-        If paper_uid is invalid or paper not found in database.
-
-    Examples
-    --------
-    >>> paper = get_paper_with_authors(db, "b5ea3e6fa2ccb0be")
-    >>> print(paper['title'], paper['authors'])
-    """
-    if not isinstance(paper_uid, str) or not paper_uid.strip():
-        raise PaperFormattingError(f"Invalid paper_uid: {paper_uid}. Must be non-empty string.")
-
-    if database is None:
-        raise PaperFormattingError("Database connection is required but not provided.")
-
-    try:
-        # Get full paper record from database using uid
-        paper_rows = database.query("SELECT * FROM papers WHERE uid = ?", (paper_uid,))
-        if not paper_rows:
-            raise PaperFormattingError(f"Paper with uid={paper_uid} not found in database.")
-
-        paper = dict(paper_rows[0])
-
-        # Parse authors from semicolon-separated string
-        if "authors" in paper and paper["authors"]:
-            paper["authors"] = [a.strip() for a in paper["authors"].split(";")]
-        else:
-            paper["authors"] = []
-
-        return paper
-
-    except Exception as e:
-        if isinstance(e, PaperFormattingError):
-            raise
-        raise PaperFormattingError(f"Failed to retrieve paper {paper_uid}: {str(e)}") from e
-
-
 def format_search_results(
     search_results: Dict[str, Any],
     database,
@@ -146,7 +89,7 @@ def format_search_results(
                 continue
 
             # Get complete paper from database (this validates paper exists)
-            paper = get_paper_with_authors(database, paper_uid)
+            paper = database.get_paper_by_id(paper_uid)
 
             # Add similarity/distance scores if available
             if "distances" in search_results and search_results["distances"][0]:
