@@ -110,6 +110,27 @@ select:focus {
     transform: scale(0.95);
     /* Yellow color on click */
 }
+/* Abstract expand/collapse toggle */
+details.abstract-details .abstract-full {
+    display: none;
+}
+
+details.abstract-details[open] .abstract-preview {
+    display: none;
+}
+
+details.abstract-details[open] .abstract-full {
+    display: block;
+}
+
+details.abstract-details > summary {
+    list-style: none;
+}
+
+details.abstract-details > summary::-webkit-details-marker {
+    display: none;
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
     .container {

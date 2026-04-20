@@ -8,7 +8,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from sqlalchemy import create_engine, select, delete, func, or_, and_, text
 from sqlalchemy.orm import sessionmaker, Session
@@ -220,6 +220,38 @@ class DatabaseManager:
         """Context manager exit."""
         self.close()
 
+    @staticmethod
+    def compute_uid(title: str, original_id: Optional[Union[str, int]], conference: str, year: int) -> str:
+        """
+        Compute a deterministic paper UID from its identifying fields.
+
+        The UID is a 16-character hex string derived from a SHA-256 hash
+        of the concatenated title, original_id, conference and year.
+
+        Parameters
+        ----------
+        title : str
+            Paper title.
+        original_id : str, int, or None
+            Original paper ID from the source (e.g., OpenReview ID).
+        conference : str
+            Conference name (e.g., "NeurIPS").
+        year : int
+            Conference year.
+
+        Returns
+        -------
+        str
+            16-character hex UID.
+
+        Examples
+        --------
+        >>> DatabaseManager.compute_uid("My Paper", "abc123", "NeurIPS", 2025)
+        'a1b2c3d4e5f67890'
+        """
+        uid_source = f"{title}:{original_id}:{conference}:{year}"
+        return hashlib.sha256(uid_source.encode("utf-8")).hexdigest()[:16]
+
     def create_tables(self) -> None:
         """
         Create database tables for papers and embeddings metadata.
@@ -311,8 +343,7 @@ class DatabaseManager:
             authors_str = serialize_authors_to_string(paper.authors)
 
             # Generate UID as hash from title + conference + year
-            uid_source = f"{title}:{paper_id}:{paper.conference}:{paper.year}"
-            uid = hashlib.sha256(uid_source.encode("utf-8")).hexdigest()[:16]
+            uid = self.compute_uid(title, paper_id, paper.conference, paper.year)
 
             # Check if paper already exists (by UID)
             existing = self._session.execute(select(Paper).where(Paper.uid == uid)).scalar_one_or_none()
