@@ -31,10 +31,13 @@ let currentHierarchyLevel = 0;
 let maxHierarchyLevel = 0;
 let currentParentId = null;
 
-// Custom query clustering state
-let customQueryClusters = [];  // Array of custom query cluster objects
-let customClusterMode = false;  // Whether custom cluster mode is active
-let customClusterVisibility = {};  // Track visibility of each custom cluster by ID
+// Custom topic clustering state
+let customQueryClusters = [];  // Array of custom topic cluster objects
+let customClusterMode = false;  // Whether custom topic mode is active
+let customClusterVisibility = {};  // Track visibility of each custom topic by ID
+
+// Color palette for topic evolution charts
+const TOPIC_COLORS = ['#7c3aed', '#2563eb', '#059669', '#d97706', '#dc2626', '#6366f1', '#0891b2', '#be185d'];
 
 /**
  * Check if clusters are loaded
@@ -50,6 +53,9 @@ export function areClustersLoaded() {
  */
 export function resetClusters() {
     clusterData = null;
+    customQueryClusters = [];
+    customClusterMode = false;
+    customClusterVisibility = {};
 }
 
 /**
@@ -1275,7 +1281,7 @@ if (typeof window !== 'undefined') {
 }
 
 /**
- * Search for papers within distance of a custom query
+ * Search for papers within distance of a custom topic
  * @async
  */
 export async function searchCustomCluster() {
@@ -1355,6 +1361,9 @@ export async function searchCustomCluster() {
         visualizeClustersWithCustomQueries();
         
         console.log(`Found ${data.count} papers within distance ${distance} for query: "${query}"`);
+        
+        // Fetch and display topic evolution for this custom topic
+        fetchAndDisplayTopicEvolution(query, distance, selectedConference);
         
     } catch (error) {
         console.error('Error searching custom cluster:', error);
@@ -1578,18 +1587,18 @@ function visualizeClustersWithCustomQueries() {
 }
 
 /**
- * Update custom legend showing only custom queries
+ * Update custom legend showing only custom topics
  */
 function updateCustomQueryLegend() {
     const legendDiv = document.getElementById('cluster-legend');
     
     if (customQueryClusters.length === 0) {
-        legendDiv.innerHTML = '<p class="text-gray-500 text-sm">No custom queries</p>';
+        legendDiv.innerHTML = '<p class="text-gray-500 text-sm">No custom topics</p>';
         return;
     }
     
     let html = '<div class="space-y-3">';
-    html += '<h4 class="text-md font-bold text-gray-700 mb-3">Custom Queries</h4>';
+    html += '<h4 class="text-md font-bold text-gray-700 mb-3">Custom Topics</h4>';
     
     customQueryClusters.forEach((cluster, idx) => {
         // Skip blue (first color) - start from index 1 to avoid confusion with background
@@ -1717,13 +1726,222 @@ export async function deleteCustomCluster(clusterId) {
     if (customQueryClusters.length === 0) {
         customClusterMode = false;
         customClusterVisibility = {};  // Reset visibility state
-        // Reload normal clusters
+        // Reload normal clusters (also rebuilds the legend via createCustomLegend)
         visualizeClusters();
-        // Update normal legend
-        updateLegend();
     } else {
         // Re-render the visualization with remaining custom clusters
         visualizeClustersWithCustomQueries();
+    }
+}
+
+/**
+ * Fetch topic evolution data and display a chart for a custom topic.
+ * Appends a new plot to the topic-evolution-container.
+ * @param {string} topic - Topic keywords
+ * @param {number} distance - Distance threshold used for the custom topic search
+ * @param {string} conference - Selected conference (may be empty)
+ * @async
+ */
+async function fetchAndDisplayTopicEvolution(topic, distance, conference) {
+    const container = document.getElementById('topic-evolution-container');
+    if (!container) return;
+
+    // Topic evolution requires a conference; skip when none is selected
+    if (!conference) {
+        return;
+    }
+
+    // Build request body
+    const requestBody = {
+        topic_keywords: topic,
+        distance_threshold: distance,
+        conferences: [conference]
+    };
+
+    // Create a placeholder with loading spinner
+    const plotId = `topic-evo-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'bg-white rounded-lg shadow-md p-6 mb-6';
+    wrapper.id = `${plotId}-wrapper`;
+    wrapper.innerHTML = `
+        <div id="${plotId}" style="width: 100%; height: 350px;">
+            <div class="text-center text-gray-500 py-8">
+                <i class="fas fa-spinner fa-spin text-4xl mb-4 opacity-20"></i>
+                <p class="text-sm">Loading topic evolution for "${escapeHtml(topic)}"...</p>
+            </div>
+        </div>
+    `;
+    container.appendChild(wrapper);
+    container.classList.remove('hidden');
+
+    try {
+        const response = await fetch(`${API_BASE}/api/topic-evolution`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (data.error) {
+            throw new Error(data.error);
+        }
+
+        // Render topic evolution chart
+        renderTopicEvolutionChart(plotId, data);
+
+    } catch (error) {
+        console.error('Error fetching topic evolution:', error);
+        const plotEl = document.getElementById(plotId);
+        if (plotEl) {
+            plotEl.innerHTML = `
+                <div class="text-center text-red-500 py-8">
+                    <i class="fas fa-exclamation-triangle text-4xl mb-4 opacity-50"></i>
+                    <p class="text-sm">Failed to load topic evolution: ${escapeHtml(error.message)}</p>
+                </div>
+            `;
+        }
+    }
+}
+
+/**
+ * Render a topic evolution line chart using Plotly.
+ * @param {string} plotId - DOM element id for the plot container
+ * @param {Object} data - Topic evolution data from the API
+ */
+function renderTopicEvolutionChart(plotId, data) {
+    const conferenceData = data.conference_data || {};
+    const conferences = Object.keys(conferenceData);
+    const topic = data.topic || '';
+
+    const traces = [];
+    let colorIdx = 0;
+
+    for (const conf of conferences) {
+        const cdata = conferenceData[conf] || {};
+        const yearRelative = cdata.year_relative || {};
+        const years = Object.keys(yearRelative).sort();
+        const values = years.map(y => yearRelative[y]);
+
+        traces.push({
+            x: years.map(Number),
+            y: values,
+            type: 'scatter',
+            mode: 'lines+markers',
+            name: conf,
+            line: { color: TOPIC_COLORS[colorIdx % TOPIC_COLORS.length], width: 2 },
+            marker: { size: 6 }
+        });
+        colorIdx++;
+    }
+
+    if (traces.length === 0) {
+        const plotEl = document.getElementById(plotId);
+        if (plotEl) {
+            plotEl.innerHTML = `
+                <div class="text-center text-gray-500 py-8">
+                    <p class="text-sm">No topic evolution data available for "${escapeHtml(topic)}"</p>
+                </div>
+            `;
+        }
+        return;
+    }
+
+    const confLabel = conferences.length === 1
+        ? ` (${conferences[0]})`
+        : conferences.length > 1
+            ? ` (${conferences.join(', ')})`
+            : '';
+
+    const layout = {
+        title: { text: `Topic Evolution: ${topic}${confLabel}` },
+        xaxis: { title: { text: 'Year' }, type: 'linear', automargin: true, dtick: 1 },
+        yaxis: { title: { text: 'Percentage of Papers (%)' }, automargin: true },
+        margin: { t: 50, b: 60, l: 80, r: 20 },
+        paper_bgcolor: 'white',
+        plot_bgcolor: 'white',
+        showlegend: traces.length > 1
+    };
+
+    if (typeof Plotly !== 'undefined') {
+        Plotly.newPlot(plotId, traces, layout, { responsive: true, displayModeBar: false });
+    }
+}
+
+/**
+ * Load and display papers-per-year bar chart for the currently selected conference.
+ * Highlights the currently selected year.
+ * @async
+ */
+export async function loadPapersPerYear() {
+    const plotDiv = document.getElementById('papers-per-year-plot');
+    if (!plotDiv) return;
+
+    const selectedConference = getSelectedConference();
+    const selectedYears = getSelectedYears();
+    const highlightYear = selectedYears.length > 0 ? selectedYears[0] : null;
+
+    // Build query params
+    let url = `${API_BASE}/api/papers-per-year`;
+    if (selectedConference) {
+        url += `?conference=${encodeURIComponent(selectedConference)}`;
+    }
+
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data.error) {
+            throw new Error(data.error);
+        }
+
+        const yearCounts = data.year_counts || {};
+        const years = Object.keys(yearCounts).map(Number).sort();
+        const counts = years.map(y => yearCounts[y]);
+
+        if (years.length === 0) {
+            plotDiv.innerHTML = '<div class="text-center text-gray-500 py-8"><p class="text-sm">No data available</p></div>';
+            return;
+        }
+
+        // Build colors array: highlight the selected year
+        const colors = years.map(y =>
+            y === highlightYear ? '#7c3aed' : '#c4b5fd'
+        );
+
+        const traces = [{
+            x: years,
+            y: counts,
+            type: 'bar',
+            marker: { color: colors },
+            hovertemplate: '<b>%{x}</b><br>Papers: %{y}<extra></extra>'
+        }];
+
+        const confTitle = selectedConference || 'All Conferences';
+        const layout = {
+            title: { text: `Total Papers Per Year — ${confTitle}` },
+            xaxis: { title: { text: 'Year' }, type: 'linear', dtick: 1, automargin: true },
+            yaxis: { title: { text: 'Number of Papers' }, automargin: true },
+            margin: { t: 50, b: 50, l: 70, r: 20 },
+            paper_bgcolor: 'white',
+            plot_bgcolor: 'white',
+            showlegend: false,
+            bargap: 0.2
+        };
+
+        Plotly.newPlot(plotDiv, traces, layout, { responsive: true, displayModeBar: false });
+
+    } catch (error) {
+        console.error('Error loading papers per year:', error);
+        plotDiv.innerHTML = `<div class="text-center text-red-500 py-8"><p class="text-sm">Failed to load: ${escapeHtml(error.message)}</p></div>`;
     }
 }
 
