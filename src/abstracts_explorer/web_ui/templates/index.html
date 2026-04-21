@@ -352,19 +352,23 @@
         <div class="bg-white rounded-lg shadow-md mb-6">
             <nav class="flex border-b">
                 <button onclick="switchTab('search')" id="tab-search"
-                    class="tab-btn flex-1 py-4 px-6 font-semibold text-gray-700 border-b-2 border-purple-600">
+                    class="tab-btn flex-1 py-4 px-6 font-semibold text-gray-700 border-b-2 border-purple-600"
+                    title="Search for conference papers by keywords. Enable LLM-Powered search in settings to find papers by meaning, not just exact keywords.">
                     <i class="fas fa-search mr-2"></i>Search Abstracts (beta)
                 </button>
                 <button onclick="switchTab('chat')" id="tab-chat"
-                    class="tab-btn flex-1 py-4 px-6 font-semibold text-gray-500 border-b-2 border-transparent hover:text-gray-700">
+                    class="tab-btn flex-1 py-4 px-6 font-semibold text-gray-500 border-b-2 border-transparent hover:text-gray-700"
+                    title="Chat with an AI assistant that answers questions about the conference papers using Retrieval-Augmented Generation (RAG). Requires a running LLM backend.">
                     <i class="fas fa-comments mr-2"></i>AI Chat (alpha)
                 </button>
                 <button onclick="switchTab('interesting')" id="tab-interesting"
-                    class="tab-btn flex-1 py-4 px-6 font-semibold text-gray-500 border-b-2 border-transparent hover:text-gray-700">
+                    class="tab-btn flex-1 py-4 px-6 font-semibold text-gray-500 border-b-2 border-transparent hover:text-gray-700"
+                    title="View and manage papers you have marked with stars. Export your selection as ZIP, JSON, or Markdown.">
                     <i class="fas fa-star mr-2"></i>Interesting Papers (<span id="interesting-count">0</span>)
                 </button>
                 <button onclick="switchTab('clusters')" id="tab-clusters"
-                    class="tab-btn flex-1 py-4 px-6 font-semibold text-gray-500 border-b-2 border-transparent hover:text-gray-700">
+                    class="tab-btn flex-1 py-4 px-6 font-semibold text-gray-500 border-b-2 border-transparent hover:text-gray-700"
+                    title="Visualize and explore paper clusters based on topic similarity. Discover trends and themes across the conference.">
                     <i class="fas fa-chart-bar mr-2"></i>Conference Statistics (alpha)
                 </button>
             </nav>

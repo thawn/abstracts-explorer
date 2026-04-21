@@ -110,7 +110,7 @@ export function formatPaperCard(paper, options = {}) {
         </span>`;
     }
     if (paper.distance !== undefined) {
-        metadata += `<span class="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full"><i class="fas fa-chart-line mr-1"></i>${(1 - paper.distance).toFixed(compact ? 2 : 3)}</span>`;
+        metadata += `<span class="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full" title="Similarity score: how closely this paper matches your search query (0 = no match, 1 = perfect match)"><i class="fas fa-chart-line mr-1"></i>${(1 - paper.distance).toFixed(compact ? 2 : 3)}</span>`;
     }
 
     const cardId = idPrefix ? `id="${idPrefix}"` : '';
