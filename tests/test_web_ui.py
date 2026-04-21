@@ -665,9 +665,11 @@ class TestExtractTopKeywords:
         assert isinstance(result, list)
         assert len(result) <= 5
         assert all(isinstance(kw, str) for kw in result)
-        # "deep learning" or "deep" should appear in keywords given its frequency
+        # All keywords should be multi-word phrases (bigrams or trigrams)
+        assert all(len(kw.split()) >= 2 for kw in result)
+        # "deep learning" should appear in keywords given its frequency
         all_kw = " ".join(result).lower()
-        assert "deep" in all_kw or "learning" in all_kw
+        assert "deep learning" in all_kw
 
     def test_respects_n_keywords_parameter(self):
         """Should return at most n_keywords results."""

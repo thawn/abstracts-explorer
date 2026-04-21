@@ -435,7 +435,7 @@ def extract_top_keywords(papers: list, n_keywords: int = 5) -> list:
             max_features=_TFIDF_MAX_FEATURES,
             min_df=min_df,
             stop_words="english",
-            ngram_range=(1, 2),
+            ngram_range=(2, 3),
         )
         tfidf_matrix = tfidf.fit_transform(docs)
         feature_names = tfidf.get_feature_names_out()

@@ -295,10 +295,11 @@ describe('Search Module', () => {
 
             const results = document.getElementById('search-results');
             expect(results.innerHTML).toContain('attention mechanism');
-            // Should be rendered as a button element
+            // Should be rendered as a button element with a data-topic attribute
             const buttons = results.querySelectorAll('button');
             const topicButton = Array.from(buttons).find(btn => btn.textContent.trim() === 'attention mechanism');
             expect(topicButton).toBeTruthy();
+            expect(topicButton.dataset.topic).toBe('attention mechanism');
         });
     });
 

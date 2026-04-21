@@ -118,7 +118,8 @@ export function displaySearchResults(data) {
                 <div class="flex flex-wrap gap-2 mt-2">
                     ${data.related_topics.map(kw => `<button
                         class="px-3 py-1 bg-blue-50 text-blue-700 text-sm rounded-full border border-blue-200 hover:bg-blue-100 transition-colors cursor-pointer"
-                        onclick="document.getElementById('search-input').value = ${JSON.stringify(kw)}; searchPapers();"
+                        data-topic="${escapeHtml(kw)}"
+                        onclick="document.getElementById('search-input').value = this.dataset.topic; searchPapers();"
                     >${escapeHtml(kw)}</button>`).join('')}
                 </div>
             </div>` : ''}
