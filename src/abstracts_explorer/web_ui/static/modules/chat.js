@@ -17,6 +17,9 @@ let _hasUserSentMessage = false;
 /** Whether the feedback highlight animation has already been triggered. */
 let _feedbackHighlightShown = false;
 
+/** Monotonically increasing counter used to generate unique message IDs. */
+let _messageIdCounter = 0;
+
 /**
  * Get the current chat donation consent status from localStorage.
  * @returns {boolean|null} true if accepted, false if declined, null if not yet asked
@@ -293,7 +296,7 @@ export function displayChatPapers(papers, metadata = {}) {
  */
 export function addChatMessage(text, role, isLoading = false) {
     const messagesDiv = document.getElementById('chat-messages');
-    const messageId = `msg-${Date.now()}`;
+    const messageId = `msg-${++_messageIdCounter}`;
 
     const isUser = role === 'user';
     const bgColor = isUser ? 'bg-purple-600 text-white' : 'bg-white text-gray-700';
@@ -731,4 +734,5 @@ export function closePapersModal() {
 export function _resetChatState() {
     _hasUserSentMessage = false;
     _feedbackHighlightShown = false;
+    _messageIdCounter = 0;
 }
