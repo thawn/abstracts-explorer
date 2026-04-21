@@ -1252,7 +1252,7 @@ describe('Clustering Module', () => {
             const [plotEl, traces, layout] = global.Plotly.newPlot.mock.calls[0];
             expect(plotEl).toBe(document.getElementById('papers-per-year-plot'));
             expect(traces).toHaveLength(1);
-            expect(traces[0].type).toBe('bar');
+            expect(traces[0].type).toBe('scatter');
             expect(traces[0].x).toEqual([2023, 2024, 2025]);
             expect(traces[0].y).toEqual([100, 150, 200]);
         });
