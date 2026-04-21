@@ -26,6 +26,23 @@ select:focus {
     outline: none;
 }
 
+/* Ensure header conference/year selectors are readable regardless of OS color scheme.
+   On Linux Chromium in dark mode the native dropdown popup can render with a light
+   background while inheriting color:white from the parent <select>, making options
+   invisible.  color-scheme:light forces light-mode rendering for the native popup;
+   the explicit option rules act as an additional fallback for browsers that honour
+   CSS on <option> elements. */
+#conference-selector,
+#year-selector {
+    color-scheme: light;
+}
+
+#conference-selector option,
+#year-selector option {
+    color: black;
+    background-color: white;
+}
+
 /* Chat message formatting */
 .chat-message p {
     line-height: 1.6;
