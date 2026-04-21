@@ -299,7 +299,7 @@ export function addChatMessage(text, role, isLoading = false) {
     const messageId = `msg-${++_messageIdCounter}`;
 
     const isUser = role === 'user';
-    const bgColor = isUser ? 'bg-purple-600 text-white' : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200';
+    const bgColor = isUser ? 'bg-purple-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200';
     const iconBg = isUser ? 'bg-gray-600' : 'bg-purple-600';
     const icon = isUser ? 'fa-user' : 'fa-robot';
     const justifyClass = isUser ? 'justify-end' : 'justify-start';
