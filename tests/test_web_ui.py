@@ -119,6 +119,12 @@ class TestWebInterface:
         # Ensure the template variable was replaced (not left as {{ version }})
         assert b"{{ version }}" not in response.data
 
+    def test_index_documentation_link(self, client):
+        """Test that the documentation link is present in the header."""
+        response = client.get("/")
+        assert response.status_code == 200
+        assert b"https://thawn.github.io/abstracts-explorer/web_ui.html" in response.data
+
     def test_index_no_imprint_link_by_default(self, client):
         """Test that the imprint link is not shown by default."""
         response = client.get("/")
