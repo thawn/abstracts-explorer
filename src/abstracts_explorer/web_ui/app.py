@@ -11,6 +11,7 @@ import sys
 import logging
 import json
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 from flask import Flask, render_template, request, jsonify, g, send_file, abort
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -139,6 +140,62 @@ def teardown_db(exception):
         db.close()
 
 
+# Known LLM backend definitions: each entry maps a URL fragment to backend metadata.
+# Order matters – more specific patterns should come first.
+_LLM_BACKENDS: List[Dict[str, Any]] = [
+    {
+        "url_fragments": ["blablador.fz-juelich.de"],
+        "name": "BLABLADOR",
+        "homepage": "https://helmholtz-blablador.fz-juelich.de",
+        "logo": "blablador-logo.png",
+    },
+    {
+        "url_fragments": ["chat.fz-rossendorf.de"],
+        "name": "chat.fz-rossendorf.de",
+        "homepage": "https://chat.fz-rossendorf.de",
+        "logo": None,
+    },
+    {
+        "url_fragments": ["localhost:1234", "127.0.0.1:1234"],
+        "name": "LM Studio",
+        "homepage": "https://lmstudio.ai",
+        "logo": None,
+    },
+]
+
+
+def get_llm_backend_info(backend_url: str) -> Dict[str, Optional[str]]:
+    """
+    Detect the LLM backend from its URL and return display metadata.
+
+    Parameters
+    ----------
+    backend_url : str
+        The URL of the configured LLM backend (e.g. from ``config.llm_backend_url``).
+
+    Returns
+    -------
+    dict
+        A dictionary with the following keys:
+
+        ``name`` : str or None
+            Human-readable backend name, or ``None`` if unknown.
+        ``homepage`` : str or None
+            URL of the backend's homepage, or ``None`` if unknown.
+        ``logo`` : str or None
+            Static-file name of the backend logo (relative to the ``static/``
+            directory), or ``None`` if no logo is available.
+    """
+    for backend in _LLM_BACKENDS:
+        if any(fragment in backend_url for fragment in backend["url_fragments"]):
+            return {
+                "name": backend["name"],
+                "homepage": backend["homepage"],
+                "logo": backend["logo"],
+            }
+    return {"name": None, "homepage": None, "logo": None}
+
+
 @app.route("/")
 def index():
     """
@@ -149,12 +206,14 @@ def index():
     str
         Rendered HTML template
     """
+    llm_backend = get_llm_backend_info(_config.llm_backend_url)
     return render_template(
         "index.html",
         version=__version__,
         imprint_link=_config.imprint_link,
         url_conference=None,
         url_conference_error=None,
+        llm_backend=llm_backend,
     )
 
 
@@ -185,6 +244,7 @@ def conference_index(conference_name):
     if conference_name.startswith("."):
         abort(404)
 
+    llm_backend = get_llm_backend_info(_config.llm_backend_url)
     try:
         database = get_database()
         result = database.resolve_conference_for_url(conference_name)
@@ -194,6 +254,7 @@ def conference_index(conference_name):
             imprint_link=_config.imprint_link,
             url_conference=result["conference"],
             url_conference_error=result["error"],
+            llm_backend=llm_backend,
         )
     except Exception as e:
         logger.error(f"Error in conference URL route: {e}", exc_info=True)
@@ -203,6 +264,7 @@ def conference_index(conference_name):
             imprint_link=_config.imprint_link,
             url_conference=None,
             url_conference_error=None,
+            llm_backend=llm_backend,
         )
 
 
