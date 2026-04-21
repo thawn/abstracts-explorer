@@ -1602,6 +1602,489 @@ class TestWebUIAccessibility:
 
 @pytest.mark.e2e
 @pytest.mark.slow
+class TestAdvancedSearchE2E:
+    """End-to-end tests for the advanced search functionality.
+
+    Tests cover:
+    - Plain author name search (without field:"value" syntax)
+    - ``authors:"Name"`` and ``author:"Name"`` field syntax
+    - Combined field + topic queries via the advanced search form
+    - Other field searches (title, keywords, abstract) via the advanced search form
+    """
+
+    # ------------------------------------------------------------------ helpers
+
+    def _open_advanced_search(self, browser, wait):
+        """
+        Click the Advanced Search button and wait for the modal to appear.
+
+        Parameters
+        ----------
+        browser : webdriver.Chrome or webdriver.Firefox
+            Selenium WebDriver instance.
+        wait : WebDriverWait
+            WebDriverWait instance configured with the desired timeout.
+        """
+        adv_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[onclick='openAdvancedSearch()']")))
+        adv_btn.click()
+        wait.until(EC.visibility_of_element_located((By.ID, "advanced-search-modal")))
+
+    def _apply_advanced_search(self, browser, wait):
+        """
+        Click the Search button inside the advanced search modal and wait for results.
+
+        Parameters
+        ----------
+        browser : webdriver.Chrome or webdriver.Firefox
+            Selenium WebDriver instance.
+        wait : WebDriverWait
+            WebDriverWait instance configured with the desired timeout.
+        """
+        apply_btn = browser.find_element(By.CSS_SELECTOR, "button[onclick='applyAdvancedSearch()']")
+        apply_btn.click()
+        # Wait for the modal to close before checking results
+        wait.until(EC.invisibility_of_element_located((By.ID, "advanced-search-modal")))
+        # Wait for at least one result card (header card is always present when papers are found)
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")))
+
+    # ------------------------------------------------------------------ tests
+
+    def test_plain_author_name_search(self, web_server, browser):
+        """
+        Test that entering only an author name (without field syntax) returns the correct paper.
+
+        When a user types a plain name such as "Ashish Vaswani" the backend
+        recognises it as an author match and returns the corresponding paper as
+        the first result, even though no ``authors:"…"`` syntax is used.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        search_input = browser.find_element(By.ID, "search-input")
+        search_input.send_keys("Ashish Vaswani")
+        search_input.send_keys(Keys.RETURN)
+
+        wait = WebDriverWait(browser, 10)
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")))
+
+        results_text = browser.find_element(By.ID, "search-results").text
+        assert (
+            "Attention is All You Need" in results_text
+        ), "Searching for 'Ashish Vaswani' should return 'Attention is All You Need'"
+
+    def test_plain_author_last_name_search(self, web_server, browser):
+        """
+        Test that entering only an author's last name returns the correct paper.
+
+        A partial name such as "Vaswani" must be resolved to the author
+        "Ashish Vaswani" and return that author's paper.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        search_input = browser.find_element(By.ID, "search-input")
+        search_input.send_keys("Vaswani")
+        search_input.send_keys(Keys.RETURN)
+
+        wait = WebDriverWait(browser, 10)
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")))
+
+        results_text = browser.find_element(By.ID, "search-results").text
+        assert (
+            "Attention is All You Need" in results_text
+        ), "Searching for 'Vaswani' should return 'Attention is All You Need'"
+
+    def test_authors_field_syntax_alone(self, web_server, browser):
+        """
+        Test that the ``authors:"Name"`` syntax works alone in the search box.
+
+        Entering ``authors:"Ashish Vaswani"`` must bypass the embedding search
+        and return only papers whose ``authors`` column matches that value.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        search_input = browser.find_element(By.ID, "search-input")
+        search_input.send_keys('authors:"Ashish Vaswani"')
+        search_input.send_keys(Keys.RETURN)
+
+        wait = WebDriverWait(browser, 10)
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")))
+
+        results_text = browser.find_element(By.ID, "search-results").text
+        assert (
+            "Attention is All You Need" in results_text
+        ), "authors:\"Ashish Vaswani\" should return 'Attention is All You Need'"
+        # Papers by other authors must not be in the results
+        assert "Generative Adversarial" not in results_text, "GAN paper should not appear when filtering by Vaswani"
+
+    def test_author_alias_field_syntax(self, web_server, browser):
+        """
+        Test that the ``author:"Name"`` alias syntax works the same as ``authors:"Name"``.
+
+        The backend accepts both ``author:`` and ``authors:`` as field names and
+        must return identical results for both.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        search_input = browser.find_element(By.ID, "search-input")
+        search_input.send_keys('author:"Ashish Vaswani"')
+        search_input.send_keys(Keys.RETURN)
+
+        wait = WebDriverWait(browser, 10)
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")))
+
+        results_text = browser.find_element(By.ID, "search-results").text
+        assert (
+            "Attention is All You Need" in results_text
+        ), "author:\"Ashish Vaswani\" (alias) should return 'Attention is All You Need'"
+        assert (
+            "Generative Adversarial" not in results_text
+        ), "GAN paper should not appear when filtering by Vaswani (using author: alias)"
+
+    def test_advanced_search_modal_opens_and_closes(self, web_server, browser):
+        """
+        Test that the advanced search modal can be opened and closed.
+
+        Verifies:
+        * The modal is hidden on page load.
+        * The Advanced Search button makes the modal visible.
+        * The Cancel button hides the modal again.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        wait = WebDriverWait(browser, 10)
+
+        # Modal must be hidden initially
+        modal = browser.find_element(By.ID, "advanced-search-modal")
+        assert not modal.is_displayed(), "Advanced search modal should be hidden on page load"
+
+        # Open the modal
+        self._open_advanced_search(browser, wait)
+        assert modal.is_displayed(), "Advanced search modal should be visible after clicking the button"
+
+        # Close with the Cancel button
+        cancel_btn = browser.find_element(
+            By.XPATH, "//button[@onclick='closeAdvancedSearch()' and contains(., 'Cancel')]"
+        )
+        cancel_btn.click()
+        wait.until(EC.invisibility_of_element_located((By.ID, "advanced-search-modal")))
+        assert not modal.is_displayed(), "Advanced search modal should be hidden after Cancel"
+
+    def test_advanced_search_modal_fields_present(self, web_server, browser):
+        """
+        Test that the advanced search modal contains all expected input fields.
+
+        The modal must expose fields for: topic, authors, title, keywords,
+        abstract, and award.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        wait = WebDriverWait(browser, 10)
+        self._open_advanced_search(browser, wait)
+
+        for field_id in ("adv-topic", "adv-authors", "adv-title", "adv-keywords", "adv-abstract", "adv-award"):
+            assert browser.find_element(
+                By.ID, field_id
+            ).is_displayed(), f"Advanced search field '{field_id}' should be visible"
+
+        # Close the modal
+        browser.find_element(By.XPATH, "//button[@onclick='closeAdvancedSearch()' and contains(., 'Cancel')]").click()
+        wait.until(EC.invisibility_of_element_located((By.ID, "advanced-search-modal")))
+
+    def test_advanced_search_authors_field(self, web_server, browser):
+        """
+        Test searching by the authors field in the advanced search form.
+
+        Filling in "Ashish Vaswani" in the Authors field and applying the
+        search must return only that author's paper.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        wait = WebDriverWait(browser, 10)
+        self._open_advanced_search(browser, wait)
+
+        authors_input = browser.find_element(By.ID, "adv-authors")
+        authors_input.clear()
+        authors_input.send_keys("Ashish Vaswani")
+
+        self._apply_advanced_search(browser, wait)
+
+        results_text = browser.find_element(By.ID, "search-results").text
+        assert (
+            "Attention is All You Need" in results_text
+        ), "Searching for author 'Ashish Vaswani' via the advanced form should return 'Attention is All You Need'"
+        assert (
+            "Generative Adversarial" not in results_text
+        ), "GAN paper should not appear in results filtered to Vaswani"
+
+    def test_advanced_search_author_with_topic(self, web_server, browser):
+        """
+        Test combining an author filter with a free-text topic query.
+
+        Entering "Yoshua Bengio" in the Authors field and "adversarial" in
+        the Topic field must return only papers by Yoshua Bengio; papers by
+        other authors must not appear in the results.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        wait = WebDriverWait(browser, 10)
+        self._open_advanced_search(browser, wait)
+
+        authors_input = browser.find_element(By.ID, "adv-authors")
+        authors_input.clear()
+        authors_input.send_keys("Yoshua Bengio")
+
+        topic_input = browser.find_element(By.ID, "adv-topic")
+        topic_input.clear()
+        topic_input.send_keys("adversarial")
+
+        self._apply_advanced_search(browser, wait)
+
+        results_text = browser.find_element(By.ID, "search-results").text
+        # At least one Bengio paper must appear (checking for last name is sufficient
+        # since the full name "Yoshua Bengio" always contains "Bengio")
+        assert "Bengio" in results_text, "Expected at least one Yoshua Bengio paper in results"
+        # Papers by unrelated authors must not appear
+        assert "Ashish Vaswani" not in results_text, "Vaswani paper should not appear when filtering by Yoshua Bengio"
+        assert "Kaiming He" not in results_text, "He paper should not appear when filtering by Yoshua Bengio"
+
+    def test_advanced_search_title_field(self, web_server, browser):
+        """
+        Test searching by the title field in the advanced search form.
+
+        Entering "Residual" in the Title field must return the
+        'Deep Residual Learning for Image Recognition' paper and not
+        unrelated papers.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        wait = WebDriverWait(browser, 10)
+        self._open_advanced_search(browser, wait)
+
+        title_input = browser.find_element(By.ID, "adv-title")
+        title_input.clear()
+        title_input.send_keys("Residual")
+
+        self._apply_advanced_search(browser, wait)
+
+        results_text = browser.find_element(By.ID, "search-results").text
+        assert (
+            "Residual" in results_text
+        ), "Searching by title 'Residual' should return the Deep Residual Learning paper"
+        assert (
+            "Generative Adversarial" not in results_text
+        ), "GAN paper should not appear in results filtered by title 'Residual'"
+
+    def test_advanced_search_keywords_field(self, web_server, browser):
+        """
+        Test searching by the keywords field in the advanced search form.
+
+        Entering "deep learning" in the Keywords field must return the
+        'Deep Residual Learning for Image Recognition' paper which has
+        "deep learning" as one of its keywords.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        wait = WebDriverWait(browser, 10)
+        self._open_advanced_search(browser, wait)
+
+        keywords_input = browser.find_element(By.ID, "adv-keywords")
+        keywords_input.clear()
+        keywords_input.send_keys("deep learning")
+
+        self._apply_advanced_search(browser, wait)
+
+        results_text = browser.find_element(By.ID, "search-results").text
+        # The Deep Residual Learning paper has "deep learning" in its keywords.
+        # "Residual" is sufficient: the title "Deep Residual Learning for Image Recognition"
+        # always contains this substring.
+        assert (
+            "Residual" in results_text
+        ), "Searching by keyword 'deep learning' should return the Deep Residual Learning paper"
+
+    def test_advanced_search_abstract_field(self, web_server, browser):
+        """
+        Test searching by the abstract field in the advanced search form.
+
+        Entering "adversarial process" in the Abstract field must return the
+        'Generative Adversarial Networks' paper whose abstract contains that phrase.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        wait = WebDriverWait(browser, 10)
+        self._open_advanced_search(browser, wait)
+
+        abstract_input = browser.find_element(By.ID, "adv-abstract")
+        abstract_input.clear()
+        abstract_input.send_keys("adversarial process")
+
+        self._apply_advanced_search(browser, wait)
+
+        results_text = browser.find_element(By.ID, "search-results").text
+        assert (
+            "Generative Adversarial Networks" in results_text
+        ), "Searching abstract for 'adversarial process' should return the GAN paper"
+        assert (
+            "Attention is All You Need" not in results_text
+        ), "Vaswani paper should not appear when filtering by abstract 'adversarial process'"
+
+    def test_advanced_search_search_input_populated(self, web_server, browser):
+        """
+        Test that applying an advanced search populates the main search input.
+
+        After the user fills in the advanced search form and applies it, the
+        constructed ``field:"value"`` query string must be written back to the
+        main search input box so the user can see and edit it.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        wait = WebDriverWait(browser, 10)
+        self._open_advanced_search(browser, wait)
+
+        authors_input = browser.find_element(By.ID, "adv-authors")
+        authors_input.clear()
+        authors_input.send_keys("Vaswani")
+
+        self._apply_advanced_search(browser, wait)
+
+        # The main search input must now contain the field:"value" query
+        search_input = browser.find_element(By.ID, "search-input")
+        search_value = search_input.get_attribute("value")
+        assert "Vaswani" in search_value, f"Main search input should contain the author query, got: {search_value!r}"
+        assert "authors:" in search_value, f"Main search input should use field syntax, got: {search_value!r}"
+
+    def test_advanced_search_enter_key_applies(self, web_server, browser):
+        """
+        Test that pressing Enter inside an advanced search field applies the search.
+
+        The advanced search form must submit when the user presses Enter in
+        any of its input fields, matching the behaviour of the main search box.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        browser : webdriver.Chrome
+            Selenium WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.get(base_url)
+
+        wait = WebDriverWait(browser, 10)
+        self._open_advanced_search(browser, wait)
+
+        authors_input = browser.find_element(By.ID, "adv-authors")
+        authors_input.clear()
+        authors_input.send_keys("Ashish Vaswani")
+        # Press Enter instead of clicking the Search button
+        authors_input.send_keys(Keys.RETURN)
+
+        # Modal should close and results should appear
+        wait.until(EC.invisibility_of_element_located((By.ID, "advanced-search-modal")))
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")))
+
+        results_text = browser.find_element(By.ID, "search-results").text
+        assert (
+            "Attention is All You Need" in results_text
+        ), "Pressing Enter in the authors field should trigger search and return Vaswani's paper"
+
+
+@pytest.mark.e2e
+@pytest.mark.slow
 @pytest.mark.skip(
     reason="Clustering tab tests are currently too slow because of the large number of papers in test data. Need to use smaller dataset for testing."
 )
