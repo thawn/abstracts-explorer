@@ -12,6 +12,41 @@ import { getSelectedConference, getSelectedYears, escapeHtml } from './utils/dom
 import { formatPaperCard } from './paper-card.js';
 import { renderInlineMarkdownWithLatex } from './utils/markdown-utils.js';
 
+/**
+ * Returns Plotly background and font colours matching the current colour scheme.
+ * Backgrounds are always transparent so the parent card's CSS (dark:bg-gray-800)
+ * handles the surface colour automatically.
+ * @returns {{ plot_bgcolor: string, paper_bgcolor: string, font: { color: string } }}
+ */
+function getPlotColors() {
+    const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    return {
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        font: { color: isDark ? '#e5e7eb' : '#374151' }  // gray-200 vs gray-700
+    };
+}
+
+/**
+ * Re-apply font colour to every active Plotly chart inside the clusters tab.
+ * Called automatically when the OS colour scheme changes.
+ */
+function _refreshClusteringPlotColors() {
+    const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const fontColor = isDark ? '#e5e7eb' : '#374151';
+    const container = document.getElementById('clusters-tab');
+    if (!container || typeof Plotly === 'undefined') return;
+    /* global Plotly */
+    container.querySelectorAll('.js-plotly-plot').forEach(function (el) {
+        Plotly.relayout(el, { 'font.color': fontColor });
+    });
+}
+
+// Keep clustering charts in sync when the OS colour scheme changes
+if (typeof window !== 'undefined' && window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', _refreshClusteringPlotColors);
+}
+
 // Cluster state
 let clusterData = null;
 let currentClusterConfig = {
@@ -353,6 +388,7 @@ function visualizeHierarchyLevel(levelData) {
         }
     });
     
+    const plotColors = getPlotColors();
     const layout = {
         title: '',
         hovermode: 'closest',
@@ -371,8 +407,9 @@ function visualizeHierarchyLevel(levelData) {
             showticklabels: false,
             ticks: ''
         },
-        plot_bgcolor: 'white',
-        paper_bgcolor: 'white',
+        plot_bgcolor: plotColors.plot_bgcolor,
+        paper_bgcolor: plotColors.paper_bgcolor,
+        font: plotColors.font,
         margin: {
             l: 50,
             r: 50,
@@ -532,6 +569,7 @@ export function visualizeClusters() {
     });
     
     // Layout configuration
+    const plotColors = getPlotColors();
     const layout = {
         title: '',  // No title in plot
         xaxis: {
@@ -550,8 +588,9 @@ export function visualizeClusters() {
         },
         hovermode: 'closest',
         showlegend: false,  // Hide built-in legend, we'll create custom one
-        plot_bgcolor: 'white',  // White background
-        paper_bgcolor: 'white',
+        plot_bgcolor: plotColors.plot_bgcolor,
+        paper_bgcolor: plotColors.paper_bgcolor,
+        font: plotColors.font,
         margin: {
             l: 50,
             r: 50,
@@ -606,7 +645,7 @@ export function visualizeClusters() {
  */
 function createDendrogram() {
     const container = document.createElement('div');
-    container.className = 'mb-3 pb-3 border-b border-gray-200';
+    container.className = 'mb-3 pb-3 border-b border-gray-200 dark:border-gray-700';
     
     // Get hierarchy tree info
     if (!clusterData || !clusterData.cluster_hierarchy || !clusterData.cluster_hierarchy.dendrogram) {
@@ -649,7 +688,7 @@ function createDendrogram() {
     // If no visible merges, show a message
     if (visibleMerges.length === 0) {
         const message = document.createElement('p');
-        message.className = 'text-xs text-gray-500 text-center py-2';
+        message.className = 'text-xs text-gray-500 dark:text-gray-400 text-center py-2';
         message.textContent = 'Dendrogram shown for levels ≥ 5';
         container.appendChild(message);
         return container;
@@ -725,7 +764,7 @@ function createDendrogram() {
     
     // Add title
     const title = document.createElement('p');
-    title.className = 'text-xs text-gray-600 mt-2 text-center';
+    title.className = 'text-xs text-gray-600 dark:text-gray-400 mt-2 text-center';
     title.textContent = `Dendrogram (Levels ≥ 5)`;
     
     container.appendChild(svg);
@@ -747,10 +786,10 @@ function createHierarchyLegend(clusters) {
     
     // Create legend header with hierarchy controls
     const header = document.createElement('div');
-    header.className = 'mb-3 pb-3 border-b border-gray-200';
+    header.className = 'mb-3 pb-3 border-b border-gray-200 dark:border-gray-700';
     
     const title = document.createElement('h4');
-    title.className = 'text-sm font-semibold text-gray-700 mb-3';
+    title.className = 'text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3';
     title.innerHTML = '🔍 Hierarchical View';
     header.appendChild(title);
     
@@ -765,7 +804,7 @@ function createHierarchyLegend(clusters) {
     levelUpBtn.addEventListener('click', navigateHierarchyUp);
     
     const levelDisplay = document.createElement('span');
-    levelDisplay.className = 'px-2 py-1 text-xs bg-gray-100 border border-gray-300 rounded flex-1 text-center';
+    levelDisplay.className = 'px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded flex-1 text-center text-gray-800 dark:text-gray-200';
     levelDisplay.textContent = `Level ${currentHierarchyLevel} / ${maxHierarchyLevel}`;
     
     const levelDownBtn = document.createElement('button');
@@ -788,7 +827,7 @@ function createHierarchyLegend(clusters) {
     
     // Info text
     const infoText = document.createElement('p');
-    infoText.className = 'text-xs text-gray-600 mt-2';
+    infoText.className = 'text-xs text-gray-600 dark:text-gray-400 mt-2';
     infoText.textContent = 'Click on cluster centers (★) to drill down';
     header.appendChild(infoText);
     
@@ -806,7 +845,7 @@ function createHierarchyLegend(clusters) {
         
         // Create legend item
         const item = document.createElement('div');
-        item.className = 'flex items-center gap-2 p-2 rounded cursor-pointer hover:bg-gray-200 transition-colors';
+        item.className = 'flex items-center gap-2 p-2 rounded cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors';
         item.style.backgroundColor = 'rgb(249 250 251)';
         
         // Color box
@@ -816,7 +855,7 @@ function createHierarchyLegend(clusters) {
         
         // Label text
         const labelText = document.createElement('span');
-        labelText.className = 'text-sm text-gray-700 flex-1';
+        labelText.className = 'text-sm text-gray-700 dark:text-gray-300 flex-1';
         labelText.textContent = `${label} (${cluster.size})`;
         
         item.appendChild(colorBox);
@@ -824,7 +863,7 @@ function createHierarchyLegend(clusters) {
         
         if (!cluster.is_leaf) {
             const drillIcon = document.createElement('span');
-            drillIcon.className = 'text-xs text-gray-500';
+            drillIcon.className = 'text-xs text-gray-500 dark:text-gray-400';
             drillIcon.textContent = '▼';
             item.appendChild(drillIcon);
             
@@ -896,7 +935,7 @@ function createCustomLegend(sortedClusterEntries, labels) {
     header.className = 'mb-3';
     
     const title = document.createElement('h4');
-    title.className = 'text-sm font-semibold text-gray-700 mb-2';
+    title.className = 'text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2';
     
     // Build dynamic title with stats
     const titleHTML = formatClusterStats(clusterData?.statistics, labels);
@@ -909,7 +948,7 @@ function createCustomLegend(sortedClusterEntries, labels) {
     
     // "Select All" button
     const selectAllBtn = document.createElement('button');
-    selectAllBtn.className = 'px-2 py-1 text-xs bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition-colors';
+    selectAllBtn.className = 'px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors';
     selectAllBtn.textContent = 'All';
     selectAllBtn.addEventListener('click', () => {
         selectedClusters.clear();
@@ -921,7 +960,7 @@ function createCustomLegend(sortedClusterEntries, labels) {
     
     // "Clear All" button
     const clearAllBtn = document.createElement('button');
-    clearAllBtn.className = 'px-2 py-1 text-xs bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition-colors';
+    clearAllBtn.className = 'px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors';
     clearAllBtn.textContent = 'None';
     clearAllBtn.addEventListener('click', () => {
         selectedClusters.clear();
@@ -972,7 +1011,7 @@ function createCustomLegend(sortedClusterEntries, labels) {
         
         // Label text
         const labelText = document.createElement('span');
-        labelText.className = 'text-sm text-gray-700 flex-1';
+        labelText.className = 'text-sm text-gray-700 dark:text-gray-300 flex-1';
         labelText.textContent = label;
         
         item.appendChild(colorBox);
@@ -1106,6 +1145,7 @@ function updateClusterVisualization() {
     });
     
     // Update plot with new data
+    const plotColors3 = getPlotColors();
     const layout = {
         title: selectedClusters.size > 0 && selectedClusters.size < sortedClusterEntries.length
             ? `Clusters (${selectedClusters.size} selected)`
@@ -1126,8 +1166,9 @@ function updateClusterVisualization() {
         },
         hovermode: 'closest',
         showlegend: false,
-        plot_bgcolor: 'white',
-        paper_bgcolor: 'white',
+        plot_bgcolor: plotColors3.plot_bgcolor,
+        paper_bgcolor: plotColors3.paper_bgcolor,
+        font: plotColors3.font,
         margin: { l: 50, r: 50, t: 50, b: 50 },
         hoverlabel: {
             namelength: -1,
@@ -1206,9 +1247,9 @@ export async function showClusterPaperDetails(paperId, basicInfo) {
     } catch (error) {
         console.error('Error formatting loading state:', error);
         contentDiv.innerHTML = `
-            <div class="bg-white rounded-lg shadow-md p-6">
-                <h4 class="text-lg font-semibold text-gray-800">${renderInlineMarkdownWithLatex(basicInfo.title)}</h4>
-                <p class="text-sm text-gray-500 mt-2">Loading full details...</p>
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+                <h4 class="text-lg font-semibold text-gray-800 dark:text-gray-100">${renderInlineMarkdownWithLatex(basicInfo.title)}</h4>
+                <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">Loading full details...</p>
             </div>
         `;
     }
@@ -1522,6 +1563,7 @@ function visualizeClustersWithCustomQueries() {
     });
     
     // Layout configuration
+    const plotColors4 = getPlotColors();
     const layout = {
         title: '',
         xaxis: {
@@ -1540,8 +1582,9 @@ function visualizeClustersWithCustomQueries() {
         },
         hovermode: 'closest',
         showlegend: false,  // We'll use custom legend
-        plot_bgcolor: 'white',
-        paper_bgcolor: 'white',
+        plot_bgcolor: plotColors4.plot_bgcolor,
+        paper_bgcolor: plotColors4.paper_bgcolor,
+        font: plotColors4.font,
         margin: {
             l: 50,
             r: 50,
@@ -1593,12 +1636,12 @@ function updateCustomQueryLegend() {
     const legendDiv = document.getElementById('cluster-legend');
     
     if (customQueryClusters.length === 0) {
-        legendDiv.innerHTML = '<p class="text-gray-500 text-sm">No custom topics</p>';
+        legendDiv.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-sm">No custom topics</p>';
         return;
     }
     
     let html = '<div class="space-y-3">';
-    html += '<h4 class="text-md font-bold text-gray-700 mb-3">Custom Topics</h4>';
+    html += '<h4 class="text-md font-bold text-gray-700 dark:text-gray-300 mb-3">Custom Topics</h4>';
     
     customQueryClusters.forEach((cluster, idx) => {
         // Skip blue (first color) - start from index 1 to avoid confusion with background
@@ -1611,12 +1654,12 @@ function updateCustomQueryLegend() {
         const opacityClass = isVisible ? 'opacity-100' : 'opacity-50';
         
         html += `
-            <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100">
+            <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
                 <div class="flex items-center gap-3 flex-1 cursor-pointer ${opacityClass}" onclick="toggleCustomClusterVisibility('${cluster.id}')">
                     <div class="w-4 h-4 rounded-full" style="background-color: ${clusterColor}"></div>
                     <div class="flex-1">
-                        <div class="font-semibold text-sm text-gray-800">${escapedQuery}</div>
-                        <div class="text-xs text-gray-600">${cluster.count} papers (d=${cluster.distance.toFixed(2)})</div>
+                        <div class="font-semibold text-sm text-gray-800 dark:text-gray-200">${escapedQuery}</div>
+                        <div class="text-xs text-gray-600 dark:text-gray-400">${cluster.count} papers (d=${cluster.distance.toFixed(2)})</div>
                     </div>
                 </div>
                 <button onclick="deleteCustomCluster('${cluster.id}')" 
@@ -1750,11 +1793,11 @@ async function fetchAndDisplayTopicEvolution(topic, distance, conference) {
     // Create a placeholder with loading spinner
     const plotId = `topic-evo-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const wrapper = document.createElement('div');
-    wrapper.className = 'bg-white rounded-lg shadow-md p-6 mb-6';
+    wrapper.className = 'bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 mb-6';
     wrapper.id = `${plotId}-wrapper`;
     wrapper.innerHTML = `
         <div id="${plotId}" style="width: 100%; height: 350px;">
-            <div class="text-center text-gray-500 py-8">
+            <div class="text-center text-gray-500 dark:text-gray-400 py-8">
                 <i class="fas fa-spinner fa-spin text-4xl mb-4 opacity-20"></i>
                 <p class="text-sm">Loading topic evolution for "${escapeHtml(topic)}"...</p>
             </div>
@@ -1833,7 +1876,7 @@ function renderTopicEvolutionChart(plotId, data) {
         const plotEl = document.getElementById(plotId);
         if (plotEl) {
             plotEl.innerHTML = `
-                <div class="text-center text-gray-500 py-8">
+                <div class="text-center text-gray-500 dark:text-gray-400 py-8">
                     <p class="text-sm">No topic evolution data available for "${escapeHtml(topic)}"</p>
                 </div>
             `;
@@ -1847,13 +1890,15 @@ function renderTopicEvolutionChart(plotId, data) {
             ? ` (${conferences.join(', ')})`
             : '';
 
+    const plotColors5 = getPlotColors();
     const layout = {
         title: { text: `Topic Evolution: ${topic}${confLabel}` },
-        xaxis: { title: { text: 'Year' }, type: 'linear', automargin: true, dtick: 1 },
-        yaxis: { title: { text: 'Percentage of Papers (%)' }, automargin: true },
+        xaxis: { title: { text: 'Year' }, type: 'linear', automargin: true, dtick: 1, showgrid: false, zeroline: false },
+        yaxis: { title: { text: 'Percentage of Papers (%)' }, automargin: true, showgrid: false, zeroline: false },
         margin: { t: 50, b: 60, l: 80, r: 20 },
-        paper_bgcolor: 'white',
-        plot_bgcolor: 'white',
+        paper_bgcolor: plotColors5.paper_bgcolor,
+        plot_bgcolor: plotColors5.plot_bgcolor,
+        font: plotColors5.font,
         showlegend: traces.length > 1
     };
 
@@ -1897,7 +1942,7 @@ export async function loadPapersPerYear() {
         const counts = years.map(y => yearCounts[y]);
 
         if (years.length === 0) {
-            plotDiv.innerHTML = '<div class="text-center text-gray-500 py-8"><p class="text-sm">No data available</p></div>';
+            plotDiv.innerHTML = '<div class="text-center text-gray-500 dark:text-gray-400 py-8"><p class="text-sm">No data available</p></div>';
             return;
         }
 
@@ -1916,13 +1961,15 @@ export async function loadPapersPerYear() {
         }];
 
         const confTitle = selectedConference || 'All Conferences';
+        const plotColors6 = getPlotColors();
         const layout = {
             title: { text: `Total Papers Per Year — ${confTitle}` },
-            xaxis: { title: { text: 'Year' }, type: 'linear', dtick: 1, automargin: true },
-            yaxis: { title: { text: 'Number of Papers' }, automargin: true },
+            xaxis: { title: { text: 'Year' }, type: 'linear', dtick: 1, automargin: true, showgrid: false, zeroline: false },
+            yaxis: { title: { text: 'Number of Papers' }, automargin: true, showgrid: false, zeroline: false },
             margin: { t: 50, b: 50, l: 70, r: 20 },
-            paper_bgcolor: 'white',
-            plot_bgcolor: 'white',
+            paper_bgcolor: plotColors6.paper_bgcolor,
+            plot_bgcolor: plotColors6.plot_bgcolor,
+            font: plotColors6.font,
             showlegend: false,
             bargap: 0.2
         };

@@ -105,19 +105,19 @@ export function displaySearchResults(data) {
 
     // Display results header
     let html = `
-        <div class="bg-white rounded-lg shadow-md p-4 mb-4">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 mb-4">
             <div class="flex items-center justify-between">
                 <div>
-                    <span class="text-sm text-gray-600">${data.total_similar != null ? `Showing the <strong>${data.count}</strong> best matches out of <strong>${data.total_similar}</strong> similar papers` : `Found <strong>${data.count}</strong> papers`}</span>
-                    ${data.use_embeddings ? '<span class="ml-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">LLM-Powered</span>' : ''}
+                    <span class="text-sm text-gray-600 dark:text-gray-400">${data.total_similar != null ? `Showing the <strong>${data.count}</strong> best matches out of <strong>${data.total_similar}</strong> similar papers` : `Found <strong>${data.count}</strong> papers`}</span>
+                    ${data.use_embeddings ? '<span class="ml-2 px-2 py-1 bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 text-xs rounded-full">LLM-Powered</span>' : ''}
                 </div>
             </div>
             ${data.related_topics && data.related_topics.length > 0 ? `
-            <div class="mt-3 pt-3 border-t border-gray-100">
-                <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">Related Topics</span>
+            <div class="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
+                <span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Related Topics</span>
                 <div class="flex flex-wrap gap-2 mt-2">
                     ${data.related_topics.map(kw => `<button
-                        class="px-3 py-1 bg-blue-50 text-blue-700 text-sm rounded-full border border-blue-200 hover:bg-blue-100 transition-colors cursor-pointer"
+                        class="px-3 py-1 bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-sm rounded-full border border-blue-200 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-800 transition-colors cursor-pointer"
                         data-topic="${escapeHtml(kw)}"
                         onclick="document.getElementById('search-input').value = this.dataset.topic; searchPapers();"
                     >${escapeHtml(kw)}</button>`).join('')}
