@@ -1279,5 +1279,171 @@ class TestPaperCardDisplayFields:
                 ), f"Author '{author}' still contains semicolon; authors were not split correctly"
 
 
+class TestTopicEvolutionIntegration:
+    """
+    Integration tests for the /api/topic-evolution endpoint.
+
+    These tests exercise the endpoint through the real web server and ChromaDB so
+    that the full request→MCP tool→embeddings→database→response chain is verified.
+    The OpenAI client is still mocked by the web_server fixture (no real LLM needed).
+    """
+
+    def test_topic_evolution_returns_valid_structure(self, web_server):
+        """
+        Test that /api/topic-evolution returns the expected JSON structure.
+
+        All required top-level keys must be present and have the correct types.
+        """
+        host, port, base_url = web_server
+
+        response = requests.post(
+            f"{base_url}/api/topic-evolution",
+            json={"topic_keywords": "transformers", "conferences": ["NeurIPS"]},
+            timeout=15,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Top-level keys required by the frontend
+        assert "topic" in data
+        assert "conferences" in data
+        assert "conference_data" in data
+        assert data["topic"] == "transformers"
+        assert data["conferences"] == ["NeurIPS"]
+        assert isinstance(data["conference_data"], dict)
+
+    def test_topic_evolution_conference_data_structure(self, web_server):
+        """
+        Test that the per-conference data contains the expected sub-keys.
+
+        The frontend's fetchAndDisplayTopicEvolution() reads year_relative to
+        build the line chart, so that key is essential.
+        """
+        host, port, base_url = web_server
+
+        response = requests.post(
+            f"{base_url}/api/topic-evolution",
+            json={"topic_keywords": "attention mechanisms", "conferences": ["NeurIPS"]},
+            timeout=15,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert "NeurIPS" in data["conference_data"]
+        neurips_data = data["conference_data"]["NeurIPS"]
+
+        # Keys read by the JS frontend
+        assert "year_counts" in neurips_data
+        assert "year_relative" in neurips_data
+        assert "year_totals" in neurips_data
+
+        # year_relative values must be floats (percentages)
+        for year_key, value in neurips_data["year_relative"].items():
+            assert isinstance(value, (int, float)), f"year_relative[{year_key}] is not a number"
+            assert value >= 0, f"year_relative[{year_key}] is negative"
+
+    def test_topic_evolution_missing_topic_keywords_returns_400(self, web_server):
+        """Test that omitting topic_keywords returns HTTP 400."""
+        host, port, base_url = web_server
+
+        response = requests.post(
+            f"{base_url}/api/topic-evolution",
+            json={"conferences": ["NeurIPS"]},
+            timeout=10,
+        )
+
+        assert response.status_code == 400
+        data = response.json()
+        assert "error" in data
+
+    def test_topic_evolution_empty_body_returns_400(self, web_server):
+        """Test that an empty request body returns HTTP 400."""
+        host, port, base_url = web_server
+
+        response = requests.post(
+            f"{base_url}/api/topic-evolution",
+            json={},
+            timeout=10,
+        )
+
+        assert response.status_code == 400
+        data = response.json()
+        assert "error" in data
+
+    def test_topic_evolution_no_conferences_returns_error_in_body(self, web_server):
+        """
+        Test that omitting conferences causes the MCP tool to return an error.
+
+        The endpoint returns HTTP 200 but the response body contains an "error"
+        key because the MCP tool itself enforces the conference requirement.
+        """
+        host, port, base_url = web_server
+
+        response = requests.post(
+            f"{base_url}/api/topic-evolution",
+            json={"topic_keywords": "deep learning"},
+            timeout=10,
+        )
+
+        # The MCP tool returns a JSON error rather than raising — endpoint stays 200
+        assert response.status_code == 200
+        data = response.json()
+        assert "error" in data
+
+    def test_topic_evolution_custom_distance_threshold(self, web_server):
+        """
+        Test that a custom distance_threshold is forwarded and respected.
+
+        A very small threshold (0.0) should still return a valid response
+        structure (just with zero-count years).
+        """
+        host, port, base_url = web_server
+
+        response = requests.post(
+            f"{base_url}/api/topic-evolution",
+            json={
+                "topic_keywords": "transformers",
+                "conferences": ["NeurIPS"],
+                "distance_threshold": 0.0,
+            },
+            timeout=15,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "conference_data" in data
+        # distance_threshold should be echoed back
+        assert data.get("distance_threshold") == 0.0
+
+    def test_topic_evolution_covers_test_paper_years(self, web_server):
+        """
+        Test that the response includes all years present in the test database.
+
+        The web_server fixture adds papers for years 2016, 2017, and 2019 in the
+        NeurIPS conference, so the response must contain entries for those years.
+        """
+        host, port, base_url = web_server
+
+        response = requests.post(
+            f"{base_url}/api/topic-evolution",
+            json={"topic_keywords": "neural networks", "conferences": ["NeurIPS"]},
+            timeout=15,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert "NeurIPS" in data["conference_data"]
+        year_counts = data["conference_data"]["NeurIPS"]["year_counts"]
+
+        # The three test papers span these years
+        expected_years = {"2016", "2017", "2019"}
+        assert expected_years.issubset(
+            set(str(k) for k in year_counts.keys())
+        ), f"Expected years {expected_years} not all present in {set(year_counts.keys())}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])
