@@ -18,7 +18,7 @@ A live demo is available at [abstracts.hzdr.de](https://abstracts.hzdr.de).
 ![Web UI overview](images/screenshot.png)
 
 The interface has four tabs. A **header bar** at the top lets you switch conference
-and year; the selected filters apply to every tab. Click the **Docs** button in the
+and year; the selected filters apply to every tab. Click the **Help** button in the
 header to open this documentation page.
 
 > **Prerequisites:** You need to have downloaded papers first
