@@ -1909,9 +1909,8 @@ export async function loadPapersPerYear() {
         const traces = [{
             x: years,
             y: counts,
-            type: 'scatter',
-            mode: 'lines+markers',
-            marker: { color: colors, size: 12, line: { width: 2, color: '#7c3aed' }, symbol: 'diamond' },
+            type: 'bar',
+            marker: { color: colors },
             hovertemplate: '<b>%{x}</b><br>Papers: %{y}<extra></extra>'
         }];
 
@@ -1927,6 +1926,7 @@ export async function loadPapersPerYear() {
             bargap: 0.2
         };
 
+        plotDiv.innerHTML = '';
         Plotly.newPlot(plotDiv, traces, layout, { responsive: true, displayModeBar: false });
 
     } catch (error) {
