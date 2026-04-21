@@ -901,6 +901,11 @@ class EmbeddingsManager:
         UIDs are forwarded to ChromaDB as a ``{"uid": {"$in": …}}`` condition.
         The remaining query text is used for the semantic similarity search.
 
+        In addition, the query text is always checked against the ``authors``
+        field in the SQL database (unless an explicit ``authors:`` filter is
+        already present in the query).  Papers that match the query as an author
+        name are prepended to the results so that author matches appear first.
+
         Parameters
         ----------
         query : str
@@ -960,6 +965,24 @@ class EmbeddingsManager:
 
         semantic_query = remaining_query if remaining_query else query
 
+        # Always check whether the query text matches any author names in the
+        # SQL database, unless the user already provided an explicit authors:
+        # field filter.  Author-matching papers are prepended to the final
+        # result so they appear before the purely semantic matches.
+        # Any additional field_filters (e.g. award:"Best Paper") are included
+        # in the author search so the matches remain consistent with the rest
+        # of the result set.
+        author_matches: List[Dict[str, Any]] = []
+        if "authors" not in field_filters:
+            author_search_filters = {**field_filters, "authors": semantic_query}
+            author_matches = database.search_papers(
+                field_filters=author_search_filters,
+                sessions=sessions,
+                years=years,
+                conferences=conferences,
+                limit=limit,
+            )
+
         # Build metadata filter for embeddings search.
         # NOTE: All metadata is stored as strings in ChromaDB (see add_paper, line 445).
         # ChromaDB only supports $eq, $ne, $in, $nin, $gt, $gte, $lt, $lte operators on
@@ -1012,7 +1035,14 @@ class EmbeddingsManager:
             papers = format_search_results(results, database, include_documents=False)
         except PaperFormattingError:
             # No valid papers found
-            return []
+            papers = []
+
+        # Merge: author-matching papers come first, followed by semantic results
+        # that were not already included via author matching.
+        if author_matches:
+            author_uids = {p["uid"] for p in author_matches}
+            semantic_only = [p for p in papers if p["uid"] not in author_uids]
+            return (author_matches + semantic_only)[:limit]
 
         return papers[:limit]
 
