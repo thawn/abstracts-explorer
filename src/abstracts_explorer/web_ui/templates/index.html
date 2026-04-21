@@ -563,25 +563,6 @@
 
         <!-- Clusters Tab -->
         <div id="clusters-tab" class="tab-content hidden">
-            <div class="bg-white rounded-lg shadow-md p-6 mb-6">
-                <div class="flex justify-between items-start gap-6">
-                    <div class="flex flex-col">
-                        <h2 class="text-2xl font-bold text-gray-800 mb-4">
-                            <i class="fas fa-project-diagram text-purple-600 mr-2"></i>Embedding Clusters
-                        </h2>
-                        <p class="text-sm text-gray-600">
-                            Visualize papers clustered by their semantic embeddings using dimensionality reduction.
-                        </p>
-                    </div>
-                    <div class="flex flex-col items-end space-y-2">
-                        <button onclick="exportClusters()"
-                            class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-600">
-                            <i class="fas fa-download mr-2"></i>Export Data
-                        </button>
-                    </div>
-                </div>
-            </div>
-
             <!-- Papers Per Year Chart -->
             <div class="bg-white rounded-lg shadow-md p-6 mb-6">
                 <h3 class="text-xl font-bold text-gray-800 mb-4">
@@ -630,6 +611,22 @@
 
             <!-- Cluster Visualization -->
             <div class="bg-white rounded-lg shadow-md p-6">
+                <div class="flex justify-between items-start gap-6">
+                    <div class="flex flex-col">
+                        <h2 class="text-2xl font-bold text-gray-800 mb-4">
+                            <i class="fas fa-project-diagram text-purple-600 mr-2"></i>Embedding Clusters
+                        </h2>
+                        <p class="text-sm text-gray-600">
+                            Visualize papers clustered by their semantic embeddings using dimensionality reduction.
+                        </p>
+                    </div>
+                    <div class="flex flex-col items-end space-y-2">
+                        <button onclick="exportClusters()"
+                            class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-600">
+                            <i class="fas fa-download mr-2"></i>Export Data
+                        </button>
+                    </div>
+                </div>
                 <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
                     <div id="cluster-plot" class="col-span-1 lg:col-span-3" style="aspect-ratio: 1/1; width: 100%;">
                         <div class="text-center text-gray-500 py-12">
