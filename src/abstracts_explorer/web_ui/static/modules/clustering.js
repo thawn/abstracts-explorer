@@ -1909,8 +1909,9 @@ export async function loadPapersPerYear() {
         const traces = [{
             x: years,
             y: counts,
-            type: 'bar',
-            marker: { color: colors },
+            type: 'scatter',
+            mode: 'lines+markers',
+            marker: { color: colors, size: 12, line: { width: 2, color: '#7c3aed' }, symbol: 'diamond' },
             hovertemplate: '<b>%{x}</b><br>Papers: %{y}<extra></extra>'
         }];
 
