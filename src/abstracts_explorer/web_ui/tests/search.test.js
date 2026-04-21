@@ -209,6 +209,98 @@ describe('Search Module', () => {
             const results = document.getElementById('search-results');
             expect(results.innerHTML).toContain('Minimal Paper');
         });
+
+        it('should display related topics when provided', () => {
+            const data = {
+                papers: [
+                    {
+                        uid: 'paper1',
+                        title: 'Test Paper',
+                        authors: ['Author 1'],
+                        abstract: 'Test abstract',
+                        year: 2025,
+                        conference: 'NeurIPS'
+                    }
+                ],
+                count: 1,
+                use_embeddings: true,
+                related_topics: ['deep learning', 'neural networks', 'optimization']
+            };
+
+            displaySearchResults(data);
+
+            const results = document.getElementById('search-results');
+            expect(results.innerHTML).toContain('Related Topics');
+            expect(results.innerHTML).toContain('deep learning');
+            expect(results.innerHTML).toContain('neural networks');
+            expect(results.innerHTML).toContain('optimization');
+        });
+
+        it('should not display related topics section when related_topics is empty', () => {
+            const data = {
+                papers: [
+                    {
+                        uid: 'paper1',
+                        title: 'Test Paper',
+                        authors: ['Author 1'],
+                        abstract: 'Test abstract',
+                        year: 2025
+                    }
+                ],
+                count: 1,
+                related_topics: []
+            };
+
+            displaySearchResults(data);
+
+            const results = document.getElementById('search-results');
+            expect(results.innerHTML).not.toContain('Related Topics');
+        });
+
+        it('should not display related topics section when related_topics is absent', () => {
+            const data = {
+                papers: [
+                    {
+                        uid: 'paper1',
+                        title: 'Test Paper',
+                        authors: ['Author 1'],
+                        abstract: 'Test abstract',
+                        year: 2025
+                    }
+                ],
+                count: 1
+            };
+
+            displaySearchResults(data);
+
+            const results = document.getElementById('search-results');
+            expect(results.innerHTML).not.toContain('Related Topics');
+        });
+
+        it('should render related topic keywords as clickable buttons', () => {
+            const data = {
+                papers: [
+                    {
+                        uid: 'paper1',
+                        title: 'Test Paper',
+                        authors: [],
+                        abstract: 'Test abstract'
+                    }
+                ],
+                count: 1,
+                related_topics: ['attention mechanism']
+            };
+
+            displaySearchResults(data);
+
+            const results = document.getElementById('search-results');
+            expect(results.innerHTML).toContain('attention mechanism');
+            // Should be rendered as a button element with a data-topic attribute
+            const buttons = results.querySelectorAll('button');
+            const topicButton = Array.from(buttons).find(btn => btn.textContent.trim() === 'attention mechanism');
+            expect(topicButton).toBeTruthy();
+            expect(topicButton.dataset.topic).toBe('attention mechanism');
+        });
     });
 
     describe('Advanced Search Modal', () => {

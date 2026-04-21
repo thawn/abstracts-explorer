@@ -614,6 +614,109 @@ class TestSearchEndpoint:
         assert "total_similar" not in data
 
 
+class TestExtractTopKeywords:
+    """Tests for the extract_top_keywords helper function."""
+
+    def test_returns_empty_list_for_empty_input(self):
+        """Should return empty list when no papers are provided."""
+        from abstracts_explorer.paper_utils import extract_top_keywords
+
+        result = extract_top_keywords([])
+        assert result == []
+
+    def test_returns_empty_list_for_papers_without_text(self):
+        """Should return empty list when all papers have no title or abstract."""
+        from abstracts_explorer.paper_utils import extract_top_keywords
+
+        result = extract_top_keywords([{"uid": "p1"}, {"uid": "p2"}])
+        assert result == []
+
+    def test_extracts_keywords_from_single_paper(self):
+        """Should extract keywords from a single paper."""
+        from abstracts_explorer.paper_utils import extract_top_keywords
+
+        papers = [
+            {
+                "title": "Neural Network Optimization",
+                "abstract": "We study gradient descent optimization for neural networks.",
+            }
+        ]
+        result = extract_top_keywords(papers, n_keywords=3)
+        assert isinstance(result, list)
+        assert len(result) <= 3
+        assert all(isinstance(kw, str) for kw in result)
+
+    def test_extracts_keywords_from_multiple_papers(self):
+        """Should extract keywords from multiple papers."""
+        from abstracts_explorer.paper_utils import extract_top_keywords
+
+        papers = [
+            {
+                "title": "Deep Learning for Vision",
+                "abstract": "Convolutional neural networks for image classification.",
+            },
+            {"title": "Transformer Models", "abstract": "Attention mechanism in deep learning for NLP tasks."},
+            {
+                "title": "Reinforcement Learning",
+                "abstract": "Policy gradient methods for deep reinforcement learning agents.",
+            },
+        ]
+        result = extract_top_keywords(papers, n_keywords=5)
+        assert isinstance(result, list)
+        assert len(result) <= 5
+        assert all(isinstance(kw, str) for kw in result)
+        # All keywords should be multi-word phrases (bigrams or trigrams)
+        assert all(len(kw.split()) >= 2 for kw in result)
+        # "deep learning" should appear in keywords given its frequency
+        all_kw = " ".join(result).lower()
+        assert "deep learning" in all_kw
+
+    def test_respects_n_keywords_parameter(self):
+        """Should return at most n_keywords results."""
+        from abstracts_explorer.paper_utils import extract_top_keywords
+
+        papers = [
+            {"title": "Neural Networks", "abstract": "Deep learning optimization with gradient descent algorithms."},
+            {
+                "title": "Convolutional Networks",
+                "abstract": "Image recognition with convolutional neural network layers.",
+            },
+        ]
+        for n in [1, 3, 5]:
+            result = extract_top_keywords(papers, n_keywords=n)
+            assert len(result) <= n
+
+    def test_search_response_includes_related_topics(self, client):
+        """Test that search response includes related_topics field."""
+        from unittest.mock import MagicMock, patch
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+
+        mock_db = MagicMock()
+        mock_papers = [
+            {"uid": "p1", "title": "Deep Learning", "abstract": "Neural network optimization with gradient descent."},
+            {
+                "uid": "p2",
+                "title": "Neural Networks",
+                "abstract": "Convolutional deep learning for image classification.",
+            },
+        ]
+        mock_db.search_papers_keyword.return_value = mock_papers
+
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            response = client.post(
+                "/api/search",
+                data=json.dumps({"query": "deep learning", "use_embeddings": False, "limit": 10}),
+                content_type="application/json",
+            )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert "related_topics" in data
+        assert isinstance(data["related_topics"], list)
+
+
 class TestChatEndpoint:
     """Test the chat endpoint."""
 

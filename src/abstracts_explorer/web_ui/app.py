@@ -20,6 +20,7 @@ from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.rag import RAGChat
 from abstracts_explorer.config import get_config
 from abstracts_explorer.export_utils import export_papers_to_zip
+from abstracts_explorer.paper_utils import extract_top_keywords
 
 # Import version
 try:
@@ -468,11 +469,14 @@ def search():
             )
             total_similar = None
 
+        related_topics = extract_top_keywords(papers)
+
         response_data = {
             "papers": papers,
             "count": len(papers),
             "query": query,
             "use_embeddings": use_embeddings,
+            "related_topics": related_topics,
         }
         if total_similar is not None:
             response_data["total_similar"] = total_similar

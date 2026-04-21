@@ -10,6 +10,12 @@ from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
+# TF-IDF settings for keyword extraction from search results.
+_TFIDF_MAX_FEATURES = 500
+_TFIDF_SMALL_CORPUS_THRESHOLD = 3  # corpora smaller than this use min_df=1
+_TFIDF_MIN_DF_SMALL = 1
+_TFIDF_MIN_DF_REGULAR = 2
+
 
 class PaperFormattingError(Exception):
     """Exception raised when paper formatting fails."""
@@ -190,3 +196,50 @@ def build_context_from_papers(papers: List[Dict[str, Any]]) -> str:
         context_parts.append("")  # Empty line between papers
 
     return "\n".join(context_parts)
+
+
+def extract_top_keywords(papers: list, n_keywords: int = 5) -> list:
+    """
+    Extract top keywords from a list of papers using TF-IDF.
+
+    Parameters
+    ----------
+    papers : list
+        List of paper dicts, each with optional 'title' and 'abstract' keys.
+    n_keywords : int, optional
+        Number of top keywords to return (default: 5).
+
+    Returns
+    -------
+    list
+        List of keyword strings, ordered by relevance (highest TF-IDF first).
+    """
+    from sklearn.feature_extraction.text import TfidfVectorizer
+
+    docs = []
+    for paper in papers:
+        title = paper.get("title", "") or ""
+        abstract = paper.get("abstract", "") or ""
+        text = f"{title}\n\n{abstract}".strip()
+        if text:
+            docs.append(text)
+
+    if not docs:
+        return []
+
+    try:
+        min_df = _TFIDF_MIN_DF_SMALL if len(docs) < _TFIDF_SMALL_CORPUS_THRESHOLD else _TFIDF_MIN_DF_REGULAR
+        tfidf = TfidfVectorizer(
+            max_features=_TFIDF_MAX_FEATURES,
+            min_df=min_df,
+            stop_words="english",
+            ngram_range=(2, 3),
+        )
+        tfidf_matrix = tfidf.fit_transform(docs)
+        feature_names = tfidf.get_feature_names_out()
+        mean_tfidf = tfidf_matrix.mean(axis=0).A1
+        top_indices = mean_tfidf.argsort()[-n_keywords:][::-1]
+        keywords = [feature_names[i] for i in top_indices if mean_tfidf[i] > 0]
+        return keywords[:n_keywords]
+    except Exception:
+        return []
