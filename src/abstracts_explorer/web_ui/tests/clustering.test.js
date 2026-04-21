@@ -10,7 +10,8 @@ global.Plotly = {
     newPlot: jest.fn(() => Promise.resolve()),
     relayout: jest.fn(() => Promise.resolve()),
     restyle: jest.fn(() => Promise.resolve()),
-    react: jest.fn(() => Promise.resolve())
+    react: jest.fn(() => Promise.resolve()),
+    addTraces: jest.fn(() => Promise.resolve())
 };
 global.alert = jest.fn();
 global.console = {
@@ -1338,6 +1339,8 @@ describe('Clustering Module', () => {
             });
 
             await loadClusters();
+            // Reset Plotly mock counts so we only count calls from the topic-evolution path
+            global.Plotly.newPlot.mockClear();
 
             // Mock cluster search response
             global.fetch.mockResolvedValueOnce({
@@ -1374,11 +1377,89 @@ describe('Clustering Module', () => {
             const container = document.getElementById('topic-evolution-container');
             expect(container.classList.contains('hidden')).toBe(false);
 
+            // A single chart wrapper should exist with the fixed plot id
+            expect(document.getElementById('topic-evolution-plot')).not.toBeNull();
+            expect(document.getElementById('topic-evolution-wrapper')).not.toBeNull();
+
             // The topic evolution fetch should have been called
             const topicEvoCalls = global.fetch.mock.calls.filter(
                 call => call[0] === '/api/topic-evolution'
             );
             expect(topicEvoCalls.length).toBe(1);
+
+            // Plotly.newPlot should have been called once for the first trace
+            expect(global.Plotly.newPlot).toHaveBeenCalledTimes(1);
+        });
+
+        it('should add trace to the same chart on a second query instead of creating a new chart', async () => {
+            // Set conference
+            document.getElementById('conference-selector').innerHTML = '<option value="NeurIPS" selected>NeurIPS</option>';
+            document.getElementById('conference-selector').value = 'NeurIPS';
+
+            // Load clusters
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    points: [{ x: 1, y: 1, cluster: 0, id: '1', uid: '1', title: 'Paper 1' }],
+                    cluster_labels: { 0: 'Cluster 0' }
+                })
+            });
+            await loadClusters();
+            // Reset Plotly mock counts so we only count calls from the topic-evolution path
+            global.Plotly.newPlot.mockClear();
+            global.Plotly.addTraces.mockClear();
+            global.Plotly.relayout.mockClear();
+
+            // --- First custom topic search ---
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ query: 'topic A', distance: 0.5, papers: [], count: 0, query_embedding: [] })
+            });
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    topic: 'topic A',
+                    conferences: ['NeurIPS'],
+                    conference_data: { 'NeurIPS': { year_relative: { '2023': 1.0 } } }
+                })
+            });
+
+            document.getElementById('custom-query-input').value = 'topic A';
+            await searchCustomCluster();
+            await new Promise(resolve => setTimeout(resolve, 50));
+
+            // --- Second custom topic search ---
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ query: 'topic B', distance: 0.5, papers: [], count: 0, query_embedding: [] })
+            });
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    topic: 'topic B',
+                    conferences: ['NeurIPS'],
+                    conference_data: { 'NeurIPS': { year_relative: { '2023': 2.0 } } }
+                })
+            });
+
+            document.getElementById('custom-query-input').value = 'topic B';
+            await searchCustomCluster();
+            await new Promise(resolve => setTimeout(resolve, 50));
+
+            // There should be exactly ONE chart wrapper (not two)
+            const container = document.getElementById('topic-evolution-container');
+            expect(document.getElementById('topic-evolution-wrapper')).not.toBeNull();
+            expect(container.querySelectorAll('[id^="topic-evolution-wrapper"]').length).toBe(1);
+
+            // newPlot called once (first query), addTraces called once (second query)
+            expect(global.Plotly.newPlot).toHaveBeenCalledTimes(1);
+            expect(global.Plotly.addTraces).toHaveBeenCalledTimes(1);
+
+            // relayout should have been called to update the title with both topics
+            expect(global.Plotly.relayout).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({ 'title.text': 'Topic Evolution: topic A, topic B' })
+            );
         });
 
         it('should handle topic evolution fetch error gracefully', async () => {
