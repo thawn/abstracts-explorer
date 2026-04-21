@@ -965,24 +965,6 @@ class EmbeddingsManager:
 
         semantic_query = remaining_query if remaining_query else query
 
-        # Always check whether the query text matches any author names in the
-        # SQL database, unless the user already provided an explicit authors:
-        # field filter.  Author-matching papers are prepended to the final
-        # result so they appear before the purely semantic matches.
-        # Any additional field_filters (e.g. award:"Best Paper") are included
-        # in the author search so the matches remain consistent with the rest
-        # of the result set.
-        author_matches: List[Dict[str, Any]] = []
-        if "authors" not in field_filters:
-            author_search_filters = {**field_filters, "authors": semantic_query}
-            author_matches = database.search_papers(
-                field_filters=author_search_filters,
-                sessions=sessions,
-                years=years,
-                conferences=conferences,
-                limit=limit,
-            )
-
         # Build metadata filter for embeddings search.
         # NOTE: All metadata is stored as strings in ChromaDB (see add_paper, line 445).
         # ChromaDB only supports $eq, $ne, $in, $nin, $gt, $gte, $lt, $lte operators on
@@ -1002,6 +984,19 @@ class EmbeddingsManager:
                 # No papers satisfy the field filters — no results possible
                 return []
             matching_uids = [p["uid"] for p in matching_papers]
+        else:
+            # still check whether the remaining query matches any author names, even if there are no explicit field filters for authors
+            author_search_filters = {**field_filters, "authors": semantic_query}
+            author_matches = database.search_papers(
+                field_filters=author_search_filters,
+                sessions=sessions,
+                years=years,
+                conferences=conferences,
+                limit=limit,
+            )
+            if author_matches:
+                matching_uids = [p["uid"] for p in author_matches]
+                logger.info(f"Author name matches found for query '{semantic_query}': {len(author_matches)} papers")
 
         if sessions:
             filter_conditions.append({"session": {"$in": sessions}})
@@ -1036,13 +1031,6 @@ class EmbeddingsManager:
         except PaperFormattingError:
             # No valid papers found
             papers = []
-
-        # Merge: author-matching papers come first, followed by semantic results
-        # that were not already included via author matching.
-        if author_matches:
-            author_uids = {p["uid"] for p in author_matches}
-            semantic_only = [p for p in papers if p["uid"] not in author_uids]
-            return (author_matches + semantic_only)[:limit]
 
         return papers[:limit]
 
