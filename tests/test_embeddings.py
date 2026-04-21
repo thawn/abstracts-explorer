@@ -1226,6 +1226,8 @@ def test_search_papers_semantic_no_author_match_falls_back_to_semantic(embedding
 
     embeddings_manager.close()
 
+
+class TestParseChromaDBMetadata:
     """Tests for EmbeddingsManager.parse_chromadb_metadata."""
 
     def _make_raw_metadata(self, **overrides):
