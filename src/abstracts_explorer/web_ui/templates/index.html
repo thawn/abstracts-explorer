@@ -658,11 +658,12 @@
     <footer class="bg-gray-800 text-white mt-12">
         <div class="container mx-auto px-4 py-6">
             <div class="text-center">
-                <p class="text-sm">Powered by <a href="https://github.com/thawn/abstracts-explorer" class="underline hover:text-gray-300" target="_blank" rel="noopener noreferrer">Abstracts Explorer</a> version {{ version }}</p>
-                <p class="text-xs text-gray-400 mt-2">Open source project for exploring conference abstracts</p>
+                <p class="text-sm"><a href="https://github.com/thawn/abstracts-explorer" class="underline hover:text-gray-300"
+                        target="_blank" rel="noopener noreferrer">Abstracts Explorer</a> version {{ version }}</p>
+                <p class="text-xs text-gray-400">Open source project for exploring conference abstracts</p>
                 {% if llm_backend and llm_backend.name %}
-                <p class="text-xs text-gray-400 mt-2 flex items-center justify-center gap-2">
-                    <span>AI powered by</span>
+                <p class="text-sm mt-2 flex items-center justify-center gap-2">
+                    <span>LLM provided by</span>
                     <a href="{{ llm_backend.homepage }}" class="inline-flex items-center gap-1 underline hover:text-gray-300" target="_blank" rel="noopener noreferrer">
                         {% if llm_backend.logo %}
                         <img src="{{ url_for('static', filename=llm_backend.logo) }}" alt="{{ llm_backend.name }} logo" class="inline-block h-4 w-auto align-middle">
