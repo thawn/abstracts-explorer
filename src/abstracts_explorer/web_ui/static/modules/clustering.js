@@ -14,15 +14,37 @@ import { renderInlineMarkdownWithLatex } from './utils/markdown-utils.js';
 
 /**
  * Returns Plotly background and font colours matching the current colour scheme.
+ * Backgrounds are always transparent so the parent card's CSS (dark:bg-gray-800)
+ * handles the surface colour automatically.
  * @returns {{ plot_bgcolor: string, paper_bgcolor: string, font: { color: string } }}
  */
 function getPlotColors() {
     const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
     return {
-        plot_bgcolor: isDark ? '#1f2937' : 'white',   // gray-800
-        paper_bgcolor: isDark ? '#111827' : 'white',  // gray-900
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        paper_bgcolor: 'rgba(0,0,0,0)',
         font: { color: isDark ? '#e5e7eb' : '#374151' }  // gray-200 vs gray-700
     };
+}
+
+/**
+ * Re-apply font colour to every active Plotly chart inside the clusters tab.
+ * Called automatically when the OS colour scheme changes.
+ */
+function _refreshClusteringPlotColors() {
+    const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const fontColor = isDark ? '#e5e7eb' : '#374151';
+    const container = document.getElementById('clusters-tab');
+    if (!container || typeof Plotly === 'undefined') return;
+    /* global Plotly */
+    container.querySelectorAll('.js-plotly-plot').forEach(function (el) {
+        Plotly.relayout(el, { 'font.color': fontColor });
+    });
+}
+
+// Keep clustering charts in sync when the OS colour scheme changes
+if (typeof window !== 'undefined' && window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', _refreshClusteringPlotColors);
 }
 
 // Cluster state

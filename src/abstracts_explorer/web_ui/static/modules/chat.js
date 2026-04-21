@@ -744,3 +744,23 @@ export function _resetChatState() {
     _feedbackHighlightShown = false;
     _messageIdCounter = 0;
 }
+
+/**
+ * Re-apply font colour to every active Plotly chart inside the chat message area.
+ * Called automatically when the OS colour scheme changes.
+ */
+function _refreshChatPlotColors() {
+    const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const fontColor = isDark ? '#e5e7eb' : '#374151';
+    const messagesDiv = document.getElementById('chat-messages');
+    if (!messagesDiv || typeof Plotly === 'undefined') return;
+    /* global Plotly */
+    messagesDiv.querySelectorAll('.js-plotly-plot').forEach(function (el) {
+        Plotly.relayout(el, { 'font.color': fontColor });
+    });
+}
+
+// Keep chat charts in sync when the OS colour scheme changes
+if (typeof window !== 'undefined' && window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', _refreshChatPlotColors);
+}
