@@ -30,7 +30,8 @@ import {
 import {
     loadClusters,
     exportClusters,
-    resetClusters
+    resetClusters,
+    loadPapersPerYear
 } from './modules/clustering.js';
 import {
     loadFilterOptions,
@@ -167,6 +168,7 @@ function attachToWindow() {
     window.loadClusters = loadClusters;
     window.exportClusters = exportClusters;
     window.resetClusters = resetClusters;
+    window.loadPapersPerYear = loadPapersPerYear;
 
     // Filters module
     window.selectAllFilter = selectAllFilter;

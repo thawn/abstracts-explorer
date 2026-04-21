@@ -341,6 +341,11 @@ export function handleYearChange() {
             window.loadClusters();
         }
     }
+
+    // Refresh papers-per-year chart if on clusters tab
+    if (currentTab === 'clusters' && window.loadPapersPerYear) {
+        window.loadPapersPerYear();
+    }
 }
 
 /**
@@ -381,6 +386,11 @@ export function handleConferenceChange() {
         if (currentTab === 'clusters' && window.loadClusters) {
             window.loadClusters();
         }
+    }
+
+    // Refresh papers-per-year chart if on clusters tab
+    if (currentTab === 'clusters' && window.loadPapersPerYear) {
+        window.loadPapersPerYear();
     }
 }
 

@@ -2582,3 +2582,136 @@ class TestPaperCardDisplayFieldsUnit:
             assert isinstance(
                 paper.get("authors"), list
             ), f"Batch endpoint must return authors as list, got {type(paper.get('authors')).__name__}"
+
+
+class TestPapersPerYearEndpoint:
+    """Test /api/papers-per-year endpoint."""
+
+    def test_papers_per_year_returns_counts(self):
+        """Test that papers-per-year returns year counts."""
+        from abstracts_explorer.web_ui.app import app
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
+                mock_db = Mock()
+                mock_db.get_years_for_conference.return_value = [2023, 2024]
+                mock_db.get_stats.side_effect = [
+                    {"total_papers": 100, "year": 2023, "conference": "NeurIPS"},
+                    {"total_papers": 150, "year": 2024, "conference": "NeurIPS"},
+                ]
+                mock_get_db.return_value = mock_db
+
+                response = client.get("/api/papers-per-year?conference=NeurIPS")
+
+                assert response.status_code == 200
+                data = response.get_json()
+                assert "year_counts" in data
+                assert data["year_counts"]["2023"] == 100
+                assert data["year_counts"]["2024"] == 150
+                assert data["conference"] == "NeurIPS"
+
+    def test_papers_per_year_no_conference(self):
+        """Test papers-per-year without conference filter."""
+        from abstracts_explorer.web_ui.app import app
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
+                mock_db = Mock()
+                mock_db.get_years.return_value = [2024, 2023]
+                mock_db.get_stats.side_effect = [
+                    {"total_papers": 200, "year": 2023, "conference": None},
+                    {"total_papers": 300, "year": 2024, "conference": None},
+                ]
+                mock_get_db.return_value = mock_db
+
+                response = client.get("/api/papers-per-year")
+
+                assert response.status_code == 200
+                data = response.get_json()
+                assert "year_counts" in data
+                assert data["conference"] is None
+
+    def test_papers_per_year_error_handling(self):
+        """Test papers-per-year handles errors."""
+        from abstracts_explorer.web_ui.app import app
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
+                mock_get_db.side_effect = Exception("DB error")
+
+                response = client.get("/api/papers-per-year")
+
+                assert response.status_code == 500
+                data = response.get_json()
+                assert "error" in data
+
+
+class TestTopicEvolutionEndpoint:
+    """Test /api/topic-evolution endpoint."""
+
+    def test_topic_evolution_returns_data(self):
+        """Test that topic-evolution returns evolution data."""
+        from abstracts_explorer.web_ui.app import app
+
+        mock_result = {
+            "topic": "transformers",
+            "conferences": ["NeurIPS"],
+            "distance_threshold": 1.1,
+            "total_papers": 10,
+            "year_range": {"start": 2022, "end": 2024},
+            "conference_data": {
+                "NeurIPS": {
+                    "year_counts": {"2022": 3, "2023": 5, "2024": 7},
+                    "year_relative": {"2022": 1.5, "2023": 2.5, "2024": 3.5},
+                    "year_totals": {"2022": 200, "2023": 200, "2024": 200},
+                }
+            },
+        }
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.json") as mock_json:
+                mock_json.loads.return_value = mock_result
+                with patch(
+                    "abstracts_explorer.mcp_server.get_topic_evolution",
+                    return_value='{"topic": "transformers"}',
+                ):
+                    response = client.post(
+                        "/api/topic-evolution",
+                        json={"topic_keywords": "transformers", "conferences": ["NeurIPS"]},
+                    )
+
+                    assert response.status_code == 200
+
+    def test_topic_evolution_missing_keywords(self):
+        """Test topic-evolution returns 400 for missing topic_keywords."""
+        from abstracts_explorer.web_ui.app import app
+
+        with app.test_client() as client:
+            response = client.post(
+                "/api/topic-evolution",
+                json={"conferences": ["NeurIPS"]},
+            )
+
+            assert response.status_code == 400
+            data = response.get_json()
+            assert "error" in data
+
+    def test_topic_evolution_error_handling(self):
+        """Test topic-evolution handles errors."""
+        from abstracts_explorer.web_ui.app import app
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.json") as mock_json:
+                mock_json.loads.side_effect = Exception("Parse error")
+                with patch(
+                    "abstracts_explorer.mcp_server.get_topic_evolution",
+                    return_value="{}",
+                ):
+                    response = client.post(
+                        "/api/topic-evolution",
+                        json={"topic_keywords": "test"},
+                    )
+
+                    assert response.status_code == 500
+                    data = response.get_json()
+                    assert "error" in data

@@ -853,6 +853,89 @@ def search_custom_cluster():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/topic-evolution", methods=["POST"])
+def topic_evolution():
+    """
+    Get topic evolution data for a given topic across years.
+
+    Uses the MCP ``get_topic_evolution`` tool to compute how many papers
+    match a topic query per year for the requested conference(s).
+
+    Request Body
+    ------------
+    {
+        "topic_keywords": str (required) - Topic keywords to search for
+        "conferences": list[str] (optional) - Conference names
+        "distance_threshold": float (optional, default: 1.1) - Distance threshold
+    }
+
+    Returns
+    -------
+    dict
+        Topic evolution data with per-conference year_counts and year_relative
+    """
+    try:
+        data = request.get_json()
+
+        if not data or "topic_keywords" not in data:
+            return jsonify({"error": "Missing required field: topic_keywords"}), 400
+
+        topic_keywords = data["topic_keywords"]
+        conferences = data.get("conferences")
+        distance_threshold = data.get("distance_threshold", 1.1)
+
+        from abstracts_explorer.mcp_server import get_topic_evolution as mcp_get_topic_evolution
+
+        result_json = mcp_get_topic_evolution(
+            topic_keywords=topic_keywords,
+            conferences=conferences,
+            distance_threshold=distance_threshold,
+        )
+
+        result = json.loads(result_json)
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Error in topic evolution endpoint: {e}", exc_info=True)
+        return jsonify({"error": "Failed to compute topic evolution"}), 500
+
+
+@app.route("/api/papers-per-year")
+def papers_per_year():
+    """
+    Get paper counts per year for a conference.
+
+    Query Parameters
+    ----------------
+    conference : str (optional)
+        Conference name to filter by
+
+    Returns
+    -------
+    dict
+        Dictionary with year_counts mapping year to paper count
+    """
+    try:
+        conference = request.args.get("conference")
+        database = get_database()
+
+        if conference:
+            years = database.get_years_for_conference(conference)
+        else:
+            years = sorted(database.get_years())
+
+        year_counts = {}
+        for year in years:
+            stats = database.get_stats(year=year, conference=conference)
+            year_counts[year] = stats["total_papers"]
+
+        return jsonify({"year_counts": year_counts, "conference": conference})
+
+    except Exception as e:
+        logger.error(f"Error in papers-per-year endpoint: {e}", exc_info=True)
+        return jsonify({"error": "Failed to load papers per year data"}), 500
+
+
 @app.route("/api/years")
 def get_years():
     """
