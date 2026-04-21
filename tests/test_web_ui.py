@@ -307,6 +307,123 @@ class TestWebInterface:
         assert data["default_conference"] == "NeurIPS"
         assert data["default_year"] == 2025
 
+    def test_index_llm_backend_not_shown_for_unknown_url(self, client):
+        """Test that no LLM backend reference is shown for an unknown backend URL."""
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        original_url = app_module._config.llm_backend_url
+        try:
+            app_module._config.llm_backend_url = "http://unknown.example.com:5678"
+            response = client.get("/")
+            assert response.status_code == 200
+            assert b"AI powered by" not in response.data
+        finally:
+            app_module._config.llm_backend_url = original_url
+
+    def test_index_llm_backend_blablador_shown(self, client):
+        """Test that the Blablador backend link is shown when configured."""
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        original_url = app_module._config.llm_backend_url
+        try:
+            app_module._config.llm_backend_url = "https://api.helmholtz-blablador.fz-juelich.de/v1"
+            response = client.get("/")
+            assert response.status_code == 200
+            assert b"AI powered by" in response.data
+            assert b"BLABLADOR" in response.data
+            assert b"helmholtz-blablador.fz-juelich.de" in response.data
+            assert b"blablador-logo.png" in response.data
+        finally:
+            app_module._config.llm_backend_url = original_url
+
+    def test_index_llm_backend_lmstudio_shown(self, client):
+        """Test that the LM Studio backend link is shown when configured."""
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        original_url = app_module._config.llm_backend_url
+        try:
+            app_module._config.llm_backend_url = "http://localhost:1234/v1"
+            response = client.get("/")
+            assert response.status_code == 200
+            assert b"AI powered by" in response.data
+            assert b"LM Studio" in response.data
+            assert b"lmstudio.ai" in response.data
+        finally:
+            app_module._config.llm_backend_url = original_url
+
+    def test_index_llm_backend_rossendorf_shown(self, client):
+        """Test that the chat.fz-rossendorf.de backend link is shown when configured."""
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        original_url = app_module._config.llm_backend_url
+        try:
+            app_module._config.llm_backend_url = "https://chat.fz-rossendorf.de/v1"
+            response = client.get("/")
+            assert response.status_code == 200
+            assert b"AI powered by" in response.data
+            assert b"chat.fz-rossendorf.de" in response.data
+        finally:
+            app_module._config.llm_backend_url = original_url
+
+
+class TestGetLLMBackendInfo:
+    """Test get_llm_backend_info() helper function."""
+
+    def setup_method(self):
+        """Import the function once for all tests."""
+        from abstracts_explorer.web_ui.app import get_llm_backend_info
+
+        self.get_llm_backend_info = get_llm_backend_info
+
+    def test_blablador_url_detected(self):
+        """Test that the Blablador API URL is recognised."""
+        result = self.get_llm_backend_info("https://api.helmholtz-blablador.fz-juelich.de/v1")
+        assert result["name"] == "BLABLADOR"
+        assert result["homepage"] == "https://helmholtz-blablador.fz-juelich.de"
+        assert result["logo"] == "blablador-logo.png"
+
+    def test_blablador_homepage_url_detected(self):
+        """Test that the Blablador homepage URL is also recognised."""
+        result = self.get_llm_backend_info("https://helmholtz-blablador.fz-juelich.de")
+        assert result["name"] == "BLABLADOR"
+
+    def test_lmstudio_localhost_detected(self):
+        """Test that the LM Studio localhost URL is recognised."""
+        result = self.get_llm_backend_info("http://localhost:1234")
+        assert result["name"] == "LM Studio"
+        assert result["homepage"] == "https://lmstudio.ai"
+        assert result["logo"] is None
+
+    def test_lmstudio_127001_detected(self):
+        """Test that the LM Studio 127.0.0.1 URL is recognised."""
+        result = self.get_llm_backend_info("http://127.0.0.1:1234/v1")
+        assert result["name"] == "LM Studio"
+
+    def test_rossendorf_url_detected(self):
+        """Test that the chat.fz-rossendorf.de URL is recognised."""
+        result = self.get_llm_backend_info("https://chat.fz-rossendorf.de/v1")
+        assert result["name"] == "chat.fz-rossendorf.de"
+        assert result["homepage"] == "https://chat.fz-rossendorf.de"
+        assert result["logo"] is None
+
+    def test_unknown_url_returns_none_fields(self):
+        """Test that an unknown URL returns None for all metadata fields."""
+        result = self.get_llm_backend_info("http://unknown.example.com:5678")
+        assert result["name"] is None
+        assert result["homepage"] is None
+        assert result["logo"] is None
+
+    def test_empty_url_returns_none_fields(self):
+        """Test that an empty URL returns None for all metadata fields."""
+        result = self.get_llm_backend_info("")
+        assert result["name"] is None
+        assert result["homepage"] is None
+        assert result["logo"] is None
+
 
 class TestConferenceURLRoute:
     """Test direct URL paths to conferences (e.g., /icml, /neurips)."""
