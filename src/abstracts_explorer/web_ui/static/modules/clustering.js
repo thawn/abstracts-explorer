@@ -12,6 +12,19 @@ import { getSelectedConference, getSelectedYears, escapeHtml } from './utils/dom
 import { formatPaperCard } from './paper-card.js';
 import { renderInlineMarkdownWithLatex } from './utils/markdown-utils.js';
 
+/**
+ * Returns Plotly background and font colours matching the current colour scheme.
+ * @returns {{ plot_bgcolor: string, paper_bgcolor: string, font: { color: string } }}
+ */
+function getPlotColors() {
+    const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    return {
+        plot_bgcolor: isDark ? '#1f2937' : 'white',   // gray-800
+        paper_bgcolor: isDark ? '#111827' : 'white',  // gray-900
+        font: { color: isDark ? '#e5e7eb' : '#374151' }  // gray-200 vs gray-700
+    };
+}
+
 // Cluster state
 let clusterData = null;
 let currentClusterConfig = {
@@ -353,6 +366,7 @@ function visualizeHierarchyLevel(levelData) {
         }
     });
     
+    const plotColors = getPlotColors();
     const layout = {
         title: '',
         hovermode: 'closest',
@@ -371,8 +385,9 @@ function visualizeHierarchyLevel(levelData) {
             showticklabels: false,
             ticks: ''
         },
-        plot_bgcolor: 'white',
-        paper_bgcolor: 'white',
+        plot_bgcolor: plotColors.plot_bgcolor,
+        paper_bgcolor: plotColors.paper_bgcolor,
+        font: plotColors.font,
         margin: {
             l: 50,
             r: 50,
@@ -532,6 +547,7 @@ export function visualizeClusters() {
     });
     
     // Layout configuration
+    const plotColors = getPlotColors();
     const layout = {
         title: '',  // No title in plot
         xaxis: {
@@ -550,8 +566,9 @@ export function visualizeClusters() {
         },
         hovermode: 'closest',
         showlegend: false,  // Hide built-in legend, we'll create custom one
-        plot_bgcolor: 'white',  // White background
-        paper_bgcolor: 'white',
+        plot_bgcolor: plotColors.plot_bgcolor,
+        paper_bgcolor: plotColors.paper_bgcolor,
+        font: plotColors.font,
         margin: {
             l: 50,
             r: 50,
@@ -1106,6 +1123,7 @@ function updateClusterVisualization() {
     });
     
     // Update plot with new data
+    const plotColors3 = getPlotColors();
     const layout = {
         title: selectedClusters.size > 0 && selectedClusters.size < sortedClusterEntries.length
             ? `Clusters (${selectedClusters.size} selected)`
@@ -1126,8 +1144,9 @@ function updateClusterVisualization() {
         },
         hovermode: 'closest',
         showlegend: false,
-        plot_bgcolor: 'white',
-        paper_bgcolor: 'white',
+        plot_bgcolor: plotColors3.plot_bgcolor,
+        paper_bgcolor: plotColors3.paper_bgcolor,
+        font: plotColors3.font,
         margin: { l: 50, r: 50, t: 50, b: 50 },
         hoverlabel: {
             namelength: -1,
@@ -1522,6 +1541,7 @@ function visualizeClustersWithCustomQueries() {
     });
     
     // Layout configuration
+    const plotColors4 = getPlotColors();
     const layout = {
         title: '',
         xaxis: {
@@ -1540,8 +1560,9 @@ function visualizeClustersWithCustomQueries() {
         },
         hovermode: 'closest',
         showlegend: false,  // We'll use custom legend
-        plot_bgcolor: 'white',
-        paper_bgcolor: 'white',
+        plot_bgcolor: plotColors4.plot_bgcolor,
+        paper_bgcolor: plotColors4.paper_bgcolor,
+        font: plotColors4.font,
         margin: {
             l: 50,
             r: 50,
@@ -1847,13 +1868,15 @@ function renderTopicEvolutionChart(plotId, data) {
             ? ` (${conferences.join(', ')})`
             : '';
 
+    const plotColors5 = getPlotColors();
     const layout = {
         title: { text: `Topic Evolution: ${topic}${confLabel}` },
         xaxis: { title: { text: 'Year' }, type: 'linear', automargin: true, dtick: 1 },
         yaxis: { title: { text: 'Percentage of Papers (%)' }, automargin: true },
         margin: { t: 50, b: 60, l: 80, r: 20 },
-        paper_bgcolor: 'white',
-        plot_bgcolor: 'white',
+        paper_bgcolor: plotColors5.paper_bgcolor,
+        plot_bgcolor: plotColors5.plot_bgcolor,
+        font: plotColors5.font,
         showlegend: traces.length > 1
     };
 
@@ -1916,13 +1939,15 @@ export async function loadPapersPerYear() {
         }];
 
         const confTitle = selectedConference || 'All Conferences';
+        const plotColors6 = getPlotColors();
         const layout = {
             title: { text: `Total Papers Per Year — ${confTitle}` },
             xaxis: { title: { text: 'Year' }, type: 'linear', dtick: 1, automargin: true },
             yaxis: { title: { text: 'Number of Papers' }, automargin: true },
             margin: { t: 50, b: 50, l: 70, r: 20 },
-            paper_bgcolor: 'white',
-            plot_bgcolor: 'white',
+            paper_bgcolor: plotColors6.paper_bgcolor,
+            plot_bgcolor: plotColors6.plot_bgcolor,
+            font: plotColors6.font,
             showlegend: false,
             bargap: 0.2
         };

@@ -37,12 +37,12 @@ function getChatDonationConsent() {
  */
 export function buildMcpToolsHintHtml() {
     return `
-        <div id="mcp-tools-hint" class="mcp-tools-hint bg-gradient-to-br from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-4 shadow-sm max-w-2xl mx-auto">
+        <div id="mcp-tools-hint" class="mcp-tools-hint bg-gradient-to-br from-purple-50 dark:from-purple-900/30 to-blue-50 dark:to-blue-900/30 border border-purple-200 dark:border-purple-700 rounded-lg p-4 shadow-sm max-w-2xl mx-auto">
             <div class="flex items-start gap-2 mb-3">
                 <i class="fas fa-lightbulb text-purple-500 mt-0.5"></i>
-                <p class="text-sm font-semibold text-gray-700">I can use specialized tools to help answer your questions. Try asking:</p>
+                <p class="text-sm font-semibold text-gray-700 dark:text-gray-300">I can use specialized tools to help answer your questions. Try asking:</p>
             </div>
-            <ul class="space-y-2 text-sm text-gray-600 ml-6">
+            <ul class="space-y-2 text-sm text-gray-600 dark:text-gray-400 ml-6">
                 <li class="flex items-start gap-2">
                     <i class="fas fa-chart-pie text-purple-400 mt-0.5 flex-shrink-0"></i>
                     <span><em>"What are the main topics?"</em></span>
@@ -431,7 +431,7 @@ export function renderChatVisualizations(visualizations) {
                 <div class="flex-shrink-0 w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white">
                     <i class="fas fa-chart-line text-sm"></i>
                 </div>
-                <div class="bg-white rounded-lg p-4 shadow-sm w-full max-w-2xl">
+                <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm w-full max-w-2xl">
                     <div id="${plotId}" style="width:100%;height:400px;"></div>
                 </div>
             </div>
@@ -517,6 +517,9 @@ function _renderTopicEvolutionChart(plotId, viz) {
         ? topics[0]
         : topics.join(', ');
 
+    const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const fontColor = isDark ? '#e5e7eb' : '#374151';  // gray-200 vs gray-700
+
     const layout = {
         title: { text: `Topic Evolution: ${topicLabel}${confLabel}` },
         xaxis: { title: { text: 'Year' }, type: 'linear', automargin: true, dtick: 1 },
@@ -524,6 +527,7 @@ function _renderTopicEvolutionChart(plotId, viz) {
         margin: { t: 50, b: 60, l: 80, r: 20 },
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
+        font: { color: fontColor },
         showlegend: traces.length > 1
     };
 
@@ -571,6 +575,9 @@ function _renderClusterVisualizationChart(plotId, viz) {
     const stats = viz.statistics || {};
     const title = `Cluster Visualization (${stats.total_papers || points.length} papers, ${stats.n_clusters || Object.keys(clusters).length} clusters)`;
 
+    const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const fontColor = isDark ? '#e5e7eb' : '#374151';  // gray-200 vs gray-700
+
     const layout = {
         title: title,
         xaxis: { title: '', zeroline: false, showticklabels: false },
@@ -579,6 +586,7 @@ function _renderClusterVisualizationChart(plotId, viz) {
         showlegend: false,
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
+        font: { color: fontColor },
         hovermode: 'closest'
     };
 
