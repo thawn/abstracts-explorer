@@ -1931,27 +1931,26 @@ function _addTopicEvolutionTrace(data) {
 
     const plotColors = getPlotColors();
     const chartTitle = `Topic Evolution: ${topicEvolutionTopics.join(', ')}`;
+    const layout = {
+        title: { text: chartTitle },
+        xaxis: { title: { text: 'Year' }, type: 'linear', automargin: true, dtick: 1, showgrid: false, zeroline: false },
+        yaxis: { title: { text: 'Percentage of Papers (%)' }, automargin: true, showgrid: false, zeroline: false },
+        margin: { t: 50, b: 60, l: 80, r: 20 },
+        paper_bgcolor: plotColors.paper_bgcolor,
+        plot_bgcolor: plotColors.plot_bgcolor,
+        font: plotColors.font,
+        showlegend: topicEvolutionTraces.length > 1
+    };
+    const config = { responsive: true, displayModeBar: false };
 
     if (prevTraceCount === 0) {
         // First data: create the Plotly chart from scratch
-        const layout = {
-            title: { text: chartTitle },
-            xaxis: { title: { text: 'Year' }, type: 'linear', automargin: true, dtick: 1, showgrid: false, zeroline: false },
-            yaxis: { title: { text: 'Percentage of Papers (%)' }, automargin: true, showgrid: false, zeroline: false },
-            margin: { t: 50, b: 60, l: 80, r: 20 },
-            paper_bgcolor: plotColors.paper_bgcolor,
-            plot_bgcolor: plotColors.plot_bgcolor,
-            font: plotColors.font,
-            showlegend: topicEvolutionTraces.length > 1
-        };
-        Plotly.newPlot(plotEl, topicEvolutionTraces, layout, { responsive: true, displayModeBar: false });
+        Plotly.newPlot(plotEl, topicEvolutionTraces, layout, config);
     } else {
-        // Subsequent data: add traces to the existing chart and refresh the title/legend
-        Plotly.addTraces(plotEl, newTraces);
-        Plotly.relayout(plotEl, {
-            'title.text': chartTitle,
-            showlegend: topicEvolutionTraces.length > 1
-        });
+        // Subsequent data: rebuild the chart atomically with all accumulated traces.
+        // Using react() instead of addTraces()+relayout() avoids a Plotly rendering
+        // quirk where the new trace would appear twice in the legend.
+        Plotly.react(plotEl, topicEvolutionTraces, layout, config);
     }
 }
 

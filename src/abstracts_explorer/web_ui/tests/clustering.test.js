@@ -1339,8 +1339,6 @@ describe('Clustering Module', () => {
             });
 
             await loadClusters();
-            // Reset Plotly mock counts so we only count calls from the topic-evolution path
-            global.Plotly.newPlot.mockClear();
 
             // Mock cluster search response
             global.fetch.mockResolvedValueOnce({
@@ -1387,8 +1385,11 @@ describe('Clustering Module', () => {
             );
             expect(topicEvoCalls.length).toBe(1);
 
-            // Plotly.newPlot should have been called once for the first trace
-            expect(global.Plotly.newPlot).toHaveBeenCalledTimes(1);
+            // Plotly.newPlot should have been called once for the topic-evolution chart
+            const newPlotCalls = global.Plotly.newPlot.mock.calls.filter(
+                call => call[0] && call[0].id === 'topic-evolution-plot'
+            );
+            expect(newPlotCalls.length).toBe(1);
         });
 
         it('should add trace to the same chart on a second query instead of creating a new chart', async () => {
@@ -1405,10 +1406,6 @@ describe('Clustering Module', () => {
                 })
             });
             await loadClusters();
-            // Reset Plotly mock counts so we only count calls from the topic-evolution path
-            global.Plotly.newPlot.mockClear();
-            global.Plotly.addTraces.mockClear();
-            global.Plotly.relayout.mockClear();
 
             // --- First custom topic search ---
             global.fetch.mockResolvedValueOnce({
@@ -1451,15 +1448,22 @@ describe('Clustering Module', () => {
             expect(document.getElementById('topic-evolution-wrapper')).not.toBeNull();
             expect(container.querySelectorAll('[id^="topic-evolution-wrapper"]').length).toBe(1);
 
-            // newPlot called once (first query), addTraces called once (second query)
-            expect(global.Plotly.newPlot).toHaveBeenCalledTimes(1);
-            expect(global.Plotly.addTraces).toHaveBeenCalledTimes(1);
-
-            // relayout should have been called to update the title with both topics
-            expect(global.Plotly.relayout).toHaveBeenCalledWith(
-                expect.anything(),
-                expect.objectContaining({ 'title.text': 'Topic Evolution: topic A, topic B' })
+            // newPlot should have been called once (for the topic-evolution chart on first query)
+            const newPlotCalls = global.Plotly.newPlot.mock.calls.filter(
+                call => call[0] && call[0].id === 'topic-evolution-plot'
             );
+            expect(newPlotCalls.length).toBe(1);
+
+            // react should have been called once for the topic-evolution chart (second query)
+            const reactCalls = global.Plotly.react.mock.calls.filter(
+                call => call[0] && call[0].id === 'topic-evolution-plot'
+            );
+            expect(reactCalls.length).toBe(1);
+
+            // react should have been called with all accumulated traces and updated title
+            const reactCall = reactCalls[0];
+            expect(reactCall[1]).toHaveLength(2);  // both traces
+            expect(reactCall[2]).toMatchObject({ title: { text: 'Topic Evolution: topic A, topic B' }, showlegend: true });
         });
 
         it('should handle topic evolution fetch error gracefully', async () => {
