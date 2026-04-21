@@ -394,6 +394,53 @@ def get_available_filters_endpoint():
         return jsonify({"error": str(e)}), 500
 
 
+def extract_top_keywords(papers: list, n_keywords: int = 5) -> list:
+    """
+    Extract top keywords from a list of papers using TF-IDF.
+
+    Parameters
+    ----------
+    papers : list
+        List of paper dicts, each with optional 'title' and 'abstract' keys.
+    n_keywords : int, optional
+        Number of top keywords to return (default: 5).
+
+    Returns
+    -------
+    list
+        List of keyword strings, ordered by relevance (highest TF-IDF first).
+    """
+    from sklearn.feature_extraction.text import TfidfVectorizer
+
+    docs = []
+    for paper in papers:
+        title = paper.get("title", "") or ""
+        abstract = paper.get("abstract", "") or ""
+        text = f"{title}\n\n{abstract}".strip()
+        if text:
+            docs.append(text)
+
+    if not docs:
+        return []
+
+    try:
+        min_df = 1 if len(docs) < 3 else 2
+        tfidf = TfidfVectorizer(
+            max_features=500,
+            min_df=min_df,
+            stop_words="english",
+            ngram_range=(1, 2),
+        )
+        tfidf_matrix = tfidf.fit_transform(docs)
+        feature_names = tfidf.get_feature_names_out()
+        mean_tfidf = tfidf_matrix.mean(axis=0).A1
+        top_indices = mean_tfidf.argsort()[-n_keywords:][::-1]
+        keywords = [feature_names[i] for i in top_indices if mean_tfidf[i] > 0]
+        return keywords[:n_keywords]
+    except Exception:
+        return []
+
+
 @app.route("/api/search", methods=["POST"])
 def search():
     """
@@ -468,11 +515,14 @@ def search():
             )
             total_similar = None
 
+        related_topics = extract_top_keywords(papers)
+
         response_data = {
             "papers": papers,
             "count": len(papers),
             "query": query,
             "use_embeddings": use_embeddings,
+            "related_topics": related_topics,
         }
         if total_similar is not None:
             response_data["total_similar"] = total_similar

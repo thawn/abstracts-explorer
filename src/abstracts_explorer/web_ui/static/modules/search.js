@@ -112,6 +112,16 @@ export function displaySearchResults(data) {
                     ${data.use_embeddings ? '<span class="ml-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">LLM-Powered</span>' : ''}
                 </div>
             </div>
+            ${data.related_topics && data.related_topics.length > 0 ? `
+            <div class="mt-3 pt-3 border-t border-gray-100">
+                <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">Related Topics</span>
+                <div class="flex flex-wrap gap-2 mt-2">
+                    ${data.related_topics.map(kw => `<button
+                        class="px-3 py-1 bg-blue-50 text-blue-700 text-sm rounded-full border border-blue-200 hover:bg-blue-100 transition-colors cursor-pointer"
+                        onclick="document.getElementById('search-input').value = ${JSON.stringify(kw)}; searchPapers();"
+                    >${escapeHtml(kw)}</button>`).join('')}
+                </div>
+            </div>` : ''}
         </div>
     `;
 
