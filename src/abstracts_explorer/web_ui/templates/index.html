@@ -731,21 +731,22 @@
 
     <!-- Footer -->
     <footer class="bg-gray-800 dark:bg-gray-950 text-white mt-12">
-        <div class="container mx-auto px-4 py-6">
-            <div class="text-center">
-                <p class="text-sm"><a href="https://github.com/thawn/abstracts-explorer" class="underline hover:text-gray-300"
-                        target="_blank" rel="noopener noreferrer">Abstracts Explorer</a> version {{ version }}</p>
-                <p class="text-xs text-gray-400">Open source project for exploring conference abstracts</p>
+        <div class="container mx-auto px-4 py-3">
+            <div class="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-sm text-gray-300">
+                <span class="text-sm mx-2"><a href="https://github.com/thawn/abstracts-explorer"
+                        class="underline hover:text-gray-300" target="_blank" rel="noopener noreferrer">Abstracts Explorer</a>
+                    version {{ version }}</span>
                 {% if llm_backend and llm_backend.name %}
-                <p class="text-sm mt-2 flex items-center justify-center gap-2">
-                    <span>LLM provided by</span>
-                    <a href="{{ llm_backend.homepage }}" class="inline-flex items-center gap-1 underline hover:text-gray-300" target="_blank" rel="noopener noreferrer">
+                <span class="text-gray-500 mx-2" aria-hidden="true">|</span>
+                <span class="text-sm mx-2">LLM provided by
+                    <a href="{{ llm_backend.homepage }}" class="underline hover:text-gray-300" target="_blank"
+                        rel="noopener noreferrer">
                         {% if llm_backend.logo %}
                         <img src="{{ url_for('static', filename=llm_backend.logo) }}" alt="{{ llm_backend.name }} logo" class="inline-block h-4 w-auto align-middle">
                         {% endif %}
                         {{ llm_backend.name }}
                     </a>
-                </p>
+                </span>
                 {% endif %}
                 {% if imprint_link %}
                 <p class="text-xs text-gray-400 mt-2"><a href="{{ imprint_link }}" class="underline hover:text-gray-300" target="_blank" rel="noopener noreferrer">Imprint</a></p>
