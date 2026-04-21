@@ -3,16 +3,6 @@
 Abstracts Explorer includes a browser-based interface for searching, chatting, rating,
 and visualizing conference abstracts.
 
-## Quick Start
-
-**1. Start the server:**
-
-```bash
-abstracts-explorer web-ui
-```
-
-**2. Open your browser** at <http://127.0.0.1:5000>.
-
 A live demo is available at [abstracts.hzdr.de](https://abstracts.hzdr.de).
 
 ![Web UI overview](images/screenshot.png)
@@ -144,6 +134,16 @@ automatically identified topic cluster.
 
 ## Starting the Web UI
 
+### Quick Start
+
+**1. Start the server:**
+
+```bash
+abstracts-explorer web-ui
+```
+
+**2. Open your browser** at <http://127.0.0.1:5000>.
+
 ### Command-line options
 
 ```bash
@@ -159,4 +159,4 @@ abstracts-explorer web-ui [OPTIONS]
 
 ### Docker / Podman
 
-See the [Docker Guide](docker.md) for running via Docker Compose.
+See the [Docker Guide](docker.md) for running the docker container.
