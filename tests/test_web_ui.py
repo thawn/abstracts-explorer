@@ -112,7 +112,6 @@ class TestWebInterface:
         response = client.get("/")
         assert response.status_code == 200
         # Check that version is present in footer
-        assert b"Powered by" in response.data
         assert b"Abstracts Explorer" in response.data
         # Ensure "Abstracts Explorer" links to the GitHub project page
         assert b"https://github.com/thawn/abstracts-explorer" in response.data
@@ -323,7 +322,7 @@ class TestWebInterface:
             app_module._config.llm_backend_url = "http://unknown.example.com:5678"
             response = client.get("/")
             assert response.status_code == 200
-            assert b"AI powered by" not in response.data
+            assert b"LLM provided by" not in response.data
         finally:
             app_module._config.llm_backend_url = original_url
 
@@ -337,7 +336,7 @@ class TestWebInterface:
             app_module._config.llm_backend_url = "https://api.helmholtz-blablador.fz-juelich.de/v1"
             response = client.get("/")
             assert response.status_code == 200
-            assert b"AI powered by" in response.data
+            assert b"LLM provided by" in response.data
             assert b"BLABLADOR" in response.data
             assert b"helmholtz-blablador.fz-juelich.de" in response.data
             assert b"blablador-logo.png" in response.data
@@ -354,7 +353,7 @@ class TestWebInterface:
             app_module._config.llm_backend_url = "http://localhost:1234/v1"
             response = client.get("/")
             assert response.status_code == 200
-            assert b"AI powered by" in response.data
+            assert b"LLM provided by" in response.data
             assert b"LM Studio" in response.data
             assert b"lmstudio.ai" in response.data
         finally:
@@ -370,7 +369,7 @@ class TestWebInterface:
             app_module._config.llm_backend_url = "https://chat.fz-rossendorf.de/v1"
             response = client.get("/")
             assert response.status_code == 200
-            assert b"AI powered by" in response.data
+            assert b"LLM provided by" in response.data
             assert b"chat.fz-rossendorf.de" in response.data
         finally:
             app_module._config.llm_backend_url = original_url

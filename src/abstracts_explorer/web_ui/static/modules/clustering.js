@@ -74,6 +74,14 @@ let customClusterVisibility = {};  // Track visibility of each custom topic by I
 // Color palette for topic evolution charts
 const TOPIC_COLORS = ['#7c3aed', '#2563eb', '#059669', '#d97706', '#dc2626', '#6366f1', '#0891b2', '#be185d'];
 
+// Fixed DOM id for the single topic evolution Plotly chart
+const TOPIC_EVOLUTION_PLOT_ID = 'topic-evolution-plot';
+
+// Topic evolution chart state – accumulated across multiple queries
+let topicEvolutionTraces = [];   // All traces added so far
+let topicEvolutionColorIdx = 0;  // Running colour index
+let topicEvolutionTopics = [];   // Topic names already loaded (for the chart title)
+
 /**
  * Check if clusters are loaded
  * @returns {boolean} True if clusters are loaded
@@ -91,6 +99,10 @@ export function resetClusters() {
     customQueryClusters = [];
     customClusterMode = false;
     customClusterVisibility = {};
+    // Reset topic evolution state
+    topicEvolutionTraces = [];
+    topicEvolutionColorIdx = 0;
+    topicEvolutionTopics = [];
 }
 
 /**
@@ -1767,8 +1779,9 @@ export async function deleteCustomCluster(clusterId) {
 }
 
 /**
- * Fetch topic evolution data and display a chart for a custom topic.
- * Appends a new plot to the topic-evolution-container.
+ * Fetch topic evolution data and add a new line to the unified topic evolution chart.
+ * The first call creates the chart; subsequent calls append additional traces so that
+ * all queries are visible as separate lines in the same plot.
  * @param {string} topic - Topic keywords
  * @param {number} distance - Distance threshold used for the custom topic search
  * @param {string} conference - Selected conference (may be empty)
@@ -1790,21 +1803,35 @@ async function fetchAndDisplayTopicEvolution(topic, distance, conference) {
         conferences: [conference]
     };
 
-    // Create a placeholder with loading spinner
-    const plotId = `topic-evo-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const wrapper = document.createElement('div');
-    wrapper.className = 'bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 mb-6';
-    wrapper.id = `${plotId}-wrapper`;
-    wrapper.innerHTML = `
-        <div id="${plotId}" style="width: 100%; height: 350px;">
-            <div class="text-center text-gray-500 dark:text-gray-400 py-8">
-                <i class="fas fa-spinner fa-spin text-4xl mb-4 opacity-20"></i>
-                <p class="text-sm">Loading topic evolution for "${escapeHtml(topic)}"...</p>
+    const isFirstLoad = topicEvolutionTraces.length === 0;
+    const loadingId = `${TOPIC_EVOLUTION_PLOT_ID}-loading`;
+
+    if (isFirstLoad) {
+        // Build the single chart wrapper with a loading spinner
+        container.innerHTML = `
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 mb-6" id="topic-evolution-wrapper">
+                <div id="${loadingId}" class="text-center text-gray-500 dark:text-gray-400 py-8">
+                    <i class="fas fa-spinner fa-spin text-4xl mb-4 opacity-20"></i>
+                    <p class="text-sm">Loading topic evolution for "${escapeHtml(topic)}"...</p>
+                </div>
+                <div id="${TOPIC_EVOLUTION_PLOT_ID}" style="width: 100%; height: 350px;"></div>
             </div>
-        </div>
-    `;
-    container.appendChild(wrapper);
-    container.classList.remove('hidden');
+        `;
+        container.classList.remove('hidden');
+    } else {
+        // Append a small inline loading indicator below the existing chart
+        const wrapper = document.getElementById('topic-evolution-wrapper');
+        if (wrapper) {
+            let loadingEl = document.getElementById(loadingId);
+            if (!loadingEl) {
+                loadingEl = document.createElement('div');
+                loadingEl.id = loadingId;
+                wrapper.appendChild(loadingEl);
+            }
+            loadingEl.className = 'mt-3 text-sm text-gray-500 dark:text-gray-400';
+            loadingEl.innerHTML = `<i class="fas fa-spinner fa-spin mr-2 text-purple-600 opacity-70"></i>Loading topic evolution for "${escapeHtml(topic)}"...`;
+        }
+    }
 
     try {
         const response = await fetch(`${API_BASE}/api/topic-evolution`, {
@@ -1824,57 +1851,69 @@ async function fetchAndDisplayTopicEvolution(topic, distance, conference) {
             throw new Error(data.error);
         }
 
-        // Render topic evolution chart
-        renderTopicEvolutionChart(plotId, data);
+        // Add trace(s) to the unified chart
+        _addTopicEvolutionTrace(data);
 
     } catch (error) {
         console.error('Error fetching topic evolution:', error);
-        const plotEl = document.getElementById(plotId);
-        if (plotEl) {
-            plotEl.innerHTML = `
-                <div class="text-center text-red-500 py-8">
-                    <i class="fas fa-exclamation-triangle text-4xl mb-4 opacity-50"></i>
-                    <p class="text-sm">Failed to load topic evolution: ${escapeHtml(error.message)}</p>
-                </div>
-            `;
+        const loadingEl = document.getElementById(loadingId);
+        if (loadingEl) {
+            if (isFirstLoad) {
+                loadingEl.innerHTML = `
+                    <div class="text-center text-red-500 py-8">
+                        <i class="fas fa-exclamation-triangle text-4xl mb-4 opacity-50"></i>
+                        <p class="text-sm">Failed to load topic evolution: ${escapeHtml(error.message)}</p>
+                    </div>
+                `;
+            } else {
+                loadingEl.className = 'mt-3 text-sm text-red-500';
+                loadingEl.innerHTML = `<i class="fas fa-exclamation-triangle mr-1"></i>Failed to load topic evolution for "${escapeHtml(topic)}": ${escapeHtml(error.message)}`;
+            }
         }
     }
 }
 
 /**
- * Render a topic evolution line chart using Plotly.
- * @param {string} plotId - DOM element id for the plot container
+ * Add a new trace from topic evolution API data to the unified chart.
+ * Creates the chart on the first call; uses Plotly.addTraces on subsequent calls.
  * @param {Object} data - Topic evolution data from the API
  */
-function renderTopicEvolutionChart(plotId, data) {
+function _addTopicEvolutionTrace(data) {
     const conferenceData = data.conference_data || {};
     const conferences = Object.keys(conferenceData);
     const topic = data.topic || '';
 
-    const traces = [];
-    let colorIdx = 0;
+    const loadingEl = document.getElementById(`${TOPIC_EVOLUTION_PLOT_ID}-loading`);
+    const plotEl = document.getElementById(TOPIC_EVOLUTION_PLOT_ID);
 
+    const newTraces = [];
     for (const conf of conferences) {
         const cdata = conferenceData[conf] || {};
         const yearRelative = cdata.year_relative || {};
         const years = Object.keys(yearRelative).sort();
         const values = years.map(y => yearRelative[y]);
 
-        traces.push({
+        // When a single conference is requested, label by topic; otherwise add "(conf)" suffix
+        const traceName = conferences.length > 1 ? `${topic} (${conf})` : topic;
+        newTraces.push({
             x: years.map(Number),
             y: values,
             type: 'scatter',
             mode: 'lines+markers',
-            name: conf,
-            line: { color: TOPIC_COLORS[colorIdx % TOPIC_COLORS.length], width: 2 },
+            name: traceName,
+            line: { color: TOPIC_COLORS[topicEvolutionColorIdx % TOPIC_COLORS.length], width: 2 },
             marker: { size: 6 }
         });
-        colorIdx++;
+        topicEvolutionColorIdx++;
     }
 
-    if (traces.length === 0) {
-        const plotEl = document.getElementById(plotId);
-        if (plotEl) {
+    // Remove the loading indicator regardless of whether we got data
+    if (loadingEl) {
+        loadingEl.remove();
+    }
+
+    if (newTraces.length === 0) {
+        if (plotEl && topicEvolutionTraces.length === 0) {
             plotEl.innerHTML = `
                 <div class="text-center text-gray-500 dark:text-gray-400 py-8">
                     <p class="text-sm">No topic evolution data available for "${escapeHtml(topic)}"</p>
@@ -1884,26 +1923,34 @@ function renderTopicEvolutionChart(plotId, data) {
         return;
     }
 
-    const confLabel = conferences.length === 1
-        ? ` (${conferences[0]})`
-        : conferences.length > 1
-            ? ` (${conferences.join(', ')})`
-            : '';
+    const prevTraceCount = topicEvolutionTraces.length;
+    topicEvolutionTraces.push(...newTraces);
+    topicEvolutionTopics.push(topic);
 
-    const plotColors5 = getPlotColors();
+    if (typeof Plotly === 'undefined' || !plotEl) return;
+
+    const plotColors = getPlotColors();
+    const chartTitle = `Topic Evolution: ${topicEvolutionTopics.join(', ')}`;
     const layout = {
-        title: { text: `Topic Evolution: ${topic}${confLabel}` },
+        title: { text: chartTitle },
         xaxis: { title: { text: 'Year' }, type: 'linear', automargin: true, dtick: 1, showgrid: false, zeroline: false },
         yaxis: { title: { text: 'Percentage of Papers (%)' }, automargin: true, showgrid: false, zeroline: false },
         margin: { t: 50, b: 60, l: 80, r: 20 },
-        paper_bgcolor: plotColors5.paper_bgcolor,
-        plot_bgcolor: plotColors5.plot_bgcolor,
-        font: plotColors5.font,
-        showlegend: traces.length > 1
+        paper_bgcolor: plotColors.paper_bgcolor,
+        plot_bgcolor: plotColors.plot_bgcolor,
+        font: plotColors.font,
+        showlegend: topicEvolutionTraces.length > 1
     };
+    const config = { responsive: true, displayModeBar: false };
 
-    if (typeof Plotly !== 'undefined') {
-        Plotly.newPlot(plotId, traces, layout, { responsive: true, displayModeBar: false });
+    if (prevTraceCount === 0) {
+        // First data: create the Plotly chart from scratch
+        Plotly.newPlot(plotEl, topicEvolutionTraces, layout, config);
+    } else {
+        // Subsequent data: rebuild the chart atomically with all accumulated traces.
+        // Using react() instead of addTraces()+relayout() avoids a Plotly rendering
+        // quirk where the new trace would appear twice in the legend.
+        Plotly.react(plotEl, topicEvolutionTraces, layout, config);
     }
 }
 
