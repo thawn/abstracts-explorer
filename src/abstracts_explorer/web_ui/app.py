@@ -11,6 +11,7 @@ import sys
 import logging
 import json
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 from flask import Flask, render_template, request, jsonify, g, send_file, abort
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -19,8 +20,8 @@ from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.rag import RAGChat
 from abstracts_explorer.config import get_config
-from abstracts_explorer.paper_utils import get_paper_with_authors, PaperFormattingError
 from abstracts_explorer.export_utils import export_papers_to_zip
+from abstracts_explorer.paper_utils import extract_top_keywords
 
 # Import version
 try:
@@ -30,6 +31,10 @@ except ImportError:
     from abstracts_explorer import __version__
 
 logger = logging.getLogger(__name__)
+
+# Distance threshold for counting similar papers in embedding space.
+# Matches the default radius used on the clustering page's custom query.
+_SIMILAR_DISTANCE_THRESHOLD = 1.1
 
 # Get the directory where this file is located
 PACKAGE_DIR = Path(__file__).parent
@@ -135,6 +140,62 @@ def teardown_db(exception):
         db.close()
 
 
+# Known LLM backend definitions: each entry maps a URL fragment to backend metadata.
+# Order matters – more specific patterns should come first.
+_LLM_BACKENDS: List[Dict[str, Any]] = [
+    {
+        "url_fragments": ["blablador.fz-juelich.de"],
+        "name": "BLABLADOR",
+        "homepage": "https://helmholtz-blablador.fz-juelich.de",
+        "logo": "blablador-logo.png",
+    },
+    {
+        "url_fragments": ["chat.fz-rossendorf.de"],
+        "name": "chat.fz-rossendorf.de",
+        "homepage": "https://chat.fz-rossendorf.de",
+        "logo": None,
+    },
+    {
+        "url_fragments": ["localhost:1234", "127.0.0.1:1234"],
+        "name": "LM Studio",
+        "homepage": "https://lmstudio.ai",
+        "logo": None,
+    },
+]
+
+
+def get_llm_backend_info(backend_url: str) -> Dict[str, Optional[str]]:
+    """
+    Detect the LLM backend from its URL and return display metadata.
+
+    Parameters
+    ----------
+    backend_url : str
+        The URL of the configured LLM backend (e.g. from ``config.llm_backend_url``).
+
+    Returns
+    -------
+    dict
+        A dictionary with the following keys:
+
+        ``name`` : str or None
+            Human-readable backend name, or ``None`` if unknown.
+        ``homepage`` : str or None
+            URL of the backend's homepage, or ``None`` if unknown.
+        ``logo`` : str or None
+            Static-file name of the backend logo (relative to the ``static/``
+            directory), or ``None`` if no logo is available.
+    """
+    for backend in _LLM_BACKENDS:
+        if any(fragment in backend_url for fragment in backend["url_fragments"]):
+            return {
+                "name": backend["name"],
+                "homepage": backend["homepage"],
+                "logo": backend["logo"],
+            }
+    return {"name": None, "homepage": None, "logo": None}
+
+
 @app.route("/")
 def index():
     """
@@ -145,12 +206,14 @@ def index():
     str
         Rendered HTML template
     """
+    llm_backend = get_llm_backend_info(_config.llm_backend_url)
     return render_template(
         "index.html",
         version=__version__,
         imprint_link=_config.imprint_link,
         url_conference=None,
         url_conference_error=None,
+        llm_backend=llm_backend,
     )
 
 
@@ -181,6 +244,7 @@ def conference_index(conference_name):
     if conference_name.startswith("."):
         abort(404)
 
+    llm_backend = get_llm_backend_info(_config.llm_backend_url)
     try:
         database = get_database()
         result = database.resolve_conference_for_url(conference_name)
@@ -190,6 +254,7 @@ def conference_index(conference_name):
             imprint_link=_config.imprint_link,
             url_conference=result["conference"],
             url_conference_error=result["error"],
+            llm_backend=llm_backend,
         )
     except Exception as e:
         logger.error(f"Error in conference URL route: {e}", exc_info=True)
@@ -199,6 +264,7 @@ def conference_index(conference_name):
             imprint_link=_config.imprint_link,
             url_conference=None,
             url_conference_error=None,
+            llm_backend=llm_backend,
         )
 
 
@@ -434,6 +500,25 @@ def search():
                 years=years,
                 conferences=conferences,
             )
+
+            # Count total similar papers within distance threshold.
+            # Parse field filters to determine the semantic portion of the query;
+            # when the query consists only of field filters there is no meaningful
+            # embedding to compare against, so skip the count.
+            _, remaining_query = DatabaseManager.parse_field_filters(query)
+            if remaining_query:
+                try:
+                    total_similar = em.count_papers_within_distance(
+                        database=database,
+                        query=remaining_query,
+                        distance_threshold=_SIMILAR_DISTANCE_THRESHOLD,
+                        conferences=conferences if conferences else None,
+                        years=years if years else None,
+                    )
+                except Exception:
+                    total_similar = None
+            else:
+                total_similar = None
         else:
             # Keyword search in database
             database = get_database()
@@ -444,8 +529,21 @@ def search():
                 years=years,
                 conferences=conferences,
             )
+            total_similar = None
 
-        return jsonify({"papers": papers, "count": len(papers), "query": query, "use_embeddings": use_embeddings})
+        related_topics = extract_top_keywords(papers)
+
+        response_data = {
+            "papers": papers,
+            "count": len(papers),
+            "query": query,
+            "use_embeddings": use_embeddings,
+            "related_topics": related_topics,
+        }
+        if total_similar is not None:
+            response_data["total_similar"] = total_similar
+
+        return jsonify(response_data)
     except Exception as e:
         logger.error(f"Error in search endpoint: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
@@ -468,10 +566,10 @@ def get_paper(paper_uid):
     """
     try:
         database = get_database()
-        paper = get_paper_with_authors(database, paper_uid)
+        paper = database.get_paper_by_uid(paper_uid)
+        if paper is None:
+            return jsonify({"error": f"Paper with uid={paper_uid} not found"}), 404
         return jsonify(paper)
-    except PaperFormattingError as e:
-        return jsonify({"error": str(e)}), 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -505,10 +603,13 @@ def get_papers_batch():
             try:
                 # Convert to string if needed (JavaScript might send as string or int)
                 paper_uid_str = str(paper_uid)
-                paper = get_paper_with_authors(database, paper_uid_str)
-                papers.append(paper)
-            except PaperFormattingError as e:
-                logger.warning(f"Paper {paper_uid} not found: {e}")
+                paper = database.get_paper_by_uid(paper_uid_str)
+                if paper is not None:
+                    papers.append(paper)
+                else:
+                    logger.warning(f"Paper {paper_uid} not found in database")
+            except Exception as e:
+                logger.warning(f"Error fetching paper {paper_uid}: {e}")
                 continue
 
         return jsonify({"papers": papers})
@@ -818,6 +919,89 @@ def search_custom_cluster():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/topic-evolution", methods=["POST"])
+def topic_evolution():
+    """
+    Get topic evolution data for a given topic across years.
+
+    Uses the MCP ``get_topic_evolution`` tool to compute how many papers
+    match a topic query per year for the requested conference(s).
+
+    Request Body
+    ------------
+    {
+        "topic_keywords": str (required) - Topic keywords to search for
+        "conferences": list[str] (optional) - Conference names
+        "distance_threshold": float (optional, default: 1.1) - Distance threshold
+    }
+
+    Returns
+    -------
+    dict
+        Topic evolution data with per-conference year_counts and year_relative
+    """
+    try:
+        data = request.get_json()
+
+        if not data or "topic_keywords" not in data:
+            return jsonify({"error": "Missing required field: topic_keywords"}), 400
+
+        topic_keywords = data["topic_keywords"]
+        conferences = data.get("conferences")
+        distance_threshold = data.get("distance_threshold", 1.1)
+
+        from abstracts_explorer.mcp_server import get_topic_evolution as mcp_get_topic_evolution
+
+        result_json = mcp_get_topic_evolution(
+            topic_keywords=topic_keywords,
+            conferences=conferences,
+            distance_threshold=distance_threshold,
+        )
+
+        result = json.loads(result_json)
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Error in topic evolution endpoint: {e}", exc_info=True)
+        return jsonify({"error": "Failed to compute topic evolution"}), 500
+
+
+@app.route("/api/papers-per-year")
+def papers_per_year():
+    """
+    Get paper counts per year for a conference.
+
+    Query Parameters
+    ----------------
+    conference : str (optional)
+        Conference name to filter by
+
+    Returns
+    -------
+    dict
+        Dictionary with year_counts mapping year to paper count
+    """
+    try:
+        conference = request.args.get("conference")
+        database = get_database()
+
+        if conference:
+            years = database.get_years_for_conference(conference)
+        else:
+            years = sorted(database.get_years())
+
+        year_counts = {}
+        for year in years:
+            stats = database.get_stats(year=year, conference=conference)
+            year_counts[year] = stats["total_papers"]
+
+        return jsonify({"year_counts": year_counts, "conference": conference})
+
+    except Exception as e:
+        logger.error(f"Error in papers-per-year endpoint: {e}", exc_info=True)
+        return jsonify({"error": "Failed to load papers per year data"}), 500
+
+
 @app.route("/api/years")
 def get_years():
     """
@@ -871,7 +1055,10 @@ def export_interesting_papers():
         papers = []
         for paper_id in paper_ids:
             try:
-                paper = get_paper_with_authors(database, paper_id)
+                paper = database.get_paper_by_uid(str(paper_id))
+                if paper is None:
+                    logger.warning(f"Paper {paper_id} not found")
+                    continue
                 priority_data = priorities.get(str(paper_id), {})
 
                 # Handle both old format (int) and new format (dict with priority and searchTerm)
@@ -884,7 +1071,7 @@ def export_interesting_papers():
                     paper["searchTerm"] = search_query or "Unknown"
 
                 papers.append(paper)
-            except PaperFormattingError:
+            except Exception:
                 logger.warning(f"Paper {paper_id} not found")
                 continue
 

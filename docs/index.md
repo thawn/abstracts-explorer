@@ -118,6 +118,7 @@ api/evaluation
 
 contributing
 branching_strategy
+architecture
 ```
 
 ## Indices and tables

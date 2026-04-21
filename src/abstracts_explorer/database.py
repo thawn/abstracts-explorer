@@ -8,7 +8,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from sqlalchemy import create_engine, select, delete, func, or_, and_, text
 from sqlalchemy.orm import sessionmaker, Session
@@ -16,7 +16,13 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError, ProgrammingError, IntegrityError
 
 # Import Pydantic models from plugin framework
-from abstracts_explorer.plugin import LightweightPaper, serialize_authors_to_string, serialize_keywords_to_string
+from abstracts_explorer.plugin import (
+    LightweightPaper,
+    serialize_authors_to_string,
+    serialize_keywords_to_string,
+    deserialize_authors_from_string,
+    deserialize_keywords_from_string,
+)
 
 # Import SQLAlchemy models
 from abstracts_explorer.db_models import (
@@ -214,6 +220,38 @@ class DatabaseManager:
         """Context manager exit."""
         self.close()
 
+    @staticmethod
+    def compute_uid(title: str, original_id: Optional[Union[str, int]], conference: str, year: int) -> str:
+        """
+        Compute a deterministic paper UID from its identifying fields.
+
+        The UID is a 16-character hex string derived from a SHA-256 hash
+        of the concatenated title, original_id, conference and year.
+
+        Parameters
+        ----------
+        title : str
+            Paper title.
+        original_id : str, int, or None
+            Original paper ID from the source (e.g., OpenReview ID).
+        conference : str
+            Conference name (e.g., "NeurIPS").
+        year : int
+            Conference year.
+
+        Returns
+        -------
+        str
+            16-character hex UID.
+
+        Examples
+        --------
+        >>> DatabaseManager.compute_uid("My Paper", "abc123", "NeurIPS", 2025)
+        'a1b2c3d4e5f67890'
+        """
+        uid_source = f"{title}:{original_id}:{conference}:{year}"
+        return hashlib.sha256(uid_source.encode("utf-8")).hexdigest()[:16]
+
     def create_tables(self) -> None:
         """
         Create database tables for papers and embeddings metadata.
@@ -305,8 +343,7 @@ class DatabaseManager:
             authors_str = serialize_authors_to_string(paper.authors)
 
             # Generate UID as hash from title + conference + year
-            uid_source = f"{title}:{paper_id}:{paper.conference}:{paper.year}"
-            uid = hashlib.sha256(uid_source.encode("utf-8")).hexdigest()[:16]
+            uid = self.compute_uid(title, paper_id, paper.conference, paper.year)
 
             # Check if paper already exists (by UID)
             existing = self._session.execute(select(Paper).where(Paper.uid == uid)).scalar_one_or_none()
@@ -646,6 +683,68 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Failed to count papers: {str(e)}") from e
 
+    def get_paper_by_uid(self, uid: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a paper by its UID.
+
+        Parameters
+        ----------
+        uid : str
+            UID of the paper to retrieve.
+
+        Returns
+        -------
+        dict or None
+            Paper data as a dictionary, or None if not found.
+
+        Raises
+        ------
+        DatabaseError
+            If query fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            paper = self._session.execute(select(Paper).where(Paper.uid == uid)).scalar_one_or_none()
+            return self._paper_to_dict(paper) if paper else None
+        except Exception as e:
+            raise DatabaseError(f"Failed to retrieve paper by UID: {str(e)}") from e
+
+    def get_paper_by_original_id_or_uid(self, paper_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a paper by its UID or original_id (whichever matches first).
+
+        Tries uid first, then falls back to original_id. All formatting
+        (e.g. author deserialization) is performed inside this method so that
+        callers always receive a fully formatted paper dictionary.
+
+        Parameters
+        ----------
+        paper_id : str
+            Value to match against the ``uid`` or ``original_id`` column.
+
+        Returns
+        -------
+        dict or None
+            Fully formatted paper data dictionary, or None if not found.
+
+        Raises
+        ------
+        DatabaseError
+            If the database query fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            paper = self._session.execute(
+                select(Paper).where((Paper.uid == paper_id) | (Paper.original_id == paper_id)).limit(1)
+            ).scalar_one_or_none()
+            return self._paper_to_dict(paper) if paper else None
+        except Exception as e:
+            raise DatabaseError(f"Failed to retrieve paper by id/uid: {str(e)}") from e
+
     #: Paper model column names that can be used as ``field:"value"`` filters
     #: in search queries.  Internal columns (``uid``, ``created_at``) are
     #: excluded because they are not meaningful search targets for users.
@@ -803,6 +902,8 @@ class DatabaseManager:
         ({'authors': 'John Smith'}, 'transformers')
         >>> DatabaseManager.parse_field_filters('author:"John Smith" transformers')
         ({'authors': 'John Smith'}, 'transformers')
+        >>> DatabaseManager.parse_field_filters('Author:"John Smith" transformers')
+        ({'authors': 'John Smith'}, 'transformers')
         >>> DatabaseManager.parse_field_filters('transformers')
         ({}, 'transformers')
         >>> DatabaseManager.parse_field_filters('award:"Best Paper" authors:"Doe"')
@@ -811,15 +912,20 @@ class DatabaseManager:
         field_filters: Dict[str, str] = {}
         remaining = query
 
+        # Build a lower-cased lookup for aliases and searchable fields so
+        # that user input is matched case-insensitively (e.g. Author, AUTHOR).
+        alias_lower = {k.lower(): v for k, v in DatabaseManager.FIELD_ALIASES.items()}
+        fields_lower = {f.lower(): f for f in DatabaseManager.SEARCHABLE_FIELDS}
+
         # Iterate in reverse so that removing matched spans does not
         # invalidate the start/end offsets of earlier matches.
         for match in reversed(list(re.finditer(r'(\w+):"([^"]+)"', query))):
-            raw_field = match.group(1)
+            raw_field = match.group(1).lower()
             # Resolve alias (e.g. "author" → "authors") if applicable
-            field_name = DatabaseManager.FIELD_ALIASES.get(raw_field, raw_field)
+            field_name = alias_lower.get(raw_field, raw_field)
             value = match.group(2).strip()
-            if field_name in DatabaseManager.SEARCHABLE_FIELDS:
-                field_filters[field_name] = value
+            if field_name in fields_lower:
+                field_filters[fields_lower[field_name]] = value
                 remaining = remaining[: match.start()] + remaining[match.end() :]
 
         remaining = " ".join(remaining.split())  # normalise whitespace
@@ -884,16 +990,6 @@ class DatabaseManager:
             limit=limit,
         )
 
-        # Convert to list of dicts for JSON serialization
-        papers = [dict(p) for p in papers]
-
-        # Parse authors from comma-separated string for each paper
-        for paper in papers:
-            if "authors" in paper and paper["authors"]:
-                paper["authors"] = [a.strip() for a in paper["authors"].split(";")]
-            else:
-                paper["authors"] = []
-
         return papers
 
     def get_stats(self, year: Optional[int] = None, conference: Optional[str] = None) -> Dict[str, Any]:
@@ -954,7 +1050,7 @@ class DatabaseManager:
             "uid": paper.uid,
             "original_id": paper.original_id,
             "title": paper.title,
-            "authors": paper.authors,
+            "authors": deserialize_authors_from_string(paper.authors),
             "abstract": paper.abstract,
             "session": paper.session,
             "poster_position": paper.poster_position,
@@ -962,80 +1058,14 @@ class DatabaseManager:
             "poster_image_url": paper.poster_image_url,
             "url": paper.url,
             "room_name": paper.room_name,
-            "keywords": paper.keywords,
-            "starttime": paper.starttime,
-            "endtime": paper.endtime,
+            "keywords": deserialize_keywords_from_string(paper.keywords),
+            "starttime": str(paper.starttime),  # Convert datetime to string for JSON serialization
+            "endtime": str(paper.endtime),  # Convert datetime to string for JSON serialization
             "award": paper.award,
             "year": paper.year,
             "conference": paper.conference,
-            "created_at": paper.created_at,
+            "created_at": str(paper.created_at),  # Convert datetime to string for JSON serialization
         }
-
-    def search_authors_in_papers(
-        self,
-        name: Optional[str] = None,
-        limit: int = 100,
-    ) -> List[Dict[str, Any]]:
-        """
-        Search for authors by name within the papers' authors field.
-
-        Parameters
-        ----------
-        name : str, optional
-            Name to search for (partial match).
-        limit : int, default=100
-            Maximum number of results to return.
-
-        Returns
-        -------
-        list of dict
-            Unique authors found in papers with fields: name.
-
-        Raises
-        ------
-        DatabaseError
-            If search fails.
-
-        Examples
-        --------
-        >>> db = DatabaseManager()
-        >>> with db:
-        ...     authors = db.search_authors_in_papers(name="Huang")
-        >>> for author in authors:
-        ...     print(author['name'])
-        """
-        if not name or not self._session:
-            return []
-
-        try:
-            # Search for authors in the semicolon-separated authors field
-            search_pattern = f"%{name}%"
-            stmt = (
-                select(Paper.authors)
-                .where(Paper.authors.ilike(search_pattern))
-                .distinct()
-                .limit(limit * 10)  # Get more papers to extract unique authors
-            )
-
-            results = self._session.execute(stmt).scalars().all()
-
-            # Extract unique author names
-            author_names = set()
-            for authors_str in results:
-                if authors_str:
-                    # Split semicolon-separated authors
-                    for author in authors_str.split(";"):
-                        author = author.strip()
-                        if name.lower() in author.lower():
-                            author_names.add(author)
-                            if len(author_names) >= limit:
-                                break
-                if len(author_names) >= limit:
-                    break
-
-            return [{"name": name} for name in sorted(author_names)[:limit]]
-        except Exception as e:
-            raise DatabaseError(f"Author search failed: {str(e)}") from e
 
     def get_author_count(self) -> int:
         """

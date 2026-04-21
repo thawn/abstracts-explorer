@@ -23,7 +23,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from abstracts_explorer.web_ui import app as flask_app
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.config import get_config
-from abstracts_explorer.paper_utils import PaperFormattingError
 
 # ============================================================
 # Tests from test_web.py
@@ -113,12 +112,17 @@ class TestWebInterface:
         response = client.get("/")
         assert response.status_code == 200
         # Check that version is present in footer
-        assert b"Powered by" in response.data
         assert b"Abstracts Explorer" in response.data
         # Ensure "Abstracts Explorer" links to the GitHub project page
         assert b"https://github.com/thawn/abstracts-explorer" in response.data
         # Ensure the template variable was replaced (not left as {{ version }})
         assert b"{{ version }}" not in response.data
+
+    def test_index_documentation_link(self, client):
+        """Test that the documentation link is present in the header."""
+        response = client.get("/")
+        assert response.status_code == 200
+        assert b"https://thawn.github.io/abstracts-explorer/web_ui.html" in response.data
 
     def test_index_no_imprint_link_by_default(self, client):
         """Test that the imprint link is not shown by default."""
@@ -307,6 +311,123 @@ class TestWebInterface:
         data = json.loads(response.data)
         assert data["default_conference"] == "NeurIPS"
         assert data["default_year"] == 2025
+
+    def test_index_llm_backend_not_shown_for_unknown_url(self, client):
+        """Test that no LLM backend reference is shown for an unknown backend URL."""
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        original_url = app_module._config.llm_backend_url
+        try:
+            app_module._config.llm_backend_url = "http://unknown.example.com:5678"
+            response = client.get("/")
+            assert response.status_code == 200
+            assert b"LLM provided by" not in response.data
+        finally:
+            app_module._config.llm_backend_url = original_url
+
+    def test_index_llm_backend_blablador_shown(self, client):
+        """Test that the Blablador backend link is shown when configured."""
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        original_url = app_module._config.llm_backend_url
+        try:
+            app_module._config.llm_backend_url = "https://api.helmholtz-blablador.fz-juelich.de/v1"
+            response = client.get("/")
+            assert response.status_code == 200
+            assert b"LLM provided by" in response.data
+            assert b"BLABLADOR" in response.data
+            assert b"helmholtz-blablador.fz-juelich.de" in response.data
+            assert b"blablador-logo.png" in response.data
+        finally:
+            app_module._config.llm_backend_url = original_url
+
+    def test_index_llm_backend_lmstudio_shown(self, client):
+        """Test that the LM Studio backend link is shown when configured."""
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        original_url = app_module._config.llm_backend_url
+        try:
+            app_module._config.llm_backend_url = "http://localhost:1234/v1"
+            response = client.get("/")
+            assert response.status_code == 200
+            assert b"LLM provided by" in response.data
+            assert b"LM Studio" in response.data
+            assert b"lmstudio.ai" in response.data
+        finally:
+            app_module._config.llm_backend_url = original_url
+
+    def test_index_llm_backend_rossendorf_shown(self, client):
+        """Test that the chat.fz-rossendorf.de backend link is shown when configured."""
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        original_url = app_module._config.llm_backend_url
+        try:
+            app_module._config.llm_backend_url = "https://chat.fz-rossendorf.de/v1"
+            response = client.get("/")
+            assert response.status_code == 200
+            assert b"LLM provided by" in response.data
+            assert b"chat.fz-rossendorf.de" in response.data
+        finally:
+            app_module._config.llm_backend_url = original_url
+
+
+class TestGetLLMBackendInfo:
+    """Test get_llm_backend_info() helper function."""
+
+    def setup_method(self):
+        """Import the function once for all tests."""
+        from abstracts_explorer.web_ui.app import get_llm_backend_info
+
+        self.get_llm_backend_info = get_llm_backend_info
+
+    def test_blablador_url_detected(self):
+        """Test that the Blablador API URL is recognised."""
+        result = self.get_llm_backend_info("https://api.helmholtz-blablador.fz-juelich.de/v1")
+        assert result["name"] == "BLABLADOR"
+        assert result["homepage"] == "https://helmholtz-blablador.fz-juelich.de"
+        assert result["logo"] == "blablador-logo.png"
+
+    def test_blablador_homepage_url_detected(self):
+        """Test that the Blablador homepage URL is also recognised."""
+        result = self.get_llm_backend_info("https://helmholtz-blablador.fz-juelich.de")
+        assert result["name"] == "BLABLADOR"
+
+    def test_lmstudio_localhost_detected(self):
+        """Test that the LM Studio localhost URL is recognised."""
+        result = self.get_llm_backend_info("http://localhost:1234")
+        assert result["name"] == "LM Studio"
+        assert result["homepage"] == "https://lmstudio.ai"
+        assert result["logo"] is None
+
+    def test_lmstudio_127001_detected(self):
+        """Test that the LM Studio 127.0.0.1 URL is recognised."""
+        result = self.get_llm_backend_info("http://127.0.0.1:1234/v1")
+        assert result["name"] == "LM Studio"
+
+    def test_rossendorf_url_detected(self):
+        """Test that the chat.fz-rossendorf.de URL is recognised."""
+        result = self.get_llm_backend_info("https://chat.fz-rossendorf.de/v1")
+        assert result["name"] == "chat.fz-rossendorf.de"
+        assert result["homepage"] == "https://chat.fz-rossendorf.de"
+        assert result["logo"] is None
+
+    def test_unknown_url_returns_none_fields(self):
+        """Test that an unknown URL returns None for all metadata fields."""
+        result = self.get_llm_backend_info("http://unknown.example.com:5678")
+        assert result["name"] is None
+        assert result["homepage"] is None
+        assert result["logo"] is None
+
+    def test_empty_url_returns_none_fields(self):
+        """Test that an empty URL returns None for all metadata fields."""
+        result = self.get_llm_backend_info("")
+        assert result["name"] is None
+        assert result["homepage"] is None
+        assert result["logo"] is None
 
 
 class TestConferenceURLRoute:
@@ -586,6 +707,137 @@ class TestSearchEndpoint:
         data = json.loads(response.data)
         assert data["count"] == 1
 
+    def test_search_semantic_field_filter_only(self, client):
+        """Test semantic search with field-filter-only query bypasses embeddings."""
+        from unittest.mock import MagicMock, patch
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+
+        mock_em = MagicMock()
+        mock_db = MagicMock()
+        mock_papers = [{"uid": "test1", "title": "Test Paper", "abstract": "Test", "authors": ["John Smith"]}]
+        mock_em.search_papers_semantic.return_value = mock_papers
+
+        with patch.object(app_module, "get_embeddings_manager", return_value=mock_em):
+            with patch.object(app_module, "get_database", return_value=mock_db):
+                response = client.post(
+                    "/api/search",
+                    data=json.dumps({"query": 'authors:"John Smith"', "use_embeddings": True, "limit": 10}),
+                    content_type="application/json",
+                )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["count"] == 1
+        # Field-filter-only query should not trigger count_papers_within_distance
+        mock_em.count_papers_within_distance.assert_not_called()
+        # total_similar should not be in response for field-filter-only queries
+        assert "total_similar" not in data
+
+
+class TestExtractTopKeywords:
+    """Tests for the extract_top_keywords helper function."""
+
+    def test_returns_empty_list_for_empty_input(self):
+        """Should return empty list when no papers are provided."""
+        from abstracts_explorer.paper_utils import extract_top_keywords
+
+        result = extract_top_keywords([])
+        assert result == []
+
+    def test_returns_empty_list_for_papers_without_text(self):
+        """Should return empty list when all papers have no title or abstract."""
+        from abstracts_explorer.paper_utils import extract_top_keywords
+
+        result = extract_top_keywords([{"uid": "p1"}, {"uid": "p2"}])
+        assert result == []
+
+    def test_extracts_keywords_from_single_paper(self):
+        """Should extract keywords from a single paper."""
+        from abstracts_explorer.paper_utils import extract_top_keywords
+
+        papers = [
+            {
+                "title": "Neural Network Optimization",
+                "abstract": "We study gradient descent optimization for neural networks.",
+            }
+        ]
+        result = extract_top_keywords(papers, n_keywords=3)
+        assert isinstance(result, list)
+        assert len(result) <= 3
+        assert all(isinstance(kw, str) for kw in result)
+
+    def test_extracts_keywords_from_multiple_papers(self):
+        """Should extract keywords from multiple papers."""
+        from abstracts_explorer.paper_utils import extract_top_keywords
+
+        papers = [
+            {
+                "title": "Deep Learning for Vision",
+                "abstract": "Convolutional neural networks for image classification.",
+            },
+            {"title": "Transformer Models", "abstract": "Attention mechanism in deep learning for NLP tasks."},
+            {
+                "title": "Reinforcement Learning",
+                "abstract": "Policy gradient methods for deep reinforcement learning agents.",
+            },
+        ]
+        result = extract_top_keywords(papers, n_keywords=5)
+        assert isinstance(result, list)
+        assert len(result) <= 5
+        assert all(isinstance(kw, str) for kw in result)
+        # All keywords should be multi-word phrases (bigrams or trigrams)
+        assert all(len(kw.split()) >= 2 for kw in result)
+        # "deep learning" should appear in keywords given its frequency
+        all_kw = " ".join(result).lower()
+        assert "deep learning" in all_kw
+
+    def test_respects_n_keywords_parameter(self):
+        """Should return at most n_keywords results."""
+        from abstracts_explorer.paper_utils import extract_top_keywords
+
+        papers = [
+            {"title": "Neural Networks", "abstract": "Deep learning optimization with gradient descent algorithms."},
+            {
+                "title": "Convolutional Networks",
+                "abstract": "Image recognition with convolutional neural network layers.",
+            },
+        ]
+        for n in [1, 3, 5]:
+            result = extract_top_keywords(papers, n_keywords=n)
+            assert len(result) <= n
+
+    def test_search_response_includes_related_topics(self, client):
+        """Test that search response includes related_topics field."""
+        from unittest.mock import MagicMock, patch
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+
+        mock_db = MagicMock()
+        mock_papers = [
+            {"uid": "p1", "title": "Deep Learning", "abstract": "Neural network optimization with gradient descent."},
+            {
+                "uid": "p2",
+                "title": "Neural Networks",
+                "abstract": "Convolutional deep learning for image classification.",
+            },
+        ]
+        mock_db.search_papers_keyword.return_value = mock_papers
+
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            response = client.post(
+                "/api/search",
+                data=json.dumps({"query": "deep learning", "use_embeddings": False, "limit": 10}),
+                content_type="application/json",
+            )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert "related_topics" in data
+        assert isinstance(data["related_topics"], list)
+
 
 class TestChatEndpoint:
     """Test the chat endpoint."""
@@ -730,6 +982,7 @@ class TestWebUISemanticSearchDetails:
                         },
                     ]
                     mock_em.search_papers_semantic.return_value = mock_papers
+                    mock_em.count_papers_within_distance.return_value = 25
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
 
@@ -768,6 +1021,7 @@ class TestWebUISemanticSearchDetails:
                     mock_em = Mock()
                     mock_db = Mock()
                     mock_em.search_papers_semantic.return_value = []
+                    mock_em.count_papers_within_distance.return_value = 0
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
 
@@ -926,23 +1180,27 @@ class TestWebUIGetPaperDetails:
     """Test get_paper endpoint (lines 219-227)."""
 
     def test_get_paper_with_authors_list(self):
-        """Test that paper details include authors as list."""
+        """Test that paper details include authors as list.
+
+        DatabaseManager.get_paper_by_uid() already returns authors as a list
+        (via _paper_to_dict), so the endpoint returns them as-is.
+        """
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 mock_db = Mock()
 
-                # Mock paper data with lightweight schema (authors as semicolon-separated string)
+                # DatabaseManager.get_paper_by_uid returns authors already as a list
                 paper_row = {
                     "uid": "test_uid_123",
                     "title": "Test Paper",
                     "abstract": "Test abstract",
-                    "authors": "Author 1; Author 2",  # Semicolon-separated string
+                    "authors": ["Author 1", "Author 2"],
                     "session": "Poster Session 1",
                     "poster_position": "123",
                 }
-                mock_db.query.return_value = [paper_row]
+                mock_db.get_paper_by_uid.return_value = paper_row
                 mock_get_db.return_value = mock_db
 
                 # Use string UID (not integer ID)
@@ -951,7 +1209,7 @@ class TestWebUIGetPaperDetails:
                 assert response.status_code == 200
                 data = response.get_json()
 
-                # Verify authors are included as list (parsed from semicolon-separated string)
+                # Verify authors are included as list (formatting done by DatabaseManager)
                 assert "authors" in data
                 assert data["authors"] == ["Author 1", "Author 2"]
                 # Verify 'uid' field is present
@@ -1213,7 +1471,7 @@ class TestWebUIGetPaperException:
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 mock_db = Mock()
-                mock_db.query.return_value = []  # No paper found
+                mock_db.get_paper_by_uid.return_value = None  # Paper not found
                 mock_get_db.return_value = mock_db
 
                 response = client.get("/api/paper/999")
@@ -1223,28 +1481,22 @@ class TestWebUIGetPaperException:
                 assert "error" in data
                 assert "not found" in data["error"].lower()
 
-    def test_get_paper_database_error_returns_404(self):
-        """Test that database exceptions are wrapped as PaperFormattingError and return 404.
-
-        This is by design - our new API fails early and converts all database errors
-        to PaperFormattingError which returns 404 (not found).
-        """
+    def test_get_paper_database_error_returns_500(self):
+        """Test that database exceptions return 500."""
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 mock_db = Mock()
-                # Simulate a database exception - gets wrapped as PaperFormattingError
-                mock_db.query.side_effect = RuntimeError("Database connection lost")
+                # Simulate a database exception
+                mock_db.get_paper_by_uid.side_effect = RuntimeError("Database connection lost")
                 mock_get_db.return_value = mock_db
 
                 response = client.get("/api/paper/1")
 
-                # Database errors are wrapped as PaperFormattingError, which returns 404
-                assert response.status_code == 404
+                assert response.status_code == 500
                 data = response.get_json()
                 assert "error" in data
-                assert "Failed to retrieve paper" in data["error"]
 
 
 class TestWebUIStatsExceptionHandling:
@@ -2461,11 +2713,12 @@ class TestPaperCardDisplayFieldsUnit:
             "url": "https://papers.nips.cc/paper/detail",
         }
 
-        with patch("abstracts_explorer.web_ui.app.get_paper_with_authors") as mock_get_paper:
-            with patch.object(app_module, "get_database"):
-                mock_get_paper.return_value = expected_paper
+        with patch.object(app_module, "get_database") as mock_get_db:
+            mock_db = Mock()
+            mock_db.get_paper_by_uid.return_value = expected_paper
+            mock_get_db.return_value = mock_db
 
-                response = client.get("/api/paper/detail-uid-1")
+            response = client.get("/api/paper/detail-uid-1")
 
         assert response.status_code == 200
         paper = response.get_json()
@@ -2490,11 +2743,12 @@ class TestPaperCardDisplayFieldsUnit:
             "year": 2025,
         }
 
-        with patch("abstracts_explorer.web_ui.app.get_paper_with_authors") as mock_get_paper:
-            with patch.object(app_module, "get_database"):
-                mock_get_paper.return_value = expected_paper
+        with patch.object(app_module, "get_database") as mock_get_db:
+            mock_db = Mock()
+            mock_db.get_paper_by_uid.return_value = expected_paper
+            mock_get_db.return_value = mock_db
 
-                response = client.get("/api/paper/detail-uid-2")
+            response = client.get("/api/paper/detail-uid-2")
 
         assert response.status_code == 200
         paper = response.get_json()
@@ -2531,20 +2785,17 @@ class TestPaperCardDisplayFieldsUnit:
             },
         ]
 
-        def mock_get_paper_side_effect(database, paper_uid):
-            for p in batch_papers:
-                if p["uid"] == paper_uid:
-                    return p
-            raise PaperFormattingError(f"Paper {paper_uid} not found")
+        paper_map = {p["uid"]: p for p in batch_papers}
 
-        with patch("abstracts_explorer.web_ui.app.get_paper_with_authors") as mock_get_paper:
-            with patch.object(app_module, "get_database"):
-                mock_get_paper.side_effect = mock_get_paper_side_effect
+        with patch.object(app_module, "get_database") as mock_get_db:
+            mock_db = Mock()
+            mock_db.get_paper_by_uid.side_effect = lambda uid: paper_map.get(uid)
+            mock_get_db.return_value = mock_db
 
-                response = client.post(
-                    "/api/papers/batch",
-                    json={"paper_ids": ["batch-uid-1", "batch-uid-2"]},
-                )
+            response = client.post(
+                "/api/papers/batch",
+                json={"paper_ids": ["batch-uid-1", "batch-uid-2"]},
+            )
 
         assert response.status_code == 200
         data = response.get_json()
@@ -2556,3 +2807,136 @@ class TestPaperCardDisplayFieldsUnit:
             assert isinstance(
                 paper.get("authors"), list
             ), f"Batch endpoint must return authors as list, got {type(paper.get('authors')).__name__}"
+
+
+class TestPapersPerYearEndpoint:
+    """Test /api/papers-per-year endpoint."""
+
+    def test_papers_per_year_returns_counts(self):
+        """Test that papers-per-year returns year counts."""
+        from abstracts_explorer.web_ui.app import app
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
+                mock_db = Mock()
+                mock_db.get_years_for_conference.return_value = [2023, 2024]
+                mock_db.get_stats.side_effect = [
+                    {"total_papers": 100, "year": 2023, "conference": "NeurIPS"},
+                    {"total_papers": 150, "year": 2024, "conference": "NeurIPS"},
+                ]
+                mock_get_db.return_value = mock_db
+
+                response = client.get("/api/papers-per-year?conference=NeurIPS")
+
+                assert response.status_code == 200
+                data = response.get_json()
+                assert "year_counts" in data
+                assert data["year_counts"]["2023"] == 100
+                assert data["year_counts"]["2024"] == 150
+                assert data["conference"] == "NeurIPS"
+
+    def test_papers_per_year_no_conference(self):
+        """Test papers-per-year without conference filter."""
+        from abstracts_explorer.web_ui.app import app
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
+                mock_db = Mock()
+                mock_db.get_years.return_value = [2024, 2023]
+                mock_db.get_stats.side_effect = [
+                    {"total_papers": 200, "year": 2023, "conference": None},
+                    {"total_papers": 300, "year": 2024, "conference": None},
+                ]
+                mock_get_db.return_value = mock_db
+
+                response = client.get("/api/papers-per-year")
+
+                assert response.status_code == 200
+                data = response.get_json()
+                assert "year_counts" in data
+                assert data["conference"] is None
+
+    def test_papers_per_year_error_handling(self):
+        """Test papers-per-year handles errors."""
+        from abstracts_explorer.web_ui.app import app
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
+                mock_get_db.side_effect = Exception("DB error")
+
+                response = client.get("/api/papers-per-year")
+
+                assert response.status_code == 500
+                data = response.get_json()
+                assert "error" in data
+
+
+class TestTopicEvolutionEndpoint:
+    """Test /api/topic-evolution endpoint."""
+
+    def test_topic_evolution_returns_data(self):
+        """Test that topic-evolution returns evolution data."""
+        from abstracts_explorer.web_ui.app import app
+
+        mock_result = {
+            "topic": "transformers",
+            "conferences": ["NeurIPS"],
+            "distance_threshold": 1.1,
+            "total_papers": 10,
+            "year_range": {"start": 2022, "end": 2024},
+            "conference_data": {
+                "NeurIPS": {
+                    "year_counts": {"2022": 3, "2023": 5, "2024": 7},
+                    "year_relative": {"2022": 1.5, "2023": 2.5, "2024": 3.5},
+                    "year_totals": {"2022": 200, "2023": 200, "2024": 200},
+                }
+            },
+        }
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.json") as mock_json:
+                mock_json.loads.return_value = mock_result
+                with patch(
+                    "abstracts_explorer.mcp_server.get_topic_evolution",
+                    return_value='{"topic": "transformers"}',
+                ):
+                    response = client.post(
+                        "/api/topic-evolution",
+                        json={"topic_keywords": "transformers", "conferences": ["NeurIPS"]},
+                    )
+
+                    assert response.status_code == 200
+
+    def test_topic_evolution_missing_keywords(self):
+        """Test topic-evolution returns 400 for missing topic_keywords."""
+        from abstracts_explorer.web_ui.app import app
+
+        with app.test_client() as client:
+            response = client.post(
+                "/api/topic-evolution",
+                json={"conferences": ["NeurIPS"]},
+            )
+
+            assert response.status_code == 400
+            data = response.get_json()
+            assert "error" in data
+
+    def test_topic_evolution_error_handling(self):
+        """Test topic-evolution handles errors."""
+        from abstracts_explorer.web_ui.app import app
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.json") as mock_json:
+                mock_json.loads.side_effect = Exception("Parse error")
+                with patch(
+                    "abstracts_explorer.mcp_server.get_topic_evolution",
+                    return_value="{}",
+                ):
+                    response = client.post(
+                        "/api/topic-evolution",
+                        json={"topic_keywords": "test"},
+                    )
+
+                    assert response.status_code == 500
+                    data = response.get_json()
+                    assert "error" in data

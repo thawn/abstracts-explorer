@@ -18,6 +18,29 @@ import {
 } from './state.js';
 
 /**
+ * Build URL badges HTML for a paper
+ * @param {Object} paper - Paper object with optional url, paper_pdf_url, poster_image_url
+ * @param {boolean} compact - Whether to use compact styling
+ * @param {boolean} stopPropagation - Whether to include onclick="event.stopPropagation()"
+ * @returns {string} HTML string (empty string if no URLs available)
+ */
+export function buildUrlBadges(paper, compact = false, stopPropagation = true) {
+    const stop = stopPropagation ? ' onclick="event.stopPropagation()"' : '';
+    const size = compact ? 'px-2 py-0.5 text-xs' : 'px-2 py-1 text-xs';
+    let badges = '';
+    if (paper.url) {
+        badges += `<a href="${escapeHtml(paper.url)}" target="_blank"${stop} class="${size} bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 rounded-full hover:bg-purple-200 dark:hover:bg-purple-900 inline-flex items-center gap-1"><i class="fas fa-external-link-alt"></i>Paper Page</a>`;
+    }
+    if (paper.paper_pdf_url) {
+        badges += `<a href="${escapeHtml(paper.paper_pdf_url)}" target="_blank"${stop} class="${size} bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full hover:bg-blue-200 dark:hover:bg-blue-900 inline-flex items-center gap-1"><i class="fas fa-file-pdf"></i>PDF</a>`;
+    }
+    if (paper.poster_image_url) {
+        badges += `<a href="${escapeHtml(paper.poster_image_url)}" target="_blank"${stop} class="${size} bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 rounded-full hover:bg-green-200 dark:hover:bg-green-900 inline-flex items-center gap-1"><i class="fas fa-image"></i>Poster</a>`;
+    }
+    return badges ? `<div class="flex flex-wrap gap-1 ${compact ? 'mb-2' : 'mb-3'}">${badges}</div>` : '';
+}
+
+/**
  * Format a single paper card
  * @param {Object} paper - Paper object
  * @param {Object} options - Display options
@@ -48,49 +71,52 @@ export function formatPaperCard(paper, options = {}) {
     if (paper.abstract) {
         if (paper.abstract.length > abstractLength) {
             const preview = paper.abstract.substring(0, abstractLength);
-            const remaining = paper.abstract.substring(abstractLength);
             abstractHtml = `
-                <details class="text-gray-700 ${compact ? 'text-xs' : 'text-sm'} leading-relaxed ${compact ? 'mt-2' : ''} markdown-content" onclick="event.stopPropagation()">
-                    <summary class="cursor-pointer hover:text-purple-600">
-                        ${renderMarkdownWithLatex(preview)}... <span class="text-purple-600 font-medium">Show more</span>
+                <details class="abstract-details text-gray-700 dark:text-gray-300 ${compact ? 'text-xs' : 'text-sm'} leading-relaxed ${compact ? 'mt-2' : ''} markdown-content" onclick="event.stopPropagation()">
+                    <summary class="cursor-pointer">
+                        <span class="abstract-preview">
+                            ${renderMarkdownWithLatex(preview)}... <span class="text-purple-600 dark:text-purple-400 font-medium hover:text-purple-800 dark:hover:text-purple-300">Show more</span>
+                        </span>
+                        <span class="abstract-full">
+                            ${renderMarkdownWithLatex(paper.abstract)} <span class="text-purple-600 dark:text-purple-400 font-medium hover:text-purple-800 dark:hover:text-purple-300">Show less</span>
+                        </span>
                     </summary>
-                    <div class="mt-2">${renderMarkdownWithLatex(remaining)}</div>
                 </details>
             `;
         } else {
-            abstractHtml = `<div class="text-gray-700 ${compact ? 'text-xs' : 'text-sm'} leading-relaxed ${compact ? 'mt-2' : ''} markdown-content">${renderMarkdownWithLatex(paper.abstract)}</div>`;
+            abstractHtml = `<div class="text-gray-700 dark:text-gray-300 ${compact ? 'text-xs' : 'text-sm'} leading-relaxed ${compact ? 'mt-2' : ''} markdown-content">${renderMarkdownWithLatex(paper.abstract)}</div>`;
         }
     } else if (!compact) {
-        abstractHtml = `<p class="text-gray-700 text-sm leading-relaxed">No abstract available</p>`;
+        abstractHtml = `<p class="text-gray-700 dark:text-gray-300 text-sm leading-relaxed">No abstract available</p>`;
     }
 
     // Build metadata badges
     let metadata = '';
     if (paper.conference) {
-        metadata += `<span class="px-2 py-1 bg-indigo-100 text-indigo-700 text-xs rounded-full mr-${compact ? '1' : '2'}"><i class="fas fa-university mr-1"></i>${escapeHtml(paper.conference)}</span>`;
+        metadata += `<span class="px-2 py-1 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 text-xs rounded-full mr-${compact ? '1' : '2'}"><i class="fas fa-university mr-1"></i>${escapeHtml(paper.conference)}</span>`;
     }
     if (paper.session) {
-        metadata += `<span class="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full mr-${compact ? '1' : '2'}"><i class="fas fa-calendar-alt mr-1"></i>${escapeHtml(paper.session)}</span>`;
+        metadata += `<span class="px-2 py-1 bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 text-xs rounded-full mr-${compact ? '1' : '2'}"><i class="fas fa-calendar-alt mr-1"></i>${escapeHtml(paper.session)}</span>`;
     }
     if (paper.poster_position) {
-        metadata += `<span class="px-2 py-1 bg-yellow-100 text-yellow-700 text-xs rounded-full mr-${compact ? '1' : '2'}"><i class="fas fa-map-pin mr-1"></i>Poster ${escapeHtml(paper.poster_position)}</span>`;
+        metadata += `<span class="px-2 py-1 bg-yellow-100 dark:bg-yellow-900/50 text-yellow-700 dark:text-yellow-300 text-xs rounded-full mr-${compact ? '1' : '2'}"><i class="fas fa-map-pin mr-1"></i>Poster ${escapeHtml(paper.poster_position)}</span>`;
     }
     if (showSearchTerm && paper.searchTerm) {
-        metadata += `<span class="px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full mr-${compact ? '1' : '2'} inline-flex items-center">
+        metadata += `<span class="px-2 py-1 bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 text-xs rounded-full mr-${compact ? '1' : '2'} inline-flex items-center">
             <i class="fas fa-search mr-1"></i>${escapeHtml(paper.searchTerm)}
-            <button onclick="editPaperSearchTerm(${paper.uid}, event)" class="ml-1 text-purple-600 hover:text-purple-800 focus:outline-none" title="Edit search term">
+            <button onclick="editPaperSearchTerm(${paper.uid}, event)" class="ml-1 text-purple-600 dark:text-purple-400 hover:text-purple-800 dark:hover:text-purple-200 focus:outline-none" title="Edit search term">
                 <i class="fas fa-edit text-xs"></i>
             </button>
         </span>`;
     }
     if (paper.distance !== undefined) {
-        metadata += `<span class="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full"><i class="fas fa-chart-line mr-1"></i>${(1 - paper.distance).toFixed(compact ? 2 : 3)}</span>`;
+        metadata += `<span class="px-2 py-1 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-xs rounded-full" title="Similarity score: how closely this paper matches your search query (-1 = no match, 1 = perfect match)"><i class="fas fa-chart-line mr-1"></i>${(1 - paper.distance).toFixed(compact ? 2 : 3)}</span>`;
     }
 
     const cardId = idPrefix ? `id="${idPrefix}"` : '';
     const cardClasses = compact
-        ? 'paper-card bg-white rounded-lg shadow-sm p-3 hover:shadow-md cursor-pointer border border-gray-200'
-        : 'paper-card bg-white rounded-lg shadow-md p-6 hover:shadow-lg cursor-pointer';
+        ? 'paper-card bg-white dark:bg-gray-800 rounded-lg shadow-sm p-3 hover:shadow-md cursor-pointer border border-gray-200 dark:border-gray-700'
+        : 'paper-card bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 hover:shadow-lg cursor-pointer';
 
     // Get current priority for this paper
     const currentPriority = getPaperPriority(paper.uid);
@@ -101,7 +127,7 @@ export function formatPaperCard(paper, options = {}) {
         const isSelected = i <= currentPriority;
         const starClass = isSelected
             ? 'fas fa-star text-yellow-400 hover:text-yellow-500'
-            : 'far fa-star text-gray-300 hover:text-yellow-400';
+            : 'far fa-star text-gray-300 dark:text-gray-600 hover:text-yellow-400';
         starsHtml += `<i class="${starClass} cursor-pointer text-${compact ? 'sm' : 'base'} paper-star" data-paper-id="${paper.uid}" onclick="setPaperPriority('${paper.uid}', ${i})"></i>`;
     }
     starsHtml += '</div>';
@@ -111,32 +137,21 @@ export function formatPaperCard(paper, options = {}) {
             ${showNumber !== null ? `
                 <div class="flex items-start justify-between mb-1">
                     <span class="text-xs font-semibold text-purple-600">#${showNumber}</span>
-                    ${paper.paper_url ? `
-                        <a href="${escapeHtml(paper.paper_url)}" target="_blank" class="text-purple-600 hover:text-purple-800 text-xs" onclick="event.stopPropagation()">
-                            <i class="fas fa-external-link-alt"></i>
-                        </a>
-                    ` : ''}
                 </div>
             ` : ''}
             <div class="flex items-start justify-between ${compact ? 'mb-1' : 'mb-2'}">
-                <h${compact ? '4' : '3'} class="${compact ? 'text-sm' : 'text-lg'} font-semibold text-gray-800 flex-1 ${compact ? 'leading-tight pr-2' : 'pr-2'}">${renderInlineMarkdownWithLatex(title)}</h${compact ? '4' : '3'}>
+                <h${compact ? '4' : '3'} class="${compact ? 'text-sm' : 'text-lg'} font-semibold text-gray-800 dark:text-gray-100 flex-1 ${compact ? 'leading-tight pr-2' : 'pr-2'}">${renderInlineMarkdownWithLatex(title)}</h${compact ? '4' : '3'}>
                 ${starsHtml}
             </div>
-            <p class="${compact ? 'text-xs' : 'text-sm'} text-gray-600 ${compact ? 'mb-2 truncate' : 'mb-3'}">
+            <p class="${compact ? 'text-xs' : 'text-sm'} text-gray-600 dark:text-gray-400 ${compact ? 'mb-1 truncate' : 'mb-2'}">
                 <i class="fas fa-users mr-1"></i>${escapeHtml(authors)}
             </p>
+            ${buildUrlBadges(paper, compact)}
             ${metadata ? `<div class="${compact ? 'mb-2' : 'mb-3'}">${metadata}</div>` : ''}
             ${abstractHtml}
-            ${!compact && paper.paper_url ? `
-                <div class="mt-3">
-                    <a href="${escapeHtml(paper.paper_url)}" target="_blank" class="text-purple-600 hover:text-purple-800 text-sm" onclick="event.stopPropagation()">
-                        <i class="fas fa-external-link-alt mr-1"></i>View Paper Details
-                    </a>
-                </div>
-            ` : ''}
             ${!compact && paper.distance !== undefined && !metadata.includes('chart-line') ? `
-                <div class="mt-3 pt-3 border-t">
-                    <span class="text-xs text-gray-500">
+                <div class="mt-3 pt-3 border-t dark:border-gray-700">
+                    <span class="text-xs text-gray-500 dark:text-gray-400">
                         <i class="fas fa-chart-line mr-1"></i>
                         Relevance: ${(1 - paper.distance).toFixed(3)}
                     </span>
@@ -179,65 +194,48 @@ export async function showPaperDetails(paperId) {
         const title = paper.title || 'Untitled';
 
         modal.innerHTML = `
-            <div class="bg-white rounded-lg max-w-4xl max-h-[90vh] overflow-y-auto p-8">
+            <div class="bg-white dark:bg-gray-800 rounded-lg max-w-4xl max-h-[90vh] overflow-y-auto p-8">
                 <div class="flex items-start justify-between mb-4">
-                    <h2 class="text-2xl font-bold text-gray-800 flex-1">${renderInlineMarkdownWithLatex(title)}</h2>
-                    <button onclick="this.closest('.fixed').remove()" class="ml-4 text-gray-500 hover:text-gray-700">
+                    <h2 class="text-2xl font-bold text-gray-800 dark:text-gray-100 flex-1">${renderInlineMarkdownWithLatex(title)}</h2>
+                    <button onclick="this.closest('.fixed').remove()" class="ml-4 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
                         <i class="fas fa-times text-xl"></i>
                     </button>
                 </div>
                 
                 <div class="mb-4 flex flex-wrap gap-2">
                     ${paper.conference ? `
-                        <span class="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm">
+                        <span class="px-3 py-1 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-full text-sm">
                             <i class="fas fa-university mr-1"></i>${escapeHtml(paper.conference)}
                         </span>
                     ` : ''}
                     ${paper.session ? `
-                        <span class="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">
+                        <span class="px-3 py-1 bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 rounded-full text-sm">
                             <i class="fas fa-calendar-alt mr-1"></i>${escapeHtml(paper.session)}
                         </span>
                     ` : ''}
                     ${paper.poster_position ? `
-                        <span class="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-sm">
+                        <span class="px-3 py-1 bg-yellow-100 dark:bg-yellow-900/50 text-yellow-700 dark:text-yellow-300 rounded-full text-sm">
                             <i class="fas fa-map-pin mr-1"></i>Poster ${escapeHtml(paper.poster_position)}
                         </span>
                     ` : ''}
-                    <span class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">
+                    <span class="px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full text-sm">
                         <i class="fas fa-fingerprint mr-1"></i>ID: ${paper.uid}
                     </span>
                 </div>
                 
                 <div class="mb-6">
-                    <h3 class="text-sm font-semibold text-gray-700 mb-2">
+                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                         <i class="fas fa-users mr-2"></i>Authors
                     </h3>
-                    <p class="text-gray-700">${escapeHtml(authors)}</p>
+                    <p class="text-gray-700 dark:text-gray-300 mb-3">${escapeHtml(authors)}</p>
+                    ${buildUrlBadges(paper, false, false)}
                 </div>
                 
                 <div class="mb-6">
-                    <h3 class="text-sm font-semibold text-gray-700 mb-2">
+                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                         <i class="fas fa-file-alt mr-2"></i>Abstract
                     </h3>
-                    <div class="text-gray-700 leading-relaxed markdown-content">${paper.abstract ? renderMarkdownWithLatex(paper.abstract) : 'No abstract available'}</div>
-                </div>
-                
-                <div class="flex gap-3">
-                    ${paper.url ? `
-                        <a href="${escapeHtml(paper.url)}" target="_blank" class="inline-block px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
-                            <i class="fas fa-external-link-alt mr-2"></i>View Paper Details
-                        </a>
-                    ` : ''}
-                    ${paper.pdf_url ? `
-                        <a href="${escapeHtml(paper.pdf_url)}" target="_blank" class="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                            <i class="fas fa-file-pdf mr-2"></i>View PDF
-                        </a>
-                    ` : ''}
-                    ${paper.paper_url ? `
-                        <a href="${escapeHtml(paper.paper_url)}" target="_blank" class="inline-block px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
-                            <i class="fas fa-link mr-2"></i>Paper Link
-                        </a>
-                    ` : ''}
+                    <div class="text-gray-700 dark:text-gray-300 leading-relaxed markdown-content">${paper.abstract ? renderMarkdownWithLatex(paper.abstract) : 'No abstract available'}</div>
                 </div>
             </div>
         `;
@@ -268,7 +266,7 @@ export function updateStarDisplay(paperId) {
         
         if (starNumber <= priority) {
             // Set to filled star
-            star.classList.remove('far', 'text-gray-300');
+            star.classList.remove('far', 'text-gray-300', 'dark:text-gray-600');
             star.classList.add('fas', 'text-yellow-400');
             // Update hover state
             star.classList.remove('hover:text-yellow-400');
@@ -276,7 +274,7 @@ export function updateStarDisplay(paperId) {
         } else {
             // Set to empty star
             star.classList.remove('fas', 'text-yellow-400', 'hover:text-yellow-500');
-            star.classList.add('far', 'text-gray-300', 'hover:text-yellow-400');
+            star.classList.add('far', 'text-gray-300', 'dark:text-gray-600', 'hover:text-yellow-400');
         }
     });
 }

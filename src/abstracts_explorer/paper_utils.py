@@ -10,68 +10,17 @@ from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
+# TF-IDF settings for keyword extraction from search results.
+_TFIDF_MAX_FEATURES = 500
+_TFIDF_SMALL_CORPUS_THRESHOLD = 3  # corpora smaller than this use min_df=1
+_TFIDF_MIN_DF_SMALL = 1
+_TFIDF_MIN_DF_REGULAR = 2
+
 
 class PaperFormattingError(Exception):
     """Exception raised when paper formatting fails."""
 
     pass
-
-
-def get_paper_with_authors(database, paper_uid: str) -> Dict[str, Any]:
-    """
-    Get a complete paper record with authors from database.
-
-    This function enforces that papers MUST come from the database with full details.
-    No fallbacks or partial data allowed - fail early if paper doesn't exist.
-
-    Parameters
-    ----------
-    database : DatabaseManager
-        Database instance to query.
-    paper_uid : str
-        Paper UID (unique identifier) to retrieve.
-
-    Returns
-    -------
-    dict
-        Complete paper dictionary with all fields including authors list.
-
-    Raises
-    ------
-    PaperFormattingError
-        If paper_uid is invalid or paper not found in database.
-
-    Examples
-    --------
-    >>> paper = get_paper_with_authors(db, "b5ea3e6fa2ccb0be")
-    >>> print(paper['title'], paper['authors'])
-    """
-    if not isinstance(paper_uid, str) or not paper_uid.strip():
-        raise PaperFormattingError(f"Invalid paper_uid: {paper_uid}. Must be non-empty string.")
-
-    if database is None:
-        raise PaperFormattingError("Database connection is required but not provided.")
-
-    try:
-        # Get full paper record from database using uid
-        paper_rows = database.query("SELECT * FROM papers WHERE uid = ?", (paper_uid,))
-        if not paper_rows:
-            raise PaperFormattingError(f"Paper with uid={paper_uid} not found in database.")
-
-        paper = dict(paper_rows[0])
-
-        # Parse authors from semicolon-separated string
-        if "authors" in paper and paper["authors"]:
-            paper["authors"] = [a.strip() for a in paper["authors"].split(";")]
-        else:
-            paper["authors"] = []
-
-        return paper
-
-    except Exception as e:
-        if isinstance(e, PaperFormattingError):
-            raise
-        raise PaperFormattingError(f"Failed to retrieve paper {paper_uid}: {str(e)}") from e
 
 
 def format_search_results(
@@ -146,7 +95,9 @@ def format_search_results(
                 continue
 
             # Get complete paper from database (this validates paper exists)
-            paper = get_paper_with_authors(database, paper_uid)
+            paper = database.get_paper_by_uid(paper_uid)
+            if paper is None:
+                raise PaperFormattingError(f"Paper with uid={paper_uid} not found in database.")
 
             # Add similarity/distance scores if available
             if "distances" in search_results and search_results["distances"][0]:
@@ -245,3 +196,50 @@ def build_context_from_papers(papers: List[Dict[str, Any]]) -> str:
         context_parts.append("")  # Empty line between papers
 
     return "\n".join(context_parts)
+
+
+def extract_top_keywords(papers: list, n_keywords: int = 5) -> list:
+    """
+    Extract top keywords from a list of papers using TF-IDF.
+
+    Parameters
+    ----------
+    papers : list
+        List of paper dicts, each with optional 'title' and 'abstract' keys.
+    n_keywords : int, optional
+        Number of top keywords to return (default: 5).
+
+    Returns
+    -------
+    list
+        List of keyword strings, ordered by relevance (highest TF-IDF first).
+    """
+    from sklearn.feature_extraction.text import TfidfVectorizer
+
+    docs = []
+    for paper in papers:
+        title = paper.get("title", "") or ""
+        abstract = paper.get("abstract", "") or ""
+        text = f"{title}\n\n{abstract}".strip()
+        if text:
+            docs.append(text)
+
+    if not docs:
+        return []
+
+    try:
+        min_df = _TFIDF_MIN_DF_SMALL if len(docs) < _TFIDF_SMALL_CORPUS_THRESHOLD else _TFIDF_MIN_DF_REGULAR
+        tfidf = TfidfVectorizer(
+            max_features=_TFIDF_MAX_FEATURES,
+            min_df=min_df,
+            stop_words="english",
+            ngram_range=(2, 3),
+        )
+        tfidf_matrix = tfidf.fit_transform(docs)
+        feature_names = tfidf.get_feature_names_out()
+        mean_tfidf = tfidf_matrix.mean(axis=0).A1
+        top_indices = mean_tfidf.argsort()[-n_keywords:][::-1]
+        keywords = [feature_names[i] for i in top_indices if mean_tfidf[i] > 0]
+        return keywords[:n_keywords]
+    except Exception:
+        return []

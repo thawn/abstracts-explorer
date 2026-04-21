@@ -17,6 +17,9 @@ let _hasUserSentMessage = false;
 /** Whether the feedback highlight animation has already been triggered. */
 let _feedbackHighlightShown = false;
 
+/** Monotonically increasing counter used to generate unique message IDs. */
+let _messageIdCounter = 0;
+
 /**
  * Get the current chat donation consent status from localStorage.
  * @returns {boolean|null} true if accepted, false if declined, null if not yet asked
@@ -34,12 +37,12 @@ function getChatDonationConsent() {
  */
 export function buildMcpToolsHintHtml() {
     return `
-        <div id="mcp-tools-hint" class="mcp-tools-hint bg-gradient-to-br from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-4 shadow-sm max-w-2xl mx-auto">
+        <div id="mcp-tools-hint" class="mcp-tools-hint bg-gradient-to-br from-purple-50 dark:from-purple-900/30 to-blue-50 dark:to-blue-900/30 border border-purple-200 dark:border-purple-700 rounded-lg p-4 shadow-sm max-w-2xl mx-auto">
             <div class="flex items-start gap-2 mb-3">
                 <i class="fas fa-lightbulb text-purple-500 mt-0.5"></i>
-                <p class="text-sm font-semibold text-gray-700">I can use specialized tools to help answer your questions. Try asking:</p>
+                <p class="text-sm font-semibold text-gray-700 dark:text-gray-300">I can use specialized tools to help answer your questions. Try asking:</p>
             </div>
-            <ul class="space-y-2 text-sm text-gray-600 ml-6">
+            <ul class="space-y-2 text-sm text-gray-600 dark:text-gray-400 ml-6">
                 <li class="flex items-start gap-2">
                     <i class="fas fa-chart-pie text-purple-400 mt-0.5 flex-shrink-0"></i>
                     <span><em>"What are the main topics?"</em></span>
@@ -248,15 +251,15 @@ export function displayChatPapers(papers, metadata = {}) {
         const cacheText = wasRetrieved ? 'Retrieved new papers' : 'Using cached papers';
 
         html += `
-            <div class="bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-4 mb-4 shadow-sm">
+            <div class="bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 border border-purple-200 dark:border-purple-700 rounded-lg p-4 mb-4 shadow-sm">
                 <div class="flex items-start gap-2 mb-2">
                     <i class="fas fa-magic text-purple-600 mt-1"></i>
                     <div class="flex-1">
-                        <h3 class="text-sm font-semibold text-gray-700 mb-1">Optimized Search Query</h3>
-                        <p class="text-sm text-gray-800 font-medium italic">"${escapeHtml(metadata.rewritten_query)}"</p>
+                        <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Optimized Search Query</h3>
+                        <p class="text-sm text-gray-800 dark:text-gray-200 font-medium italic">"${escapeHtml(metadata.rewritten_query)}"</p>
                     </div>
                 </div>
-                <div class="flex items-center gap-2 text-xs text-gray-600 mt-2 pt-2 border-t border-purple-200">
+                <div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 mt-2 pt-2 border-t border-purple-200 dark:border-purple-700">
                     <i class="fas ${cacheIcon} ${cacheColor}"></i>
                     <span>${cacheText}</span>
                     <span class="ml-auto">${papers.length} paper${papers.length !== 1 ? 's' : ''} found</span>
@@ -293,10 +296,10 @@ export function displayChatPapers(papers, metadata = {}) {
  */
 export function addChatMessage(text, role, isLoading = false) {
     const messagesDiv = document.getElementById('chat-messages');
-    const messageId = `msg-${Date.now()}`;
+    const messageId = `msg-${++_messageIdCounter}`;
 
     const isUser = role === 'user';
-    const bgColor = isUser ? 'bg-purple-600 text-white' : 'bg-white text-gray-700';
+    const bgColor = isUser ? 'bg-purple-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200';
     const iconBg = isUser ? 'bg-gray-600' : 'bg-purple-600';
     const icon = isUser ? 'fa-user' : 'fa-robot';
     const justifyClass = isUser ? 'justify-end' : 'justify-start';
@@ -321,8 +324,8 @@ export function addChatMessage(text, role, isLoading = false) {
                 <div data-chat-content>${contentHtml}</div>
                 ${isLoading ? '<div class="spinner mt-2" style="width: 20px; height: 20px; border-width: 2px;"></div>' : ''}
                 ${!isUser && !isLoading ? `
-                <div class="chat-feedback-buttons flex items-center gap-2 mt-3 pt-2 border-t border-gray-100">
-                    <span class="text-s text-gray-500 mr-1">Helpful?</span>
+                <div class="chat-feedback-buttons flex items-center gap-2 mt-3 pt-2 border-t border-gray-100 dark:border-gray-600">
+                    <span class="text-s text-gray-500 dark:text-gray-400 mr-1">Helpful?</span>
                     <button class="chat-feedback-btn text-gray-400 hover:text-green-600 transition-colors p-1"
                         data-rating="up" data-msg-id="${messageId}" title="Thumbs up">
                         <i class="fas fa-thumbs-up text-s"></i>
@@ -428,7 +431,7 @@ export function renderChatVisualizations(visualizations) {
                 <div class="flex-shrink-0 w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white">
                     <i class="fas fa-chart-line text-sm"></i>
                 </div>
-                <div class="bg-white rounded-lg p-4 shadow-sm w-full max-w-2xl">
+                <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm w-full max-w-2xl">
                     <div id="${plotId}" style="width:100%;height:400px;"></div>
                 </div>
             </div>
@@ -514,13 +517,17 @@ function _renderTopicEvolutionChart(plotId, viz) {
         ? topics[0]
         : topics.join(', ');
 
+    const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const fontColor = isDark ? '#e5e7eb' : '#374151';  // gray-200 vs gray-700
+
     const layout = {
         title: { text: `Topic Evolution: ${topicLabel}${confLabel}` },
-        xaxis: { title: { text: 'Year' }, type: 'linear', automargin: true, dtick: 1 },
-        yaxis: { title: { text: 'Percentage of Papers (%)' }, automargin: true },
+        xaxis: { title: { text: 'Year' }, type: 'linear', automargin: true, dtick: 1, showgrid: false, zeroline: false },
+        yaxis: { title: { text: 'Percentage of Papers (%)' }, automargin: true, showgrid: false, zeroline: false },
         margin: { t: 50, b: 60, l: 80, r: 20 },
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
+        font: { color: fontColor },
         showlegend: traces.length > 1
     };
 
@@ -568,14 +575,18 @@ function _renderClusterVisualizationChart(plotId, viz) {
     const stats = viz.statistics || {};
     const title = `Cluster Visualization (${stats.total_papers || points.length} papers, ${stats.n_clusters || Object.keys(clusters).length} clusters)`;
 
+    const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const fontColor = isDark ? '#e5e7eb' : '#374151';  // gray-200 vs gray-700
+
     const layout = {
         title: title,
-        xaxis: { title: '', zeroline: false, showticklabels: false },
-        yaxis: { title: '', zeroline: false, showticklabels: false },
+        xaxis: { title: '', zeroline: false, showticklabels: false, showgrid: false },
+        yaxis: { title: '', zeroline: false, showticklabels: false, showgrid: false },
         margin: { t: 40, b: 20, l: 20, r: 20 },
         showlegend: false,
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
+        font: { color: fontColor },
         hovermode: 'closest'
     };
 
@@ -731,4 +742,25 @@ export function closePapersModal() {
 export function _resetChatState() {
     _hasUserSentMessage = false;
     _feedbackHighlightShown = false;
+    _messageIdCounter = 0;
+}
+
+/**
+ * Re-apply font colour to every active Plotly chart inside the chat message area.
+ * Called automatically when the OS colour scheme changes.
+ */
+function _refreshChatPlotColors() {
+    const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const fontColor = isDark ? '#e5e7eb' : '#374151';
+    const messagesDiv = document.getElementById('chat-messages');
+    if (!messagesDiv || typeof Plotly === 'undefined') return;
+    /* global Plotly */
+    messagesDiv.querySelectorAll('.js-plotly-plot').forEach(function (el) {
+        Plotly.relayout(el, { 'font.color': fontColor });
+    });
+}
+
+// Keep chat charts in sync when the OS colour scheme changes
+if (typeof window !== 'undefined' && window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', _refreshChatPlotColors);
 }

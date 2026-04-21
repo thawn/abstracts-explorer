@@ -12,7 +12,7 @@ import { configureMarkedWithKatex } from './modules/utils/markdown-utils.js';
 import { loadPriorities } from './modules/state.js';
 
 // Import feature modules
-import { searchPapers } from './modules/search.js';
+import { searchPapers, openAdvancedSearch, closeAdvancedSearch, applyAdvancedSearch } from './modules/search.js';
 import { sendChatMessage, resetChat, openPapersModal, closePapersModal, handleChatFeedback, initMcpToolsHint } from './modules/chat.js';
 import {
     loadInterestingPapers,
@@ -30,7 +30,8 @@ import {
 import {
     loadClusters,
     exportClusters,
-    resetClusters
+    resetClusters,
+    loadPapersPerYear
 } from './modules/clustering.js';
 import {
     loadFilterOptions,
@@ -94,6 +95,15 @@ function setupModalEventListeners() {
         });
     }
 
+    const advancedSearchModal = document.getElementById('advanced-search-modal');
+    if (advancedSearchModal) {
+        advancedSearchModal.addEventListener('click', function (event) {
+            if (event.target === this) {
+                closeAdvancedSearch();
+            }
+        });
+    }
+
     // Close modal on Escape key
     document.addEventListener('keydown', function (event) {
         if (event.key === 'Escape') {
@@ -101,6 +111,23 @@ function setupModalEventListeners() {
             if (modal && !modal.classList.contains('hidden')) {
                 closeSettings();
             }
+            const advModal = document.getElementById('advanced-search-modal');
+            if (advModal && !advModal.classList.contains('hidden')) {
+                closeAdvancedSearch();
+            }
+        }
+    });
+
+    // Allow Enter key to submit advanced search
+    const advancedSearchFields = ['adv-topic', 'adv-authors', 'adv-title', 'adv-keywords', 'adv-abstract', 'adv-award'];
+    advancedSearchFields.forEach(id => {
+        const input = document.getElementById(id);
+        if (input) {
+            input.addEventListener('keypress', function (event) {
+                if (event.key === 'Enter') {
+                    applyAdvancedSearch();
+                }
+            });
         }
     });
 }
@@ -112,6 +139,9 @@ function setupModalEventListeners() {
 function attachToWindow() {
     // Search module
     window.searchPapers = searchPapers;
+    window.openAdvancedSearch = openAdvancedSearch;
+    window.closeAdvancedSearch = closeAdvancedSearch;
+    window.applyAdvancedSearch = applyAdvancedSearch;
 
     // Chat module
     window.sendChatMessage = sendChatMessage;
@@ -138,6 +168,7 @@ function attachToWindow() {
     window.loadClusters = loadClusters;
     window.exportClusters = exportClusters;
     window.resetClusters = resetClusters;
+    window.loadPapersPerYear = loadPapersPerYear;
 
     // Filters module
     window.selectAllFilter = selectAllFilter;

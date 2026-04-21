@@ -48,6 +48,13 @@ export function switchTab(tab) {
             window.loadClusters();
         }
     }
+
+    // Always load papers-per-year when switching to clusters tab
+    if (tab === 'clusters') {
+        if (window.loadPapersPerYear) {
+            window.loadPapersPerYear();
+        }
+    }
 }
 
 /**

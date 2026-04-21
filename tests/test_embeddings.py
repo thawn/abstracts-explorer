@@ -913,6 +913,320 @@ def test_search_papers_semantic_field_filter_partial_match(embeddings_manager, t
     embeddings_manager.close()
 
 
+def test_search_papers_semantic_field_filter_only(embeddings_manager, tmp_path, mock_lm_studio):
+    """Test that field-filter-only queries bypass semantic search and return DB results.
+
+    When the query is e.g. ``authors:"Vaswani"`` (no remaining keywords after
+    extracting the field filter), the method should return matching papers from
+    the SQL database directly without generating an embedding or querying ChromaDB.
+    """
+    from abstracts_explorer.database import DatabaseManager
+    from abstracts_explorer.plugin import LightweightPaper
+
+    db_path = tmp_path / "test_field_only.db"
+    set_test_db(db_path)
+
+    with DatabaseManager() as db:
+        db.create_tables()
+        papers = [
+            LightweightPaper(
+                uid="paper_vaswani",
+                title="Attention is All You Need",
+                abstract="Transformer architecture paper.",
+                authors=["Vaswani", "Shazeer"],
+                session="Session 1",
+                poster_position="A1",
+                year=2017,
+                conference="NeurIPS",
+            ),
+            LightweightPaper(
+                uid="paper_devlin",
+                title="BERT Paper",
+                abstract="BERT language model paper.",
+                authors=["Devlin", "Chang"],
+                session="Session 2",
+                poster_position="A2",
+                year=2019,
+                conference="NeurIPS",
+            ),
+        ]
+        for paper in papers:
+            db.add_paper(paper)
+
+    # Connect embeddings (but note: the search should NOT need to generate embeddings)
+    embeddings_manager.connect()
+    embeddings_manager.create_collection()
+    # Don't embed papers - field-filter-only queries should not need ChromaDB
+
+    # Query with only a field filter (no remaining keywords)
+    with DatabaseManager() as db:
+        results = embeddings_manager.search_papers_semantic(
+            'authors:"Vaswani"',
+            database=db,
+            limit=10,
+        )
+
+    assert len(results) == 1, f"Expected 1 result, got {len(results)}"
+    assert results[0]["title"] == "Attention is All You Need"
+    # Authors should be parsed into a list
+    assert isinstance(results[0]["authors"], list)
+    assert "Vaswani" in results[0]["authors"]
+
+    # Test with the 'author' alias
+    with DatabaseManager() as db:
+        results = embeddings_manager.search_papers_semantic(
+            'author:"Vaswani"',
+            database=db,
+            limit=10,
+        )
+
+    assert len(results) == 1
+    assert results[0]["title"] == "Attention is All You Need"
+
+    # Test with no matching results
+    with DatabaseManager() as db:
+        results = embeddings_manager.search_papers_semantic(
+            'authors:"Nonexistent"',
+            database=db,
+            limit=10,
+        )
+    assert len(results) == 0
+
+    embeddings_manager.close()
+
+
+def test_search_papers_semantic_field_filter_only_with_filters(embeddings_manager, tmp_path, mock_lm_studio):
+    """Test field-filter-only queries respect additional session/year/conference filters."""
+    from abstracts_explorer.database import DatabaseManager
+    from abstracts_explorer.plugin import LightweightPaper
+
+    db_path = tmp_path / "test_field_only_filters.db"
+    set_test_db(db_path)
+
+    with DatabaseManager() as db:
+        db.create_tables()
+        papers = [
+            LightweightPaper(
+                uid="paper_a",
+                title="Paper A",
+                abstract="Paper A abstract.",
+                authors=["John Smith"],
+                session="Session 1",
+                poster_position="A1",
+                year=2024,
+                conference="NeurIPS",
+            ),
+            LightweightPaper(
+                uid="paper_b",
+                title="Paper B",
+                abstract="Paper B abstract.",
+                authors=["John Smith"],
+                session="Session 2",
+                poster_position="A2",
+                year=2025,
+                conference="ICLR",
+            ),
+        ]
+        for paper in papers:
+            db.add_paper(paper)
+
+    embeddings_manager.connect()
+    embeddings_manager.create_collection()
+
+    # Both papers by John Smith
+    with DatabaseManager() as db:
+        results = embeddings_manager.search_papers_semantic(
+            'authors:"John Smith"',
+            database=db,
+            limit=10,
+        )
+    assert len(results) == 2
+
+    # Filter by year
+    with DatabaseManager() as db:
+        results = embeddings_manager.search_papers_semantic(
+            'authors:"John Smith"',
+            database=db,
+            limit=10,
+            years=[2024],
+        )
+    assert len(results) == 1
+    assert results[0]["year"] == 2024
+
+    # Filter by conference
+    with DatabaseManager() as db:
+        results = embeddings_manager.search_papers_semantic(
+            'authors:"John Smith"',
+            database=db,
+            limit=10,
+            conferences=["ICLR"],
+        )
+    assert len(results) == 1
+    assert results[0]["conference"] == "ICLR"
+
+    embeddings_manager.close()
+
+
+def test_search_papers_semantic_implicit_author_match(embeddings_manager, tmp_path, mock_lm_studio):
+    """Test that semantic search always checks for author matches without explicit author: filter.
+
+    When the query text matches an author name in the database (even without using
+    the ``author:"Name"`` syntax), those papers should appear first in the results.
+    """
+    from abstracts_explorer.database import DatabaseManager
+    from abstracts_explorer.plugin import LightweightPaper
+
+    db_path = tmp_path / "test_implicit_author.db"
+    set_test_db(db_path)
+
+    with DatabaseManager() as db:
+        db.create_tables()
+        papers = [
+            LightweightPaper(
+                uid="paper_lecun",
+                title="LeCun Vision Paper",
+                abstract="Convolutional neural networks for image recognition.",
+                authors=["Yann LeCun", "Bengio"],
+                session="Session 1",
+                poster_position="A1",
+                year=2020,
+                conference="NeurIPS",
+            ),
+            LightweightPaper(
+                uid="paper_attention",
+                title="Attention Mechanism Paper",
+                abstract="Self-attention and transformer architectures.",
+                authors=["Vaswani", "Shazeer"],
+                session="Session 2",
+                poster_position="A2",
+                year=2017,
+                conference="NeurIPS",
+            ),
+        ]
+        for paper in papers:
+            db.add_paper(paper)
+
+    embeddings_manager.connect()
+    embeddings_manager.create_collection()
+    embeddings_manager.embed_from_database()
+
+    # Search for "LeCun" without the author: field prefix — should still find
+    # the LeCun paper first (implicit author match).
+    with DatabaseManager() as db:
+        results = embeddings_manager.search_papers_semantic(
+            "LeCun",
+            database=db,
+            limit=10,
+        )
+
+    assert len(results) >= 1, f"Expected at least 1 result, got {len(results)}"
+    # The LeCun paper must appear first (author match takes priority)
+    assert results[0]["title"] == "LeCun Vision Paper", f"Expected LeCun paper first, got {results[0]['title']!r}"
+    assert isinstance(results[0]["authors"], list)
+    assert any("LeCun" in a for a in results[0]["authors"])
+
+    embeddings_manager.close()
+
+
+def test_search_papers_semantic_implicit_author_match_no_duplicate(embeddings_manager, tmp_path, mock_lm_studio):
+    """Test that implicit author matches are not duplicated in the semantic results."""
+    from abstracts_explorer.database import DatabaseManager
+    from abstracts_explorer.plugin import LightweightPaper
+
+    db_path = tmp_path / "test_implicit_author_dedup.db"
+    set_test_db(db_path)
+
+    with DatabaseManager() as db:
+        db.create_tables()
+        papers = [
+            LightweightPaper(
+                uid="paper_lecun",
+                title="LeCun Vision Paper",
+                abstract="Convolutional neural networks for image recognition.",
+                authors=["Yann LeCun"],
+                session="Session 1",
+                poster_position="A1",
+                year=2020,
+                conference="NeurIPS",
+            ),
+            LightweightPaper(
+                uid="paper_other",
+                title="Other Paper",
+                abstract="Unrelated topic.",
+                authors=["Someone Else"],
+                session="Session 2",
+                poster_position="A2",
+                year=2021,
+                conference="NeurIPS",
+            ),
+        ]
+        for paper in papers:
+            db.add_paper(paper)
+
+    embeddings_manager.connect()
+    embeddings_manager.create_collection()
+    embeddings_manager.embed_from_database()
+
+    with DatabaseManager() as db:
+        results = embeddings_manager.search_papers_semantic(
+            "LeCun",
+            database=db,
+            limit=10,
+        )
+
+    # No duplicate UIDs
+    uids = [p["uid"] for p in results]
+    assert len(uids) == len(set(uids)), f"Duplicate UIDs in results: {uids}"
+    # LeCun paper must appear first
+    assert results[0]["title"] == "LeCun Vision Paper"
+
+    embeddings_manager.close()
+
+
+def test_search_papers_semantic_no_author_match_falls_back_to_semantic(embeddings_manager, tmp_path, mock_lm_studio):
+    """Test that when query doesn't match any author, semantic results are returned normally."""
+    from abstracts_explorer.database import DatabaseManager
+    from abstracts_explorer.plugin import LightweightPaper
+
+    db_path = tmp_path / "test_no_author_fallback.db"
+    set_test_db(db_path)
+
+    with DatabaseManager() as db:
+        db.create_tables()
+        papers = [
+            LightweightPaper(
+                uid="paper_transformer",
+                title="Transformer Paper",
+                abstract="Self-attention and transformer architectures.",
+                authors=["Vaswani", "Shazeer"],
+                session="Session 1",
+                poster_position="A1",
+                year=2017,
+                conference="NeurIPS",
+            ),
+        ]
+        for paper in papers:
+            db.add_paper(paper)
+
+    embeddings_manager.connect()
+    embeddings_manager.create_collection()
+    embeddings_manager.embed_from_database()
+
+    # Query that does NOT match any author name
+    with DatabaseManager() as db:
+        results = embeddings_manager.search_papers_semantic(
+            "transformer architecture",
+            database=db,
+            limit=10,
+        )
+
+    # Should return the paper via semantic search (no author match, but semantically similar)
+    assert len(results) >= 1
+    assert results[0]["title"] == "Transformer Paper"
+
+    embeddings_manager.close()
+
+
 class TestParseChromaDBMetadata:
     """Tests for EmbeddingsManager.parse_chromadb_metadata."""
 

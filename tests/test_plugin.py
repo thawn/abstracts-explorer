@@ -1439,8 +1439,8 @@ class TestPydanticValidation:
         assert len(papers_result) == 1
         assert papers_result[0]["title"] == "Valid Paper Title"
 
-        # Verify authors were stored as semicolon-separated string
-        assert papers_result[0]["authors"] == "John Doe; Jane Smith"
+        # Verify authors were stored correctly (returned as a list by search_papers)
+        assert papers_result[0]["authors"] == ["John Doe", "Jane Smith"]
 
     def test_extra_fields_allowed(self, connected_db):
         """Test that extra fields not in model are allowed."""

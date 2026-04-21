@@ -1250,12 +1250,16 @@ class TestGetPaperDetails:
     """Tests for the get_paper_details MCP tool."""
 
     def _make_paper_row(self, **overrides):
-        """Return a minimal paper dict suitable for mock DB results."""
+        """Return a minimal paper dict suitable for mock DB results.
+
+        Returns authors as a list, mirroring what DatabaseManager._paper_to_dict()
+        returns after deserializing the stored semicolon-separated string.
+        """
         defaults = {
             "uid": "abc123",
             "original_id": "neurips2023/abc",
             "title": "A Test Paper",
-            "authors": "Smith, John; Doe, Jane",
+            "authors": ["Smith, John", "Doe, Jane"],
             "abstract": "This paper describes a test.",
             "session": "Poster Session 1",
             "poster_position": "P01",
@@ -1296,18 +1300,18 @@ class TestGetPaperDetails:
         assert result["papers_found"] == 1
         paper = result["papers"][0]
         assert paper["title"] == "A Test Paper"
-        # Authors should be parsed as a list
+        # Authors returned as list (formatting done by DatabaseManager)
         assert paper["authors"] == ["Smith, John", "Doe, Jane"]
         assert paper["paper_pdf_url"] == "https://example.com/paper.pdf"
         assert paper["keywords"] == "deep learning, transformers"
         mock_db.search_papers.assert_called_once_with(keyword="Test Paper", conference=None, year=None, limit=5)
 
     def test_lookup_by_paper_id(self):
-        """get_paper_details performs exact UID lookup when paper_id is provided."""
+        """get_paper_details performs exact UID/original_id lookup when paper_id is provided."""
         from abstracts_explorer.mcp_server import get_paper_details
 
         mock_db = Mock()
-        mock_db.query.return_value = [self._make_paper_row(award="Best Paper")]
+        mock_db.get_paper_by_original_id_or_uid.return_value = self._make_paper_row(award="Best Paper")
 
         with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
             result = json.loads(get_paper_details(paper_id="abc123"))
@@ -1318,18 +1322,14 @@ class TestGetPaperDetails:
         assert paper["uid"] == "abc123"
         assert paper["award"] == "Best Paper"
         assert paper["authors"] == ["Smith, John", "Doe, Jane"]
-        # query should use both uid and original_id columns
-        call_args = mock_db.query.call_args
-        assert "uid" in call_args[0][0]
-        assert "original_id" in call_args[0][0]
-        assert ("abc123", "abc123") == call_args[0][1]
+        mock_db.get_paper_by_original_id_or_uid.assert_called_once_with("abc123")
 
     def test_lookup_by_id_falls_back_to_title(self):
         """When paper_id lookup finds nothing, falls back to title search."""
         from abstracts_explorer.mcp_server import get_paper_details
 
         mock_db = Mock()
-        mock_db.query.return_value = []  # ID not found
+        mock_db.get_paper_by_original_id_or_uid.return_value = None  # ID not found
         mock_db.search_papers.return_value = [self._make_paper_row()]
 
         with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
@@ -1337,15 +1337,15 @@ class TestGetPaperDetails:
 
         assert "error" not in result
         assert result["papers_found"] == 1
-        mock_db.query.assert_called_once()
+        mock_db.get_paper_by_original_id_or_uid.assert_called_once()
         mock_db.search_papers.assert_called_once()
 
     def test_authors_with_no_semicolon(self):
-        """Single author (no semicolon) is returned as one-element list."""
+        """Single author is returned as one-element list (DatabaseManager already returns list)."""
         from abstracts_explorer.mcp_server import get_paper_details
 
         mock_db = Mock()
-        mock_db.search_papers.return_value = [self._make_paper_row(authors="Solo Author")]
+        mock_db.search_papers.return_value = [self._make_paper_row(authors=["Solo Author"])]
 
         with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
             result = json.loads(get_paper_details(title="Paper"))
@@ -1357,7 +1357,7 @@ class TestGetPaperDetails:
         from abstracts_explorer.mcp_server import get_paper_details
 
         mock_db = Mock()
-        mock_db.search_papers.return_value = [self._make_paper_row(authors=None)]
+        mock_db.search_papers.return_value = [self._make_paper_row(authors=[])]
 
         with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
             result = json.loads(get_paper_details(title="Paper"))

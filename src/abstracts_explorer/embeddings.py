@@ -649,6 +649,7 @@ class EmbeddingsManager:
         query: str,
         n_results: int = 10,
         where: Optional[Dict[str, Any]] = None,
+        ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Search for similar papers using semantic similarity.
@@ -693,6 +694,7 @@ class EmbeddingsManager:
                 query_embeddings=[query_embedding],
                 n_results=n_results,
                 where=where,
+                ids=ids,
             )
 
             logger.info(f"Found {len(results['ids'][0])} similar papers")
@@ -899,6 +901,11 @@ class EmbeddingsManager:
         UIDs are forwarded to ChromaDB as a ``{"uid": {"$in": …}}`` condition.
         The remaining query text is used for the semantic similarity search.
 
+        In addition, the query text is always checked against the ``authors``
+        field in the SQL database (unless an explicit ``authors:`` filter is
+        already present in the query).  Papers that match the query as an author
+        name are prepended to the results so that author matches appear first.
+
         Parameters
         ----------
         query : str
@@ -942,6 +949,20 @@ class EmbeddingsManager:
 
         # Parse field-specific filters from query
         field_filters, remaining_query = DatabaseManager.parse_field_filters(query)
+
+        # When the query consists only of field filters (no remaining keywords),
+        # bypass the embedding search entirely and return SQL results directly.
+        # This avoids generating a meaningless embedding for the raw filter syntax
+        # and allows field-filter searches to work without an LLM backend.
+        if field_filters and not remaining_query:
+            return database.search_papers(
+                field_filters=field_filters,
+                sessions=sessions,
+                years=years,
+                conferences=conferences,
+                limit=limit,
+            )
+
         semantic_query = remaining_query if remaining_query else query
 
         # Build metadata filter for embeddings search.
@@ -954,6 +975,8 @@ class EmbeddingsManager:
         # to ChromaDB as a {"uid": {"$in": [...]}} condition.
         filter_conditions: List[Dict[str, Any]] = []
 
+        matching_uids: Optional[List[str]] = None
+
         if field_filters:
             # Use the SQL database for substring-capable ILIKE filtering
             matching_papers = database.search_papers(field_filters=field_filters, limit=0)
@@ -961,7 +984,19 @@ class EmbeddingsManager:
                 # No papers satisfy the field filters — no results possible
                 return []
             matching_uids = [p["uid"] for p in matching_papers]
-            filter_conditions.append({"uid": {"$in": matching_uids}})
+        else:
+            # still check whether the remaining query matches any author names, even if there are no explicit field filters for authors
+            author_search_filters = {**field_filters, "authors": semantic_query}
+            author_matches = database.search_papers(
+                field_filters=author_search_filters,
+                sessions=sessions,
+                years=years,
+                conferences=conferences,
+                limit=limit,
+            )
+            if author_matches:
+                matching_uids = [p["uid"] for p in author_matches]
+                logger.info(f"Author name matches found for query '{semantic_query}': {len(author_matches)} papers")
 
         if sessions:
             filter_conditions.append({"session": {"$in": sessions}})
@@ -984,8 +1019,9 @@ class EmbeddingsManager:
             f"years={years}, conferences={conferences}, field_filters={field_filters}"
         )
         logger.info(f"Where filter: {where_filter}")
+        logger.info(f"Matching UIDs from SQL filter: {matching_uids}")
 
-        results = self.search_similar(semantic_query, n_results=limit * 2, where=where_filter)
+        results = self.search_similar(semantic_query, n_results=limit * 2, where=where_filter, ids=matching_uids)
 
         logger.info(f"Search results count: {len(results.get('ids', [[]])[0]) if results else 0}")
 
@@ -994,9 +1030,55 @@ class EmbeddingsManager:
             papers = format_search_results(results, database, include_documents=False)
         except PaperFormattingError:
             # No valid papers found
-            return []
+            papers = []
 
         return papers[:limit]
+
+    def count_papers_within_distance(
+        self,
+        database,
+        query: str,
+        distance_threshold: float = 1.1,
+        conferences: Optional[List[str]] = None,
+        years: Optional[List[int]] = None,
+    ) -> int:
+        """
+        Count papers within a distance threshold.
+
+        Delegates to :meth:`find_papers_within_distance` and returns only the
+        count of matching papers.
+
+        Parameters
+        ----------
+        database : DatabaseManager
+            Database manager instance for retrieving paper details.
+        query : str
+            The search query text.
+        distance_threshold : float, optional
+            Euclidean distance radius, by default 1.1.
+        conferences : list[str], optional
+            Filter results to only include papers from these conferences.
+        years : list[int], optional
+            Filter results to only include papers from these years.
+
+        Returns
+        -------
+        int
+            Number of papers within the distance threshold.
+
+        Raises
+        ------
+        EmbeddingsError
+            If embeddings collection is empty or operation fails.
+        """
+        result = self.find_papers_within_distance(
+            database=database,
+            query=query,
+            distance_threshold=distance_threshold,
+            conferences=conferences,
+            years=years,
+        )
+        return result["count"]
 
     def find_papers_within_distance(
         self,
@@ -1066,7 +1148,7 @@ class EmbeddingsManager:
         ...     years=[2023, 2024]
         ... )
         """
-        from abstracts_explorer.paper_utils import get_paper_with_authors, PaperFormattingError
+        from abstracts_explorer.paper_utils import PaperFormattingError
 
         if not query or not query.strip():
             raise EmbeddingsError("Query cannot be empty")
@@ -1133,7 +1215,7 @@ class EmbeddingsManager:
                 if distance <= distance_threshold:
                     # Get full paper details from database using uid
                     try:
-                        paper_dict = get_paper_with_authors(database, paper_id)
+                        paper_dict = database.get_paper_by_uid(paper_id)
                         paper_dict["distance"] = float(distance)
                         matching_papers.append(paper_dict)
                     except PaperFormattingError:
@@ -1370,3 +1452,63 @@ class EmbeddingsManager:
             raise
         except Exception as e:
             raise EmbeddingsError(f"Failed to import embeddings: {str(e)}") from e
+
+    def update_paper_metadata(self, updates: Dict[str, Dict[str, Any]]) -> int:
+        """
+        Update metadata fields for existing papers without changing their embeddings.
+
+        Fetches the current metadata for each UID, merges the supplied field
+        updates, re-serialises the result and calls ``collection.update``.
+        Papers whose UIDs are not found in the collection are silently skipped.
+
+        Parameters
+        ----------
+        updates : dict
+            Mapping of paper UID → dict of metadata field → new value.
+            Only the keys present in each inner dict are modified; all other
+            metadata fields are preserved.
+
+        Returns
+        -------
+        int
+            Number of papers whose metadata was actually updated.
+
+        Raises
+        ------
+        EmbeddingsError
+            If fetching or updating the collection fails.
+
+        Examples
+        --------
+        >>> em = EmbeddingsManager()
+        >>> em.update_paper_metadata({
+        ...     "abc123": {"paper_pdf_url": "https://example.com/paper.pdf"}
+        ... })
+        1
+        """
+        if not updates:
+            return 0
+
+        try:
+            ids = list(updates.keys())
+            existing = self.collection.get(ids=ids, include=["metadatas"])
+
+            updated_ids = []
+            updated_metadatas = []
+            for uid, raw_meta in zip(existing["ids"], existing.get("metadatas") or []):
+                # raw_meta contains already-serialised string values from ChromaDB.
+                # Merge new values and re-serialise so None → "" and lists are handled.
+                merged = dict(raw_meta)
+                merged.update(updates[uid])
+                updated_ids.append(uid)
+                updated_metadatas.append(self._serialize_metadata_for_chromadb(merged))
+
+            if updated_ids:
+                self.collection.update(ids=updated_ids, metadatas=updated_metadatas)
+
+            return len(updated_ids)
+
+        except EmbeddingsError:
+            raise
+        except Exception as e:
+            raise EmbeddingsError(f"Failed to update paper metadata: {str(e)}") from e
