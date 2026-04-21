@@ -522,8 +522,8 @@ function _renderTopicEvolutionChart(plotId, viz) {
 
     const layout = {
         title: { text: `Topic Evolution: ${topicLabel}${confLabel}` },
-        xaxis: { title: { text: 'Year' }, type: 'linear', automargin: true, dtick: 1 },
-        yaxis: { title: { text: 'Percentage of Papers (%)' }, automargin: true },
+        xaxis: { title: { text: 'Year' }, type: 'linear', automargin: true, dtick: 1, showgrid: false, zeroline: false },
+        yaxis: { title: { text: 'Percentage of Papers (%)' }, automargin: true, showgrid: false, zeroline: false },
         margin: { t: 50, b: 60, l: 80, r: 20 },
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
@@ -580,8 +580,8 @@ function _renderClusterVisualizationChart(plotId, viz) {
 
     const layout = {
         title: title,
-        xaxis: { title: '', zeroline: false, showticklabels: false },
-        yaxis: { title: '', zeroline: false, showticklabels: false },
+        xaxis: { title: '', zeroline: false, showticklabels: false, showgrid: false },
+        yaxis: { title: '', zeroline: false, showticklabels: false, showgrid: false },
         margin: { t: 40, b: 20, l: 20, r: 20 },
         showlegend: false,
         paper_bgcolor: 'rgba(0,0,0,0)',

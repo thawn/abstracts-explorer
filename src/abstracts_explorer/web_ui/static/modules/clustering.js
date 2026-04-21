@@ -1871,8 +1871,8 @@ function renderTopicEvolutionChart(plotId, data) {
     const plotColors5 = getPlotColors();
     const layout = {
         title: { text: `Topic Evolution: ${topic}${confLabel}` },
-        xaxis: { title: { text: 'Year' }, type: 'linear', automargin: true, dtick: 1 },
-        yaxis: { title: { text: 'Percentage of Papers (%)' }, automargin: true },
+        xaxis: { title: { text: 'Year' }, type: 'linear', automargin: true, dtick: 1, showgrid: false, zeroline: false },
+        yaxis: { title: { text: 'Percentage of Papers (%)' }, automargin: true, showgrid: false, zeroline: false },
         margin: { t: 50, b: 60, l: 80, r: 20 },
         paper_bgcolor: plotColors5.paper_bgcolor,
         plot_bgcolor: plotColors5.plot_bgcolor,
@@ -1942,8 +1942,8 @@ export async function loadPapersPerYear() {
         const plotColors6 = getPlotColors();
         const layout = {
             title: { text: `Total Papers Per Year — ${confTitle}` },
-            xaxis: { title: { text: 'Year' }, type: 'linear', dtick: 1, automargin: true },
-            yaxis: { title: { text: 'Number of Papers' }, automargin: true },
+            xaxis: { title: { text: 'Year' }, type: 'linear', dtick: 1, automargin: true, showgrid: false, zeroline: false },
+            yaxis: { title: { text: 'Number of Papers' }, automargin: true, showgrid: false, zeroline: false },
             margin: { t: 50, b: 50, l: 70, r: 20 },
             paper_bgcolor: plotColors6.paper_bgcolor,
             plot_bgcolor: plotColors6.plot_bgcolor,
