@@ -34,6 +34,12 @@ logger = logging.getLogger(__name__)
 # Matches the default radius used on the clustering page's custom query.
 _SIMILAR_DISTANCE_THRESHOLD = 1.1
 
+# TF-IDF settings for keyword extraction from search results.
+_TFIDF_MAX_FEATURES = 500
+_TFIDF_SMALL_CORPUS_THRESHOLD = 3  # corpora smaller than this use min_df=1
+_TFIDF_MIN_DF_SMALL = 1
+_TFIDF_MIN_DF_REGULAR = 2
+
 # Get the directory where this file is located
 PACKAGE_DIR = Path(__file__).parent
 
@@ -424,9 +430,9 @@ def extract_top_keywords(papers: list, n_keywords: int = 5) -> list:
         return []
 
     try:
-        min_df = 1 if len(docs) < 3 else 2
+        min_df = _TFIDF_MIN_DF_SMALL if len(docs) < _TFIDF_SMALL_CORPUS_THRESHOLD else _TFIDF_MIN_DF_REGULAR
         tfidf = TfidfVectorizer(
-            max_features=500,
+            max_features=_TFIDF_MAX_FEATURES,
             min_df=min_df,
             stop_words="english",
             ngram_range=(1, 2),
