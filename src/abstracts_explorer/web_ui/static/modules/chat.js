@@ -251,15 +251,15 @@ export function displayChatPapers(papers, metadata = {}) {
         const cacheText = wasRetrieved ? 'Retrieved new papers' : 'Using cached papers';
 
         html += `
-            <div class="bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-4 mb-4 shadow-sm">
+            <div class="bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 border border-purple-200 dark:border-purple-700 rounded-lg p-4 mb-4 shadow-sm">
                 <div class="flex items-start gap-2 mb-2">
                     <i class="fas fa-magic text-purple-600 mt-1"></i>
                     <div class="flex-1">
-                        <h3 class="text-sm font-semibold text-gray-700 mb-1">Optimized Search Query</h3>
-                        <p class="text-sm text-gray-800 font-medium italic">"${escapeHtml(metadata.rewritten_query)}"</p>
+                        <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Optimized Search Query</h3>
+                        <p class="text-sm text-gray-800 dark:text-gray-200 font-medium italic">"${escapeHtml(metadata.rewritten_query)}"</p>
                     </div>
                 </div>
-                <div class="flex items-center gap-2 text-xs text-gray-600 mt-2 pt-2 border-t border-purple-200">
+                <div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 mt-2 pt-2 border-t border-purple-200 dark:border-purple-700">
                     <i class="fas ${cacheIcon} ${cacheColor}"></i>
                     <span>${cacheText}</span>
                     <span class="ml-auto">${papers.length} paper${papers.length !== 1 ? 's' : ''} found</span>
@@ -299,7 +299,7 @@ export function addChatMessage(text, role, isLoading = false) {
     const messageId = `msg-${++_messageIdCounter}`;
 
     const isUser = role === 'user';
-    const bgColor = isUser ? 'bg-purple-600 text-white' : 'bg-white text-gray-700';
+    const bgColor = isUser ? 'bg-purple-600 text-white' : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200';
     const iconBg = isUser ? 'bg-gray-600' : 'bg-purple-600';
     const icon = isUser ? 'fa-user' : 'fa-robot';
     const justifyClass = isUser ? 'justify-end' : 'justify-start';
@@ -324,8 +324,8 @@ export function addChatMessage(text, role, isLoading = false) {
                 <div data-chat-content>${contentHtml}</div>
                 ${isLoading ? '<div class="spinner mt-2" style="width: 20px; height: 20px; border-width: 2px;"></div>' : ''}
                 ${!isUser && !isLoading ? `
-                <div class="chat-feedback-buttons flex items-center gap-2 mt-3 pt-2 border-t border-gray-100">
-                    <span class="text-s text-gray-500 mr-1">Helpful?</span>
+                <div class="chat-feedback-buttons flex items-center gap-2 mt-3 pt-2 border-t border-gray-100 dark:border-gray-600">
+                    <span class="text-s text-gray-500 dark:text-gray-400 mr-1">Helpful?</span>
                     <button class="chat-feedback-btn text-gray-400 hover:text-green-600 transition-colors p-1"
                         data-rating="up" data-msg-id="${messageId}" title="Thumbs up">
                         <i class="fas fa-thumbs-up text-s"></i>

@@ -277,7 +277,7 @@ export function displayInterestingPapers(papers) {
     let tabsHtml = '';
     sessions.forEach(session => {
         const isActive = session === currentSession;
-        const activeClass = isActive ? 'border-b-2 border-purple-600 text-purple-600' : 'text-gray-600 hover:text-gray-800 hover:border-gray-300';
+        const activeClass = isActive ? 'border-b-2 border-purple-600 text-purple-600 dark:text-purple-400' : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:border-gray-300';
         tabsHtml += `
             <button 
                 onclick="switchInterestingSession('${escapeHtml(session).replace(/'/g, "\\'")}')"
@@ -333,10 +333,10 @@ export function displayInterestingPapers(papers) {
                     : '';
 
                 html += `
-                    <div class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg shadow-md p-5 mb-4">
-                        <h3 class="text-lg font-bold text-gray-800 mb-4 border-b border-blue-200 pb-2 flex items-center justify-between">
+                    <div class="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-lg shadow-md p-5 mb-4">
+                        <h3 class="text-lg font-bold text-gray-800 dark:text-gray-100 mb-4 border-b border-blue-200 dark:border-blue-700 pb-2 flex items-center justify-between">
                             <span>
-                                <i class="fas ${groupIcon} text-blue-600 mr-2"></i>${escapeHtml(groupKey)}
+                                <i class="fas ${groupIcon} text-blue-600 dark:text-blue-400 mr-2"></i>${escapeHtml(groupKey)}
                             </span>
                             ${editButton}
                         </h3>
