@@ -619,21 +619,21 @@ class TestExtractTopKeywords:
 
     def test_returns_empty_list_for_empty_input(self):
         """Should return empty list when no papers are provided."""
-        from abstracts_explorer.web_ui.app import extract_top_keywords
+        from abstracts_explorer.paper_utils import extract_top_keywords
 
         result = extract_top_keywords([])
         assert result == []
 
     def test_returns_empty_list_for_papers_without_text(self):
         """Should return empty list when all papers have no title or abstract."""
-        from abstracts_explorer.web_ui.app import extract_top_keywords
+        from abstracts_explorer.paper_utils import extract_top_keywords
 
         result = extract_top_keywords([{"uid": "p1"}, {"uid": "p2"}])
         assert result == []
 
     def test_extracts_keywords_from_single_paper(self):
         """Should extract keywords from a single paper."""
-        from abstracts_explorer.web_ui.app import extract_top_keywords
+        from abstracts_explorer.paper_utils import extract_top_keywords
 
         papers = [
             {
@@ -648,7 +648,7 @@ class TestExtractTopKeywords:
 
     def test_extracts_keywords_from_multiple_papers(self):
         """Should extract keywords from multiple papers."""
-        from abstracts_explorer.web_ui.app import extract_top_keywords
+        from abstracts_explorer.paper_utils import extract_top_keywords
 
         papers = [
             {
@@ -673,7 +673,7 @@ class TestExtractTopKeywords:
 
     def test_respects_n_keywords_parameter(self):
         """Should return at most n_keywords results."""
-        from abstracts_explorer.web_ui.app import extract_top_keywords
+        from abstracts_explorer.paper_utils import extract_top_keywords
 
         papers = [
             {"title": "Neural Networks", "abstract": "Deep learning optimization with gradient descent algorithms."},

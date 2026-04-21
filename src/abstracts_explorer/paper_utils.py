@@ -10,6 +10,12 @@ from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
+# TF-IDF settings for keyword extraction from search results.
+_TFIDF_MAX_FEATURES = 500
+_TFIDF_SMALL_CORPUS_THRESHOLD = 3  # corpora smaller than this use min_df=1
+_TFIDF_MIN_DF_SMALL = 1
+_TFIDF_MIN_DF_REGULAR = 2
+
 
 class PaperFormattingError(Exception):
     """Exception raised when paper formatting fails."""

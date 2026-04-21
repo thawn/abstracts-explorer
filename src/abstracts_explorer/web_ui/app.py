@@ -35,12 +35,6 @@ logger = logging.getLogger(__name__)
 # Matches the default radius used on the clustering page's custom query.
 _SIMILAR_DISTANCE_THRESHOLD = 1.1
 
-# TF-IDF settings for keyword extraction from search results.
-_TFIDF_MAX_FEATURES = 500
-_TFIDF_SMALL_CORPUS_THRESHOLD = 3  # corpora smaller than this use min_df=1
-_TFIDF_MIN_DF_SMALL = 1
-_TFIDF_MIN_DF_REGULAR = 2
-
 # Get the directory where this file is located
 PACKAGE_DIR = Path(__file__).parent
 
