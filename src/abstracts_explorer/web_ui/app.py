@@ -491,6 +491,7 @@ def search():
             # Semantic search using embeddings
             em = get_embeddings_manager()
             database = get_database()
+            distance_threshold = get_config().semantic_distance_threshold
 
             papers = em.search_papers_semantic(
                 query=query,
@@ -499,7 +500,7 @@ def search():
                 sessions=sessions,
                 years=years,
                 conferences=conferences,
-                distance_threshold=_SIMILAR_DISTANCE_THRESHOLD,
+                distance_threshold=distance_threshold,
             )
 
             # Count total similar papers within distance threshold.
@@ -512,7 +513,7 @@ def search():
                     total_similar = em.count_papers_within_distance(
                         database=database,
                         query=remaining_query,
-                        distance_threshold=_SIMILAR_DISTANCE_THRESHOLD,
+                        distance_threshold=distance_threshold,
                         conferences=conferences if conferences else None,
                         years=years if years else None,
                     )

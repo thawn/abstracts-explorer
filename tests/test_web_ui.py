@@ -1042,7 +1042,11 @@ class TestWebUISemanticSearchDetails:
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
                 with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
-                    with patch("abstracts_explorer.web_ui.app._SIMILAR_DISTANCE_THRESHOLD", 0.9):
+                    with patch("abstracts_explorer.web_ui.app.get_config") as mock_get_config:
+                        mock_config = Mock()
+                        mock_config.semantic_distance_threshold = 0.9
+                        mock_get_config.return_value = mock_config
+
                         mock_em = Mock()
                         mock_db = Mock()
                         mock_em.search_papers_semantic.return_value = []
