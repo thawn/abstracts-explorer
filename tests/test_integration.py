@@ -628,13 +628,13 @@ class TestIntegration:
     def test_search_papers_semantic_e2e(self, tmp_path):
         """
         End-to-end test for search_papers_semantic with real API backend.
-        
+
         This test verifies that search_papers_semantic correctly:
         1. Performs semantic search with real embeddings
         2. Returns results with similarity scores
         3. Filters by year metadata correctly (regression test for bug)
         4. Works with both LM Studio and blablador API backends
-        
+
         Note: This test requires an OpenAI-compatible API backend (LM Studio or blablador)
         to be running and is marked as slow. The test will be skipped by default unless
         running with -m slow.
@@ -703,7 +703,12 @@ class TestIntegration:
 
             # Test 2: Search with year filter [2024] - should return only 2024 paper
             with DatabaseManager() as db:
-                results_2024 = em.search_papers_semantic("learning", database=db, limit=10, years=[2024])
+                results_2024 = em.search_papers_semantic(
+                    "deep learning neural networks image recognition",
+                    database=db,
+                    limit=10,
+                    years=[2024],
+                )
                 assert len(results_2024) > 0, "Search with year=2024 filter should return results"
                 for paper in results_2024:
                     assert paper["year"] == 2024, f"All results should be from 2024, got {paper['year']}"
@@ -711,7 +716,12 @@ class TestIntegration:
 
             # Test 3: Search with year filter [2025] - should return only 2025 papers
             with DatabaseManager() as db:
-                results_2025 = em.search_papers_semantic("learning", database=db, limit=10, years=[2025])
+                results_2025 = em.search_papers_semantic(
+                    "reinforcement learning robotics transformers vision",
+                    database=db,
+                    limit=10,
+                    years=[2025],
+                )
                 assert len(results_2025) > 0, "Search with year=2025 filter should return results"
                 for paper in results_2025:
                     assert paper["year"] == 2025, f"All results should be from 2025, got {paper['year']}"
@@ -720,7 +730,10 @@ class TestIntegration:
             # Test 4: Search with session filter
             with DatabaseManager() as db:
                 results_oral = em.search_papers_semantic(
-                    "learning", database=db, limit=10, sessions=["Oral Session 1"]
+                    "deep learning neural networks image recognition",
+                    database=db,
+                    limit=10,
+                    sessions=["Oral Session 1"],
                 )
                 assert len(results_oral) > 0, "Search with session filter should return results"
                 for paper in results_oral:

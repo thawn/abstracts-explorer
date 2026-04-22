@@ -578,4 +578,54 @@ describe('Filters Module', () => {
             expect(() => dismissConferenceError()).not.toThrow();
         });
     });
+
+    describe('distance threshold localStorage persistence', () => {
+        beforeEach(() => {
+            // Add distance threshold input to DOM
+            document.body.innerHTML += `<input id="distance-threshold-input" type="number" value="1.2" />`;
+            localStorage.clear();
+        });
+
+        it('should set distance threshold from localStorage if stored', async () => {
+            localStorage.setItem('searchDistanceThreshold', '0.9');
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    conferences: [],
+                    years: [],
+                    conference_years: {},
+                    default_distance_threshold: 1.2
+                })
+            });
+
+            await loadFilterOptions();
+
+            const dtInput = document.getElementById('distance-threshold-input');
+            expect(dtInput.value).toBe('0.9');
+        });
+
+        it('should set distance threshold from API default when localStorage is empty', async () => {
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    conferences: [],
+                    years: [],
+                    conference_years: {},
+                    default_distance_threshold: 1.2
+                })
+            });
+
+            await loadFilterOptions();
+
+            const dtInput = document.getElementById('distance-threshold-input');
+            expect(dtInput.value).toBe('1.2');
+        });
+    });
 });
