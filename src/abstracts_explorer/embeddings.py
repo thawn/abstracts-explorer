@@ -1041,6 +1041,8 @@ class EmbeddingsManager:
         # Filter out papers that exceed the distance threshold
         papers = [p for p in papers if p.get("distance", 0.0) <= distance_threshold]
 
+        logger.info(f"Search results count: {len(papers)}, after applying distance threshold of {distance_threshold}")
+
         return papers[:limit]
 
     def count_papers_within_distance(
