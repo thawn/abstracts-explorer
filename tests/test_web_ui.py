@@ -209,7 +209,6 @@ class TestWebInterface:
             with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
                 mock_cfg.return_value.default_conference = "NeurIPS"
                 mock_cfg.return_value.default_year = 2024
-                mock_cfg.return_value.semantic_distance_threshold = 1.1
                 response = client.get("/api/available-filters")
 
         assert response.status_code == 200
@@ -228,7 +227,6 @@ class TestWebInterface:
             with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
                 mock_cfg.return_value.default_conference = ""
                 mock_cfg.return_value.default_year = 0
-                mock_cfg.return_value.semantic_distance_threshold = 1.1
                 response = client.get("/api/available-filters")
 
         assert response.status_code == 200
@@ -247,7 +245,6 @@ class TestWebInterface:
             with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
                 mock_cfg.return_value.default_conference = ""
                 mock_cfg.return_value.default_year = 0
-                mock_cfg.return_value.semantic_distance_threshold = 1.1
                 response = client.get("/api/available-filters")
 
         assert response.status_code == 200
@@ -270,7 +267,6 @@ class TestWebInterface:
             with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
                 mock_cfg.return_value.default_conference = "ICML"
                 mock_cfg.return_value.default_year = 2024
-                mock_cfg.return_value.semantic_distance_threshold = 1.1
                 response = client.get("/api/available-filters")
 
         assert response.status_code == 200
@@ -290,7 +286,6 @@ class TestWebInterface:
             with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
                 mock_cfg.return_value.default_conference = ""
                 mock_cfg.return_value.default_year = 0
-                mock_cfg.return_value.semantic_distance_threshold = 1.1
                 response = client.get("/api/available-filters")
 
         assert response.status_code == 200
@@ -310,7 +305,6 @@ class TestWebInterface:
             with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
                 mock_cfg.return_value.default_conference = "NeurIPS"
                 mock_cfg.return_value.default_year = 2020
-                mock_cfg.return_value.semantic_distance_threshold = 1.1
                 response = client.get("/api/available-filters")
 
         assert response.status_code == 200
@@ -319,7 +313,7 @@ class TestWebInterface:
         assert data["default_year"] == 2025
 
     def test_available_filters_includes_default_distance_threshold(self, client):
-        """Test that /api/available-filters includes the configured distance threshold."""
+        """Test that /api/available-filters includes the module-level default distance threshold (1.2)."""
         import sys
 
         app_module = sys.modules["abstracts_explorer.web_ui.app"]
@@ -329,12 +323,11 @@ class TestWebInterface:
             with patch("abstracts_explorer.web_ui.app.get_config") as mock_cfg:
                 mock_cfg.return_value.default_conference = "NeurIPS"
                 mock_cfg.return_value.default_year = 2025
-                mock_cfg.return_value.semantic_distance_threshold = 0.8
                 response = client.get("/api/available-filters")
 
         assert response.status_code == 200
         data = json.loads(response.data)
-        assert data["default_distance_threshold"] == 0.8
+        assert data["default_distance_threshold"] == 1.2
 
     def test_index_llm_backend_not_shown_for_unknown_url(self, client):
         """Test that no LLM backend reference is shown for an unknown backend URL."""
@@ -1059,18 +1052,14 @@ class TestWebUISemanticSearchDetails:
                     assert data["papers"] == []
                     assert data["count"] == 0
 
-    def test_semantic_search_uses_configured_distance_threshold(self):
-        """Test that semantic search passes the configured distance threshold from config."""
+    def test_semantic_search_uses_module_default_distance_threshold(self):
+        """Test that semantic search uses the module-level default distance threshold (1.2)."""
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
                 with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
-                    with patch("abstracts_explorer.web_ui.app.get_config") as mock_get_config:
-                        mock_config = Mock()
-                        mock_config.semantic_distance_threshold = 0.9
-                        mock_get_config.return_value = mock_config
-
+                    with patch("abstracts_explorer.web_ui.app._SIMILAR_DISTANCE_THRESHOLD", 1.2):
                         mock_em = Mock()
                         mock_db = Mock()
                         mock_em.search_papers_semantic.return_value = []
@@ -1084,43 +1073,38 @@ class TestWebUISemanticSearchDetails:
                         )
 
                         assert response.status_code == 200
-                        # Verify search_papers_semantic was called with the configured threshold
+                        # Verify search_papers_semantic was called with the module default threshold
                         call_kwargs = mock_em.search_papers_semantic.call_args
-                        assert call_kwargs.kwargs.get("distance_threshold") == 0.9
+                        assert call_kwargs.kwargs.get("distance_threshold") == 1.2
 
     def test_semantic_search_accepts_per_request_distance_threshold(self):
-        """Test that a distance_threshold in the request body overrides the configured default."""
+        """Test that a distance_threshold in the request body overrides the module default."""
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
                 with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
-                    with patch("abstracts_explorer.web_ui.app.get_config") as mock_get_config:
-                        mock_config = Mock()
-                        mock_config.semantic_distance_threshold = 1.1  # configured default
-                        mock_get_config.return_value = mock_config
+                    mock_em = Mock()
+                    mock_db = Mock()
+                    mock_em.search_papers_semantic.return_value = []
+                    mock_em.count_papers_within_distance.return_value = 0
+                    mock_get_em.return_value = mock_em
+                    mock_get_db.return_value = mock_db
 
-                        mock_em = Mock()
-                        mock_db = Mock()
-                        mock_em.search_papers_semantic.return_value = []
-                        mock_em.count_papers_within_distance.return_value = 0
-                        mock_get_em.return_value = mock_em
-                        mock_get_db.return_value = mock_db
+                    response = client.post(
+                        "/api/search",
+                        json={
+                            "query": "transformers",
+                            "use_embeddings": True,
+                            "limit": 5,
+                            "distance_threshold": 0.7,  # per-request override
+                        },
+                    )
 
-                        response = client.post(
-                            "/api/search",
-                            json={
-                                "query": "transformers",
-                                "use_embeddings": True,
-                                "limit": 5,
-                                "distance_threshold": 0.7,  # per-request override
-                            },
-                        )
-
-                        assert response.status_code == 200
-                        # Verify the per-request value was used, not the config default
-                        call_kwargs = mock_em.search_papers_semantic.call_args
-                        assert call_kwargs.kwargs.get("distance_threshold") == 0.7
+                    assert response.status_code == 200
+                    # Verify the per-request value was used, not the module default
+                    call_kwargs = mock_em.search_papers_semantic.call_args
+                    assert call_kwargs.kwargs.get("distance_threshold") == 0.7
 
 
 class TestWebUIChatEndpointSuccess:

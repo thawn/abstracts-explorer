@@ -409,7 +409,7 @@ def search_command(args: argparse.Namespace) -> int:
     # Resolve conference name once to canonical form
     conference = _resolve_conference_arg(getattr(args, "conference", None))
     year = getattr(args, "year", None)
-    distance_threshold = getattr(args, "distance_threshold", config.semantic_distance_threshold)
+    distance_threshold = getattr(args, "distance_threshold", 1.2)
 
     print("NeurIPS Semantic Search")
     print("=" * 70)
@@ -2618,9 +2618,9 @@ Examples:
     search_parser.add_argument(
         "--distance-threshold",
         type=float,
-        default=config.semantic_distance_threshold,
+        default=1.2,
         dest="distance_threshold",
-        help=f"Maximum L2 distance for a result to be included (default: {config.semantic_distance_threshold})",
+        help="Maximum L2 distance for a result to be included (default: 1.2)",
     )
     add_conference_year_args(search_parser)
 

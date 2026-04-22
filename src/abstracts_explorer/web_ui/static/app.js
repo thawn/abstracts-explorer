@@ -130,6 +130,14 @@ function setupModalEventListeners() {
             });
         }
     });
+
+    // Persist distance threshold to localStorage on change
+    const dtInput = document.getElementById('distance-threshold-input');
+    if (dtInput) {
+        dtInput.addEventListener('change', function () {
+            localStorage.setItem('searchDistanceThreshold', this.value);
+        });
+    }
 }
 
 /**

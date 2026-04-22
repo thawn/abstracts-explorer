@@ -169,10 +169,13 @@ export async function loadFilterOptions() {
                 window.loadStats();
             }
 
-            // Set default distance threshold input on first load
-            if (availableData.default_distance_threshold != null) {
-                const dtInput = document.getElementById('distance-threshold-input');
-                if (dtInput && !dtInput.dataset.userModified) {
+            // Set distance threshold input: prefer localStorage, then API default
+            const dtInput = document.getElementById('distance-threshold-input');
+            if (dtInput) {
+                const stored = localStorage.getItem('searchDistanceThreshold');
+                if (stored !== null) {
+                    dtInput.value = stored;
+                } else if (availableData.default_distance_threshold != null) {
                     dtInput.value = availableData.default_distance_threshold;
                 }
             }

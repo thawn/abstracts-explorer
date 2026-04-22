@@ -388,30 +388,6 @@ DEFAULT_YEAR=2024
 
         assert config.imprint_link == "https://example.com/imprint"
 
-    def test_config_semantic_distance_threshold_default(self, tmp_path):
-        """Test that semantic_distance_threshold defaults to 1.1."""
-        env_file = tmp_path / ".env"
-        env_file.write_text("")
-
-        config = Config(env_path=env_file)
-
-        assert config.semantic_distance_threshold == 1.1
-
-    def test_config_semantic_distance_threshold_from_env(self, tmp_path):
-        """Test loading SEMANTIC_DISTANCE_THRESHOLD from .env file."""
-        env_file = tmp_path / ".env"
-        env_file.write_text("SEMANTIC_DISTANCE_THRESHOLD=0.8")
-
-        config = Config(env_path=env_file)
-
-        assert config.semantic_distance_threshold == 0.8
-
-    def test_config_semantic_distance_threshold_in_supported_env_vars(self, tmp_path):
-        """Test that SEMANTIC_DISTANCE_THRESHOLD is listed as a supported env var."""
-        config = Config(env_path=tmp_path / ".env")
-
-        assert "SEMANTIC_DISTANCE_THRESHOLD" in config.get_supported_env_vars()
-
 
 class TestGetConfig:
     """Test get_config function."""
