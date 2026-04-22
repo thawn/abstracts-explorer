@@ -888,6 +888,7 @@ class EmbeddingsManager:
         sessions: Optional[List[str]] = None,
         years: Optional[List[int]] = None,
         conferences: Optional[List[str]] = None,
+        distance_threshold: float = 1.1,
     ) -> List[Dict[str, Any]]:
         """
         Perform semantic search for papers using embeddings.
@@ -920,6 +921,11 @@ class EmbeddingsManager:
             Filter by publication years
         conferences : list of str, optional
             Filter by conference names
+        distance_threshold : float, optional
+            Maximum distance (in embedding space) for a result to be included.
+            Papers with a distance greater than this value are excluded from
+            the results. By default 1.1, matching the threshold used by
+            :meth:`count_papers_within_distance`.
 
         Returns
         -------
@@ -995,8 +1001,8 @@ class EmbeddingsManager:
                 limit=limit,
             )
             if author_matches:
-                matching_uids = [p["uid"] for p in author_matches]
                 logger.info(f"Author name matches found for query '{semantic_query}': {len(author_matches)} papers")
+                return author_matches
 
         if sessions:
             filter_conditions.append({"session": {"$in": sessions}})
@@ -1031,6 +1037,11 @@ class EmbeddingsManager:
         except PaperFormattingError:
             # No valid papers found
             papers = []
+
+        # Filter out papers that exceed the distance threshold
+        papers = [p for p in papers if p.get("distance", 0.0) <= distance_threshold]
+
+        logger.info(f"Search results count: {len(papers)}, after applying distance threshold of {distance_threshold}")
 
         return papers[:limit]
 
