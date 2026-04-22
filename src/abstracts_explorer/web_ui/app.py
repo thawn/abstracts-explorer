@@ -450,6 +450,7 @@ def get_available_filters_endpoint():
                 "conference_years": db_conference_years,
                 "default_conference": effective_conf,
                 "default_year": effective_year,
+                "default_distance_threshold": config.semantic_distance_threshold,
             }
         )
     except Exception as e:
@@ -491,7 +492,9 @@ def search():
             # Semantic search using embeddings
             em = get_embeddings_manager()
             database = get_database()
-            distance_threshold = get_config().semantic_distance_threshold
+            # Allow per-request override; fall back to the configured default
+            config = get_config()
+            distance_threshold = float(data.get("distance_threshold", config.semantic_distance_threshold))
 
             papers = em.search_papers_semantic(
                 query=query,

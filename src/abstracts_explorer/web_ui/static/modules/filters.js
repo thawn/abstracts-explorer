@@ -168,6 +168,14 @@ export async function loadFilterOptions() {
             if (defaultApplied && window.loadStats) {
                 window.loadStats();
             }
+
+            // Set default distance threshold input on first load
+            if (availableData.default_distance_threshold != null) {
+                const dtInput = document.getElementById('distance-threshold-input');
+                if (dtInput && !dtInput.dataset.userModified) {
+                    dtInput.value = availableData.default_distance_threshold;
+                }
+            }
         }
 
         // Clear and repopulate search session filter

@@ -18,6 +18,8 @@ import { formatPaperCard } from './paper-card.js';
 export async function searchPapers() {
     const query = document.getElementById('search-input').value.trim();
     const limit = parseInt(document.getElementById('limit-select').value);
+    const distanceThresholdInput = document.getElementById('distance-threshold-input');
+    const distanceThreshold = distanceThresholdInput ? parseFloat(distanceThresholdInput.value) : undefined;
 
     // Get multiple selected values from multi-select dropdowns
     const sessionSelect = document.getElementById('session-filter');
@@ -49,6 +51,11 @@ export async function searchPapers() {
             use_embeddings: true,
             limit
         };
+
+        // Include distance threshold if available and valid
+        if (distanceThreshold !== undefined && !isNaN(distanceThreshold) && distanceThreshold > 0) {
+            requestBody.distance_threshold = distanceThreshold;
+        }
 
         // Add filters only if NOT all options are selected (all selected = no filter)
         if (sessions.length > 0 && sessions.length < sessionSelect.options.length) {
