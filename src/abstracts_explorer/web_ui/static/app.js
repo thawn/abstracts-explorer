@@ -131,10 +131,10 @@ function setupModalEventListeners() {
         }
     });
 
-    // Persist distance threshold to localStorage on change
+    // Persist distance threshold to localStorage on every value change (including while typing)
     const dtInput = document.getElementById('distance-threshold-input');
     if (dtInput) {
-        dtInput.addEventListener('change', function () {
+        dtInput.addEventListener('input', function () {
             localStorage.setItem('searchDistanceThreshold', this.value);
         });
     }
