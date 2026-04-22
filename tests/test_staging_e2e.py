@@ -506,7 +506,110 @@ class TestCoreSearch:
 
 
 # ---------------------------------------------------------------------------
-# 3. Paper display
+# 3. Author search functionality
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.staging
+@pytest.mark.slow
+class TestAuthorSearch:
+    """Verify author-name searches with different query formats."""
+
+    def test_author_name_only(self, staging_url, browser):
+        """
+        Author name only search returns results.
+
+        Entering only a last name such as "LeCun" returns at least one paper
+        whose author field contains that name.
+
+        Parameters
+        ----------
+        staging_url : str
+            Base URL of the staging deployment.
+        browser : WebDriver
+            Selenium WebDriver instance.
+        """
+        browser.get(staging_url)
+
+        search_input = browser.find_element(By.ID, "search-input")
+        search_input.clear()
+        search_input.send_keys("LeCun")
+        search_input.send_keys(Keys.RETURN)
+
+        wait = WebDriverWait(browser, 15)
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")))
+
+        results = browser.find_elements(By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")
+        assert len(results) > 0, "Searching for 'LeCun' should return at least one result"
+
+        results_text = browser.find_element(By.ID, "search-results").text
+        assert "LeCun" in results_text, "Results for 'LeCun' should display the author name"
+
+    def test_author_field_syntax(self, staging_url, browser):
+        """
+        Field-formatted author query returns results for that author.
+
+        The query ``author:"LeCun"`` must bypass the embedding search and
+        return only papers whose ``authors`` column matches the name.  The
+        author name must appear in the visible results.
+
+        Parameters
+        ----------
+        staging_url : str
+            Base URL of the staging deployment.
+        browser : WebDriver
+            Selenium WebDriver instance.
+        """
+        browser.get(staging_url)
+
+        search_input = browser.find_element(By.ID, "search-input")
+        search_input.clear()
+        search_input.send_keys('author:"LeCun"')
+        search_input.send_keys(Keys.RETURN)
+
+        wait = WebDriverWait(browser, 15)
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")))
+
+        results = browser.find_elements(By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")
+        assert len(results) > 0, 'author:"LeCun" should return at least one result'
+
+        results_text = browser.find_element(By.ID, "search-results").text
+        assert "LeCun" in results_text, 'Results for author:"LeCun" should display the author name'
+
+    def test_author_with_topic(self, staging_url, browser):
+        """
+        Combined author filter and topic query returns relevant results.
+
+        The query ``author:"LeCun" world model`` filters papers by author and
+        ranks them by semantic similarity to "world model".  At least one paper
+        must be returned and the author name must appear in the results.
+
+        Parameters
+        ----------
+        staging_url : str
+            Base URL of the staging deployment.
+        browser : WebDriver
+            Selenium WebDriver instance.
+        """
+        browser.get(staging_url)
+
+        search_input = browser.find_element(By.ID, "search-input")
+        search_input.clear()
+        search_input.send_keys('author:"LeCun" world model')
+        search_input.send_keys(Keys.RETURN)
+
+        wait = WebDriverWait(browser, 15)
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")))
+
+        results = browser.find_elements(By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")
+        assert len(results) > 0, 'author:"LeCun" world model should return at least one result'
+
+        results_text = browser.find_element(By.ID, "search-results").text
+        assert "LeCun" in results_text, 'Results for author:"LeCun" world model should display the author name'
+
+
+# ---------------------------------------------------------------------------
+# 4. Paper display
 # ---------------------------------------------------------------------------
 
 
@@ -596,7 +699,7 @@ class TestPaperDisplay:
 
 
 # ---------------------------------------------------------------------------
-# 4. Chat (RAG) interface
+# 5. Chat (RAG) interface
 # ---------------------------------------------------------------------------
 
 
@@ -937,7 +1040,7 @@ class TestMCPToolSmokeTests:
 
 
 # ---------------------------------------------------------------------------
-# 5. Clustering tab
+# 6. Clustering tab
 # ---------------------------------------------------------------------------
 
 
@@ -996,7 +1099,7 @@ class TestClusteringTab:
 
 
 # ---------------------------------------------------------------------------
-# 6. Accessibility & responsiveness
+# 7. Accessibility & responsiveness
 # ---------------------------------------------------------------------------
 
 
