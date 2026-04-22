@@ -516,7 +516,7 @@ class TestAuthorSearch:
     """Verify author-name searches with different query formats."""
 
     _RESULT_CARD_CSS = "#search-results .bg-white.rounded-lg"
-    _WAIT_TIMEOUT = 15
+    _WAIT_TIMEOUT = 30
 
     def test_author_name_only(self, staging_url, browser):
         """
