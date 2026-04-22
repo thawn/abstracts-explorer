@@ -1309,6 +1309,8 @@ def test_search_papers_semantic_distance_threshold(embeddings_manager, tmp_path,
 
     embeddings_manager.close()
 
+
+class TestParseChromaDBMetadata:
     """Tests for EmbeddingsManager.parse_chromadb_metadata."""
 
     def _make_raw_metadata(self, **overrides):
