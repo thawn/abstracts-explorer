@@ -499,6 +499,7 @@ def search():
                 sessions=sessions,
                 years=years,
                 conferences=conferences,
+                distance_threshold=_SIMILAR_DISTANCE_THRESHOLD,
             )
 
             # Count total similar papers within distance threshold.
