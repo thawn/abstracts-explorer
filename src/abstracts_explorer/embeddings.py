@@ -1001,8 +1001,8 @@ class EmbeddingsManager:
                 limit=limit,
             )
             if author_matches:
-                matching_uids = [p["uid"] for p in author_matches]
                 logger.info(f"Author name matches found for query '{semantic_query}': {len(author_matches)} papers")
+                return author_matches
 
         if sessions:
             filter_conditions.append({"session": {"$in": sessions}})
