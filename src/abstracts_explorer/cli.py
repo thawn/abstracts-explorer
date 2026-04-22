@@ -409,6 +409,7 @@ def search_command(args: argparse.Namespace) -> int:
     # Resolve conference name once to canonical form
     conference = _resolve_conference_arg(getattr(args, "conference", None))
     year = getattr(args, "year", None)
+    distance_threshold = getattr(args, "distance_threshold", 1.2)
 
     print("NeurIPS Semantic Search")
     print("=" * 70)
@@ -416,6 +417,7 @@ def search_command(args: argparse.Namespace) -> int:
     print(f"Embeddings: {config.embedding_db}")
     print(f"Collection: {args.collection}")
     print(f"Results: {args.n_results}")
+    print(f"Distance threshold: {distance_threshold}")
     if conference:
         print(f"Conference: {conference}")
     if year is not None:
@@ -484,15 +486,28 @@ def search_command(args: argparse.Namespace) -> int:
             em.close()
             return 0
 
-        num_results = len(results["ids"][0])
+        # Filter by distance threshold
+        ids = results["ids"][0]
+        metadatas = results["metadatas"][0]
+        distances = results["distances"][0]
+        documents = results.get("documents", [[]])[0]
+
+        filtered = [
+            (ids[i], metadatas[i], distances[i], documents[i] if documents else "")
+            for i in range(len(ids))
+            if distances[i] <= distance_threshold
+        ]
+
+        if not filtered:
+            print(f"❌ No results found within distance threshold {distance_threshold}.")
+            em.close()
+            return 0
+
+        num_results = len(filtered)
         print(f"✅ Found {num_results} similar paper(s):\n")
 
-        for i in range(num_results):
-            paper_id = results["ids"][0][i]
-            metadata = results["metadatas"][0][i]
-            distance = results["distances"][0][i]
+        for i, (paper_id, metadata, distance, document) in enumerate(filtered):
             similarity = 1 - distance if distance <= 1 else 0
-            document = results["documents"][0][i] if "documents" in results else ""
 
             print(f"{i + 1}. Paper ID: {paper_id}")
             print(f"   Title: {metadata.get('title', 'N/A')}")
@@ -2599,6 +2614,13 @@ Examples:
         type=str,
         default=config.embedding_model,
         help=f"Name of the embedding model (default: {config.embedding_model})",
+    )
+    search_parser.add_argument(
+        "--distance-threshold",
+        type=float,
+        default=1.2,
+        dest="distance_threshold",
+        help="Maximum L2 distance for a result to be included (default: 1.2)",
     )
     add_conference_year_args(search_parser)
 

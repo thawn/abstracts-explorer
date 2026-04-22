@@ -1227,6 +1227,89 @@ def test_search_papers_semantic_no_author_match_falls_back_to_semantic(embedding
     embeddings_manager.close()
 
 
+def test_search_papers_semantic_distance_threshold(embeddings_manager, tmp_path, mock_lm_studio):
+    """Test that search_papers_semantic filters results by distance_threshold.
+
+    Papers with distance greater than the threshold must be excluded from the
+    results, matching the behaviour of count_papers_within_distance.
+    """
+    from unittest.mock import patch as mock_patch
+    from abstracts_explorer.database import DatabaseManager
+    from abstracts_explorer.plugin import LightweightPaper
+
+    db_path = tmp_path / "test_distance_threshold.db"
+    set_test_db(db_path)
+
+    # Pre-compute the UIDs that the database will assign.
+    # LightweightPaper has no 'uid' field; original_id defaults to None.
+    close_uid = DatabaseManager.compute_uid("Close Paper", None, "NeurIPS", 2024)
+    far_uid = DatabaseManager.compute_uid("Far Paper", None, "NeurIPS", 2024)
+
+    with DatabaseManager() as db:
+        db.create_tables()
+        papers = [
+            LightweightPaper(
+                title="Close Paper",
+                abstract="Very similar to the query.",
+                authors=["Author A"],
+                session="Session 1",
+                poster_position="A1",
+                year=2024,
+                conference="NeurIPS",
+            ),
+            LightweightPaper(
+                title="Far Paper",
+                abstract="Not similar to the query at all.",
+                authors=["Author B"],
+                session="Session 2",
+                poster_position="A2",
+                year=2024,
+                conference="NeurIPS",
+            ),
+        ]
+        for paper in papers:
+            db.add_paper(paper)
+
+    embeddings_manager.connect()
+    embeddings_manager.create_collection()
+    embeddings_manager.embed_from_database()
+
+    # Mock search_similar to return controlled distances:
+    # close_paper has distance 0.5 (within threshold), far_paper has distance 1.5 (outside)
+    mock_results = {
+        "ids": [[close_uid, far_uid]],
+        "distances": [[0.5, 1.5]],
+        "documents": [["doc1", "doc2"]],
+        "metadatas": [[{"uid": close_uid}, {"uid": far_uid}]],
+    }
+
+    with mock_patch.object(embeddings_manager, "search_similar", return_value=mock_results):
+        with DatabaseManager() as db:
+            # With default threshold (1.1): only the close paper should be returned
+            results = embeddings_manager.search_papers_semantic("query", database=db, limit=10)
+            titles = [r["title"] for r in results]
+            assert "Close Paper" in titles, "Close paper (distance 0.5) should be within threshold 1.1"
+            assert "Far Paper" not in titles, "Far paper (distance 1.5) should be outside threshold 1.1"
+
+        with DatabaseManager() as db:
+            # With higher threshold (2.0): both papers should be returned
+            results_high = embeddings_manager.search_papers_semantic(
+                "query", database=db, limit=10, distance_threshold=2.0
+            )
+            titles_high = [r["title"] for r in results_high]
+            assert "Close Paper" in titles_high, "Close paper should be returned with threshold 2.0"
+            assert "Far Paper" in titles_high, "Far paper (distance 1.5) should be within threshold 2.0"
+
+        with DatabaseManager() as db:
+            # With very low threshold (0.1): no papers should be returned
+            results_none = embeddings_manager.search_papers_semantic(
+                "query", database=db, limit=10, distance_threshold=0.1
+            )
+            assert len(results_none) == 0, "No papers should be returned with threshold 0.1"
+
+    embeddings_manager.close()
+
+
 class TestParseChromaDBMetadata:
     """Tests for EmbeddingsManager.parse_chromadb_metadata."""
 

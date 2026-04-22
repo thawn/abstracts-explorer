@@ -125,6 +125,32 @@ describe('Search Module', () => {
 
             expect(State.getCurrentSearchTerm()).toBe('machine learning');
         });
+
+        it('should include distance_threshold in request when input is present', async () => {
+            document.body.innerHTML += `<input id="distance-threshold-input" value="0.8" type="number" />`;
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ papers: [], count: 0, use_embeddings: true })
+            });
+
+            await searchPapers();
+
+            const callArgs = JSON.parse(global.fetch.mock.calls[0][1].body);
+            expect(callArgs.distance_threshold).toBe(0.8);
+        });
+
+        it('should not include distance_threshold when input is absent', async () => {
+            // Ensure the input is not present (default DOM has none)
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ papers: [], count: 0, use_embeddings: true })
+            });
+
+            await searchPapers();
+
+            const callArgs = JSON.parse(global.fetch.mock.calls[0][1].body);
+            expect(callArgs.distance_threshold).toBeUndefined();
+        });
     });
 
     describe('displaySearchResults', () => {
