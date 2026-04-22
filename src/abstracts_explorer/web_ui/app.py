@@ -33,8 +33,8 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # Distance threshold for counting similar papers in embedding space.
-# Matches the default radius used on the clustering page's custom query.
-_SIMILAR_DISTANCE_THRESHOLD = 1.1
+# Can be overridden via the SEMANTIC_DISTANCE_THRESHOLD environment variable.
+_SIMILAR_DISTANCE_THRESHOLD = get_config().semantic_distance_threshold
 
 # Get the directory where this file is located
 PACKAGE_DIR = Path(__file__).parent

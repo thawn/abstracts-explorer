@@ -1035,6 +1035,31 @@ class TestWebUISemanticSearchDetails:
                     assert data["papers"] == []
                     assert data["count"] == 0
 
+    def test_semantic_search_uses_configured_distance_threshold(self):
+        """Test that semantic search passes the configured distance threshold from config."""
+        from abstracts_explorer.web_ui.app import app
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
+                with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
+                    with patch("abstracts_explorer.web_ui.app._SIMILAR_DISTANCE_THRESHOLD", 0.9):
+                        mock_em = Mock()
+                        mock_db = Mock()
+                        mock_em.search_papers_semantic.return_value = []
+                        mock_em.count_papers_within_distance.return_value = 0
+                        mock_get_em.return_value = mock_em
+                        mock_get_db.return_value = mock_db
+
+                        response = client.post(
+                            "/api/search",
+                            json={"query": "transformers", "use_embeddings": True, "limit": 5},
+                        )
+
+                        assert response.status_code == 200
+                        # Verify search_papers_semantic was called with the configured threshold
+                        call_kwargs = mock_em.search_papers_semantic.call_args
+                        assert call_kwargs.kwargs.get("distance_threshold") == 0.9
+
 
 class TestWebUIChatEndpointSuccess:
     """Test chat endpoint success paths (lines 219-227, 255-270)."""

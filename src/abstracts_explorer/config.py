@@ -127,6 +127,10 @@ class Config:
     imprint_link : str
         Optional URL for an imprint/legal notice page. If set, a link is shown in the web UI footer.
         Empty string by default (no imprint link shown).
+    semantic_distance_threshold : float
+        Maximum L2 distance (in embedding space) for a paper to be included in
+        semantic search results and in the "similar papers" count.
+        Lower values are stricter (fewer, more similar results).  Default: 1.1.
     requests_per_minute : int
         Maximum number of embedding API requests per minute (default: 60).
         Set to 0 to disable rate limiting.
@@ -262,6 +266,11 @@ class Config:
         # Embedding API Rate Limiting
         # Maximum number of API requests per minute (0 = no limit)
         self.requests_per_minute = self._get_env_int("REQUESTS_PER_MINUTE", default=60)
+
+        # Semantic Search Distance Threshold
+        # Maximum L2 distance for a paper to be included in semantic search results.
+        # Lower values are stricter (fewer, more similar results).
+        self.semantic_distance_threshold = self._get_env_float("SEMANTIC_DISTANCE_THRESHOLD", default=1.1)
 
         # Registry Settings
         # GitHub Personal Access Token for registry operations
@@ -423,6 +432,7 @@ class Config:
             "PROXY_X_PREFIX",
             "IMPRINT_LINK",
             "REQUESTS_PER_MINUTE",
+            "SEMANTIC_DISTANCE_THRESHOLD",
             "GITHUB_TOKEN",
             "REGISTRY_REPOSITORY",
         }
