@@ -515,6 +515,9 @@ class TestCoreSearch:
 class TestAuthorSearch:
     """Verify author-name searches with different query formats."""
 
+    _RESULT_CARD_CSS = "#search-results .bg-white.rounded-lg"
+    _WAIT_TIMEOUT = 15
+
     def test_author_name_only(self, staging_url, browser):
         """
         Author name only search returns results.
@@ -536,10 +539,10 @@ class TestAuthorSearch:
         search_input.send_keys("LeCun")
         search_input.send_keys(Keys.RETURN)
 
-        wait = WebDriverWait(browser, 15)
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")))
+        wait = WebDriverWait(browser, self._WAIT_TIMEOUT)
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, self._RESULT_CARD_CSS)))
 
-        results = browser.find_elements(By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")
+        results = browser.find_elements(By.CSS_SELECTOR, self._RESULT_CARD_CSS)
         assert len(results) > 0, "Searching for 'LeCun' should return at least one result"
 
         results_text = browser.find_element(By.ID, "search-results").text
@@ -567,10 +570,10 @@ class TestAuthorSearch:
         search_input.send_keys('author:"LeCun"')
         search_input.send_keys(Keys.RETURN)
 
-        wait = WebDriverWait(browser, 15)
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")))
+        wait = WebDriverWait(browser, self._WAIT_TIMEOUT)
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, self._RESULT_CARD_CSS)))
 
-        results = browser.find_elements(By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")
+        results = browser.find_elements(By.CSS_SELECTOR, self._RESULT_CARD_CSS)
         assert len(results) > 0, 'author:"LeCun" should return at least one result'
 
         results_text = browser.find_element(By.ID, "search-results").text
@@ -598,10 +601,10 @@ class TestAuthorSearch:
         search_input.send_keys('author:"LeCun" world model')
         search_input.send_keys(Keys.RETURN)
 
-        wait = WebDriverWait(browser, 15)
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")))
+        wait = WebDriverWait(browser, self._WAIT_TIMEOUT)
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, self._RESULT_CARD_CSS)))
 
-        results = browser.find_elements(By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")
+        results = browser.find_elements(By.CSS_SELECTOR, self._RESULT_CARD_CSS)
         assert len(results) > 0, 'author:"LeCun" world model should return at least one result'
 
         results_text = browser.find_element(By.ID, "search-results").text
