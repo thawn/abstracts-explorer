@@ -57,7 +57,13 @@ def main() -> int:
             db.set_embedding_model(args.embedding_model)
             updated_model = db.get_embedding_model()
 
+            cache_count = 0
+            if previous_model and previous_model != args.embedding_model:
+                cache_count = db.update_clustering_cache_embedding_model(previous_model, args.embedding_model)
+
         print(f"Updated embedding model metadata: {previous_model!r} -> {updated_model!r}")
+        if cache_count:
+            print(f"Updated {cache_count} clustering cache entries to use new embedding model.")
         return 0
     except DatabaseError as exc:
         print(f"Failed to update embedding model metadata: {exc}", file=sys.stderr)
