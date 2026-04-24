@@ -1166,6 +1166,89 @@ class TestClusteringCache:
         assert entry is not None
         assert entry.n_clusters == 7
 
+    def test_update_clustering_cache_embedding_model(self, connected_db):
+        """Test updating the embedding model in clustering cache entries."""
+        results = {"points": [], "statistics": {"n_clusters": 3}}
+
+        connected_db.save_clustering_cache(
+            embedding_model="old-model",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            results=results,
+            n_clusters=3,
+        )
+        connected_db.save_clustering_cache(
+            embedding_model="old-model",
+            reduction_method="tsne",
+            n_components=2,
+            clustering_method="kmeans",
+            results=results,
+            n_clusters=3,
+        )
+
+        count = connected_db.update_clustering_cache_embedding_model("old-model", "new-model")
+        assert count == 2
+
+        # Old model entries should no longer be accessible
+        cached_old = connected_db.get_clustering_cache(
+            embedding_model="old-model",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            n_clusters=3,
+        )
+        assert cached_old is None
+
+        # New model entries should be accessible
+        cached_new = connected_db.get_clustering_cache(
+            embedding_model="new-model",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            n_clusters=3,
+        )
+        assert cached_new is not None
+
+    def test_update_clustering_cache_embedding_model_no_match(self, connected_db):
+        """Test that updating a non-existent model returns 0."""
+        count = connected_db.update_clustering_cache_embedding_model("nonexistent-model", "new-model")
+        assert count == 0
+
+    def test_update_clustering_cache_embedding_model_preserves_other_entries(self, connected_db):
+        """Test that updating only affects entries with the matching model."""
+        results = {"points": [], "statistics": {}}
+
+        connected_db.save_clustering_cache(
+            embedding_model="model-a",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            results=results,
+            n_clusters=5,
+        )
+        connected_db.save_clustering_cache(
+            embedding_model="model-b",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            results=results,
+            n_clusters=5,
+        )
+
+        count = connected_db.update_clustering_cache_embedding_model("model-a", "model-c")
+        assert count == 1
+
+        # model-b entry should be untouched
+        cached_b = connected_db.get_clustering_cache(
+            embedding_model="model-b",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            n_clusters=5,
+        )
+        assert cached_b is not None
+
     def test_save_and_get_hierarchical_label_cache(self, connected_db):
         """Test saving and retrieving hierarchical label cache."""
         labels = {0: "Root", 5: "Sub-cluster A", 6: "Sub-cluster B", 10: "Leaf"}

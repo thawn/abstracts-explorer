@@ -1977,6 +1977,60 @@ class DatabaseManager:
             self._session.rollback()
             raise DatabaseError(f"Failed to clear clustering cache: {str(e)}") from e
 
+    def update_clustering_cache_embedding_model(self, old_model: str, new_model: str) -> int:
+        """
+        Update the embedding model name in all clustering cache entries.
+
+        Renames every ``ClusteringCache`` row whose ``embedding_model``
+        matches *old_model* so that it refers to *new_model* instead.
+        This keeps cached clustering results usable after the embedding
+        model metadata is renamed (e.g. via
+        ``update_embedding_model_metadata.py``).
+
+        Parameters
+        ----------
+        old_model : str
+            Current embedding model name stored in the cache.
+        new_model : str
+            New embedding model name to write.
+
+        Returns
+        -------
+        int
+            Number of cache entries updated.
+
+        Raises
+        ------
+        DatabaseError
+            If the update fails.
+
+        Examples
+        --------
+        >>> db = DatabaseManager()
+        >>> with db:
+        ...     count = db.update_clustering_cache_embedding_model(
+        ...         "old-model", "new-model"
+        ...     )
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            stmt = select(ClusteringCache).where(ClusteringCache.embedding_model == old_model)
+            entries = self._session.execute(stmt).scalars().all()
+            count = len(entries)
+
+            for entry in entries:
+                entry.embedding_model = new_model
+
+            self._session.commit()
+            logger.info(f"Updated {count} clustering cache entries from model {old_model!r} to {new_model!r}")
+            return count
+
+        except Exception as e:
+            self._session.rollback()
+            raise DatabaseError(f"Failed to update clustering cache embedding model: {str(e)}") from e
+
     # ------------------------------------------------------------------
     # Hierarchical label cache
     # ------------------------------------------------------------------
