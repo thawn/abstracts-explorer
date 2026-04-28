@@ -1436,6 +1436,195 @@ class TestChatDonation:
             connected_db.donate_chat_transcript("up", transcript)
 
 
+class TestGetChatDonations:
+    """Tests for get_chat_donations() and get_chat_donation_stats()."""
+
+    def _make_transcript(self, n=2):
+        return [
+            {"role": "user", "text": f"msg {i}"} if i % 2 == 0 else {"role": "assistant", "text": f"reply {i}"}
+            for i in range(n)
+        ]
+
+    def test_get_chat_donations_empty(self, connected_db):
+        """Returns empty list when no donations exist."""
+        result = connected_db.get_chat_donations()
+        assert result == []
+
+    def test_get_chat_donations_returns_all(self, connected_db):
+        """Returns all donations when no filters applied."""
+        connected_db.donate_chat_transcript("up", self._make_transcript(2))
+        connected_db.donate_chat_transcript("down", self._make_transcript(4))
+        result = connected_db.get_chat_donations()
+        assert len(result) == 2
+
+    def test_get_chat_donations_filter_by_rating(self, connected_db):
+        """Filters donations by rating."""
+        connected_db.donate_chat_transcript("up", self._make_transcript(2))
+        connected_db.donate_chat_transcript("down", self._make_transcript(2))
+        up_results = connected_db.get_chat_donations(rating="up")
+        assert all(r["rating"] == "up" for r in up_results)
+        assert len(up_results) == 1
+
+    def test_get_chat_donations_limit(self, connected_db):
+        """Respects limit parameter."""
+        for _ in range(5):
+            connected_db.donate_chat_transcript("up", self._make_transcript(2))
+        result = connected_db.get_chat_donations(limit=3)
+        assert len(result) == 3
+
+    def test_get_chat_donations_offset(self, connected_db):
+        """Respects offset parameter for pagination."""
+        for _ in range(4):
+            connected_db.donate_chat_transcript("up", self._make_transcript(2))
+        result_all = connected_db.get_chat_donations()
+        result_offset = connected_db.get_chat_donations(offset=2)
+        assert len(result_offset) == 2
+        assert result_offset[0]["id"] == result_all[2]["id"]
+
+    def test_get_chat_donations_includes_parsed_transcript(self, connected_db):
+        """Returned dicts include parsed transcript (list)."""
+        transcript = [{"role": "user", "text": "hello"}, {"role": "assistant", "text": "hi"}]
+        connected_db.donate_chat_transcript("up", transcript)
+        result = connected_db.get_chat_donations()
+        assert isinstance(result[0]["transcript"], list)
+        assert result[0]["transcript"][0]["role"] == "user"
+
+    def test_get_chat_donation_stats_empty(self, connected_db):
+        """Stats returns zeros when no donations exist."""
+        stats = connected_db.get_chat_donation_stats()
+        assert stats["total"] == 0
+        assert stats["up"] == 0
+        assert stats["down"] == 0
+        assert stats["avg_turns"] == 0.0
+
+    def test_get_chat_donation_stats_counts(self, connected_db):
+        """Stats correctly counts up/down and avg_turns."""
+        connected_db.donate_chat_transcript("up", self._make_transcript(2))
+        connected_db.donate_chat_transcript("up", self._make_transcript(4))
+        connected_db.donate_chat_transcript("down", self._make_transcript(6))
+        stats = connected_db.get_chat_donation_stats()
+        assert stats["total"] == 3
+        assert stats["up"] == 2
+        assert stats["down"] == 1
+        assert stats["avg_turns"] == pytest.approx((2 + 4 + 6) / 3)
+
+    def test_delete_chat_donations_all(self, connected_db):
+        """Deletes all donations when no ids given."""
+        connected_db.donate_chat_transcript("up", self._make_transcript(2))
+        connected_db.donate_chat_transcript("down", self._make_transcript(2))
+        deleted = connected_db.delete_chat_donations()
+        assert deleted == 2
+        assert connected_db.get_chat_donations() == []
+
+    def test_delete_chat_donations_by_ids(self, connected_db):
+        """Deletes only specified donation IDs."""
+        id1 = connected_db.donate_chat_transcript("up", self._make_transcript(2))
+        id2 = connected_db.donate_chat_transcript("down", self._make_transcript(2))
+        deleted = connected_db.delete_chat_donations(ids=[id1])
+        assert deleted == 1
+        remaining = connected_db.get_chat_donations()
+        assert len(remaining) == 1
+        assert remaining[0]["id"] == id2
+
+    def test_delete_chat_donations_empty_ids(self, connected_db):
+        """Deletes nothing when ids is an empty list."""
+        connected_db.donate_chat_transcript("up", self._make_transcript(2))
+        deleted = connected_db.delete_chat_donations(ids=[])
+        assert deleted == 0
+        assert len(connected_db.get_chat_donations()) == 1
+
+
+class TestGetValidationData:
+    """Tests for get_validation_data() and get_validation_data_stats()."""
+
+    def _donate(self, connected_db, uid="uid1", priority=3, search_term=None):
+        connected_db.donate_validation_data({uid: {"priority": priority, "searchTerm": search_term}})
+
+    def test_get_validation_data_empty(self, connected_db):
+        """Returns empty list when no entries exist."""
+        result = connected_db.get_validation_data()
+        assert result == []
+
+    def test_get_validation_data_returns_all(self, connected_db):
+        """Returns all entries."""
+        self._donate(connected_db, "uid1", 5)
+        self._donate(connected_db, "uid2", 3)
+        result = connected_db.get_validation_data()
+        assert len(result) == 2
+
+    def test_get_validation_data_limit(self, connected_db):
+        """Respects limit parameter."""
+        for i in range(5):
+            self._donate(connected_db, f"uid{i}", i + 1)
+        result = connected_db.get_validation_data(limit=3)
+        assert len(result) == 3
+
+    def test_get_validation_data_offset(self, connected_db):
+        """Respects offset parameter for pagination."""
+        for i in range(4):
+            self._donate(connected_db, f"uid{i}", i + 1)
+        result_all = connected_db.get_validation_data()
+        result_offset = connected_db.get_validation_data(offset=2)
+        assert len(result_offset) == 2
+        assert result_offset[0]["id"] == result_all[2]["id"]
+
+    def test_get_validation_data_includes_fields(self, connected_db):
+        """Returned dicts include all expected fields."""
+        self._donate(connected_db, "myuid", 4, "deep learning")
+        result = connected_db.get_validation_data()
+        assert result[0]["paper_uid"] == "myuid"
+        assert result[0]["priority"] == 4
+        assert result[0]["search_term"] == "deep learning"
+        assert result[0]["donated_at"] is not None
+
+    def test_get_validation_data_stats_empty(self, connected_db):
+        """Stats returns zeros when no entries exist."""
+        stats = connected_db.get_validation_data_stats()
+        assert stats["total"] == 0
+        assert stats["unique_papers"] == 0
+        assert stats["avg_priority"] == 0.0
+        assert stats["priority_distribution"] == {}
+
+    def test_get_validation_data_stats_counts(self, connected_db):
+        """Stats correctly counts totals and distribution."""
+        self._donate(connected_db, "uid1", 5)
+        self._donate(connected_db, "uid2", 3)
+        self._donate(connected_db, "uid1", 5)  # Duplicate uid, different entry
+        stats = connected_db.get_validation_data_stats()
+        assert stats["total"] == 3
+        assert stats["unique_papers"] == 2
+        assert stats["avg_priority"] == pytest.approx((5 + 3 + 5) / 3)
+        assert stats["priority_distribution"] == {5: 2, 3: 1}
+
+    def test_delete_validation_data_all(self, connected_db):
+        """Deletes all entries when no ids given."""
+        self._donate(connected_db, "uid1", 3)
+        self._donate(connected_db, "uid2", 4)
+        deleted = connected_db.delete_validation_data()
+        assert deleted == 2
+        assert connected_db.get_validation_data() == []
+
+    def test_delete_validation_data_by_ids(self, connected_db):
+        """Deletes only specified entry IDs."""
+        # Donate two entries and grab their IDs
+        connected_db.donate_validation_data({"uid1": {"priority": 5, "searchTerm": None}})
+        connected_db.donate_validation_data({"uid2": {"priority": 3, "searchTerm": None}})
+        all_entries = connected_db.get_validation_data()
+        id_to_delete = all_entries[0]["id"]
+        deleted = connected_db.delete_validation_data(ids=[id_to_delete])
+        assert deleted == 1
+        remaining = connected_db.get_validation_data()
+        assert len(remaining) == 1
+        assert remaining[0]["id"] != id_to_delete
+
+    def test_delete_validation_data_empty_ids(self, connected_db):
+        """Deletes nothing when ids is an empty list."""
+        self._donate(connected_db, "uid1", 3)
+        deleted = connected_db.delete_validation_data(ids=[])
+        assert deleted == 0
+        assert len(connected_db.get_validation_data()) == 1
+
+
 class TestGetConferenceYearsFromDb:
     """Tests for DatabaseManager.get_conference_years_from_db()."""
 

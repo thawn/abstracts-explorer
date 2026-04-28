@@ -19,6 +19,7 @@ from abstracts_explorer.cli import (
     add_conference_year_args,
     pre_process_command,
 )
+from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.plugin import LightweightPaper
 from tests.conftest import set_test_db
 from abstracts_explorer.config import get_config
@@ -3993,3 +3994,262 @@ class TestPackageLogging:
             yield records
         finally:
             logger.removeHandler(handler)
+
+
+class TestFeedbackCommand:
+    """Tests for the 'feedback' CLI command group and sub-commands."""
+
+    def _seed_data(self, db_path):
+        """Seed the test database with chat donations and validation data."""
+        from abstracts_explorer.database import DatabaseManager
+
+        with DatabaseManager() as db:
+            db.create_tables()
+            db.donate_chat_transcript("up", [{"role": "user", "text": "q"}, {"role": "assistant", "text": "a"}])
+            db.donate_chat_transcript("down", [{"role": "user", "text": "q2"}, {"role": "assistant", "text": "a2"}])
+            db.donate_validation_data(
+                {"uid1": {"priority": 5, "searchTerm": "ml"}, "uid2": {"priority": 3, "searchTerm": None}}
+            )
+
+    # ------------------------------------------------------------------ stats
+    def test_feedback_stats_empty(self, tmp_path, capsys):
+        """feedback stats shows zeros when no data exists."""
+        set_test_db(tmp_path / "test.db")
+
+        with patch.object(sys, "argv", ["abstracts-explorer", "feedback", "stats"]):
+            from abstracts_explorer.database import DatabaseManager
+
+            with DatabaseManager() as db:
+                db.create_tables()
+
+            exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Total" in captured.out
+        assert "0" in captured.out
+
+    def test_feedback_stats_with_data(self, tmp_path, capsys):
+        """feedback stats shows correct counts with data."""
+        set_test_db(tmp_path / "test.db")
+        self._seed_data(tmp_path / "test.db")
+
+        with patch.object(sys, "argv", ["abstracts-explorer", "feedback", "stats"]):
+            exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "2" in captured.out  # 2 chat donations
+        assert "2" in captured.out  # 2 data donations
+
+    # ------------------------------------------------------------------ list
+    def test_feedback_list_all(self, tmp_path, capsys):
+        """feedback list --type all shows both chat and data donations."""
+        set_test_db(tmp_path / "test.db")
+        self._seed_data(tmp_path / "test.db")
+
+        with patch.object(sys, "argv", ["abstracts-explorer", "feedback", "list", "--type", "all"]):
+            exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Chat Donations" in captured.out
+        assert "Data Donations" in captured.out
+
+    def test_feedback_list_chat_only(self, tmp_path, capsys):
+        """feedback list --type chat shows only chat donations."""
+        set_test_db(tmp_path / "test.db")
+        self._seed_data(tmp_path / "test.db")
+
+        with patch.object(sys, "argv", ["abstracts-explorer", "feedback", "list", "--type", "chat"]):
+            exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Chat Donations" in captured.out
+        assert "Data Donations" not in captured.out
+
+    def test_feedback_list_chat_rating_filter(self, tmp_path, capsys):
+        """feedback list --type chat --rating up lists only thumbs-up donations."""
+        set_test_db(tmp_path / "test.db")
+        self._seed_data(tmp_path / "test.db")
+
+        with patch.object(
+            sys, "argv", ["abstracts-explorer", "feedback", "list", "--type", "chat", "--rating", "up"]
+        ):
+            exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "up" in captured.out
+        # Only 1 up entry expected
+        assert captured.out.count("👍") == 1
+
+    def test_feedback_list_data_only(self, tmp_path, capsys):
+        """feedback list --type data shows only data donations."""
+        set_test_db(tmp_path / "test.db")
+        self._seed_data(tmp_path / "test.db")
+
+        with patch.object(sys, "argv", ["abstracts-explorer", "feedback", "list", "--type", "data"]):
+            exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Data Donations" in captured.out
+        assert "Chat Donations" not in captured.out
+
+    def test_feedback_list_empty(self, tmp_path, capsys):
+        """feedback list shows 'No … found' when no data exists."""
+        set_test_db(tmp_path / "test.db")
+        with DatabaseManager() as db:
+            db.create_tables()
+
+        with patch.object(sys, "argv", ["abstracts-explorer", "feedback", "list"]):
+            exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "No chat donations found" in captured.out
+        assert "No data donations found" in captured.out
+
+    # ------------------------------------------------------------------ browse
+    def test_feedback_browse_chat_quit(self, tmp_path, capsys):
+        """feedback browse --type chat quits gracefully on 'q'."""
+        set_test_db(tmp_path / "test.db")
+        self._seed_data(tmp_path / "test.db")
+
+        with (
+            patch.object(sys, "argv", ["abstracts-explorer", "feedback", "browse", "--type", "chat"]),
+            patch("builtins.input", return_value="q"),
+        ):
+            exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Browsing" in captured.out
+
+    def test_feedback_browse_data_quit(self, tmp_path, capsys):
+        """feedback browse --type data quits gracefully on 'q'."""
+        set_test_db(tmp_path / "test.db")
+        self._seed_data(tmp_path / "test.db")
+
+        with (
+            patch.object(sys, "argv", ["abstracts-explorer", "feedback", "browse", "--type", "data"]),
+            patch("builtins.input", return_value="q"),
+        ):
+            exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Browsing" in captured.out
+
+    def test_feedback_browse_empty_chat(self, tmp_path, capsys):
+        """feedback browse shows message when no chat donations exist."""
+        set_test_db(tmp_path / "test.db")
+        with DatabaseManager() as db:
+            db.create_tables()
+
+        with patch.object(sys, "argv", ["abstracts-explorer", "feedback", "browse", "--type", "chat"]):
+            exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "No chat donations found" in captured.out
+
+    def test_feedback_browse_eoferror(self, tmp_path, capsys):
+        """feedback browse handles EOFError gracefully."""
+        set_test_db(tmp_path / "test.db")
+        self._seed_data(tmp_path / "test.db")
+
+        with (
+            patch.object(sys, "argv", ["abstracts-explorer", "feedback", "browse", "--type", "chat"]),
+            patch("builtins.input", side_effect=EOFError),
+        ):
+            exit_code = main()
+
+        assert exit_code == 0
+
+    def test_feedback_browse_sample(self, tmp_path, capsys):
+        """feedback browse --sample limits entries to random sample."""
+        set_test_db(tmp_path / "test.db")
+        self._seed_data(tmp_path / "test.db")
+
+        with (
+            patch.object(
+                sys, "argv", ["abstracts-explorer", "feedback", "browse", "--type", "chat", "--sample", "1"]
+            ),
+            patch("builtins.input", return_value="q"),
+        ):
+            exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Browsing 1 chat donation(s)" in captured.out
+
+    # ------------------------------------------------------------------ clear
+    def test_feedback_clear_aborted(self, tmp_path, capsys):
+        """feedback clear aborts when user does not confirm."""
+        set_test_db(tmp_path / "test.db")
+        self._seed_data(tmp_path / "test.db")
+
+        with (
+            patch.object(sys, "argv", ["abstracts-explorer", "feedback", "clear"]),
+            patch("builtins.input", return_value="no"),
+        ):
+            exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Aborted" in captured.out
+
+    def test_feedback_clear_yes_flag(self, tmp_path, capsys):
+        """feedback clear --yes deletes all feedback without prompting."""
+        set_test_db(tmp_path / "test.db")
+        self._seed_data(tmp_path / "test.db")
+
+        with patch.object(sys, "argv", ["abstracts-explorer", "feedback", "clear", "--yes"]):
+            exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Deleted" in captured.out
+
+    def test_feedback_clear_chat_only(self, tmp_path, capsys):
+        """feedback clear --type chat removes only chat donations."""
+        set_test_db(tmp_path / "test.db")
+        self._seed_data(tmp_path / "test.db")
+
+        with patch.object(sys, "argv", ["abstracts-explorer", "feedback", "clear", "--type", "chat", "--yes"]):
+            exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "chat donation" in captured.out
+
+        # Data donations should still exist
+        with DatabaseManager() as db:
+            data = db.get_validation_data()
+        assert len(data) > 0
+
+    def test_feedback_clear_nothing_to_clear(self, tmp_path, capsys):
+        """feedback clear shows message when no feedback data exists."""
+        set_test_db(tmp_path / "test.db")
+        with DatabaseManager() as db:
+            db.create_tables()
+
+        with patch.object(sys, "argv", ["abstracts-explorer", "feedback", "clear"]):
+            exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "nothing to clear" in captured.out
+
+    # ------------------------------------------------------------------ no subcommand
+    def test_feedback_no_subcommand_prints_help(self, tmp_path, capsys):
+        """feedback with no sub-command prints help and returns 1."""
+        set_test_db(tmp_path / "test.db")
+
+        with patch.object(sys, "argv", ["abstracts-explorer", "feedback"]):
+            exit_code = main()
+
+        assert exit_code == 1
