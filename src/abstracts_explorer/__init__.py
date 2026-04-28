@@ -156,7 +156,10 @@ from abstracts_explorer.plugins import (  # noqa: E402
 # Import plugins to auto-register them
 import abstracts_explorer.plugins  # noqa: E402, F401
 
-__version__ = "0.1.0"
+try:
+    from abstracts_explorer._version import __version__
+except ImportError:
+    __version__ = "0.1.0"
 __all__ = [
     "Config",
     "get_config",

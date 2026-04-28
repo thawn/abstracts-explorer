@@ -14,7 +14,13 @@ sys.path.insert(0, os.path.abspath("../src"))
 project = "abstracts-explorer"
 copyright = "2025, Abstracts Explorer Contributors"
 author = "Abstracts Explorer Contributors"
-release = "0.1.0"
+
+# Dynamically read the version from the installed package so the HTML title
+# always shows the real release version instead of a hard-coded placeholder.
+try:
+    from abstracts_explorer._version import __version__ as release
+except ImportError:
+    release = "0.1.0"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
