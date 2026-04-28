@@ -1886,6 +1886,295 @@ def eval_clear_command(args: argparse.Namespace) -> int:
         return 1
 
 
+def feedback_stats_command(args: argparse.Namespace) -> int:
+    """
+    Show summary statistics for user feedback (chat donations and data donations).
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments (no extra fields required).
+
+    Returns
+    -------
+    int
+        Exit code (0 for success, non-zero for failure).
+    """
+    try:
+        with DatabaseManager() as db:
+            db.create_tables()
+
+            chat_stats = db.get_chat_donation_stats()
+            val_stats = db.get_validation_data_stats()
+
+            print("\n📊 Feedback Statistics")
+            print("=" * 40)
+
+            print("\n💬 Chat Donations")
+            print(f"   Total:      {chat_stats['total']}")
+            print(f"   👍 Up:       {chat_stats['up']}")
+            print(f"   👎 Down:     {chat_stats['down']}")
+            if chat_stats["total"] > 0:
+                print(f"   Avg turns:  {chat_stats['avg_turns']:.1f}")
+
+            print("\n📌 Data Donations (Interesting Papers)")
+            print(f"   Total:          {val_stats['total']}")
+            print(f"   Unique papers:  {val_stats['unique_papers']}")
+            if val_stats["total"] > 0:
+                print(f"   Avg priority:   {val_stats['avg_priority']:.1f}")
+                dist = val_stats["priority_distribution"]
+                if dist:
+                    print("   Priority breakdown:")
+                    for priority in sorted(dist.keys()):
+                        print(f"      {priority}: {dist[priority]}")
+
+        return 0
+
+    except Exception as e:
+        print(f"\n❌ Error: {e}", file=sys.stderr)
+        import traceback
+
+        traceback.print_exc()
+        return 1
+
+
+def feedback_list_command(args: argparse.Namespace) -> int:
+    """
+    List individual user feedback entries.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments containing:
+        - type: 'chat', 'data', or 'all'
+        - rating: optional filter for chat donations ('up' or 'down')
+        - limit: maximum number of entries to show
+        - offset: number of entries to skip
+
+    Returns
+    -------
+    int
+        Exit code (0 for success, non-zero for failure).
+    """
+    try:
+        with DatabaseManager() as db:
+            db.create_tables()
+
+            fb_type = getattr(args, "type", "all")
+            rating_filter = getattr(args, "rating", None)
+            limit = getattr(args, "limit", 20)
+            offset = getattr(args, "offset", 0)
+
+            if fb_type in ("chat", "all"):
+                donations = db.get_chat_donations(limit=limit, rating=rating_filter, offset=offset)
+                if donations:
+                    print(f"\n💬 Chat Donations ({len(donations)} shown):")
+                    print("-" * 60)
+                    for entry in donations:
+                        ts = entry["donated_at"].strftime("%Y-%m-%d %H:%M") if entry["donated_at"] else "unknown"
+                        n_turns = len(entry["transcript"])
+                        icon = "👍" if entry["rating"] == "up" else "👎"
+                        print(f"  ID {entry['id']:5d}  {icon} {entry['rating']:<4}  {n_turns} turns  {ts}")
+                else:
+                    print("\n💬 No chat donations found.")
+
+            if fb_type in ("data", "all"):
+                val_data = db.get_validation_data(limit=limit, offset=offset)
+                if val_data:
+                    print(f"\n📌 Data Donations ({len(val_data)} shown):")
+                    print("-" * 60)
+                    for entry in val_data:
+                        ts = entry["donated_at"].strftime("%Y-%m-%d %H:%M") if entry["donated_at"] else "unknown"
+                        term = entry["search_term"] or ""
+                        print(
+                            f"  ID {entry['id']:5d}  UID {entry['paper_uid']}  "
+                            f"priority {entry['priority']}  {ts}  {term}"
+                        )
+                else:
+                    print("\n📌 No data donations found.")
+
+        return 0
+
+    except Exception as e:
+        print(f"\n❌ Error: {e}", file=sys.stderr)
+        import traceback
+
+        traceback.print_exc()
+        return 1
+
+
+def feedback_browse_command(args: argparse.Namespace) -> int:
+    """
+    Interactively browse individual user feedback entries.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments containing:
+        - type: 'chat' or 'data'
+        - rating: optional filter for chat donations ('up' or 'down')
+        - sample: optional number of entries to randomly sample
+
+    Returns
+    -------
+    int
+        Exit code (0 for success, non-zero for failure).
+    """
+    try:
+        with DatabaseManager() as db:
+            db.create_tables()
+
+            fb_type = getattr(args, "type", "chat")
+            rating_filter = getattr(args, "rating", None)
+            sample_size = getattr(args, "sample", None)
+
+            if fb_type == "chat":
+                entries = db.get_chat_donations(rating=rating_filter)
+                if not entries:
+                    print("No chat donations found.")
+                    return 0
+
+                if sample_size and sample_size < len(entries):
+                    import random
+
+                    entries = random.sample(entries, sample_size)
+
+                print(f"\n💬 Browsing {len(entries)} chat donation(s)")
+                print("Press [Enter] to continue, [q] to quit.\n")
+
+                for i, entry in enumerate(entries, 1):
+                    ts = entry["donated_at"].strftime("%Y-%m-%d %H:%M") if entry["donated_at"] else "unknown"
+                    icon = "👍" if entry["rating"] == "up" else "👎"
+                    print(f"--- Entry {i}/{len(entries)} (ID: {entry['id']}) {icon} {entry['rating']} — {ts} ---")
+                    for msg in entry["transcript"]:
+                        role = msg.get("role", "?")
+                        text = msg.get("text", "")
+                        print(f"  [{role}] {text}")
+                    print()
+                    try:
+                        choice = input("[Enter] next, [q] quit: ").strip().lower()
+                    except (EOFError, KeyboardInterrupt):
+                        print("\n\n👋 Stopped.")
+                        break
+                    if choice == "q":
+                        print("👋 Stopped.")
+                        break
+
+            elif fb_type == "data":
+                entries = db.get_validation_data()
+                if not entries:
+                    print("No data donations found.")
+                    return 0
+
+                if sample_size and sample_size < len(entries):
+                    import random
+
+                    entries = random.sample(entries, sample_size)
+
+                print(f"\n📌 Browsing {len(entries)} data donation(s)")
+                print("Press [Enter] to continue, [q] to quit.\n")
+
+                for i, entry in enumerate(entries, 1):
+                    ts = entry["donated_at"].strftime("%Y-%m-%d %H:%M") if entry["donated_at"] else "unknown"
+                    term = entry["search_term"] or "(no search term)"
+                    print(
+                        f"--- Entry {i}/{len(entries)} (ID: {entry['id']}) ---\n"
+                        f"  Paper UID:   {entry['paper_uid']}\n"
+                        f"  Priority:    {entry['priority']}\n"
+                        f"  Search term: {term}\n"
+                        f"  Donated at:  {ts}\n"
+                    )
+                    try:
+                        choice = input("[Enter] next, [q] quit: ").strip().lower()
+                    except (EOFError, KeyboardInterrupt):
+                        print("\n\n👋 Stopped.")
+                        break
+                    if choice == "q":
+                        print("👋 Stopped.")
+                        break
+            else:
+                print(f"❌ Unknown type '{fb_type}'. Use 'chat' or 'data'.", file=sys.stderr)
+                return 1
+
+        return 0
+
+    except Exception as e:
+        print(f"\n❌ Error: {e}", file=sys.stderr)
+        import traceback
+
+        traceback.print_exc()
+        return 1
+
+
+def feedback_clear_command(args: argparse.Namespace) -> int:
+    """
+    Delete user feedback data (chat donations and/or data donations).
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments containing:
+        - type: 'chat', 'data', or 'all'
+        - yes: skip the confirmation prompt
+
+    Returns
+    -------
+    int
+        Exit code (0 for success, non-zero for failure).
+    """
+    try:
+        with DatabaseManager() as db:
+            db.create_tables()
+
+            fb_type = getattr(args, "type", "all")
+
+            chat_stats = db.get_chat_donation_stats() if fb_type in ("chat", "all") else {"total": 0}
+            val_stats = db.get_validation_data_stats() if fb_type in ("data", "all") else {"total": 0}
+
+            total = chat_stats["total"] + val_stats["total"]
+            if total == 0:
+                print("No feedback data found — nothing to clear.")
+                return 0
+
+            parts = []
+            if chat_stats["total"] > 0:
+                parts.append(f"{chat_stats['total']} chat donation(s)")
+            if val_stats["total"] > 0:
+                parts.append(f"{val_stats['total']} data donation(s)")
+
+            print(f"⚠️  This will permanently delete {' and '.join(parts)}.")
+            if not getattr(args, "yes", False):
+                try:
+                    answer = input("Are you sure? [y/N]: ").strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    print("\nAborted.")
+                    return 0
+                if answer not in ("y", "yes"):
+                    print("Aborted.")
+                    return 0
+
+            deleted_chat = 0
+            deleted_val = 0
+            if fb_type in ("chat", "all"):
+                deleted_chat = db.delete_chat_donations()
+            if fb_type in ("data", "all"):
+                deleted_val = db.delete_validation_data()
+
+            if deleted_chat:
+                print(f"✅ Deleted {deleted_chat} chat donation(s).")
+            if deleted_val:
+                print(f"✅ Deleted {deleted_val} data donation(s).")
+
+        return 0
+
+    except Exception as e:
+        print(f"\n❌ Error: {e}", file=sys.stderr)
+        import traceback
+
+        traceback.print_exc()
+        return 1
+
+
 def registry_upload_command(args: argparse.Namespace) -> int:
     """
     Upload data for a conference (and optionally a specific year) to an OCI-compatible container registry.
@@ -3309,6 +3598,134 @@ Examples:
         help="Skip confirmation prompt.",
     )
 
+    # Feedback command (with sub-subcommands)
+    feedback_parser = subparsers.add_parser(
+        "feedback",
+        help="Explore user feedback (chat donations and data donations)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+Explore user feedback collected by the web UI.
+
+Two types of feedback are tracked:
+  - Chat donations: anonymized chat transcripts with thumbs up/down ratings.
+  - Data donations: anonymized interesting-paper ratings (1-5 priority).
+
+Sub-commands:
+  stats   Show summary statistics for all feedback types
+  list    List individual feedback entries (with optional filters)
+  browse  Interactively browse individual feedback entries
+  clear   Delete feedback data (with confirmation)
+
+Examples:
+  # Show summary statistics
+  abstracts-explorer feedback stats
+
+  # List all chat donations
+  abstracts-explorer feedback list --type chat
+
+  # List only thumbs-down chat donations
+  abstracts-explorer feedback list --type chat --rating down
+
+  # List data donations (up to 50 entries)
+  abstracts-explorer feedback list --type data --limit 50
+
+  # Interactively browse chat donations
+  abstracts-explorer feedback browse --type chat
+
+  # Browse a random sample of 5 chat donations
+  abstracts-explorer feedback browse --type chat --sample 5
+
+  # Delete all feedback data (with confirmation)
+  abstracts-explorer feedback clear
+
+  # Delete only chat donations, no prompt
+  abstracts-explorer feedback clear --type chat --yes
+        """,
+    )
+    feedback_subparsers = feedback_parser.add_subparsers(dest="feedback_command", help="Feedback sub-commands")
+
+    # feedback stats
+    feedback_subparsers.add_parser(
+        "stats",
+        help="Show summary statistics for all user feedback",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+    # feedback list
+    feedback_list_parser = feedback_subparsers.add_parser(
+        "list",
+        help="List individual feedback entries",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    feedback_list_parser.add_argument(
+        "--type",
+        choices=["chat", "data", "all"],
+        default="all",
+        help="Type of feedback to list: 'chat', 'data', or 'all' (default: all)",
+    )
+    feedback_list_parser.add_argument(
+        "--rating",
+        choices=["up", "down"],
+        default=None,
+        help="Filter chat donations by rating (only applies when --type is 'chat' or 'all')",
+    )
+    feedback_list_parser.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Maximum number of entries to show per type (default: 20)",
+    )
+    feedback_list_parser.add_argument(
+        "--offset",
+        type=int,
+        default=0,
+        help="Number of entries to skip (for pagination, default: 0)",
+    )
+
+    # feedback browse
+    feedback_browse_parser = feedback_subparsers.add_parser(
+        "browse",
+        help="Interactively browse individual feedback entries",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    feedback_browse_parser.add_argument(
+        "--type",
+        choices=["chat", "data"],
+        default="chat",
+        help="Type of feedback to browse: 'chat' or 'data' (default: chat)",
+    )
+    feedback_browse_parser.add_argument(
+        "--rating",
+        choices=["up", "down"],
+        default=None,
+        help="Filter chat donations by rating (only applies when --type is 'chat')",
+    )
+    feedback_browse_parser.add_argument(
+        "--sample",
+        type=int,
+        default=None,
+        help="Randomly sample N entries to browse",
+    )
+
+    # feedback clear
+    feedback_clear_parser = feedback_subparsers.add_parser(
+        "clear",
+        help="Delete feedback data",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    feedback_clear_parser.add_argument(
+        "--type",
+        choices=["chat", "data", "all"],
+        default="all",
+        help="Type of feedback to delete: 'chat', 'data', or 'all' (default: all)",
+    )
+    feedback_clear_parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Skip the confirmation prompt",
+    )
+
     # Delete-data command
     delete_data_parser = subparsers.add_parser(
         "delete-data",
@@ -3444,6 +3861,21 @@ Examples:
             return 1
     elif args.command == "delete-data":
         return delete_data_command(args)
+    elif args.command == "feedback":
+        if not hasattr(args, "feedback_command") or not args.feedback_command:
+            feedback_parser.print_help()
+            return 1
+        if args.feedback_command == "stats":
+            return feedback_stats_command(args)
+        elif args.feedback_command == "list":
+            return feedback_list_command(args)
+        elif args.feedback_command == "browse":
+            return feedback_browse_command(args)
+        elif args.feedback_command == "clear":
+            return feedback_clear_command(args)
+        else:
+            feedback_parser.print_help()
+            return 1
     elif args.command == "registry":
         if not hasattr(args, "registry_command") or not args.registry_command:
             registry_parser.print_help()
