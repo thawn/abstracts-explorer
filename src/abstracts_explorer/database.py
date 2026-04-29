@@ -598,6 +598,325 @@ class DatabaseManager:
             logger.error(f"Error donating chat transcript: {e}", exc_info=True)
             raise DatabaseError(f"Failed to donate chat transcript: {e}")
 
+    def get_chat_donations(
+        self,
+        limit: Optional[int] = None,
+        rating: Optional[str] = None,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve donated chat transcripts from the database.
+
+        Parameters
+        ----------
+        limit : int, optional
+            Maximum number of entries to return. Returns all if None.
+        rating : str, optional
+            Filter by rating ('up' or 'down'). Returns all ratings if None.
+        offset : int, optional
+            Number of entries to skip for pagination (default: 0).
+
+        Returns
+        -------
+        list of dict
+            List of donation dicts, each containing:
+            - id (int): Entry ID.
+            - rating (str): 'up' or 'down'.
+            - transcript (list): Parsed list of message dicts.
+            - donated_at (datetime): Donation timestamp.
+
+        Raises
+        ------
+        DatabaseError
+            If the database operation fails.
+
+        Examples
+        --------
+        >>> db = DatabaseManager()
+        >>> with db:
+        ...     donations = db.get_chat_donations(limit=10, rating='up')
+        """
+        if self._session is None:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            import json
+
+            query = self._session.query(ChatDonation)
+            if rating is not None:
+                query = query.filter(ChatDonation.rating == rating)
+            query = query.order_by(ChatDonation.donated_at.desc())
+            if offset:
+                query = query.offset(offset)
+            if limit is not None:
+                query = query.limit(limit)
+
+            results = []
+            for entry in query.all():
+                try:
+                    transcript = json.loads(entry.transcript)
+                except Exception:
+                    transcript = []
+                results.append(
+                    {
+                        "id": entry.id,
+                        "rating": entry.rating,
+                        "transcript": transcript,
+                        "donated_at": entry.donated_at,
+                    }
+                )
+            return results
+
+        except Exception as e:
+            logger.error(f"Error retrieving chat donations: {e}", exc_info=True)
+            raise DatabaseError(f"Failed to retrieve chat donations: {e}")
+
+    def get_chat_donation_stats(self) -> Dict[str, Any]:
+        """
+        Get summary statistics for donated chat transcripts.
+
+        Returns
+        -------
+        dict
+            Statistics dict containing:
+            - total (int): Total number of donations.
+            - up (int): Number of thumbs-up donations.
+            - down (int): Number of thumbs-down donations.
+            - avg_turns (float): Average number of turns per transcript.
+
+        Raises
+        ------
+        DatabaseError
+            If the database operation fails.
+
+        Examples
+        --------
+        >>> db = DatabaseManager()
+        >>> with db:
+        ...     stats = db.get_chat_donation_stats()
+        ...     print(f"Total donations: {stats['total']}")
+        """
+        if self._session is None:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            import json
+
+            all_entries = self._session.query(ChatDonation).all()
+            total = len(all_entries)
+            up = sum(1 for e in all_entries if e.rating == "up")
+            down = sum(1 for e in all_entries if e.rating == "down")
+            turn_counts = []
+            for entry in all_entries:
+                try:
+                    turns = len(json.loads(entry.transcript))
+                except Exception:
+                    turns = 0
+                turn_counts.append(turns)
+            avg_turns = sum(turn_counts) / total if total > 0 else 0.0
+            return {"total": total, "up": up, "down": down, "avg_turns": avg_turns}
+
+        except Exception as e:
+            logger.error(f"Error retrieving chat donation stats: {e}", exc_info=True)
+            raise DatabaseError(f"Failed to retrieve chat donation stats: {e}")
+
+    def get_validation_data(
+        self,
+        limit: Optional[int] = None,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve donated validation (interesting-paper) data from the database.
+
+        Parameters
+        ----------
+        limit : int, optional
+            Maximum number of entries to return. Returns all if None.
+        offset : int, optional
+            Number of entries to skip for pagination (default: 0).
+
+        Returns
+        -------
+        list of dict
+            List of validation data dicts, each containing:
+            - id (int): Entry ID.
+            - paper_uid (str): Paper UID.
+            - priority (int): Priority rating.
+            - search_term (str or None): Associated search term.
+            - donated_at (datetime): Donation timestamp.
+
+        Raises
+        ------
+        DatabaseError
+            If the database operation fails.
+
+        Examples
+        --------
+        >>> db = DatabaseManager()
+        >>> with db:
+        ...     data = db.get_validation_data(limit=20)
+        """
+        if self._session is None:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            query = self._session.query(ValidationData).order_by(ValidationData.donated_at.desc())
+            if offset:
+                query = query.offset(offset)
+            if limit is not None:
+                query = query.limit(limit)
+
+            return [
+                {
+                    "id": entry.id,
+                    "paper_uid": entry.paper_uid,
+                    "priority": entry.priority,
+                    "search_term": entry.search_term,
+                    "donated_at": entry.donated_at,
+                }
+                for entry in query.all()
+            ]
+
+        except Exception as e:
+            logger.error(f"Error retrieving validation data: {e}", exc_info=True)
+            raise DatabaseError(f"Failed to retrieve validation data: {e}")
+
+    def get_validation_data_stats(self) -> Dict[str, Any]:
+        """
+        Get summary statistics for donated validation (interesting-paper) data.
+
+        Returns
+        -------
+        dict
+            Statistics dict containing:
+            - total (int): Total number of donated paper ratings.
+            - unique_papers (int): Number of distinct paper UIDs.
+            - avg_priority (float): Average priority rating.
+            - priority_distribution (dict): Count per priority value.
+
+        Raises
+        ------
+        DatabaseError
+            If the database operation fails.
+
+        Examples
+        --------
+        >>> db = DatabaseManager()
+        >>> with db:
+        ...     stats = db.get_validation_data_stats()
+        ...     print(f"Total data donations: {stats['total']}")
+        """
+        if self._session is None:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            all_entries = self._session.query(ValidationData).all()
+            total = len(all_entries)
+            unique_papers = len({e.paper_uid for e in all_entries})
+            priorities = [e.priority for e in all_entries]
+            avg_priority = sum(priorities) / total if total > 0 else 0.0
+            distribution: Dict[int, int] = {}
+            for p in priorities:
+                distribution[p] = distribution.get(p, 0) + 1
+            return {
+                "total": total,
+                "unique_papers": unique_papers,
+                "avg_priority": avg_priority,
+                "priority_distribution": distribution,
+            }
+
+        except Exception as e:
+            logger.error(f"Error retrieving validation data stats: {e}", exc_info=True)
+            raise DatabaseError(f"Failed to retrieve validation data stats: {e}")
+
+    def delete_chat_donations(self, ids: Optional[List[int]] = None) -> int:
+        """
+        Delete donated chat transcripts.
+
+        Parameters
+        ----------
+        ids : list of int, optional
+            List of donation IDs to delete. If None, deletes all donations.
+
+        Returns
+        -------
+        int
+            Number of donations deleted.
+
+        Raises
+        ------
+        DatabaseError
+            If the database operation fails.
+
+        Examples
+        --------
+        >>> db = DatabaseManager()
+        >>> with db:
+        ...     deleted = db.delete_chat_donations()
+        ...     print(f"Deleted {deleted} donations")
+        """
+        if self._session is None:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            query = self._session.query(ChatDonation)
+            if ids is not None:
+                query = query.filter(ChatDonation.id.in_(ids))
+            count = query.count()
+            query.delete(synchronize_session=False)
+            self._session.commit()
+            logger.info(f"Deleted {count} chat donation(s)")
+            return count
+
+        except Exception as e:
+            self._session.rollback()
+            logger.error(f"Error deleting chat donations: {e}", exc_info=True)
+            raise DatabaseError(f"Failed to delete chat donations: {e}")
+
+    def delete_validation_data(self, ids: Optional[List[int]] = None) -> int:
+        """
+        Delete donated validation (interesting-paper) data.
+
+        Parameters
+        ----------
+        ids : list of int, optional
+            List of entry IDs to delete. If None, deletes all validation data.
+
+        Returns
+        -------
+        int
+            Number of entries deleted.
+
+        Raises
+        ------
+        DatabaseError
+            If the database operation fails.
+
+        Examples
+        --------
+        >>> db = DatabaseManager()
+        >>> with db:
+        ...     deleted = db.delete_validation_data()
+        ...     print(f"Deleted {deleted} entries")
+        """
+        if self._session is None:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            query = self._session.query(ValidationData)
+            if ids is not None:
+                query = query.filter(ValidationData.id.in_(ids))
+            count = query.count()
+            query.delete(synchronize_session=False)
+            self._session.commit()
+            logger.info(f"Deleted {count} validation data entry(ies)")
+            return count
+
+        except Exception as e:
+            self._session.rollback()
+            logger.error(f"Error deleting validation data: {e}", exc_info=True)
+            raise DatabaseError(f"Failed to delete validation data: {e}")
+
     def query(self, sql: str, parameters: tuple = ()) -> List[Dict[str, Any]]:
         """
         Execute a SQL query and return results.
@@ -1976,6 +2295,60 @@ class DatabaseManager:
         except Exception as e:
             self._session.rollback()
             raise DatabaseError(f"Failed to clear clustering cache: {str(e)}") from e
+
+    def update_clustering_cache_embedding_model(self, old_model: str, new_model: str) -> int:
+        """
+        Update the embedding model name in all clustering cache entries.
+
+        Renames every ``ClusteringCache`` row whose ``embedding_model``
+        matches *old_model* so that it refers to *new_model* instead.
+        This keeps cached clustering results usable after the embedding
+        model metadata is renamed (e.g. via
+        ``update_embedding_model_metadata.py``).
+
+        Parameters
+        ----------
+        old_model : str
+            Current embedding model name stored in the cache.
+        new_model : str
+            New embedding model name to write.
+
+        Returns
+        -------
+        int
+            Number of cache entries updated.
+
+        Raises
+        ------
+        DatabaseError
+            If the update fails.
+
+        Examples
+        --------
+        >>> db = DatabaseManager()
+        >>> with db:
+        ...     count = db.update_clustering_cache_embedding_model(
+        ...         "old-model", "new-model"
+        ...     )
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        try:
+            stmt = select(ClusteringCache).where(ClusteringCache.embedding_model == old_model)
+            entries = self._session.execute(stmt).scalars().all()
+            count = len(entries)
+
+            for entry in entries:
+                entry.embedding_model = new_model
+
+            self._session.commit()
+            logger.info(f"Updated {count} clustering cache entries from model {old_model!r} to {new_model!r}")
+            return count
+
+        except Exception as e:
+            self._session.rollback()
+            raise DatabaseError(f"Failed to update clustering cache embedding model: {str(e)}") from e
 
     # ------------------------------------------------------------------
     # Hierarchical label cache
