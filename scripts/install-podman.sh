@@ -256,7 +256,7 @@ cat <<EOF
   5. Check status:
        systemctl --user status 'abstracts-*'
 
-  Optional — enable GitHub token for OCI registry downloads:
+  Optional — enable GitHub token (only required for OCI registry uploads, downloads work without):
        printf '%s' 'YOUR_GITHUB_TOKEN' | podman secret create github-token -
        # Then uncomment the Secret=github-token line in:
        #   $QUADLET_DIR/abstracts-explorer.container
