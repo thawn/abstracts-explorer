@@ -402,7 +402,7 @@ class HAICONDownloaderPlugin(LightweightDownloaderPlugin):
             bold = tag.find("b")
             if bold:
                 return bold.get_text(strip=True)
-        return "unknown session at HAICON"
+        return "HAICON"
 
     def _parse_paper_div(
         self,
