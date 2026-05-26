@@ -6,6 +6,7 @@ This module provides downloadable plugin implementations for different data sour
 
 Available plugins:
 - CHIDownloaderPlugin: ACM CHI conference data (from SIGCHI program JSON)
+- HAICONDownloaderPlugin: HAICON (Helmholtz AI Conference) data via ConfTool
 - ICLRDownloaderPlugin: Official ICLR conference data
 - ICMLDownloaderPlugin: Official ICML conference data
 - IGARSSDownloaderPlugin: IGARSS conference data (via IEEE Xplore)
@@ -40,6 +41,7 @@ from abstracts_explorer.plugin import (
 
 # Import actual plugin implementations
 from abstracts_explorer.plugins.chi_downloader import CHIDownloaderPlugin
+from abstracts_explorer.plugins.haicon_downloader import HAICONDownloaderPlugin
 from abstracts_explorer.plugins.iclr_downloader import ICLRDownloaderPlugin
 from abstracts_explorer.plugins.icml_downloader import ICMLDownloaderPlugin
 from abstracts_explorer.plugins.igarss_downloader import IGARSSDownloaderPlugin
@@ -68,6 +70,7 @@ __all__ = [
     "validate_lightweight_papers",
     # Plugin implementations
     "CHIDownloaderPlugin",
+    "HAICONDownloaderPlugin",
     "ICLRDownloaderPlugin",
     "ICMLDownloaderPlugin",
     "IGARSSDownloaderPlugin",
