@@ -29,9 +29,8 @@ As a basis for discussion, we present concrete example projects that tackle diff
 | ------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | ~30 min | **Introduction to Agentic AI for Science**                                                                                             |
 | ~30 min | **Project Presentation: Abstracts Explorer**                                                                                           |
-| ~30 min | **Project Presentation: Voucher Canvas Agent**                                                                                |
 | ~15 min | *Break*                                                                                                                                |
-| ~30 min | **Project Presentation: TBD**                                                                                                          |
+| ~30 min | **Project Presentation: Voucher Canvas Agent**                                                                                         |
 | ~15 min | **General Discussion** — Cross-cutting themes: What design patterns transferred? Where did things break? What would we do differently? |
 
 ### Hackathon (2 h)
