@@ -35,6 +35,18 @@ uv run abstracts-explorer download --plugin ml4ps --year 2025 --db-path data/ml4
 - **Source**: [ML4PS Workshop](https://ml4physicalsciences.github.io/)
 - **Fields**: Full schema with abstracts from NeurIPS virtual site
 
+### haicon
+
+HAICON (Helmholtz AI Conference) data downloader.
+
+```bash
+uv run abstracts-explorer download --plugin haicon --year 2026 --db-path data/haicon.db
+```
+
+- **Years**: 2026+
+- **Source**: [ConfTool](https://www.conftool.pro/haicon26/) / [haicon.cc](https://haicon.cc/)
+- **Fields**: Lightweight schema (title, authors, abstract, session, keywords, start time)
+
 ## Using Plugins via CLI
 
 ### List Available Plugins
