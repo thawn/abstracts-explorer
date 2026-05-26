@@ -20,6 +20,14 @@ ML4PS (Machine Learning for Physical Sciences) workshop downloader.
 - **Source**: <https://ml4physicalsciences.github.io/>
 - **API**: Full schema
 
+### haicon
+
+HAICON (Helmholtz AI Conference) data downloader via ConfTool.
+- **File**: `haicon_downloader.py`
+- **Years**: 2026+
+- **Source**: <https://www.conftool.pro/haicon26/> (conference website: <https://haicon.cc/>)
+- **API**: Lightweight schema
+
 ### example_lightweight
 
 Example demonstrating the lightweight plugin API.
