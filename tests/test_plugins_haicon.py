@@ -303,7 +303,7 @@ class TestHAICONHTMLParsing:
 
         soup = BeautifulSoup("<html><body></body></html>", "html.parser")
         name = haicon_plugin._extract_session_name(soup)
-        assert name == "HAICON"
+        assert name == "unknown session at HAICON"
 
     def test_extract_authors_simple(self, haicon_plugin):
         """Test author extraction without superscripts."""
