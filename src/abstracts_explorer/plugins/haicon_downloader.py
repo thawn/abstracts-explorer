@@ -395,14 +395,14 @@ class HAICONDownloaderPlugin(LightweightDownloaderPlugin):
         Returns
         -------
         str
-            Session name, or ``"HAICON"`` if it cannot be found.
+            Session name, or ``"unknown session at HAICON"`` if it cannot be found.
         """
         tag = soup.find("span", class_="font11")
         if tag:
             bold = tag.find("b")
             if bold:
                 return bold.get_text(strip=True)
-        return "HAICON"
+        return "unknown session at HAICON"
 
     def _parse_paper_div(
         self,
