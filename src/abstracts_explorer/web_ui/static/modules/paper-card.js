@@ -99,7 +99,7 @@ export function formatPaperCard(paper, options = {}) {
         metadata += `<span class="px-2 py-1 bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 text-xs rounded-full mr-${compact ? '1' : '2'}"><i class="fas fa-calendar-alt mr-1"></i>${escapeHtml(paper.session)}</span>`;
     }
     if (paper.poster_position) {
-        metadata += `<span class="px-2 py-1 bg-yellow-100 dark:bg-yellow-900/50 text-yellow-700 dark:text-yellow-300 text-xs rounded-full mr-${compact ? '1' : '2'}"><i class="fas fa-map-pin mr-1"></i>Poster ${escapeHtml(paper.poster_position)}</span>`;
+        metadata += `<span class="px-2 py-1 bg-yellow-100 dark:bg-yellow-900/50 text-yellow-700 dark:text-yellow-300 text-xs rounded-full mr-${compact ? '1' : '2'}"><i class="fas fa-map-pin mr-1"></i>${escapeHtml(paper.poster_position)}</span>`;
     }
     if (showSearchTerm && paper.searchTerm) {
         metadata += `<span class="px-2 py-1 bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 text-xs rounded-full mr-${compact ? '1' : '2'} inline-flex items-center">
@@ -215,7 +215,7 @@ export async function showPaperDetails(paperId) {
                     ` : ''}
                     ${paper.poster_position ? `
                         <span class="px-3 py-1 bg-yellow-100 dark:bg-yellow-900/50 text-yellow-700 dark:text-yellow-300 rounded-full text-sm">
-                            <i class="fas fa-map-pin mr-1"></i>Poster ${escapeHtml(paper.poster_position)}
+                            <i class="fas fa-map-pin mr-1"></i>${escapeHtml(paper.poster_position)}
                         </span>
                     ` : ''}
                     <span class="px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full text-sm">
