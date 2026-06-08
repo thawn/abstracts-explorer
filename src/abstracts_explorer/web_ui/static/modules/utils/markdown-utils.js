@@ -1,21 +1,39 @@
 /**
  * Markdown Rendering Utilities
- * 
- * This module provides utility functions for rendering markdown with LaTeX support.
+ *
+ * Renders markdown (with LaTeX) and sanitizes the resulting HTML with DOMPurify
+ * before it is inserted into the DOM, preventing XSS from untrusted content
+ * (scraped paper abstracts/titles and LLM chat output).
  */
 
 /**
- * Render inline markdown with LaTeX support (no block-level wrappers)
- * Use this for titles and other inline content where block elements like <p> are not desired.
+ * Sanitize an HTML string with DOMPurify.
+ *
+ * Uses DOMPurify's secure defaults, which strip <script>, on* event-handler
+ * attributes, and javascript:/data: script URLs while preserving standard
+ * markup, <a href="#paper-N"> citation anchors, and KaTeX (output: 'html')
+ * spans (class/style/aria-hidden are retained).
+ *
+ * @param {string} html - Untrusted HTML produced by marked.
+ * @returns {string} Sanitized HTML safe for innerHTML.
+ */
+function sanitizeHtml(html) {
+    return DOMPurify.sanitize(html);
+}
+
+/**
+ * Render inline markdown with LaTeX support (no block-level wrappers).
+ * Use this for titles and other inline content where block elements like <p>
+ * are not desired.
  * @param {string} text - Inline markdown text to render
- * @returns {string} Rendered HTML without block-level wrappers
+ * @returns {string} Sanitized HTML without block-level wrappers
  */
 export function renderInlineMarkdownWithLatex(text) {
     if (!text) return '';
 
     try {
-        // Use parseInline for inline content to avoid wrapping in <p> tags
-        return marked.parseInline(text);
+        // parseInline avoids wrapping in <p>; sanitize before it reaches innerHTML
+        return sanitizeHtml(marked.parseInline(text));
     } catch (e) {
         console.warn('Markdown inline parsing error:', e);
         // Fallback to escaped HTML if markdown parsing fails
@@ -26,16 +44,16 @@ export function renderInlineMarkdownWithLatex(text) {
 }
 
 /**
- * Render markdown with LaTeX support
+ * Render markdown with LaTeX support.
  * @param {string} text - Markdown text to render
- * @returns {string} Rendered HTML
+ * @returns {string} Sanitized HTML
  */
 export function renderMarkdownWithLatex(text) {
     if (!text) return '';
-    
+
     try {
-        // Use the globally loaded marked library with KaTeX extension
-        return marked.parse(text);
+        // Render with the globally loaded marked (+ KaTeX), then sanitize
+        return sanitizeHtml(marked.parse(text));
     } catch (e) {
         console.warn('Markdown parsing error:', e);
         // Fallback to escaped HTML if markdown parsing fails

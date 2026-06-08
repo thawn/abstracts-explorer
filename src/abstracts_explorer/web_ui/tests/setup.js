@@ -8,6 +8,11 @@ import '@testing-library/jest-dom';
 // Mock fetch globally
 global.fetch = jest.fn();
 
+// Passthrough DOMPurify so modules that sanitize markdown work in tests that
+// don't exercise sanitization. The dedicated security test overrides this with
+// the real DOMPurify.
+global.DOMPurify = { sanitize: (html) => html };
+
 // Mock console methods to reduce noise in tests
 global.console = {
     ...console,
