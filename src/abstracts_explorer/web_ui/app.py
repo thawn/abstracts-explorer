@@ -22,6 +22,11 @@ from abstracts_explorer.rag import RAGChat
 from abstracts_explorer.config import get_config
 from abstracts_explorer.export_utils import export_papers_to_zip
 from abstracts_explorer.paper_utils import extract_top_keywords
+from abstracts_explorer.recommendations import (
+    DEFAULT_RECOMMENDATION_LIMIT,
+    explain_recommendations,
+    recommend_papers,
+)
 
 # Import version
 try:
@@ -551,6 +556,73 @@ def search():
         return jsonify(response_data)
     except Exception as e:
         logger.error(f"Error in search endpoint: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/recommendations", methods=["POST"])
+def recommendations():
+    """
+    Recommend papers using Personalized PageRank over paper metadata and embeddings.
+
+    Expected JSON body:
+    - query: str - Search or seed query
+    - limit: int - Maximum recommendation count (default and cap: 50)
+    - sessions: list[str] - Filter by sessions (optional)
+    - years: list[int] - Filter by years (optional)
+    - conferences: list[str] - Filter by conferences (optional)
+    - institutions: list[str] - Currently reported as unsupported; schema has no affiliation column
+    - explain_top_n: int - Ask the chat model to explain the top N, capped at 10
+    """
+    try:
+        data = request.get_json()
+        query = data.get("query", "")
+        if not query:
+            return jsonify({"error": "Query is required"}), 400
+
+        limit = min(DEFAULT_RECOMMENDATION_LIMIT, max(1, int(data.get("limit", DEFAULT_RECOMMENDATION_LIMIT))))
+        sessions = data.get("sessions", [])
+        years = data.get("years", [])
+        conferences = data.get("conferences", [])
+        institutions = data.get("institutions", [])
+        explain_top_n = min(10, max(0, int(data.get("explain_top_n", 0))))
+
+        unsupported_filters = []
+        if institutions:
+            unsupported_filters.append("institutions")
+
+        database = get_database()
+        em = get_embeddings_manager()
+        result = recommend_papers(
+            database=database,
+            embeddings_manager=em,
+            query=query,
+            sessions=sessions,
+            years=years,
+            conferences=conferences,
+            limit=limit,
+            unsupported_filters=unsupported_filters,
+        )
+
+        explanation_metadata = {"explained_count": 0}
+        if explain_top_n > 0 and result.get("papers"):
+            explanation_metadata = explain_recommendations(
+                embeddings_manager=em,
+                query=query,
+                papers=result["papers"],
+                top_n=explain_top_n,
+            )
+
+        papers = result.get("papers", [])
+        response_data = {
+            **result,
+            "use_embeddings": True,
+            "is_recommendation": True,
+            "related_topics": extract_top_keywords(papers),
+            "explanations": explanation_metadata,
+        }
+        return jsonify(response_data)
+    except Exception as e:
+        logger.error(f"Error in recommendations endpoint: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
