@@ -451,8 +451,8 @@ class RAGChat:
             "Use the available tools to search for papers, analyze topics, and understand trends. "
             "Present the information in a clear, easy-to-understand format. "
             f"Today's date is {datetime.now().strftime('%Y-%m-%d')}. "
-            "When referencing specific papers, cite them using local links: "
-            "<a href='#paper-1'>Paper-1</a>, <a href='#paper-2'>Paper-2</a>, etc."
+            "When referencing specific papers, cite them using local markdown links: "
+            "[Paper-1](#paper-1), [Paper-2](#paper-2), etc."
         )
 
     def _build_instructions(
