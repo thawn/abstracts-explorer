@@ -221,6 +221,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
 
     # Resolve conference name once to canonical form
     conference = _resolve_conference_arg(getattr(args, "conference", None))
+    args.conference = conference
 
     # Build combined WHERE clause from --conference, --year, and --where
     where_clause = _build_embeddings_where_clause(args)
