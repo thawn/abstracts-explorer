@@ -1262,6 +1262,5 @@ class TestParallelChatRequests:
         success_count = sum(1 for s, _ in results if s == 200)
         assert success_count == num_requests, (
             f"Expected {num_requests} HTTP 200 responses, got {success_count}. "
-            f"Non-200 status codes likely indicate per-thread rate limiting "
-            f"(v0.8.5) rather than a shared global limit."
+            f"Non-200 status codes likely indicate threading issues."
         )
