@@ -41,7 +41,6 @@ from warnings import warn
 
 import pytest
 import requests as _requests
-from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import Select, WebDriverWait
@@ -354,6 +353,27 @@ def _assert_llm_judgment(query: str, response: str, criteria: str | None = None)
     )
 
 
+def _submit_search_query(driver: WebDriver, query: str) -> None:
+    """
+    Select the default conference and year in the header, then enter *query*
+    in the main search input and submit with Enter.
+
+    Parameters
+    ----------
+    driver : WebDriver
+        The Selenium WebDriver instance.
+    query : str
+        Search query text to submit.
+    """
+
+    _select_conference_and_year(driver)
+
+    search_input = driver.find_element(By.ID, "search-input")
+    search_input.clear()
+    search_input.send_keys(query)
+    search_input.send_keys(Keys.RETURN)
+
+
 # ---------------------------------------------------------------------------
 # 1. Application startup
 # ---------------------------------------------------------------------------
@@ -410,7 +430,7 @@ class TestApplicationStartup:
             logs = browser.get_log("browser")
             errors = [entry for entry in logs if entry["level"] == "SEVERE"]
             assert len(errors) == 0, f"JavaScript errors found: {errors}"
-        except (AttributeError, webdriver.remote.errorhandler.WebDriverException):
+        except (AttributeError, TimeoutException):
             # Firefox does not support get_log – fall back
             assert "Abstracts Explorer" in browser.title
 
@@ -441,10 +461,7 @@ class TestCoreSearch:
         """
         browser.get(staging_url)
 
-        search_input = browser.find_element(By.ID, "search-input")
-        search_input.clear()
-        search_input.send_keys("learning")
-        search_input.send_keys(Keys.RETURN)
+        _submit_search_query(browser, "learning")
 
         wait = WebDriverWait(browser, 15)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")))
@@ -468,9 +485,7 @@ class TestCoreSearch:
         """
         browser.get(staging_url)
 
-        search_input = browser.find_element(By.ID, "search-input")
-        search_input.clear()
-        search_input.send_keys(Keys.RETURN)
+        _submit_search_query(browser, "")
 
         time.sleep(1)
 
@@ -493,10 +508,7 @@ class TestCoreSearch:
         """
         browser.get(staging_url)
 
-        search_input = browser.find_element(By.ID, "search-input")
-        search_input.clear()
-        search_input.send_keys("xyzqwertyuiopasdfghjkl9999")
-        search_input.send_keys(Keys.RETURN)
+        _submit_search_query(browser, "xyzqwertyuiopasdfghjkl9999")
 
         time.sleep(1)
 
@@ -534,10 +546,7 @@ class TestAuthorSearch:
         """
         browser.get(staging_url)
 
-        search_input = browser.find_element(By.ID, "search-input")
-        search_input.clear()
-        search_input.send_keys("LeCun")
-        search_input.send_keys(Keys.RETURN)
+        _submit_search_query(browser, "LeCun")
 
         wait = WebDriverWait(browser, self._WAIT_TIMEOUT)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, self._RESULT_CARD_CSS)))
@@ -565,10 +574,7 @@ class TestAuthorSearch:
         """
         browser.get(staging_url)
 
-        search_input = browser.find_element(By.ID, "search-input")
-        search_input.clear()
-        search_input.send_keys('author:"LeCun"')
-        search_input.send_keys(Keys.RETURN)
+        _submit_search_query(browser, 'author:"LeCun"')
 
         wait = WebDriverWait(browser, self._WAIT_TIMEOUT)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, self._RESULT_CARD_CSS)))
@@ -596,16 +602,13 @@ class TestAuthorSearch:
         """
         browser.get(staging_url)
 
-        search_input = browser.find_element(By.ID, "search-input")
-        search_input.clear()
-        search_input.send_keys('author:"LeCun" world model')
-        search_input.send_keys(Keys.RETURN)
+        _submit_search_query(browser, 'authors:"LeCun" world model')
 
         wait = WebDriverWait(browser, self._WAIT_TIMEOUT)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, self._RESULT_CARD_CSS)))
 
         results = browser.find_elements(By.CSS_SELECTOR, self._RESULT_CARD_CSS)
-        assert len(results) > 0, 'author:"LeCun" world model should return at least one result'
+        assert len(results) > 0, 'authors:"LeCun" world model should return at least one result'
 
         results_text = browser.find_element(By.ID, "search-results").text
         assert "LeCun" in results_text, 'Results for author:"LeCun" world model should display the author name'
@@ -636,10 +639,7 @@ class TestPaperDisplay:
         """
         browser.get(staging_url)
 
-        search_input = browser.find_element(By.ID, "search-input")
-        search_input.clear()
-        search_input.send_keys("learning")
-        search_input.send_keys(Keys.RETURN)
+        _submit_search_query(browser, "learning")
 
         wait = WebDriverWait(browser, 15)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .paper-card")))
@@ -673,10 +673,7 @@ class TestPaperDisplay:
         """
         browser.get(staging_url)
 
-        search_input = browser.find_element(By.ID, "search-input")
-        search_input.clear()
-        search_input.send_keys("large language models")
-        search_input.send_keys(Keys.RETURN)
+        _submit_search_query(browser, "large language models")
 
         wait = WebDriverWait(browser, 15)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")))
@@ -1171,3 +1168,99 @@ class TestAccessibilityResponsiveness:
 
         # Reset to default size
         browser.set_window_size(1920, 1080)
+
+
+# ---------------------------------------------------------------------------
+# 8. Parallel / rate-limiting tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.staging
+@pytest.mark.slow
+class TestParallelChatRequests:
+    """
+    Verify rate limiting under concurrent chat API requests.
+
+    Fires multiple HTTP POST requests to ``/api/chat`` simultaneously and
+    confirms the application handles them without errors, rate limiting them
+    as configured.
+    """
+
+    # Queries that force the RAG agent to call the ``search_papers`` MCP tool.
+    # Each call triggers an embedding API request followed by LLM calls.
+    _RAG_QUERIES = [
+        "Find papers about reinforcement learning at NeurIPS 2025.",
+        "Find papers about large language models at NeurIPS 2025.",
+        "Find papers about computer vision at NeurIPS 2025.",
+        "Find papers about generative adversarial networks at NeurIPS 2025.",
+        "Find papers about transformers at NeurIPS 2025.",
+        "Find papers about graph neural networks at NeurIPS 2025.",
+        "Find papers about federated learning at NeurIPS 2025.",
+        "Find papers about causal inference at NeurIPS 2025.",
+        "Find papers about robust machine learning at NeurIPS 2025.",
+        "Find papers about unsupervised learning at NeurIPS 2025.",
+    ]  # type: ignore[var-annotated]
+
+    def test_concurrent_chat_api_requests(self, staging_url, browser):
+        """
+        Concurrent RAG chat requests should all complete with HTTP 200.
+
+        Sends 10 parallel POST requests to ``/api/chat`` with queries that
+        exercise the ``search_papers`` MCP tool (each triggers an embedding
+        generation call plus LLM calls).  With a properly shared global rate
+        limiter the burst is handled gracefully.  On older deployments where
+        rate limiting was applied per-thread (v0.8.5), the concurrent burst of
+        LLM + embedding requests exceeds the upstream API limit and causes
+        500 errors on some requests.
+        """
+        import concurrent.futures
+
+        num_requests = len(self._RAG_QUERIES)
+
+        # First reset the chat to clear prior conversation state
+        _requests.post(
+            f"{staging_url}/api/chat/reset",
+            timeout=5,
+            verify=False,
+        )
+
+        results: list[tuple[int, str | dict | None]] = []
+
+        def chat_request(idx: int) -> tuple[int, str | dict | None]:
+            try:
+                resp = _requests.post(
+                    f"{staging_url}/api/chat",
+                    json={"message": self._RAG_QUERIES[idx], "reset": True},
+                    timeout=120,
+                    verify=False,
+                )
+                return resp.status_code, resp.json() if resp.status_code == 200 else None
+            except _requests.exceptions.RequestException as e:
+                return -1, str(e)
+
+        start = time.monotonic()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_requests) as pool:
+            futures = [pool.submit(chat_request, i) for i in range(num_requests)]
+            for f in concurrent.futures.as_completed(futures, timeout=600):
+                status, body = f.result()
+                results.append((status, body))
+        elapsed = time.monotonic() - start
+
+        print(f"\nParallel RAG chat requests: {len(results)} completed, elapsed={elapsed:.2f}s")
+        for status, body in results:
+            if status == 200:
+                print(f"  [OK] status={status}")
+            else:
+                print(f"  [ERR] status={status}, body={body}")
+
+        assert len(results) == num_requests, f"All {num_requests} requests should complete"
+
+        # All requests must return 200 – a shared global rate limiter ensures
+        # the upstream LLM/embedding API is never exceeded.  Any 500 response
+        # indicates that the per-thread rate limiting bug (v0.8.5) allowed
+        # concurrent threads to collectively exceed the API rate limit.
+        success_count = sum(1 for s, _ in results if s == 200)
+        assert success_count == num_requests, (
+            f"Expected {num_requests} HTTP 200 responses, got {success_count}. "
+            f"Non-200 status codes likely indicate threading issues."
+        )
