@@ -1186,15 +1186,36 @@ class TestParallelChatRequests:
     as configured.
     """
 
+    # Queries that force the RAG agent to call the ``search_papers`` MCP tool.
+    # Each call triggers an embedding API request followed by LLM calls.
+    _RAG_QUERIES = [
+        "Find papers about reinforcement learning at NeurIPS 2025.",
+        "Find papers about large language models at NeurIPS 2025.",
+        "Find papers about computer vision at NeurIPS 2025.",
+        "Find papers about generative adversarial networks at NeurIPS 2025.",
+        "Find papers about transformers at NeurIPS 2025.",
+        "Find papers about graph neural networks at NeurIPS 2025.",
+        "Find papers about federated learning at NeurIPS 2025.",
+        "Find papers about causal inference at NeurIPS 2025.",
+        "Find papers about robust machine learning at NeurIPS 2025.",
+        "Find papers about unsupervised learning at NeurIPS 2025.",
+    ]  # type: ignore[var-annotated]
+
     def test_concurrent_chat_api_requests(self, staging_url, browser):
         """
-        Concurrent chat requests should all complete without error.
+        Concurrent RAG chat requests should all complete with HTTP 200.
 
-        Sends 5 parallel POST requests to the chat endpoint. All should
-        return HTTP 200 (or gracefully fail if the LLM backend is unavailable,
-        which still counts as the server handling the request properly).
+        Sends 10 parallel POST requests to ``/api/chat`` with queries that
+        exercise the ``search_papers`` MCP tool (each triggers an embedding
+        generation call plus LLM calls).  With a properly shared global rate
+        limiter the burst is handled gracefully.  On older deployments where
+        rate limiting was applied per-thread (v0.8.5), the concurrent burst of
+        LLM + embedding requests exceeds the upstream API limit and causes
+        500 errors on some requests.
         """
         import concurrent.futures
+
+        num_requests = len(self._RAG_QUERIES)
 
         # First reset the chat to clear prior conversation state
         _requests.post(
@@ -1203,13 +1224,13 @@ class TestParallelChatRequests:
             verify=False,
         )
 
-        results = []
+        results: list[tuple[int, str | dict | None]] = []
 
-        def chat_request(idx):
+        def chat_request(idx: int) -> tuple[int, str | dict | None]:
             try:
                 resp = _requests.post(
                     f"{staging_url}/api/chat",
-                    json={"message": f"What papers are about topic {idx}?", "reset": True},
+                    json={"message": self._RAG_QUERIES[idx], "reset": True},
                     timeout=120,
                     verify=False,
                 )
@@ -1218,23 +1239,29 @@ class TestParallelChatRequests:
                 return -1, str(e)
 
         start = time.monotonic()
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
-            futures = [pool.submit(chat_request, i) for i in range(5)]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_requests) as pool:
+            futures = [pool.submit(chat_request, i) for i in range(num_requests)]
             for f in concurrent.futures.as_completed(futures, timeout=600):
                 status, body = f.result()
                 results.append((status, body))
         elapsed = time.monotonic() - start
 
-        print(f"\nParallel chat requests: {len(results)} completed, elapsed={elapsed:.2f}s")
+        print(f"\nParallel RAG chat requests: {len(results)} completed, elapsed={elapsed:.2f}s")
         for status, body in results:
             if status == 200:
                 print(f"  [OK] status={status}")
             else:
                 print(f"  [ERR] status={status}, body={body}")
 
-        assert len(results) == 5, "All 5 requests should complete"
+        assert len(results) == num_requests, f"All {num_requests} requests should complete"
 
-        # All requests should complete (regardless of LLM backend availability)
-        # Server may return 500 if LLM is unreachable, but it should not crash
-        success_count = sum(1 for s, _ in results if s in (200, 500))
-        assert success_count == 5, f"Expected 5 successful responses, got {success_count}"
+        # All requests must return 200 – a shared global rate limiter ensures
+        # the upstream LLM/embedding API is never exceeded.  Any 500 response
+        # indicates that the per-thread rate limiting bug (v0.8.5) allowed
+        # concurrent threads to collectively exceed the API rate limit.
+        success_count = sum(1 for s, _ in results if s == 200)
+        assert success_count == num_requests, (
+            f"Expected {num_requests} HTTP 200 responses, got {success_count}. "
+            f"Non-200 status codes likely indicate per-thread rate limiting "
+            f"(v0.8.5) rather than a shared global limit."
+        )

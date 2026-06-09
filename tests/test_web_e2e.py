@@ -357,7 +357,7 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     # CRITICAL: Set this BEFORE starting the server to avoid race conditions
     # This prevents get_embeddings_manager() from creating a new instance
     app_module.embeddings_manager = em
-    app_module.rag_chat = None
+    app_module._reset_rag_chat_local()
 
     # Pre-populate the database with cached clustering results so that MCP
     # tools (get_conference_topics, get_cluster_visualization) return instantly
@@ -419,7 +419,7 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
 
     # Reset the app module state
     app_module.embeddings_manager = None
-    app_module.rag_chat = None
+    app_module._reset_rag_chat_local()
     app_module.get_database = original_get_database
 
     # Restore original environment variables

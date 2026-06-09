@@ -170,10 +170,12 @@ def web_server(test_database, tmp_path_factory):
         db.close()
 
         # Inject the pre-created embeddings manager directly
-        import abstracts_explorer.web_ui.app as app_module
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
 
         app_module.embeddings_manager = em
-        app_module.rag_chat = None
+        app_module._reset_rag_chat_local()
 
         # Use werkzeug's make_server for better cross-platform compatibility
         # This works more reliably in threads than Flask's app.run()
