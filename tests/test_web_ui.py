@@ -1213,21 +1213,24 @@ class TestWebUIErrorHandlingDetails:
     """Test error handling paths (lines 287-288, 304-305)."""
 
     def test_chat_reset_exception_handling(self):
-        """Test chat reset endpoint handles exceptions (lines 287-288)."""
-        from abstracts_explorer.web_ui.app import app
+        """Test chat reset endpoint handles exceptions."""
+        from abstracts_explorer.web_ui.app import app, _rag_chat_cache
+
+        _rag_chat_cache.clear()
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.app.get_rag_chat") as mock_get_rag:
-                mock_rag = Mock()
-                mock_rag.reset_conversation.side_effect = Exception("Reset failed")
-                mock_get_rag.return_value = mock_rag
+            # Seed a RAGChat into cache so the reset actually has something to call
+            mock_rag = Mock()
+            mock_rag.reset_conversation.side_effect = Exception("Reset failed")
+            _rag_chat_cache["test-reset-sid"] = mock_rag
 
+            with patch("abstracts_explorer.web_ui.app._get_session_id", return_value="test-reset-sid"):
                 response = client.post("/api/chat/reset")
 
-                assert response.status_code == 500
-                data = response.get_json()
-                assert "error" in data
-                assert "Reset failed" in data["error"]
+            assert response.status_code == 500
+            data = response.get_json()
+            assert "error" in data
+            assert "Reset failed" in data["error"]
 
     def test_stats_endpoint_exception_handling(self):
         """Test stats endpoint handles exceptions (lines 304-305)."""
@@ -2045,9 +2048,337 @@ class TestServerInitialization:
                             "/api/clusters/compute", json={"reduction_method": "pca", "n_components": 2}
                         )
 
-                        assert response.status_code == 500
-                        data = response.get_json()
-                        assert "error" in data
+                    assert response.status_code == 500
+                    data = response.get_json()
+                    assert "error" in data
+
+
+class TestSessionScopedRAGChat:
+    """Regression tests for session-scoped RAG chat instances.
+
+    Ensures that each browser session gets its own RAGChat instance with
+    isolated conversation history.  A new browser session must not see
+    messages from a prior session.  These tests prevent the old bug where
+    RAGChat was cached per-thread (threading.local), causing all requests
+    handled by the same Waitress worker thread to share conversation history.
+    """
+
+    def test_different_sessions_get_different_rag_instances(self):
+        """Two distinct sessions must receive different RAGChat instances."""
+        from abstracts_explorer.web_ui.app import (
+            app,
+            get_rag_chat,
+            _rag_chat_cache,
+            _reset_rag_chat_local,
+        )
+
+        _reset_rag_chat_local()
+        _rag_chat_cache.clear()
+
+        mock_config = Mock()
+        mock_config.llm_backend_url = "http://localhost"
+        mock_config.chat_model = "test"
+
+        with (
+            patch("abstracts_explorer.web_ui.app.RAGChat") as MockRAGChat,
+            patch("abstracts_explorer.web_ui.app.get_database"),
+            patch("abstracts_explorer.web_ui.app.get_embeddings_manager"),
+            patch("abstracts_explorer.web_ui.app.get_config", return_value=mock_config),
+        ):
+            MockRAGChat.side_effect = [Mock(), Mock()]
+
+            rag_a = None
+            rag_b = None
+
+            with app.test_request_context():
+                from flask import session as flask_session
+
+                flask_session["_session_id"] = "session-a"
+                flask_session.modified = True
+                rag_a = get_rag_chat()
+
+            with app.test_request_context():
+                from flask import session as flask_session
+
+                flask_session["_session_id"] = "session-b"
+                flask_session.modified = True
+                rag_b = get_rag_chat()
+
+            assert rag_a is not rag_b, "Different sessions must receive different RAGChat instances"
+            assert MockRAGChat.call_count == 2, "RAGChat should be constructed once per unique session"
+
+    def test_new_session_starts_with_fresh_rag_chat(self):
+        """A brand-new session cookie must get a fresh RAGChat, not reused from a previous one."""
+        from abstracts_explorer.web_ui.app import (
+            app,
+            get_rag_chat,
+            _rag_chat_cache,
+            _reset_rag_chat_local,
+        )
+
+        _reset_rag_chat_local()
+        _rag_chat_cache.clear()
+
+        mock_config = Mock()
+        mock_config.llm_backend_url = "http://localhost"
+        mock_config.chat_model = "test"
+
+        with (
+            patch("abstracts_explorer.web_ui.app.RAGChat") as MockRAGChat,
+            patch("abstracts_explorer.web_ui.app.get_database"),
+            patch("abstracts_explorer.web_ui.app.get_embeddings_manager"),
+            patch("abstracts_explorer.web_ui.app.get_config", return_value=mock_config),
+        ):
+            created_instances = []
+            MockRAGChat.side_effect = lambda *a, **kw: created_instances.append(Mock()) or created_instances[-1]
+
+            new_session_id = "brand-new-session-id"
+
+            with app.test_request_context():
+                from flask import session as flask_session
+
+                flask_session["_session_id"] = new_session_id
+                flask_session.modified = True
+                rag = get_rag_chat()
+
+            assert len(created_instances) == 1, "A new session should create exactly one RAGChat"
+            assert rag is created_instances[0]
+
+    def test_same_session_reuses_rag_chat(self):
+        """The same session should reuse the same RAGChat instance across calls."""
+        from abstracts_explorer.web_ui.app import (
+            app,
+            get_rag_chat,
+            _rag_chat_cache,
+            _reset_rag_chat_local,
+        )
+
+        _reset_rag_chat_local()
+        _rag_chat_cache.clear()
+
+        mock_config = Mock()
+        mock_config.llm_backend_url = "http://localhost"
+        mock_config.chat_model = "test"
+
+        with (
+            patch("abstracts_explorer.web_ui.app.RAGChat") as MockRAGChat,
+            patch("abstracts_explorer.web_ui.app.get_database"),
+            patch("abstracts_explorer.web_ui.app.get_embeddings_manager"),
+            patch("abstracts_explorer.web_ui.app.get_config", return_value=mock_config),
+        ):
+            MockRAGChat.return_value = Mock()
+
+            sid = "same-session"
+
+            with app.test_request_context():
+                from flask import session as flask_session
+
+                flask_session["_session_id"] = sid
+                flask_session.modified = True
+                rag1 = get_rag_chat()
+                rag2 = get_rag_chat()
+
+            assert rag1 is rag2, "Same session must reuse the same RAGChat instance"
+            assert MockRAGChat.call_count == 1, "RAGChat should only be constructed once per session"
+
+    def test_session_id_generated_on_first_request(self):
+        """_session_id should be auto-generated when absent from session."""
+        from abstracts_explorer.web_ui.app import app, _get_session_id
+
+        with app.test_request_context():
+            from flask import session as flask_session
+
+            assert "_session_id" not in flask_session
+            sid1 = _get_session_id()
+            sid2 = _get_session_id()
+
+            assert sid1 == sid2
+            assert isinstance(sid1, str)
+            assert len(sid1) == 32  # uuid4().hex is 32 hex chars
+
+    def test_cache_evicts_oldest_when_full(self):
+        """When _rag_chat_cache exceeds _RAG_CHAT_CACHE_MAX, oldest entry is evicted."""
+        from abstracts_explorer.web_ui.app import (
+            app,
+            get_rag_chat,
+            _rag_chat_cache,
+            _RAG_CHAT_CACHE_MAX,
+            _reset_rag_chat_local,
+        )
+
+        _reset_rag_chat_local()
+        _rag_chat_cache.clear()
+
+        mock_config = Mock()
+        mock_config.llm_backend_url = "http://localhost"
+        mock_config.chat_model = "test"
+
+        with (
+            patch("abstracts_explorer.web_ui.app.RAGChat", return_value=Mock()),
+            patch("abstracts_explorer.web_ui.app.get_database"),
+            patch("abstracts_explorer.web_ui.app.get_embeddings_manager"),
+            patch("abstracts_explorer.web_ui.app.get_config", return_value=mock_config),
+        ):
+            # Fill the cache to the max
+            for i in range(_RAG_CHAT_CACHE_MAX):
+                sid = f"session-{i}"
+                with app.test_request_context():
+                    from flask import session as flask_session
+
+                    flask_session["_session_id"] = sid
+                    flask_session.modified = True
+                    get_rag_chat()
+
+            assert len(_rag_chat_cache) == _RAG_CHAT_CACHE_MAX
+
+            # Adding one more should evict the oldest ("session-0")
+            overflow_sid = f"session-{_RAG_CHAT_CACHE_MAX}"
+            with app.test_request_context():
+                from flask import session as flask_session
+
+                flask_session["_session_id"] = overflow_sid
+                flask_session.modified = True
+                get_rag_chat()
+
+            assert len(_rag_chat_cache) == _RAG_CHAT_CACHE_MAX
+            assert "session-0" not in _rag_chat_cache, "Oldest entry should have been evicted"
+            assert overflow_sid in _rag_chat_cache
+
+    def test_reset_chat_clears_session_cache_entry(self):
+        """Calling /api/chat/reset should clear the session's RAGChat from cache."""
+        from abstracts_explorer.web_ui.app import (
+            app,
+            _rag_chat_cache,
+            _reset_rag_chat_local,
+        )
+
+        _reset_rag_chat_local()
+        _rag_chat_cache.clear()
+
+        mock_config = Mock()
+        mock_config.llm_backend_url = "http://localhost"
+        mock_config.chat_model = "test"
+
+        with (
+            patch("abstracts_explorer.web_ui.app.RAGChat") as MockRAGChat,
+            patch("abstracts_explorer.web_ui.app.get_database"),
+            patch("abstracts_explorer.web_ui.app.get_embeddings_manager"),
+            patch("abstracts_explorer.web_ui.app.get_config", return_value=mock_config),
+        ):
+            mock_rag = Mock()
+            MockRAGChat.return_value = mock_rag
+
+            sid = "reset-test-session"
+
+            # First create the instance via chat endpoint
+            with app.test_client() as client:
+                with client.session_transaction() as sess:
+                    sess["_session_id"] = sid
+
+                response = client.post(
+                    "/api/chat",
+                    json={"message": "hello"},
+                )
+                assert response.status_code in (200, 500)
+
+            assert sid in _rag_chat_cache, "RAGChat should exist after first chat"
+
+            # Now reset
+            with app.test_client() as client:
+                with client.session_transaction() as sess:
+                    sess["_session_id"] = sid
+
+                response = client.post("/api/chat/reset")
+                assert response.status_code in (200, 500)
+
+    def test_reset_rag_chat_local_outside_request_context_clears_all(self):
+        """_reset_rag_chat_local() should clear the entire cache when called outside a request context."""
+        from abstracts_explorer.web_ui.app import (
+            _rag_chat_cache,
+            _reset_rag_chat_local,
+        )
+
+        _rag_chat_cache.clear()
+
+        # Seed some entries directly
+        _rag_chat_cache["a"] = Mock()
+        _rag_chat_cache["b"] = Mock()
+        assert len(_rag_chat_cache) == 2
+
+        # Call outside request context
+        _reset_rag_chat_local()
+
+        assert len(_rag_chat_cache) == 0, "_reset_rag_chat_local outside request context should clear all entries"
+
+    def test_reset_rag_chat_local_inside_request_context_clears_only_session(self):
+        """_reset_rag_chat_local() inside a request context should only clear the current session."""
+        from abstracts_explorer.web_ui.app import (
+            app,
+            _rag_chat_cache,
+            _reset_rag_chat_local,
+        )
+
+        _rag_chat_cache.clear()
+
+        _rag_chat_cache["session-x"] = Mock()
+        _rag_chat_cache["session-y"] = Mock()
+
+        with app.test_request_context():
+            from flask import session as flask_session
+
+            flask_session["_session_id"] = "session-x"
+            flask_session.modified = True
+            _reset_rag_chat_local()
+
+        assert "session-x" not in _rag_chat_cache
+        assert "session-y" in _rag_chat_cache, "Other sessions should not be affected"
+
+    def test_consecutive_sessions_are_isolated(self):
+        """Messages in session A must not leak into session B (regression for thread-local bug)."""
+        from abstracts_explorer.web_ui.app import (
+            app,
+            get_rag_chat,
+            _rag_chat_cache,
+            _reset_rag_chat_local,
+        )
+
+        _reset_rag_chat_local()
+        _rag_chat_cache.clear()
+
+        mock_config = Mock()
+        mock_config.llm_backend_url = "http://localhost"
+        mock_config.chat_model = "test"
+
+        rag_a = Mock()
+        rag_b = Mock()
+        rag_a._message_history = [("user", "hi from A")]
+        rag_b._message_history = []
+
+        with (
+            patch("abstracts_explorer.web_ui.app.RAGChat"),
+            patch("abstracts_explorer.web_ui.app.get_database"),
+            patch("abstracts_explorer.web_ui.app.get_embeddings_manager"),
+            patch("abstracts_explorer.web_ui.app.get_config", return_value=mock_config),
+        ):
+            # Manually seed cache as if session A already had a conversation
+            _rag_chat_cache["session-a"] = rag_a
+
+            # Now session B comes in – it must get its own RAGChat, not rag_a
+            with app.test_request_context():
+                from flask import session as flask_session
+
+                flask_session["_session_id"] = "session-b"
+                flask_session.modified = True
+
+                with patch("abstracts_explorer.web_ui.app.RAGChat", return_value=rag_b):
+                    got_rag = get_rag_chat()
+
+            assert got_rag is rag_b, "Session B must get its own RAGChat, not session A's"
+            assert got_rag is not rag_a, "Regression: session B received session A's RAGChat (thread-local leak)"
+
+
+class TestClusteringEndpoint:
+    """Test clustering endpoints and caching functionality."""
 
     def test_compute_clusters_uses_cache_when_available(self, tmp_path):
         """Test that compute_clusters uses cached results when available."""

@@ -8,12 +8,12 @@ and exploring the abstracts database.
 import os
 import signal
 import sys
-import threading
 import logging
 import json
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from flask import Flask, render_template, request, jsonify, g, send_file, abort
+from flask import Flask, render_template, request, jsonify, g, send_file, abort, session
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -43,6 +43,7 @@ PACKAGE_DIR = Path(__file__).parent
 
 # Initialize Flask app with correct template/static folders
 app = Flask(__name__, template_folder=str(PACKAGE_DIR / "templates"), static_folder=str(PACKAGE_DIR / "static"))
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", os.urandom(32).hex())
 CORS(app)
 
 # Apply ProxyFix so Flask correctly interprets X-Forwarded-* headers set by a
@@ -64,7 +65,8 @@ app.wsgi_app = ProxyFix(  # type: ignore[assignment]
 
 # Initialize components (lazy loading)
 embeddings_manager = None
-_rag_chat_local = threading.local()
+_rag_chat_cache: Dict[str, RAGChat] = {}
+_RAG_CHAT_CACHE_MAX = 1024
 
 
 def get_database():
@@ -106,43 +108,69 @@ def get_embeddings_manager():
     return embeddings_manager
 
 
+def _get_session_id() -> str:
+    """
+    Get or create a unique session identifier.
+
+    Generates a UUID4 on first request and persists it in the Flask
+    session cookie so it survives page reloads within the same tab.
+    Closing the tab (session cookie expiry) generates a new ID on
+    the next request.
+    """
+    if "_session_id" not in session:
+        session["_session_id"] = uuid.uuid4().hex
+    return session["_session_id"]
+
+
 def get_rag_chat():
     """
-    Get or create thread-local RAG chat instance.
+    Get or create a RAG chat instance scoped to the current browser session.
 
-    Each Waitress worker thread gets its own ``RAGChat`` instance so that
-    concurrent requests do not share mutable conversation history or database
-    references.  The underlying rate limiter remains global and shared.
+    Each unique browser session gets its own ``RAGChat`` instance so that
+    conversation history is isolated per browser tab. A new page reload
+    (new session cookie) starts with a fresh conversation.
 
     Returns
     -------
     RAGChat
-        RAG chat instance for the calling thread.
+        RAG chat instance for the current session.
     """
     database = get_database()  # Get database connection first (required)
+    session_id = _get_session_id()
 
-    if not hasattr(_rag_chat_local, "rag_chat") or _rag_chat_local.rag_chat is None:
+    if session_id not in _rag_chat_cache:
+        # Evict oldest entries if cache is full
+        if len(_rag_chat_cache) >= _RAG_CHAT_CACHE_MAX:
+            oldest_key = next(iter(_rag_chat_cache))
+            del _rag_chat_cache[oldest_key]
+
         config = get_config()  # Get config lazily
         em = get_embeddings_manager()
-        _rag_chat_local.rag_chat = RAGChat(
+        _rag_chat_cache[session_id] = RAGChat(
             embeddings_manager=em,
             database=database,  # Database is now required
             lm_studio_url=config.llm_backend_url,
             model=config.chat_model,
         )
 
-    return _rag_chat_local.rag_chat
+    return _rag_chat_cache[session_id]
 
 
 def _reset_rag_chat_local():
     """
-    Reset the thread-local RAG chat instance.
+    Reset the RAG chat cache.
 
-    Called by tests to clear cached state between test runs.  Must be called
-    from the thread that holds the ``RAGChat`` instance.
+    When called inside a request context, only clears the entry for the
+    current session.  When called outside a request context (e.g., by
+    tests during setup/teardown), clears the entire cache.
     """
-    if hasattr(_rag_chat_local, "rag_chat"):
-        _rag_chat_local.rag_chat = None
+    try:
+        session_id = _get_session_id()
+        if session_id in _rag_chat_cache:
+            del _rag_chat_cache[session_id]
+    except (RuntimeError, KeyError):
+        # No active request context (e.g., called by tests outside a request)
+        _rag_chat_cache.clear()
 
 
 @app.teardown_appcontext
@@ -724,8 +752,9 @@ def reset_chat():
         Success message
     """
     try:
-        rag = get_rag_chat()
-        rag.reset_conversation()
+        session_id = _get_session_id()
+        if session_id in _rag_chat_cache:
+            _rag_chat_cache[session_id].reset_conversation()
         return jsonify({"success": True, "message": "Conversation reset"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
