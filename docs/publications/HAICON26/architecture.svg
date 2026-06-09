@@ -1,0 +1,1050 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="304.00363mm"
+   height="137.88936mm"
+   viewBox="0 0 304.00363 137.88936"
+   version="1.1"
+   id="svg1"
+   inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
+   sodipodi:docname="architecture.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#505050"
+     bordercolor="#eeeeee"
+     borderopacity="1"
+     inkscape:showpageshadow="0"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="mm"
+     inkscape:zoom="4.423179"
+     inkscape:cx="149.55307"
+     inkscape:cy="224.83829"
+     inkscape:window-width="1463"
+     inkscape:window-height="916"
+     inkscape:window-x="0"
+     inkscape:window-y="38"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer1" />
+  <defs
+     id="defs1" />
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1"
+     transform="translate(49.2125,-79.63957)">
+    <g
+       id="g78"
+       transform="matrix(0.1203082,0,0,0.11986388,-49.59194,88.51087)"
+       style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+      <g
+         stroke-linecap="round"
+         transform="matrix(1,0,0,1.0744235,1743.9559,-67.993115)"
+         id="g1"
+         style="stroke-width:4.25121;stroke-linecap:butt;stroke-linejoin:round">
+        <path
+           d="M 780.77,0 C 400.02,-1.85 199.94,-1.75 0,0 v 0 c 235.16,2.2 470.24,1.68 780.77,0 v 0 c -2.36,257.5 -2.21,514.88 0,1060.83 v 0 c 1.34,-433.52 1.46,-747.5 0,-1060.83 z M 0,1060.83 C -4.52,726.62 -3.67,392.68 0,0 v 0 c -1.18,472.31 -1.28,766.49 0,1060.83 v 0 c 221.91,-0.26 500.75,0.09 780.77,0 v 0 c -177.56,-2.41 -355.35,-1.88 -780.77,0 z"
+           stroke="#2f9e44"
+           stroke-width="8.50243"
+           fill="none"
+           id="path1-3"
+           style="stroke-linecap:butt;stroke-linejoin:round"
+           sodipodi:nodetypes="ccccccccccccccccc" />
+      </g>
+      <g
+         transform="translate(2075.7171,15)"
+         id="g2"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <text
+           x="58.366665"
+           y="13.865555"
+           font-family="Excalifont, Xiaolai, sans-serif, 'Segoe UI Emoji'"
+           font-size="40.7937px"
+           fill="#2f9e44"
+           text-anchor="middle"
+           style="font-size:94.0068px;white-space:pre;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round"
+           direction="ltr"
+           dominant-baseline="alphabetic"
+           id="text1-0">Agent</text>
+      </g>
+      <g
+         transform="translate(2087.8926,135.8159)"
+         id="g4"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <g
+           id="g135"
+           style="stroke-linecap:butt;stroke-linejoin:round">
+          <g
+             stroke-linecap="round"
+             transform="translate(-56.145536,-50.657235)"
+             id="g3"
+             style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+            <path
+               d="M 203.42,122.38 C 203.38,74.05 203.85,37.77 203.42,0 V 0 C 148.48,0 74.81,-1.93 0,0 v 0 c 75.58,1.49 150.36,0.55 203.42,0 v 0 c -2.05,34.28 0.45,69.56 0,122.38 z m 0,0 c -55.75,-2.2 -110.17,-0.94 -203.42,0 v 0 C -1.09,92.16 0.45,62.33 0,0 v 0 c 0.85,52.53 -1.33,87.95 0,122.38 v 0 c 103.89,1.03 154,2.25 203.42,0 z"
+               stroke="#2f9e44"
+               stroke-width="8.81314"
+               fill="none"
+               id="path2-0"
+               style="stroke-linecap:butt;stroke-linejoin:round"
+               sodipodi:nodetypes="cccccccccccccccccc" />
+          </g>
+          <text
+             x="45.566666"
+             y="35.939205"
+             font-family="Excalifont, Xiaolai, sans-serif, 'Segoe UI Emoji'"
+             font-size="40.7937px"
+             fill="#2f9e44"
+             text-anchor="middle"
+             style="font-size:70.5051px;white-space:pre;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round"
+             direction="ltr"
+             dominant-baseline="alphabetic"
+             id="text3">User</text>
+        </g>
+      </g>
+      <g
+         id="g137"
+         transform="translate(-53.535162)"
+         style="stroke-linecap:butt;stroke-linejoin:round">
+        <g
+           stroke-linecap="round"
+           transform="translate(1921.9309,560.71429)"
+           id="g7"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m -29.93924,0 c 234.17686,-0.69 467.00698,0 590.25035,0 v 0 c 0.50085,53.02 -1.93663,104.95 0,183.57 v 0 c -1.27996,-70.87 -2.0702,-127.64 0,-183.57 V 0 C 236.10304,1.24 102.97616,1.49 -29.93924,0 Z m 0,0 c -0.189211,60.19 0.244862,123.34 0,183.57 v 0 c 243.89342,0.21 418.11255,-0.05 590.25035,0 v 0 c -219.03996,-0.14 -438.31364,-0.71 -590.25035,0 v 0 c -0.745715,-38.64 -0.801366,-77.17 0,-183.57 z"
+             stroke="#1971c2"
+             stroke-width="8.81314"
+             fill="none"
+             id="path6-5"
+             style="stroke-linecap:butt;stroke-linejoin:round"
+             sodipodi:nodetypes="cccccccccccccccccc" />
+        </g>
+        <g
+           transform="translate(2086.3229,642.73284)"
+           id="g8"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <text
+             x="100.76667"
+             y="-12.61913"
+             font-family="Excalifont, Xiaolai, sans-serif, 'Segoe UI Emoji'"
+             font-size="40.7937px"
+             fill="#1971c2"
+             text-anchor="middle"
+             style="font-size:70.5051px;white-space:pre;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round"
+             direction="ltr"
+             dominant-baseline="alphabetic"
+             id="text7-7"><tspan
+               sodipodi:role="line"
+               id="tspan97"
+               x="100.76666"
+               y="-12.61913">RAG Chat</tspan><tspan
+               sodipodi:role="line"
+               id="tspan98"
+               x="100.76666"
+               y="76.200768">(Blablador LLM)</tspan></text>
+        </g>
+      </g>
+      <g
+         id="g138"
+         transform="translate(-53.591201)"
+         style="stroke-linecap:butt;stroke-linejoin:round">
+        <g
+           stroke-linecap="round"
+           transform="matrix(1.2738088,0,0,1,1994.9807,907.46032)"
+           id="g9-0"
+           style="stroke-width:3.90435;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="M 301.7,122.38 C 302.16,57.31 301.95,28.9 301.7,0 V 0 C 121.19,-0.49 59.92,1.09 0,0 v 0 c 110.89,-0.25 222.39,0.17 301.7,0 v 0 c -0.69,36.54 -2.3,75.23 0,122.38 z m 0,0 c -116.17,-1.82 -233.36,-1.7 -301.7,0 v 0 c 148,0.16 226.06,-0.21 301.7,0 z M 0,122.38 C -0.8,75.92 0.28,27.86 0,0 v 0 c -1.4,37.4 0.05,80.11 0,122.38 z"
+             stroke="#9c36b5"
+             stroke-width="7.8087"
+             fill="none"
+             id="path8-1"
+             style="stroke-linecap:butt;stroke-linejoin:round"
+             sodipodi:nodetypes="cccccccccccccccccc" />
+        </g>
+        <g
+           transform="translate(2079.9063,958.96774)"
+           id="g10"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <text
+             x="107.18333"
+             y="35.939205"
+             font-family="Excalifont, Xiaolai, sans-serif, 'Segoe UI Emoji'"
+             font-size="40.7937px"
+             fill="#9c36b5"
+             text-anchor="middle"
+             style="font-size:70.5051px;white-space:pre;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round"
+             direction="ltr"
+             dominant-baseline="alphabetic"
+             id="text9-8">MCP Tools</text>
+        </g>
+      </g>
+      <g
+         stroke-linecap="round"
+         id="g14"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round"
+         transform="translate(-52.781111)">
+        <g
+           transform="translate(2093.9208,213.53968)"
+           id="g11-6"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m -0.61,0.81 c -7.69,3.6 -37.44,9.64 -44.82,20.08 -7.39,10.44 0.29,35.34 0.52,42.55 M 1.27,0.2 c -7.35,3.86 -36.48,11.52 -44.32,22.26 -7.84,10.74 -2.64,35.01 -2.71,42.18"
+             stroke="#2f9e44"
+             stroke-width="8.81314"
+             fill="none"
+             id="path10-3"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+        <g
+           transform="translate(2093.9208,213.53968)"
+           id="g12-0"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m -54.75,45.21 c 4.46,5.95 6.42,13.68 8.99,19.43 m -8.99,-19.43 c 2.76,4.74 4.86,11 8.99,19.43"
+             stroke="#2f9e44"
+             stroke-width="8.81314"
+             fill="none"
+             id="path11-9"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+        <g
+           transform="translate(2093.9208,213.53968)"
+           id="g13"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m -40.15,43.97 c -0.77,6.32 -4.02,14.5 -5.61,20.67 m 5.61,-20.67 c -1.35,5.15 -3.37,11.76 -5.61,20.67"
+             stroke="#2f9e44"
+             stroke-width="8.81314"
+             fill="none"
+             id="path12"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+      </g>
+      <g
+         stroke-linecap="round"
+         id="g18"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round"
+         transform="translate(-57.179537)">
+        <g
+           transform="translate(2049.1497,413.7381)"
+           id="g15-6"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m -0.62,0.06 c 0.07,7.33 0.22,28.65 0.44,44.71 0.21,16.07 -6.45,35.79 0.84,51.69 7.29,15.89 35.85,36.24 42.91,43.67 M 1.25,-0.95 c -0.05,7.44 -2.3,31.26 -2.46,47.15 -0.17,15.88 -6.05,32.39 1.47,48.16 7.52,15.77 36.17,38.58 43.63,46.44"
+             stroke="#1971c2"
+             stroke-width="8.81314"
+             fill="none"
+             id="path14-2"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+        <g
+           transform="translate(2049.1497,413.7381)"
+           id="g16"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m 20.87,131.05 c 5.91,2.3 11.17,6.13 23.02,9.75 m -23.02,-9.75 c 7.5,3.55 14.87,6.05 23.02,9.75"
+             stroke="#1971c2"
+             stroke-width="8.81314"
+             fill="none"
+             id="path15"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+        <g
+           transform="translate(2049.1497,413.7381)"
+           id="g17"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m 32.52,118.53 c 3.09,5.36 5.45,12.31 11.37,22.27 M 32.52,118.53 c 3.56,7.72 6.98,14.47 11.37,22.27"
+             stroke="#1971c2"
+             stroke-width="8.81314"
+             fill="none"
+             id="path16"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+      </g>
+      <g
+         transform="translate(2055.5679,800.37698)"
+         id="g23"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <text
+           x="80.116669"
+           y="35.939205"
+           font-family="Excalifont, Xiaolai, sans-serif, 'Segoe UI Emoji'"
+           font-size="40.7937px"
+           fill="#9c36b5"
+           text-anchor="middle"
+           style="font-size:70.5051px;white-space:pre;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round"
+           direction="ltr"
+           dominant-baseline="alphabetic"
+           id="text23">tool call</text>
+      </g>
+      <g
+         id="g139"
+         transform="translate(-52.781111)"
+         style="stroke-linecap:butt;stroke-linejoin:round">
+        <path
+           d="m 2337.8796,285.72241 c 0.5061,-16.64232 0.6617,-24.66171 -1.1996,-37.25025 -10.58,-21.88 -52.23,-29.3 -62.63,-35.09 m 63.8296,72.34025 c -0.7,-17.56199 3.3915,-23.56649 -2.5096,-37.22025 -10.34,-22.08 -49.9,-29.77 -59.95,-35.7"
+           style="fill:none;stroke:#099268;stroke-width:8.81314;stroke-linecap:butt;stroke-linejoin:round;stroke-opacity:1"
+           id="path1-0"
+           sodipodi:nodetypes="cccccc" />
+        <g
+           transform="translate(2288.3681,554.71429)"
+           id="g25"
+           style="stroke:#099268;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round;stroke-opacity:1">
+          <path
+             d="m 8.97,-340.1 c -10.35,-0.89 -17.72,-2.05 -24.99,-0.76 m 24.99,0.76 c -5.43,-0.91 -11.44,0.22 -24.99,-0.76"
+             stroke="#1971c2"
+             stroke-width="8.81314"
+             fill="none"
+             id="path24"
+             style="stroke:#099268;stroke-linecap:butt;stroke-linejoin:round;stroke-opacity:1" />
+        </g>
+        <g
+           transform="translate(2288.3681,554.71429)"
+           id="g26"
+           style="stroke:#099268;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round;stroke-opacity:1">
+          <path
+             d="m 2.64,-324.22 c -8.15,-6.58 -13.25,-13.42 -18.66,-16.64 m 18.66,16.64 c -3.92,-4.48 -8.49,-6.96 -18.66,-16.64"
+             stroke="#1971c2"
+             stroke-width="8.81314"
+             fill="none"
+             id="path25"
+             style="stroke:#099268;stroke-linecap:butt;stroke-linejoin:round;stroke-opacity:1" />
+        </g>
+      </g>
+      <g
+         stroke-linecap="round"
+         transform="matrix(1,0,0,1.0914728,796.86125,-69.328549)"
+         id="g28"
+         style="stroke-width:4.21788;stroke-linecap:butt;stroke-linejoin:round">
+        <path
+           d="m 843.17,0.03113754 c -319.19,0.8605053 -580.82,0.56581171 -843.17,0 v 0 c 193.94,2.59330366 388,2.71118116 843.17,0 z m 0,1040.90486246 c -1.43,-511.45835 -0.68,-776.27001 0,-1040.90486246 v 0 C 843.79,401.46275 843.38,803.33051 843.17,1040.936 Z m -843.17,0 c 182.09,2.169 512.07,2.2161 843.17,0 v 0 c -289.25,3.784 -579.44,3.4656 -843.17,0 v 0 C -0.63,692.69075 0.44,345.42382 0,0.03113754 v 0 C -0.34,596.50276 -0.53,818.93749 0,1040.936 Z"
+           stroke="#6741d9"
+           stroke-width="8.43576"
+           fill="none"
+           id="path27-8"
+           style="stroke-linecap:butt;stroke-linejoin:round"
+           sodipodi:nodetypes="ccccccccccccccccccc" />
+      </g>
+      <g
+         transform="translate(1055.2815,15)"
+         id="g29"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <text
+           x="163.16667"
+           y="15.304512"
+           font-family="Excalifont, Xiaolai, sans-serif, 'Segoe UI Emoji'"
+           font-size="42.427px"
+           fill="#6741d9"
+           text-anchor="middle"
+           style="font-size:94.0068px;white-space:pre;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round"
+           direction="ltr"
+           dominant-baseline="alphabetic"
+           id="text28-4">Knowledge Base</text>
+      </g>
+      <g
+         stroke-linecap="round"
+         transform="translate(989.40351,85.533712)"
+         id="g30"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <path
+           d="M 0,0 C -1.48,90.63 -3.29,141.51 0,191.48 0.37,122.52 -1.11,54.33 0,0 89.39,1.31 179.71,0.95 403.62,0 302.03,-1.86 150.8,-2.46 0,0 Z m 403.62,0 c 1.29,58.82 -1.59,117.89 0,191.48 C 402.8,85.32 403.34,42.33 403.62,0 Z M 0,191.48 c 180.62,-2.35 292.39,-2.02 403.62,0 -150.74,2.31 -301.36,2.54 -403.62,0 z"
+           stroke="#6741d9"
+           stroke-width="8.81314"
+           fill="none"
+           id="path29"
+           style="stroke-linecap:butt;stroke-linejoin:round"
+           sodipodi:nodetypes="ccccccccccc" />
+      </g>
+      <g
+         transform="translate(1037.1645,160.06015)"
+         id="g31-0"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <text
+           x="154.05"
+           y="3.4141483"
+           font-family="Excalifont, Xiaolai, sans-serif, 'Segoe UI Emoji'"
+           font-size="33.9416px"
+           fill="#6741d9"
+           text-anchor="middle"
+           style="font-size:70.5051px;white-space:pre;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round"
+           direction="ltr"
+           dominant-baseline="alphabetic"
+           id="text30-7"><tspan
+             sodipodi:role="line"
+             id="tspan88"
+             x="154.05"
+             y="3.4141483">SQL DB</tspan><tspan
+             sodipodi:role="line"
+             id="tspan89"
+             x="154.05"
+             y="92.234047">ChromaDB</tspan></text>
+      </g>
+      <path
+         d="m 1500.4268,362.24766 c -2.9157,58.52 -2.5344,121.37 0,190.92 1.5927,-105.37 1.6487,-148.69 0,-190.92 -291.2393,-1.23 -454.943,-1.66 -618.55706,0 1.14392,79.9 1.43551,135.79 0,190.92 1.25607,-59.17 0.54953,-117.65 0,-190.92 201.98016,0.27 403.52296,-0.22 618.55706,0 z m 0,190.92 c -226.3163,1.41 -453.014,2.16 -618.55706,0 240.25656,-1.5 429.17136,-0.83 618.55706,0 z"
+         stroke="#6741d9"
+         stroke-width="8.81315"
+         fill="none"
+         id="path31"
+         style="stroke-linecap:butt;stroke-linejoin:round"
+         sodipodi:nodetypes="cccccccccc" />
+      <g
+         transform="translate(959.13114,404.67463)"
+         id="g33"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <text
+           x="232.08333"
+           y="28.20578"
+           font-family="Excalifont, Xiaolai, sans-serif, 'Segoe UI Emoji'"
+           font-size="42.427px"
+           fill="#6741d9"
+           text-anchor="middle"
+           style="font-size:70.5051px;white-space:pre;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round"
+           direction="ltr"
+           dominant-baseline="alphabetic"
+           id="text32-1"><tspan
+             sodipodi:role="line"
+             x="232.08333"
+             y="28.20578"
+             id="tspan85">Clustering</tspan><tspan
+             sodipodi:role="line"
+             id="tspan82"
+             x="232.08334"
+             y="117.02568">(Agglomerative)</tspan></text>
+        <text
+           x="232.08333"
+           y="90.411873"
+           font-family="Excalifont, Xiaolai, sans-serif, 'Segoe UI Emoji'"
+           font-size="42.427px"
+           fill="#6741d9"
+           text-anchor="middle"
+           style="white-space:pre;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round"
+           direction="ltr"
+           dominant-baseline="alphabetic"
+           id="text33-2" />
+      </g>
+      <g
+         stroke-linecap="round"
+         transform="translate(986.31782,649.23646)"
+         id="g34"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <path
+           d="m 409.79,239.83149 c -2.8,-94.28 -2.59,-138.35 0,-182.44 v 0 c 1.93,49.68 2.13,97.17 0,182.44 z m -409.79,0 c 212.33,0.36 311.41,0.46 409.79,0 v 0 c -156.22,-1.93 -312.69,-1.62 -409.79,0 v 0 c -0.67,-60.57 0.73,-118.45 0,-182.44 v 0 c 128.67,0.88 258.91,1.1 409.79,0 v 0 c -182.35,-2.35 -296.1,-2.26 -409.79,0 v 0 c 1.23,47.59 0.38,114.82 0,182.44 z"
+           stroke="#6741d9"
+           stroke-width="8.81314"
+           fill="none"
+           id="path33"
+           style="stroke-linecap:butt;stroke-linejoin:round"
+           sodipodi:nodetypes="cccccccccccccccccc" />
+      </g>
+      <g
+         transform="translate(1058.4978,689.9049)"
+         id="g35"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <text
+           x="132.71666"
+           y="89.107483"
+           font-family="Excalifont, Xiaolai, sans-serif, 'Segoe UI Emoji'"
+           font-size="36px"
+           fill="#6741d9"
+           text-anchor="middle"
+           style="font-size:70.5051px;white-space:pre;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round"
+           direction="ltr"
+           dominant-baseline="alphabetic"
+           id="text34"><tspan
+             sodipodi:role="line"
+             id="tspan83"
+             x="132.71666"
+             y="89.107483">Cluster</tspan><tspan
+             sodipodi:role="line"
+             id="tspan84"
+             x="132.71666"
+             y="177.92738">Cache</tspan></text>
+      </g>
+      <g
+         stroke-linecap="round"
+         id="g39"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <g
+           transform="translate(1191.256,283.01356)"
+           id="g36"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m 0.07,-0.27 c 0.09,11.82 0.3,60.33 0.32,72.05 M -1.35,-1.46 C -1.37,9.97 -0.5,58.12 -0.36,70.2"
+             stroke="#6741d9"
+             stroke-width="8.81314"
+             fill="none"
+             id="path35"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+        <g
+           transform="translate(1191.256,283.01356)"
+           id="g37-2"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m -9.26,46.84 c 2.26,7.31 6.98,13.64 8.9,23.36 m -8.9,-23.36 c 1.62,5.14 5.32,10.61 8.9,23.36"
+             stroke="#6741d9"
+             stroke-width="8.81314"
+             fill="none"
+             id="path36"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+        <g
+           transform="translate(1191.256,283.01356)"
+           id="g38"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="M 7.84,46.58 C 5.2,53.98 5.03,60.38 -0.36,70.2 M 7.84,46.58 C 5.32,51.66 4.88,57.19 -0.36,70.2"
+             stroke="#6741d9"
+             stroke-width="8.81314"
+             fill="none"
+             id="path37"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+      </g>
+      <g
+         stroke-linecap="round"
+         id="g43"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <g
+           transform="translate(1191.2687,559.16903)"
+           id="g40"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="M 0.38,1.03 C 0.39,14.97 0.13,69.68 0.14,83.37 M -0.88,0.53 c -0.14,14.11 0.02,127.07076 0.16,140.99076"
+             stroke="#6741d9"
+             stroke-width="8.81314"
+             fill="none"
+             id="path39"
+             style="stroke-linecap:butt;stroke-linejoin:round"
+             sodipodi:nodetypes="cccc" />
+        </g>
+        <g
+           transform="translate(1191.2687,559.16903)"
+           id="g41"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m -9.4,118.49149 c 4.32,7.41 4.1,15.08 8.68,23.45 m -8.68,-23.45 c 2.72,4.56 4.14,9.74 8.68,23.45"
+             stroke="#6741d9"
+             stroke-width="8.81314"
+             fill="none"
+             id="path40"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+        <g
+           transform="translate(1191.2687,559.16903)"
+           id="g42"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m 7.7,118.40149 c -0.91,7.48 -6.36,15.19 -8.42,23.54 m 8.42,-23.54 c -1.13,4.48 -3.56,9.67 -8.42,23.54"
+             stroke="#6741d9"
+             stroke-width="8.81314"
+             fill="none"
+             id="path41-7"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+      </g>
+      <g
+         stroke-linecap="round"
+         transform="matrix(1,0,0,1.0363364,10,-28.513057)"
+         id="g44"
+         style="stroke-width:4.32863;stroke-linecap:butt;stroke-linejoin:round">
+        <path
+           d="M 0,1059.6171 C -3.5,654.68597 -3.21,248.76979 0,-39.115796 v 0 c 163.12,1.793841 326.23,2.011591 673.1,0 v 0 c 1.33,229.497606 1.29,459.772896 0,1098.732896 v 0 c -221.35,0.052 -442.16,0.083 -673.1,0 v 0 C -2.77,752.33107 -2.39,442.97124 0,-39.115796 v 0 c 222.59,-0.05185 445.51,-0.881367 673.1,0 v 0 c 2.62,406.973826 1.65,812.029376 0,1098.732896 v 0 c -221.37,0.1763 -442.32,0.5599 -673.1,0 z"
+           stroke="#f08c00"
+           stroke-width="8.65726"
+           fill="none"
+           id="path43"
+           style="stroke-linecap:butt;stroke-linejoin:round"
+           sodipodi:nodetypes="ccccccccccccccccc" />
+      </g>
+      <g
+         transform="translate(251.64762,15)"
+         id="g45"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <text
+           x="94.900002"
+           y="13.865555"
+           font-family="Excalifont, Xiaolai, sans-serif, 'Segoe UI Emoji'"
+           font-size="40.7937px"
+           fill="#f08c00"
+           text-anchor="middle"
+           style="font-size:94.0068px;white-space:pre;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round"
+           direction="ltr"
+           dominant-baseline="alphabetic"
+           id="text44-4">Ingestion</text>
+      </g>
+      <g
+         stroke-linecap="round"
+         transform="translate(79.722222,89.325397)"
+         id="g46"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <path
+           d="M 530.32,0 C 358.01,1.63 178.85,2.06 0,0 v 0 c 113.16,0.87 226.03,1.09 530.32,0 z m 0,183.57 C 530,140.94 528.06,71.44 530.32,0 v 0 c -0.41,44.6 -0.57,90.98 0,183.57 v 0 c -147.71,1.21 -295.93,0.02 -530.32,0 v 0 C -2.27,115.14 -2.33,47.58 0,0 v 0 c 0.9,41.86 0.35,114.16 0,183.57 v 0 c 145.88,1.54 338.02,1.78 530.32,0 z"
+           stroke="#f08c00"
+           stroke-width="8.81314"
+           fill="none"
+           id="path45"
+           style="stroke-linecap:butt;stroke-linejoin:round"
+           sodipodi:nodetypes="cccccccccccccccccc" />
+      </g>
+      <g
+         transform="translate(151.93096,130.11905)"
+         id="g47"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <text
+           x="192.95"
+           y="31.524475"
+           font-family="Excalifont, Xiaolai, sans-serif, 'Segoe UI Emoji'"
+           font-size="40.7937px"
+           fill="#f08c00"
+           text-anchor="middle"
+           style="font-size:70.5051px;white-space:pre;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round"
+           direction="ltr"
+           dominant-baseline="alphabetic"
+           id="text46-7"><tspan
+             sodipodi:role="line"
+             id="tspan90"
+             x="192.95"
+             y="31.524475">Conference</tspan><tspan
+             sodipodi:role="line"
+             id="tspan91"
+             x="192.95"
+             y="120.34438">Website</tspan></text>
+      </g>
+      <g
+         stroke-linecap="round"
+         transform="matrix(1.4033525,0,0,1,109.44776,407.7381)"
+         id="g48"
+         style="stroke-width:3.71978;stroke-linecap:butt;stroke-linejoin:round">
+        <path
+           d="M 0,0 C 116.7,-2.37 231.86,-2.82 338.11,0 V 0 C 264.54,0.08 131.33,0.14 0,0 Z m 338.11,122.38 c 1.7,-40 -0.97,-82.23 0,-122.38 v 0 c -0.06,26.73 0.41,52.55 0,122.38 z M 0,122.38 c 78.78,-1.7 208.81,-1.35 338.11,0 v 0 c -123.47,0.56 -248.62,0.64 -338.11,0 z m 0,0 C 0.15,86.36 0.14,51.35 0,0 v 0 c -3,27.21 0.27,77.22 0,122.38 z"
+           stroke="#f08c00"
+           stroke-width="7.43956"
+           fill="none"
+           id="path47"
+           style="stroke-linecap:butt;stroke-linejoin:round"
+           sodipodi:nodetypes="cccccccccccccccccccc" />
+      </g>
+      <g
+         transform="translate(232.69762,458.52367)"
+         id="g49"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <text
+           x="113.85"
+           y="35.939205"
+           font-family="Excalifont, Xiaolai, sans-serif, 'Segoe UI Emoji'"
+           font-size="40.7937px"
+           fill="#f08c00"
+           text-anchor="middle"
+           style="font-size:70.5051px;white-space:pre;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round"
+           direction="ltr"
+           dominant-baseline="alphabetic"
+           id="text48">Downloader</text>
+      </g>
+      <g
+         stroke-linecap="round"
+         transform="translate(143.56151,681.42857)"
+         id="g50"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <path
+           d="M 438.53,0 C 329.6,-0.68 164.74,-0.88 0,0 v 0 c 2.95,50.52 1.7,149.65 0,249.71 v 0 c 169.36,0.45 304.58,-0.41 438.53,0 v 0 c -155.61,2 -311.95,1.88 -438.53,0 v 0 C 1.53,188.16 0.41,126.05 0,0 v 0 c 121.23,2.03 241.97,1.74 438.53,0 v 0 c 0.25,65.69 1.73,130.63 0,249.71 v 0 c -0.01,-69.53 1.21,-159.94 0,-249.71 z"
+           stroke="#6741d9"
+           stroke-width="8.81314"
+           fill="none"
+           id="path49"
+           style="fill:#f08c00;fill-opacity:1;stroke:#f08c00;stroke-linecap:butt;stroke-linejoin:round;stroke-opacity:1"
+           sodipodi:nodetypes="ccccccccccccccccc" />
+      </g>
+      <g
+         transform="translate(273.06071,762.71486)"
+         id="g51-7"
+         style="fill:#f08c00;fill-opacity:1;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <text
+           x="89.76667"
+           y="31.716"
+           font-family="Excalifont, Xiaolai, sans-serif, 'Segoe UI Emoji'"
+           font-size="36px"
+           fill="#6741d9"
+           text-anchor="middle"
+           style="font-size:70.5051px;white-space:pre;fill:#f08c00;fill-opacity:1;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round"
+           direction="ltr"
+           dominant-baseline="alphabetic"
+           id="text50"><tspan
+             sodipodi:role="line"
+             id="tspan119"
+             x="89.76667"
+             y="31.716">Embedding</tspan><tspan
+             sodipodi:role="line"
+             id="tspan120"
+             x="89.76667"
+             y="120.5359">Model</tspan></text>
+      </g>
+      <g
+         mask="url(#mask-83SqCWAQiArDvhF__29G-)"
+         stroke-linecap="round"
+         id="g55"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <g
+           transform="translate(345.08123,278.89683)"
+           id="g52-3"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="M 1.03,-0.29 C 1.02,9.29 0.6,2.5964408 0.75,22.766441 m 0,62.381939 C 0.9,105.32838 1.84,110.52 1.91,120.75 M 0.1,-1.48 C 0.42,8.71 2.88,2.1383508 3.08,22.738351 m 0,62.381939 C 3.29,105.72029 1.67,111.91 1.36,122.11"
+             stroke="#f08c00"
+             stroke-width="8.81314"
+             fill="none"
+             id="path51"
+             style="stroke-linecap:butt;stroke-linejoin:round"
+             sodipodi:nodetypes="cccccccc" />
+        </g>
+        <g
+           transform="translate(345.08123,278.89683)"
+           id="g53-8"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m -6.27,98.3 c 2.54,7.44 3.99,18.02 7.63,23.81 M -6.27,98.3 c 1.89,8.14 4.89,13.74 7.63,23.81"
+             stroke="#f08c00"
+             stroke-width="8.81314"
+             fill="none"
+             id="path52"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+        <g
+           transform="translate(345.08123,278.89683)"
+           id="g54"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m 10.82,98.97 c -3.71,7.34 -8.51,17.68 -9.46,23.14 m 9.46,-23.14 c -3.34,7.84 -5.56,13.24 -9.46,23.14"
+             stroke="#f08c00"
+             stroke-width="8.81314"
+             fill="none"
+             id="path53"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+      </g>
+      <g
+         transform="translate(292.51429,313.15476)"
+         id="g56"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <text
+           x="54.033333"
+           y="35.939205"
+           font-family="Excalifont, Xiaolai, sans-serif, 'Segoe UI Emoji'"
+           font-size="40.7937px"
+           fill="#f08c00"
+           text-anchor="middle"
+           style="font-size:70.5051px;white-space:pre;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round"
+           direction="ltr"
+           dominant-baseline="alphabetic"
+           id="text56">plugin</text>
+      </g>
+      <g
+         stroke-linecap="round"
+         id="g60"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <g
+           transform="translate(346.57745,536.11905)"
+           id="g57"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m 0.41,0.07 c 0.06,7.58 -0.63,28.15 -0.78,44.29 -0.15,16.15 -0.05,37.28 -0.11,52.6 -0.07,15.32 -0.19,32.58 -0.27,39.31 M -0.83,-0.94 c -0.07,7.82 -0.56,30.5 -0.67,46.51 -0.11,16.01 -0.18,34.35 0.01,49.56 0.2,15.21 1.31,34.59 1.17,41.7"
+             stroke="#f08c00"
+             stroke-width="8.81314"
+             fill="none"
+             id="path56"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+        <g
+           transform="translate(346.57745,536.11905)"
+           id="g58"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m -7.71,117.53 c 1.72,4.04 2.33,8.49 7.39,19.3 m -7.39,-19.3 c 3,7.46 5.48,15.38 7.39,19.3"
+             stroke="#f08c00"
+             stroke-width="8.81314"
+             fill="none"
+             id="path57"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+        <g
+           transform="translate(346.57745,536.11905)"
+           id="g59"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m 6.43,117.29 c -1.68,4.15 -4.47,8.66 -6.75,19.54 m 6.75,-19.54 c -2.39,7.44 -5.3,15.44 -6.75,19.54"
+             stroke="#f08c00"
+             stroke-width="8.81314"
+             fill="none"
+             id="path58"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+      </g>
+      <g
+         mask="url(#mask-fGOPWfhbqFKDLCAo1GpyN)"
+         stroke-linecap="round"
+         id="g64"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <g
+           transform="translate(588.09325,804.92925)"
+           id="g61"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m -0.34,-0.63 c 19.8,-4.43 96.6,67.47 119.54,-25.91 22.93,-93.38 -27.95,-435.1 18.09,-534.36 46.04,-99.27 215.21,-51.15 258.17,-61.24 M 1.68,1.66 c 19.56,-4.76 93.82,63.82 116.33,-29.81 22.5,-93.63 -27.6,-433.17 18.7,-531.98 46.29,-98.81 215.68,-50.79 259.08,-60.88"
+             stroke="#6741d9"
+             stroke-width="8.81314"
+             fill="none"
+             id="path60"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+        <g
+           transform="translate(588.09325,804.92925)"
+           id="g62"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m 372.16,-612.84 c 6.84,-3.42 17.42,-4.82 23.63,-8.17 m -23.63,8.17 c 4.82,-1.16 10.33,-3.22 23.63,-8.17"
+             stroke="#6741d9"
+             stroke-width="8.81314"
+             fill="none"
+             id="path61"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+        <g
+           transform="translate(588.09325,804.92925)"
+           id="g63"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m 372.44,-629.94 c 6.76,2.3 17.24,6.61 23.35,8.93 m -23.35,-8.93 c 4.78,2.49 10.23,4.09 23.35,8.93"
+             stroke="#6741d9"
+             stroke-width="8.81314"
+             fill="none"
+             id="path62"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+      </g>
+      <g
+         stroke-linecap="round"
+         id="g69"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <g
+           transform="translate(2030.2381,909.21489)"
+           id="g66"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="M -96.484741,32.097269 C -128.52474,19.897269 -141.32,37.29 -192.66,-72.26 -244,-181.81 -234.67,-549.33 -307.71,-658.34 c -73.04,-109.01 -269.46,-56.58 -323.2,-67.99 M -96.484741,32.097269 C -128.62474,20.017268 -142.25,39.52 -193.53,-70.7 c -51.28,-110.22 -42.25,-480.55 -115.08,-589.6 -72.83,-109.06 -268.14,-53.73 -321.9,-64.74"
+             stroke="#9c36b5"
+             stroke-width="8.81314"
+             fill="none"
+             id="path65"
+             style="stroke-linecap:butt;stroke-linejoin:round"
+             sodipodi:nodetypes="cssccscc" />
+        </g>
+        <g
+           transform="translate(2030.2381,909.21489)"
+           id="g67"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m -121.16746,36.047924 c 8.16229,-0.996842 12.72467,-1.759455 24.682719,-3.950655 m -24.682719,3.950655 c 8.02563,-1.599244 18.50522,-3.383876 24.682719,-3.950655"
+             stroke="#9c36b5"
+             stroke-width="8.81314"
+             fill="none"
+             id="path66"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+        <g
+           transform="translate(2030.2381,909.21489)"
+           id="g68"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m -117.95061,19.251181 c 7.4568,3.4334 11.16496,7.079092 21.465869,12.846088 M -117.95061,19.251181 c 6.91105,4.450851 16.22718,8.705742 21.465869,12.846088"
+             stroke="#9c36b5"
+             stroke-width="8.81314"
+             fill="none"
+             id="path67"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+      </g>
+      <g
+         id="g136"
+         transform="translate(-47.115919)"
+         style="stroke-linecap:butt;stroke-linejoin:round">
+        <g
+           stroke-linecap="round"
+           transform="translate(1976.5033,285.35714)"
+           id="g5"
+           style="fill:none;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="M 409.13,0 C 202.98,-1.33 102.61,-0.22 0,0 v 0 c 141.32,0.94 283.09,1.03 409.13,0 v 0 c 0.93,30.24 0.46,62.13 0,122.38 v 0 C 408.5,82.33 408.94,41.61 409.13,0 Z M 0,122.38 c 201.54,0.74 304.3,0.5 409.13,0 v 0 C 245.44,121.97 81.93,121.45 0,122.38 Z M 0,0 c -0.38,62.79 -0.75,91.88 0,122.38 v 0 C -2.21,82.59 -2.55,40.02 0,0 Z"
+             stroke="#099268"
+             stroke-width="8.81314"
+             fill="none"
+             id="path4-4"
+             style="fill:none;stroke-linecap:butt;stroke-linejoin:round"
+             sodipodi:nodetypes="ccccccccccccccccc" />
+        </g>
+        <g
+           transform="translate(2108.8332,336.80552)"
+           id="g6"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <text
+             x="72.23333"
+             y="35.939205"
+             font-family="Excalifont, Xiaolai, sans-serif, 'Segoe UI Emoji'"
+             font-size="40.7937px"
+             fill="#099268"
+             text-anchor="middle"
+             style="font-size:70.5051px;white-space:pre;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round"
+             direction="ltr"
+             dominant-baseline="alphabetic"
+             id="text5">Web UI</text>
+        </g>
+      </g>
+      <g
+         stroke-linecap="round"
+         id="g73"
+         style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+        <g
+           transform="translate(2030.2381,969.17366)"
+           id="g70"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="M -92.71947,2.3257759 C -130.33947,5.8057759 -169.17,47.45 -225.36,19.87 c -56.19,-27.57 -44.67,-144.02 -111.63,-185.25 -66.96,-41.24 -241.47,-51.92 -290.12,-62.14 M -94.09947,1.3057759 C -131.92947,4.5357759 -170.38,45.89 -226.44,18.13 -282.5,-9.63 -270.95,-126.78 -337.6,-167.55 c -66.64,-40.76 -240.48,-49.19 -288.73,-58.91"
+             stroke="#9c36b5"
+             stroke-width="8.81314"
+             fill="none"
+             id="path69"
+             style="stroke-linecap:butt;stroke-linejoin:round"
+             sodipodi:nodetypes="cccccscc" />
+        </g>
+        <g
+           transform="translate(2030.2381,969.17366)"
+           id="g71"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m -115.73485,13.883244 c 7.20491,-3.760206 12.97948,-8.4291895 21.63538,-12.5774681 m -21.63538,12.5774681 c 7.48846,-4.8889058 13.89414,-8.8879484 21.63538,-12.5774681"
+             stroke="#9c36b5"
+             stroke-width="8.81314"
+             fill="none"
+             id="path70"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+        <g
+           transform="translate(2030.2381,969.17366)"
+           id="g72"
+           style="stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round">
+          <path
+             d="m -118.72295,-2.957525 c 8.04842,1.8354564 14.80349,2.69759173 24.62348,4.2633009 m -24.62348,-4.2633009 c 8.6024,0.5997607 15.98857,2.13183783 24.62348,4.2633009"
+             stroke="#9c36b5"
+             stroke-width="8.81314"
+             fill="none"
+             id="path71-7"
+             style="stroke-linecap:butt;stroke-linejoin:round" />
+        </g>
+      </g>
+      <g
+         id="g127"
+         transform="translate(-57.179537)"
+         style="stroke-linecap:butt;stroke-linejoin:round">
+        <path
+           d="m 2288.4981,553.87429 c 7.59,-7.56 38.49,-28.05 46.08,-44.05 7.59,-16 -0.5,-24.61 -0.53,-51.96 -0.03,-27.36 0.6413,-15.52699 0.5713,-50.25699 m -47.5113,148.43699 c 7.34,-7.39 38.1,-28.41 46.32,-44.63 8.23,-16.22 2.87,-25.19 3.03,-52.69 0.16,-27.51 -1.1487,-16.25699 -1.8387,-51.11699"
+           stroke="#1971c2"
+           stroke-width="8.81314"
+           fill="none"
+           id="path23"
+           style="stroke-linecap:butt;stroke-linejoin:round"
+           sodipodi:nodetypes="csscccsc" />
+        <path
+           d="m 2343.3002,436.19443 c -2.3269,-5.91799 -3.0931,-12.39492 -8.4846,-23.58805 m 8.4846,23.58805 c -2.491,-7.93845 -5.6623,-15.06858 -8.4846,-23.58805"
+           stroke="#1971c2"
+           stroke-width="8.81314"
+           fill="none"
+           id="path15-1"
+           style="stroke-width:8.32738;stroke-linecap:butt;stroke-linejoin:round" />
+        <path
+           d="m 2326.2324,436.10047 c 1.826,-5.9152 5.311,-12.37107 8.5832,-23.49409 m -8.5832,23.49409 c 3.2343,-7.86309 5.8536,-14.96477 8.5832,-23.49409"
+           stroke="#1971c2"
+           stroke-width="8.81314"
+           fill="none"
+           id="path16-1"
+           style="stroke-width:8.32738;stroke-linecap:butt;stroke-linejoin:round" />
+      </g>
+      <g
+         stroke-linecap="round"
+         id="g132"
+         style="stroke:#9c36b5;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round;stroke-opacity:1"
+         transform="translate(-96.765368,348.76367)">
+        <g
+           transform="translate(2049.1497,413.7381)"
+           id="g128"
+           style="stroke:#9c36b5;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round;stroke-opacity:1">
+          <path
+             d="M 0.4796064,-12.717739 C 0.5496064,-5.387739 -0.4,28.71 -0.18,44.77 0.03,60.84 -6.63,80.56 0.66,96.46 7.95,112.35 36.51,132.7 43.57,140.13 M 2.3496064,-13.727739 C 2.2996064,-6.287739 -1.05,30.31 -1.21,46.2 c -0.17,15.88 -6.05,32.39 1.47,48.16 7.52,15.77 36.17,38.58 43.63,46.44"
+             stroke="#1971c2"
+             stroke-width="8.81314"
+             fill="none"
+             id="path127"
+             style="stroke:#9c36b5;stroke-linecap:butt;stroke-linejoin:round;stroke-opacity:1"
+             sodipodi:nodetypes="ccccccsc" />
+        </g>
+        <g
+           transform="translate(2049.1497,413.7381)"
+           id="g129"
+           style="stroke:#9c36b5;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round;stroke-opacity:1">
+          <path
+             d="m 20.87,131.05 c 5.91,2.3 11.17,6.13 23.02,9.75 m -23.02,-9.75 c 7.5,3.55 14.87,6.05 23.02,9.75"
+             stroke="#1971c2"
+             stroke-width="8.81314"
+             fill="none"
+             id="path128"
+             style="stroke:#9c36b5;stroke-linecap:butt;stroke-linejoin:round;stroke-opacity:1" />
+        </g>
+        <g
+           transform="translate(2049.1497,413.7381)"
+           id="g130"
+           style="stroke:#9c36b5;stroke-width:4.40657;stroke-linecap:butt;stroke-linejoin:round;stroke-opacity:1">
+          <path
+             d="m 32.52,118.53 c 3.09,5.36 5.45,12.31 11.37,22.27 M 32.52,118.53 c 3.56,7.72 6.98,14.47 11.37,22.27"
+             stroke="#1971c2"
+             stroke-width="8.81314"
+             fill="none"
+             id="path129"
+             style="stroke:#9c36b5;stroke-linecap:butt;stroke-linejoin:round;stroke-opacity:1" />
+        </g>
+      </g>
+      <g
+         id="g134"
+         transform="translate(-8.796854,348.76367)"
+         style="stroke:#9c36b5;stroke-linecap:butt;stroke-linejoin:round;stroke-opacity:1">
+        <path
+           d="m 2288.4981,553.87429 c 7.59,-7.56 38.49,-28.05 46.08,-44.05 7.59,-16 -0.5,-24.61 -0.53,-51.96 -0.03,-27.36 0.6413,-23.12393 0.5713,-57.85393 m -47.5113,156.03393 c 7.34,-7.39 38.1,-28.41 46.32,-44.63 8.23,-16.22 2.87,-25.19 3.03,-52.69 0.16,-27.51 -1.1487,-23.85393 -1.8387,-58.71393"
+           stroke="#1971c2"
+           stroke-width="8.81314"
+           fill="none"
+           id="path132"
+           style="stroke:#9c36b5;stroke-linecap:butt;stroke-linejoin:round;stroke-opacity:1"
+           sodipodi:nodetypes="csscccsc" />
+        <path
+           d="m 2343.3002,424.60576 c -2.3269,-5.91799 -3.0931,-12.39492 -8.4846,-23.58805 m 8.4846,23.58805 c -2.491,-7.93845 -5.6623,-15.06858 -8.4846,-23.58805"
+           stroke="#1971c2"
+           stroke-width="8.81314"
+           fill="none"
+           id="path133"
+           style="stroke:#9c36b5;stroke-width:8.32738;stroke-linecap:butt;stroke-linejoin:round;stroke-opacity:1" />
+        <path
+           d="m 2326.2324,424.5118 c 1.826,-5.9152 5.311,-12.37107 8.5832,-23.49409 m -8.5832,23.49409 c 3.2343,-7.86309 5.8536,-14.96477 8.5832,-23.49409"
+           stroke="#1971c2"
+           stroke-width="8.81314"
+           fill="none"
+           id="path134"
+           style="stroke:#9c36b5;stroke-width:8.32738;stroke-linecap:butt;stroke-linejoin:round;stroke-opacity:1" />
+      </g>
+    </g>
+  </g>
+</svg>
