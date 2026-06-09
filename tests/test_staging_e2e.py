@@ -353,6 +353,28 @@ def _assert_llm_judgment(query: str, response: str, criteria: str | None = None)
     )
 
 
+def _submit_search_query(driver: WebDriver, query: str, settle_seconds: float = 1.0) -> None:
+    """
+    Enter *query* in the main search input and submit with Enter.
+
+    Parameters
+    ----------
+    driver : WebDriver
+        The Selenium WebDriver instance.
+    query : str
+        Search query text to submit.
+    settle_seconds : float, optional
+        Optional delay before interacting with the input (default: 0).
+    """
+    if settle_seconds > 0:
+        time.sleep(settle_seconds)
+
+    search_input = driver.find_element(By.ID, "search-input")
+    search_input.clear()
+    search_input.send_keys(query)
+    search_input.send_keys(Keys.RETURN)
+
+
 # ---------------------------------------------------------------------------
 # 1. Application startup
 # ---------------------------------------------------------------------------
@@ -440,10 +462,7 @@ class TestCoreSearch:
         """
         browser.get(staging_url)
 
-        search_input = browser.find_element(By.ID, "search-input")
-        search_input.clear()
-        search_input.send_keys("learning")
-        search_input.send_keys(Keys.RETURN)
+        _submit_search_query(browser, "learning")
 
         wait = WebDriverWait(browser, 15)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")))
@@ -467,9 +486,7 @@ class TestCoreSearch:
         """
         browser.get(staging_url)
 
-        search_input = browser.find_element(By.ID, "search-input")
-        search_input.clear()
-        search_input.send_keys(Keys.RETURN)
+        _submit_search_query(browser, "")
 
         time.sleep(1)
 
@@ -492,10 +509,7 @@ class TestCoreSearch:
         """
         browser.get(staging_url)
 
-        search_input = browser.find_element(By.ID, "search-input")
-        search_input.clear()
-        search_input.send_keys("xyzqwertyuiopasdfghjkl9999")
-        search_input.send_keys(Keys.RETURN)
+        _submit_search_query(browser, "xyzqwertyuiopasdfghjkl9999")
 
         time.sleep(1)
 
@@ -533,10 +547,7 @@ class TestAuthorSearch:
         """
         browser.get(staging_url)
 
-        search_input = browser.find_element(By.ID, "search-input")
-        search_input.clear()
-        search_input.send_keys("LeCun")
-        search_input.send_keys(Keys.RETURN)
+        _submit_search_query(browser, "LeCun", settle_seconds=1)
 
         wait = WebDriverWait(browser, self._WAIT_TIMEOUT)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, self._RESULT_CARD_CSS)))
@@ -564,10 +575,7 @@ class TestAuthorSearch:
         """
         browser.get(staging_url)
 
-        search_input = browser.find_element(By.ID, "search-input")
-        search_input.clear()
-        search_input.send_keys('author:"LeCun"')
-        search_input.send_keys(Keys.RETURN)
+        _submit_search_query(browser, 'author:"LeCun"', settle_seconds=1)
 
         wait = WebDriverWait(browser, self._WAIT_TIMEOUT)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, self._RESULT_CARD_CSS)))
@@ -595,10 +603,7 @@ class TestAuthorSearch:
         """
         browser.get(staging_url)
 
-        search_input = browser.find_element(By.ID, "search-input")
-        search_input.clear()
-        search_input.send_keys('author:"LeCun" world model')
-        search_input.send_keys(Keys.RETURN)
+        _submit_search_query(browser, 'author:"LeCun" world model', settle_seconds=1)
 
         wait = WebDriverWait(browser, self._WAIT_TIMEOUT)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, self._RESULT_CARD_CSS)))
@@ -635,10 +640,7 @@ class TestPaperDisplay:
         """
         browser.get(staging_url)
 
-        search_input = browser.find_element(By.ID, "search-input")
-        search_input.clear()
-        search_input.send_keys("learning")
-        search_input.send_keys(Keys.RETURN)
+        _submit_search_query(browser, "learning")
 
         wait = WebDriverWait(browser, 15)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .paper-card")))
@@ -672,10 +674,7 @@ class TestPaperDisplay:
         """
         browser.get(staging_url)
 
-        search_input = browser.find_element(By.ID, "search-input")
-        search_input.clear()
-        search_input.send_keys("large language models")
-        search_input.send_keys(Keys.RETURN)
+        _submit_search_query(browser, "large language models")
 
         wait = WebDriverWait(browser, 15)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")))
