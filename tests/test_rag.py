@@ -40,7 +40,7 @@ def mock_database():
     # Set up mock to return papers based on UID (string)
     def mock_query_side_effect(sql, params):
         paper_uid = params[0] if params else None
-        papers_map = {
+        papers_map: dict[str, dict] = {
             "1": {
                 "uid": "1",
                 "title": "Attention Is All You Need",
@@ -69,7 +69,7 @@ def mock_database():
                 "conference": "NeurIPS",
             },
         }
-        paper = papers_map.get(paper_uid)
+        paper = papers_map.get(paper_uid) if isinstance(paper_uid, str) else None
         return [paper] if paper else []
 
     mock_db.query.side_effect = mock_query_side_effect

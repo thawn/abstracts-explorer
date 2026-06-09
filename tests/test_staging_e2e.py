@@ -410,7 +410,7 @@ class TestApplicationStartup:
             logs = browser.get_log("browser")
             errors = [entry for entry in logs if entry["level"] == "SEVERE"]
             assert len(errors) == 0, f"JavaScript errors found: {errors}"
-        except (AttributeError, webdriver.remote.errorhandler.WebDriverException):
+        except (AttributeError, TimeoutException):
             # Firefox does not support get_log – fall back
             assert "Abstracts Explorer" in browser.title
 
