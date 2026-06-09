@@ -409,3 +409,62 @@ class TestMultithreadedAsyncRateLimiting:
 
         asyncio.get_event_loop().run_until_complete(run_all())
         assert len(completed) == 20
+
+    def test_concurrent_async_tasks_spread(self):
+        """Multiple concurrent async tasks should be spread out over time, not all fire at once."""
+        limiter = TokenBucketRateLimiter(requests_per_minute=60)
+        limiter._tokens = 1.0
+        limiter._last_update = time.monotonic()
+
+        timestamps = []
+        lock = threading.Lock()
+
+        async def worker():
+            await limiter.async_acquire(tokens=1.0)
+            with lock:
+                timestamps.append(time.monotonic())
+
+        async def run_all():
+            await asyncio.gather(*[worker() for _ in range(10)])
+
+        asyncio.get_event_loop().run_until_complete(run_all())
+
+        assert len(timestamps) == 10
+        sorted_ts = sorted(timestamps)
+        for i in range(1, len(sorted_ts)):
+            gap = sorted_ts[i] - sorted_ts[i - 1]
+            assert gap >= 0.5
+
+    def test_async_and_sync_interleaved(self):
+        """Sync and async acquires should interleave correctly, consuming the same token pool."""
+        limiter = TokenBucketRateLimiter(requests_per_minute=60)
+        limiter._tokens = 5.0
+        limiter._last_update = time.monotonic()
+
+        acquired = []
+        lock = threading.Lock()
+
+        def sync_worker():
+            limiter.acquire(tokens=1.0)
+            with lock:
+                acquired.append("sync")
+
+        async def async_worker():
+            await limiter.async_acquire(tokens=1.0)
+            with lock:
+                acquired.append("async")
+
+        async def run_async_tasks():
+            await asyncio.gather(*[async_worker() for _ in range(3)])
+
+        # Launch 2 sync threads and 3 async tasks all competing for 5 tokens + refill
+        threads = [threading.Thread(target=sync_worker) for _ in range(2)]
+        for t in threads:
+            t.start()
+        asyncio.get_event_loop().run_until_complete(run_async_tasks())
+        for t in threads:
+            t.join()
+
+        assert len(acquired) == 5
+        assert acquired.count("sync") == 2
+        assert acquired.count("async") == 3
