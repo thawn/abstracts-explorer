@@ -353,9 +353,10 @@ def _assert_llm_judgment(query: str, response: str, criteria: str | None = None)
     )
 
 
-def _submit_search_query(driver: WebDriver, query: str, settle_seconds: float = 1.0) -> None:
+def _submit_search_query(driver: WebDriver, query: str) -> None:
     """
-    Enter *query* in the main search input and submit with Enter.
+    Select the default conference and year in the header, then enter *query*
+    in the main search input and submit with Enter.
 
     Parameters
     ----------
@@ -363,11 +364,9 @@ def _submit_search_query(driver: WebDriver, query: str, settle_seconds: float = 
         The Selenium WebDriver instance.
     query : str
         Search query text to submit.
-    settle_seconds : float, optional
-        Optional delay before interacting with the input (default: 0).
     """
-    if settle_seconds > 0:
-        time.sleep(settle_seconds)
+
+    _select_conference_and_year(driver)
 
     search_input = driver.find_element(By.ID, "search-input")
     search_input.clear()
@@ -547,7 +546,7 @@ class TestAuthorSearch:
         """
         browser.get(staging_url)
 
-        _submit_search_query(browser, "LeCun", settle_seconds=1)
+        _submit_search_query(browser, "LeCun")
 
         wait = WebDriverWait(browser, self._WAIT_TIMEOUT)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, self._RESULT_CARD_CSS)))
@@ -575,7 +574,7 @@ class TestAuthorSearch:
         """
         browser.get(staging_url)
 
-        _submit_search_query(browser, 'author:"LeCun"', settle_seconds=1)
+        _submit_search_query(browser, 'author:"LeCun"')
 
         wait = WebDriverWait(browser, self._WAIT_TIMEOUT)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, self._RESULT_CARD_CSS)))
@@ -603,7 +602,7 @@ class TestAuthorSearch:
         """
         browser.get(staging_url)
 
-        _submit_search_query(browser, 'authors:"LeCun" world model', settle_seconds=1)
+        _submit_search_query(browser, 'authors:"LeCun" world model')
 
         wait = WebDriverWait(browser, self._WAIT_TIMEOUT)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, self._RESULT_CARD_CSS)))
@@ -1201,6 +1200,7 @@ class TestParallelChatRequests:
         _requests.post(
             f"{staging_url}/api/chat/reset",
             timeout=5,
+            verify=False,
         )
 
         results = []
@@ -1211,6 +1211,7 @@ class TestParallelChatRequests:
                     f"{staging_url}/api/chat",
                     json={"message": f"What papers are about topic {idx}?", "reset": True},
                     timeout=120,
+                    verify=False,
                 )
                 return resp.status_code, resp.json() if resp.status_code == 200 else None
             except _requests.exceptions.RequestException as e:
