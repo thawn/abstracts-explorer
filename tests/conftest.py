@@ -15,6 +15,15 @@ from abstracts_explorer.plugin import LightweightPaper
 from abstracts_explorer.config import get_config
 
 
+@pytest.fixture(autouse=True)
+def _reset_global_rate_limiter():
+    """Reset the global rate limiter between tests to avoid test pollution."""
+    from abstracts_explorer.rate_limiter import set_global_rate_limiter
+
+    set_global_rate_limiter(None)
+    yield
+
+
 def get_env_test_path() -> Path:
     """
     Get the path to the .env.tests file.

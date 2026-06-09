@@ -27,8 +27,10 @@ class RateLimitedTransport(httpx.BaseTransport):
     """
     An httpx transport that enforces a maximum requests-per-minute rate.
 
-    Wraps an existing transport and sleeps between requests to stay within the
-    configured rate limit.
+    Wraps an existing transport and acquires tokens from a shared token bucket
+    rate limiter before forwarding requests.  This provides thread-safe, global
+    rate limiting that works correctly under Waitress's multi-threaded WSGI
+    server.
 
     Parameters
     ----------
@@ -39,17 +41,28 @@ class RateLimitedTransport(httpx.BaseTransport):
     """
 
     def __init__(self, transport: httpx.BaseTransport, requests_per_minute: int) -> None:
+        from abstracts_explorer.rate_limiter import (
+            TokenBucketRateLimiter,
+            get_global_rate_limiter,
+            set_global_rate_limiter,
+        )
+
         self._transport = transport
-        self._min_interval: float = 60.0 / requests_per_minute
-        self._last_request_time: float = 0.0
+        self._rpm = requests_per_minute
+
+        global_rate_limiter = get_global_rate_limiter()
+        if global_rate_limiter is None:
+            global_rate_limiter = TokenBucketRateLimiter(
+                requests_per_minute=requests_per_minute
+            )
+            set_global_rate_limiter(global_rate_limiter)
+
+        self._rate_limiter = global_rate_limiter
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
-        """Send *request* after enforcing the minimum inter-request interval."""
-        elapsed = time.monotonic() - self._last_request_time
-        if elapsed < self._min_interval:
-            time.sleep(self._min_interval - elapsed)
+        """Send *request* after acquiring a rate-limit token."""
+        self._rate_limiter.acquire(tokens=1.0)
         response = self._transport.handle_request(request)
-        self._last_request_time = time.monotonic()
         return response
 
     def close(self) -> None:
