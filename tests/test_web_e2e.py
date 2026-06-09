@@ -2572,10 +2572,14 @@ class TestMobileUIE2E:
             scroll_width <= viewport_width + 1
         ), f"Page overflows viewport: scrollWidth={scroll_width} > viewportWidth={viewport_width}"
 
-        # All four tab buttons should be present
+        # All four tab buttons should be present and fit within the viewport
         for tab_id in ["tab-search", "tab-chat", "tab-interesting", "tab-clusters"]:
             tab = mobile_browser.find_element(By.ID, tab_id)
             assert tab is not None, f"Tab {tab_id} should be in the DOM"
+            tab_rect = mobile_browser.execute_script("return arguments[0].getBoundingClientRect()", tab)
+            assert (
+                tab_rect["right"] <= viewport_width + 1
+            ), f"Tab {tab_id} overflows viewport: right={tab_rect['right']} > viewportWidth={viewport_width}"
 
     def test_tab_buttons_are_clickable_on_mobile(self, web_server, mobile_browser):
         """
