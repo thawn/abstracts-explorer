@@ -1,14 +1,14 @@
 """
-Thread-safe token bucket rate limiter shared across all threads.
+Thread-safe and async-compatible token bucket rate limiter.
 
 Provides accurate global rate limiting that works correctly with
-Waitress's multi-threaded environment.
+Waitress's multi-threaded WSGI server and async agents (Pydantic AI).
 """
 
+import asyncio
 import threading
 import time
 from typing import Optional
-
 
 _global_rate_limiter: Optional["TokenBucketRateLimiter"] = None
 
@@ -58,6 +58,30 @@ class TokenBucketRateLimiter:
                 self._lock.release()
                 try:
                     time.sleep(wait_time)
+                finally:
+                    self._lock.acquire()
+
+                self._refill()
+
+            self._tokens -= tokens
+
+    async def async_acquire(self, tokens: float = 1.0) -> None:
+        """
+        Acquire tokens from the bucket asynchronously.
+
+        Args:
+            tokens: Number of tokens to acquire (default: 1).
+        """
+        with self._lock:
+            self._refill()
+
+            while self._tokens < tokens:
+                needed = tokens - self._tokens
+                wait_time = needed / self._rate
+
+                self._lock.release()
+                try:
+                    await asyncio.sleep(wait_time)
                 finally:
                     self._lock.acquire()
 

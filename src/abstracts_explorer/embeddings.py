@@ -52,9 +52,7 @@ class RateLimitedTransport(httpx.BaseTransport):
 
         global_rate_limiter = get_global_rate_limiter()
         if global_rate_limiter is None:
-            global_rate_limiter = TokenBucketRateLimiter(
-                requests_per_minute=requests_per_minute
-            )
+            global_rate_limiter = TokenBucketRateLimiter(requests_per_minute=requests_per_minute)
             set_global_rate_limiter(global_rate_limiter)
 
         self._rate_limiter = global_rate_limiter
@@ -68,6 +66,50 @@ class RateLimitedTransport(httpx.BaseTransport):
     def close(self) -> None:
         """Close the underlying transport."""
         self._transport.close()
+
+
+class AsyncRateLimitedTransport(httpx.AsyncBaseTransport):
+    """
+    An async httpx transport that enforces a maximum requests-per-minute rate.
+
+    Wraps an existing async transport and acquires tokens from a shared token bucket
+    rate limiter before forwarding requests.  This provides thread-safe, global
+    rate limiting that works with Pydantic AI's async OpenAI provider.
+
+    Parameters
+    ----------
+    transport : httpx.AsyncBaseTransport
+        The underlying async transport to delegate requests to.
+    requests_per_minute : int
+        Maximum number of requests per minute. Must be > 0.
+    """
+
+    def __init__(self, transport: httpx.AsyncBaseTransport, requests_per_minute: int) -> None:
+        from abstracts_explorer.rate_limiter import (
+            TokenBucketRateLimiter,
+            get_global_rate_limiter,
+            set_global_rate_limiter,
+        )
+
+        self._transport = transport
+        self._rpm = requests_per_minute
+
+        global_rate_limiter = get_global_rate_limiter()
+        if global_rate_limiter is None:
+            global_rate_limiter = TokenBucketRateLimiter(requests_per_minute=requests_per_minute)
+            set_global_rate_limiter(global_rate_limiter)
+
+        self._rate_limiter = global_rate_limiter
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        """Send *request* after acquiring a rate-limit token asynchronously."""
+        await self._rate_limiter.async_acquire(tokens=1.0)
+        response = await self._transport.handle_async_request(request)
+        return response
+
+    async def aclose(self) -> None:
+        """Close the underlying async transport."""
+        await self._transport.aclose()
 
 
 class EmbeddingsError(Exception):
