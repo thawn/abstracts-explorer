@@ -106,3 +106,6 @@ coverage/
 # Ignore all webfonts
 # src/abstracts_explorer/web_ui/static/webfonts/
 
+# Opencode
+opencode.json
+
