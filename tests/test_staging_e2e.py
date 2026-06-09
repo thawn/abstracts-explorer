@@ -1200,6 +1200,7 @@ class TestParallelChatRequests:
         _requests.post(
             f"{staging_url}/api/chat/reset",
             timeout=5,
+            verify=False,
         )
 
         results = []
@@ -1210,6 +1211,7 @@ class TestParallelChatRequests:
                     f"{staging_url}/api/chat",
                     json={"message": f"What papers are about topic {idx}?", "reset": True},
                     timeout=120,
+                    verify=False,
                 )
                 return resp.status_code, resp.json() if resp.status_code == 200 else None
             except _requests.exceptions.RequestException as e:
