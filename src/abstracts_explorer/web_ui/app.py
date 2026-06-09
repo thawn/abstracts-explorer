@@ -8,6 +8,7 @@ and exploring the abstracts database.
 import os
 import signal
 import sys
+import threading
 import logging
 import json
 from pathlib import Path
@@ -63,7 +64,7 @@ app.wsgi_app = ProxyFix(  # type: ignore[assignment]
 
 # Initialize components (lazy loading)
 embeddings_manager = None
-rag_chat = None
+_rag_chat_local = threading.local()
 
 
 def get_database():
@@ -107,30 +108,41 @@ def get_embeddings_manager():
 
 def get_rag_chat():
     """
-    Get or create RAG chat instance.
+    Get or create thread-local RAG chat instance.
+
+    Each Waitress worker thread gets its own ``RAGChat`` instance so that
+    concurrent requests do not share mutable conversation history or database
+    references.  The underlying rate limiter remains global and shared.
 
     Returns
     -------
     RAGChat
-        RAG chat instance
+        RAG chat instance for the calling thread.
     """
-    global rag_chat
     database = get_database()  # Get database connection first (required)
 
-    if rag_chat is None:
+    if not hasattr(_rag_chat_local, "rag_chat") or _rag_chat_local.rag_chat is None:
         config = get_config()  # Get config lazily
         em = get_embeddings_manager()
-        rag_chat = RAGChat(
+        _rag_chat_local.rag_chat = RAGChat(
             embeddings_manager=em,
             database=database,  # Database is now required
             lm_studio_url=config.llm_backend_url,
             model=config.chat_model,
         )
-    else:
-        # Update database reference for this request
-        rag_chat.database = database
 
-    return rag_chat
+    return _rag_chat_local.rag_chat
+
+
+def _reset_rag_chat_local():
+    """
+    Reset the thread-local RAG chat instance.
+
+    Called by tests to clear cached state between test runs.  Must be called
+    from the thread that holds the ``RAGChat`` instance.
+    """
+    if hasattr(_rag_chat_local, "rag_chat"):
+        _rag_chat_local.rag_chat = None
 
 
 @app.teardown_appcontext
