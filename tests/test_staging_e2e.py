@@ -603,13 +603,13 @@ class TestAuthorSearch:
         """
         browser.get(staging_url)
 
-        _submit_search_query(browser, 'author:"LeCun" world model', settle_seconds=1)
+        _submit_search_query(browser, 'authors:"LeCun" world model', settle_seconds=1)
 
         wait = WebDriverWait(browser, self._WAIT_TIMEOUT)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, self._RESULT_CARD_CSS)))
 
         results = browser.find_elements(By.CSS_SELECTOR, self._RESULT_CARD_CSS)
-        assert len(results) > 0, 'author:"LeCun" world model should return at least one result'
+        assert len(results) > 0, 'authors:"LeCun" world model should return at least one result'
 
         results_text = browser.find_element(By.ID, "search-results").text
         assert "LeCun" in results_text, 'Results for author:"LeCun" world model should display the author name'
