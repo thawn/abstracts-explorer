@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 
+import httpx
+
 from pydantic_ai import Agent, RunContext, Tool
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.openai import OpenAIChatModel
@@ -514,11 +516,21 @@ class RAGChat:
             Configured Pydantic AI agent.
         """
         config = get_config()
+        requests_per_minute = config.requests_per_minute
+
+        # Build rate-limited async HTTP client when RPM > 0.
+        http_client: Optional[httpx.AsyncClient] = None
+        if requests_per_minute > 0:
+            from abstracts_explorer.embeddings import AsyncRateLimitedTransport
+
+            transport = AsyncRateLimitedTransport(httpx.AsyncHTTPTransport(), requests_per_minute=requests_per_minute)
+            http_client = httpx.AsyncClient(transport=transport)
 
         # Create OpenAI-compatible model
         provider = OpenAIProvider(
             base_url=f"{self.lm_studio_url}/v1",
             api_key=config.llm_backend_auth_token or "lm-studio-local",
+            http_client=http_client,
         )
         ai_model = OpenAIChatModel(self.model, provider=provider)
 
