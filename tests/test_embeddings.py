@@ -5,7 +5,7 @@ Tests for the embeddings module.
 import time
 
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 from abstracts_explorer.embeddings import EmbeddingsError, EmbeddingsManager
 from tests.conftest import set_test_db

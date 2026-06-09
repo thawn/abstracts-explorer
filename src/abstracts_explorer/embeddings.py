@@ -7,7 +7,6 @@ embeddings and stores them in ChromaDB for efficient similarity search.
 """
 
 import logging
-import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse

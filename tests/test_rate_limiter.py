@@ -295,7 +295,7 @@ class TestAsyncTokenBucketAcquire:
 class TestAsyncRateLimitedTransport:
     def test_transport_init_creates_global_limiter(self):
         set_global_rate_limiter(None)
-        transport = AsyncRateLimitedTransport(httpx.AsyncHTTPTransport(), requests_per_minute=60)
+        _ = AsyncRateLimitedTransport(httpx.AsyncHTTPTransport(), requests_per_minute=60)
         gl = get_global_rate_limiter()
         assert gl is not None
         assert gl.requests_per_minute == 60
@@ -343,7 +343,7 @@ class TestSyncAsyncSharedLimiter:
         limiter._last_update = time.monotonic()
         set_global_rate_limiter(limiter)
 
-        transport = AsyncRateLimitedTransport(httpx.AsyncHTTPTransport(), requests_per_minute=60)
+        _ = AsyncRateLimitedTransport(httpx.AsyncHTTPTransport(), requests_per_minute=60)
 
         async def acquire_all():
             for _ in range(25):
