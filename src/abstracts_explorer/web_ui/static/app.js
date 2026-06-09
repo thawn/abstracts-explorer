@@ -82,6 +82,40 @@ function initializeApp() {
 }
 
 /**
+ * Toggle mobile navigation menu
+ */
+function toggleMobileMenu() {
+    const controls = document.getElementById('header-controls');
+    const btn = document.getElementById('mobile-menu-btn');
+    if (!controls) return;
+
+    const isHidden = controls.classList.contains('hidden');
+    if (isHidden) {
+        controls.classList.remove('hidden');
+        controls.classList.add('flex');
+        if (btn) {
+            btn.setAttribute('aria-expanded', 'true');
+            const icon = btn.querySelector('i');
+            if (icon) {
+                icon.classList.remove('fa-bars');
+                icon.classList.add('fa-times');
+            }
+        }
+    } else {
+        controls.classList.remove('flex');
+        controls.classList.add('hidden');
+        if (btn) {
+            btn.setAttribute('aria-expanded', 'false');
+            const icon = btn.querySelector('i');
+            if (icon) {
+                icon.classList.remove('fa-times');
+                icon.classList.add('fa-bars');
+            }
+        }
+    }
+}
+
+/**
  * Setup modal event listeners
  */
 function setupModalEventListeners() {
@@ -197,6 +231,9 @@ function attachToWindow() {
     window.showPaperDetails = showPaperDetails;
     window.setPaperPriority = setPaperPriority;
     window.updateInterestingPapersCount = updateInterestingPapersCount;
+
+    // Mobile menu
+    window.toggleMobileMenu = toggleMobileMenu;
 }
 
 // Initialize when DOM is ready
