@@ -744,7 +744,7 @@ def _format_search_papers_result(data: Dict[str, Any]) -> str:
         lines.append(f"Filtered by years: {years_filter}")
     lines.append(f"Found {len(papers)} papers:\n")
 
-    for i, paper in enumerate(papers[:5], 1):  # Top 5 papers
+    for i, paper in enumerate(papers, 1):
         title = paper.get("title", "Unknown")
         year = paper.get("year", "")
         lines.append(f"{i}. {title} ({year})")

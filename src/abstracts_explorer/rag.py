@@ -63,6 +63,7 @@ class RAGDeps:
     tool_results: List[Dict[str, Any]] = field(default_factory=list)
     conferences: List[str] = field(default_factory=list)
     years: List[int] = field(default_factory=list)
+    n_results: int = 5
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +78,7 @@ class RAGDeps:
 def _tool_search_papers(
     ctx: RunContext[RAGDeps],
     topic_keywords: str,
-    n_results: int = 5,
+    n_results: Optional[int] = None,
     years: Optional[List[int]] = None,
     conference: Optional[str] = None,
 ) -> str:
@@ -453,6 +454,9 @@ class RAGChat:
             "Use the available tools to search for papers, analyze topics, and understand trends. "
             "Present the information in a clear, easy-to-understand format. "
             f"Today's date is {datetime.now().strftime('%Y-%m-%d')}. "
+            "When the user requests a specific number of papers, pass that number as n_results "
+            "when calling search papers. Re-run search papers when the user asks for more results "
+            "on the same topic rather than reusing a previous truncated list. "
             "When referencing specific papers, cite them using local links: "
             "<a href='#paper-1'>Paper-1</a>, <a href='#paper-2'>Paper-2</a>, etc."
         )
@@ -622,6 +626,7 @@ class RAGChat:
             deps = RAGDeps(
                 conferences=conferences or [],
                 years=years or [],
+                n_results=n_results,
             )
 
             # Model settings
