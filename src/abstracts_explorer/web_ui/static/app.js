@@ -172,6 +172,29 @@ function setupModalEventListeners() {
             localStorage.setItem('searchDistanceThreshold', this.value);
         });
     }
+
+    const recommendationsToggle = document.getElementById('recommendations-toggle');
+    const explainToggle = document.getElementById('recommendations-explain-toggle');
+    if (recommendationsToggle) {
+        recommendationsToggle.checked = localStorage.getItem('useGraphRecommendations') === 'true';
+        recommendationsToggle.addEventListener('change', function () {
+            localStorage.setItem('useGraphRecommendations', String(this.checked));
+            if (explainToggle) {
+                explainToggle.disabled = !this.checked;
+                if (!this.checked) {
+                    explainToggle.checked = false;
+                    localStorage.setItem('explainGraphRecommendations', 'false');
+                }
+            }
+        });
+    }
+    if (explainToggle) {
+        explainToggle.checked = localStorage.getItem('explainGraphRecommendations') === 'true';
+        explainToggle.disabled = recommendationsToggle ? !recommendationsToggle.checked : true;
+        explainToggle.addEventListener('change', function () {
+            localStorage.setItem('explainGraphRecommendations', String(this.checked));
+        });
+    }
 }
 
 /**
