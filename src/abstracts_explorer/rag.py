@@ -13,8 +13,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 
+import httpx
+
 from pydantic_ai import Agent, RunContext, Tool
-from pydantic_ai.messages import ModelMessage
+from pydantic_ai.messages import ModelMessage, ModelRequest
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.settings import ModelSettings
@@ -514,11 +516,21 @@ class RAGChat:
             Configured Pydantic AI agent.
         """
         config = get_config()
+        requests_per_minute = config.requests_per_minute
+
+        # Build rate-limited async HTTP client when RPM > 0.
+        http_client: Optional[httpx.AsyncClient] = None
+        if requests_per_minute > 0:
+            from abstracts_explorer.embeddings import AsyncRateLimitedTransport
+
+            transport = AsyncRateLimitedTransport(httpx.AsyncHTTPTransport(), requests_per_minute=requests_per_minute)
+            http_client = httpx.AsyncClient(transport=transport)
 
         # Create OpenAI-compatible model
         provider = OpenAIProvider(
             base_url=f"{self.lm_studio_url}/v1",
             api_key=config.llm_backend_auth_token or "lm-studio-local",
+            http_client=http_client,
         )
         ai_model = OpenAIChatModel(self.model, provider=provider)
 
@@ -618,26 +630,31 @@ class RAGChat:
                 max_tokens=1000,
             )
 
-            # Prepare run kwargs
-            run_kwargs: Dict[str, Any] = {
-                "deps": deps,
-                "model_settings": settings,
-            }
-
-            # Pass message history for conversation context
-            if self._message_history:
-                run_kwargs["message_history"] = self._message_history
-
-            # Set per-run instructions: use explicit system_prompt if provided,
-            # otherwise build context-aware instructions with conference information
+            # Build instructions first so we can update message history
             if system_prompt is not None:
-                run_kwargs["instructions"] = system_prompt
+                instructions = system_prompt
             else:
-                run_kwargs["instructions"] = self._build_instructions(
+                instructions = self._build_instructions(
                     conferences=conferences,
                     years=years,
                     available_conferences=available_conferences,
                 )
+
+            # Prepare run kwargs
+            run_kwargs: Dict[str, Any] = {
+                "deps": deps,
+                "model_settings": settings,
+                "instructions": instructions,
+            }
+
+            # Pass message history for conversation context, updating stale
+            # system prompt in the first request to reflect current conference.
+            # Pydantic AI doesn't re-add system prompts on continuation turns,
+            # so the first ModelRequest in history may contain outdated
+            # conference context from a prior turn.
+            if self._message_history:
+                self._update_message_history_instructions(instructions)
+                run_kwargs["message_history"] = self._message_history
 
             # Run the agent
             result = self.agent.run_sync(question, **run_kwargs)
@@ -711,7 +728,10 @@ class RAGChat:
                     "model_settings": settings,
                 }
                 if self._message_history:
+                    base_instructions = self._build_base_instructions()
+                    self._update_message_history_instructions(base_instructions)
                     run_kwargs["message_history"] = self._message_history
+                    run_kwargs["instructions"] = base_instructions
 
                 result = self.agent.run_sync(message, **run_kwargs)
                 self._message_history = result.all_messages()
@@ -723,6 +743,21 @@ class RAGChat:
                 }
             except Exception as e:
                 raise RAGError(f"Chat failed: {str(e)}") from e
+
+    def _update_message_history_instructions(self, instructions: str) -> None:
+        """
+        Update the instructions on the first ModelRequest in message history.
+
+        Pydantic AI does not re-add system prompts on continuation turns.
+        When the user changes the conference in the UI, the instructions need to
+        reflect the new conference, but the first ModelRequest in
+        ``_message_history`` still holds the stale system prompt from the prior
+        conference.  This method walks the history and updates the ``instructions``
+        field on every ModelRequest so the LLM sees consistent context.
+        """
+        for msg in self._message_history:
+            if isinstance(msg, ModelRequest):
+                msg.instructions = instructions
 
     def reset_conversation(self):
         """

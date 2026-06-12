@@ -357,7 +357,7 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     # CRITICAL: Set this BEFORE starting the server to avoid race conditions
     # This prevents get_embeddings_manager() from creating a new instance
     app_module.embeddings_manager = em
-    app_module.rag_chat = None
+    app_module._reset_rag_chat_local()
 
     # Pre-populate the database with cached clustering results so that MCP
     # tools (get_conference_topics, get_cluster_visualization) return instantly
@@ -419,7 +419,7 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
 
     # Reset the app module state
     app_module.embeddings_manager = None
-    app_module.rag_chat = None
+    app_module._reset_rag_chat_local()
     app_module.get_database = original_get_database
 
     # Restore original environment variables
@@ -2421,6 +2421,254 @@ class TestClusteringTabE2E:
         except TimeoutException:
             # If plot takes too long to load, skip this test
             pytest.skip("Clustering plot failed to load within timeout")
+
+
+# ---------------------------------------------------------------------------
+# Mobile viewport fixture
+# ---------------------------------------------------------------------------
+
+MOBILE_WIDTH = 375
+MOBILE_HEIGHT = 812  # iPhone X dimensions
+
+
+@pytest.fixture
+def mobile_browser():
+    """
+    Create a Selenium WebDriver instance sized to a typical mobile phone screen.
+
+    Uses iPhone X dimensions (375×812 px) to exercise narrow-screen behaviour.
+
+    Yields
+    ------
+    webdriver.Chrome or webdriver.Firefox
+        WebDriver instance sized to mobile dimensions.
+
+    Notes
+    -----
+    Automatically quits the browser after the test.
+    Skips the test if no browser is available.
+    """
+    driver = create_webdriver()
+    driver.set_window_size(MOBILE_WIDTH, MOBILE_HEIGHT)
+    yield driver
+    driver.quit()
+
+
+@pytest.mark.e2e
+@pytest.mark.slow
+class TestMobileUIE2E:
+    """End-to-end tests that verify the web UI works on narrow phone screens."""
+
+    def test_hamburger_button_visible_on_mobile(self, web_server, mobile_browser):
+        """
+        Test that the hamburger menu button is visible on a narrow phone screen.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        mobile_browser : webdriver.Chrome or webdriver.Firefox
+            WebDriver instance sized to mobile dimensions
+        """
+        base_url, _ = web_server
+        mobile_browser.get(base_url)
+
+        hamburger = mobile_browser.find_element(By.ID, "mobile-menu-btn")
+        assert hamburger.is_displayed(), "Hamburger button should be visible on mobile"
+
+    def test_header_controls_collapsed_by_default_on_mobile(self, web_server, mobile_browser):
+        """
+        Test that the header controls are hidden by default on a narrow screen.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        mobile_browser : webdriver.Chrome or webdriver.Firefox
+            WebDriver instance sized to mobile dimensions
+        """
+        base_url, _ = web_server
+        mobile_browser.get(base_url)
+
+        header_controls = mobile_browser.find_element(By.ID, "header-controls")
+        assert not header_controls.is_displayed(), "Header controls should be collapsed by default on mobile"
+
+    def test_hamburger_opens_header_controls(self, web_server, mobile_browser):
+        """
+        Test that clicking the hamburger button reveals the header controls.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        mobile_browser : webdriver.Chrome or webdriver.Firefox
+            WebDriver instance sized to mobile dimensions
+        """
+        base_url, _ = web_server
+        mobile_browser.get(base_url)
+
+        hamburger = mobile_browser.find_element(By.ID, "mobile-menu-btn")
+        header_controls = mobile_browser.find_element(By.ID, "header-controls")
+
+        # Controls are hidden before clicking
+        assert not header_controls.is_displayed()
+
+        # Click hamburger → controls should appear
+        hamburger.click()
+        wait = WebDriverWait(mobile_browser, 5)
+        wait.until(EC.visibility_of_element_located((By.ID, "header-controls")))
+
+        assert header_controls.is_displayed(), "Header controls should be visible after opening menu"
+        assert mobile_browser.find_element(By.ID, "conference-selector").is_displayed()
+        assert mobile_browser.find_element(By.ID, "year-selector").is_displayed()
+
+    def test_hamburger_closes_header_controls(self, web_server, mobile_browser):
+        """
+        Test that clicking the hamburger button again collapses the header controls.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        mobile_browser : webdriver.Chrome or webdriver.Firefox
+            WebDriver instance sized to mobile dimensions
+        """
+        base_url, _ = web_server
+        mobile_browser.get(base_url)
+
+        hamburger = mobile_browser.find_element(By.ID, "mobile-menu-btn")
+        wait = WebDriverWait(mobile_browser, 5)
+
+        # Open
+        hamburger.click()
+        wait.until(EC.visibility_of_element_located((By.ID, "header-controls")))
+
+        # Close
+        hamburger.click()
+        wait.until(EC.invisibility_of_element_located((By.ID, "header-controls")))
+
+        header_controls = mobile_browser.find_element(By.ID, "header-controls")
+        assert not header_controls.is_displayed(), "Header controls should collapse after closing menu"
+
+    def test_tabs_fit_within_viewport_on_mobile(self, web_server, mobile_browser):
+        """
+        Test that the tab navigation bar does not overflow the screen width.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        mobile_browser : webdriver.Chrome or webdriver.Firefox
+            WebDriver instance sized to mobile dimensions
+        """
+        base_url, _ = web_server
+        mobile_browser.get(base_url)
+
+        viewport_width = mobile_browser.execute_script("return window.innerWidth")
+
+        # Check that the overall body/page doesn't overflow horizontally
+        scroll_width = mobile_browser.execute_script("return document.body.scrollWidth")
+        assert (
+            scroll_width <= viewport_width + 1
+        ), f"Page overflows viewport: scrollWidth={scroll_width} > viewportWidth={viewport_width}"
+
+        # All four tab buttons should be present and fit within the viewport
+        for tab_id in ["tab-search", "tab-chat", "tab-interesting", "tab-clusters"]:
+            tab = mobile_browser.find_element(By.ID, tab_id)
+            assert tab is not None, f"Tab {tab_id} should be in the DOM"
+            tab_rect = mobile_browser.execute_script("return arguments[0].getBoundingClientRect()", tab)
+            assert (
+                tab_rect["right"] <= viewport_width + 1
+            ), f"Tab {tab_id} overflows viewport: right={tab_rect['right']} > viewportWidth={viewport_width}"
+
+    def test_tab_buttons_are_clickable_on_mobile(self, web_server, mobile_browser):
+        """
+        Test that tab buttons can be clicked on a narrow screen.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        mobile_browser : webdriver.Chrome or webdriver.Firefox
+            WebDriver instance sized to mobile dimensions
+        """
+        base_url, _ = web_server
+        mobile_browser.get(base_url)
+
+        # Click each tab and verify the corresponding content becomes visible
+        wait = WebDriverWait(mobile_browser, 5)
+
+        chat_tab_btn = mobile_browser.find_element(By.ID, "tab-chat")
+        chat_tab_btn.click()
+        wait.until(EC.visibility_of_element_located((By.ID, "chat-tab")))
+        assert mobile_browser.find_element(By.ID, "chat-tab").is_displayed()
+
+        search_tab_btn = mobile_browser.find_element(By.ID, "tab-search")
+        search_tab_btn.click()
+        wait.until(EC.visibility_of_element_located((By.ID, "search-tab")))
+        assert mobile_browser.find_element(By.ID, "search-tab").is_displayed()
+
+    def test_search_works_on_mobile(self, web_server, mobile_browser):
+        """
+        Test that keyword search returns results on a narrow phone screen.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        mobile_browser : webdriver.Chrome or webdriver.Firefox
+            WebDriver instance sized to mobile dimensions
+        """
+        base_url, _ = web_server
+        mobile_browser.get(base_url)
+
+        search_input = mobile_browser.find_element(By.ID, "search-input")
+        search_input.send_keys("attention")
+        search_input.send_keys(Keys.RETURN)
+
+        wait = WebDriverWait(mobile_browser, 10)
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")))
+
+        results = mobile_browser.find_elements(By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")
+        assert len(results) > 0, "Search should return results on mobile"
+
+    def test_hamburger_button_hidden_on_desktop(self, web_server, browser):
+        """
+        Test that the hamburger button is not visible on a desktop-sized screen.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        browser : webdriver.Chrome or webdriver.Firefox
+            Standard (desktop) WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.set_window_size(1280, 800)
+        browser.get(base_url)
+
+        hamburger = browser.find_element(By.ID, "mobile-menu-btn")
+        assert not hamburger.is_displayed(), "Hamburger button should be hidden on desktop"
+
+    def test_header_controls_visible_on_desktop(self, web_server, browser):
+        """
+        Test that the header controls are always visible on a desktop-sized screen.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        browser : webdriver.Chrome or webdriver.Firefox
+            Standard (desktop) WebDriver instance
+        """
+        base_url, _ = web_server
+        browser.set_window_size(1280, 800)
+        browser.get(base_url)
+
+        header_controls = browser.find_element(By.ID, "header-controls")
+        assert header_controls.is_displayed(), "Header controls should always be visible on desktop"
+        assert browser.find_element(By.ID, "conference-selector").is_displayed()
+        assert browser.find_element(By.ID, "year-selector").is_displayed()
 
 
 if __name__ == "__main__":

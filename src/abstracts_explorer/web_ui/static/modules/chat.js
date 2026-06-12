@@ -388,7 +388,8 @@ export async function resetChat() {
 
         const messagesDiv = document.getElementById('chat-messages');
         messagesDiv.innerHTML = '';
-        addChatMessage('Conversation reset. How can I help you explore NeurIPS abstracts?', 'assistant');
+        const conf = getSelectedConference() || 'conference';
+        addChatMessage(`Conversation reset. How can I help you explore ${conf} abstracts?`, 'assistant');
 
         // Re-show the MCP tools hint
         _hasUserSentMessage = false;

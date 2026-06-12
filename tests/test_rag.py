@@ -40,7 +40,7 @@ def mock_database():
     # Set up mock to return papers based on UID (string)
     def mock_query_side_effect(sql, params):
         paper_uid = params[0] if params else None
-        papers_map = {
+        papers_map: dict[str, dict] = {
             "1": {
                 "uid": "1",
                 "title": "Attention Is All You Need",
@@ -69,7 +69,7 @@ def mock_database():
                 "conference": "NeurIPS",
             },
         }
-        paper = papers_map.get(paper_uid)
+        paper = papers_map.get(paper_uid) if isinstance(paper_uid, str) else None
         return [paper] if paper else []
 
     mock_db.query.side_effect = mock_query_side_effect
@@ -1671,3 +1671,113 @@ class TestRAGToolGetPaperDetails:
         chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=False)
         tool_names = list(chat.agent._function_toolset.tools.keys())
         assert "get_paper_details" in tool_names
+
+
+class TestParallelRAGRateLimiting:
+    """
+    Integration tests for rate limiting under concurrent RAG queries.
+
+    These tests fire multiple RAG queries from multiple threads simultaneously
+    to verify the global rate limiter enforces the configured limit across all
+    concurrent requests. Requires a running LM Studio instance.
+    """
+
+    @requires_lm_studio
+    def test_parallel_rag_queries_enforce_rate_limit(self, tmp_path):
+        """
+        Multiple concurrent RAG queries from different threads should be rate-limited.
+
+        Fires 6 queries from 6 threads simultaneously. With a low token cap,
+        queries should spread over time due to rate limiting.
+        """
+        import threading
+        import time as _time
+
+        from abstracts_explorer.embeddings import EmbeddingsManager
+        from abstracts_explorer.rate_limiter import (
+            TokenBucketRateLimiter,
+            set_global_rate_limiter,
+        )
+
+        config = get_config()
+
+        # Create database with test data (matches existing integration test pattern)
+        db_path = tmp_path / "test.db"
+        db = create_test_db_with_paper(
+            db_path,
+            {
+                "uid": "1",
+                "title": "Attention Mechanisms",
+                "abstract": "This paper discusses attention mechanisms in neural networks.",
+                "authors": "Test Author",
+                "session": "Test Session",
+                "keywords": "attention, neural networks",
+                "year": 2025,
+                "conference": "NeurIPS",
+            },
+        )
+
+        papers = db.query("SELECT uid FROM papers LIMIT 1")
+        generated_uid = papers[0]["uid"]
+
+        chroma_path = tmp_path / "chroma_parallel"
+        set_test_embedding_db(chroma_path)
+        em = EmbeddingsManager()
+        em.connect()
+        em.create_collection(reset=True)
+        em.add_paper(
+            {
+                "uid": generated_uid,
+                "abstract": "This paper discusses attention mechanisms in neural networks.",
+                "title": "Attention Mechanisms",
+                "authors": "Test Author",
+                "session": "Test Session",
+                "keywords": "attention, neural networks",
+            }
+        )
+
+        # Set up global rate limiter with low tokens to force spreading
+        limiter = TokenBucketRateLimiter(requests_per_minute=12)
+        limiter._tokens = 2.0
+        limiter._last_update = _time.monotonic()
+        set_global_rate_limiter(limiter)
+
+        # Create RAGChat - rate limiting kicks in via _build_agent
+        chat = RAGChat(
+            em,
+            db,
+            lm_studio_url=config.llm_backend_url,
+            model=config.chat_model,
+        )
+
+        timestamps = []
+        errors = []
+        lock = threading.Lock()
+
+        def query_thread(idx):
+            try:
+                chat.query(f"What is paper {idx} about?")
+                with lock:
+                    timestamps.append(_time.monotonic())
+            except Exception as e:
+                with lock:
+                    errors.append(str(e))
+
+        threads = [threading.Thread(target=query_thread, args=(i,)) for i in range(6)]
+
+        start = _time.monotonic()
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=120)
+        elapsed = _time.monotonic() - start
+
+        em.close()
+        db.close()
+
+        print(f"\nParallel RAG: {len(timestamps)} successful, {len(errors)} errors, elapsed={elapsed:.2f}s")
+        if errors:
+            print(f"Errors: {errors}")
+
+        assert len(timestamps) > 0, "At least some queries should succeed"
+        assert elapsed >= 2.0, f"Queries should be rate-limited. Got {elapsed:.2f}s"
