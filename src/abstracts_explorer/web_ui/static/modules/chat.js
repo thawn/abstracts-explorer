@@ -10,6 +10,7 @@ import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom
 import { renderEmptyState } from './utils/ui-utils.js';
 import { setCurrentSearchTerm } from './state.js';
 import { formatPaperCard } from './paper-card.js';
+import { renderMarkdownWithLatex } from './utils/markdown-utils.js';
 
 /** Whether the user has sent at least one chat message in this session. */
 let _hasUserSentMessage = false;
@@ -307,7 +308,7 @@ export function addChatMessage(text, role, isLoading = false) {
     // Render markdown for assistant messages, escape HTML for user messages
     const contentHtml = isUser
         ? `<p class="whitespace-pre-wrap">${escapeHtml(text)}</p>`
-        : `<div class="markdown-content">${marked.parse(text)}</div>`;
+        : `<div class="markdown-content">${renderMarkdownWithLatex(text)}</div>`;
 
     const messageDiv = document.createElement('div');
     messageDiv.id = messageId;

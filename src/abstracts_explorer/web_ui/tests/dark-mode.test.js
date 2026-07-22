@@ -97,7 +97,8 @@ jest.unstable_mockModule('../static/modules/paper-card.js', () => ({
 }));
 
 jest.unstable_mockModule('../static/modules/utils/markdown-utils.js', () => ({
-    renderInlineMarkdownWithLatex: jest.fn((s) => s)
+    renderInlineMarkdownWithLatex: jest.fn((s) => s),
+    renderMarkdownWithLatex: jest.fn((s) => s)
 }));
 
 jest.unstable_mockModule('../static/modules/state.js', () => ({

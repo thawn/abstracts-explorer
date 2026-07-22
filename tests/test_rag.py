@@ -301,6 +301,13 @@ class TestRAGChatInstructions:
         assert "conference data" in instructions
         assert "Today's date" in instructions
 
+    def test_build_base_instructions_uses_markdown_citation_links(self, mock_embeddings_manager, mock_database):
+        """Citations must use markdown links, not raw HTML anchors (XSS hardening)."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        instructions = chat._build_base_instructions()
+        assert "[Paper-1](#paper-1)" in instructions
+        assert "<a href" not in instructions
+
     def test_build_instructions_with_conference_and_year(self, mock_embeddings_manager, mock_database):
         """Test instructions include selected conference and year."""
         chat = RAGChat(mock_embeddings_manager, mock_database)

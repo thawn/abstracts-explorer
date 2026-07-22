@@ -23,6 +23,9 @@
     <!-- Marked-KaTeX extension for LaTeX in Markdown -->
     <script src="{{ url_for('static', filename='vendor/marked-katex-extension.min.js') }}"></script>
 
+    <!-- DOMPurify for sanitizing rendered markdown (XSS protection) -->
+    <script src="{{ url_for('static', filename='vendor/purify.min.js') }}"></script>
+
     <!-- Plotly for cluster visualization -->
     <script src="{{ url_for('static', filename='vendor/plotly.min.js') }}"></script>
 
