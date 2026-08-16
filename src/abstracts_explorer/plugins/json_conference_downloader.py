@@ -32,6 +32,9 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
     - _start_year: First supported year (used to compute supported_years dynamically)
     - conference_name: Full conference name (e.g., "NeurIPS", "ICLR")
     - get_url(year): Method to construct the URL for a specific year
+
+    EventHosts-style URLs ending in ``-orals-posters.json`` automatically use the
+    corresponding ``-abstracts.json`` file when records have no inline abstract.
     """
 
     plugin_name = "json_conference_base"
@@ -51,6 +54,87 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
         """
         self.timeout = timeout
         self.verify_ssl = verify_ssl
+
+    def get_companion_abstracts_url(self, year: int) -> Optional[str]:
+        """
+        Get the companion abstract URL for an EventHosts paper URL.
+
+        Subclasses with a different companion URL convention may override this
+        method. Returning ``None`` disables companion abstract retrieval.
+
+        Parameters
+        ----------
+        year : int
+            Conference year
+
+        Returns
+        -------
+        str or None
+            Companion abstract URL, or ``None`` when the main URL does not use
+            the EventHosts naming convention
+        """
+        url = self.get_url(year)
+        suffix = "-orals-posters.json"
+        if not url.endswith(suffix):
+            return None
+        return f"{url.removesuffix(suffix)}-abstracts.json"
+
+    def _merge_companion_abstracts(
+        self,
+        records: List[Dict[str, Any]],
+        year: int,
+        timeout: int,
+        verify_ssl: bool,
+    ) -> None:
+        """Add missing abstracts from an EventHosts companion JSON object."""
+        missing_records = [
+            record
+            for record in records
+            if (not isinstance(record.get("abstract"), str) or not record["abstract"].strip())
+        ]
+        if not missing_records:
+            return
+
+        url = self.get_companion_abstracts_url(year)
+        if url is None:
+            return
+
+        try:
+            response = requests.get(url, timeout=timeout, verify=verify_ssl)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as exc:
+            logger.warning("Failed to download companion abstracts from %s: %s", url, exc)
+            return
+
+        try:
+            abstracts = response.json()
+        except json.JSONDecodeError as exc:
+            logger.warning("Invalid JSON in companion abstracts response from %s: %s", url, exc)
+            return
+
+        if not isinstance(abstracts, dict):
+            logger.warning(
+                "Invalid companion abstracts response from %s: expected an object",
+                url,
+            )
+            return
+
+        matched = 0
+        for record in missing_records:
+            paper_id = record.get("id")
+            abstract = abstracts.get(str(paper_id)) if paper_id is not None else None
+            if isinstance(abstract, str) and abstract.strip():
+                record["abstract"] = abstract
+                matched += 1
+
+        unmatched = len(missing_records) - matched
+        if unmatched:
+            logger.warning(
+                "No companion abstract found for %d of %d records from %s",
+                unmatched,
+                len(missing_records),
+                url,
+            )
 
     def download(
         self,
@@ -128,7 +212,11 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
 
         # Convert papers to lightweight schema
         papers_data = []
+        source_record_count = 0
         if "results" in data and isinstance(data["results"], list):
+            source_record_count = len(data["results"])
+            self._merge_companion_abstracts(data["results"], year, timeout, verify_ssl)
+
             # Add year and conference fields before conversion
             for paper in data["results"]:
                 paper["year"] = year
@@ -139,6 +227,13 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
 
         # Convert to LightweightPaper objects (skip papers that fail validation)
         papers = validate_lightweight_papers(papers_data)
+        if source_record_count and not papers:
+            logger.warning(
+                "No valid papers produced from %d source records for %s %d",
+                source_record_count,
+                self.conference_name,
+                year,
+            )
 
         # Save to file if path provided
         if output_path:
