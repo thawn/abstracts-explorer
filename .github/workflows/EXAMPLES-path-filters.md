@@ -179,7 +179,7 @@ If you need to run all workflows regardless of paths:
 
 ## Scheduled Runs & Tags
 
-- **Scheduled runs** (e.g., slow-tests daily cron): Always run regardless of paths
+- **Scheduled runs**: Always run regardless of paths (no workflows currently use scheduled triggers)
 - **Tag pushes** (e.g., v1.0.0): Docker workflow always runs regardless of paths
 - **Manual dispatch**: Always runs regardless of paths
 
