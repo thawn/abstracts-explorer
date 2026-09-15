@@ -8,10 +8,9 @@ Plugin for downloading papers from the official IEEE VIS conference.
 import json
 import logging
 import requests
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from abstracts_explorer.plugin import sanitize_author_names, LightweightPaper, validate_lightweight_papers
+from abstracts_explorer.plugin import sanitize_author_names, LightweightPaper
 from pydantic import ValidationError
 from abstracts_explorer.plugins.json_conference_downloader import JSONConferenceDownloaderPlugin
 
@@ -179,17 +178,9 @@ class IEEEVISDownloaderPlugin(JSONConferenceDownloaderPlugin):
 
         # Load from local file if it exists and force_download is False
         if output_path and not force_download:
-            output_file = Path(output_path)
-            if output_file.exists():
-                logger.info(f"Loading existing data from: {output_file}")
-                try:
-                    with open(output_file, "r", encoding="utf-8") as f:
-                        cached_data = json.load(f)
-                    cached_papers = validate_lightweight_papers(cached_data)
-                    logger.info(f"Successfully loaded {len(cached_papers)} papers from local file")
-                    return cached_papers
-                except (json.JSONDecodeError, IOError, Exception) as e:
-                    logger.warning(f"Failed to load local file: {str(e)}. Downloading from URL...")
+            cached_papers = self._load_papers_json(output_path, "URL")
+            if cached_papers is not None:
+                return cached_papers
 
         logger.info(f"Downloading {self.conference_name} {year} data...")
 
@@ -217,14 +208,8 @@ class IEEEVISDownloaderPlugin(JSONConferenceDownloaderPlugin):
             if paper is not None:
                 papers.append(paper)
 
-        # Save to file if path provided
-        if output_path:
-            output_file = Path(output_path)
-            output_file.parent.mkdir(parents=True, exist_ok=True)
-            papers_json = [paper.model_dump() for paper in papers]
-            with open(output_file, "w", encoding="utf-8") as f:
-                json.dump(papers_json, f, indent=2, ensure_ascii=False)
-            logger.info(f"Saved JSON data to: {output_file}")
+        # Save to file only if path provided and papers were found
+        self._save_papers_json(papers, output_path, self.conference_name)
 
         logger.info(f"Successfully downloaded {len(papers)} papers from {self.conference_name} {year}")
 
