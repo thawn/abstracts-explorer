@@ -917,14 +917,20 @@ class ClusteringManager:
 
         return hierarchical_labels
 
-    def _llm_chat_label(self, system_prompt: str, user_prompt: str, max_tokens: int = 60) -> str:
+    def _llm_chat_label(self, system_prompt: str, user_prompt: str, max_tokens: int = 200) -> str:
         """
         Shared code path for one-shot LLM cluster-label generation.
 
-        Uses ``config.cluster_label_model`` (default ``alias-fast``), a
-        non-thinking instruction model, so a short 3-5 word label fits
-        comfortably within the token budget and ``message.content`` is
-        reliably populated.  Callers are expected to wrap this in a
+        Uses ``config.cluster_label_model`` (default ``alias-fast``) for the
+        call.  The back-end chat models are *reasoning* models that emit a
+        hidden reasoning block before the short 3-5 word label.  We pass
+        ``reasoning_effort="low"`` to suppress that block where the back-end
+        supports it (GPT-OSS-120B does; Qwen3.8 ignores the param and always
+        reasons ~140-150 tokens).  ``max_tokens`` therefore stays at 200 as a
+        safety net: with ``reasoning_effort="low"`` only ~10-20 tokens are
+        needed, but the Qwen fallback path still needs the full budget
+        (default 200) or ``message.content`` comes back ``None`` with
+        ``finish_reason="length"``.  Callers are expected to wrap this in a
         try/except and provide a fallback label.
 
         Parameters
@@ -934,7 +940,10 @@ class ClusteringManager:
         user_prompt : str
             User message for the LLM.
         max_tokens : int
-            Maximum tokens to generate (default 60).
+            Maximum tokens to generate (default 200).  With
+            ``reasoning_effort="low"`` only a handful of tokens are used;
+            the budget exists to absorb reasons from models where the param
+            is a no-op.
 
         Returns
         -------
@@ -964,6 +973,11 @@ class ClusteringManager:
             ],
             temperature=0.3,
             max_tokens=max_tokens,
+            # Suppress the hidden reasoning block on GPT-OSS-120B so the
+            # ~5-token label fits comfortably.  Qwen3.8 ignores this param
+            # (its reasoning is controlled by enable_thinking, which the
+            # deployment does not honor) and falls back on max_tokens.
+            reasoning_effort="low",
         )
 
         content = response.choices[0].message.content

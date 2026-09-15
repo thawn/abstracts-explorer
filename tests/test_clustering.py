@@ -395,6 +395,61 @@ class TestClusterLabeling:
         # At least one cluster should have the LLM-generated label
         assert any("Machine Learning" in label for label in labels.values())
 
+    def test_llm_chat_label_returns_stripped_label(self, mock_embeddings_manager, mocker):
+        """_llm_chat_label strips whitespace and surrounding quotes."""
+        mock_response = mocker.MagicMock()
+        mock_response.choices = [mocker.MagicMock()]
+        mock_response.choices[0].message.content = "  'Deep Learning'  "
+
+        mock_openai_client = mocker.MagicMock()
+        mock_openai_client.chat.completions.create.return_value = mock_response
+        mock_embeddings_manager.openai_client = mock_openai_client
+
+        cm = ClusteringManager(mock_embeddings_manager)
+        result = cm._llm_chat_label(
+            "system prompt",
+            "user prompt",
+        )
+
+        assert result == "Deep Learning"
+        # The call must use the dedicated label model, not the chat model
+        call_kwargs = mock_openai_client.chat.completions.create.call_args.kwargs
+        from abstracts_explorer.config import get_config
+
+        assert call_kwargs["model"] == get_config().cluster_label_model
+        # Budget must be large enough to absorb reasoning-model overhead
+        assert call_kwargs["max_tokens"] >= 200
+        # Reasoning must be suppressed where the back-end supports it
+        assert call_kwargs["reasoning_effort"] == "low"
+
+    def test_generate_cluster_labels_llm_truncated_content_falls_back(
+        self, mock_embeddings_manager, mock_collection_with_data, mocker
+    ):
+        """A reasoning model truncated at the token budget returns
+        ``content=None`` (finish_reason='length'); each label must then fall
+        back to keyword concatenation instead of crashing the whole run."""
+        mock_response = mocker.MagicMock()
+        mock_response.choices = [mocker.MagicMock()]
+        mock_response.choices[0].message.content = None  # reasoning ate the budget
+
+        mock_openai_client = mocker.MagicMock()
+        mock_openai_client.chat.completions.create.return_value = mock_response
+        mock_embeddings_manager.collection = mock_collection_with_data
+        mock_embeddings_manager.openai_client = mock_openai_client
+
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        cm.cluster(method="kmeans", n_clusters=3, use_reduced=False)
+
+        labels = cm.generate_cluster_labels(use_llm=True)
+
+        assert isinstance(labels, dict)
+        assert len(labels) > 0
+        # No label should be empty or None: the fallback kicked in everywhere
+        for cluster_id, label in labels.items():
+            assert isinstance(label, str)
+            assert len(label) > 0
+
     def test_get_cluster_representative_papers(self, mock_embeddings_manager, mock_collection_with_data):
         """Test finding representative papers for each cluster."""
         mock_embeddings_manager.collection = mock_collection_with_data
