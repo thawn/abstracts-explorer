@@ -12,9 +12,11 @@ The framework consists of:
 - Pydantic models for data validation (LightweightPaper)
 """
 
+import json
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -182,6 +184,68 @@ class DownloaderPlugin(ABC):
             raise ValueError(
                 f"Year {year} not supported by {self.plugin_name}. " f"Supported years: {self.supported_years}"
             )
+
+    def _save_papers_json(
+        self, papers: List["LightweightPaper"], output_path: Optional[str], label: str
+    ) -> None:
+        """
+        Save validated papers to a per-year lightweight JSON file.
+
+        Skips the write entirely when *papers* is empty so a year with no
+        abstracts does not leave a stray ``[]`` file in the data directory.
+
+        Parameters
+        ----------
+        papers : list of LightweightPaper
+            Papers to persist.
+        output_path : str or None
+            Destination path. When ``None``, nothing is written.
+        label : str
+            Conference/source name used only in log messages.
+        """
+        if output_path and papers:
+            output_file = Path(output_path)
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            papers_json = [paper.model_dump() for paper in papers]
+            with open(output_file, "w", encoding="utf-8") as f:
+                json.dump(papers_json, f, indent=2, ensure_ascii=False)
+            logger.info("Saved %d %s papers to %s", len(papers), label, output_path)
+        elif output_path:
+            logger.info("No papers found; skipping save of %s", output_path)
+
+    def _load_papers_json(
+        self, output_path: Optional[str], source_label: str
+    ) -> Optional[List["LightweightPaper"]]:
+        """
+        Load cached lightweight papers from a previously written JSON file.
+
+        Returns ``None`` when there is nothing to load (no path given, file
+        absent, or the file cannot be parsed), signalling the caller to fall
+        through to a fresh download.
+
+        Parameters
+        ----------
+        output_path : str or None
+            Path to an existing lightweight JSON file.
+        source_label : str
+            Where the fresh download comes from, used only in the fallback
+            warning message.
+
+        Returns
+        -------
+        list of LightweightPaper or None
+        """
+        if output_path and Path(output_path).exists():
+            logger.info("Loading existing %s from: %s", source_label, output_path)
+            try:
+                with open(output_path, "r", encoding="utf-8") as f:
+                    cached_data = json.load(f)
+                papers = validate_lightweight_papers(cached_data)
+                logger.info("Successfully loaded %d papers from local file", len(papers))
+                return papers
+            except (json.JSONDecodeError, Exception) as e:
+                logger.warning("Failed to load local file: %s. Downloading from %s...", e, source_label)
+        return None
 
 
 class LightweightDownloaderPlugin(DownloaderPlugin):

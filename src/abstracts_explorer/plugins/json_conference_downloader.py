@@ -7,7 +7,6 @@ This reduces code duplication between similar conference data downloaders.
 """
 
 from typing import Any, Dict, List, Optional
-from pathlib import Path
 import logging
 import json
 import requests
@@ -184,17 +183,9 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
 
         # Check if file already exists and should be loaded
         if output_path and not force_download:
-            output_file = Path(output_path)
-            if output_file.exists():
-                logger.info(f"Loading existing data from: {output_file}")
-                try:
-                    with open(output_file, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    papers = validate_lightweight_papers(data)
-                    logger.info(f"Successfully loaded {len(papers)} papers from local file")
-                    return papers
-                except (json.JSONDecodeError, IOError, Exception) as e:
-                    logger.warning(f"Failed to load local file: {str(e)}. Downloading from URL...")
+            cached_papers = self._load_papers_json(output_path, "URL")
+            if cached_papers is not None:
+                return cached_papers
 
         logger.info(f"Downloading {self.conference_name} {year} data...")
 
@@ -238,15 +229,8 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
                 year,
             )
 
-        # Save to file if path provided
-        if output_path:
-            output_file = Path(output_path)
-            output_file.parent.mkdir(parents=True, exist_ok=True)
-            # Save as list of dicts for readability
-            papers_json = [paper.model_dump() for paper in papers]
-            with open(output_file, "w", encoding="utf-8") as f:
-                json.dump(papers_json, f, indent=2, ensure_ascii=False)
-            logger.info(f"Saved JSON data to: {output_file}")
+        # Save to file only if path provided and papers were found
+        self._save_papers_json(papers, output_path, self.conference_name)
 
         logger.info(f"Successfully downloaded {len(papers)} papers from {self.conference_name} {year}")
 

@@ -168,8 +168,8 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
 
         papers = self._parse_chi_json(input_path, year)
 
-        if output_path:
-            self._save_lightweight_papers(papers, output_path)
+        # Save to file only if path provided and papers were found
+        self._save_papers_json(papers, output_path, "CHI")
 
         return papers
 
@@ -212,20 +212,6 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
         if not isinstance(data, list):
             raise ValueError(f"Expected a list of papers in {path}, got {type(data).__name__}")
         return validate_lightweight_papers(data)
-
-    def _save_lightweight_papers(self, papers: List[LightweightPaper], path: str) -> None:
-        """
-        Save lightweight papers to a JSON file.
-
-        Parameters
-        ----------
-        papers : list of LightweightPaper
-        path : str
-        """
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump([p.model_dump() for p in papers], fh, indent=2, ensure_ascii=False)
-        logger.info("Saved %d CHI papers to %s", len(papers), path)
 
     def _parse_chi_json(self, input_path: str, year: Optional[int]) -> List[LightweightPaper]:
         """
