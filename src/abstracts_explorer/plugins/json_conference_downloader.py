@@ -33,7 +33,10 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
     - conference_name: Full conference name (e.g., "NeurIPS", "ICLR")
     - get_url(year): Method to construct the URL for a specific year
 
-    EventHosts-style URLs ending in ``-orals-posters.json`` automatically use the
+
+    Starting 2026, EventHosts, the CMS behind NeurIPS/ICML/ICLR/CVPR and more
+    split metadata (-orals-posters.json) and abstracts (-abstracts.json) into separate files
+    Therefore, we now automatically download not only the main ``-orals-posters.json``, but also the
     corresponding ``-abstracts.json`` file when records have no inline abstract.
     """
 
