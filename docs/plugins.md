@@ -9,6 +9,18 @@ The plugin system provides two APIs:
 1. **Full Schema API** (`DownloaderPlugin`) - For complex data sources with rich metadata
 2. **Lightweight API** (`LightweightDownloaderPlugin`) - For simple workshops and conferences
 
+### EventHosts JSON sources
+
+Conference plugins backed by EventHosts can extend
+`JSONConferenceDownloaderPlugin`. For main URLs ending in
+`-orals-posters.json`, the downloader automatically retrieves the corresponding
+`-abstracts.json` file when records do not contain inline abstracts. Abstracts are
+joined by paper/event ID before lightweight validation. Existing inline abstracts
+are preserved, and unmatched records are reported and skipped.
+
+Plugins with a different companion URL convention can override
+`get_companion_abstracts_url()`.
+
 ## Available Plugins
 
 ### neurips
