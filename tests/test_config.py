@@ -124,6 +124,7 @@ class TestConfig:
         assert config.max_context_papers == 5
         assert config.chat_temperature == 0.7
         assert config.chat_max_tokens == 2000
+        assert config.cluster_label_model == "alias-fast"
 
     def test_config_from_env_file(self, tmp_path):
         """Test loading configuration from .env file."""
@@ -139,6 +140,7 @@ COLLECTION_NAME=custom_collection
 MAX_CONTEXT_PAPERS=15
 CHAT_TEMPERATURE=0.9
 CHAT_MAX_TOKENS=4000
+CLUSTER_LABEL_MODEL=custom-label-model
 """)
 
         config = Config(env_path=env_file)
@@ -155,6 +157,7 @@ CHAT_MAX_TOKENS=4000
         assert config.max_context_papers == 15
         assert config.chat_temperature == 0.9
         assert config.chat_max_tokens == 4000
+        assert config.cluster_label_model == "custom-label-model"
 
     def test_config_env_vars_override_file(self, tmp_path, monkeypatch):
         """Test that environment variables override .env file."""

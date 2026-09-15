@@ -772,6 +772,7 @@ class TestML4PSPluginYearConference:
     def test_ml4ps_lightweight_format_includes_year_and_conference(self):
         """Test that ML4PS plugin includes year and conference in lightweight format."""
         plugin = ML4PSDownloaderPlugin()
+        expected_year = plugin._current_year
 
         # Create sample papers data
         papers = [
@@ -791,12 +792,13 @@ class TestML4PSPluginYearConference:
         # Verify year and conference are set
         assert len(lightweight_papers) == 1
         paper = lightweight_papers[0]
-        assert paper["year"] == 2025
+        assert paper["year"] == expected_year
         assert paper["conference"] == "ML4PS@Neurips"
 
     def test_ml4ps_lightweight_format_preserves_fields(self):
         """Test that ML4PS plugin preserves all required fields."""
         plugin = ML4PSDownloaderPlugin()
+        expected_year = plugin._current_year
 
         papers = [
             {
@@ -817,9 +819,9 @@ class TestML4PSPluginYearConference:
         assert paper["title"] == "Amazing Paper"
         assert paper["authors"] == ["Alice", "Bob", "Charlie"]
         assert paper["abstract"] == "This is an amazing abstract"
-        assert paper["session"] == "ML4PhysicalSciences 2025 Workshop - Spotlight"
+        assert paper["session"] == f"ML4PhysicalSciences {expected_year} Workshop - Spotlight"
         assert paper["id"] == 42
-        assert paper["year"] == 2025
+        assert paper["year"] == expected_year
         assert paper["conference"] == "ML4PS@Neurips"
         assert paper["award"] == "Best Paper, Outstanding Poster"
 
@@ -895,6 +897,7 @@ class TestDatabaseYearConferenceIntegration:
     def test_ml4ps_year_conference_in_database(self):
         """Test that year and conference are stored in database from ML4PS plugin."""
         plugin = ML4PSDownloaderPlugin()
+        expected_year = plugin._current_year
 
         # Create sample lightweight papers
         papers = [
@@ -938,17 +941,17 @@ class TestDatabaseYearConferenceIntegration:
 
                 # Check first paper
                 assert papers[0]["title"] == "ML4PS Paper 1"
-                assert papers[0]["year"] == 2025
+                assert papers[0]["year"] == expected_year
                 assert papers[0]["conference"] == "ML4PS@Neurips"
 
                 # Check second paper
                 assert papers[1]["title"] == "ML4PS Paper 2"
-                assert papers[1]["year"] == 2025
+                assert papers[1]["year"] == expected_year
                 assert papers[1]["conference"] == "ML4PS@Neurips"
 
                 # Test filtering by year
-                papers_2025 = db.query("SELECT * FROM papers WHERE year = 2025")
-                assert len(papers_2025) == 2
+                papers_for_year = db.query(f"SELECT * FROM papers WHERE year = {expected_year}")
+                assert len(papers_for_year) == 2
 
                 # Test filtering by conference
                 ml4ps_papers = db.query("SELECT * FROM papers WHERE conference = 'ML4PS@Neurips'")

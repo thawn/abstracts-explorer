@@ -917,6 +917,74 @@ class ClusteringManager:
 
         return hierarchical_labels
 
+    def _llm_chat_label(self, system_prompt: str, user_prompt: str, max_tokens: int = 200) -> str:
+        """
+        Shared code path for one-shot LLM cluster-label generation.
+
+        Uses ``config.cluster_label_model`` (default ``alias-fast``) for the
+        call.  The back-end chat models are *reasoning* models that emit a
+        hidden reasoning block before the short 3-5 word label.  We pass
+        ``reasoning_effort="low"`` to suppress that block where the back-end
+        supports it (GPT-OSS-120B does; Qwen3.8 ignores the param and always
+        reasons ~140-150 tokens).  ``max_tokens`` therefore stays at 200 as a
+        safety net: with ``reasoning_effort="low"`` only ~10-20 tokens are
+        needed, but the Qwen fallback path still needs the full budget
+        (default 200) or ``message.content`` comes back ``None`` with
+        ``finish_reason="length"``.  Callers are expected to wrap this in a
+        try/except and provide a fallback label.
+
+        Parameters
+        ----------
+        system_prompt : str
+            System message for the LLM.
+        user_prompt : str
+            User message for the LLM.
+        max_tokens : int
+            Maximum tokens to generate (default 200).  With
+            ``reasoning_effort="low"`` only a handful of tokens are used;
+            the budget exists to absorb reasons from models where the param
+            is a no-op.
+
+        Returns
+        -------
+        str
+            The model's response, stripped of surrounding whitespace and
+            any enclosing single/double quotes.
+
+        Raises
+        ------
+        AttributeError
+            If the OpenAI client is not available on the embeddings manager.
+        ValueError
+            If the model returns no text content.
+        """
+        if not hasattr(self.embeddings_manager, "openai_client"):
+            raise AttributeError("OpenAI client not available in embeddings manager")
+
+        from abstracts_explorer.config import get_config
+
+        config = get_config()
+
+        response = self.embeddings_manager.openai_client.chat.completions.create(
+            model=config.cluster_label_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.3,
+            max_tokens=max_tokens,
+            # Suppress the hidden reasoning block on GPT-OSS-120B so the
+            # ~5-token label fits comfortably.  Qwen3.8 ignores this param
+            # (its reasoning is controlled by enable_thinking, which the
+            # deployment does not honor) and falls back on max_tokens.
+            reasoning_effort="low",
+        )
+
+        content = response.choices[0].message.content
+        if not content:
+            raise ValueError("LLM returned empty content")
+        return content.strip().strip("\"'")
+
     def _generate_parent_label_llm(self, child_labels: List[str], sample_indices: List[int]) -> str:
         """
         Generate a parent cluster label by summarizing child labels using LLM.
@@ -933,10 +1001,6 @@ class ClusteringManager:
         str
             Generated parent label
         """
-        from abstracts_explorer.config import get_config
-
-        config = get_config()
-
         # Get sample titles from the parent cluster
         sample_titles = []
         if self.metadatas and len(sample_indices) > 0:
@@ -963,24 +1027,10 @@ Only respond with the label, nothing else. Do not add formatting."""
         logger.debug(f"Generating LLM parent label with prompt: {prompt}")
 
         try:
-            if not hasattr(self.embeddings_manager, "openai_client"):
-                raise AttributeError("OpenAI client not available")
-
-            response = self.embeddings_manager.openai_client.chat.completions.create(
-                model=config.chat_model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a research paper categorization expert. Generate concise labels that generalize child cluster themes.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.3,
-                max_tokens=50,
+            label = self._llm_chat_label(
+                "You are a research paper categorization expert. Generate concise labels that generalize child cluster themes.",
+                prompt,
             )
-
-            label = response.choices[0].message.content.strip()
-            label = label.strip("\"'")
             logger.debug(f"Generated LLM parent label: {label}")
             return label
 
@@ -1090,10 +1140,6 @@ Only respond with the label, nothing else. Do not add formatting."""
         str
             Generated label
         """
-        from abstracts_explorer.config import get_config
-
-        config = get_config()
-
         keywords_str = ", ".join(keywords[:5])
         prompt = f"""Given these keywords from academic papers: {keywords_str}
 
@@ -1101,22 +1147,10 @@ Generate a concise, descriptive label (3-5 words) that captures the main theme.
 Only respond with the label, nothing else. Do not add formatting."""
 
         try:
-            if not hasattr(self.embeddings_manager, "openai_client"):
-                raise AttributeError("OpenAI client not available")
-
-            response = self.embeddings_manager.openai_client.chat.completions.create(
-                model=config.chat_model,
-                messages=[
-                    {"role": "system", "content": "You are a research paper categorization expert."},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.3,
-                max_tokens=50,
+            return self._llm_chat_label(
+                "You are a research paper categorization expert.",
+                prompt,
             )
-
-            label = response.choices[0].message.content.strip()
-            label = label.strip("\"'")
-            return label
 
         except Exception as e:
             logger.warning(f"LLM API call failed: {e}")
@@ -1381,32 +1415,10 @@ Generate a concise, descriptive label (3-5 words) that captures the main theme o
 Only respond with the label, nothing else. Do not add formatting."""
 
         try:
-            # Check if OpenAI client is available
-            if not hasattr(self.embeddings_manager, "openai_client"):
-                raise AttributeError("OpenAI client not available in embeddings manager")
-
-            # Use the embeddings manager's OpenAI client
-            from abstracts_explorer.config import get_config
-
-            config = get_config()
-
-            response = self.embeddings_manager.openai_client.chat.completions.create(
-                model=config.chat_model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a research paper categorization expert. Generate concise, descriptive labels for clusters of papers.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.3,
-                max_tokens=50,
+            return self._llm_chat_label(
+                "You are a research paper categorization expert. Generate concise, descriptive labels for clusters of papers.",
+                prompt,
             )
-
-            label = response.choices[0].message.content.strip()
-            # Remove quotes if present
-            label = label.strip("\"'")
-            return label
 
         except Exception as e:
             logger.warning(f"LLM API call failed: {e}")

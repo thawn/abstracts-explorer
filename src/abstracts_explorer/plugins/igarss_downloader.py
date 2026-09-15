@@ -16,7 +16,6 @@ import json
 import logging
 import re
 import time
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -27,7 +26,6 @@ from abstracts_explorer.plugin import (
     LightweightDownloaderPlugin,
     LightweightPaper,
     sanitize_author_names,
-    validate_lightweight_papers,
 )
 
 logger = logging.getLogger(__name__)
@@ -398,23 +396,9 @@ class IGARSSDownloaderPlugin(LightweightDownloaderPlugin):
 
         # Load from local file if it exists and force_download is False
         if output_path and not force_download:
-            output_file = Path(output_path)
-            if output_file.exists():
-                logger.info("Loading existing IGARSS data from: %s", output_file)
-                try:
-                    with open(output_file, "r", encoding="utf-8") as f:
-                        cached_data = json.load(f)
-                    cached_papers = validate_lightweight_papers(cached_data)
-                    logger.info(
-                        "Successfully loaded %d papers from local file",
-                        len(cached_papers),
-                    )
-                    return cached_papers
-                except (json.JSONDecodeError, IOError, Exception) as e:
-                    logger.warning(
-                        "Failed to load local file: %s. Downloading from IEEE Xplore...",
-                        e,
-                    )
+            cached_papers = self._load_papers_json(output_path, "IEEE Xplore")
+            if cached_papers is not None:
+                return cached_papers
 
         logger.info("Downloading IGARSS %d data from IEEE Xplore...", year)
 
@@ -453,14 +437,8 @@ class IGARSSDownloaderPlugin(LightweightDownloaderPlugin):
             if paper is not None:
                 papers.append(paper)
 
-        # Save to file if path provided
-        if output_path:
-            output_file = Path(output_path)
-            output_file.parent.mkdir(parents=True, exist_ok=True)
-            papers_json = [paper.model_dump() for paper in papers]
-            with open(output_file, "w", encoding="utf-8") as f:
-                json.dump(papers_json, f, indent=2, ensure_ascii=False)
-            logger.info("Saved IGARSS JSON data to: %s", output_file)
+        # Save to file only if path provided and papers were found
+        self._save_papers_json(papers, output_path, "IGARSS")
 
         logger.info(
             "Successfully downloaded %d papers from IGARSS %d",

@@ -103,7 +103,7 @@ Path filters have been added to all workflows to skip unnecessary runs when only
 
 **Skips when**: Only documentation or Docker files change
 
-**Note**: This workflow also runs on a daily schedule (`cron: '0 2 * * *'`). According to GitHub Actions behavior, scheduled runs ignore path filters and always execute. Path filters are identical to `tests.yml` since both run the test suite.
+**Note**: Path filters are identical to `tests.yml` since both run the test suite.
 
 ---
 
@@ -118,7 +118,7 @@ All workflows retain the `workflow_dispatch` trigger, allowing manual runs regar
 
 ### Scheduled Runs
 
-The `slow-tests.yml` workflow has a scheduled trigger that runs daily at 2 AM UTC. According to GitHub Actions behavior, scheduled runs ignore path filters and always execute.
+No workflows currently use scheduled triggers. If a workflow adds a scheduled trigger, note that according to GitHub Actions behavior, scheduled runs ignore path filters and always execute.
 
 ### Tag Pushes
 

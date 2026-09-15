@@ -32,9 +32,6 @@ on:
             - '.github/scripts/setup-ci.ps1'
             - '.github/actions/setup-environment/**'
     workflow_dispatch:
-    schedule:
-        # Run daily at 2 AM UTC
-        - cron: '0 2 * * *'
 
 jobs:
     slow-tests:

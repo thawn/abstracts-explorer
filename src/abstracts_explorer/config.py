@@ -105,6 +105,11 @@ class Config:
         Default temperature for chat generation.
     chat_max_tokens : int
         Default max tokens for chat responses.
+    cluster_label_model : str
+        Model used for short cluster-label generation during clustering.
+        Defaults to ``alias-fast`` so a non-thinking instruction model is
+        used for these one-shot label tasks (unlike ``chat_model``, which
+        may be a thinking-capable agent model).
     enable_query_rewriting : bool
         Whether to enable query rewriting for better semantic search.
     query_similarity_threshold : float
@@ -170,6 +175,7 @@ class Config:
         self.chat_model = self._get_env("CHAT_MODEL", default="diffbot-small-xl-2508")
         self.chat_temperature = self._get_env_float("CHAT_TEMPERATURE", default=0.7)
         self.chat_max_tokens = self._get_env_int("CHAT_MAX_TOKENS", default=1000)
+        self.cluster_label_model = self._get_env("CLUSTER_LABEL_MODEL", default="alias-fast")
 
         # Embedding Model Settings
         self.embedding_model = self._get_env("EMBEDDING_MODEL", default="text-embedding-qwen3-embedding-4b")
@@ -400,6 +406,7 @@ class Config:
             "CHAT_MODEL",
             "CHAT_TEMPERATURE",
             "CHAT_MAX_TOKENS",
+            "CLUSTER_LABEL_MODEL",
             "EMBEDDING_MODEL",
             "LLM_BACKEND_URL",
             "LLM_BACKEND_AUTH_TOKEN",
