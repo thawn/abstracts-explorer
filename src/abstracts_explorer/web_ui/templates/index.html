@@ -477,6 +477,18 @@
                         <i class="fas fa-search mr-2"></i>Search
                     </button>
                 </div>
+                <div class="mt-4 flex flex-wrap items-center gap-4 text-sm text-gray-700 dark:text-gray-300">
+                    <label class="inline-flex items-center gap-2 cursor-pointer" title="Use graph recommendations instead of the standard ranked search results">
+                        <input type="checkbox" id="recommendations-toggle"
+                            class="h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-600">
+                        <span><i class="fas fa-project-diagram mr-1 text-purple-600 dark:text-purple-400"></i>Graph recommendations</span>
+                    </label>
+                    <label class="inline-flex items-center gap-2 cursor-pointer" title="Ask the configured chat model to explain the top 10 recommendations">
+                        <input type="checkbox" id="recommendations-explain-toggle"
+                            class="h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-600">
+                        <span><i class="fas fa-lightbulb mr-1 text-amber-500"></i>Explain top 10</span>
+                    </label>
+                </div>
 
                 <!-- Hidden filter elements for search (used by JavaScript) -->
                 <div class="hidden">

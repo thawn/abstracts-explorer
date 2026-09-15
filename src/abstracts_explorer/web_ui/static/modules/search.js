@@ -20,6 +20,10 @@ export async function searchPapers() {
     const limit = parseInt(document.getElementById('limit-select').value);
     const distanceThresholdInput = document.getElementById('distance-threshold-input');
     const distanceThreshold = distanceThresholdInput ? parseFloat(distanceThresholdInput.value) : undefined;
+    const recommendationsToggle = document.getElementById('recommendations-toggle');
+    const explainToggle = document.getElementById('recommendations-explain-toggle');
+    const useRecommendations = recommendationsToggle ? recommendationsToggle.checked : false;
+    const explainRecommendations = explainToggle ? explainToggle.checked : false;
 
     // Get multiple selected values from multi-select dropdowns
     const sessionSelect = document.getElementById('session-filter');
@@ -49,7 +53,7 @@ export async function searchPapers() {
         const requestBody = {
             query,
             use_embeddings: true,
-            limit
+            limit: useRecommendations ? 50 : limit
         };
 
         // Include distance threshold if available and valid
@@ -72,7 +76,12 @@ export async function searchPapers() {
             requestBody.conferences = [selectedConference];
         }
 
-        const response = await fetch(`${API_BASE}/api/search`, {
+        if (useRecommendations && explainRecommendations) {
+            requestBody.explain_top_n = 10;
+        }
+
+        const endpoint = useRecommendations ? '/api/recommendations' : '/api/search';
+        const response = await fetch(`${API_BASE}${endpoint}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -113,12 +122,20 @@ export function displaySearchResults(data) {
     // Display results header
     let html = `
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 mb-4">
-            <div class="flex items-center justify-between">
+            <div class="flex items-start justify-between gap-4">
                 <div>
-                    <span class="text-sm text-gray-600 dark:text-gray-400">${data.total_similar != null ? `Showing the <strong>${data.count}</strong> best matches out of <strong>${data.total_similar}</strong> similar papers` : `Found <strong>${data.count}</strong> papers`}</span>
+                    <span class="text-sm text-gray-600 dark:text-gray-400">${formatResultsSummary(data)}</span>
                     ${data.use_embeddings ? '<span class="ml-2 px-2 py-1 bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 text-xs rounded-full">LLM-Powered</span>' : ''}
+                    ${data.is_recommendation ? '<span class="ml-2 px-2 py-1 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-xs rounded-full">Personalized PageRank</span>' : ''}
+                    ${data.explanations && data.explanations.explained_count > 0 ? `<span class="ml-2 px-2 py-1 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 text-xs rounded-full">${data.explanations.explained_count} explained</span>` : ''}
                 </div>
             </div>
+            ${data.warning ? `<p class="mt-2 text-sm text-yellow-700 dark:text-yellow-300">${escapeHtml(data.warning)}</p>` : ''}
+            ${data.unsupported_filters && data.unsupported_filters.length > 0 ? `
+                <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                    Unsupported filters ignored: ${data.unsupported_filters.map(escapeHtml).join(', ')}
+                </p>
+            ` : ''}
             ${data.related_topics && data.related_topics.length > 0 ? `
             <div class="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
                 <span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Related Topics</span>
@@ -145,6 +162,19 @@ export function displaySearchResults(data) {
     }
 
     resultsDiv.innerHTML = html;
+}
+
+function formatResultsSummary(data) {
+    if (data.is_recommendation) {
+        const seedText = data.direct_seed_count
+            ? `, excluding ${data.direct_seed_count} direct seed paper${data.direct_seed_count === 1 ? '' : 's'}`
+            : '';
+        return `Showing <strong>${data.count}</strong> recommended papers from <strong>${data.candidate_count || 0}</strong> candidates${seedText}`;
+    }
+    if (data.total_similar != null) {
+        return `Showing the <strong>${data.count}</strong> best matches out of <strong>${data.total_similar}</strong> similar papers`;
+    }
+    return `Found <strong>${data.count}</strong> papers`;
 }
 
 /**

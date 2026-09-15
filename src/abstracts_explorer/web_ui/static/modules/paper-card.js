@@ -112,6 +112,30 @@ export function formatPaperCard(paper, options = {}) {
     if (paper.distance !== undefined) {
         metadata += `<span class="px-2 py-1 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-xs rounded-full" title="Similarity score: how closely this paper matches your search query (-1 = no match, 1 = perfect match)"><i class="fas fa-chart-line mr-1"></i>${(1 - paper.distance).toFixed(compact ? 2 : 3)}</span>`;
     }
+    if (paper.recommendation_score !== undefined) {
+        metadata += `<span class="px-2 py-1 bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-xs rounded-full ml-1" title="Personalized PageRank recommendation score"><i class="fas fa-project-diagram mr-1"></i>${Number(paper.recommendation_score).toFixed(compact ? 2 : 3)}</span>`;
+    }
+
+    let recommendationHtml = '';
+    const reasons = Array.isArray(paper.recommendation_reasons) ? paper.recommendation_reasons : [];
+    if (!compact && (reasons.length > 0 || paper.llm_explanation)) {
+        const reasonHtml = reasons.length > 0 ? `
+            <div class="flex flex-wrap gap-2 mb-2">
+                ${reasons.map(reason => `<span class="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs rounded-full"><i class="fas fa-link mr-1"></i>${escapeHtml(reason)}</span>`).join('')}
+            </div>
+        ` : '';
+        const explanationHtml = paper.llm_explanation ? `
+            <p class="text-sm text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+                <i class="fas fa-lightbulb mr-1"></i>${escapeHtml(paper.llm_explanation)}
+            </p>
+        ` : '';
+        recommendationHtml = `
+            <div class="mt-3 pt-3 border-t dark:border-gray-700">
+                ${reasonHtml}
+                ${explanationHtml}
+            </div>
+        `;
+    }
 
     const cardId = idPrefix ? `id="${idPrefix}"` : '';
     const cardClasses = compact
@@ -149,6 +173,7 @@ export function formatPaperCard(paper, options = {}) {
             ${buildUrlBadges(paper, compact)}
             ${metadata ? `<div class="${compact ? 'mb-2' : 'mb-3'}">${metadata}</div>` : ''}
             ${abstractHtml}
+            ${recommendationHtml}
             ${!compact && paper.distance !== undefined && !metadata.includes('chart-line') ? `
                 <div class="mt-3 pt-3 border-t dark:border-gray-700">
                     <span class="text-xs text-gray-500 dark:text-gray-400">
