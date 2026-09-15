@@ -185,9 +185,7 @@ class DownloaderPlugin(ABC):
                 f"Year {year} not supported by {self.plugin_name}. " f"Supported years: {self.supported_years}"
             )
 
-    def _save_papers_json(
-        self, papers: List["LightweightPaper"], output_path: Optional[str], label: str
-    ) -> None:
+    def _save_papers_json(self, papers: List["LightweightPaper"], output_path: Optional[str], label: str) -> None:
         """
         Save validated papers to a per-year lightweight JSON file.
 
@@ -213,9 +211,7 @@ class DownloaderPlugin(ABC):
         elif output_path:
             logger.info("No papers found; skipping save of %s", output_path)
 
-    def _load_papers_json(
-        self, output_path: Optional[str], source_label: str
-    ) -> Optional[List["LightweightPaper"]]:
+    def _load_papers_json(self, output_path: Optional[str], source_label: str) -> Optional[List["LightweightPaper"]]:
         """
         Load cached lightweight papers from a previously written JSON file.
 
