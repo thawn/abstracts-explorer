@@ -309,6 +309,7 @@ class TestML4PSLightweightConversion:
     def test_convert_to_lightweight_format(self, ml4ps_plugin, sample_scraped_papers):
         """Test conversion to lightweight format."""
         lightweight = ml4ps_plugin._convert_to_lightweight_format(sample_scraped_papers)
+        expected_year = ml4ps_plugin._current_year
 
         assert len(lightweight) == 2
 
@@ -317,7 +318,7 @@ class TestML4PSLightweightConversion:
         assert paper1["title"] == "Test Paper Title One"
         assert paper1["authors"] == ["John Doe", "Jane Smith"]
         assert paper1["abstract"] == "This is a test abstract."
-        assert paper1["session"] == "ML4PhysicalSciences 2025 Workshop"
+        assert paper1["session"] == f"ML4PhysicalSciences {expected_year} Workshop"
         assert paper1["poster_position"] == "1"
         assert paper1["id"] == 1
 
@@ -464,6 +465,7 @@ class TestML4PSPaperRowExtraction:
 
     def test_extract_paper_row_basic(self, ml4ps_plugin):
         """Test basic paper row extraction."""
+        expected_year = ml4ps_plugin._current_year
         html = """
         <tr>
             <td>1</td>
@@ -484,8 +486,10 @@ class TestML4PSPaperRowExtraction:
         assert paper["id"] == 1
         assert paper["title"] == "Test Paper Title"
         assert "John Doe" in paper["authors_str"]
-        assert paper["paper_url"] == "https://ml4physicalsciences.github.io/2025/files/paper1.pdf"
-        assert paper["poster_url"] == "https://ml4physicalsciences.github.io/2025/assets/posters/123456.png"
+        assert paper["paper_url"] == f"https://ml4physicalsciences.github.io/{expected_year}/files/paper1.pdf"
+        assert paper["poster_url"] == (
+            f"https://ml4physicalsciences.github.io/{expected_year}/assets/posters/123456.png"
+        )
 
     def test_extract_paper_row_insufficient_cells(self, ml4ps_plugin):
         """Test row with insufficient cells."""
@@ -536,6 +540,7 @@ class TestML4PSPaperRowExtraction:
 
     def test_extract_paper_row_with_video_url(self, ml4ps_plugin):
         """Test row with video URL."""
+        expected_year = ml4ps_plugin._current_year
         html = """
         <tr>
             <td>1</td>
@@ -554,7 +559,7 @@ class TestML4PSPaperRowExtraction:
         paper = ml4ps_plugin._extract_paper_info_from_row(row)
 
         assert paper is not None
-        assert paper["video_url"] == "https://ml4physicalsciences.github.io/2025/videos/video1.mp4"
+        assert paper["video_url"] == f"https://ml4physicalsciences.github.io/{expected_year}/videos/video1.mp4"
 
     def test_extract_paper_row_spotlight_award(self, ml4ps_plugin):
         """Test row with Spotlight Talk award."""
