@@ -16,6 +16,12 @@ authors:
     orcid: "https://orcid.org/0009-0005-4222-4250"
   - family-names: Kulkarni
     given-names: Somashekhar
+  - family-names: Steinbach
+    given-names: Peter
+    orcid: "https://orcid.org/0000-0002-4974-230X"
+  - family-names: Guido
+    given-names: Juckeland
+    orcid: "https://orcid.org/0000-0002-9935-4428"
 license: Apache-2.0
 repository-code: "https://github.com/thawn/abstracts-explorer"
 url: "https://abstracts.hzdr.de"
