@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata from this file."
+title: "abstracts-explorer"
+type: software
+abstract: >-
+  Abstracts Explorer downloads conference data and supports semantic search,
+  question answering, clustering, visualization, a web UI, and MCP tools for
+  exploring conference literature.
+authors:
+  - family-names: Korten
+    given-names: Till
+    affiliation: Helmholtz-Zentrum Dresden-Rossendorf
+    orcid: "https://orcid.org/0000-0002-2315-9247"
+  - family-names: Vahidi
+    given-names: Peyman
+    orcid: "https://orcid.org/0009-0005-4222-4250"
+  - family-names: Kulkarni
+    given-names: Somashekhar
+license: Apache-2.0
+repository-code: "https://github.com/thawn/abstracts-explorer"
+url: "https://abstracts.hzdr.de"
+keywords:
+  - abstracts
+  - conferences
+  - semantic search
+  - retrieval-augmented generation
+  - clustering
+  - MCP
