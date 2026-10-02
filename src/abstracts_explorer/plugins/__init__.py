@@ -5,6 +5,7 @@ Download Plugins
 This module provides downloadable plugin implementations for different data sources.
 
 Available plugins:
+- AAAIDownloaderPlugin: Official AAAI proceedings data
 - AISTATSDownloaderPlugin: Official AISTATS conference data
 - CHIDownloaderPlugin: ACM CHI conference data (from SIGCHI program JSON)
 - HAICONDownloaderPlugin: HAICON (Helmholtz AI Conference) data via ConfTool
@@ -41,6 +42,7 @@ from abstracts_explorer.plugin import (
 )
 
 # Import actual plugin implementations
+from abstracts_explorer.plugins.aaai_downloader import AAAIDownloaderPlugin
 from abstracts_explorer.plugins.aistats_downloader import AISTATSDownloaderPlugin
 from abstracts_explorer.plugins.chi_downloader import CHIDownloaderPlugin
 from abstracts_explorer.plugins.haicon_downloader import HAICONDownloaderPlugin
@@ -71,6 +73,7 @@ __all__ = [
     "validate_lightweight_paper",
     "validate_lightweight_papers",
     # Plugin implementations
+    "AAAIDownloaderPlugin",
     "AISTATSDownloaderPlugin",
     "CHIDownloaderPlugin",
     "HAICONDownloaderPlugin",
