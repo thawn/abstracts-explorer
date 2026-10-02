@@ -2734,6 +2734,7 @@ Without arguments, downloads ALL conferences for ALL available years
 (plugins that require manual input are skipped).
 
 Available plugins:
+  aaai     - Official AAAI proceedings (2010 onward)
   neurips  - Official NeurIPS conference data (2020-2025)
   iclr     - Official ICLR conference data (2020-2025)
   icml     - Official ICML conference data (2020-2025)
