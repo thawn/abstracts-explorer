@@ -42,6 +42,10 @@ env:
 
 jobs:
   build-and-push:
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
+      github.event.pull_request.author_association)
     runs-on: ubuntu-latest
     permissions:
       contents: read
