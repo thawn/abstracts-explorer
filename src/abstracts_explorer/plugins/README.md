@@ -4,6 +4,19 @@ This directory contains downloader plugins for the neurips-abstracts package.
 
 ## Available Plugins
 
+### aaai
+
+Official AAAI proceedings downloader via Open Journal Systems.
+
+- **File**: `aaai_downloader.py`
+- **Years**: 2010 onward; current-year availability is checked against archive entries
+- **Source**: <https://ojs.aaai.org/index.php/AAAI/issue/archive>
+- **API**: Lightweight schema
+- **Scope**: AAAI sections only; excludes frontmatter and co-located IAAI/EAAI sections
+
+See the [plugin guide](../../../docs/plugins.md#aaai) for usage, available fields,
+caching, and source limitations.
+
 ### neurips
 
 Official NeurIPS conference data downloader.
