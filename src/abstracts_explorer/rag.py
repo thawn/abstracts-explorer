@@ -63,6 +63,7 @@ class RAGDeps:
     tool_results: List[Dict[str, Any]] = field(default_factory=list)
     conferences: List[str] = field(default_factory=list)
     years: List[int] = field(default_factory=list)
+    n_results: Optional[int] = None
 
 
 # ---------------------------------------------------------------------------
@@ -77,9 +78,10 @@ class RAGDeps:
 def _tool_search_papers(
     ctx: RunContext[RAGDeps],
     topic_keywords: str,
-    n_results: int = 5,
+    n_results: Optional[int] = None,
     years: Optional[List[int]] = None,
     conference: Optional[str] = None,
+    limit: Optional[int] = None,
 ) -> str:
     """Search for papers about a specific topic using semantic search.
 
@@ -97,16 +99,19 @@ def _tool_search_papers(
         Agent context with dependencies.
     topic_keywords : str
         Keywords describing the topic to search for.
-    n_results : int
-        Number of papers to return (default: 5).
+    n_results : int, optional
+        Number of papers to return (default: 10, or session default).
     years : list of int, optional
         Filter by publication years (e.g. [2024, 2025]).
         When omitted, the default year(s) from the current session are used.
     conference : str, optional
         Filter by conference name (e.g. "NeurIPS", "ICLR").
         When omitted, the default conference from the current session is used.
+    limit : int, optional
+        Alias for n_results.
     """
-    kwargs: Dict[str, Any] = {"topic_keywords": topic_keywords, "n_results": n_results}
+    count = n_results if n_results is not None else (limit if limit is not None else (ctx.deps.n_results or 10))
+    kwargs: Dict[str, Any] = {"topic_keywords": topic_keywords, "n_results": count}
 
     # Determine years: explicit param > deps default
     if years is not None:
@@ -622,6 +627,7 @@ class RAGChat:
             deps = RAGDeps(
                 conferences=conferences or [],
                 years=years or [],
+                n_results=n_results,
             )
 
             # Model settings
