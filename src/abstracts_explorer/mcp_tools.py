@@ -68,6 +68,7 @@ def _normalize_search_papers_args(arguments: Dict[str, Any]) -> Dict[str, Any]:
     * ``topic_keywords`` as a list → joined string
     * ``conference`` as a list → first element string
     * ``conferences`` (list, wrong field name) → ``conference`` (str, first element)
+    * ``limit``, ``num_results``, ``max_results``, ``count`` → ``n_results``
 
     Parameters
     ----------
