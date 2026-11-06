@@ -20,6 +20,8 @@ from abstracts_explorer.plugin import (
 
 logger = logging.getLogger(__name__)
 
+_ARTICLE_VIEW_RE = re.compile(r"/article/view/(\d+)(?:-\d+)?/?$")
+
 
 class AAAIDownloaderPlugin(LightweightDownloaderPlugin):
     """Download AAAI papers, excluding co-located IAAI and EAAI sections.
@@ -55,9 +57,7 @@ class AAAIDownloaderPlugin(LightweightDownloaderPlugin):
         self.timeout = timeout
         self.verify_ssl = verify_ssl
         self._session = requests.Session()
-        self._session.headers.update(
-            {"User-Agent": "abstracts-explorer AAAI proceedings downloader"}
-        )
+        self._session.headers.update({"User-Agent": "abstracts-explorer AAAI proceedings downloader"})
 
     def get_url(self, year: int) -> str:
         """Return the archive URL shared by all conference years.
@@ -102,9 +102,7 @@ class AAAIDownloaderPlugin(LightweightDownloaderPlugin):
                 return True
         return False
 
-    def _fetch_page(
-        self, url: str, timeout: int, verify_ssl: bool, request_delay: float
-    ) -> BeautifulSoup:
+    def _fetch_page(self, url: str, timeout: int, verify_ssl: bool, request_delay: float) -> BeautifulSoup:
         """Fetch HTML with a timeout, request delay, and contextual errors."""
         if request_delay > 0:
             time.sleep(request_delay)
@@ -115,9 +113,7 @@ class AAAIDownloaderPlugin(LightweightDownloaderPlugin):
             raise RuntimeError(f"Failed to fetch AAAI proceedings from {url}") from exc
         return BeautifulSoup(response.text, "html.parser")
 
-    def _discover_issues(
-        self, year: int, timeout: int, verify_ssl: bool, request_delay: float
-    ) -> list[str]:
+    def _discover_issues(self, year: int, timeout: int, verify_ssl: bool, request_delay: float) -> list[str]:
         """Follow archive pagination and collect all AAAI issues for a year."""
         issues: dict[str, None] = {}
         visited: set[str] = set()
@@ -167,9 +163,7 @@ class AAAIDownloaderPlugin(LightweightDownloaderPlugin):
             raise RuntimeError(f"No AAAI proceedings issues found for {year}")
         return list(issues)
 
-    def _parse_article(
-        self, soup: BeautifulSoup, url: str, session: str, year: int
-    ) -> LightweightPaper | None:
+    def _parse_article(self, soup: BeautifulSoup, url: str, session: str, year: int) -> LightweightPaper | None:
         """Map OJS citation metadata and abstract text to a validated paper."""
         metadata: dict[str, list[str]] = {}
         for meta in soup.select("meta[name][content]"):
@@ -189,15 +183,14 @@ class AAAIDownloaderPlugin(LightweightDownloaderPlugin):
                 abstract = abstract_tag.get_text(" ", strip=True)
         # Some OJS descriptions include HTML even inside the meta attribute.
         abstract = BeautifulSoup(abstract, "html.parser").get_text(" ", strip=True)
-        article_id = re.search(r"/article/view/(\d+)/?$", url)
+        article_id = _ARTICLE_VIEW_RE.search(url)
         pdf_url = first("citation_pdf_url")
         keywords = metadata.get("DC.Subject", [])
         try:
             return LightweightPaper(
                 title=first("citation_title") or first("DC.Title"),
                 authors=sanitize_author_names(
-                    metadata.get("citation_author")
-                    or metadata.get("DC.Creator.PersonalName", [])
+                    metadata.get("citation_author") or metadata.get("DC.Creator.PersonalName", [])
                 ),
                 abstract=abstract,
                 session=session,
@@ -252,10 +245,7 @@ class AAAIDownloaderPlugin(LightweightDownloaderPlugin):
             raise ValueError(f"Year {year} not supported by {self.plugin_name}")
         if output_path and not force_download:
             cached = self._load_papers_json(output_path, "AAAI")
-            if cached and all(
-                paper.year == year and paper.conference == self.conference_name
-                for paper in cached
-            ):
+            if cached and all(paper.year == year and paper.conference == self.conference_name for paper in cached):
                 return cached
         # Explicit requests use actual issue discovery, not a cached metadata
         # probe, which can fail transiently or use different HTTP options.
@@ -269,34 +259,24 @@ class AAAIDownloaderPlugin(LightweightDownloaderPlugin):
             soup = self._fetch_page(issue_url, timeout, verify_ssl, request_delay)
             sections = soup.select(".section")
             if not sections:
-                raise RuntimeError(
-                    f"No proceedings sections in AAAI issue: {issue_url}"
-                )
+                raise RuntimeError(f"No proceedings sections in AAAI issue: {issue_url}")
             for section in sections:
                 heading = section.select_one("h2")
-                session = (
-                    heading.get_text(" ", strip=True) if heading else "AAAI proceedings"
-                )
+                session = heading.get_text(" ", strip=True) if heading else "AAAI proceedings"
                 if self._EXCLUDED_SECTIONS.search(session):
                     continue
                 summaries = section.select(".obj_article_summary")
                 entries = section.select(".articles > li")
                 if entries and len(entries) != len(summaries):
-                    raise RuntimeError(
-                        f"Inconsistent AAAI article listing: {issue_url} ({session})"
-                    )
+                    raise RuntimeError(f"Inconsistent AAAI article listing: {issue_url} ({session})")
                 if not summaries:
-                    raise RuntimeError(
-                        f"No article summaries in AAAI section: {issue_url} ({session})"
-                    )
+                    raise RuntimeError(f"No article summaries in AAAI section: {issue_url} ({session})")
                 for summary in summaries:
                     link = summary.select_one(".title a[href]")
                     if not link:
-                        raise RuntimeError(
-                            f"Unrecognized AAAI article link: {issue_url}"
-                        )
+                        raise RuntimeError(f"Unrecognized AAAI article link: {issue_url}")
                     url = urljoin(issue_url, str(link["href"]))
-                    match = re.search(r"/AAAI/article/view/(\d+)/?$", url)
+                    match = _ARTICLE_VIEW_RE.search(url)
                     if not match:
                         raise RuntimeError(f"Unrecognized AAAI article URL: {url}")
                     article_id = int(match.group(1))

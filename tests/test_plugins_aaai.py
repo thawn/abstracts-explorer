@@ -207,9 +207,7 @@ def test_colocated_issue_not_current_year_proof(aaai_site):
     assert plugin._check_current_year_available(2026) is False
 
 
-@pytest.mark.parametrize(
-    "series,year", [("Vol. 24 No. 1 (2010)", 2010), ("Vol. 40 No. 1", 2026), ("", None)]
-)
+@pytest.mark.parametrize("series,year", [("Vol. 24 No. 1 (2010)", 2010), ("Vol. 40 No. 1", 2026), ("", None)])
 def test_issue_year(series, year):
     """Old explicit years and modern volume numbers map to conference years."""
     summary = BeautifulSoup(f'<div class="series">{series}</div>', "html.parser")
@@ -233,9 +231,7 @@ def test_multiple_issues_and_metadata(aaai_site, caplog):
     assert paper.paper_pdf_url == BASE + "/article/download/36958/40920"
     assert paper.keywords == ["Machine learning", "Reasoning"]
     assert papers[1].session == "AAAI Journal Track"
-    assert papers[1].abstract == (
-        "We study reliable planning. Experiments support the approach."
-    )
+    assert papers[1].abstract == ("We study reliable planning. Experiments support the approach.")
     assert papers[1].paper_pdf_url is None
     assert "Skipping AAAI article" in caplog.text
     fetched = [call.args[0] for call in get.call_args_list]
@@ -254,9 +250,20 @@ def test_old_proceedings(aaai_site):
     assert paper.year == 2010
     assert paper.session == "Constraints, Satisfiability, and Search"
     assert paper.original_id == 7545
-    assert not any(
-        call.args[0].endswith(("/467", "/468")) for call in get.call_args_list
+    assert not any(call.args[0].endswith(("/467", "/468")) for call in get.call_args_list)
+
+
+def test_range_style_article_id(aaai_site):
+    """Historical OJS articles may use a numeric range as their identifier."""
+    plugin, pages, _ = aaai_site
+    pages[BASE + "/issue/view/309"] = pages[BASE + "/issue/view/309"].replace(
+        "/article/view/7545", "/article/view/7545-7546"
     )
+    pages[BASE + "/article/view/7545-7546"] = pages.pop(BASE + "/article/view/7545")
+    (paper,) = plugin.download(2010, request_delay=0)
+    assert paper.original_id == 7545
+    assert paper.url == BASE + "/article/view/7545-7546"
+    assert paper.paper_pdf_url == BASE + "/article/download/7545/7406"
 
 
 def test_default_year(aaai_site):
@@ -324,9 +331,7 @@ def test_partial_issue_layout_preserves_cache(aaai_site, tmp_path, change):
     if change == "title":
         pages[url] = pages[url].replace('class="title"', 'class="paper-title"')
     elif change == "summary":
-        pages[url] = pages[url].replace(
-            'class="obj_article_summary"', 'class="article-summary"'
-        )
+        pages[url] = pages[url].replace('class="obj_article_summary"', 'class="article-summary"')
     else:
         pages[url] = pages[url].replace("/article/view/36960", "/about")
     path = tmp_path / "aaai.json"
@@ -366,13 +371,9 @@ def test_partial_archive_layout_preserves_cache(aaai_site, tmp_path, change):
     elif change == "title":
         pages[url] = pages[url].replace('class="title"', 'class="issue-title"')
     elif change == "range":
-        pages[BASE + "/issue/archive/2"] = pages[BASE + "/issue/archive/2"].replace(
-            "3-6 of 6", "4-7 of 7"
-        )
+        pages[BASE + "/issue/archive/2"] = pages[BASE + "/issue/archive/2"].replace("3-6 of 6", "4-7 of 7")
     else:
-        pages[BASE + "/issue/archive/2"] = pages[BASE + "/issue/archive/2"].replace(
-            "3-6 of 6", "3-6 of 7"
-        )
+        pages[BASE + "/issue/archive/2"] = pages[BASE + "/issue/archive/2"].replace("3-6 of 6", "3-6 of 7")
     path = tmp_path / "aaai.json"
     with pytest.raises(RuntimeError, match="AAAI archive"):
         plugin.download(2026, str(path), request_delay=0)
@@ -388,12 +389,8 @@ def test_smoke_cache_uses_dedicated_directory():
     plugin = AAAIDownloaderPlugin()
     plugin.download = Mock(return_value=[])
     args = SimpleNamespace(max_workers=20, input_file=None)
-    _download_single(
-        plugin, 2010, Path("data/aaai-pr-smoke/abstracts.json"), False, args
-    )
-    assert plugin.download.call_args.kwargs["output_path"] == str(
-        Path("data/aaai-pr-smoke/aaai_2010.json")
-    )
+    _download_single(plugin, 2010, Path("data/aaai-pr-smoke/abstracts.json"), False, args)
+    assert plugin.download.call_args.kwargs["output_path"] == str(Path("data/aaai-pr-smoke/aaai_2010.json"))
 
 
 def test_json_cache_round_trip(aaai_site, tmp_path):
@@ -472,9 +469,7 @@ def test_unsupported_year(aaai_site, year):
         plugin.download(year, request_delay=0)
 
 
-@pytest.mark.parametrize(
-    "failed_path", ["/issue/archive/2", "/issue/view/729", "/article/view/36960"]
-)
+@pytest.mark.parametrize("failed_path", ["/issue/archive/2", "/issue/view/729", "/article/view/36960"])
 def test_network_failure_does_not_replace_cache(aaai_site, tmp_path, failed_path):
     """Failures at any stage abort and leave an existing cache unchanged."""
     plugin, _, get = aaai_site
@@ -527,8 +522,7 @@ def test_archive_pagination_cycle(aaai_site):
     """Fail clearly rather than loop or save partial data on cyclic pagination."""
     plugin, pages, _ = aaai_site
     pages[BASE + "/issue/archive/2"] += (
-        '<div class="cmp_pagination"><a class="next" '
-        'href="/index.php/AAAI/issue/archive">Next</a></div>'
+        '<div class="cmp_pagination"><a class="next" ' 'href="/index.php/AAAI/issue/archive">Next</a></div>'
     )
     with pytest.raises(RuntimeError, match="Repeated AAAI archive"):
         plugin.download(2026, request_delay=0)
@@ -560,18 +554,14 @@ def test_no_valid_papers_does_not_write_cache(aaai_site, tmp_path):
     assert not path.exists()
 
 
-@pytest.mark.parametrize(
-    "missing", ["citation_title", "citation_author", "DC.Description"]
-)
+@pytest.mark.parametrize("missing", ["citation_title", "citation_author", "DC.Description"])
 def test_missing_required_metadata(aaai_site, missing):
     """Invalid title, author, or abstract data is skipped after validation."""
     plugin, pages, _ = aaai_site
     soup = BeautifulSoup(pages[BASE + "/article/view/36958"], "html.parser")
     for tag in soup.select(f'meta[name="{missing}"]'):
         tag.decompose()
-    assert (
-        plugin._parse_article(soup, BASE + "/article/view/36958", "Track", 2026) is None
-    )
+    assert plugin._parse_article(soup, BASE + "/article/view/36958", "Track", 2026) is None
 
 
 @pytest.mark.parametrize(
