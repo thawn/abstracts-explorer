@@ -194,6 +194,24 @@ def test_format_search_papers_result():
     assert "This paper presents" in result
 
 
+def test_format_search_papers_result_more_than_five_papers():
+    """Test that formatting search papers includes all results when more than 5 papers are found."""
+    papers = [
+        {"title": f"Paper Number {i}", "year": 2024, "abstract": f"Abstract text for paper {i}"}
+        for i in range(1, 9)
+    ]
+    data = {
+        "topic": "Transformers",
+        "papers": papers,
+    }
+
+    result = _format_search_papers_result(data)
+
+    assert "Found 8 papers:" in result
+    for i in range(1, 9):
+        assert f"{i}. Paper Number {i} (2024)" in result
+
+
 def test_format_visualization_result():
     """Test formatting visualization result for LLM."""
     data = {
@@ -409,6 +427,30 @@ class TestNormalizeSearchPapersArgs:
         assert result["years"] == [2025]
         assert result["n_results"] == 2
         assert "year" not in result
+
+    def test_limit_alias(self):
+        """'limit' alias is normalized to 'n_results'."""
+        result = _normalize_search_papers_args({"topic_keywords": "RL", "limit": 20})
+        assert result["n_results"] == 20
+        assert "limit" not in result
+
+    def test_num_results_alias(self):
+        """'num_results' alias is normalized to 'n_results'."""
+        result = _normalize_search_papers_args({"topic_keywords": "RL", "num_results": 15})
+        assert result["n_results"] == 15
+        assert "num_results" not in result
+
+    def test_limit_and_n_results_coexist(self):
+        """When both 'n_results' and 'limit' are present, 'n_results' is kept and 'limit' dropped."""
+        result = _normalize_search_papers_args({"topic_keywords": "RL", "n_results": 12, "limit": 25})
+        assert result["n_results"] == 12
+        assert "limit" not in result
+
+    def test_n_results_string_converted_to_int(self):
+        """'n_results' as string is converted to int."""
+        result = _normalize_search_papers_args({"topic_keywords": "RL", "n_results": "20"})
+        assert result["n_results"] == 20
+        assert isinstance(result["n_results"], int)
 
 
 class TestNormalizeGetTopicEvolutionArgs:

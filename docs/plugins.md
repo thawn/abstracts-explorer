@@ -23,6 +23,28 @@ Plugins with a different companion URL convention can override
 
 ## Available Plugins
 
+### aaai
+
+Official AAAI conference proceedings downloader using Open Journal Systems (OJS).
+
+```bash
+uv run abstracts-explorer download --conference aaai --year 2026
+```
+
+- **Years**: 2010 onward; current-year availability is checked against proceedings.
+  Earlier proceedings outside OJS are not supported.
+- **Source**: [Official proceedings archive](https://ojs.aaai.org/index.php/AAAI/issue/archive)
+- **Fields**: Title, authors, abstract, proceedings section as `session`, conference
+  year, article ID, article/PDF URLs, and keywords when provided.
+  Unavailable poster positions are empty; presentation times are not inferred.
+- **Scope**: AAAI sections only; excludes frontmatter and separately labeled
+  co-located IAAI/EAAI sections.
+
+The downloader follows archive pagination to include all matching issues and
+deduplicates by article ID. Requests are sequential, with a 0.5-second delay by
+default, so a full recent year can take a long time. Existing JSON caches are
+reused; use CLI `--force` to fetch fresh data.
+
 ### neurips
 
 Official NeurIPS conference data downloader.

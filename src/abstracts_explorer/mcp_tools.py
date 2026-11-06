@@ -68,6 +68,7 @@ def _normalize_search_papers_args(arguments: Dict[str, Any]) -> Dict[str, Any]:
     * ``topic_keywords`` as a list → joined string
     * ``conference`` as a list → first element string
     * ``conferences`` (list, wrong field name) → ``conference`` (str, first element)
+    * ``limit``, ``num_results``, ``max_results``, ``count`` → ``n_results``
 
     Parameters
     ----------
@@ -108,6 +109,18 @@ def _normalize_search_papers_args(arguments: Dict[str, Any]) -> Dict[str, Any]:
             args["conference"] = conferences_val
     elif "conferences" in args:
         args.pop("conferences")  # 'conference' already present; drop duplicate
+
+    # Normalize 'limit', 'num_results', 'max_results', 'count' → 'n_results'
+    for alias in ("limit", "num_results", "max_results", "count"):
+        if alias in args and "n_results" not in args:
+            args["n_results"] = args.pop(alias)
+        elif alias in args:
+            args.pop(alias)
+    if "n_results" in args:
+        try:
+            args["n_results"] = int(args["n_results"])
+        except (ValueError, TypeError):
+            args.pop("n_results")
 
     return args
 
@@ -744,7 +757,7 @@ def _format_search_papers_result(data: Dict[str, Any]) -> str:
         lines.append(f"Filtered by years: {years_filter}")
     lines.append(f"Found {len(papers)} papers:\n")
 
-    for i, paper in enumerate(papers[:5], 1):  # Top 5 papers
+    for i, paper in enumerate(papers, 1):
         title = paper.get("title", "Unknown")
         year = paper.get("year", "")
         lines.append(f"{i}. {title} ({year})")

@@ -1465,6 +1465,58 @@ class TestRAGToolConferenceDefaults:
         call_kwargs = mock_search_papers.call_args[1]
         assert "years" not in call_kwargs
 
+    def test_search_papers_explicit_n_results(self, mock_search_papers):
+        """_tool_search_papers passes explicit n_results."""
+        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        ctx.deps.conferences = ["NeurIPS"]
+
+        _tool_search_papers(ctx, topic_keywords="transformers", n_results=20)
+
+        call_kwargs = mock_search_papers.call_args[1]
+        assert call_kwargs.get("n_results") == 20
+
+    def test_search_papers_limit_alias(self, mock_search_papers):
+        """_tool_search_papers maps limit alias to n_results."""
+        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        ctx.deps.conferences = ["NeurIPS"]
+
+        _tool_search_papers(ctx, topic_keywords="transformers", limit=15)
+
+        call_kwargs = mock_search_papers.call_args[1]
+        assert call_kwargs.get("n_results") == 15
+
+    def test_search_papers_uses_deps_n_results(self, mock_search_papers):
+        """_tool_search_papers uses ctx.deps.n_results when not provided."""
+        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps(n_results=25)
+        ctx.deps.conferences = ["NeurIPS"]
+
+        _tool_search_papers(ctx, topic_keywords="transformers")
+
+        call_kwargs = mock_search_papers.call_args[1]
+        assert call_kwargs.get("n_results") == 25
+
+    def test_search_papers_default_n_results(self, mock_search_papers):
+        """_tool_search_papers defaults to 10 when neither param nor deps provide n_results."""
+        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        ctx.deps.conferences = ["NeurIPS"]
+
+        _tool_search_papers(ctx, topic_keywords="transformers")
+
+        call_kwargs = mock_search_papers.call_args[1]
+        assert call_kwargs.get("n_results") == 10
+
     def test_analyze_topic_relevance_uses_deps_conference_when_not_specified(self, mock_analyze_topic):
         """_tool_analyze_topic_relevance uses ctx.deps.conferences when no conference provided."""
         from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGDeps

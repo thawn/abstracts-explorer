@@ -25,6 +25,7 @@ authors:
 license: Apache-2.0
 repository-code: https://github.com/thawn/abstracts-explorer
 url: https://abstracts.hzdr.de
+doi: 10.5281/zenodo.23021836
 keywords:
   - abstracts
   - conferences

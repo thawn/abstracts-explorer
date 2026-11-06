@@ -1,5 +1,7 @@
 # Abstracts Explorer
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23021836.svg)](https://doi.org/10.5281/zenodo.23021836)
+
 > Hundreds of abstracts. Days to conference. Which talks matter to *you*?
 
 Abstracts Explorer is an **agentic AI** tool that helps researchers navigate conference literature — download abstracts, search semantically, chat with an AI that cites its sources, and visualise the topic landscape.
