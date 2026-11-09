@@ -103,6 +103,21 @@ class TestDatabaseManager:
 
         db_manager.close()
 
+    def test_connect_enables_wal_and_busy_timeout(self, db_manager):
+        """SQLite connections use WAL and a 30s busy timeout for concurrent access."""
+        db_manager.connect()
+
+        cursor = db_manager.connection.cursor()
+        try:
+            journal_mode = cursor.execute("PRAGMA journal_mode").fetchone()[0]
+            busy_timeout = cursor.execute("PRAGMA busy_timeout").fetchone()[0]
+        finally:
+            cursor.close()
+        db_manager.close()
+
+        assert str(journal_mode).lower() == "wal"
+        assert busy_timeout == 30000
+
     def test_connect_creates_directories(self, tmp_path):
         """Test that connect creates parent directories."""
         db_path = tmp_path / "subdir" / "another" / "test.db"
