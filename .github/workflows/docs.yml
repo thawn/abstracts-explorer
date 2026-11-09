@@ -144,9 +144,19 @@ jobs:
 
         environment:
             name: github-pages
-            url: ${{ steps.deployment.outputs.page_url }}
+            url: ${{ steps.deployment_retry.outputs.page_url || steps.deployment.outputs.page_url }}
 
         steps:
             - name: Deploy to GitHub Pages
               id: deployment
+              continue-on-error: true
+              uses: actions/deploy-pages@v5
+
+            - name: Wait before retrying deployment
+              if: steps.deployment.outcome == 'failure'
+              run: sleep 60
+
+            - name: Retry GitHub Pages deployment
+              if: steps.deployment.outcome == 'failure'
+              id: deployment_retry
               uses: actions/deploy-pages@v5
