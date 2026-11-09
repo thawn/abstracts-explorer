@@ -19,6 +19,7 @@ The `DatabaseManager` class handles all database operations including:
    :undoc-members:
    :show-inheritance:
    :special-members: __init__
+   :exclude-members: datetime, timezone, Path, Any, Dict, List, Optional, Union, create_engine, select, delete, func, or_, and_, text, sessionmaker, Session, Engine, OperationalError, ProgrammingError, IntegrityError, logger
 ```
 
 ## Usage Examples
