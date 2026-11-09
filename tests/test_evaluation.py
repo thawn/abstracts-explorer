@@ -39,7 +39,6 @@ def eval_db(tmp_path, monkeypatch):
     set_test_db(db_path)
 
     db = DatabaseManager()
-    db.connect()
     db.create_tables()
     yield db
     db.close()

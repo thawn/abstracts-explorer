@@ -36,8 +36,7 @@ def parse_args() -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(
         description=(
-            "Delete papers without abstracts from the paper database and the "
-            "ChromaDB embeddings collection."
+            "Delete papers without abstracts from the paper database and the ChromaDB embeddings collection."
         )
     )
     parser.add_argument(
@@ -71,9 +70,6 @@ def find_papers_without_abstract(db: DatabaseManager) -> list[str]:
     DatabaseError
         If the query fails.
     """
-    if not db._session:
-        raise DatabaseError("Not connected to database")
-
     try:
         stmt = select(Paper.uid).where(
             or_(
@@ -81,7 +77,7 @@ def find_papers_without_abstract(db: DatabaseManager) -> list[str]:
                 Paper.abstract == "",
             )
         )
-        result = db._session.execute(stmt).scalars().all()
+        result = db.session.execute(stmt).scalars().all()
         return list(result)
     except DatabaseError:
         raise
@@ -109,23 +105,21 @@ def delete_papers_by_uids(db: DatabaseManager, uids: list[str]) -> int:
     DatabaseError
         If deletion fails.
     """
-    if not db._session:
-        raise DatabaseError("Not connected to database")
-
     if not uids:
         return 0
 
     try:
         from sqlalchemy import delete as sa_delete
 
-        result = db._session.execute(sa_delete(Paper).where(Paper.uid.in_(uids)))
-        db._session.commit()
+        session = db.session
+        result = session.execute(sa_delete(Paper).where(Paper.uid.in_(uids)))
+        session.commit()
         count = result.rowcount if result.rowcount is not None else 0
         return count
     except DatabaseError:
         raise
     except Exception as e:
-        db._session.rollback()
+        db.session.rollback()
         raise DatabaseError(f"Failed to delete papers: {e}") from e
 
 
@@ -230,8 +224,6 @@ def main() -> int:
     # ------------------------------------------------------------------
     try:
         em = EmbeddingsManager()
-        em.connect()
-        em.create_collection(reset=False)
         deleted_embeddings = delete_embeddings_by_uids(em, uids)
         em.close()
         print(f"✅ Deleted {deleted_embeddings:,} embedding(s) from ChromaDB.")

@@ -1047,23 +1047,26 @@ class TestCLI:
         assert "Clustering: 1 succeeded, 1 failed" in captured.out
         assert "NeurIPS 2024: clustering pre-generate" in captured.err
 
-    def test_create_embeddings_missing_database(self, tmp_path, capsys, monkeypatch):
-        """Test create-embeddings with non-existent database."""
+    def test_create_embeddings_missing_database_auto_creates(self, tmp_path, capsys, monkeypatch):
+        """create-embeddings auto-creates a missing database."""
         nonexistent_db = tmp_path / "nonexistent.db"
         set_test_db(nonexistent_db)
 
-        # The exception will be raised and not caught, so we expect it to propagate
-        with patch.object(
-            sys,
-            "argv",
-            ["neurips-abstracts", "create-embeddings"],
-        ):
-            # Should raise DatabaseError because database/tables don't exist
-            with pytest.raises(Exception) as exc_info:
-                main()
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+            mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
+            mock_em.verbose_api_connection_test.return_value = False
+            MockEM.return_value = mock_em
 
-        # Verify it's a database-related error
-        assert "table" in str(exc_info.value).lower() or "database" in str(exc_info.value).lower()
+            with patch.object(
+                sys,
+                "argv",
+                ["neurips-abstracts", "create-embeddings"],
+            ):
+                exit_code = main()
+
+        assert exit_code == 1
+        assert nonexistent_db.exists()
 
     def test_create_embeddings_lm_studio_not_available(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings when OpenAI API is not available."""
@@ -2443,17 +2446,12 @@ class TestCLI:
 
     def test_search_with_db_path_lookup_error(self, tmp_path, capsys, monkeypatch):
         """Test search command when database connection fails (no longer relevant)."""
-        from abstracts_explorer.database import DatabaseManager
-
         embeddings_path = tmp_path / "embeddings"
         embeddings_path.mkdir()
 
-        # Create an empty database using DatabaseManager
+        # Point the database at a temporary location
         db_path = tmp_path / "test.db"
         set_test_db(db_path)
-        db = DatabaseManager()
-        db.connect()
-        db.close()
 
         # Set EMBEDDING_DB and patch config reload
         patch_get_config_for_test(monkeypatch, embeddings_path)
@@ -2706,42 +2704,24 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Embeddings database not found" in captured.err
 
-    def test_pre_generate_clustering_calls_init(self, tmp_path, capsys, monkeypatch):
-        """Test pre-generate-clustering initializes the embeddings manager.
-
-        This is a regression test: previously the command called connect() but
-        forgot create_collection(), causing ``get_collection_stats()`` to raise
-        ``EmbeddingsError: Collection not initialized. Call create_collection() first.``
-        ``init()`` now performs both steps atomically.
-        """
+    def test_pre_generate_clustering_calls_compute(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering invokes the clustering pipeline."""
 
         embeddings_path = tmp_path / "chroma_db"
         embeddings_path.mkdir()
         patch_get_config_for_test(monkeypatch, embeddings_path)
         set_test_db(tmp_path / "test.db")
 
-        call_order = []
-
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
         ):
-            mock_em = Mock()
-
-            def track_init(reset=False):
-                call_order.append("init")
-
-            def track_compute(*args, **kwargs):
-                call_order.append("compute")
-                return {
-                    "points": [],
-                    "statistics": {"total_papers": 5, "n_clusters": 2, "n_noise": 0, "cluster_sizes": {}},
-                }
-
-            mock_em.init.side_effect = track_init
-            mock_em_class.return_value = mock_em
-            mock_compute.side_effect = track_compute
+            mock_em_class.return_value = Mock()
+            mock_compute.return_value = {
+                "points": [],
+                "statistics": {"total_papers": 5, "n_clusters": 2, "n_noise": 0, "cluster_sizes": {}},
+            }
 
             mock_db_instance = Mock()
             mock_db_instance.get_conferences.return_value = ["NeurIPS"]
@@ -2754,9 +2734,7 @@ class TestCLI:
                 exit_code = main()
 
         assert exit_code == 0
-        mock_em.init.assert_called_once_with()
-        assert "init" in call_order, "em.init() was not called"
-        assert call_order.index("init") < call_order.index("compute"), "em.init() must be called before clustering"
+        mock_em_class.assert_called_once()
         mock_compute.assert_called_once()
 
     def test_pre_generate_clustering_success(self, tmp_path, capsys, monkeypatch):

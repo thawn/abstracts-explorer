@@ -688,7 +688,6 @@ class TestIntegration:
         # Generate embeddings with real API
         set_test_embedding_db(chroma_path)  # Ensure chroma path is clean before test
         with EmbeddingsManager(collection_name="semantic_test") as em:
-            em.connect()
             em.create_collection(reset=True)
             em.embed_from_database()
 

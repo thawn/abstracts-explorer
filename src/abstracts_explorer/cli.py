@@ -465,8 +465,6 @@ def search_command(args: argparse.Namespace) -> int:
         if not em.verbose_api_connection_test():
             return 1
 
-        em.init()
-
         # Check collection stats
         stats = em.get_collection_stats()
         print(f"\n📊 Searching {stats['count']:,} papers in collection '{stats['name']}'")
@@ -631,16 +629,12 @@ def chat_command(args: argparse.Namespace) -> int:
         if not em.verbose_api_connection_test(model_hint="A language model is loaded"):
             return 1
 
-        # Get or create the collection (should already exist for chat)
-        em.init(reset=False)
-
         # Get collection stats
         stats = em.get_collection_stats()
         print(f"\n📊 Loaded {stats['count']:,} papers from collection '{stats['name']}'")
 
         # Initialize database connection
         db = DatabaseManager()
-        db.connect()
 
         # Build conference/year context for RAG queries (case-insensitive via DB lookup)
         chat_conferences: Optional[List[str]] = None
@@ -1202,7 +1196,6 @@ def delete_data_command(args: argparse.Namespace) -> int:
     embedding_count = 0
     try:
         em = EmbeddingsManager()
-        em.init(reset=False)
         existing = em.collection.get(where={"$and": [{"conference": conference}, {"year": str(year)}]})
         embedding_count = len(existing.get("ids", []))
         em.close()
@@ -1241,7 +1234,6 @@ def delete_data_command(args: argparse.Namespace) -> int:
     # 2. Delete embeddings from ChromaDB
     try:
         em = EmbeddingsManager()
-        em.init(reset=False)
         deleted_embeddings = em.delete_embeddings_by_filter(conference=conference, year=year)
         em.close()
         print(f"✅ Deleted {deleted_embeddings:,} embedding(s) from ChromaDB.")
@@ -1350,7 +1342,6 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
             collection_name=args.collection,
             requests_per_minute=args.requests_per_minute,
         )
-        em.init()
 
         success_count = 0
         fail_count = 0
@@ -1726,8 +1717,6 @@ def eval_run_command(args: argparse.Namespace) -> int:
 
         if not em.verbose_api_connection_test():
             return 1
-
-        em.init(reset=False)
 
         with DatabaseManager() as db:
             db.create_tables()

@@ -81,7 +81,6 @@ def get_database():
     if "db" not in g:
         # Database configuration comes from config file
         g.db = DatabaseManager()
-        g.db.connect()  # Explicitly connect to the database
         g.db.create_tables()  # Ensure all tables exist (including new ones like clustering_cache)
     return g.db
 
@@ -103,7 +102,6 @@ def get_embeddings_manager():
             model_name=config.embedding_model,
             collection_name=config.collection_name,
         )
-        embeddings_manager.init()  # Connect to ChromaDB and get or create the collection
     return embeddings_manager
 
 

@@ -510,9 +510,8 @@ class RAGChat:
     >>> from abstracts_explorer.embeddings import EmbeddingsManager
     >>> from abstracts_explorer.database import DatabaseManager
     >>> em = EmbeddingsManager()
-    >>> em.connect()
+    >>> em.init()
     >>> db = DatabaseManager()
-    >>> db.connect()
     >>> chat = RAGChat(em, db)
     >>>
     >>> # Ask about specific papers

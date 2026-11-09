@@ -75,11 +75,9 @@ def load_clustering_data(
         em = EmbeddingsManager(
             collection_name=collection_name,
         )
-        em.init()
 
         # Initialize database manager
         db = DatabaseManager()
-        db.connect()
 
         # Initialize clustering manager
         cm = ClusteringManager(em, db)
@@ -660,11 +658,9 @@ def get_topic_evolution(
         em = EmbeddingsManager(
             collection_name=collection_name,
         )
-        em.init()
 
         # Initialize database
         db = DatabaseManager()
-        db.connect()
 
         logger.info(f"Analyzing topic evolution for: {topic_keywords}")
         logger.info(f"Conferences: {conferences}")
@@ -832,11 +828,9 @@ def search_papers(
         em = EmbeddingsManager(
             collection_name=collection_name,
         )
-        em.init()
 
         # Initialize database
         db = DatabaseManager()
-        db.connect()
 
         # Build metadata filter using helper function
         try:
@@ -954,7 +948,6 @@ def get_paper_details(
 
     try:
         db = DatabaseManager()
-        db.connect()
 
         result_papers: List[Dict[str, Any]] = []
 
@@ -1035,7 +1028,6 @@ def summarize_interesting_papers(
         )
 
     db = DatabaseManager()
-    db.connect()
     try:
         result = _summarize_interesting_papers(
             database=db,
@@ -1115,9 +1107,7 @@ def recommend_related_papers(
     collection_name = collection_name or config.collection_name
 
     em = EmbeddingsManager(collection_name=collection_name)
-    em.init()
     db = DatabaseManager()
-    db.connect()
     try:
         result = _recommend_related_papers(
             database=db,
@@ -1212,11 +1202,9 @@ def analyze_topic_relevance(
         em = EmbeddingsManager(
             collection_name=collection_name,
         )
-        em.init()
 
         # Initialize database
         db = DatabaseManager()
-        db.connect()
 
         # Find papers within distance
         logger.info(f"Analyzing relevance for topic: {topic}")

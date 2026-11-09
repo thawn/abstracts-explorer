@@ -153,7 +153,6 @@ def web_server(test_database, tmp_path_factory):
 
         # Initialize embeddings with test data
         em = EmbeddingsManager(collection_name=collection_name)
-        em.connect()
         em.create_collection(reset=True)
 
         # Add embeddings for test papers
@@ -161,7 +160,6 @@ def web_server(test_database, tmp_path_factory):
 
         set_test_db(str(test_database))
         db = DatabaseManager()
-        db.connect()
         papers = db.query("SELECT * FROM papers")
 
         for paper in papers:
