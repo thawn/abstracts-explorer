@@ -33,6 +33,9 @@ from abstracts_explorer.plugin import (
     list_plugin_names,
     # Conversion utilities
     convert_to_lightweight_schema,
+    # HTTP utilities
+    fetch_with_retries,
+    get_failed_downloads_path,
     # Pydantic models
     LightweightPaper,
     # Validation functions
@@ -66,6 +69,9 @@ __all__ = [
     "list_plugin_names",
     # Conversion utilities
     "convert_to_lightweight_schema",
+    # HTTP utilities
+    "fetch_with_retries",
+    "get_failed_downloads_path",
     # Pydantic models
     "LightweightPaper",
     # Validation functions

@@ -45,6 +45,13 @@ deduplicates by article ID. Requests are sequential, with a 0.5-second delay by
 default, so a full recent year can take a long time. Existing JSON caches are
 reused; use CLI `--force` to fetch fresh data.
 
+Individual issue and article pages are retried on transient failures. If a page
+still fails, it is skipped so the rest of the year continues; successful papers
+are cached, and failed URLs are recorded in `<cache>.failed.json` (for example
+`data/aaai_2023.failed.json`). The next download retries those URLs automatically
+and merges recovered papers into the cache. Delete the sidecar file to skip
+automatic retries.
+
 ### neurips
 
 Official NeurIPS conference data downloader.

@@ -2,13 +2,14 @@
 
 import json
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 import requests
 from bs4 import BeautifulSoup
 
-from abstracts_explorer.plugin import LightweightDownloaderPlugin
+from abstracts_explorer.plugin import LightweightDownloaderPlugin, get_failed_downloads_path
 from abstracts_explorer.plugins import AAAIDownloaderPlugin, get_plugin
 
 BASE = "https://ojs.aaai.org/index.php/AAAI"
@@ -158,7 +159,7 @@ def aaai_site(monkeypatch):
     plugin = AAAIDownloaderPlugin()
     get = Mock(side_effect=respond)
     monkeypatch.setattr(plugin._session, "get", get)
-    monkeypatch.setattr("abstracts_explorer.plugins.aaai_downloader.time.sleep", Mock())
+    monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", Mock())
     return plugin, pages, get
 
 
@@ -273,16 +274,16 @@ def test_default_year(aaai_site):
     assert all(paper.year == 2026 for paper in plugin.download(request_delay=0))
 
 
-def test_transport_options_and_delay(aaai_site):
+def test_transport_options_and_delay(aaai_site, monkeypatch):
     """Forward HTTP options and delay every proceedings request."""
     plugin, _, get = aaai_site
+    sleep = Mock()
+    monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
     plugin.download(2026, timeout=7, verify_ssl=False, request_delay=0.25)
     for call in get.call_args_list:
         assert call.kwargs == {"timeout": 7, "verify": False}
-    from abstracts_explorer.plugins.aaai_downloader import time
-
-    assert time.sleep.call_count == get.call_count
-    time.sleep.assert_called_with(0.25)
+    assert sleep.call_count == get.call_count
+    sleep.assert_called_with(0.25)
 
 
 def test_explicit_download_after_failed_availability_probe(aaai_site, monkeypatch):
@@ -469,9 +470,8 @@ def test_unsupported_year(aaai_site, year):
         plugin.download(year, request_delay=0)
 
 
-@pytest.mark.parametrize("failed_path", ["/issue/archive/2", "/issue/view/729", "/article/view/36960"])
-def test_network_failure_does_not_replace_cache(aaai_site, tmp_path, failed_path):
-    """Failures at any stage abort and leave an existing cache unchanged."""
+def test_archive_network_failure_does_not_replace_cache(aaai_site, tmp_path):
+    """Archive discovery failures abort and leave an existing cache unchanged."""
     plugin, _, get = aaai_site
     path = tmp_path / "aaai.json"
     original = "[]"
@@ -479,7 +479,7 @@ def test_network_failure_does_not_replace_cache(aaai_site, tmp_path, failed_path
     respond = get.side_effect
 
     def fail(url, **kwargs):
-        if url == BASE + failed_path:
+        if url == BASE + "/issue/archive/2":
             raise requests.Timeout("offline")
         return respond(url, **kwargs)
 
@@ -487,6 +487,155 @@ def test_network_failure_does_not_replace_cache(aaai_site, tmp_path, failed_path
     with pytest.raises(RuntimeError, match="Failed to fetch AAAI"):
         plugin.download(2026, str(path), force_download=True, request_delay=0)
     assert path.read_text(encoding="utf-8") == original
+    assert not Path(get_failed_downloads_path(str(path))).exists()
+
+
+def test_article_network_failure_skips_and_saves_partial_cache(aaai_site, tmp_path, caplog):
+    """A failed article is skipped while successful papers are still cached."""
+    plugin, _, get = aaai_site
+    path = tmp_path / "aaai.json"
+    respond = get.side_effect
+
+    def fail(url, **kwargs):
+        if url == BASE + "/article/view/36960":
+            raise requests.Timeout("offline")
+        return respond(url, **kwargs)
+
+    get.side_effect = fail
+    papers = plugin.download(2026, str(path), request_delay=0)
+
+    assert [paper.original_id for paper in papers] == [36958]
+    assert [paper["original_id"] for paper in json.loads(path.read_text(encoding="utf-8"))] == [36958]
+    failed = json.loads(Path(get_failed_downloads_path(str(path))).read_text(encoding="utf-8"))
+    assert failed["conference"] == "AAAI"
+    assert failed["year"] == 2026
+    assert failed["failed"] == [
+        {
+            "url": BASE + "/article/view/36960",
+            "type": "article",
+            "session": "AAAI Journal Track",
+            "issue_url": BASE + "/issue/view/729",
+        }
+    ]
+    assert "Downloaded 1 AAAI 2026 paper(s), but 1 page(s) failed" in caplog.text
+
+
+def test_issue_network_failure_skips_and_saves_partial_cache(aaai_site, tmp_path, caplog):
+    """A failed issue page is skipped while other issues are still processed."""
+    plugin, _, get = aaai_site
+    path = tmp_path / "aaai.json"
+    respond = get.side_effect
+
+    def fail(url, **kwargs):
+        if url == BASE + "/issue/view/729":
+            raise requests.Timeout("offline")
+        return respond(url, **kwargs)
+
+    get.side_effect = fail
+    papers = plugin.download(2026, str(path), request_delay=0)
+
+    assert [paper.original_id for paper in papers] == [36958]
+    failed = json.loads(Path(get_failed_downloads_path(str(path))).read_text(encoding="utf-8"))
+    assert failed["failed"] == [{"url": BASE + "/issue/view/729", "type": "issue"}]
+    assert "Skipping AAAI issue" in caplog.text
+
+
+def test_failed_article_is_retried_automatically(aaai_site, tmp_path):
+    """A sidecar triggers a targeted retry that merges into the existing cache."""
+    plugin, _, get = aaai_site
+    path = tmp_path / "aaai.json"
+    respond = get.side_effect
+
+    def fail(url, **kwargs):
+        if url == BASE + "/article/view/36960":
+            raise requests.Timeout("offline")
+        return respond(url, **kwargs)
+
+    get.side_effect = fail
+    assert [paper.original_id for paper in plugin.download(2026, str(path), request_delay=0)] == [36958]
+    failed_path = Path(get_failed_downloads_path(str(path)))
+    assert failed_path.exists()
+
+    get.side_effect = respond
+    get.reset_mock()
+    papers = plugin.download(2026, str(path), request_delay=0)
+
+    assert [paper.original_id for paper in papers] == [36958, 36960]
+    assert [paper["original_id"] for paper in json.loads(path.read_text(encoding="utf-8"))] == [36958, 36960]
+    assert not failed_path.exists()
+    assert [call.args[0] for call in get.call_args_list] == [BASE + "/article/view/36960"]
+
+
+def test_failed_issue_is_retried_automatically(aaai_site, tmp_path):
+    """A failed issue sidecar is retried as a whole before merging papers."""
+    plugin, _, get = aaai_site
+    path = tmp_path / "aaai.json"
+    respond = get.side_effect
+
+    def fail(url, **kwargs):
+        if url == BASE + "/issue/view/729":
+            raise requests.Timeout("offline")
+        return respond(url, **kwargs)
+
+    get.side_effect = fail
+    assert [paper.original_id for paper in plugin.download(2026, str(path), request_delay=0)] == [36958]
+    failed_path = Path(get_failed_downloads_path(str(path)))
+    assert failed_path.exists()
+
+    get.side_effect = respond
+    get.reset_mock()
+    papers = plugin.download(2026, str(path), request_delay=0)
+
+    assert [paper.original_id for paper in papers] == [36958, 36960]
+    assert not failed_path.exists()
+    assert [call.args[0] for call in get.call_args_list] == [
+        BASE + "/issue/view/729",
+        BASE + "/article/view/36960",
+    ]
+
+
+def test_retry_keeps_still_failing_urls(aaai_site, tmp_path):
+    """URLs that still fail remain in the sidecar for the next run."""
+    plugin, _, get = aaai_site
+    path = tmp_path / "aaai.json"
+    respond = get.side_effect
+
+    def fail(url, **kwargs):
+        if url == BASE + "/article/view/36960":
+            raise requests.Timeout("offline")
+        return respond(url, **kwargs)
+
+    get.side_effect = fail
+    plugin.download(2026, str(path), request_delay=0)
+    failed_path = Path(get_failed_downloads_path(str(path)))
+    plugin.download(2026, str(path), request_delay=0)
+
+    assert failed_path.exists()
+    failed = json.loads(failed_path.read_text(encoding="utf-8"))
+    assert [entry["url"] for entry in failed["failed"]] == [BASE + "/article/view/36960"]
+
+
+def test_deleting_sidecar_skips_retry(aaai_site, tmp_path):
+    """Deleting the sidecar keeps the partial cache without another retry."""
+    plugin, _, get = aaai_site
+    path = tmp_path / "aaai.json"
+    respond = get.side_effect
+
+    def fail(url, **kwargs):
+        if url == BASE + "/article/view/36960":
+            raise requests.Timeout("offline")
+        return respond(url, **kwargs)
+
+    get.side_effect = fail
+    plugin.download(2026, str(path), request_delay=0)
+    Path(get_failed_downloads_path(str(path))).unlink()
+
+    get.side_effect = respond
+    get.reset_mock()
+    papers = plugin.download(2026, str(path), request_delay=0)
+
+    assert [paper.original_id for paper in papers] == [36958]
+    get.assert_not_called()
 
 
 def test_http_error(aaai_site):

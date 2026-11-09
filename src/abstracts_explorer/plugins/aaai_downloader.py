@@ -1,9 +1,10 @@
 """Download AAAI abstracts and metadata from the official OJS proceedings."""
 
+import json
 import logging
 import re
-import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
@@ -14,6 +15,8 @@ from pydantic import ValidationError
 from abstracts_explorer.plugin import (
     LightweightDownloaderPlugin,
     LightweightPaper,
+    fetch_with_retries,
+    get_failed_downloads_path,
     register_plugin,
     sanitize_author_names,
 )
@@ -21,6 +24,8 @@ from abstracts_explorer.plugin import (
 logger = logging.getLogger(__name__)
 
 _ARTICLE_VIEW_RE = re.compile(r"/article/view/(\d+)(?:-\d+)?/?$")
+_FAILED_ARTICLE = "article"
+_FAILED_ISSUE = "issue"
 
 
 class AAAIDownloaderPlugin(LightweightDownloaderPlugin):
@@ -37,8 +42,10 @@ class AAAIDownloaderPlugin(LightweightDownloaderPlugin):
     -----
     The official OJS archive covers 2010 onward. A year may span many issues.
     Conference years come from the issue series, not article publication dates.
-    Missing abstracts and invalid records are logged and skipped. HTTP failures
-    abort the download so an incomplete result is not saved as a complete cache.
+    Missing abstracts and invalid records are logged and skipped. Issue and
+    article fetch failures are recorded in a ``.failed.json`` sidecar so the
+    next run retries only those URLs; delete the sidecar to skip retries.
+    Archive discovery and layout errors abort the download.
     """
 
     plugin_name = "aaai"
@@ -103,14 +110,19 @@ class AAAIDownloaderPlugin(LightweightDownloaderPlugin):
         return False
 
     def _fetch_page(self, url: str, timeout: int, verify_ssl: bool, request_delay: float) -> BeautifulSoup:
-        """Fetch HTML with a timeout, request delay, and contextual errors."""
-        if request_delay > 0:
-            time.sleep(request_delay)
+        """Fetch HTML, retrying transient failures with exponential backoff."""
         try:
-            response = self._session.get(url, timeout=timeout, verify=verify_ssl)
-            response.raise_for_status()
+            response = fetch_with_retries(
+                self._session,
+                url,
+                timeout=timeout,
+                verify=verify_ssl,
+                request_delay=request_delay,
+            )
         except requests.RequestException as exc:
-            raise RuntimeError(f"Failed to fetch AAAI proceedings from {url}") from exc
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            detail = f" (HTTP {status})" if isinstance(status, int) else ""
+            raise RuntimeError(f"Failed to fetch AAAI proceedings from {url}{detail}: {exc}") from exc
         return BeautifulSoup(response.text, "html.parser")
 
     def _discover_issues(self, year: int, timeout: int, verify_ssl: bool, request_delay: float) -> list[str]:
@@ -206,6 +218,188 @@ class AAAIDownloaderPlugin(LightweightDownloaderPlugin):
             logger.warning("Skipping AAAI article %s: %s", url, exc)
             return None
 
+    def _load_failed_downloads(self, output_path: str | None, year: int) -> list[dict[str, Any]]:
+        """Load recorded failed URLs for a year, ignoring malformed sidecars."""
+        if not output_path:
+            return []
+        path = Path(get_failed_downloads_path(output_path))
+        if not path.exists():
+            return []
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Could not read AAAI failed-download list %s: %s", path, exc)
+            return []
+        if not isinstance(data, dict):
+            logger.warning("Ignoring malformed AAAI failed-download list: %s", path)
+            return []
+        if data.get("conference") != self.conference_name or data.get("year") != year:
+            logger.warning("Ignoring mismatched AAAI failed-download list: %s", path)
+            return []
+        failures = data.get("failed", [])
+        if not isinstance(failures, list):
+            logger.warning("Ignoring malformed AAAI failed-download list: %s", path)
+            return []
+        return [
+            entry
+            for entry in failures
+            if isinstance(entry, dict) and isinstance(entry.get("url"), str) and entry["url"]
+        ]
+
+    def _save_failed_downloads(self, output_path: str | None, year: int, failures: list[dict[str, Any]]) -> None:
+        """Save failed URLs, or remove the sidecar when every page succeeded."""
+        if not output_path:
+            return
+        path = Path(get_failed_downloads_path(output_path))
+        if not failures:
+            path.unlink(missing_ok=True)
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(
+                {"conference": self.conference_name, "year": year, "failed": failures},
+                f,
+                indent=2,
+            )
+        logger.warning(
+            "Recorded %d failed AAAI %d page(s) in %s; they will be retried "
+            "automatically on the next run. Delete this file to skip retrying them.",
+            len(failures),
+            year,
+            path,
+        )
+
+    def _process_issue(
+        self,
+        issue_url: str,
+        year: int,
+        timeout: int,
+        verify_ssl: bool,
+        request_delay: float,
+        papers: list[LightweightPaper],
+        seen: set[int],
+        failures: list[dict[str, Any]],
+    ) -> None:
+        """Collect one issue's papers, recording page-level fetch failures."""
+        try:
+            soup = self._fetch_page(issue_url, timeout, verify_ssl, request_delay)
+        except RuntimeError as exc:
+            logger.warning("Skipping AAAI issue %s: %s", issue_url, exc)
+            failures.append({"url": issue_url, "type": _FAILED_ISSUE})
+            return
+        sections = soup.select(".section")
+        if not sections:
+            raise RuntimeError(f"No proceedings sections in AAAI issue: {issue_url}")
+        for section in sections:
+            heading = section.select_one("h2")
+            session = heading.get_text(" ", strip=True) if heading else "AAAI proceedings"
+            if self._EXCLUDED_SECTIONS.search(session):
+                continue
+            summaries = section.select(".obj_article_summary")
+            entries = section.select(".articles > li")
+            if entries and len(entries) != len(summaries):
+                raise RuntimeError(f"Inconsistent AAAI article listing: {issue_url} ({session})")
+            if not summaries:
+                raise RuntimeError(f"No article summaries in AAAI section: {issue_url} ({session})")
+            for summary in summaries:
+                link = summary.select_one(".title a[href]")
+                if not link:
+                    raise RuntimeError(f"Unrecognized AAAI article link: {issue_url}")
+                url = urljoin(issue_url, str(link["href"]))
+                match = _ARTICLE_VIEW_RE.search(url)
+                if not match:
+                    raise RuntimeError(f"Unrecognized AAAI article URL: {url}")
+                article_id = int(match.group(1))
+                if article_id in seen:
+                    continue
+                seen.add(article_id)
+                try:
+                    article = self._fetch_page(url, timeout, verify_ssl, request_delay)
+                except RuntimeError as exc:
+                    logger.warning("Skipping AAAI article %s: %s", url, exc)
+                    failures.append(
+                        {
+                            "url": url,
+                            "type": _FAILED_ARTICLE,
+                            "session": session,
+                            "issue_url": issue_url,
+                        }
+                    )
+                    continue
+                paper = self._parse_article(article, url, session, year)
+                if paper is not None:
+                    papers.append(paper)
+
+    def _retry_failed(
+        self,
+        cached: list[LightweightPaper],
+        failures: list[dict[str, Any]],
+        year: int,
+        output_path: str,
+        timeout: int,
+        verify_ssl: bool,
+        request_delay: float,
+    ) -> list[LightweightPaper]:
+        """Retry previously failed URLs and merge recovered papers into the cache."""
+        papers = list(cached)
+        seen = {paper.original_id for paper in papers if paper.original_id is not None}
+        seen_urls = {paper.url for paper in papers if paper.url}
+        remaining: list[dict[str, Any]] = []
+        for entry in failures:
+            url = entry["url"]
+            kind = entry.get("type")
+            if kind == _FAILED_ISSUE:
+                issue_failures: list[dict[str, Any]] = []
+                try:
+                    self._process_issue(
+                        url,
+                        year,
+                        timeout,
+                        verify_ssl,
+                        request_delay,
+                        papers,
+                        seen,
+                        issue_failures,
+                    )
+                except RuntimeError as exc:
+                    logger.warning("Could not retry AAAI issue %s: %s", url, exc)
+                    remaining.append(entry)
+                else:
+                    remaining.extend(issue_failures)
+                continue
+            if kind != _FAILED_ARTICLE:
+                logger.warning("Ignoring unknown failed AAAI entry: %s", url)
+                continue
+            match = _ARTICLE_VIEW_RE.search(url)
+            if match and int(match.group(1)) in seen:
+                continue
+            try:
+                article = self._fetch_page(url, timeout, verify_ssl, request_delay)
+            except RuntimeError as exc:
+                logger.warning("Retry failed for AAAI article %s: %s", url, exc)
+                remaining.append(entry)
+                continue
+            paper = self._parse_article(article, url, entry.get("session") or "AAAI proceedings", year)
+            if paper is not None and (not paper.url or paper.url not in seen_urls):
+                papers.append(paper)
+                if paper.url:
+                    seen_urls.add(paper.url)
+                if paper.original_id is not None:
+                    seen.add(paper.original_id)
+        self._save_papers_json(papers, output_path, "AAAI")
+        self._save_failed_downloads(output_path, year, remaining)
+        if remaining:
+            logger.warning(
+                "Retried %d failed AAAI %d page(s); %d still failed.",
+                len(failures),
+                year,
+                len(remaining),
+            )
+        else:
+            logger.info("Recovered all %d previously failed AAAI %d page(s).", len(failures), year)
+        return papers
+
     def download(
         self,
         year: int | None = None,
@@ -237,60 +431,62 @@ class AAAIDownloaderPlugin(LightweightDownloaderPlugin):
         ValueError
             If the requested year is unsupported.
         RuntimeError
-            If fetching or issue discovery fails, or no valid papers remain.
+            If archive discovery or layout parsing fails, or no valid papers
+            remain.
         """
         if year is None:
             year = max(self.supported_years)
         if year < self._start_year or year > datetime.now().year:
             raise ValueError(f"Year {year} not supported by {self.plugin_name}")
-        if output_path and not force_download:
-            cached = self._load_papers_json(output_path, "AAAI")
-            if cached and all(paper.year == year and paper.conference == self.conference_name for paper in cached):
-                return cached
-        # Explicit requests use actual issue discovery, not a cached metadata
-        # probe, which can fail transiently or use different HTTP options.
         timeout = kwargs.get("timeout", self.timeout)
         verify_ssl = kwargs.get("verify_ssl", self.verify_ssl)
         request_delay = kwargs.get("request_delay", 0.5)
+        if output_path and not force_download:
+            cached = self._load_papers_json(output_path, "AAAI")
+            if cached and all(paper.year == year and paper.conference == self.conference_name for paper in cached):
+                failures = self._load_failed_downloads(output_path, year)
+                if failures:
+                    logger.info("Retrying %d previously failed AAAI %d page(s).", len(failures), year)
+                    return self._retry_failed(
+                        cached,
+                        failures,
+                        year,
+                        output_path,
+                        timeout,
+                        verify_ssl,
+                        request_delay,
+                    )
+                return cached
+        # Explicit requests use actual issue discovery, not a cached metadata
+        # probe, which can fail transiently or use different HTTP options.
         issue_urls = self._discover_issues(year, timeout, verify_ssl, request_delay)
         papers: list[LightweightPaper] = []
         seen: set[int] = set()
+        failures: list[dict[str, Any]] = []
         for issue_url in issue_urls:
-            soup = self._fetch_page(issue_url, timeout, verify_ssl, request_delay)
-            sections = soup.select(".section")
-            if not sections:
-                raise RuntimeError(f"No proceedings sections in AAAI issue: {issue_url}")
-            for section in sections:
-                heading = section.select_one("h2")
-                session = heading.get_text(" ", strip=True) if heading else "AAAI proceedings"
-                if self._EXCLUDED_SECTIONS.search(session):
-                    continue
-                summaries = section.select(".obj_article_summary")
-                entries = section.select(".articles > li")
-                if entries and len(entries) != len(summaries):
-                    raise RuntimeError(f"Inconsistent AAAI article listing: {issue_url} ({session})")
-                if not summaries:
-                    raise RuntimeError(f"No article summaries in AAAI section: {issue_url} ({session})")
-                for summary in summaries:
-                    link = summary.select_one(".title a[href]")
-                    if not link:
-                        raise RuntimeError(f"Unrecognized AAAI article link: {issue_url}")
-                    url = urljoin(issue_url, str(link["href"]))
-                    match = _ARTICLE_VIEW_RE.search(url)
-                    if not match:
-                        raise RuntimeError(f"Unrecognized AAAI article URL: {url}")
-                    article_id = int(match.group(1))
-                    if article_id in seen:
-                        continue
-                    seen.add(article_id)
-                    article = self._fetch_page(url, timeout, verify_ssl, request_delay)
-                    paper = self._parse_article(article, url, session, year)
-                    if paper is not None:
-                        papers.append(paper)
+            self._process_issue(
+                issue_url,
+                year,
+                timeout,
+                verify_ssl,
+                request_delay,
+                papers,
+                seen,
+                failures,
+            )
         if not papers:
             raise RuntimeError(f"No valid AAAI papers with abstracts found for {year}")
         logger.info("Downloaded %d unique AAAI %d papers", len(papers), year)
         self._save_papers_json(papers, output_path, "AAAI")
+        self._save_failed_downloads(output_path, year, failures)
+        if failures:
+            logger.warning(
+                "Downloaded %d AAAI %d paper(s), but %d page(s) failed; "
+                "they will be retried automatically on the next run.",
+                len(papers),
+                year,
+                len(failures),
+            )
         return papers
 
     def get_metadata(self) -> dict[str, Any]:

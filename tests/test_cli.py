@@ -6,9 +6,11 @@ including the download and create-embeddings commands.
 """
 
 import sys
+import json
 import logging
 import argparse
 import contextlib
+from pathlib import Path
 from unittest.mock import Mock, patch
 import pytest
 from abstracts_explorer.cli import (
@@ -20,7 +22,7 @@ from abstracts_explorer.cli import (
     pre_process_command,
 )
 from abstracts_explorer.database import DatabaseManager
-from abstracts_explorer.plugin import LightweightPaper
+from abstracts_explorer.plugin import LightweightPaper, get_failed_downloads_path
 from tests.conftest import set_test_db
 from abstracts_explorer.config import get_config
 
@@ -246,6 +248,55 @@ class TestCLI:
         assert "Downloaded 2 papers" in captured.out
         assert "Database updated:" in captured.out
         assert output_db.exists()
+
+    def test_download_reports_failed_urls_sidecar(self, tmp_path, capsys):
+        """A failed-URL sidecar is reported with automatic retry guidance."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        mock_plugin = Mock()
+        mock_plugin.plugin_name = "aaai"
+        mock_plugin.plugin_description = "AAAI Test Plugin"
+        mock_plugin.download.return_value = []
+
+        json_path = tmp_path / "aaai_2025.json"
+        failed_path = Path(get_failed_downloads_path(str(json_path)))
+        failed_path.write_text(
+            json.dumps(
+                {
+                    "conference": "AAAI",
+                    "year": 2025,
+                    "failed": [{"url": "https://example.com/article", "type": "article"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with patch("abstracts_explorer.cli.get_plugin") as mock_get_plugin:
+            mock_get_plugin.return_value = mock_plugin
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "abstracts-explorer",
+                    "download",
+                    "--conference",
+                    "aaai",
+                    "--year",
+                    "2025",
+                    "--output",
+                    str(output_db),
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "1 page(s) failed" in captured.err
+        assert f"failed URLs saved to {failed_path}" in captured.err
+        assert "They will be retried automatically on the next run." in captured.err
+        assert "Delete this file to skip retrying them." in captured.err
 
     def test_download_command_failure(self, tmp_path, capsys):
         """Test download command handles errors gracefully."""
