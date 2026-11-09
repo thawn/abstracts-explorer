@@ -283,6 +283,20 @@ def _prepopulate_clustering_cache(test_database, em, collection_name):
         n_clusters=None,
         clustering_params={"linkage": "ward", "distance_threshold": 150.0},
     )
+
+    # The clustering tab requests results for the selected conference/year
+    # (NeurIPS 2025 in the test data), which are cached under separate keys.
+    db.save_clustering_cache(
+        embedding_model=config.embedding_model,
+        reduction_method="tsne",
+        n_components=2,
+        clustering_method="agglomerative",
+        results=results,
+        n_clusters=None,
+        clustering_params={"linkage": "ward", "distance_threshold": 150.0},
+        conference="NeurIPS",
+        year=2025,
+    )
     db.close()
 
 
@@ -2085,9 +2099,6 @@ class TestAdvancedSearchE2E:
 
 @pytest.mark.e2e
 @pytest.mark.slow
-@pytest.mark.skip(
-    reason="Clustering tab tests are currently too slow because of the large number of papers in test data. Need to use smaller dataset for testing."
-)
 class TestClusteringTabE2E:
     """Test clustering tab functionality with Selenium."""
 
@@ -2212,7 +2223,7 @@ class TestClusteringTabE2E:
 
         # Check for paper details panel with timeout
         try:
-            details_panel = wait.until(EC.presence_of_element_located((By.ID, "selected-paper-details")), timeout=5)
+            details_panel = wait.until(EC.presence_of_element_located((By.ID, "selected-paper-details")))
             # Panel might be hidden initially
             assert details_panel is not None, "Selected paper details panel should exist"
         except TimeoutException:
