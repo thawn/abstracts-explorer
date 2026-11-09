@@ -12,7 +12,7 @@ After=abstracts-postgres.service abstracts-chromadb.service abstracts-data-volum
 Requires=abstracts-postgres.service abstracts-chromadb.service abstracts-data-volume.service
 
 [Container]
-Image=ghcr.io/thawn/abstracts-explorer:latest
+Image=ghcr.io/thawn/abstracts-explorer:${ABSTRACTS_EXPLORER_TAG}
 ContainerName=abstracts-explorer
 Network=abstracts.network
 
