@@ -2674,8 +2674,10 @@ class TestCLI:
 
     def test_clear_clustering_cache_error(self, tmp_path, capsys):
         """Test clear-clustering-cache command handles errors gracefully."""
-        # Set a database path that doesn't exist and can't be created
-        set_test_db("/nonexistent/path/test.db")
+        # Parent "directory" is a regular file, so the DB can't be created on any OS
+        blocker = tmp_path / "blocker"
+        blocker.write_text("not a directory")
+        set_test_db(blocker / "test.db")
 
         # Run clear-clustering-cache command
         with patch.object(
