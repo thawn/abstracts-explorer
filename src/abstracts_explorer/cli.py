@@ -6,6 +6,7 @@ including downloading data, creating databases, and generating embeddings.
 """
 
 import argparse
+import json
 import logging
 import sys
 from datetime import datetime
@@ -24,6 +25,7 @@ from abstracts_explorer.rag import RAGChat, RAGError
 from abstracts_explorer.plugins import (
     DownloaderPlugin,
     LightweightPaper,
+    get_failed_downloads_path,
     get_plugin,
     get_all_plugins,
     list_plugins,
@@ -784,6 +786,23 @@ def _download_single(
     return plugin.download(year=year, output_path=str(json_path), force_download=force, **kwargs)
 
 
+def _report_failed_downloads(json_path: Path) -> None:
+    """Notify the user about recorded failed URLs and automatic retries."""
+    failed_path = Path(get_failed_downloads_path(str(json_path)))
+    if not failed_path.exists():
+        return
+    try:
+        data = json.loads(failed_path.read_text(encoding="utf-8"))
+        failures = data.get("failed", []) if isinstance(data, dict) else []
+        count = len(failures) if isinstance(failures, list) else 0
+        label = f"{count} page(s)" if count else "Some pages"
+    except (OSError, json.JSONDecodeError):
+        label = "Some pages"
+    print(f"⚠️  {label} failed; failed URLs saved to {failed_path}", file=sys.stderr)
+    print("   They will be retried automatically on the next run.", file=sys.stderr)
+    print("   Delete this file to skip retrying them.", file=sys.stderr)
+
+
 def download_command(args: argparse.Namespace) -> int:
     """
     Download conference data and create database.
@@ -865,6 +884,8 @@ def download_command(args: argparse.Namespace) -> int:
             try:
                 papers = _download_single(plugin, yr, output_path, args.force, args)
                 print(f"✅ Downloaded {len(papers):,} papers for {plugin.plugin_name} {yr}")
+                json_path = output_path.parent / f"{plugin.plugin_name}_{yr}.json"
+                _report_failed_downloads(json_path)
 
                 with DatabaseManager() as db:
                     db.create_tables()

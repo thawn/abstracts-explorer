@@ -30,6 +30,10 @@ abstracts-explorer download [OPTIONS]
 - `--force`: Force re-download even if papers exist
 - `--cache/--no-cache`: Enable/disable caching (default: enabled)
 
+Some plugins (currently AAAI) record failed page URLs in `<cache>.failed.json`.
+The next download retries those URLs automatically; delete the sidecar file to
+skip those retries.
+
 **Examples:**
 
 ```bash

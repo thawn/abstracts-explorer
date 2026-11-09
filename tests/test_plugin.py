@@ -9,6 +9,7 @@ This module tests all plugin-related functionality including:
 """
 
 import pytest
+import requests
 import tempfile
 from pathlib import Path
 from pydantic import ValidationError
@@ -19,6 +20,7 @@ from tests.conftest import set_test_db
 from abstracts_explorer.plugin import (
     sanitize_author_names,
     convert_to_lightweight_schema,
+    fetch_with_retries,
     validate_lightweight_paper,
     LightweightPaper,
     resolve_conference_from_url,
@@ -585,6 +587,86 @@ class TestIntegration:
         # Validate
         validated = validate_lightweight_paper(lightweight[0])
         assert validated.authors == ["John Doe", "Jane Smith"]
+
+
+# ============================================================
+# HTTP Retry Helper Tests
+# ============================================================
+
+
+class TestFetchWithRetries:
+    """Tests for the reusable HTTP retry helper."""
+
+    @staticmethod
+    def _response(status=200, headers=None):
+        response = Mock(status_code=status, headers=headers or {})
+        if status >= 400:
+            response.raise_for_status.side_effect = requests.HTTPError(str(status), response=response)
+        return response
+
+    def test_successful_request(self, monkeypatch):
+        """A successful request is returned without retrying."""
+        sleep = Mock()
+        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        session = Mock()
+        response = self._response()
+        session.get.return_value = response
+
+        result = fetch_with_retries(session, "https://example.com", timeout=7, verify=False)
+
+        assert result is response
+        session.get.assert_called_once_with("https://example.com", timeout=7, verify=False)
+        sleep.assert_not_called()
+
+    def test_transient_failure_retries(self, monkeypatch):
+        """A dropped connection is retried and then succeeds."""
+        sleep = Mock()
+        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        session = Mock()
+        response = self._response()
+        session.get.side_effect = [requests.ConnectionError("reset"), response]
+
+        result = fetch_with_retries(session, "https://example.com", timeout=7, request_delay=0.5)
+
+        assert result is response
+        assert session.get.call_count == 2
+        sleep.assert_any_call(1)
+
+    def test_persistent_server_error_is_retried_then_raised(self, monkeypatch):
+        """Persistent HTTP 503 responses are retried before raising."""
+        sleep = Mock()
+        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        session = Mock()
+        session.get.return_value = self._response(503)
+
+        with pytest.raises(requests.HTTPError, match="503"):
+            fetch_with_retries(session, "https://example.com", timeout=7)
+
+        assert session.get.call_count == 3
+
+    def test_permanent_http_error_not_retried(self, monkeypatch):
+        """Missing pages are not retried."""
+        sleep = Mock()
+        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        session = Mock()
+        session.get.return_value = self._response(404)
+
+        with pytest.raises(requests.HTTPError, match="404"):
+            fetch_with_retries(session, "https://example.com", timeout=7)
+
+        assert session.get.call_count == 1
+
+    def test_retry_after_is_honored(self, monkeypatch):
+        """Rate-limit responses respect the server's Retry-After header."""
+        sleep = Mock()
+        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        session = Mock()
+        session.get.return_value = self._response(429, {"Retry-After": "7"})
+
+        with pytest.raises(requests.HTTPError, match="429"):
+            fetch_with_retries(session, "https://example.com", timeout=7)
+
+        sleep.assert_any_call(7)
 
 
 # ============================================================

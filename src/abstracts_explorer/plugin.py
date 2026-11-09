@@ -14,6 +14,7 @@ The framework consists of:
 
 import json
 import logging
+import time
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
@@ -242,6 +243,102 @@ class DownloaderPlugin(ABC):
             except (json.JSONDecodeError, Exception) as e:
                 logger.warning("Failed to load local file: %s. Downloading from %s...", e, source_label)
         return None
+
+
+_RETRYABLE_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504})
+
+
+def get_failed_downloads_path(output_path: str) -> str:
+    """
+    Return the sidecar path used to record failed download URLs.
+
+    Parameters
+    ----------
+    output_path : str
+        Path to the main lightweight JSON cache.
+
+    Returns
+    -------
+    str
+        Sibling path ending in ``.failed.json``.
+    """
+    return str(Path(output_path).with_suffix(".failed.json"))
+
+
+def fetch_with_retries(
+    session: requests.Session,
+    url: str,
+    *,
+    timeout: float,
+    verify: bool = True,
+    request_delay: float = 0.0,
+    max_attempts: int = 3,
+    retryable_statuses: frozenset[int] = _RETRYABLE_HTTP_STATUSES,
+) -> requests.Response:
+    """
+    Fetch a URL, retrying transient failures with exponential backoff.
+
+    Connection errors and timeouts are retried, as are HTTP responses in
+    ``retryable_statuses``. Permanent failures, such as HTTP 404, are raised
+    immediately without retrying.
+
+    Parameters
+    ----------
+    session : requests.Session
+        Session used to issue the request.
+    url : str
+        URL to fetch.
+    timeout : float
+        HTTP timeout in seconds.
+    verify : bool, optional
+        Verify TLS certificates (default: True).
+    request_delay : float, optional
+        Delay before every attempt in seconds (default: 0).
+    max_attempts : int, optional
+        Maximum number of attempts, including the first (default: 3).
+    retryable_statuses : frozenset of int, optional
+        HTTP statuses that should be retried.
+
+    Returns
+    -------
+    requests.Response
+        Successful response.
+
+    Raises
+    ------
+    requests.RequestException
+        The last request failure after all retry attempts are exhausted.
+    """
+    last_error: Optional[requests.RequestException] = None
+    for attempt in range(max_attempts):
+        if request_delay > 0:
+            time.sleep(request_delay)
+        try:
+            response = session.get(url, timeout=timeout, verify=verify)
+            response.raise_for_status()
+            return response
+        except requests.RequestException as exc:
+            last_error = exc
+            error_response = getattr(exc, "response", None)
+            status = getattr(error_response, "status_code", None)
+            if not isinstance(status, int):
+                status = None
+            retryable = (
+                status in retryable_statuses
+                if status is not None
+                else isinstance(exc, (requests.ConnectionError, requests.Timeout))
+            )
+            if not retryable or attempt == max_attempts - 1:
+                break
+            retry_after = getattr(error_response, "headers", {}).get("Retry-After")
+            try:
+                delay = float(retry_after) if retry_after else 2**attempt
+            except (TypeError, ValueError):
+                delay = 2**attempt
+            logger.warning("Retrying request to %s in %.0fs after: %s", url, delay, exc)
+            time.sleep(delay)
+    assert last_error is not None
+    raise last_error
 
 
 class LightweightDownloaderPlugin(DownloaderPlugin):
@@ -1079,6 +1176,9 @@ __all__ = [
     "list_plugin_names",
     # Conversion utilities
     "convert_to_lightweight_schema",
+    # HTTP utilities
+    "fetch_with_retries",
+    "get_failed_downloads_path",
     # Pydantic models
     "LightweightPaper",
     # Validation functions
