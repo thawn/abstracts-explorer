@@ -104,7 +104,7 @@ Start the server with default settings:
 abstracts-explorer mcp-server
 ```
 
-This starts the server on `http://127.0.0.1:8000` with SSE transport.
+This starts the server on `http://127.0.0.1:8000/mcp` with streamable HTTP transport.
 
 ### Custom Host and Port
 
@@ -251,7 +251,7 @@ Before using the MCP server, ensure:
 
 1. **Embeddings are created**: Run `abstracts-explorer create-embeddings` first
 2. **Database exists**: Download papers with `abstracts-explorer download`
-3. **MCP package installed**: `uv sync` or `pip install mcp>=1.0.0`
+3. **MCP package installed**: `uv sync` or `pip install "mcp>=2.0.0,<3"`
 
 ## Troubleshooting
 

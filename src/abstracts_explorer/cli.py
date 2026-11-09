@@ -1443,7 +1443,7 @@ def mcp_server_command(args: argparse.Namespace) -> int:
         Command-line arguments containing:
         - host: Host to bind to
         - port: Port to bind to
-        - transport: Transport method (sse or stdio)
+        - transport: Transport method (streamable-http or stdio)
 
     Returns
     -------
@@ -3484,7 +3484,7 @@ The MCP server exposes tools that allow LLM-based assistants to:
 - Generate cluster visualizations
 
 Examples:
-  # Start MCP server on default port (8000)
+  # Start MCP server on default port (8000) using streamable HTTP
   abstracts-explorer mcp-server
   
   # Start on custom host and port
@@ -3509,9 +3509,9 @@ Examples:
     mcp_parser.add_argument(
         "--transport",
         type=str,
-        choices=["sse", "stdio"],
-        default="sse",
-        help="Transport method: sse (HTTP/SSE) or stdio (default: sse)",
+        choices=["streamable-http", "stdio"],
+        default="streamable-http",
+        help="Transport method: streamable-http (HTTP) or stdio (default: streamable-http)",
     )
 
     # Eval command (with sub-subcommands)

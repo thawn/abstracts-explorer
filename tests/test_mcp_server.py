@@ -2,6 +2,7 @@
 Tests for MCP server functionality.
 """
 
+import asyncio
 import json
 import pytest
 from unittest.mock import Mock, patch
@@ -1019,11 +1020,22 @@ class TestMCPServerIntegration:
 
     def test_mcp_server_initialization(self):
         """Test that MCP server initializes correctly."""
+        from mcp.server.mcpserver import MCPServer
+
         from abstracts_explorer.mcp_server import mcp
 
         assert mcp is not None
-        # Verify tools are registered
-        # Note: We can't easily test tool registration without running the server
+        assert isinstance(mcp, MCPServer)
+
+        tool_names = {tool.name for tool in asyncio.run(mcp.list_tools())}
+        assert tool_names == {
+            "analyze_topic_relevance",
+            "get_cluster_visualization",
+            "get_conference_topics",
+            "get_paper_details",
+            "get_topic_evolution",
+            "search_papers",
+        }
 
 
 class TestSearchPapersPaperCardFields:

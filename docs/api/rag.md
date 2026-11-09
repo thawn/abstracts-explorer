@@ -20,6 +20,7 @@ The `RAGChat` class implements:
    :undoc-members:
    :show-inheritance:
    :special-members: __init__
+   :exclude-members: datetime, dataclass, field, Path, List, Dict, Optional, Any, Agent, RunContext, Tool, ModelMessage, ModelRequest, OpenAIChatModel, OpenAIProvider, ModelSettings, logger
 ```
 
 ## Usage Examples
