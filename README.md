@@ -53,6 +53,29 @@ curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/main/scrip
 
 ### Option B — Local Python
 
+The web UI needs an OpenAI-compatible LLM backend for AI chat and embeddings. Copy the
+configuration template and edit `.env` to match your backend:
+
+```bash
+cp .env.example .env
+```
+
+For local use, start LM Studio's server and load chat and embedding models, then set
+`CHAT_MODEL` and `EMBEDDING_MODEL` in `.env` to their model identifiers. The default
+backend URL is `http://localhost:1234`. For a remote backend such as Blablador, set
+its URL and API token instead; for example:
+
+```dotenv
+LLM_BACKEND_URL=https://api.helmholtz-blablador.fz-juelich.de
+LLM_BACKEND_AUTH_TOKEN=your_blablador_token
+CHAT_MODEL=alias-code
+EMBEDDING_MODEL=alias-embedding
+```
+
+Configure these settings before generating embeddings or starting the web UI. See the
+[configuration guide](https://thawn.github.io/abstracts-explorer/configuration.html)
+for details.
+
 ```bash
 uv sync --all-extras
 uv run abstracts-explorer download --conference haicon --year 2026
