@@ -49,6 +49,26 @@ class TestEmbeddingsManager:
             assert em._client is not None
         assert embeddings_manager._client is None
 
+    def test_init_connects_and_creates_collection(self, embeddings_manager):
+        """Test that init connects and creates the collection."""
+        embeddings_manager.connect = Mock()
+        embeddings_manager.create_collection = Mock()
+
+        embeddings_manager.init()
+
+        embeddings_manager.connect.assert_called_once_with()
+        embeddings_manager.create_collection.assert_called_once_with(reset=False)
+
+    def test_init_reset(self, embeddings_manager):
+        """Test that init forwards the reset flag to create_collection."""
+        embeddings_manager.connect = Mock()
+        embeddings_manager.create_collection = Mock()
+
+        embeddings_manager.init(reset=True)
+
+        embeddings_manager.connect.assert_called_once_with()
+        embeddings_manager.create_collection.assert_called_once_with(reset=True)
+
     def test_test_lm_studio_connection_success(self, embeddings_manager):
         """Test successful LM Studio connection."""
         result = embeddings_manager.test_lm_studio_connection()
@@ -61,6 +81,38 @@ class TestEmbeddingsManager:
         embeddings_manager.openai_client.models.list.side_effect = Exception("Connection error")
         result = embeddings_manager.test_lm_studio_connection()
         assert result is False
+
+    def test_verbose_api_connection_test_success(self, embeddings_manager, capsys):
+        """Test verbose connection test prints success messages."""
+        result = embeddings_manager.verbose_api_connection_test()
+
+        assert result is True
+        captured = capsys.readouterr()
+        assert "Testing OpenAI API connection" in captured.out
+        assert "Successfully connected to OpenAI API" in captured.out
+        assert captured.err == ""
+
+    def test_verbose_api_connection_test_failure(self, embeddings_manager, capsys):
+        """Test verbose connection test prints failure details."""
+        embeddings_manager.openai_client.models.list.side_effect = Exception("Connection error")
+
+        result = embeddings_manager.verbose_api_connection_test()
+
+        assert result is False
+        captured = capsys.readouterr()
+        assert "Failed to connect to OpenAI API" in captured.err
+        assert embeddings_manager.lm_studio_url in captured.err
+        assert embeddings_manager.model_name in captured.err
+
+    def test_verbose_api_connection_test_model_hint(self, embeddings_manager, capsys):
+        """Test verbose connection test uses a custom model hint."""
+        embeddings_manager.openai_client.models.list.side_effect = Exception("Connection error")
+
+        result = embeddings_manager.verbose_api_connection_test(model_hint="A language model is loaded")
+
+        assert result is False
+        captured = capsys.readouterr()
+        assert "A language model is loaded" in captured.err
 
     def test_generate_embedding_success(self, embeddings_manager):
         """Test successful embedding generation."""

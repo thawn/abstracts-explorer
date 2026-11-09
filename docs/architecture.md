@@ -566,20 +566,17 @@ severity:
 |---|---------|-------------|---------|----------|
 | 1 | Session validation boilerplate (`if not self._session`) | 30+ | database.py | High |
 | 2 | ChromaDB where-clause construction (`$and/$in` filters) | 5+ | embeddings.py, clustering.py, mcp_server.py | High |
-| 3 | EmbeddingsManager initialization sequence | 6 | cli.py | High |
-| 4 | LM Studio connection test + error message | 4 | cli.py | Medium |
-| 5 | Embeddings DB path validation | 4 | cli.py | Medium |
-| 6 | CLI command header printing | 15+ | cli.py | Medium |
-| 7 | TF-IDF keyword extraction | 2 | clustering.py | Medium |
-| 8 | LLM label generation (OpenAI call + fallback) | 3 | clustering.py | Medium |
-| 9 | RAG tool wrapper functions (identical pattern) | 6 | rag.py | Medium |
-| 10 | MCP argument normalization functions | 4 | mcp_tools.py | Medium |
-| 11 | Resource init in MCP tools (config → embed → db) | 6 | mcp_server.py | Medium |
-| 12 | Conference/year argument resolution | 8+ | cli.py | Low |
-| 13 | Paper markdown formatting (session grouping) | 2 | export_utils.py | Low |
-| 14 | Error handling + traceback pattern | 15+ | cli.py | Low |
-| 15 | Faceting query pattern | 4 | database.py | Low |
-| 16 | Eval CRUD parallel structures | 2×5 | database.py | Low |
-| 17 | Progress callback definitions | 4 | registry.py | Low |
-| 18 | Web route error handling (try/except/jsonify) | 22 | web_ui/app.py | Low |
-| 19 | `get_years_for_conference` duplicates `get_years` | 2 | database.py | Low |
+| 3 | CLI command header printing | 15+ | cli.py | Medium |
+| 4 | TF-IDF keyword extraction | 2 | clustering.py | Medium |
+| 5 | LLM label generation (OpenAI call + fallback) | 3 | clustering.py | Medium |
+| 6 | RAG tool wrapper functions (identical pattern) | 6 | rag.py | Medium |
+| 7 | MCP argument normalization functions | 4 | mcp_tools.py | Medium |
+| 8 | Resource init in MCP tools (config → embed → db) | 6 | mcp_server.py | Medium |
+| 9 | Conference/year argument resolution | 8+ | cli.py | Low |
+| 10 | Paper markdown formatting (session grouping) | 2 | export_utils.py | Low |
+| 11 | Error handling + traceback pattern | 15+ | cli.py | Low |
+| 12 | Faceting query pattern | 4 | database.py | Low |
+| 13 | Eval CRUD parallel structures | 2×5 | database.py | Low |
+| 14 | Progress callback definitions | 4 | registry.py | Low |
+| 15 | Web route error handling (try/except/jsonify) | 22 | web_ui/app.py | Low |
+| 16 | `get_years_for_conference` duplicates `get_years` | 2 | database.py | Low |

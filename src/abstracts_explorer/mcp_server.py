@@ -75,8 +75,7 @@ def load_clustering_data(
         em = EmbeddingsManager(
             collection_name=collection_name,
         )
-        em.connect()
-        em.create_collection()
+        em.init()
 
         # Initialize database manager
         db = DatabaseManager()
@@ -661,8 +660,7 @@ def get_topic_evolution(
         em = EmbeddingsManager(
             collection_name=collection_name,
         )
-        em.connect()
-        em.create_collection()
+        em.init()
 
         # Initialize database
         db = DatabaseManager()
@@ -834,8 +832,7 @@ def search_papers(
         em = EmbeddingsManager(
             collection_name=collection_name,
         )
-        em.connect()
-        em.create_collection()
+        em.init()
 
         # Initialize database
         db = DatabaseManager()
@@ -1118,8 +1115,7 @@ def recommend_related_papers(
     collection_name = collection_name or config.collection_name
 
     em = EmbeddingsManager(collection_name=collection_name)
-    em.connect()
-    em.create_collection()
+    em.init()
     db = DatabaseManager()
     db.connect()
     try:
@@ -1216,8 +1212,7 @@ def analyze_topic_relevance(
         em = EmbeddingsManager(
             collection_name=collection_name,
         )
-        em.connect()
-        em.create_collection()
+        em.init()
 
         # Initialize database
         db = DatabaseManager()

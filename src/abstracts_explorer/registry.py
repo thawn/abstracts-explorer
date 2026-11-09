@@ -482,7 +482,7 @@ class RegistryClient:
 
         # 2. Reset the ChromaDB collection
         em = EmbeddingsManager()
-        em.create_collection(reset=True)
+        em.init(reset=True)
 
     def _export_year(
         self,

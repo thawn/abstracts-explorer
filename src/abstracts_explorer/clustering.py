@@ -1772,8 +1772,7 @@ def perform_clustering(
         em = EmbeddingsManager(
             collection_name=collection_name,
         )
-        em.connect()
-        em.create_collection()
+        em.init()
 
         # Initialize clustering manager
         cm = ClusteringManager(em)

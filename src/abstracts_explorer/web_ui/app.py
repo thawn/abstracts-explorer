@@ -103,8 +103,7 @@ def get_embeddings_manager():
             model_name=config.embedding_model,
             collection_name=config.collection_name,
         )
-        embeddings_manager.connect()  # Connect to ChromaDB
-        embeddings_manager.create_collection()  # Get or create the collection
+        embeddings_manager.init()  # Connect to ChromaDB and get or create the collection
     return embeddings_manager
 
 
