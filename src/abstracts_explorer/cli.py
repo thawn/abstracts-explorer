@@ -19,7 +19,7 @@ import argcomplete
 
 from tqdm import tqdm
 
-from abstracts_explorer.config import get_config
+from abstracts_explorer.config import Config, get_config
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager, EmbeddingsError
 from abstracts_explorer.clustering import perform_clustering, compute_clusters_with_cache, ClusteringError
@@ -196,6 +196,34 @@ def _build_embeddings_where_clause(args: argparse.Namespace) -> Optional[str]:
     return " AND ".join(conditions) if conditions else None
 
 
+def _validate_embeddings_db(config: Config) -> bool:
+    """
+    Validate that the configured local embeddings database exists.
+
+    HTTP(S) URLs are always considered valid because the database is remote.
+
+    Parameters
+    ----------
+    config : Config
+        Configuration containing the ``embedding_db`` setting.
+
+    Returns
+    -------
+    bool
+        True if the embeddings database is usable, False otherwise.
+    """
+    if config.embedding_db.startswith("http://") or config.embedding_db.startswith("https://"):
+        return True
+
+    embeddings_path = Path(config.embedding_db)
+    if not embeddings_path.exists():
+        print(f"❌ Error: Embeddings database not found: {embeddings_path}", file=sys.stderr)
+        print("\nYou can create embeddings using:", file=sys.stderr)
+        print("  abstracts-explorer create-embeddings", file=sys.stderr)
+        return False
+    return True
+
+
 def create_embeddings_command(args: argparse.Namespace) -> int:
     """
     Create embeddings database for abstracts.
@@ -300,17 +328,8 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
                 args.force = True
 
         # Test connection
-        print("🔌 Testing OpenAI API connection...")
-        if not em.test_lm_studio_connection():
-            print("\n❌ Failed to connect to OpenAI API!", file=sys.stderr)
-            print("\nPlease ensure:", file=sys.stderr)
-            print(f"  - OpenAI-compatible API is running at {args.lm_studio_url}", file=sys.stderr)
-            print(f"  - The {args.model} model is loaded", file=sys.stderr)
+        if not em.verbose_api_connection_test():
             return 1
-        print("✅ Successfully connected to OpenAI API\n")
-
-        # Connect to ChromaDB
-        em.connect()
 
         # Create or reset collection.
         # When --force is combined with --conference / --year, only delete the
@@ -331,7 +350,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         else:
             print(f"📁 Creating collection '{args.collection}'...")
 
-        em.create_collection(reset=args.force and not filtered_force)
+        em.init(reset=args.force and not filtered_force)
 
         if filtered_force:
             deleted = em.delete_embeddings_by_filter(conference=conference, year=year)
@@ -413,13 +432,8 @@ def search_command(args: argparse.Namespace) -> int:
     config = get_config()
 
     # Validate embeddings database exists (for local paths only)
-    if not config.embedding_db.startswith("http://") and not config.embedding_db.startswith("https://"):
-        embeddings_path = Path(config.embedding_db)
-        if not embeddings_path.exists():
-            print(f"❌ Error: Embeddings database not found: {embeddings_path}", file=sys.stderr)
-            print("\nYou can create embeddings using:", file=sys.stderr)
-            print("  abstracts-explorer create-embeddings", file=sys.stderr)
-            return 1
+    if not _validate_embeddings_db(config):
+        return 1
 
     # Resolve conference name once to canonical form
     conference = _resolve_conference_arg(getattr(args, "conference", None))
@@ -448,16 +462,10 @@ def search_command(args: argparse.Namespace) -> int:
         )
 
         # Test OpenAI API connection
-        if not em.test_lm_studio_connection():
-            print("\n❌ Failed to connect to OpenAI API!", file=sys.stderr)
-            print("\nPlease ensure:", file=sys.stderr)
-            print(f"  - OpenAI-compatible API is running at {args.lm_studio_url}", file=sys.stderr)
-            print(f"  - The {args.model} model is loaded", file=sys.stderr)
+        if not em.verbose_api_connection_test():
             return 1
 
-        # Connect to ChromaDB
-        em.connect()
-        em.create_collection()
+        em.init()
 
         # Check collection stats
         stats = em.get_collection_stats()
@@ -609,13 +617,8 @@ def chat_command(args: argparse.Namespace) -> int:
         print("=" * 70)
 
         # Check embeddings exist (for local paths only)
-        if not config.embedding_db.startswith("http://") and not config.embedding_db.startswith("https://"):
-            embeddings_path = Path(config.embedding_db)
-            if not embeddings_path.exists():
-                print(f"\n❌ Error: Embeddings database not found: {embeddings_path}", file=sys.stderr)
-                print("\nYou can create embeddings using:", file=sys.stderr)
-                print("  abstracts-explorer create-embeddings", file=sys.stderr)
-                return 1
+        if not _validate_embeddings_db(config):
+            return 1
 
         # Initialize embeddings manager
         em = EmbeddingsManager(
@@ -625,20 +628,11 @@ def chat_command(args: argparse.Namespace) -> int:
         )
 
         # Test OpenAI API connection
-        print("\n🔌 Testing OpenAI API connection...")
-        if not em.test_lm_studio_connection():
-            print("\n❌ Failed to connect to OpenAI API!", file=sys.stderr)
-            print("\nPlease ensure:", file=sys.stderr)
-            print(f"  - OpenAI-compatible API is running at {args.lm_studio_url}", file=sys.stderr)
-            print("  - A language model is loaded", file=sys.stderr)
+        if not em.verbose_api_connection_test(model_hint="A language model is loaded"):
             return 1
-        print("✅ Successfully connected to OpenAI API")
-
-        # Connect to embeddings
-        em.connect()
 
         # Get or create the collection (should already exist for chat)
-        em.create_collection(reset=False)
+        em.init(reset=False)
 
         # Get collection stats
         stats = em.get_collection_stats()
@@ -1033,13 +1027,8 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
     config = get_config()
 
     # Validate embeddings database exists (for local paths only)
-    if not config.embedding_db.startswith("http://") and not config.embedding_db.startswith("https://"):
-        embeddings_path = Path(config.embedding_db)
-        if not embeddings_path.exists():
-            print(f"❌ Error: Embeddings database not found: {embeddings_path}", file=sys.stderr)
-            print("\nYou can create embeddings using:", file=sys.stderr)
-            print("  abstracts-explorer create-embeddings", file=sys.stderr)
-            return 1
+    if not _validate_embeddings_db(config):
+        return 1
 
     print("Abstracts Explorer - Clustering")
     print("=" * 70)
@@ -1213,8 +1202,7 @@ def delete_data_command(args: argparse.Namespace) -> int:
     embedding_count = 0
     try:
         em = EmbeddingsManager()
-        em.connect()
-        em.create_collection(reset=False)
+        em.init(reset=False)
         existing = em.collection.get(where={"$and": [{"conference": conference}, {"year": str(year)}]})
         embedding_count = len(existing.get("ids", []))
         em.close()
@@ -1253,8 +1241,7 @@ def delete_data_command(args: argparse.Namespace) -> int:
     # 2. Delete embeddings from ChromaDB
     try:
         em = EmbeddingsManager()
-        em.connect()
-        em.create_collection(reset=False)
+        em.init(reset=False)
         deleted_embeddings = em.delete_embeddings_by_filter(conference=conference, year=year)
         em.close()
         print(f"✅ Deleted {deleted_embeddings:,} embedding(s) from ChromaDB.")
@@ -1314,15 +1301,8 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     config = get_config()
 
     # Validate embeddings database exists (for local paths only)
-    if not config.embedding_db.startswith("http://") and not config.embedding_db.startswith("https://"):
-        from pathlib import Path
-
-        embeddings_path = Path(config.embedding_db)
-        if not embeddings_path.exists():
-            print(f"❌ Error: Embeddings database not found: {embeddings_path}", file=sys.stderr)
-            print("\nYou can create embeddings using:", file=sys.stderr)
-            print("  abstracts-explorer create-embeddings", file=sys.stderr)
-            return 1
+    if not _validate_embeddings_db(config):
+        return 1
 
     # Resolve conference name once to canonical form
     resolved_conference = _resolve_conference_arg(getattr(args, "conference", None))
@@ -1370,8 +1350,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
             collection_name=args.collection,
             requests_per_minute=args.requests_per_minute,
         )
-        em.connect()
-        em.create_collection()
+        em.init()
 
         success_count = 0
         fail_count = 0
@@ -1745,14 +1724,10 @@ def eval_run_command(args: argparse.Namespace) -> int:
             collection_name=args.collection,
         )
 
-        print("\n🔌 Testing OpenAI API connection...")
-        if not em.test_lm_studio_connection():
-            print("\n❌ Failed to connect to OpenAI API!", file=sys.stderr)
+        if not em.verbose_api_connection_test():
             return 1
-        print("✅ Connected")
 
-        em.connect()
-        em.create_collection(reset=False)
+        em.init(reset=False)
 
         with DatabaseManager() as db:
             db.create_tables()

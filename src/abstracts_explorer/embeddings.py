@@ -7,6 +7,7 @@ embeddings and stores them in ChromaDB for efficient similarity search.
 """
 
 import logging
+import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -349,6 +350,29 @@ class EmbeddingsManager:
         """Context manager exit."""
         self.close()
 
+    def init(self, reset: bool = False) -> None:
+        """
+        Connect to ChromaDB and create or retrieve the collection.
+
+        Parameters
+        ----------
+        reset : bool, optional
+            If True, delete the existing collection before creating it,
+            by default False.
+
+        Raises
+        ------
+        EmbeddingsError
+            If connecting to ChromaDB or creating the collection fails.
+
+        Examples
+        --------
+        >>> em = EmbeddingsManager()
+        >>> em.init()
+        """
+        self.connect()
+        self.create_collection(reset=reset)
+
     def test_lm_studio_connection(self) -> bool:
         """
         Test connection to OpenAI-compatible API endpoint.
@@ -372,6 +396,38 @@ class EmbeddingsManager:
         except Exception as e:
             logger.warning(f"Failed to connect to OpenAI API: {str(e)}")
             return False
+
+    def verbose_api_connection_test(self, model_hint: Optional[str] = None) -> bool:
+        """
+        Test the OpenAI-compatible API connection and print user-facing messages.
+
+        Parameters
+        ----------
+        model_hint : str, optional
+            Description of the expected model shown in the failure message.
+            If None, a message using ``self.model_name`` is shown.
+
+        Returns
+        -------
+        bool
+            True if the connection is successful, False otherwise.
+
+        Examples
+        --------
+        >>> em = EmbeddingsManager()
+        >>> if em.verbose_api_connection_test():
+        ...     print("API is accessible")
+        """
+        print("\n🔌 Testing OpenAI API connection...")
+        if not self.test_lm_studio_connection():
+            print("\n❌ Failed to connect to OpenAI API!", file=sys.stderr)
+            print("\nPlease ensure:", file=sys.stderr)
+            print(f"  - OpenAI-compatible API is running at {self.lm_studio_url}", file=sys.stderr)
+            hint = model_hint or f"The {self.model_name} model is loaded"
+            print(f"  - {hint}", file=sys.stderr)
+            return False
+        print("✅ Successfully connected to OpenAI API")
+        return True
 
     def generate_embedding(self, text: str) -> List[float]:
         """
