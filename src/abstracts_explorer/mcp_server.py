@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from collections import Counter
 from copy import deepcopy
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.database import DatabaseManager
@@ -30,8 +30,8 @@ from abstracts_explorer.config import get_config
 
 logger = logging.getLogger(__name__)
 
-# Initialize FastMCP server
-mcp = FastMCP("Abstracts Explorer Cluster Analysis")
+# Initialize MCP server
+mcp = MCPServer("Abstracts Explorer Cluster Analysis")
 
 
 class ClusterAnalysisError(Exception):
@@ -1273,7 +1273,7 @@ def get_cluster_visualization(
 def run_mcp_server(
     host: str = "127.0.0.1",
     port: int = 8000,
-    transport: str = "sse",
+    transport: str = "streamable-http",
 ) -> None:
     """
     Run the MCP server.
@@ -1285,7 +1285,7 @@ def run_mcp_server(
     port : int, optional
         Port to listen on (default: 8000)
     transport : str, optional
-        Transport method: 'sse' or 'stdio' (default: 'sse')
+        Transport method: 'streamable-http' or 'stdio' (default: 'streamable-http')
 
     Examples
     --------
@@ -1295,12 +1295,10 @@ def run_mcp_server(
 
     if transport == "stdio":
         # Run with stdio transport (for local CLI integration)
-        import asyncio
-
-        asyncio.run(mcp.run_stdio_async())
+        mcp.run(transport="stdio")
     else:
-        # Run with SSE transport (for HTTP integration)
-        mcp.run(host=host, port=port)
+        # Run with streamable HTTP transport (for HTTP integration)
+        mcp.run(transport="streamable-http", host=host, port=port)
 
 
 if __name__ == "__main__":
