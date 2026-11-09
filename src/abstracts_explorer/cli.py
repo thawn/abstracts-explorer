@@ -8,10 +8,12 @@ including downloading data, creating databases, and generating embeddings.
 import argparse
 import json
 import logging
+import queue
 import sys
+import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import argcomplete
 
@@ -275,7 +277,19 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
             print(f"   Current model: {current_model}")
             print("\n   Embeddings created with different models are incompatible.")
 
-            if not args.force:
+            if args.force:
+                print("   --force flag detected: will recreate embeddings with new model")
+            elif getattr(args, "ignore_embedding_model_mismatch", False):
+                print("   --ignore-embedding-model-mismatch detected: " "will recreate embeddings with new model")
+                args.force = True
+            elif getattr(args, "non_interactive", False):
+                print(
+                    "\n   Re-run with --ignore-embedding-model-mismatch to recreate the "
+                    "embeddings without prompting.",
+                    file=sys.stderr,
+                )
+                return 1
+            else:
                 print("\n   Use --force to recreate embeddings with the new model.")
                 print("   This will delete existing embeddings and recreate them.\n")
                 response = input("Do you want to recreate embeddings with the new model? (y/N): ")
@@ -284,8 +298,6 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
                     return 1
                 # User confirmed, set force flag
                 args.force = True
-            else:
-                print("   --force flag detected: will recreate embeddings with new model")
 
         # Test connection
         print("🔌 Testing OpenAI API connection...")
@@ -803,7 +815,10 @@ def _report_failed_downloads(json_path: Path) -> None:
     print("   Delete this file to skip retrying them.", file=sys.stderr)
 
 
-def download_command(args: argparse.Namespace) -> int:
+def download_command(
+    args: argparse.Namespace,
+    on_unit_complete: Optional[Callable[[str, int, int], None]] = None,
+) -> int:
     """
     Download conference data and create database.
 
@@ -819,6 +834,10 @@ def download_command(args: argparse.Namespace) -> int:
         - output: Path for intermediate JSON files
         - force: Whether to force re-download
         - list_plugins: Whether to list available plugins
+    on_unit_complete : callable, optional
+        Called after each successfully downloaded ``(conference, year)`` unit
+        has been committed to the database.  Receives the canonical conference
+        name, the year, and the number of downloaded papers.
 
     Returns
     -------
@@ -893,6 +912,18 @@ def download_command(args: argparse.Namespace) -> int:
                     print(f"✅ Loaded {count:,} papers into database")
 
                 total_papers += len(papers)
+
+                if on_unit_complete is not None and papers:
+                    unit_conference = papers[0].conference or plugin.plugin_name
+                    try:
+                        on_unit_complete(unit_conference, yr, len(papers))
+                    except Exception as callback_error:
+                        logger.warning(
+                            "Post-processing callback failed for %s %s: %s",
+                            unit_conference,
+                            yr,
+                            callback_error,
+                        )
 
             except Exception as e:
                 msg = f"{plugin.plugin_name} {yr}: {e}"
@@ -2595,12 +2626,158 @@ def registry_delete_command(args: argparse.Namespace) -> int:
         return 1
 
 
+def _build_pre_process_embeddings_args(
+    args: argparse.Namespace,
+    config: Any,
+    conference: Optional[str],
+    year: Optional[int],
+    force: bool,
+    non_interactive: bool = False,
+) -> argparse.Namespace:
+    """Build the ``create-embeddings`` argument namespace for a pipeline unit."""
+    return argparse.Namespace(
+        conference=conference,
+        year=year,
+        collection=getattr(args, "collection", config.collection_name),
+        lm_studio_url=getattr(args, "lm_studio_url", config.llm_backend_url),
+        model=getattr(args, "model", config.embedding_model),
+        force=force,
+        where=getattr(args, "where", None),
+        requests_per_minute=getattr(args, "requests_per_minute", config.requests_per_minute),
+        ignore_embedding_model_mismatch=getattr(args, "ignore_embedding_model_mismatch", False),
+        non_interactive=non_interactive,
+        verbose=getattr(args, "verbose", 0),
+    )
+
+
+def _build_pre_process_clustering_args(
+    args: argparse.Namespace,
+    config: Any,
+    conference: Optional[str],
+    year: Optional[int],
+    force: bool,
+) -> argparse.Namespace:
+    """Build the ``clustering pre-generate`` argument namespace for a pipeline unit."""
+    return argparse.Namespace(
+        conference=conference,
+        year=year,
+        collection=getattr(args, "collection", config.collection_name),
+        force=force,
+        requests_per_minute=getattr(args, "requests_per_minute", config.requests_per_minute),
+        verbose=getattr(args, "verbose", 0),
+    )
+
+
+def _post_process_worker(
+    unit_queue: "queue.Queue[Optional[Tuple[str, int, int]]]",
+    args: argparse.Namespace,
+    config: Any,
+    force: bool,
+    successes: List[str],
+    failures: List[Tuple[str, str]],
+) -> None:
+    """Embed and cluster downloaded units sequentially as they become available."""
+    while True:
+        unit = unit_queue.get()
+        if unit is None:
+            unit_queue.task_done()
+            return
+
+        unit_conference, unit_year, paper_count = unit
+        label = f"{unit_conference} {unit_year}"
+
+        try:
+            if paper_count <= 0:
+                print(f"⏭️  Skipping {label}: no papers downloaded")
+                continue
+
+            print(f"\n🧮 [{label}] Creating embeddings...")
+            rc = create_embeddings_command(
+                _build_pre_process_embeddings_args(
+                    args,
+                    config,
+                    unit_conference,
+                    unit_year,
+                    force,
+                    non_interactive=True,
+                )
+            )
+            if rc != 0:
+                failures.append((label, "create-embeddings"))
+                print(f"❌ [{label}] Create-embeddings failed (exit code {rc})", file=sys.stderr)
+                continue
+
+            print(f"\n🔮 [{label}] Pre-generating clustering results...")
+            rc = pre_generate_clustering_command(
+                _build_pre_process_clustering_args(args, config, unit_conference, unit_year, force)
+            )
+            if rc != 0:
+                failures.append((label, "clustering pre-generate"))
+                print(f"❌ [{label}] Clustering pre-generate failed (exit code {rc})", file=sys.stderr)
+                continue
+
+            successes.append(label)
+        except Exception as e:
+            failures.append((label, str(e)))
+            print(f"❌ [{label}] Unexpected error: {e}", file=sys.stderr)
+        finally:
+            unit_queue.task_done()
+
+
+def _pre_process_parallel(
+    args: argparse.Namespace,
+    config: Any,
+    download_args: argparse.Namespace,
+) -> int:
+    """Download units and post-process each unit as soon as it is committed."""
+    unit_queue: "queue.Queue[Optional[Tuple[str, int, int]]]" = queue.Queue()
+    successes: List[str] = []
+    failures: List[Tuple[str, str]] = []
+
+    worker = threading.Thread(
+        target=_post_process_worker,
+        args=(unit_queue, args, config, getattr(args, "force", False), successes, failures),
+        name="pre-process-post",
+        daemon=True,
+    )
+    worker.start()
+
+    def on_unit_complete(unit_conference: str, unit_year: int, paper_count: int) -> None:
+        if paper_count > 0:
+            unit_queue.put((unit_conference, unit_year, paper_count))
+
+    print("\n📥 Downloading conference data and post-processing units in parallel...")
+    rc_download = 1
+    try:
+        rc_download = download_command(download_args, on_unit_complete=on_unit_complete)
+    finally:
+        unit_queue.put(None)
+        worker.join()
+
+    print("\n" + "=" * 70)
+    print(f"📊 Post-processing: {len(successes)} succeeded, {len(failures)} failed")
+    if successes:
+        print("   ✅ " + ", ".join(successes))
+    for label, reason in failures:
+        print(f"   ❌ {label}: {reason}", file=sys.stderr)
+
+    rc = 0
+    if rc_download != 0:
+        rc = rc_download
+    if failures:
+        rc = 1
+
+    if rc == 0:
+        print("\n✅ Pre-process pipeline completed successfully!")
+    return rc
+
+
 def pre_process_command(args: argparse.Namespace) -> int:
     """
     Run the full pre-processing pipeline: download → create-embeddings → clustering pre-generate.
 
-    This command chains the three main data-preparation steps in the correct order,
-    passing the same ``--conference`` and ``--year`` filters to each step.
+    Each ``(conference, year)`` unit is post-processed as soon as its download
+    is committed, while the remaining downloads continue in the background.
 
     Parameters
     ----------
@@ -2609,6 +2786,10 @@ def pre_process_command(args: argparse.Namespace) -> int:
         - conference: Conference to process (optional; all conferences if omitted)
         - year: Year to process (optional; all available years if omitted)
         - force: Force re-download / reset embeddings / force recompute clustering
+        - ignore_embedding_model_mismatch: Recreate embeddings on model mismatch
+          without prompting
+        - collection, lm_studio_url, model, where, requests_per_minute: Forwarded
+          to the embeddings and clustering steps
 
     Returns
     -------
@@ -2629,11 +2810,11 @@ def pre_process_command(args: argparse.Namespace) -> int:
     if year is not None:
         print(f"Year:       {year}")
     print(f"Force:      {force}")
+    print(f"Collection: {getattr(args, 'collection', config.collection_name)}")
+    print(f"Model:      {getattr(args, 'model', config.embedding_model)}")
     print("Steps: download → create-embeddings → clustering pre-generate")
     print("=" * 70)
 
-    # Step 1: Download
-    print("\n📥 Step 1/3: Downloading conference data...")
     download_args = argparse.Namespace(
         conference=conference,
         year=year,
@@ -2644,46 +2825,8 @@ def pre_process_command(args: argparse.Namespace) -> int:
         input_file=None,
         verbose=verbose,
     )
-    rc = download_command(download_args)
-    if rc != 0:
-        print(f"\n❌ Download step failed (exit code {rc})", file=sys.stderr)
-        return rc
 
-    # Step 2: Create embeddings
-    print("\n🧮 Step 2/3: Creating embeddings...")
-    embeddings_args = argparse.Namespace(
-        conference=conference,
-        year=year,
-        collection=config.collection_name,
-        lm_studio_url=config.llm_backend_url,
-        model=config.embedding_model,
-        force=force,
-        where=None,
-        requests_per_minute=config.requests_per_minute,
-        verbose=verbose,
-    )
-    rc = create_embeddings_command(embeddings_args)
-    if rc != 0:
-        print(f"\n❌ Create-embeddings step failed (exit code {rc})", file=sys.stderr)
-        return rc
-
-    # Step 3: Clustering pre-generate
-    print("\n🔮 Step 3/3: Pre-generating clustering results...")
-    clustering_args = argparse.Namespace(
-        conference=conference,
-        year=year,
-        collection=config.collection_name,
-        force=force,
-        requests_per_minute=config.requests_per_minute,
-        verbose=verbose,
-    )
-    rc = pre_generate_clustering_command(clustering_args)
-    if rc != 0:
-        print(f"\n❌ Clustering pre-generate step failed (exit code {rc})", file=sys.stderr)
-        return rc
-
-    print("\n✅ Pre-process pipeline completed successfully!")
-    return 0
+    return _pre_process_parallel(args, config, download_args)
 
 
 def main() -> int:
@@ -2867,6 +3010,11 @@ Examples:
         "--force",
         action="store_true",
         help="Reset collection if it already exists",
+    )
+    embeddings_parser.add_argument(
+        "--ignore-embedding-model-mismatch",
+        action="store_true",
+        help="Recreate embeddings after an embedding model mismatch without prompting",
     )
     embeddings_parser.add_argument(
         "--where",
@@ -3799,16 +3947,20 @@ Examples:
         help="Run the full pre-processing pipeline (download → create-embeddings → clustering pre-generate)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="""
-Run the full pre-processing pipeline in order:
+Run the full pre-processing pipeline:
   1. download          - Download conference data
   2. create-embeddings - Generate embeddings for abstracts
   3. clustering pre-generate - Pre-generate clustering results for the web UI
 
-All three steps receive the same --conference and --year filters.
-Other options for each step use their default values (from config).
+By default the pipeline is parallel: each conference/year unit is embedded and
+clustered as soon as its download finishes, while the remaining downloads keep
+running.
+
+All steps receive the same --conference and --year filters.  The embedding and
+clustering options below are forwarded to the respective steps.
 
 Examples:
-  # Process all conferences and years
+  # Process all conferences and years (parallel pipeline)
   abstracts-explorer pre-process
 
   # Process only NeurIPS (all years)
@@ -3819,13 +3971,51 @@ Examples:
 
   # Re-process, overwriting existing data
   abstracts-explorer pre-process --conference neurips --force
+
+  # Recreate embeddings after switching embedding models, without prompting
+  abstracts-explorer pre-process --ignore-embedding-model-mismatch --model my-new-model
         """,
     )
     add_conference_year_args(pre_process_parser)
     pre_process_parser.add_argument(
         "--force",
         action="store_true",
-        help="Force re-download and reset embeddings even if they already exist",
+        help="Force re-download and reset embeddings/clustering even if they already exist",
+    )
+    pre_process_parser.add_argument(
+        "--collection",
+        type=str,
+        default=config.collection_name,
+        help=f"Name for the ChromaDB collection (default: {config.collection_name})",
+    )
+    pre_process_parser.add_argument(
+        "--lm-studio-url",
+        type=str,
+        default=config.llm_backend_url,
+        help=f"URL for LM Studio API (default: {config.llm_backend_url})",
+    )
+    pre_process_parser.add_argument(
+        "--model",
+        type=str,
+        default=config.embedding_model,
+        help=f"Name of the embedding model (default: {config.embedding_model})",
+    )
+    pre_process_parser.add_argument(
+        "--where",
+        type=str,
+        default=None,
+        help="SQL WHERE clause to filter papers for embedding",
+    )
+    pre_process_parser.add_argument(
+        "--requests-per-minute",
+        type=int,
+        default=config.requests_per_minute,
+        help=f"Maximum number of API requests per minute, 0 to disable rate limiting (default: {config.requests_per_minute})",
+    )
+    pre_process_parser.add_argument(
+        "--ignore-embedding-model-mismatch",
+        action="store_true",
+        help="Recreate embeddings after an embedding model mismatch without prompting",
     )
 
     argcomplete.autocomplete(parser)

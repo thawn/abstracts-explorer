@@ -20,6 +20,8 @@ from abstracts_explorer.cli import (
     _build_embeddings_where_clause,
     add_conference_year_args,
     pre_process_command,
+    download_command,
+    create_embeddings_command,
 )
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.plugin import LightweightPaper, get_failed_downloads_path
@@ -248,6 +250,74 @@ class TestCLI:
         assert "Downloaded 2 papers" in captured.out
         assert "Database updated:" in captured.out
         assert output_db.exists()
+
+    def test_download_command_invokes_unit_callback(self, tmp_path, capsys):
+        """download_command reports each successfully committed unit via callback."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        mock_plugin = Mock()
+        mock_plugin.plugin_name = "neurips"
+        mock_plugin.plugin_description = "NeurIPS Test Plugin"
+        mock_plugin.supported_years = [2025]
+        mock_plugin.download.return_value = [
+            LightweightPaper(
+                title="Paper 1",
+                abstract="Abstract 1",
+                authors=["Author 1"],
+                session="Session 1",
+                poster_position="P1",
+                year=2025,
+                conference="NeurIPS",
+            )
+        ]
+
+        completed = []
+        args = argparse.Namespace(
+            conference="neurips",
+            year=2025,
+            output=str(output_db),
+            force=True,
+            list_plugins=False,
+            max_workers=20,
+            input_file=None,
+            verbose=0,
+        )
+
+        with patch("abstracts_explorer.cli.get_plugin", return_value=mock_plugin):
+            rc = download_command(args, on_unit_complete=lambda c, y, n: completed.append((c, y, n)))
+
+        assert rc == 0
+        assert completed == [("NeurIPS", 2025, 1)]
+
+    def test_download_command_skips_callback_for_empty_units(self, tmp_path):
+        """Units that downloaded no papers do not trigger post-processing."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        mock_plugin = Mock()
+        mock_plugin.plugin_name = "neurips"
+        mock_plugin.plugin_description = "NeurIPS Test Plugin"
+        mock_plugin.supported_years = [2025]
+        mock_plugin.download.return_value = []
+
+        completed = []
+        args = argparse.Namespace(
+            conference="neurips",
+            year=2025,
+            output=str(output_db),
+            force=True,
+            list_plugins=False,
+            max_workers=20,
+            input_file=None,
+            verbose=0,
+        )
+
+        with patch("abstracts_explorer.cli.get_plugin", return_value=mock_plugin):
+            rc = download_command(args, on_unit_complete=lambda c, y, n: completed.append((c, y, n)))
+
+        assert rc == 0
+        assert completed == []
 
     def test_download_reports_failed_urls_sidecar(self, tmp_path, capsys):
         """A failed-URL sidecar is reported with automatic retry guidance."""
@@ -601,7 +671,7 @@ class TestCLI:
         mock_get_plugin.assert_called_once_with("neurips")
 
     def test_pre_process_command_success(self, tmp_path, capsys, monkeypatch):
-        """Test pre-process command chains download → embeddings → clustering."""
+        """Test the parallel pre-process pipeline post-processes each downloaded unit."""
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
         with (
@@ -609,7 +679,13 @@ class TestCLI:
             patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
             patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
         ):
-            mock_download.return_value = 0
+
+            def fake_download(download_args, on_unit_complete=None):
+                if on_unit_complete:
+                    on_unit_complete("NeurIPS", 2025, 2)
+                return 0
+
+            mock_download.side_effect = fake_download
             mock_embed.return_value = 0
             mock_cluster.return_value = 0
 
@@ -618,12 +694,10 @@ class TestCLI:
 
         assert rc == 0
         captured = capsys.readouterr()
-        assert "Step 1/3" in captured.out
-        assert "Step 2/3" in captured.out
-        assert "Step 3/3" in captured.out
         assert "completed successfully" in captured.out
+        assert "1 succeeded, 0 failed" in captured.out
 
-        # Verify each sub-command was called
+        # Verify each sub-command was called once for the downloaded unit
         mock_download.assert_called_once()
         mock_embed.assert_called_once()
         mock_cluster.assert_called_once()
@@ -633,8 +707,17 @@ class TestCLI:
         assert download_args.conference == "neurips"
         assert download_args.year == 2025
 
+        embed_args = mock_embed.call_args[0][0]
+        assert embed_args.conference == "NeurIPS"
+        assert embed_args.year == 2025
+        assert embed_args.non_interactive is True
+
+        cluster_args = mock_cluster.call_args[0][0]
+        assert cluster_args.conference == "NeurIPS"
+        assert cluster_args.year == 2025
+
     def test_pre_process_command_download_fails(self, tmp_path, capsys, monkeypatch):
-        """Test pre-process command stops on download failure."""
+        """Test pre-process command reports download failure and skips post-processing."""
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
         with (
@@ -662,12 +745,27 @@ class TestCLI:
             patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
             patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
         ):
-            mock_download.return_value = 0
+
+            def fake_download(download_args, on_unit_complete=None):
+                if on_unit_complete:
+                    on_unit_complete("ICLR", 2024, 1)
+                return 0
+
+            mock_download.side_effect = fake_download
             mock_embed.return_value = 0
             mock_cluster.return_value = 0
 
             with patch.object(
-                sys, "argv", ["abstracts-explorer", "pre-process", "--conference", "iclr", "--year", "2024"]
+                sys,
+                "argv",
+                [
+                    "abstracts-explorer",
+                    "pre-process",
+                    "--conference",
+                    "iclr",
+                    "--year",
+                    "2024",
+                ],
             ):
                 rc = main()
 
@@ -679,6 +777,116 @@ class TestCLI:
         download_args = mock_download.call_args[0][0]
         assert download_args.conference == "iclr"
         assert download_args.year == 2024
+
+    def test_pre_process_forwards_embedding_and_clustering_options(self, tmp_path, capsys, monkeypatch):
+        """Embedding and clustering options are forwarded to the pipeline steps."""
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with (
+            patch("abstracts_explorer.cli.download_command") as mock_download,
+            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+        ):
+
+            def fake_download(download_args, on_unit_complete=None):
+                if on_unit_complete:
+                    on_unit_complete("NeurIPS", 2024, 3)
+                return 0
+
+            mock_download.side_effect = fake_download
+            mock_embed.return_value = 0
+            mock_cluster.return_value = 0
+
+            args = argparse.Namespace(
+                conference=None,
+                year=None,
+                force=False,
+                verbose=0,
+                collection="custom-collection",
+                lm_studio_url="http://example.test:1234/v1",
+                model="custom-embedding-model",
+                where="year = 2024",
+                requests_per_minute=42,
+                ignore_embedding_model_mismatch=True,
+            )
+            rc = pre_process_command(args)
+
+        assert rc == 0
+        embed_args = mock_embed.call_args[0][0]
+        assert embed_args.collection == "custom-collection"
+        assert embed_args.lm_studio_url == "http://example.test:1234/v1"
+        assert embed_args.model == "custom-embedding-model"
+        assert embed_args.where == "year = 2024"
+        assert embed_args.requests_per_minute == 42
+        assert embed_args.ignore_embedding_model_mismatch is True
+
+        cluster_args = mock_cluster.call_args[0][0]
+        assert cluster_args.collection == "custom-collection"
+        assert cluster_args.requests_per_minute == 42
+
+    def test_pre_process_continues_after_unit_failure(self, tmp_path, capsys, monkeypatch):
+        """A failing unit does not stop post-processing of other units."""
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with (
+            patch("abstracts_explorer.cli.download_command") as mock_download,
+            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+        ):
+
+            def fake_download(download_args, on_unit_complete=None):
+                if on_unit_complete:
+                    on_unit_complete("NeurIPS", 2024, 1)
+                    on_unit_complete("ICLR", 2024, 1)
+                return 0
+
+            mock_download.side_effect = fake_download
+
+            def fake_embed(embed_args):
+                return 1 if embed_args.conference == "NeurIPS" else 0
+
+            mock_embed.side_effect = fake_embed
+            mock_cluster.return_value = 0
+
+            args = argparse.Namespace(conference=None, year=None, force=False, verbose=0)
+            rc = pre_process_command(args)
+
+        assert rc == 1
+        # Both units attempted embeddings; only ICLR reached clustering
+        assert mock_embed.call_count == 2
+        mock_cluster.assert_called_once()
+        assert mock_cluster.call_args[0][0].conference == "ICLR"
+        captured = capsys.readouterr()
+        assert "NeurIPS 2024: create-embeddings" in captured.err
+        assert "1 succeeded, 1 failed" in captured.out
+
+    def test_pre_process_zero_paper_units_are_skipped(self, tmp_path, capsys, monkeypatch):
+        """Units with no downloaded papers are not post-processed."""
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with (
+            patch("abstracts_explorer.cli.download_command") as mock_download,
+            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+        ):
+
+            def fake_download(download_args, on_unit_complete=None):
+                if on_unit_complete:
+                    on_unit_complete("EmptyConf", 2024, 0)
+                return 0
+
+            mock_download.side_effect = fake_download
+            mock_embed.return_value = 0
+            mock_cluster.return_value = 0
+
+            args = argparse.Namespace(conference=None, year=None, force=False, verbose=0)
+            rc = pre_process_command(args)
+
+        assert rc == 0
+        mock_embed.assert_not_called()
+        mock_cluster.assert_not_called()
+
+    def test_create_embeddings_missing_database(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with non-existent database."""
         nonexistent_db = tmp_path / "nonexistent.db"
         set_test_db(nonexistent_db)
@@ -922,6 +1130,103 @@ class TestCLI:
 
         # Verify create_collection was called with reset=True
         mock_em.create_collection.assert_called_once_with(reset=True)
+
+    def _create_mismatch_test_args(self):
+        return argparse.Namespace(
+            conference=None,
+            year=None,
+            collection="test",
+            lm_studio_url="http://localhost:1234/v1",
+            model="new-model",
+            force=False,
+            where=None,
+            requests_per_minute=0,
+            verbose=0,
+        )
+
+    def test_create_embeddings_ignore_model_mismatch_recreates(self, tmp_path, capsys, monkeypatch):
+        """--ignore-embedding-model-mismatch recreates embeddings without prompting."""
+        from abstracts_explorer import DatabaseManager
+
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
+        with DatabaseManager() as db:
+            db.create_tables()
+            db.add_papers(
+                [
+                    LightweightPaper(
+                        title="Test",
+                        abstract="Abstract",
+                        authors=["Test Author"],
+                        session="Test Session",
+                        poster_position="P1",
+                        year=2025,
+                        conference="NeurIPS",
+                    )
+                ]
+            )
+
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+            mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (False, "old-model", "new-model")
+            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.embed_from_database.return_value = 1
+            mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
+            MockEM.return_value = mock_em
+
+            with patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "create-embeddings", "--ignore-embedding-model-mismatch"],
+            ):
+                rc = main()
+
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "ignore-embedding-model-mismatch detected" in captured.out
+        mock_em.create_collection.assert_called_once_with(reset=True)
+
+    def test_create_embeddings_non_interactive_mismatch_fails(self, tmp_path, capsys, monkeypatch):
+        """In non-interactive mode a model mismatch fails instead of prompting."""
+        from abstracts_explorer import DatabaseManager
+
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
+        with DatabaseManager() as db:
+            db.create_tables()
+            db.add_papers(
+                [
+                    LightweightPaper(
+                        title="Test",
+                        abstract="Abstract",
+                        authors=["Test Author"],
+                        session="Test Session",
+                        poster_position="P1",
+                        year=2025,
+                        conference="NeurIPS",
+                    )
+                ]
+            )
+
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+            mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (False, "old-model", "new-model")
+            mock_em.test_lm_studio_connection.return_value = True
+            MockEM.return_value = mock_em
+
+            args = self._create_mismatch_test_args()
+            args.ignore_embedding_model_mismatch = False
+            args.non_interactive = True
+            rc = create_embeddings_command(args)
+
+        assert rc == 1
+        mock_em.embed_from_database.assert_not_called()
+        captured = capsys.readouterr()
+        assert "ignore-embedding-model-mismatch" in captured.err
 
     def test_create_embeddings_force_with_conference_does_not_reset_collection(self, tmp_path, capsys, monkeypatch):
         """--force --conference should delete only matching embeddings, not reset whole collection."""
