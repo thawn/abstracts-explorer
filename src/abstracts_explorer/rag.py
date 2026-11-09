@@ -17,9 +17,8 @@ import httpx
 
 from pydantic_ai import Agent, RunContext, Tool
 from pydantic_ai.messages import ModelMessage, ModelRequest
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.openai import OpenAIProvider
-from pydantic_ai.settings import ModelSettings
 
 from abstracts_explorer.config import get_config
 from abstracts_explorer.mcp_server import (
@@ -759,9 +758,10 @@ class RAGChat:
             )
 
             # Model settings
-            settings = ModelSettings(
+            settings = OpenAIChatModelSettings(
                 temperature=self.temperature,
                 max_tokens=1000,
+                openai_reasoning_effort="low",
             )
 
             # Build instructions first so we can update message history
@@ -853,9 +853,10 @@ class RAGChat:
         else:
             # Use only conversation history without tool calls
             try:
-                settings = ModelSettings(
+                settings = OpenAIChatModelSettings(
                     temperature=self.temperature,
                     max_tokens=1000,
+                    openai_reasoning_effort="low",
                 )
                 base_instructions = self._build_base_instructions()
                 run_kwargs: Dict[str, Any] = {
