@@ -10,6 +10,7 @@ import json
 import logging
 import argparse
 import contextlib
+import threading
 from pathlib import Path
 from unittest.mock import Mock, patch
 import pytest
@@ -885,6 +886,130 @@ class TestCLI:
         assert rc == 0
         mock_embed.assert_not_called()
         mock_cluster.assert_not_called()
+
+    def test_pre_process_overlaps_embeddings_and_clustering(self, tmp_path, monkeypatch):
+        """Embeddings for the next unit overlap clustering of the previous unit."""
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        cluster_first_started = threading.Event()
+        embed_second_started = threading.Event()
+        overlap_observed = {}
+
+        with (
+            patch("abstracts_explorer.cli.download_command") as mock_download,
+            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+        ):
+
+            def fake_download(download_args, on_unit_complete=None):
+                if on_unit_complete:
+                    on_unit_complete("First", 2024, 1)
+                    on_unit_complete("Second", 2024, 1)
+                return 0
+
+            def fake_embed(embed_args):
+                if embed_args.conference == "Second":
+                    # Only start the second embedding once clustering of the
+                    # first unit has started; this can only succeed if the two
+                    # stages run in separate workers.
+                    cluster_first_started.wait(timeout=2)
+                    embed_second_started.set()
+                return 0
+
+            def fake_cluster(cluster_args):
+                if cluster_args.conference == "First":
+                    cluster_first_started.set()
+                    overlap_observed["value"] = embed_second_started.wait(timeout=2)
+                return 0
+
+            mock_download.side_effect = fake_download
+            mock_embed.side_effect = fake_embed
+            mock_cluster.side_effect = fake_cluster
+
+            args = argparse.Namespace(conference=None, year=None, force=False, verbose=0)
+            rc = pre_process_command(args)
+
+        assert rc == 0
+        assert overlap_observed.get("value") is True
+
+    def test_pre_process_no_overlap_flag_serializes_post_processing(self, tmp_path, monkeypatch):
+        """--no-overlap-post-process runs embeddings and clustering in one worker."""
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        embed_second_started = threading.Event()
+        no_overlap = {}
+
+        with (
+            patch("abstracts_explorer.cli.download_command") as mock_download,
+            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+        ):
+
+            def fake_download(download_args, on_unit_complete=None):
+                if on_unit_complete:
+                    on_unit_complete("First", 2024, 1)
+                    on_unit_complete("Second", 2024, 1)
+                return 0
+
+            def fake_embed(embed_args):
+                if embed_args.conference == "Second":
+                    embed_second_started.set()
+                return 0
+
+            def fake_cluster(cluster_args):
+                if cluster_args.conference == "First":
+                    no_overlap["value"] = not embed_second_started.wait(timeout=0.2)
+                return 0
+
+            mock_download.side_effect = fake_download
+            mock_embed.side_effect = fake_embed
+            mock_cluster.side_effect = fake_cluster
+
+            args = argparse.Namespace(
+                conference=None,
+                year=None,
+                force=False,
+                verbose=0,
+                no_overlap_post_process=True,
+            )
+            rc = pre_process_command(args)
+
+        assert rc == 0
+        assert no_overlap.get("value") is True
+
+    def test_pre_process_clustering_failure_continues_with_other_units(self, tmp_path, capsys, monkeypatch):
+        """A clustering failure is recorded without stopping other units."""
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with (
+            patch("abstracts_explorer.cli.download_command") as mock_download,
+            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+        ):
+
+            def fake_download(download_args, on_unit_complete=None):
+                if on_unit_complete:
+                    on_unit_complete("NeurIPS", 2024, 1)
+                    on_unit_complete("ICLR", 2024, 1)
+                return 0
+
+            mock_download.side_effect = fake_download
+            mock_embed.return_value = 0
+
+            def fake_cluster(cluster_args):
+                return 1 if cluster_args.conference == "NeurIPS" else 0
+
+            mock_cluster.side_effect = fake_cluster
+
+            args = argparse.Namespace(conference=None, year=None, force=False, verbose=0)
+            rc = pre_process_command(args)
+
+        assert rc == 1
+        assert mock_embed.call_count == 2
+        assert mock_cluster.call_count == 2
+        captured = capsys.readouterr()
+        assert "Clustering: 1 succeeded, 1 failed" in captured.out
+        assert "NeurIPS 2024: clustering pre-generate" in captured.err
 
     def test_create_embeddings_missing_database(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with non-existent database."""

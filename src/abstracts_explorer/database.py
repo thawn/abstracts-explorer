@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from sqlalchemy import create_engine, select, delete, func, or_, and_, text
+from sqlalchemy import create_engine, event, select, delete, func, or_, and_, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError, ProgrammingError, IntegrityError
@@ -153,14 +153,29 @@ class DatabaseManager:
             # Create engine with appropriate settings
             connect_args = {}
             if self.database_url.startswith("sqlite"):
-                # SQLite-specific settings
-                connect_args = {"check_same_thread": False}
+                # SQLite-specific settings. ``timeout`` is the busy timeout used
+                # while another connection holds a write lock.
+                connect_args = {"check_same_thread": False, "timeout": 30}
 
             self.engine = create_engine(
                 self.database_url,
                 connect_args=connect_args,
                 echo=False,  # Set to True for SQL debugging
             )
+
+            if self.database_url.startswith("sqlite"):
+
+                @event.listens_for(self.engine, "connect")
+                def _set_sqlite_pragmas(dbapi_connection: Any, connection_record: Any) -> None:
+                    cursor = dbapi_connection.cursor()
+                    try:
+                        # WAL allows reads while a write transaction is active;
+                        # busy_timeout makes writers wait instead of failing
+                        # immediately with "database is locked".
+                        cursor.execute("PRAGMA journal_mode=WAL")
+                        cursor.execute("PRAGMA busy_timeout=30000")
+                    finally:
+                        cursor.close()
 
             # Create session factory
             self.SessionLocal = sessionmaker(

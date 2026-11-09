@@ -2724,48 +2724,198 @@ def _post_process_worker(
             unit_queue.task_done()
 
 
-def _pre_process_parallel(
+def _embedding_worker(
+    unit_queue: "queue.Queue[Optional[Tuple[str, int, int]]]",
+    clustering_queue: "queue.Queue[Optional[Tuple[str, int]]]",
     args: argparse.Namespace,
     config: Any,
-    download_args: argparse.Namespace,
-) -> int:
-    """Download units and post-process each unit as soon as it is committed."""
-    unit_queue: "queue.Queue[Optional[Tuple[str, int, int]]]" = queue.Queue()
-    successes: List[str] = []
-    failures: List[Tuple[str, str]] = []
+    force: bool,
+    successes: List[str],
+    failures: List[Tuple[str, str]],
+) -> None:
+    """Embed downloaded units and hand each completed unit to the clustering worker."""
+    try:
+        while True:
+            unit = unit_queue.get()
+            if unit is None:
+                return
 
-    worker = threading.Thread(
-        target=_post_process_worker,
-        args=(unit_queue, args, config, getattr(args, "force", False), successes, failures),
-        name="pre-process-post",
-        daemon=True,
-    )
-    worker.start()
+            unit_conference, unit_year, paper_count = unit
+            label = f"{unit_conference} {unit_year}"
+
+            try:
+                if paper_count <= 0:
+                    print(f"⏭️  Skipping {label}: no papers downloaded")
+                    continue
+
+                print(f"\n🧮 [{label}] Creating embeddings...")
+                rc = create_embeddings_command(
+                    _build_pre_process_embeddings_args(
+                        args,
+                        config,
+                        unit_conference,
+                        unit_year,
+                        force,
+                        non_interactive=True,
+                    )
+                )
+                if rc != 0:
+                    failures.append((label, "create-embeddings"))
+                    print(f"❌ [{label}] Create-embeddings failed (exit code {rc})", file=sys.stderr)
+                    continue
+
+                successes.append(label)
+                clustering_queue.put((unit_conference, unit_year))
+            except Exception as e:
+                failures.append((label, str(e)))
+                print(f"❌ [{label}] Unexpected error while creating embeddings: {e}", file=sys.stderr)
+    finally:
+        # Always terminate the downstream worker, even if this worker fails.
+        clustering_queue.put(None)
+
+
+def _clustering_worker(
+    clustering_queue: "queue.Queue[Optional[Tuple[str, int]]]",
+    args: argparse.Namespace,
+    config: Any,
+    force: bool,
+    successes: List[str],
+    failures: List[Tuple[str, str]],
+) -> None:
+    """Pre-generate clustering results for units whose embeddings are ready."""
+    while True:
+        unit = clustering_queue.get()
+        if unit is None:
+            return
+
+        unit_conference, unit_year = unit
+        label = f"{unit_conference} {unit_year}"
+
+        try:
+            print(f"\n🔮 [{label}] Pre-generating clustering results...")
+            rc = pre_generate_clustering_command(
+                _build_pre_process_clustering_args(args, config, unit_conference, unit_year, force)
+            )
+            if rc != 0:
+                failures.append((label, "clustering pre-generate"))
+                print(f"❌ [{label}] Clustering pre-generate failed (exit code {rc})", file=sys.stderr)
+                continue
+
+            successes.append(label)
+        except Exception as e:
+            failures.append((label, str(e)))
+            print(f"❌ [{label}] Unexpected error while clustering: {e}", file=sys.stderr)
+
+
+def _download_into_queue(
+    download_args: argparse.Namespace,
+    unit_queue: "queue.Queue[Optional[Tuple[str, int, int]]]",
+) -> int:
+    """Download units, enqueueing each completed unit and a final sentinel."""
 
     def on_unit_complete(unit_conference: str, unit_year: int, paper_count: int) -> None:
         if paper_count > 0:
             unit_queue.put((unit_conference, unit_year, paper_count))
 
     print("\n📥 Downloading conference data and post-processing units in parallel...")
-    rc_download = 1
     try:
-        rc_download = download_command(download_args, on_unit_complete=on_unit_complete)
+        return download_command(download_args, on_unit_complete=on_unit_complete)
     finally:
         unit_queue.put(None)
+
+
+def _pre_process_parallel(
+    args: argparse.Namespace,
+    config: Any,
+    download_args: argparse.Namespace,
+    overlap: bool = True,
+) -> int:
+    """Download units and post-process each unit as soon as it is committed."""
+    force = getattr(args, "force", False)
+    unit_queue: "queue.Queue[Optional[Tuple[str, int, int]]]" = queue.Queue()
+
+    if overlap:
+        clustering_queue: "queue.Queue[Optional[Tuple[str, int]]]" = queue.Queue()
+        embedding_successes: List[str] = []
+        embedding_failures: List[Tuple[str, str]] = []
+        clustering_successes: List[str] = []
+        clustering_failures: List[Tuple[str, str]] = []
+
+        embedding_worker = threading.Thread(
+            target=_embedding_worker,
+            args=(
+                unit_queue,
+                clustering_queue,
+                args,
+                config,
+                force,
+                embedding_successes,
+                embedding_failures,
+            ),
+            name="pre-process-embeddings",
+            daemon=True,
+        )
+        clustering_worker = threading.Thread(
+            target=_clustering_worker,
+            args=(
+                clustering_queue,
+                args,
+                config,
+                force,
+                clustering_successes,
+                clustering_failures,
+            ),
+            name="pre-process-clustering",
+            daemon=True,
+        )
+        embedding_worker.start()
+        clustering_worker.start()
+
+        rc_download = _download_into_queue(download_args, unit_queue)
+        embedding_worker.join()
+        clustering_worker.join()
+
+        print("\n" + "=" * 70)
+        print(f"📊 Embeddings: {len(embedding_successes)} succeeded, {len(embedding_failures)} failed")
+        print(f"📊 Clustering: {len(clustering_successes)} succeeded, {len(clustering_failures)} failed")
+        if clustering_successes:
+            print("   ✅ " + ", ".join(clustering_successes))
+        for label, reason in embedding_failures:
+            print(f"   ❌ {label}: {reason}", file=sys.stderr)
+        for label, reason in clustering_failures:
+            print(f"   ❌ {label}: {reason}", file=sys.stderr)
+
+        rc = 0
+        if rc_download != 0:
+            rc = rc_download
+        if embedding_failures or clustering_failures:
+            rc = 1
+    else:
+        successes: List[str] = []
+        failures: List[Tuple[str, str]] = []
+        worker = threading.Thread(
+            target=_post_process_worker,
+            args=(unit_queue, args, config, force, successes, failures),
+            name="pre-process-post",
+            daemon=True,
+        )
+        worker.start()
+
+        rc_download = _download_into_queue(download_args, unit_queue)
         worker.join()
 
-    print("\n" + "=" * 70)
-    print(f"📊 Post-processing: {len(successes)} succeeded, {len(failures)} failed")
-    if successes:
-        print("   ✅ " + ", ".join(successes))
-    for label, reason in failures:
-        print(f"   ❌ {label}: {reason}", file=sys.stderr)
+        print("\n" + "=" * 70)
+        print(f"📊 Post-processing: {len(successes)} succeeded, {len(failures)} failed")
+        if successes:
+            print("   ✅ " + ", ".join(successes))
+        for label, reason in failures:
+            print(f"   ❌ {label}: {reason}", file=sys.stderr)
 
-    rc = 0
-    if rc_download != 0:
-        rc = rc_download
-    if failures:
-        rc = 1
+        rc = 0
+        if rc_download != 0:
+            rc = rc_download
+        if failures:
+            rc = 1
 
     if rc == 0:
         print("\n✅ Pre-process pipeline completed successfully!")
@@ -2778,6 +2928,8 @@ def pre_process_command(args: argparse.Namespace) -> int:
 
     Each ``(conference, year)`` unit is post-processed as soon as its download
     is committed, while the remaining downloads continue in the background.
+    By default embeddings and clustering run in separate workers so that
+    clustering of one unit overlaps embeddings of the next.
 
     Parameters
     ----------
@@ -2788,6 +2940,7 @@ def pre_process_command(args: argparse.Namespace) -> int:
         - force: Force re-download / reset embeddings / force recompute clustering
         - ignore_embedding_model_mismatch: Recreate embeddings on model mismatch
           without prompting
+        - no_overlap_post_process: Run embeddings and clustering in one worker
         - collection, lm_studio_url, model, where, requests_per_minute: Forwarded
           to the embeddings and clustering steps
 
@@ -2826,7 +2979,8 @@ def pre_process_command(args: argparse.Namespace) -> int:
         verbose=verbose,
     )
 
-    return _pre_process_parallel(args, config, download_args)
+    overlap = not getattr(args, "no_overlap_post_process", False)
+    return _pre_process_parallel(args, config, download_args, overlap=overlap)
 
 
 def main() -> int:
@@ -3954,7 +4108,9 @@ Run the full pre-processing pipeline:
 
 By default the pipeline is parallel: each conference/year unit is embedded and
 clustered as soon as its download finishes, while the remaining downloads keep
-running.
+running.  Embeddings and clustering also overlap, so clustering of one unit runs
+while embeddings for the next unit are being created.  Use
+--no-overlap-post-process to run embeddings and clustering in a single worker.
 
 All steps receive the same --conference and --year filters.  The embedding and
 clustering options below are forwarded to the respective steps.
@@ -3974,6 +4130,9 @@ Examples:
 
   # Recreate embeddings after switching embedding models, without prompting
   abstracts-explorer pre-process --ignore-embedding-model-mismatch --model my-new-model
+
+  # Do not overlap embeddings and clustering
+  abstracts-explorer pre-process --no-overlap-post-process
         """,
     )
     add_conference_year_args(pre_process_parser)
@@ -3981,6 +4140,11 @@ Examples:
         "--force",
         action="store_true",
         help="Force re-download and reset embeddings/clustering even if they already exist",
+    )
+    pre_process_parser.add_argument(
+        "--no-overlap-post-process",
+        action="store_true",
+        help="Run embeddings and clustering in a single worker instead of overlapping them",
     )
     pre_process_parser.add_argument(
         "--collection",

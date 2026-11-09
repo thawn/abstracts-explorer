@@ -97,6 +97,8 @@ abstracts-explorer pre-process [OPTIONS]
 - `--conference TEXT`: Limit to a single conference (default: all)
 - `--year INTEGER`: Limit to a single year (default: all available)
 - `--force`: Force re-download, reset embeddings and recompute clustering
+- `--no-overlap-post-process`: Run embeddings and clustering in one worker
+  instead of overlapping them
 - `--collection TEXT`: ChromaDB collection name (default: from config)
 - `--lm-studio-url TEXT`: OpenAI-compatible API URL (default: from config)
 - `--model TEXT`: Embedding model (default: from config)
@@ -107,8 +109,11 @@ abstracts-explorer pre-process [OPTIONS]
 
 The pipeline is parallel: each conference/year unit is embedded and clustered
 as soon as its download finishes, while the remaining downloads keep running.
-To run the steps without post-processing, use the `download`, `create-embeddings`,
-and `clustering pre-generate` commands individually.
+Embeddings and clustering also overlap, so clustering of one unit runs while
+embeddings for the next unit are created. Use `--no-overlap-post-process` to
+run those two stages in a single worker. To run the steps without any
+post-processing, use the `download`, `create-embeddings`, and
+`clustering pre-generate` commands individually.
 
 **Examples:**
 
