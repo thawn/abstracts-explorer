@@ -287,7 +287,7 @@ class EmbeddingsManager:
             Initialized OpenAI client instance.
         """
         if self._openai_client is None:
-            http_client: Optional[httpx.Client] = None
+            http_client: Optional[Any] = None
             if self.requests_per_minute > 0:
                 transport = RateLimitedTransport(httpx.HTTPTransport(), self.requests_per_minute)
                 http_client = httpx.Client(transport=transport)
@@ -895,7 +895,7 @@ class EmbeddingsManager:
 
     def embed_from_database(
         self,
-        where_clause: Optional[str] = None,
+        where_filters: Optional[Dict[str, Any]] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None,
         force_recreate: bool = False,
     ) -> int:
@@ -906,8 +906,10 @@ class EmbeddingsManager:
 
         Parameters
         ----------
-        where_clause : str, optional
-            SQL WHERE clause to filter papers (e.g., "decision = 'Accept'")
+        where_filters : dict, optional
+            Structured filters passed to
+            :meth:`~abstracts_explorer.database.DatabaseManager.get_paper`
+            (e.g. ``{"conference": "NeurIPS", "year": 2025}``).
         progress_callback : callable, optional
             Callback function to report progress. Called with (current, total) number of papers processed.
         force_recreate : bool, optional
@@ -930,7 +932,7 @@ class EmbeddingsManager:
         >>> count = em.embed_from_database()
         >>> print(f"Embedded {count} papers")
         >>> # Only embed accepted papers
-        >>> count = em.embed_from_database(where_clause="decision = 'Accept'")
+        >>> count = em.embed_from_database(where_filters={"award": {"$ne": None}})
         """
         try:
             # Use DatabaseManager for database operations
@@ -939,11 +941,7 @@ class EmbeddingsManager:
             # Store the embedding model in the database
             db_manager.set_embedding_model(self.model_name)
 
-            query = "SELECT * FROM papers"
-            if where_clause:
-                query += f" WHERE {where_clause}"
-
-            rows = db_manager.query(query)
+            rows = db_manager.get_paper(where_filters, limit=0)
             total = len(rows)
 
             logger.debug(f"Found {total} papers to embed")
@@ -986,171 +984,6 @@ class EmbeddingsManager:
 
         except Exception as e:
             raise EmbeddingsError(f"Failed to embed from database: {str(e)}") from e
-
-    def search_papers_semantic(
-        self,
-        query: str,
-        database,
-        limit: int = 10,
-        sessions: Optional[List[str]] = None,
-        years: Optional[List[int]] = None,
-        conferences: Optional[List[str]] = None,
-        distance_threshold: float = 1.1,
-    ) -> List[Dict[str, Any]]:
-        """
-        Perform semantic search for papers using embeddings.
-
-        This function combines embedding-based similarity search with metadata filtering
-        and retrieves complete paper information from the database.
-
-        Supports ``field:"value"`` syntax in the query for filtering by any
-        Paper model column.  Recognised filters are resolved against the SQL
-        database (using ILIKE substring matching), and only the matching paper
-        UIDs are forwarded to ChromaDB as a ``{"uid": {"$in": …}}`` condition.
-        The remaining query text is used for the semantic similarity search.
-
-        In addition, the query text is always checked against the ``authors``
-        field in the SQL database (unless an explicit ``authors:`` filter is
-        already present in the query).  Papers that match the query as an author
-        name are prepended to the results so that author matches appear first.
-
-        Parameters
-        ----------
-        query : str
-            Search query text.  May include ``field:"value"`` filters.
-        database : DatabaseManager
-            Database manager for retrieving full paper details
-        limit : int, optional
-            Maximum number of results to return, by default 10
-        sessions : list of str, optional
-            Filter by paper sessions
-        years : list of int, optional
-            Filter by publication years
-        conferences : list of str, optional
-            Filter by conference names
-        distance_threshold : float, optional
-            Maximum distance (in embedding space) for a result to be included.
-            Papers with a distance greater than this value are excluded from
-            the results. By default 1.1, matching the threshold used by
-            :meth:`count_papers_within_distance`.
-
-        Returns
-        -------
-        list of dict
-            List of paper dictionaries with complete information
-
-        Raises
-        ------
-        EmbeddingsError
-            If search fails
-
-        Examples
-        --------
-        >>> papers = em.search_papers_semantic(
-        ...     "transformers in vision",
-        ...     database=db,
-        ...     limit=5,
-        ...     years=[2024, 2025]
-        ... )
-        >>> papers = em.search_papers_semantic(
-        ...     'authors:"Vaswani" attention',
-        ...     database=db,
-        ... )
-        """
-        from abstracts_explorer.paper_utils import format_search_results, PaperFormattingError
-        from abstracts_explorer.database import DatabaseManager
-
-        # Parse field-specific filters from query
-        field_filters, remaining_query = DatabaseManager.parse_field_filters(query)
-
-        # When the query consists only of field filters (no remaining keywords),
-        # bypass the embedding search entirely and return SQL results directly.
-        # This avoids generating a meaningless embedding for the raw filter syntax
-        # and allows field-filter searches to work without an LLM backend.
-        if field_filters and not remaining_query:
-            return database.search_papers(
-                field_filters=field_filters,
-                sessions=sessions,
-                years=years,
-                conferences=conferences,
-                limit=limit,
-            )
-
-        semantic_query = remaining_query if remaining_query else query
-
-        # Build metadata filter for embeddings search.
-        # NOTE: All metadata is stored as strings in ChromaDB (see add_paper, line 445).
-        # ChromaDB only supports $eq, $ne, $in, $nin, $gt, $gte, $lt, $lte operators on
-        # metadata fields — substring matching is NOT supported.
-        #
-        # For field filters parsed from the query (which require ILIKE/substring matching)
-        # we therefore query the SQL database first and pass only the matching paper UIDs
-        # to ChromaDB as a {"uid": {"$in": [...]}} condition.
-        filter_conditions: List[Dict[str, Any]] = []
-
-        matching_uids: Optional[List[str]] = None
-
-        if field_filters:
-            # Use the SQL database for substring-capable ILIKE filtering
-            matching_papers = database.search_papers(field_filters=field_filters, limit=0)
-            if not matching_papers:
-                # No papers satisfy the field filters — no results possible
-                return []
-            matching_uids = [p["uid"] for p in matching_papers]
-        else:
-            # still check whether the remaining query matches any author names, even if there are no explicit field filters for authors
-            author_search_filters = {**field_filters, "authors": semantic_query}
-            author_matches = database.search_papers(
-                field_filters=author_search_filters,
-                sessions=sessions,
-                years=years,
-                conferences=conferences,
-                limit=limit,
-            )
-            if author_matches:
-                logger.info(f"Author name matches found for query '{semantic_query}': {len(author_matches)} papers")
-                return author_matches
-
-        if sessions:
-            filter_conditions.append({"session": {"$in": sessions}})
-        if years:
-            # Convert years to strings to match ChromaDB metadata storage format
-            year_strs: List[str] = [str(y) for y in years]
-            filter_conditions.append({"year": {"$in": year_strs}})
-        if conferences:
-            filter_conditions.append({"conference": {"$in": conferences}})
-
-        # Use $and operator if multiple conditions, otherwise use single condition
-        where_filter: Optional[Dict[str, Any]] = None
-        if len(filter_conditions) > 1:
-            where_filter = {"$and": filter_conditions}
-        elif len(filter_conditions) == 1:
-            where_filter = filter_conditions[0]
-
-        logger.info(
-            f"Semantic search - query: {semantic_query}, filter: sessions={sessions}, "
-            f"years={years}, conferences={conferences}, field_filters={field_filters}"
-        )
-        logger.info(f"Where filter: {where_filter}")
-        logger.info(f"Matching UIDs from SQL filter: {matching_uids}")
-
-        results = self.search_similar(semantic_query, n_results=limit * 2, where=where_filter, ids=matching_uids)
-
-        logger.info(f"Search results count: {len(results.get('ids', [[]])[0]) if results else 0}")
-
-        # Transform ChromaDB results to paper format using shared utility
-        try:
-            papers = format_search_results(results, database, include_documents=False)
-        except PaperFormattingError:
-            # No valid papers found
-            papers = []
-
-        # Filter out papers that exceed the distance threshold
-        papers = [p for p in papers if p.get("distance", 0.0) <= distance_threshold]
-
-        logger.info(f"Search results count: {len(papers)}, after applying distance threshold of {distance_threshold}")
-
-        return papers[:limit]
 
     def count_papers_within_distance(
         self,

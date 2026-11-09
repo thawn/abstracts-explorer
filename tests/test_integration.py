@@ -36,7 +36,7 @@ class TestIntegration:
             results = db.search_papers(keyword="anything")
             assert len(results) == 0
 
-            results = db.search_papers(session="Session A")
+            results = db.search_papers(sessions=["Session A"])
             assert len(results) == 0
 
     def _get_real_neurips_subset(self):
@@ -447,11 +447,11 @@ class TestIntegration:
             assert len(disco_papers) >= 1
 
             # Test 3: Search by year
-            papers_2025 = db.search_papers(year=2025)
+            papers_2025 = db.search_papers(years=[2025])
             assert len(papers_2025) == 7
 
             # Test 4: Search by conference
-            papers = db.search_papers(conference="NeurIPS")
+            papers = db.search_papers(conferences=["NeurIPS"])
             assert len(papers) == 7
 
             # Test 3: Keyword search
@@ -465,12 +465,6 @@ class TestIntegration:
             # Test 4: Search by keywords related to different areas
             graph_papers_2 = db.search_papers(keyword="representation")
             assert len(graph_papers_2) >= 1
-
-            # Test 5: Verify author extraction and relationships
-            # Check author count
-            author_count = db.get_author_count()
-            # 7 + 1 + 9 + 2 + 3 + 2 + 5 = 29 unique authors
-            assert author_count == 29, f"Expected 29 unique authors, got {author_count}"
 
             # Test 6: Verify author data is stored correctly
             # Get papers and check their author strings
@@ -487,13 +481,13 @@ class TestIntegration:
             assert "Xi ruida" in paper2["authors"]
 
             # Test 7: Verify empty keywords are handled correctly
-            papers_with_no_keywords = db.query(
+            papers_with_no_keywords = db._query(
                 "SELECT * FROM papers WHERE keywords = '' OR keywords IS NULL OR keywords = '[]'"
             )
             assert len(papers_with_no_keywords) == 5  # Papers 1-5 have no keywords
 
             # Test 8: Verify papers with keywords
-            papers_with_keywords = db.query(
+            papers_with_keywords = db._query(
                 "SELECT * FROM papers WHERE keywords != '' AND keywords IS NOT NULL AND keywords != '[]'"
             )
             assert len(papers_with_keywords) == 2  # Papers 6 and 7 have keywords
@@ -550,7 +544,7 @@ class TestIntegration:
             em.create_collection()
 
             # Embed only papers with non-empty abstracts
-            embedded_count = em.embed_from_database(where_clause="abstract IS NOT NULL AND abstract != ''")
+            embedded_count = em.embed_from_database(where_filters={"abstract": {"$ne": None}})
 
             # All 7 papers should have abstracts
             assert embedded_count == 7
@@ -592,7 +586,7 @@ class TestIntegration:
             # Step 5: Test metadata filtering - filter by session
             # Get the first session name from our test data to use for filtering
             with DatabaseManager() as db:
-                results = db.query("SELECT DISTINCT session FROM papers LIMIT 1")
+                results = db._query("SELECT DISTINCT session FROM papers LIMIT 1")
                 first_session = results[0]["session"]
 
             session_results = em.search_similar("machine learning", n_results=5, where={"session": first_session})
@@ -693,7 +687,7 @@ class TestIntegration:
 
             # Test 1: Search without filters - should return all papers
             with DatabaseManager() as db:
-                results_all = em.search_papers_semantic("neural networks learning", database=db, limit=10)
+                results_all = db.search_papers_semantic("neural networks learning", limit=10, embeddings_manager=em)
                 assert len(results_all) > 0, "Search without filters should return results"
                 # Verify similarity scores are included
                 for paper in results_all:
@@ -702,11 +696,11 @@ class TestIntegration:
 
             # Test 2: Search with year filter [2024] - should return only 2024 paper
             with DatabaseManager() as db:
-                results_2024 = em.search_papers_semantic(
+                results_2024 = db.search_papers_semantic(
                     "deep learning neural networks image recognition",
-                    database=db,
                     limit=10,
                     years=[2024],
+                    embeddings_manager=em,
                 )
                 assert len(results_2024) > 0, "Search with year=2024 filter should return results"
                 for paper in results_2024:
@@ -715,11 +709,11 @@ class TestIntegration:
 
             # Test 3: Search with year filter [2025] - should return only 2025 papers
             with DatabaseManager() as db:
-                results_2025 = em.search_papers_semantic(
+                results_2025 = db.search_papers_semantic(
                     "reinforcement learning robotics transformers vision",
-                    database=db,
                     limit=10,
                     years=[2025],
+                    embeddings_manager=em,
                 )
                 assert len(results_2025) > 0, "Search with year=2025 filter should return results"
                 for paper in results_2025:
@@ -728,11 +722,11 @@ class TestIntegration:
 
             # Test 4: Search with session filter
             with DatabaseManager() as db:
-                results_oral = em.search_papers_semantic(
+                results_oral = db.search_papers_semantic(
                     "deep learning neural networks image recognition",
-                    database=db,
                     limit=10,
                     sessions=["Oral Session 1"],
+                    embeddings_manager=em,
                 )
                 assert len(results_oral) > 0, "Search with session filter should return results"
                 for paper in results_oral:

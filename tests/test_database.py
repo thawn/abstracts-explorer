@@ -227,14 +227,14 @@ class TestDatabaseManager:
 
     def test_query_auto_connects(self, db_manager):
         """Querying an uninitialized database creates the schema lazily."""
-        assert db_manager.query("SELECT * FROM papers") == []
+        assert db_manager._query("SELECT * FROM papers") == []
         assert db_manager._session is not None
         db_manager.close()
 
     def test_query_with_invalid_sql(self, connected_db):
         """Test query with invalid SQL."""
         with pytest.raises(DatabaseError, match="Query failed"):
-            connected_db.query("SELECT * FROM nonexistent_table")
+            connected_db._query("SELECT * FROM nonexistent_table")
 
     def test_get_paper_count_empty(self, connected_db):
         """Test getting paper count on empty database."""
@@ -400,7 +400,7 @@ class TestAddPaper:
         assert isinstance(paper_uid, str)
 
         # Verify paper was added
-        result = connected_db.query("SELECT * FROM papers WHERE uid = ?", (paper_uid,))
+        result = connected_db._query("SELECT * FROM papers WHERE uid = ?", (paper_uid,))
         assert len(result) == 1
 
         row = result[0]
@@ -423,7 +423,7 @@ class TestAddPaper:
         assert paper_uid is not None
 
         # Verify paper was added
-        result = connected_db.query("SELECT * FROM papers WHERE uid = ?", (paper_uid,))
+        result = connected_db._query("SELECT * FROM papers WHERE uid = ?", (paper_uid,))
         assert len(result) == 1
 
         row = result[0]
@@ -479,7 +479,7 @@ class TestAddPaper:
         assert paper_uid is not None
 
         # Verify the original_id was stored
-        result = connected_db.query("SELECT * FROM papers WHERE uid = ?", (paper_uid,))
+        result = connected_db._query("SELECT * FROM papers WHERE uid = ?", (paper_uid,))
         assert len(result) == 1
         assert result[0]["original_id"] == "12345"
 
@@ -487,7 +487,7 @@ class TestAddPaper:
         """Test that add_paper generates a UID correctly."""
         paper_uid = connected_db.add_paper(sample_paper)
 
-        result = connected_db.query("SELECT uid FROM papers WHERE uid = ?", (paper_uid,))
+        result = connected_db._query("SELECT uid FROM papers WHERE uid = ?", (paper_uid,))
         assert len(result) == 1
 
         uid = result[0]["uid"]
@@ -1732,67 +1732,66 @@ class TestGetConferenceYearsFromDb:
         db_manager.close()
 
 
-class TestResolveDefaultConferenceYear:
-    """Tests for DatabaseManager.resolve_default_conference_year()."""
+class TestConfirmDefaultConferenceYearExists:
+    """Tests for DatabaseManager.confirm_default_conference_year_exists()."""
 
     def _make_mock_db(self, conferences_with_years):
-        """Return a partial mock that delegates resolve_default_conference_year to the real method."""
+        """Return a partial mock that delegates the confirmation to the real method."""
         from unittest.mock import MagicMock
 
         mock_db = MagicMock()
-        mock_db.get_conferences.return_value = sorted(conferences_with_years.keys())
-        mock_db.get_years.side_effect = lambda conference=None: (
-            conferences_with_years.get(conference, [])
-            if conference
-            else sorted({y for years in conferences_with_years.values() for y in years}, reverse=True)
-        )
         mock_db.get_conference_years_from_db.return_value = conferences_with_years
-        mock_db.resolve_default_conference_year.side_effect = (
-            lambda conf, year: DatabaseManager.resolve_default_conference_year(mock_db, conf, year)
+        mock_db.confirm_default_conference_year_exists.side_effect = (
+            lambda conf, year: DatabaseManager.confirm_default_conference_year_exists(mock_db, conf, year)
         )
         return mock_db
 
     def test_returns_configured_values_when_match_exists(self):
         """Configured conference and year are returned when they match DB data."""
         mock_db = self._make_mock_db({"NeurIPS": [2025, 2024]})
-        conf, year = mock_db.resolve_default_conference_year("NeurIPS", 2024)
-        assert conf == "NeurIPS"
-        assert year == 2024
+        result = mock_db.confirm_default_conference_year_exists("NeurIPS", 2024)
+        assert result == {"conference": "NeurIPS", "year": 2024, "error": None}
 
     def test_case_insensitive_conference_match(self):
         """Conference name is matched case-insensitively."""
         mock_db = self._make_mock_db({"NeurIPS": [2025, 2024]})
-        conf, year = mock_db.resolve_default_conference_year("neurips", 2025)
-        assert conf == "NeurIPS"
-        assert year == 2025
+        result = mock_db.confirm_default_conference_year_exists("neurips", 2025)
+        assert result["conference"] == "NeurIPS"
+        assert result["year"] == 2025
+        assert result["error"] is None
 
-    def test_falls_back_to_most_recent_year_when_configured_year_missing(self):
-        """Most recent DB year is used when configured year has no data."""
+    def test_does_not_fall_back_when_configured_year_missing(self):
+        """A missing configured year returns an error instead of picking another year."""
         mock_db = self._make_mock_db({"NeurIPS": [2025, 2024]})
-        conf, year = mock_db.resolve_default_conference_year("NeurIPS", 2020)
-        assert conf == "NeurIPS"
-        assert year == 2025
+        result = mock_db.confirm_default_conference_year_exists("NeurIPS", 2020)
+        assert result["conference"] is None
+        assert result["year"] is None
+        assert "2020" in result["error"]["message"]
+        assert result["error"]["available_years"] == [2025, 2024]
 
-    def test_falls_back_when_configured_conference_has_no_data(self):
-        """Falls back to most-recent conference/year when configured conference is absent."""
+    def test_does_not_fall_back_when_configured_conference_missing(self):
+        """A missing configured conference returns an error and available options."""
         mock_db = self._make_mock_db({"ICLR": [2024]})
-        conf, year = mock_db.resolve_default_conference_year("ICML", 2024)
-        assert conf == "ICLR"
-        assert year == 2024
+        result = mock_db.confirm_default_conference_year_exists("ICML", 2024)
+        assert result["conference"] is None
+        assert result["year"] is None
+        assert "ICML" in result["error"]["message"]
+        assert result["error"]["available_conferences"] == ["ICLR"]
+        assert "registry download" in result["error"]["guidance"]
 
-    def test_most_recent_conference_chosen_when_no_default_configured(self):
-        """Selects the conference with the most recent year when no default is set."""
+    def test_no_default_configured_returns_no_error(self):
+        """An empty configured conference is not validated."""
         mock_db = self._make_mock_db({"NeurIPS": [2024], "ICLR": [2025]})
-        conf, year = mock_db.resolve_default_conference_year("", None)
-        assert conf == "ICLR"
-        assert year == 2025
+        result = mock_db.confirm_default_conference_year_exists("", None)
+        assert result == {"conference": None, "year": None, "error": None}
 
-    def test_returns_configured_values_when_db_empty(self):
-        """Configured values are returned unchanged when the DB has no data."""
+    def test_empty_database_returns_error(self):
+        """An empty database returns an informative error for any configured default."""
         mock_db = self._make_mock_db({})
-        conf, year = mock_db.resolve_default_conference_year("NeurIPS", 2024)
-        assert conf == "NeurIPS"
-        assert year == 2024
+        result = mock_db.confirm_default_conference_year_exists("NeurIPS", 2024)
+        assert result["conference"] is None
+        assert "empty" in result["error"]["message"]
+        assert result["error"]["available_conferences"] == []
 
 
 class TestResolveConferenceForUrl:
@@ -1874,3 +1873,43 @@ class TestGetPapersByUids:
 
     def test_empty_input_returns_empty_list(self, connected_db):
         assert connected_db.get_papers_by_uids([]) == []
+
+
+class TestGetPaperWhereFilters:
+    """Tests for the low-level get_paper where-filter authority."""
+
+    def test_in_filter(self, connected_db, sample_paper, sample_paper_minimal):
+        connected_db.add_paper(sample_paper)
+        connected_db.add_paper(sample_paper_minimal)
+
+        results = connected_db.get_paper({"year": {"$in": [2024]}})
+        assert len(results) == 1
+        assert results[0]["title"] == "Minimal Paper"
+
+    def test_or_filter(self, connected_db, sample_paper, sample_paper_minimal):
+        connected_db.add_paper(sample_paper)
+        connected_db.add_paper(sample_paper_minimal)
+
+        results = connected_db.get_paper(
+            {"$or": [{"conference": "NeurIPS"}, {"conference": "ICLR"}]},
+            limit=0,
+        )
+        assert {paper["conference"] for paper in results} == {"NeurIPS", "ICLR"}
+
+    def test_contains_filter(self, connected_db, sample_paper):
+        connected_db.add_paper(sample_paper)
+
+        results = connected_db.get_paper({"title": {"$contains": "test"}})
+        assert len(results) == 1
+        assert results[0]["title"] == "Test Paper"
+
+    def test_unknown_field_raises(self, connected_db):
+        with pytest.raises(DatabaseError, match="Unknown paper field"):
+            connected_db.get_paper({"nonexistent": "value"})
+
+    def test_count_uses_where_filters(self, connected_db, sample_paper, sample_paper_minimal):
+        connected_db.add_paper(sample_paper)
+        connected_db.add_paper(sample_paper_minimal)
+
+        assert connected_db.get_paper_count({"year": 2025}) == 1
+        assert connected_db.get_paper_count({"conference": {"$in": ["NeurIPS", "ICLR"]}}) == 2

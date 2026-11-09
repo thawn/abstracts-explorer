@@ -235,7 +235,6 @@ graph TD
             SESS["get_sessions(conference, year)"]
             CONF["get_conferences(year)"]
             YEARS["get_years(conference)"]
-            YFC["get_years_for_conference(conference)<br/>⚠ duplicate of get_years"]
             CY["get_conference_years_from_db()"]
         end
 
@@ -268,13 +267,11 @@ graph TD
     SV1 --> SESS
     SV1 --> CONF
     SV1 --> YEARS
-    YEARS -.->|"duplicate"| YFC
     SV1 --> CGET
     SV1 --> QA
     SV1 --> ER
     SV1 --> EXPS
 
-    style YFC fill:#ffcccc,stroke:#cc0000
     style SV1 fill:#ffcccc,stroke:#cc0000
     style KWSEARCH fill:#ffffcc,stroke:#cccc00
 ```
@@ -287,12 +284,12 @@ graph TD
         ECONN["connect() → ChromaDB"]
         ECOL["create_collection()"]
         EADD["add_paper → generate_embedding → store"]
-        ESRCH["search_similar / search_papers_semantic"]
+        ESRCH["search_similar (low level)"]
         EFIND["find_papers_within_distance"]
         EIMP["import/export_embeddings"]
 
         subgraph "⚠ Duplicate: Where-clause building"
-            W1["search_papers_semantic:<br/>build $and/$in filter"]
+            W1["DatabaseManager.search_papers_semantic:<br/>author + SQL filters + Chroma query"]
             W2["find_papers_within_distance:<br/>build $and/$in filter"]
         end
     end
@@ -578,4 +575,3 @@ severity:
 | 12 | Eval CRUD parallel structures | 2×5 | database.py | Low |
 | 13 | Progress callback definitions | 4 | registry.py | Low |
 | 14 | Web route error handling (try/except/jsonify) | 22 | web_ui/app.py | Low |
-| 15 | `get_years_for_conference` duplicates `get_years` | 2 | database.py | Low |

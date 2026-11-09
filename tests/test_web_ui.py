@@ -191,10 +191,10 @@ class TestWebInterface:
             if conference
             else sorted({y for years in conferences_with_years.values() for y in years}, reverse=True)
         )
-        # Delegate resolve_default_conference_year to the real implementation so
+        # Delegate the confirmation to the real implementation so
         # the business logic is exercised via database.py.
-        mock_db.resolve_default_conference_year.side_effect = (
-            lambda conf, year: DatabaseManager.resolve_default_conference_year(mock_db, conf, year)
+        mock_db.confirm_default_conference_year_exists.side_effect = (
+            lambda conf, year: DatabaseManager.confirm_default_conference_year_exists(mock_db, conf, year)
         )
         return mock_db
 
@@ -231,7 +231,7 @@ class TestWebInterface:
 
         assert response.status_code == 200
         data = json.loads(response.data)
-        assert data["default_conference"] == ""
+        assert data["default_conference"] is None
         assert data["default_year"] is None
 
     def test_available_filters_includes_conference_years(self, client):
@@ -255,8 +255,8 @@ class TestWebInterface:
         assert sorted(data["conferences"]) == ["ICLR", "NeurIPS"]
         assert data["years"] == [2025, 2024]
 
-    def test_available_filters_fallback_when_default_conf_no_data(self, client):
-        """Test that default_conference falls back to most recent DB entry when configured default has no data."""
+    def test_available_filters_error_when_default_conf_no_data(self, client):
+        """Test that the API reports an error instead of falling back when the default has no data."""
         import sys
 
         app_module = sys.modules["abstracts_explorer.web_ui.app"]
@@ -271,15 +271,18 @@ class TestWebInterface:
 
         assert response.status_code == 200
         data = json.loads(response.data)
-        assert data["default_conference"] == "ICLR"
-        assert data["default_year"] == 2024
+        assert data["default_conference"] is None
+        assert data["default_year"] is None
+        assert data["default_conference_error"] is not None
+        assert data["default_conference_error"]["available_conferences"] == ["ICLR"]
+        assert "registry download" in data["default_conference_error"]["guidance"]
 
-    def test_available_filters_fallback_when_no_default_configured(self, client):
-        """Test that the most recent conference/year from DB is returned when no default is configured."""
+    def test_available_filters_no_default_configured(self, client):
+        """Test that no default is selected and no error is returned when nothing is configured."""
         import sys
 
         app_module = sys.modules["abstracts_explorer.web_ui.app"]
-        # DB has NeurIPS/2024 and ICLR/2025 – ICLR/2025 is the most recent
+        # DB has NeurIPS/2024 and ICLR/2025
         mock_db = self._mock_db_for_available_filters(app_module, {"NeurIPS": [2024], "ICLR": [2025]})
 
         with patch.object(app_module, "get_database", return_value=mock_db):
@@ -290,11 +293,12 @@ class TestWebInterface:
 
         assert response.status_code == 200
         data = json.loads(response.data)
-        assert data["default_conference"] == "ICLR"
-        assert data["default_year"] == 2025
+        assert data["default_conference"] is None
+        assert data["default_year"] is None
+        assert data["default_conference_error"] is None
 
-    def test_available_filters_fallback_year_for_default_conf(self, client):
-        """Test that default_year falls back to the most recent DB year when configured year has no data."""
+    def test_available_filters_error_when_default_year_missing(self, client):
+        """Test that a missing configured year returns an error instead of another year."""
         import sys
 
         app_module = sys.modules["abstracts_explorer.web_ui.app"]
@@ -309,8 +313,10 @@ class TestWebInterface:
 
         assert response.status_code == 200
         data = json.loads(response.data)
-        assert data["default_conference"] == "NeurIPS"
-        assert data["default_year"] == 2025
+        assert data["default_conference"] is None
+        assert data["default_year"] is None
+        assert data["default_conference_error"] is not None
+        assert data["default_conference_error"]["available_years"] == [2025, 2024]
 
     def test_available_filters_includes_default_distance_threshold(self, client):
         """Test that /api/available-filters includes the module-level default distance threshold (1.2)."""
@@ -734,7 +740,7 @@ class TestSearchEndpoint:
         mock_em = MagicMock()
         mock_db = MagicMock()
         mock_papers = [{"uid": "test1", "title": "Test Paper", "abstract": "Test", "authors": ["John Smith"]}]
-        mock_em.search_papers_semantic.return_value = mock_papers
+        mock_db.search_papers_keyword.return_value = mock_papers
 
         with patch.object(app_module, "get_embeddings_manager", return_value=mock_em):
             with patch.object(app_module, "get_database", return_value=mock_db):
@@ -931,7 +937,7 @@ class TestDatabaseSearchIntegration:
             results = test_db.search_papers(keyword="attention")
             assert isinstance(results, list)
 
-            results = test_db.search_papers(year=2017)
+            results = test_db.search_papers(years=[2017])
             assert isinstance(results, list)
 
             results = test_db.search_papers(limit=5)
@@ -998,7 +1004,7 @@ class TestWebUISemanticSearchDetails:
                             "distance": 0.2,
                         },
                     ]
-                    mock_em.search_papers_semantic.return_value = mock_papers
+                    mock_db.search_papers_keyword.return_value = mock_papers
                     mock_em.count_papers_within_distance.return_value = 25
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
@@ -1037,7 +1043,7 @@ class TestWebUISemanticSearchDetails:
                 with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                     mock_em = Mock()
                     mock_db = Mock()
-                    mock_em.search_papers_semantic.return_value = []
+                    mock_db.search_papers_keyword.return_value = []
                     mock_em.count_papers_within_distance.return_value = 0
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
@@ -1062,7 +1068,7 @@ class TestWebUISemanticSearchDetails:
                     with patch("abstracts_explorer.web_ui.app._SIMILAR_DISTANCE_THRESHOLD", 1.2):
                         mock_em = Mock()
                         mock_db = Mock()
-                        mock_em.search_papers_semantic.return_value = []
+                        mock_db.search_papers_keyword.return_value = []
                         mock_em.count_papers_within_distance.return_value = 0
                         mock_get_em.return_value = mock_em
                         mock_get_db.return_value = mock_db
@@ -1073,8 +1079,7 @@ class TestWebUISemanticSearchDetails:
                         )
 
                         assert response.status_code == 200
-                        # Verify search_papers_semantic was called with the module default threshold
-                        call_kwargs = mock_em.search_papers_semantic.call_args
+                        call_kwargs = mock_db.search_papers_keyword.call_args
                         assert call_kwargs.kwargs.get("distance_threshold") == 1.2
 
     def test_semantic_search_accepts_per_request_distance_threshold(self):
@@ -1086,7 +1091,7 @@ class TestWebUISemanticSearchDetails:
                 with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                     mock_em = Mock()
                     mock_db = Mock()
-                    mock_em.search_papers_semantic.return_value = []
+                    mock_db.search_papers_keyword.return_value = []
                     mock_em.count_papers_within_distance.return_value = 0
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
@@ -1103,7 +1108,7 @@ class TestWebUISemanticSearchDetails:
 
                     assert response.status_code == 200
                     # Verify the per-request value was used, not the module default
-                    call_kwargs = mock_em.search_papers_semantic.call_args
+                    call_kwargs = mock_db.search_papers_keyword.call_args
                     assert call_kwargs.kwargs.get("distance_threshold") == 0.7
 
 
@@ -1751,7 +1756,7 @@ class TestConferencePluginMapping:
     """Test conference name to plugin name mapping in download endpoint."""
 
     def test_ml4ps_conference_name_maps_to_plugin(self):
-        """Test that 'ML4PS@Neurips' conference name correctly maps to 'ml4ps' plugin."""
+        """Test that 'ML4PS' conference name correctly maps to 'ml4ps' plugin."""
         from abstracts_explorer.plugins import get_plugin, list_plugins
 
         # Get all plugins and build mapping
@@ -1763,12 +1768,12 @@ class TestConferencePluginMapping:
             if conf_name and plug_name:
                 conference_to_plugin[conf_name] = plug_name
 
-        # Verify ML4PS@Neurips maps to ml4ps
-        assert "ML4PS@Neurips" in conference_to_plugin
-        assert conference_to_plugin["ML4PS@Neurips"] == "ml4ps"
+        # Verify ML4PS maps to ml4ps
+        assert "ML4PS" in conference_to_plugin
+        assert conference_to_plugin["ML4PS"] == "ml4ps"
 
         # Verify we can get the plugin
-        plugin_name = conference_to_plugin["ML4PS@Neurips"]
+        plugin_name = conference_to_plugin["ML4PS"]
         plugin = get_plugin(plugin_name)
         assert plugin is not None
         assert plugin.plugin_name == "ml4ps"
@@ -2736,7 +2741,7 @@ class TestDataDonationEndpoint:
 
         # Get the actual UID that was generated
         with db:
-            all_papers = db.query("SELECT uid FROM papers LIMIT 1")
+            all_papers = db._query("SELECT uid FROM papers LIMIT 1")
             paper_uid = all_papers[0]["uid"]
 
         paper_priorities = {paper_uid: {"priority": 5, "searchTerm": "machine learning"}}
@@ -2756,7 +2761,7 @@ class TestDataDonationEndpoint:
             db_verify = DatabaseManager()
             with db_verify:
                 # Query using the database manager's query method
-                results = db_verify.query("SELECT * FROM validation_data")
+                results = db_verify._query("SELECT * FROM validation_data")
                 assert len(results) == 1
                 assert results[0]["paper_uid"] == paper_uid
                 assert results[0]["priority"] == 5
@@ -3259,7 +3264,7 @@ class TestPapersPerYearEndpoint:
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                 mock_db = Mock()
-                mock_db.get_years_for_conference.return_value = [2023, 2024]
+                mock_db.get_years.return_value = [2023, 2024]
                 mock_db.get_stats.side_effect = [
                     {"total_papers": 100, "year": 2023, "conference": "NeurIPS"},
                     {"total_papers": 150, "year": 2024, "conference": "NeurIPS"},

@@ -102,7 +102,6 @@ abstracts-explorer pre-process [OPTIONS]
 - `--collection TEXT`: ChromaDB collection name (default: from config)
 - `--lm-studio-url TEXT`: OpenAI-compatible API URL (default: from config)
 - `--model TEXT`: Embedding model (default: from config)
-- `--where TEXT`: SQL WHERE clause to filter papers for embedding
 - `--requests-per-minute INTEGER`: API rate limit, 0 disables it
 - `--ignore-embedding-model-mismatch`: Recreate embeddings after an embedding
   model mismatch without prompting

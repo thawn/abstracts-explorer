@@ -45,7 +45,7 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
     plugin_name = "ml4ps"
     plugin_description = "ML4PS (Machine Learning for Physical Sciences) workshop downloader"
     _start_year = 2022
-    conference_name = "ML4PS@Neurips"
+    conference_name = "ML4PS"
 
     # NeurIPS virtual page base URL for fetching abstracts (years >= 2022 only)
     _NEURIPS_VIRTUAL_BASES = {
@@ -300,7 +300,8 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
             openreview_link = soup.find("a", href=re.compile(r"openreview\.net"))
 
         if openreview_link:
-            openreview_url = openreview_link.get("href")
+            href = openreview_link.get("href")
+            openreview_url = href if isinstance(href, str) else None
             if openreview_url and not openreview_url.startswith("http"):
                 openreview_url = urljoin("https://openreview.net", openreview_url)
 

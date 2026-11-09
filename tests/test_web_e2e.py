@@ -200,7 +200,7 @@ def test_embeddings(test_database, tmp_path_factory):
     set_test_db(str(test_database))
     db = DatabaseManager()
 
-    papers = db.query("SELECT * FROM papers")
+    papers = db._query("SELECT * FROM papers")
 
     # Add each paper to the embeddings database
     for paper in papers:

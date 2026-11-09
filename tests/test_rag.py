@@ -1226,7 +1226,7 @@ class TestRAGChatIntegration:
         )
 
         # Get the generated UID from the database
-        papers = db.query("SELECT uid FROM papers LIMIT 1")
+        papers = db._query("SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
 
         chroma_path = tmp_path / "chroma_integration"
@@ -1290,7 +1290,7 @@ class TestRAGChatIntegration:
             },
         )
 
-        papers = db.query("SELECT uid FROM papers LIMIT 1")
+        papers = db._query("SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
 
         chroma_path = tmp_path / "chroma_conversation"
@@ -1354,7 +1354,7 @@ class TestRAGChatIntegration:
             },
         )
 
-        papers = db.query("SELECT uid FROM papers LIMIT 1")
+        papers = db._query("SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
 
         chroma_path = tmp_path / "chroma_export"
@@ -1849,7 +1849,7 @@ class TestParallelRAGRateLimiting:
             },
         )
 
-        papers = db.query("SELECT uid FROM papers LIMIT 1")
+        papers = db._query("SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
 
         chroma_path = tmp_path / "chroma_parallel"

@@ -278,7 +278,9 @@ class HAICONDownloaderPlugin(LightweightDownloaderPlugin):
         session_ids: Set[int] = set()
 
         for link in soup.find_all("a", href=True):
-            href = link["href"]
+            href = link.get("href")
+            if not isinstance(href, str):
+                continue
             match = re.search(r"form_session=(\d+)", href)
             if match:
                 session_ids.add(int(match.group(1)))

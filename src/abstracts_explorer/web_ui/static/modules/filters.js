@@ -50,6 +50,53 @@ export function dismissConferenceError() {
 }
 
 /**
+ * Show the configured default conference/year error banner.
+ * @param {Object|null} error - Error details from /api/available-filters.
+ */
+function showDefaultFilterErrorBanner(error) {
+    const banner = document.getElementById('default-filter-error-banner');
+    const messageEl = document.getElementById('default-filter-error-message');
+    const availableEl = document.getElementById('default-filter-error-available');
+    const guidanceEl = document.getElementById('default-filter-error-guidance');
+
+    if (!banner || !messageEl) return;
+
+    if (!error) {
+        banner.classList.add('hidden');
+        return;
+    }
+
+    messageEl.textContent = error.message || 'The configured default filter is not available.';
+
+    if (availableEl) {
+        const parts = [];
+        if (error.available_conferences && error.available_conferences.length > 0) {
+            parts.push(`<strong>Available conferences:</strong> ${error.available_conferences.map(escapeHtml).join(', ')}`);
+        }
+        if (error.available_years && error.available_years.length > 0) {
+            parts.push(`<strong>Available years:</strong> ${error.available_years.map(escapeHtml).join(', ')}`);
+        }
+        availableEl.innerHTML = parts.join('<br>');
+    }
+
+    if (guidanceEl) {
+        guidanceEl.textContent = error.guidance || '';
+    }
+
+    banner.classList.remove('hidden');
+}
+
+/**
+ * Dismiss the configured default filter error banner.
+ */
+export function dismissDefaultFilterError() {
+    const banner = document.getElementById('default-filter-error-banner');
+    if (banner) {
+        banner.classList.add('hidden');
+    }
+}
+
+/**
  * Load filter options from API
  * @async
  */
@@ -85,6 +132,10 @@ export async function loadFilterOptions() {
         if (availableData.error) {
             console.error('Error loading available filters:', availableData.error);
         } else {
+            // Show an informative error when the configured default is unavailable.
+            showDefaultFilterErrorBanner(availableData.default_conference_error);
+            const hasDefaultError = Boolean(availableData.default_conference_error);
+
             // Store conference_years mapping and all years for future use
             window.conferenceYearsMap = availableData.conference_years || {};
             window.allYears = availableData.years || [];
@@ -142,14 +193,15 @@ export async function loadFilterOptions() {
                     conferenceSelect.value = defaultConf;
                     updateYearsForConference();
                     defaultApplied = true;
-                } else if (conferenceSelect.options.length > 0) {
-                    // Fall back to first available conference when default not found
-                    conferenceSelect.selectedIndex = 0;
-                    updateYearsForConference();
-                    defaultApplied = true;
                 }
-            } else if (!defaultApplied && conferencesJustPopulated && conferenceSelect && conferenceSelect.options.length > 0) {
-                // No specific default but conferences were just populated — select the first one
+            } else if (
+                !defaultApplied &&
+                !hasDefaultError &&
+                conferencesJustPopulated &&
+                conferenceSelect &&
+                conferenceSelect.options.length > 0
+            ) {
+                // No specific default and no configuration error — select the first one
                 conferenceSelect.selectedIndex = 0;
                 updateYearsForConference();
                 defaultApplied = true;

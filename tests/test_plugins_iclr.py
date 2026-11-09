@@ -329,7 +329,7 @@ class TestICLRPluginDatabaseIntegration:
                 db.add_papers(data)
 
                 # Verify paper was stored (lightweight schema uses 'title' not 'name', and 'uid' not 'id')
-                papers = db.query("SELECT uid, title, abstract, year, conference, authors FROM papers")
+                papers = db._query("SELECT uid, title, abstract, year, conference, authors FROM papers")
                 assert len(papers) == 1
 
                 paper = papers[0]
