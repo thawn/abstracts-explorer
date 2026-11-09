@@ -564,19 +564,18 @@ severity:
 
 | # | Pattern | Occurrences | Modules | Severity |
 |---|---------|-------------|---------|----------|
-| 1 | Session validation boilerplate (`if not self._session`) | 30+ | database.py | High |
-| 2 | ChromaDB where-clause construction (`$and/$in` filters) | 5+ | embeddings.py, clustering.py, mcp_server.py | High |
-| 3 | CLI command header printing | 15+ | cli.py | Medium |
-| 4 | TF-IDF keyword extraction | 2 | clustering.py | Medium |
-| 5 | LLM label generation (OpenAI call + fallback) | 3 | clustering.py | Medium |
-| 6 | RAG tool wrapper functions (identical pattern) | 6 | rag.py | Medium |
-| 7 | MCP argument normalization functions | 4 | mcp_tools.py | Medium |
-| 8 | Resource init in MCP tools (config → embed → db) | 6 | mcp_server.py | Medium |
-| 9 | Conference/year argument resolution | 8+ | cli.py | Low |
-| 10 | Paper markdown formatting (session grouping) | 2 | export_utils.py | Low |
-| 11 | Error handling + traceback pattern | 15+ | cli.py | Low |
-| 12 | Faceting query pattern | 4 | database.py | Low |
-| 13 | Eval CRUD parallel structures | 2×5 | database.py | Low |
-| 14 | Progress callback definitions | 4 | registry.py | Low |
-| 15 | Web route error handling (try/except/jsonify) | 22 | web_ui/app.py | Low |
-| 16 | `get_years_for_conference` duplicates `get_years` | 2 | database.py | Low |
+| 1 | ChromaDB where-clause construction (`$and/$in` filters) | 5+ | embeddings.py, clustering.py, mcp_server.py | High |
+| 2 | CLI command header printing | 15+ | cli.py | Medium |
+| 3 | TF-IDF keyword extraction | 2 | clustering.py | Medium |
+| 4 | LLM label generation (OpenAI call + fallback) | 3 | clustering.py | Medium |
+| 5 | RAG tool wrapper functions (identical pattern) | 6 | rag.py | Medium |
+| 6 | MCP argument normalization functions | 4 | mcp_tools.py | Medium |
+| 7 | Resource init in MCP tools (config → embed → db) | 6 | mcp_server.py | Medium |
+| 8 | Conference/year argument resolution | 8+ | cli.py | Low |
+| 9 | Paper markdown formatting (session grouping) | 2 | export_utils.py | Low |
+| 10 | Error handling + traceback pattern | 15+ | cli.py | Low |
+| 11 | Faceting query pattern | 4 | database.py | Low |
+| 12 | Eval CRUD parallel structures | 2×5 | database.py | Low |
+| 13 | Progress callback definitions | 4 | registry.py | Low |
+| 14 | Web route error handling (try/except/jsonify) | 22 | web_ui/app.py | Low |
+| 15 | `get_years_for_conference` duplicates `get_years` | 2 | database.py | Low |

@@ -1232,7 +1232,6 @@ class TestRAGChatIntegration:
         chroma_path = tmp_path / "chroma_integration"
         set_test_embedding_db(chroma_path)
         em = EmbeddingsManager()
-        em.connect()
         em.create_collection(reset=True)
 
         # Add test paper to ChromaDB using the generated UID from database
@@ -1297,7 +1296,6 @@ class TestRAGChatIntegration:
         chroma_path = tmp_path / "chroma_conversation"
         set_test_embedding_db(chroma_path)
         em = EmbeddingsManager()
-        em.connect()
         em.create_collection(reset=True)
 
         em.add_paper(
@@ -1362,7 +1360,6 @@ class TestRAGChatIntegration:
         chroma_path = tmp_path / "chroma_export"
         set_test_embedding_db(chroma_path)
         em = EmbeddingsManager()
-        em.connect()
         em.create_collection(reset=True)
 
         em.add_paper(
@@ -1858,7 +1855,6 @@ class TestParallelRAGRateLimiting:
         chroma_path = tmp_path / "chroma_parallel"
         set_test_embedding_db(chroma_path)
         em = EmbeddingsManager()
-        em.connect()
         em.create_collection(reset=True)
         em.add_paper(
             {

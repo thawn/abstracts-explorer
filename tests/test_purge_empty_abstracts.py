@@ -68,7 +68,7 @@ class TestFindPapersWithoutAbstract:
             # Manually insert a paper row with NULL abstract
             from sqlalchemy import insert as sa_insert
 
-            db._session.execute(
+            db.session.execute(
                 sa_insert(Paper).values(
                     uid="deadbeef0001",
                     title="No Abstract Paper",
@@ -80,7 +80,7 @@ class TestFindPapersWithoutAbstract:
                     conference="ICLR",
                 )
             )
-            db._session.commit()
+            db.session.commit()
 
             uids = find_papers_without_abstract(db)
 
@@ -94,7 +94,7 @@ class TestFindPapersWithoutAbstract:
             db.create_tables()
             from sqlalchemy import insert as sa_insert
 
-            db._session.execute(
+            db.session.execute(
                 sa_insert(Paper).values(
                     uid="deadbeef0002",
                     title="Empty Abstract Paper",
@@ -106,17 +106,23 @@ class TestFindPapersWithoutAbstract:
                     conference="ICLR",
                 )
             )
-            db._session.commit()
+            db.session.commit()
 
             uids = find_papers_without_abstract(db)
 
         assert "deadbeef0002" in uids
 
-    def test_raises_when_not_connected(self):
-        """DatabaseError is raised if the session is not open."""
-        db = DatabaseManager.__new__(DatabaseManager)
-        db._session = None
-        with pytest.raises(DatabaseError):
+    def test_raises_when_connection_fails(self, tmp_path, monkeypatch):
+        """DatabaseError from the lazy connection is propagated."""
+        set_test_db(tmp_path / "test.db")
+        db = DatabaseManager()
+
+        def fail_connect():
+            raise DatabaseError("connection failed")
+
+        monkeypatch.setattr(db, "connect", fail_connect)
+
+        with pytest.raises(DatabaseError, match="connection failed"):
             find_papers_without_abstract(db)
 
 
@@ -135,7 +141,7 @@ class TestDeletePapersByUids:
             db.create_tables()
             from sqlalchemy import insert as sa_insert
 
-            db._session.execute(
+            db.session.execute(
                 sa_insert(Paper).values(
                     uid="aabbccdd0001",
                     title="To Delete",
@@ -147,7 +153,7 @@ class TestDeletePapersByUids:
                     conference="ICML",
                 )
             )
-            db._session.commit()
+            db.session.commit()
 
             count = delete_papers_by_uids(db, ["aabbccdd0001"])
             assert count == 1
@@ -163,11 +169,17 @@ class TestDeletePapersByUids:
             count = delete_papers_by_uids(db, [])
         assert count == 0
 
-    def test_raises_when_not_connected(self):
-        """DatabaseError is raised if the session is not open."""
-        db = DatabaseManager.__new__(DatabaseManager)
-        db._session = None
-        with pytest.raises(DatabaseError):
+    def test_raises_when_connection_fails(self, tmp_path, monkeypatch):
+        """DatabaseError from the lazy connection is propagated."""
+        set_test_db(tmp_path / "test.db")
+        db = DatabaseManager()
+
+        def fail_connect():
+            raise DatabaseError("connection failed")
+
+        monkeypatch.setattr(db, "connect", fail_connect)
+
+        with pytest.raises(DatabaseError, match="connection failed"):
             delete_papers_by_uids(db, ["some-uid"])
 
 

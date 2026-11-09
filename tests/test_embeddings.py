@@ -138,7 +138,6 @@ class TestEmbeddingsManager:
 
     def test_create_collection(self, embeddings_manager):
         """Test creating a collection."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
         assert embeddings_manager.collection is not None
         embeddings_manager.close()
@@ -153,7 +152,6 @@ class TestEmbeddingsManager:
 
     def test_create_collection_reset(self, embeddings_manager):
         """Test resetting a collection."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
         embeddings_manager.create_collection(reset=True)
         assert embeddings_manager.collection is not None
@@ -161,7 +159,6 @@ class TestEmbeddingsManager:
 
     def test_delete_embeddings_by_filter_no_filter_raises(self, embeddings_manager):
         """delete_embeddings_by_filter with no args raises ValueError."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
         with pytest.raises(ValueError):
             embeddings_manager.delete_embeddings_by_filter()
@@ -169,7 +166,6 @@ class TestEmbeddingsManager:
 
     def test_delete_embeddings_by_filter_conference(self, embeddings_manager, mock_lm_studio):
         """delete_embeddings_by_filter(conference=...) removes only matching papers."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         papers = [
@@ -193,7 +189,6 @@ class TestEmbeddingsManager:
 
     def test_delete_embeddings_by_filter_year(self, embeddings_manager, mock_lm_studio):
         """delete_embeddings_by_filter(year=...) removes only papers from that year."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         papers = [
@@ -212,7 +207,6 @@ class TestEmbeddingsManager:
 
     def test_delete_embeddings_by_filter_conference_and_year(self, embeddings_manager, mock_lm_studio):
         """delete_embeddings_by_filter(conference=..., year=...) scopes to exact slice."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         papers = [
@@ -233,7 +227,6 @@ class TestEmbeddingsManager:
 
     def test_delete_embeddings_by_filter_nothing_to_delete(self, embeddings_manager, mock_lm_studio):
         """delete_embeddings_by_filter returns 0 when no matching embeddings exist."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         papers = [
@@ -249,7 +242,6 @@ class TestEmbeddingsManager:
 
     def test_add_paper(self, embeddings_manager, mock_lm_studio):
         """Test adding a paper."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         paper = {
@@ -266,7 +258,6 @@ class TestEmbeddingsManager:
 
     def test_add_paper_empty_abstract(self, embeddings_manager, mock_lm_studio):
         """Test adding a paper with empty abstract but non-empty title."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         # Should work with title even if abstract is empty
@@ -296,7 +287,6 @@ class TestEmbeddingsManager:
 
     def test_add_multiple_papers(self, embeddings_manager, mock_lm_studio):
         """Test adding multiple papers."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         papers = [
@@ -314,7 +304,6 @@ class TestEmbeddingsManager:
 
     def test_add_papers_with_empty_abstracts(self, embeddings_manager, mock_lm_studio):
         """Test adding papers with some empty abstracts."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         papers = [
@@ -331,7 +320,6 @@ class TestEmbeddingsManager:
 
     def test_search_similar(self, embeddings_manager, mock_lm_studio):
         """Test similarity search."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         # Add some papers (all required LightweightPaper fields needed for metadata parsing)
@@ -372,7 +360,6 @@ class TestEmbeddingsManager:
 
     def test_search_similar_empty_query(self, embeddings_manager):
         """Test search with empty query."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         with pytest.raises(EmbeddingsError, match="Query cannot be empty"):
@@ -391,7 +378,6 @@ class TestEmbeddingsManager:
 
     def test_get_collection_stats(self, embeddings_manager, mock_lm_studio):
         """Test getting collection statistics."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         stats = embeddings_manager.get_collection_stats()
@@ -420,7 +406,6 @@ class TestEmbeddingsManager:
 
     def test_embed_from_database(self, embeddings_manager, test_database, mock_lm_studio):
         """Test embedding papers from database."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         count = embeddings_manager.embed_from_database()
@@ -434,7 +419,6 @@ class TestEmbeddingsManager:
 
     def test_embed_from_database_with_filter(self, embeddings_manager, test_database, mock_lm_studio):
         """Test embedding papers from database with filter."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         count = embeddings_manager.embed_from_database(where_clause="session LIKE '%ML%'")
@@ -446,20 +430,19 @@ class TestEmbeddingsManager:
         assert stats["count"] == 1
         embeddings_manager.close()
 
-    def test_embed_from_database_not_found(self, embeddings_manager, tmp_path):
-        """Test embedding from non-existent database."""
+    def test_embed_from_database_creates_empty_database(self, embeddings_manager, tmp_path):
+        """Embedding from a non-existent database creates it and embeds nothing."""
 
         # Set PAPER_DB to a nonexistent database
         nonexistent_db = tmp_path / "nonexistent.db"
         set_test_db(nonexistent_db)
 
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
-        # The error message will now be about SQL syntax, not "database not found"
-        # because the database_url is constructed and the error happens during query
-        with pytest.raises(EmbeddingsError, match="Failed to embed from database"):
-            embeddings_manager.embed_from_database()
+        count = embeddings_manager.embed_from_database()
+
+        assert count == 0
+        assert nonexistent_db.exists()
 
         embeddings_manager.close()
 
@@ -474,7 +457,6 @@ class TestEmbeddingsManager:
 
     def test_embed_from_database_with_progress_callback(self, embeddings_manager, test_database, mock_lm_studio):
         """Test embedding papers from database with progress callback."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         progress_calls = []
@@ -503,7 +485,6 @@ class TestEmbeddingsManager:
         with DatabaseManager() as db:
             db.create_tables()
 
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         count = embeddings_manager.embed_from_database()
@@ -546,7 +527,6 @@ class TestEmbeddingsManager:
                 )
             db._session.commit()
 
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         count = embeddings_manager.embed_from_database()
@@ -555,37 +535,20 @@ class TestEmbeddingsManager:
         assert count == 3
         embeddings_manager.close()
 
-    def test_embed_from_database_sql_error(self, embeddings_manager, tmp_path):
-        """Test embedding from database with SQL error."""
+    def test_embed_from_database_sql_error(self, embeddings_manager, tmp_path, monkeypatch):
+        """Test embedding from database with a SQL error."""
         from abstracts_explorer.database import DatabaseManager
 
-        # Create database with only embeddings_metadata, but missing papers table
         db_path = tmp_path / "bad.db"
-
-        # Use DatabaseManager to connect, but manually create only embeddings_metadata table
-        # to simulate a corrupted/incomplete database
         set_test_db(db_path)
-        db = DatabaseManager()
-        db.connect()
 
-        cursor = db.connection.cursor()
-        # Create embeddings_metadata table
-        cursor.execute("""
-            CREATE TABLE embeddings_metadata (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                embedding_model TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        # Note: NOT creating the papers table to trigger error
-        db.connection.commit()
-        db.close()
+        def fail_query(self, *args, **kwargs):
+            raise RuntimeError("simulated query failure")
 
-        embeddings_manager.connect()
+        monkeypatch.setattr(DatabaseManager, "query", fail_query)
+
         embeddings_manager.create_collection()
 
-        # Should raise EmbeddingsError due to missing papers table
         with pytest.raises(EmbeddingsError, match="Failed to embed from database"):
             embeddings_manager.embed_from_database()
 
@@ -593,7 +556,6 @@ class TestEmbeddingsManager:
 
     def test_embed_from_database_with_metadata_fields(self, embeddings_manager, test_database, mock_lm_studio):
         """Test that metadata fields from lightweight schema are included."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         count = embeddings_manager.embed_from_database()
@@ -622,7 +584,6 @@ class TestEmbeddingsManager:
 
     def test_paper_exists(self, embeddings_manager, mock_lm_studio):
         """Test paper_exists method."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         # Initially paper should not exist
@@ -655,7 +616,6 @@ class TestEmbeddingsManager:
 
     def test_embed_from_database_skip_existing(self, embeddings_manager, test_database, mock_lm_studio):
         """Test that embed_from_database skips papers that already exist."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         # First run - should embed all 3 papers
@@ -684,7 +644,6 @@ class TestEmbeddingsManager:
         """
         from unittest.mock import patch
 
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         paper = {
@@ -704,17 +663,17 @@ class TestEmbeddingsManager:
 
 
 def test_check_model_compatibility_no_database(embeddings_manager, tmp_path):
-    """Test checking model compatibility when database does not exist."""
+    """Checking model compatibility creates an empty database and reports no stored model."""
 
     non_existent_db = tmp_path / "nonexistent.db"
     set_test_db(non_existent_db)
 
-    # Since the database doesn't exist, this will raise an error when trying to connect
-    # The behavior has changed - we no longer check if db exists before connecting
-    from abstracts_explorer.embeddings import EmbeddingsError
+    compatible, stored_model, current_model = embeddings_manager.check_model_compatibility()
 
-    with pytest.raises(EmbeddingsError, match="Failed to check model compatibility"):
-        embeddings_manager.check_model_compatibility()
+    assert compatible is True
+    assert stored_model is None
+    assert current_model == embeddings_manager.model_name
+    assert non_existent_db.exists()
 
 
 def test_check_model_compatibility_no_model_stored(embeddings_manager, tmp_path):
@@ -802,7 +761,6 @@ def test_embed_from_database_stores_model(embeddings_manager, test_database):
     # Set env var for test_database fixture
     set_test_db(test_database)
 
-    embeddings_manager.connect()
     embeddings_manager.create_collection()
 
     # Embed papers
@@ -860,7 +818,6 @@ def test_search_papers_semantic_with_year_filter(embeddings_manager, tmp_path, m
             db.add_paper(paper)
 
     # Embed papers
-    embeddings_manager.connect()
     embeddings_manager.create_collection()
     embeddings_manager.embed_from_database()
 
@@ -938,7 +895,6 @@ def test_search_papers_semantic_field_filter_partial_match(embeddings_manager, t
         for paper in papers:
             db.add_paper(paper)
 
-    embeddings_manager.connect()
     embeddings_manager.create_collection()
     embeddings_manager.embed_from_database()
 
@@ -1008,7 +964,6 @@ def test_search_papers_semantic_field_filter_only(embeddings_manager, tmp_path, 
             db.add_paper(paper)
 
     # Connect embeddings (but note: the search should NOT need to generate embeddings)
-    embeddings_manager.connect()
     embeddings_manager.create_collection()
     # Don't embed papers - field-filter-only queries should not need ChromaDB
 
@@ -1084,7 +1039,6 @@ def test_search_papers_semantic_field_filter_only_with_filters(embeddings_manage
         for paper in papers:
             db.add_paper(paper)
 
-    embeddings_manager.connect()
     embeddings_manager.create_collection()
 
     # Both papers by John Smith
@@ -1160,7 +1114,6 @@ def test_search_papers_semantic_implicit_author_match(embeddings_manager, tmp_pa
         for paper in papers:
             db.add_paper(paper)
 
-    embeddings_manager.connect()
     embeddings_manager.create_collection()
     embeddings_manager.embed_from_database()
 
@@ -1217,7 +1170,6 @@ def test_search_papers_semantic_implicit_author_match_no_duplicate(embeddings_ma
         for paper in papers:
             db.add_paper(paper)
 
-    embeddings_manager.connect()
     embeddings_manager.create_collection()
     embeddings_manager.embed_from_database()
 
@@ -1262,7 +1214,6 @@ def test_search_papers_semantic_no_author_match_falls_back_to_semantic(embedding
         for paper in papers:
             db.add_paper(paper)
 
-    embeddings_manager.connect()
     embeddings_manager.create_collection()
     embeddings_manager.embed_from_database()
 
@@ -1324,7 +1275,6 @@ def test_search_papers_semantic_distance_threshold(embeddings_manager, tmp_path,
         for paper in papers:
             db.add_paper(paper)
 
-    embeddings_manager.connect()
     embeddings_manager.create_collection()
     embeddings_manager.embed_from_database()
 
@@ -1484,7 +1434,6 @@ class TestImportEmbeddings:
         contains Python lists (after being parsed through LightweightPaper) but
         ChromaDB only accepts scalar values.
         """
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         # Simulate data as it would appear after export_embeddings() + JSON round-trip:
@@ -1519,7 +1468,6 @@ class TestImportEmbeddings:
 
     def test_import_embeddings_authors_stored_with_consistent_separator(self, embeddings_manager):
         """Test that after importing with list authors, they are stored consistently with the DB format."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         data = {
@@ -1560,7 +1508,6 @@ class TestExportImportRoundTrip:
         This tests the full cycle: add a paper with list authors → export to dict →
         import back from that dict → verify authors are stored correctly.
         """
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         # Add a paper via add_paper (as would happen from embed_from_database)
@@ -1614,7 +1561,6 @@ class TestExportImportRoundTrip:
 
     def test_export_import_round_trip_with_keywords(self, embeddings_manager):
         """Test that keywords survive an export→import round-trip."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         paper = {
@@ -1688,7 +1634,6 @@ class TestEmbeddingsMetadataRoundTrip:
         assert uid is not None
 
         # Embed the paper from the database (embedding API call is mocked in the fixture)
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
         embedded_count = embeddings_manager.embed_from_database()
         assert embedded_count == 1
@@ -1742,7 +1687,6 @@ class TestEmbeddingsMetadataRoundTrip:
 
         assert uid is not None
 
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
         embedded_count = embeddings_manager.embed_from_database()
         assert embedded_count == 1

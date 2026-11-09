@@ -79,7 +79,6 @@ def create_test_db_with_paper(db_path, paper_data):
     set_test_db(db_path)
 
     db = DatabaseManager()
-    db.connect()
     db.create_tables()
 
     # Create LightweightPaper from paper_data

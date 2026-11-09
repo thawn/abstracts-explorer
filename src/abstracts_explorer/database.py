@@ -105,14 +105,17 @@ class DatabaseManager:
     SessionLocal : sessionmaker or None
         SQLAlchemy session factory.
     _session : Session or None
-        Active database session if connected.
+        Internal active database session.
+    session : Session
+        Lazy session property.  The first access connects to the database and
+        creates any missing tables.
 
     Examples
     --------
     >>> # Database configuration comes from config file
     >>> db = DatabaseManager()
-    >>> db.connect()
-    >>> db.create_tables()
+    >>> db.get_paper_count()  # connects and creates tables automatically
+    0
     >>> db.close()
     """
 
@@ -130,19 +133,48 @@ class DatabaseManager:
         self.engine: Optional[Engine] = None
         self.SessionLocal: Optional[sessionmaker] = None
         self._session: Optional[Session] = None
+        self._schema_ready = False
         self.connection = None  # Legacy attribute for backward compatibility (always None now)
+
+    @property
+    def session(self) -> Session:
+        """
+        Return the active database session, connecting lazily if needed.
+
+        The first access calls :meth:`connect` and :meth:`create_tables` so
+        that the database schema is available automatically.
+
+        Returns
+        -------
+        Session
+            Active SQLAlchemy session.
+
+        Raises
+        ------
+        DatabaseError
+            If connecting to the database or creating the schema fails.
+        """
+        if self._session is None:
+            self.connect()
+        if not self._schema_ready:
+            self.create_tables()
+        assert self._session is not None
+        return self._session
 
     def connect(self) -> None:
         """
         Connect to the database.
 
-        Creates the database file if it doesn't exist (SQLite only).
+        Does nothing if already connected. Creates the database file if it
+        does not exist (SQLite only).
 
         Raises
         ------
         DatabaseError
             If connection fails.
         """
+        if self._session is not None:
+            return
         try:
             # Create parent directories for SQLite
             if self.database_url.startswith("sqlite:///"):
@@ -186,6 +218,7 @@ class DatabaseManager:
 
             # Create a session
             self._session = self.SessionLocal()
+            self._schema_ready = False
 
             # Set legacy connection attribute to provide raw database connection for backward compatibility
             # This allows tests to use .connection.cursor()
@@ -207,6 +240,11 @@ class DatabaseManager:
                     return f"{protocol_user}:***@{parts[1]}"
         return url
 
+    def _rollback(self) -> None:
+        """Roll back the active session if one exists."""
+        if self._session is not None:
+            self._session.rollback()
+
     def close(self) -> None:
         """
         Close the database connection.
@@ -216,6 +254,7 @@ class DatabaseManager:
         if self._session:
             self._session.close()
             self._session = None
+        self._schema_ready = False
         if hasattr(self, "_raw_connection") and self._raw_connection:
             self._raw_connection.close()
             self._raw_connection = None
@@ -228,7 +267,6 @@ class DatabaseManager:
 
     def __enter__(self):
         """Context manager entry."""
-        self.connect()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -284,13 +322,15 @@ class DatabaseManager:
         DatabaseError
             If table creation fails.
         """
-        if not self.engine:
-            raise DatabaseError("Not connected to database")
+        if self.engine is None:
+            self.connect()
+        assert self.engine is not None
 
         try:
             # Create tables only if they don't exist (checkfirst=True is the default)
             # This makes the operation idempotent
             Base.metadata.create_all(bind=self.engine, checkfirst=True)
+            self._schema_ready = True
             logger.debug("Database tables created successfully")
         except (OperationalError, ProgrammingError, IntegrityError) as e:
             # These exceptions can occur when tables already exist, especially with:
@@ -300,6 +340,7 @@ class DatabaseManager:
             error_msg = str(e).lower()
             if any(x in error_msg for x in ["already exists", "duplicate", "pg_type_typname_nsp_index"]):
                 # Tables already exist - this is fine, just log it
+                self._schema_ready = True
                 logger.debug(f"Tables already exist (this is normal): {str(e)}")
                 return
             # For other database errors, re-raise with context
@@ -345,9 +386,6 @@ class DatabaseManager:
         ...     paper_uid = db.add_paper(paper)
         >>> print(f"Inserted paper with UID: {paper_uid}")
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             # Extract validated fields from LightweightPaper
             paper_id = paper.original_id if paper.original_id else None
@@ -361,7 +399,7 @@ class DatabaseManager:
             uid = self.compute_uid(title, paper_id, paper.conference, paper.year)
 
             # Check if paper already exists (by UID)
-            existing = self._session.execute(select(Paper).where(Paper.uid == uid)).scalar_one_or_none()
+            existing = self.session.execute(select(Paper).where(Paper.uid == uid)).scalar_one_or_none()
 
             if existing:
                 logger.debug(f"Skipping duplicate paper: {title} (uid: {uid})")
@@ -394,13 +432,13 @@ class DatabaseManager:
                 conference=paper.conference,
             )
 
-            self._session.add(new_paper)
-            self._session.commit()
+            self.session.add(new_paper)
+            self.session.commit()
 
             return uid
 
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to add paper: {str(e)}") from e
 
     def add_papers(self, papers: List[LightweightPaper]) -> int:
@@ -451,9 +489,6 @@ class DatabaseManager:
         ...     count = db.add_papers(papers)
         >>> print(f"Inserted {count} papers")
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         inserted_count = 0
         skipped_count = 0
 
@@ -512,9 +547,6 @@ class DatabaseManager:
         if not paper_priorities:
             raise ValueError("No data provided")
 
-        if self._session is None:
-            raise DatabaseError("Not connected to database")
-
         try:
             donated_count = 0
             for paper_uid, priority_data in paper_priorities.items():
@@ -527,11 +559,11 @@ class DatabaseManager:
 
                 # Create validation data entry
                 validation_entry = ValidationData(paper_uid=paper_uid, priority=priority, search_term=search_term)
-                self._session.add(validation_entry)
+                self.session.add(validation_entry)
                 donated_count += 1
 
             # Commit all changes
-            self._session.commit()
+            self.session.commit()
 
             logger.info(f"Successfully donated {donated_count} papers to validation data")
             return donated_count
@@ -540,7 +572,7 @@ class DatabaseManager:
             # Re-raise validation errors without rollback
             raise
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             logger.error(f"Error donating validation data: {e}", exc_info=True)
             raise DatabaseError(f"Failed to donate validation data: {e}")
 
@@ -590,9 +622,6 @@ class DatabaseManager:
             if not isinstance(msg, dict) or "role" not in msg or "text" not in msg:
                 raise ValueError("Each message must be a dict with 'role' and 'text' keys.")
 
-        if self._session is None:
-            raise DatabaseError("Not connected to database")
-
         try:
             import json
 
@@ -600,8 +629,8 @@ class DatabaseManager:
                 rating=rating,
                 transcript=json.dumps(transcript),
             )
-            self._session.add(donation)
-            self._session.commit()
+            self.session.add(donation)
+            self.session.commit()
 
             logger.info(f"Successfully donated chat transcript (rating={rating})")
             return donation.id
@@ -609,7 +638,7 @@ class DatabaseManager:
         except ValueError:
             raise
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             logger.error(f"Error donating chat transcript: {e}", exc_info=True)
             raise DatabaseError(f"Failed to donate chat transcript: {e}")
 
@@ -651,13 +680,10 @@ class DatabaseManager:
         >>> with db:
         ...     donations = db.get_chat_donations(limit=10, rating='up')
         """
-        if self._session is None:
-            raise DatabaseError("Not connected to database")
-
         try:
             import json
 
-            query = self._session.query(ChatDonation)
+            query = self.session.query(ChatDonation)
             if rating is not None:
                 query = query.filter(ChatDonation.rating == rating)
             query = query.order_by(ChatDonation.donated_at.desc())
@@ -711,13 +737,10 @@ class DatabaseManager:
         ...     stats = db.get_chat_donation_stats()
         ...     print(f"Total donations: {stats['total']}")
         """
-        if self._session is None:
-            raise DatabaseError("Not connected to database")
-
         try:
             import json
 
-            all_entries = self._session.query(ChatDonation).all()
+            all_entries = self.session.query(ChatDonation).all()
             total = len(all_entries)
             up = sum(1 for e in all_entries if e.rating == "up")
             down = sum(1 for e in all_entries if e.rating == "down")
@@ -771,11 +794,8 @@ class DatabaseManager:
         >>> with db:
         ...     data = db.get_validation_data(limit=20)
         """
-        if self._session is None:
-            raise DatabaseError("Not connected to database")
-
         try:
-            query = self._session.query(ValidationData).order_by(ValidationData.donated_at.desc())
+            query = self.session.query(ValidationData).order_by(ValidationData.donated_at.desc())
             if offset:
                 query = query.offset(offset)
             if limit is not None:
@@ -821,11 +841,8 @@ class DatabaseManager:
         ...     stats = db.get_validation_data_stats()
         ...     print(f"Total data donations: {stats['total']}")
         """
-        if self._session is None:
-            raise DatabaseError("Not connected to database")
-
         try:
-            all_entries = self._session.query(ValidationData).all()
+            all_entries = self.session.query(ValidationData).all()
             total = len(all_entries)
             unique_papers = len({e.paper_uid for e in all_entries})
             priorities = [e.priority for e in all_entries]
@@ -870,21 +887,18 @@ class DatabaseManager:
         ...     deleted = db.delete_chat_donations()
         ...     print(f"Deleted {deleted} donations")
         """
-        if self._session is None:
-            raise DatabaseError("Not connected to database")
-
         try:
-            query = self._session.query(ChatDonation)
+            query = self.session.query(ChatDonation)
             if ids is not None:
                 query = query.filter(ChatDonation.id.in_(ids))
             count = query.count()
             query.delete(synchronize_session=False)
-            self._session.commit()
+            self.session.commit()
             logger.info(f"Deleted {count} chat donation(s)")
             return count
 
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             logger.error(f"Error deleting chat donations: {e}", exc_info=True)
             raise DatabaseError(f"Failed to delete chat donations: {e}")
 
@@ -914,21 +928,18 @@ class DatabaseManager:
         ...     deleted = db.delete_validation_data()
         ...     print(f"Deleted {deleted} entries")
         """
-        if self._session is None:
-            raise DatabaseError("Not connected to database")
-
         try:
-            query = self._session.query(ValidationData)
+            query = self.session.query(ValidationData)
             if ids is not None:
                 query = query.filter(ValidationData.id.in_(ids))
             count = query.count()
             query.delete(synchronize_session=False)
-            self._session.commit()
+            self.session.commit()
             logger.info(f"Deleted {count} validation data entry(ies)")
             return count
 
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             logger.error(f"Error deleting validation data: {e}", exc_info=True)
             raise DatabaseError(f"Failed to delete validation data: {e}")
 
@@ -964,9 +975,6 @@ class DatabaseManager:
         >>> for row in results:
         ...     print(row['title'])
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             # Convert ? placeholders to :0, :1, :2 for SQLAlchemy
             # Count the number of ? placeholders
@@ -981,7 +989,7 @@ class DatabaseManager:
             param_dict = {f"param{i}": parameters[i] for i in range(len(parameters))}
 
             # Execute raw SQL using text()
-            result = self._session.execute(text(converted_sql), param_dict)
+            result = self.session.execute(text(converted_sql), param_dict)
 
             # Convert result to list of dicts
             rows = []
@@ -1008,11 +1016,8 @@ class DatabaseManager:
         DatabaseError
             If query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
-            count = self._session.execute(select(func.count()).select_from(Paper)).scalar()
+            count = self.session.execute(select(func.count()).select_from(Paper)).scalar()
             return count or 0
         except Exception as e:
             raise DatabaseError(f"Failed to count papers: {str(e)}") from e
@@ -1036,11 +1041,8 @@ class DatabaseManager:
         DatabaseError
             If query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
-            paper = self._session.execute(select(Paper).where(Paper.uid == uid)).scalar_one_or_none()
+            paper = self.session.execute(select(Paper).where(Paper.uid == uid)).scalar_one_or_none()
             return self._paper_to_dict(paper) if paper else None
         except Exception as e:
             raise DatabaseError(f"Failed to retrieve paper by UID: {str(e)}") from e
@@ -1065,14 +1067,11 @@ class DatabaseManager:
         DatabaseError
             If the query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         if not uids:
             return []
 
         try:
-            papers = self._session.execute(select(Paper).where(Paper.uid.in_(uids))).scalars().all()
+            papers = self.session.execute(select(Paper).where(Paper.uid.in_(uids))).scalars().all()
             by_uid = {paper.uid: self._paper_to_dict(paper) for paper in papers}
             return [by_uid[uid] for uid in uids if uid in by_uid]
         except Exception as e:
@@ -1101,11 +1100,8 @@ class DatabaseManager:
         DatabaseError
             If the database query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
-            paper = self._session.execute(
+            paper = self.session.execute(
                 select(Paper).where((Paper.uid == paper_id) | (Paper.original_id == paper_id)).limit(1)
             ).scalar_one_or_none()
             return self._paper_to_dict(paper) if paper else None
@@ -1186,9 +1182,6 @@ class DatabaseManager:
         >>> # Search by field filter
         >>> papers = db.search_papers(field_filters={"authors": "John Smith"})
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             # Build query conditions
             conditions = []
@@ -1232,7 +1225,7 @@ class DatabaseManager:
                 stmt = stmt.limit(limit)
 
             # Execute query
-            results = self._session.execute(stmt).scalars().all()
+            results = self.session.execute(stmt).scalars().all()
 
             # Convert ORM objects to dicts
             return [self._paper_to_dict(paper) for paper in results]
@@ -1451,13 +1444,10 @@ class DatabaseManager:
         DatabaseError
             If query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             # Get all author fields
             stmt = select(Paper.authors).where(and_(Paper.authors.isnot(None), Paper.authors != ""))
-            results = self._session.execute(stmt).scalars().all()
+            results = self.session.execute(stmt).scalars().all()
 
             # Extract unique author names
             author_names = set()
@@ -1489,9 +1479,6 @@ class DatabaseManager:
         DatabaseError
             If query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             stmt = (
                 select(Paper.year)
@@ -1499,7 +1486,7 @@ class DatabaseManager:
                 .where(and_(Paper.conference == conference, Paper.year.isnot(None)))
                 .order_by(Paper.year)
             )
-            return list(self._session.execute(stmt).scalars().all())
+            return list(self.session.execute(stmt).scalars().all())
         except Exception as e:
             raise DatabaseError(f"Failed to get years for conference: {str(e)}") from e
 
@@ -1514,7 +1501,7 @@ class DatabaseManager:
         dict[str, list[int]]
             Mapping of conference name to list of years (descending) that have
             at least one paper in the database.  Returns an empty dict when the
-            database is empty or not connected.
+            database is empty.
 
         Raises
         ------
@@ -1524,14 +1511,10 @@ class DatabaseManager:
         Examples
         --------
         >>> db = DatabaseManager()
-        >>> with db:
-        ...     mapping = db.get_conference_years_from_db()
+        >>> mapping = db.get_conference_years_from_db()
         >>> print(mapping)
         {'NeurIPS': [2025, 2024], 'ICLR': [2024]}
         """
-        if not self._session:
-            return {}
-
         try:
             conferences_in_db = self.get_conferences()
             result: Dict[str, List[int]] = {}
@@ -1655,9 +1638,6 @@ class DatabaseManager:
         ...     canonical = db.resolve_conference_name("ml4ps@neurips")
         ...     # Returns "ML4PS@Neurips" if that form is stored in the DB
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         # 1. Try case-insensitive match against conferences already in the DB
         try:
             for conf in self.get_conferences():
@@ -1768,7 +1748,7 @@ class DatabaseManager:
         Raises
         ------
         DatabaseError
-            If query fails or not connected.
+            If query fails.
 
         Examples
         --------
@@ -1779,9 +1759,6 @@ class DatabaseManager:
         ['Session 1', 'Session 2', ...]
         >>> sessions = db.get_sessions(conference="NeurIPS", year=2025)
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             conditions: list = []
             if conference is not None:
@@ -1794,7 +1771,7 @@ class DatabaseManager:
                 stmt = stmt.where(and_(*conditions))
             stmt = stmt.where(and_(Paper.session.isnot(None), Paper.session != "")).order_by(Paper.session)
 
-            return list(self._session.execute(stmt).scalars().all())
+            return list(self.session.execute(stmt).scalars().all())
         except Exception as e:
             raise DatabaseError(f"Failed to get sessions: {str(e)}") from e
 
@@ -1815,7 +1792,7 @@ class DatabaseManager:
         Raises
         ------
         DatabaseError
-            If query fails or not connected.
+            If query fails.
 
         Examples
         --------
@@ -1826,9 +1803,6 @@ class DatabaseManager:
         ['ICLR', 'NeurIPS']
         >>> conferences = db.get_conferences(year=2025)
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             stmt = (
                 select(Paper.conference).distinct().where(and_(Paper.conference.isnot(None), Paper.conference != ""))
@@ -1837,7 +1811,7 @@ class DatabaseManager:
                 stmt = stmt.where(Paper.year == year)
             stmt = stmt.order_by(Paper.conference)
 
-            return list(self._session.execute(stmt).scalars().all())
+            return list(self.session.execute(stmt).scalars().all())
         except Exception as e:
             raise DatabaseError(f"Failed to get conferences: {str(e)}") from e
 
@@ -1858,7 +1832,7 @@ class DatabaseManager:
         Raises
         ------
         DatabaseError
-            If query fails or not connected.
+            If query fails.
 
         Examples
         --------
@@ -1869,16 +1843,13 @@ class DatabaseManager:
         [2025, 2024, 2023]
         >>> years = db.get_years(conference="NeurIPS")
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             stmt = select(Paper.year).distinct().where(Paper.year.isnot(None))
             if conference is not None:
                 stmt = stmt.where(Paper.conference == conference)
             stmt = stmt.order_by(Paper.year.desc())
 
-            return list(self._session.execute(stmt).scalars().all())
+            return list(self.session.execute(stmt).scalars().all())
         except Exception as e:
             raise DatabaseError(f"Failed to get years: {str(e)}") from e
 
@@ -1904,13 +1875,10 @@ class DatabaseManager:
         >>> print(model)
         'text-embedding-qwen3-embedding-4b'
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             # Get the most recent embedding model entry
             stmt = select(EmbeddingsMetadata.embedding_model).order_by(EmbeddingsMetadata.updated_at.desc()).limit(1)
-            result = self._session.execute(stmt).scalar_one_or_none()
+            result = self.session.execute(stmt).scalar_one_or_none()
             return result
         except Exception as e:
             raise DatabaseError(f"Failed to get embedding model: {str(e)}") from e
@@ -1938,30 +1906,27 @@ class DatabaseManager:
         >>> with db:
         ...     db.set_embedding_model("text-embedding-qwen3-embedding-4b")
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             # Check if any record exists
             count_stmt = select(func.count()).select_from(EmbeddingsMetadata)
-            count = self._session.execute(count_stmt).scalar()
+            count = self.session.execute(count_stmt).scalar()
 
             if count and count > 0:
                 # Update the most recent record
                 # Get the most recent entry
                 latest_stmt = select(EmbeddingsMetadata).order_by(EmbeddingsMetadata.updated_at.desc()).limit(1)
-                latest = self._session.execute(latest_stmt).scalar_one()
+                latest = self.session.execute(latest_stmt).scalar_one()
                 latest.embedding_model = model_name
                 latest.updated_at = datetime.now(timezone.utc)
             else:
                 # Insert new record
                 new_metadata = EmbeddingsMetadata(embedding_model=model_name)
-                self._session.add(new_metadata)
+                self.session.add(new_metadata)
 
-            self._session.commit()
+            self.session.commit()
             logger.info(f"Set embedding model to: {model_name}")
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to set embedding model: {str(e)}") from e
 
     def get_clustering_cache(
@@ -2018,9 +1983,6 @@ class DatabaseManager:
         DatabaseError
             If query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             import json
 
@@ -2055,7 +2017,7 @@ class DatabaseManager:
 
             # Get all matching results (we'll filter by params in Python)
             stmt = stmt.order_by(ClusteringCache.created_at.desc())
-            results = self._session.execute(stmt).scalars().all()
+            results = self.session.execute(stmt).scalars().all()
 
             if not results:
                 return None
@@ -2135,9 +2097,6 @@ class DatabaseManager:
         DatabaseError
             If save fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             import json
 
@@ -2165,8 +2124,8 @@ class DatabaseManager:
                 results_json=results_json,
             )
 
-            self._session.add(cache_entry)
-            self._session.commit()
+            self.session.add(cache_entry)
+            self.session.commit()
 
             logger.info(
                 f"Saved clustering cache: {clustering_method} with {n_clusters} clusters, "
@@ -2175,7 +2134,7 @@ class DatabaseManager:
             )
 
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to save clustering cache: {str(e)}") from e
 
     def delete_papers_by_conference_year(self, conference: str, year: int) -> int:
@@ -2199,20 +2158,17 @@ class DatabaseManager:
         DatabaseError
             If deletion fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
-            result = self._session.execute(
+            result = self.session.execute(
                 delete(Paper).where(and_(Paper.conference == conference, Paper.year == year))
             )
-            self._session.commit()
+            self.session.commit()
             count = result.rowcount if result.rowcount is not None else 0
             logger.info(f"Deleted {count} papers for {conference}/{year}")
             return count
 
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to delete papers for {conference}/{year}: {str(e)}") from e
 
     def delete_clustering_cache_by_conference_year(self, conference: str, year: int) -> int:
@@ -2236,25 +2192,22 @@ class DatabaseManager:
         DatabaseError
             If deletion fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             stmt = select(ClusteringCache).where(
                 and_(ClusteringCache.conference == conference, ClusteringCache.year == year)
             )
-            entries = self._session.execute(stmt).scalars().all()
+            entries = self.session.execute(stmt).scalars().all()
             count = len(entries)
 
             for entry in entries:
-                self._session.delete(entry)
+                self.session.delete(entry)
 
-            self._session.commit()
+            self.session.commit()
             logger.info(f"Deleted {count} clustering cache entries for {conference}/{year}")
             return count
 
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to delete clustering cache for {conference}/{year}: {str(e)}") from e
 
     def count_clustering_cache_by_conference_year(self, conference: str, year: int) -> int:
@@ -2278,11 +2231,8 @@ class DatabaseManager:
         DatabaseError
             If the query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
-            result = self._session.execute(
+            result = self.session.execute(
                 select(func.count())
                 .select_from(ClusteringCache)
                 .where(and_(ClusteringCache.conference == conference, ClusteringCache.year == year))
@@ -2314,9 +2264,6 @@ class DatabaseManager:
         DatabaseError
             If deletion fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             if embedding_model:
                 # Delete only for specific model
@@ -2325,13 +2272,13 @@ class DatabaseManager:
                 # Delete all
                 stmt = select(ClusteringCache)
 
-            entries = self._session.execute(stmt).scalars().all()
+            entries = self.session.execute(stmt).scalars().all()
             count = len(entries)
 
             for entry in entries:
-                self._session.delete(entry)
+                self.session.delete(entry)
 
-            self._session.commit()
+            self.session.commit()
 
             if embedding_model:
                 logger.info(f"Cleared {count} clustering cache entries for model: {embedding_model}")
@@ -2341,7 +2288,7 @@ class DatabaseManager:
             return count
 
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to clear clustering cache: {str(e)}") from e
 
     def update_clustering_cache_embedding_model(self, old_model: str, new_model: str) -> int:
@@ -2379,23 +2326,20 @@ class DatabaseManager:
         ...         "old-model", "new-model"
         ...     )
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             stmt = select(ClusteringCache).where(ClusteringCache.embedding_model == old_model)
-            entries = self._session.execute(stmt).scalars().all()
+            entries = self.session.execute(stmt).scalars().all()
             count = len(entries)
 
             for entry in entries:
                 entry.embedding_model = new_model
 
-            self._session.commit()
+            self.session.commit()
             logger.info(f"Updated {count} clustering cache entries from model {old_model!r} to {new_model!r}")
             return count
 
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to update clustering cache embedding model: {str(e)}") from e
 
     # ------------------------------------------------------------------
@@ -2432,9 +2376,6 @@ class DatabaseManager:
         DatabaseError
             If query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             import json
 
@@ -2449,7 +2390,7 @@ class DatabaseManager:
                 .order_by(HierarchicalLabelCache.created_at.desc())
                 .limit(1)
             )
-            result = self._session.execute(stmt).scalars().first()
+            result = self.session.execute(stmt).scalars().first()
             if result is None:
                 return None
             raw = json.loads(result.labels_json)
@@ -2482,9 +2423,6 @@ class DatabaseManager:
         DatabaseError
             If save fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             import json
 
@@ -2494,15 +2432,15 @@ class DatabaseManager:
                 linkage=linkage,
                 labels_json=labels_json,
             )
-            self._session.add(entry)
-            self._session.commit()
+            self.session.add(entry)
+            self.session.commit()
             logger.info(
                 f"Saved hierarchical label cache: {len(labels)} labels, "
                 f"model={embedding_model}, linkage={linkage}"
             )
 
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to save hierarchical label cache: {str(e)}") from e
 
     # ------------------------------------------------------------------ #
@@ -2546,9 +2484,6 @@ class DatabaseManager:
         DatabaseError
             If insertion fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             pair = EvalQAPair(
                 conversation_id=conversation_id,
@@ -2558,11 +2493,11 @@ class DatabaseManager:
                 tool_name=tool_name,
                 source_info=source_info,
             )
-            self._session.add(pair)
-            self._session.commit()
+            self.session.add(pair)
+            self.session.commit()
             return pair.id
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to add eval QA pair: {str(e)}") from e
 
     def get_eval_qa_pairs(
@@ -2599,9 +2534,6 @@ class DatabaseManager:
         DatabaseError
             If query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             stmt = select(EvalQAPair)
             if verified_only:
@@ -2616,7 +2548,7 @@ class DatabaseManager:
             if limit:
                 stmt = stmt.limit(limit)
 
-            rows = self._session.execute(stmt).scalars().all()
+            rows = self.session.execute(stmt).scalars().all()
             return [
                 {
                     "id": r.id,
@@ -2653,14 +2585,11 @@ class DatabaseManager:
         DatabaseError
             If query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             stmt = select(func.count()).select_from(EvalQAPair)
             if verified_only:
                 stmt = stmt.where(EvalQAPair.verified == 1)
-            return self._session.execute(stmt).scalar() or 0
+            return self.session.execute(stmt).scalar() or 0
         except Exception as e:
             raise DatabaseError(f"Failed to count eval QA pairs: {str(e)}") from e
 
@@ -2687,24 +2616,21 @@ class DatabaseManager:
         DatabaseError
             If update fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         allowed = {"query", "expected_answer", "tool_name", "verified", "source_info"}
         to_set = {k: v for k, v in fields.items() if k in allowed}
         if not to_set:
             return False
 
         try:
-            pair = self._session.get(EvalQAPair, pair_id)
+            pair = self.session.get(EvalQAPair, pair_id)
             if pair is None:
                 return False
             for k, v in to_set.items():
                 setattr(pair, k, v)
-            self._session.commit()
+            self.session.commit()
             return True
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to update eval QA pair: {str(e)}") from e
 
     def delete_eval_qa_pair(self, pair_id: int) -> bool:
@@ -2726,18 +2652,15 @@ class DatabaseManager:
         DatabaseError
             If deletion fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
-            pair = self._session.get(EvalQAPair, pair_id)
+            pair = self.session.get(EvalQAPair, pair_id)
             if pair is None:
                 return False
-            self._session.delete(pair)
-            self._session.commit()
+            self.session.delete(pair)
+            self.session.commit()
             return True
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to delete eval QA pair: {str(e)}") from e
 
     def delete_verified_eval_qa_pairs(self) -> int:
@@ -2754,16 +2677,13 @@ class DatabaseManager:
         DatabaseError
             If deletion fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
-            result = self._session.execute(delete(EvalQAPair).where(EvalQAPair.verified == 1))
+            result = self.session.execute(delete(EvalQAPair).where(EvalQAPair.verified == 1))
             count = result.rowcount
-            self._session.commit()
+            self.session.commit()
             return count
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to delete verified eval QA pairs: {str(e)}") from e
 
     def delete_eval_results(self, run_id: Optional[str] = None) -> int:
@@ -2786,19 +2706,16 @@ class DatabaseManager:
         DatabaseError
             If deletion fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             stmt = delete(EvalResult)
             if run_id is not None:
                 stmt = stmt.where(EvalResult.run_id == run_id)
-            result = self._session.execute(stmt)
+            result = self.session.execute(stmt)
             count = result.rowcount
-            self._session.commit()
+            self.session.commit()
             return count
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to delete eval results: {str(e)}") from e
 
     def add_eval_result(
@@ -2847,9 +2764,6 @@ class DatabaseManager:
         DatabaseError
             If insertion fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             result = EvalResult(
                 run_id=run_id,
@@ -2862,11 +2776,11 @@ class DatabaseManager:
                 error=error,
                 judge_reasoning=judge_reasoning,
             )
-            self._session.add(result)
-            self._session.commit()
+            self.session.add(result)
+            self.session.commit()
             return result.id
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to add eval result: {str(e)}") from e
 
     def get_eval_results(
@@ -2897,9 +2811,6 @@ class DatabaseManager:
         DatabaseError
             If query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             stmt = select(EvalResult)
             if run_id:
@@ -2910,7 +2821,7 @@ class DatabaseManager:
             if limit:
                 stmt = stmt.limit(limit)
 
-            rows = self._session.execute(stmt).scalars().all()
+            rows = self.session.execute(stmt).scalars().all()
             return [
                 {
                     "id": r.id,
@@ -2947,14 +2858,11 @@ class DatabaseManager:
         DatabaseError
             If query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             stmt = (
                 select(EvalResult.run_id).group_by(EvalResult.run_id).order_by(func.min(EvalResult.created_at).asc())
             )
-            return [row.run_id for row in self._session.execute(stmt).all()]
+            return [row.run_id for row in self.session.execute(stmt).all()]
         except Exception as e:
             raise DatabaseError(f"Failed to get eval run IDs: {str(e)}") from e
 
@@ -2984,9 +2892,6 @@ class DatabaseManager:
         DatabaseError
             If query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             results = self.get_eval_results(run_id=run_id)
             if not results:
@@ -3007,7 +2912,7 @@ class DatabaseManager:
 
             # Determine the timestamp of the earliest result in this run
             stmt = select(func.min(EvalResult.created_at)).where(EvalResult.run_id == run_id)
-            run_date = self._session.execute(stmt).scalar()
+            run_date = self.session.execute(stmt).scalar()
 
             return {
                 "total": total,
@@ -3056,9 +2961,6 @@ class DatabaseManager:
         DatabaseError
             If the export fails or no papers are found.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
 
             output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -3069,18 +2971,18 @@ class DatabaseManager:
             with Session(export_engine) as export_session:
                 # Export papers filtered by conference and year
                 query = select(Paper).where(and_(Paper.conference == conference, Paper.year == year))
-                for paper in self._session.execute(query).scalars():
+                for paper in self.session.execute(query).scalars():
                     paper_dict = {c.name: getattr(paper, c.name) for c in Paper.__table__.columns}
                     export_session.add(Paper(**paper_dict))
                     paper_count += 1
 
                 # Export hierarchical label cache
-                for entry in self._session.execute(select(HierarchicalLabelCache)).scalars():
+                for entry in self.session.execute(select(HierarchicalLabelCache)).scalars():
                     entry_dict = {c.name: getattr(entry, c.name) for c in HierarchicalLabelCache.__table__.columns}
                     export_session.add(HierarchicalLabelCache(**entry_dict))
 
                 # Export embeddings metadata
-                for entry in self._session.execute(select(EmbeddingsMetadata)).scalars():
+                for entry in self.session.execute(select(EmbeddingsMetadata)).scalars():
                     entry_dict = {c.name: getattr(entry, c.name) for c in EmbeddingsMetadata.__table__.columns}
                     export_session.add(EmbeddingsMetadata(**entry_dict))
 
@@ -3127,9 +3029,6 @@ class DatabaseManager:
         DatabaseError
             If the import fails or the embedding model is inconsistent.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             source_engine = create_engine(
                 f"sqlite:///{sqlite_path}",
@@ -3141,7 +3040,7 @@ class DatabaseManager:
                 # --- Validate EmbeddingsMetadata consistency ---
                 imported_meta = source_session.execute(select(EmbeddingsMetadata)).scalars().first()
                 if imported_meta:
-                    existing_meta = self._session.execute(select(EmbeddingsMetadata)).scalars().first()
+                    existing_meta = self.session.execute(select(EmbeddingsMetadata)).scalars().first()
                     if existing_meta and normalize_model_name(existing_meta.embedding_model) != normalize_model_name(
                         imported_meta.embedding_model
                     ):
@@ -3150,7 +3049,7 @@ class DatabaseManager:
                         )
 
                 # Delete existing papers for this conference+year
-                self._session.execute(delete(Paper).where(and_(Paper.conference == conference, Paper.year == year)))
+                self.session.execute(delete(Paper).where(and_(Paper.conference == conference, Paper.year == year)))
 
                 # Delete only hierarchical label cache entries whose
                 # embedding_model matches one from the imported data
@@ -3158,37 +3057,37 @@ class DatabaseManager:
                     source_session.execute(select(HierarchicalLabelCache.embedding_model).distinct()).scalars().all()
                 )
                 if imported_models_result:
-                    self._session.execute(
+                    self.session.execute(
                         delete(HierarchicalLabelCache).where(
                             HierarchicalLabelCache.embedding_model.in_(imported_models_result)
                         )
                     )
 
-                self._session.commit()
+                self.session.commit()
 
                 # Import papers — use merge() to handle any UID collisions
                 # (e.g. the same paper existing under a different conference
                 # casing that the DELETE above didn't catch).
                 for paper in source_session.execute(select(Paper)).scalars():
                     paper_dict = {c.name: getattr(paper, c.name) for c in Paper.__table__.columns}
-                    self._session.merge(Paper(**paper_dict))
+                    self.session.merge(Paper(**paper_dict))
                     paper_count += 1
 
                 # Import hierarchical labels
                 for entry in source_session.execute(select(HierarchicalLabelCache)).scalars():
                     entry_dict = {c.name: getattr(entry, c.name) for c in HierarchicalLabelCache.__table__.columns}
-                    self._session.add(HierarchicalLabelCache(**entry_dict))
+                    self.session.add(HierarchicalLabelCache(**entry_dict))
 
                 # Import embeddings metadata (only if not already present)
                 if imported_meta:
-                    existing_meta = self._session.execute(select(EmbeddingsMetadata)).scalars().first()
+                    existing_meta = self.session.execute(select(EmbeddingsMetadata)).scalars().first()
                     if not existing_meta:
                         meta_dict = {
                             c.name: getattr(imported_meta, c.name) for c in EmbeddingsMetadata.__table__.columns
                         }
-                        self._session.add(EmbeddingsMetadata(**meta_dict))
+                        self.session.add(EmbeddingsMetadata(**meta_dict))
 
-                self._session.commit()
+                self.session.commit()
 
             source_engine.dispose()
             return paper_count
@@ -3196,7 +3095,7 @@ class DatabaseManager:
         except DatabaseError:
             raise
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to import papers: {str(e)}") from e
 
     # ------------------------------------------------------------------
@@ -3232,9 +3131,6 @@ class DatabaseManager:
         """
         import json as _json
 
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             entries: List[Dict[str, Any]] = []
             stmt = select(ClusteringCache).where(
@@ -3243,7 +3139,7 @@ class DatabaseManager:
                     ClusteringCache.year == year,
                 )
             )
-            for entry in self._session.execute(stmt).scalars():
+            for entry in self.session.execute(stmt).scalars():
                 row: Dict[str, Any] = {}
                 for col in ClusteringCache.__table__.columns:
                     if col.name == "id":
@@ -3305,12 +3201,9 @@ class DatabaseManager:
         """
         import json as _json
 
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             # Delete existing matching entries using column-based filtering.
-            self._session.execute(
+            self.session.execute(
                 delete(ClusteringCache).where(
                     and_(
                         ClusteringCache.conference == conference,
@@ -3318,7 +3211,7 @@ class DatabaseManager:
                     )
                 )
             )
-            self._session.flush()
+            self.session.flush()
 
             # For PostgreSQL the auto-increment sequence can fall out of sync when rows
             # were previously inserted with explicit primary-key values (e.g. by an older
@@ -3329,7 +3222,7 @@ class DatabaseManager:
             # new row gets a safe ID regardless of sequence history.
             db_url = self.database_url.lower()
             if "postgresql" in db_url or "postgres" in db_url:
-                self._session.execute(
+                self.session.execute(
                     text(
                         "SELECT setval("
                         "  pg_get_serial_sequence('clustering_cache', 'id'),"
@@ -3338,7 +3231,7 @@ class DatabaseManager:
                         ")"
                     )
                 )
-                self._session.flush()
+                self.session.flush()
 
             count = 0
             for item in data.get("entries", []):
@@ -3381,14 +3274,14 @@ class DatabaseManager:
                         if actual is not None:
                             row["n_clusters"] = int(actual)
 
-                self._session.add(ClusteringCache(**row))
+                self.session.add(ClusteringCache(**row))
                 count += 1
 
-            self._session.commit()
+            self.session.commit()
             return count
 
         except DatabaseError:
             raise
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to import clustering cache: {str(e)}") from e

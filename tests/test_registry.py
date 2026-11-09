@@ -14,7 +14,7 @@ import pytest
 
 from abstracts_explorer._version import __version__
 from abstracts_explorer.config import get_config
-from abstracts_explorer.database import DatabaseManager
+from abstracts_explorer.database import DatabaseError, DatabaseManager
 from abstracts_explorer.plugin import LightweightPaper
 from abstracts_explorer.registry import (
     EmbeddingModelMismatchError,
@@ -74,7 +74,6 @@ def _populate_test_db(db_path):
     """
     set_test_db(db_path)
     db = DatabaseManager()
-    db.connect()
     db.create_tables()
     db.add_papers(_make_sample_papers())
     return db
@@ -402,7 +401,6 @@ class TestDatabaseExportImport:
         target_path = tmp_path / "target.db"
         set_test_db(target_path)
         db2 = DatabaseManager()
-        db2.connect()
         db2.create_tables()
         try:
             count = db2.import_papers_from_sqlite(export_path, "neurips", 2024)
@@ -422,7 +420,6 @@ class TestDatabaseExportImport:
         # Populate with mixed-case conference name (e.g. "ML4PS@Neurips")
         set_test_db(tmp_path / "db.db")
         db = DatabaseManager()
-        db.connect()
         db.create_tables()
         db.add_papers(
             [
@@ -455,7 +452,6 @@ class TestDatabaseExportImport:
         """resolve_conference_name falls back to plugin conference_name if not in DB."""
         set_test_db(tmp_path / "empty.db")
         db = DatabaseManager()
-        db.connect()
         db.create_tables()
         try:
             # DB is empty; should fall back to plugin that has "NeurIPS"
@@ -472,7 +468,6 @@ class TestDatabaseExportImport:
         # Populate with mixed-case conference name (e.g. "ML4PS@Neurips")
         set_test_db(tmp_path / "db.db")
         db = DatabaseManager()
-        db.connect()
         db.create_tables()
         db.add_papers(
             [
@@ -513,7 +508,6 @@ class TestDatabaseExportImport:
         # Create a paper with a known UID
         set_test_db(tmp_path / "source.db")
         db = DatabaseManager()
-        db.connect()
         db.create_tables()
         db.add_papers(
             [
@@ -538,7 +532,6 @@ class TestDatabaseExportImport:
         # Create a target DB with a paper having the same UID (same title+id+conf+year)
         set_test_db(tmp_path / "target.db")
         db2 = DatabaseManager()
-        db2.connect()
         db2.create_tables()
         db2.add_papers(
             [
@@ -564,19 +557,26 @@ class TestDatabaseExportImport:
         finally:
             db2.close()
 
-    def test_export_not_connected(self, tmp_path):
-        """Export raises error when not connected."""
-        set_test_db(tmp_path / "not_connected.db")
+    def test_export_auto_connects(self, tmp_path):
+        """Export connects lazily and creates an empty export."""
+        set_test_db(tmp_path / "auto.db")
         db = DatabaseManager()
-        with pytest.raises(Exception, match="Not connected"):
-            db.export_papers_to_sqlite(tmp_path / "export.db", "neurips", 2024)
+        export_path = tmp_path / "export.db"
+        try:
+            assert db.export_papers_to_sqlite(export_path, "neurips", 2024) == 0
+            assert export_path.exists()
+        finally:
+            db.close()
 
-    def test_import_not_connected(self, tmp_path):
-        """Import raises error when not connected."""
-        set_test_db(tmp_path / "not_connected.db")
+    def test_import_auto_connects(self, tmp_path):
+        """Import connects lazily before reporting source errors."""
+        set_test_db(tmp_path / "auto.db")
         db = DatabaseManager()
-        with pytest.raises(Exception, match="Not connected"):
-            db.import_papers_from_sqlite(tmp_path / "source.db", "neurips", 2024)
+        try:
+            with pytest.raises(DatabaseError, match="Failed to import papers"):
+                db.import_papers_from_sqlite(tmp_path / "missing.db", "neurips", 2024)
+        finally:
+            db.close()
 
     def test_import_embedding_model_mismatch(self, tmp_path):
         """Import raises EmbeddingModelConflictError when embedding models don't match."""
@@ -1293,7 +1293,6 @@ class TestUploadDownload:
         """Upload fails when no clustering cache exists for conference+year."""
         set_test_db(tmp_path / "test.db")
         db = DatabaseManager()
-        db.connect()
         db.create_tables()
         db.add_papers(_make_sample_papers())  # papers only, no clustering cache
         db.close()
@@ -1461,7 +1460,6 @@ class TestUploadDownload:
         # Populate DB with mixed-case conference name "NeurIPS"
         set_test_db(tmp_path / "test.db")
         db = DatabaseManager()
-        db.connect()
         db.create_tables()
         db.add_papers(
             [
@@ -1672,7 +1670,6 @@ class TestUploadDownload:
 
         set_test_db(tmp_path / "target.db")
         db = DatabaseManager()
-        db.connect()
         db.create_tables()
         try:
             entries = db._session.query(ClusteringCache).all()
@@ -1779,7 +1776,6 @@ class TestUploadDownload:
 
         # Set up a fresh target database
         db = DatabaseManager()
-        db.connect()
         db.create_tables()
         db.close()
 
@@ -1827,7 +1823,6 @@ class TestUploadDownload:
 
         set_test_db(tmp_path / "target.db")
         db = DatabaseManager()
-        db.connect()
         db.create_tables()
         try:
             from sqlalchemy import and_, select
@@ -1902,7 +1897,6 @@ class TestUploadDownload:
         """upload_all raises RegistryError when no conferences exist."""
         set_test_db(tmp_path / "empty.db")
         db = DatabaseManager()
-        db.connect()
         db.create_tables()
         db.close()
 

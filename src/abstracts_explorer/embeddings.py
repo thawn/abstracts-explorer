@@ -8,6 +8,7 @@ embeddings and stores them in ChromaDB for efficient similarity search.
 
 import logging
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -205,6 +206,7 @@ class EmbeddingsManager:
         self.collection_name = collection_name or config.collection_name
         self._client: Optional[Any] = None  # chromadb.Client
         self._collection: Optional[Any] = None  # chromadb.Collection
+        self._init_lock = threading.RLock()
 
         # OpenAI client - lazy loaded on first use to avoid API calls during test collection
         self._openai_client: Optional[OpenAI] = None
@@ -230,7 +232,9 @@ class EmbeddingsManager:
             If connecting to ChromaDB fails.
         """
         if self._client is None:
-            self.connect()
+            with self._init_lock:
+                if self._client is None:
+                    self.connect()
         assert self._client is not None  # connect() always sets _client or raises EmbeddingsError
         return self._client
 
@@ -257,7 +261,9 @@ class EmbeddingsManager:
             If connecting to ChromaDB or creating the collection fails.
         """
         if self._collection is None:
-            self.create_collection()
+            with self._init_lock:
+                if self._collection is None:
+                    self.create_collection()
         return self._collection
 
     @collection.setter
@@ -370,8 +376,9 @@ class EmbeddingsManager:
         >>> em = EmbeddingsManager()
         >>> em.init()
         """
-        self.connect()
-        self.create_collection(reset=reset)
+        with self._init_lock:
+            self.connect()
+            self.create_collection(reset=reset)
 
     def test_lm_studio_connection(self) -> bool:
         """
@@ -491,9 +498,7 @@ class EmbeddingsManager:
         Examples
         --------
         >>> em = EmbeddingsManager()
-        >>> em.connect()
-        >>> em.create_collection()
-        >>> em.create_collection(reset=True)  # Reset existing collection
+        >>> em.init(reset=True)  # Reset an existing collection
         """
         try:
             if reset:
@@ -534,8 +539,7 @@ class EmbeddingsManager:
         Examples
         --------
         >>> em = EmbeddingsManager()
-        >>> em.connect()
-        >>> em.create_collection()
+        >>> em.init()
         >>> em.paper_exists("uid1")
         False
         >>> em.add_paper(paper_dict)
@@ -573,8 +577,7 @@ class EmbeddingsManager:
         Examples
         --------
         >>> em = EmbeddingsManager()
-        >>> em.connect()
-        >>> em.create_collection()
+        >>> em.init()
         >>> em.paper_needs_update({"id": 1, "abstract": "Updated abstract"})
         True
         >>> em.paper_needs_update({"id": 1, "abstract": "This paper presents..."})
@@ -728,8 +731,7 @@ class EmbeddingsManager:
         Examples
         --------
         >>> em = EmbeddingsManager()
-        >>> em.connect()
-        >>> em.create_collection()
+        >>> em.init()
         >>> em.add_paper(paper_dict)
         """
         try:
@@ -786,8 +788,7 @@ class EmbeddingsManager:
         Examples
         --------
         >>> em = EmbeddingsManager()
-        >>> em.connect()
-        >>> em.create_collection()
+        >>> em.init()
         >>> results = em.search_similar("deep learning transformers", n_results=5, where={"year": 2025})
         >>> for i, paper_id in enumerate(results['ids'][0]):
         ...     print(f"{i+1}. Paper {paper_id}: {results['metadatas'][0][i]}")
@@ -838,8 +839,7 @@ class EmbeddingsManager:
         Examples
         --------
         >>> em = EmbeddingsManager()
-        >>> em.connect()
-        >>> em.create_collection()
+        >>> em.init()
         >>> stats = em.get_collection_stats()
         >>> print(f"Collection has {stats['count']} papers")
         """
@@ -878,7 +878,6 @@ class EmbeddingsManager:
         try:
             # Use DatabaseManager to check the stored model
             db_manager = DatabaseManager()
-            db_manager.connect()
 
             stored_model = db_manager.get_embedding_model()
             db_manager.close()
@@ -927,8 +926,7 @@ class EmbeddingsManager:
         Examples
         --------
         >>> em = EmbeddingsManager()
-        >>> em.connect()
-        >>> em.create_collection()
+        >>> em.init()
         >>> count = em.embed_from_database()
         >>> print(f"Embedded {count} papers")
         >>> # Only embed accepted papers
@@ -937,7 +935,6 @@ class EmbeddingsManager:
         try:
             # Use DatabaseManager for database operations
             db_manager = DatabaseManager()
-            db_manager.connect()
 
             # Store the embedding model in the database
             db_manager.set_embedding_model(self.model_name)
@@ -1255,10 +1252,8 @@ class EmbeddingsManager:
         Examples
         --------
         >>> em = EmbeddingsManager()
-        >>> em.connect()
-        >>> em.create_collection()
+        >>> em.init()
         >>> db = DatabaseManager()
-        >>> db.connect()
         >>> results = em.find_papers_within_distance(db, "machine learning", 1.1)
         >>> print(f"Found {results['count']} papers")
         >>>
@@ -1399,8 +1394,7 @@ class EmbeddingsManager:
         Examples
         --------
         >>> em = EmbeddingsManager()
-        >>> em.connect()
-        >>> em.create_collection()
+        >>> em.init()
         >>> deleted = em.delete_embeddings_by_filter(conference="NeurIPS", year=2024)
         >>> print(f"Deleted {deleted} embeddings")
         """

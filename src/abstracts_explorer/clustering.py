@@ -30,8 +30,7 @@ Example
 >>>
 >>> # Initialize managers
 >>> em = EmbeddingsManager()
->>> em.connect()
->>> em.create_collection()
+>>> em.init()
 >>> cm = ClusteringManager(em)
 >>>
 >>> # Load and cluster embeddings
@@ -166,8 +165,7 @@ class ClusteringManager:
     Examples
     --------
     >>> em = EmbeddingsManager()
-    >>> em.connect()
-    >>> em.create_collection()
+    >>> em.init()
     >>> cm = ClusteringManager(em)
     >>> cm.load_embeddings()
     >>> reduced = cm.reduce_dimensions(method='pca', n_components=2)
@@ -1772,7 +1770,6 @@ def perform_clustering(
         em = EmbeddingsManager(
             collection_name=collection_name,
         )
-        em.init()
 
         # Initialize clustering manager
         cm = ClusteringManager(em)

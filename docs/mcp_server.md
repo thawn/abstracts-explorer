@@ -192,9 +192,7 @@ from abstracts_explorer.database import DatabaseManager
 
 # Initialize components
 em = EmbeddingsManager()
-em.connect()
 db = DatabaseManager()
-db.connect()
 
 # Create RAG chat (MCP tools enabled by default)
 chat = RAGChat(em, db, enable_mcp_tools=True)

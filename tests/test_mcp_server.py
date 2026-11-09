@@ -132,10 +132,8 @@ class TestLoadClusteringData:
         mock_em_class.assert_called_once_with(
             collection_name="papers",
         )
-        mock_em.init.assert_called_once()
 
         mock_db_class.assert_called_once_with()
-        mock_db.connect.assert_called_once()
 
         mock_cm_class.assert_called_once_with(mock_em, mock_db)
 

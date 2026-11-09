@@ -280,7 +280,6 @@ def connected_db(db_manager):
     -----
     Automatically closes the database connection after the test.
     """
-    db_manager.connect()
     db_manager.create_tables()
     yield db_manager
     db_manager.close()

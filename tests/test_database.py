@@ -149,14 +149,48 @@ class TestDatabaseManager:
         set_test_db(db_path)
 
         with DatabaseManager() as db:
+            assert db._session is None
+            db.create_tables()
             assert db.connection is not None
 
         # Connection should be closed after exiting context
         assert db.connection is None
 
+    def test_session_property_lazily_connects(self, db_manager):
+        """The session property connects and initializes the schema on first access."""
+        assert db_manager._session is None
+        assert db_manager._schema_ready is False
+
+        session = db_manager.session
+
+        assert session is db_manager._session
+        assert db_manager._schema_ready is True
+        assert db_manager.session is session
+        db_manager.close()
+
+    def test_session_property_reconnects_after_close(self, db_manager):
+        """The session property reconnects after close()."""
+        first_session = db_manager.session
+        db_manager.close()
+
+        second_session = db_manager.session
+
+        assert second_session is not first_session
+        assert second_session is db_manager._session
+        db_manager.close()
+
+    def test_connect_is_idempotent(self, db_manager):
+        """Calling connect() while connected keeps the existing session."""
+        db_manager.connect()
+        first_session = db_manager.session
+
+        db_manager.connect()
+
+        assert db_manager.session is first_session
+        db_manager.close()
+
     def test_create_tables(self, db_manager):
         """Test table creation."""
-        db_manager.connect()
         db_manager.create_tables()
 
         # Check if tables exist
@@ -168,15 +202,16 @@ class TestDatabaseManager:
 
         db_manager.close()
 
-    def test_create_tables_without_connection(self, db_manager):
-        """Test create_tables raises error when not connected."""
-        with pytest.raises(DatabaseError, match="Not connected to database"):
-            db_manager.create_tables()
+    def test_create_tables_auto_connects(self, db_manager):
+        """create_tables() connects lazily when needed."""
+        db_manager.create_tables()
+
+        assert db_manager._session is not None
+        assert db_manager._schema_ready is True
+        db_manager.close()
 
     def test_create_tables_idempotent(self, db_manager):
         """Test that create_tables can be called multiple times without error."""
-        db_manager.connect()
-
         # Call create_tables multiple times - should not raise errors
         db_manager.create_tables()
         db_manager.create_tables()
@@ -190,10 +225,11 @@ class TestDatabaseManager:
 
         db_manager.close()
 
-    def test_query_without_connection(self, db_manager):
-        """Test query raises error when not connected."""
-        with pytest.raises(DatabaseError, match="Not connected to database"):
-            db_manager.query("SELECT * FROM papers")
+    def test_query_auto_connects(self, db_manager):
+        """Querying an uninitialized database creates the schema lazily."""
+        assert db_manager.query("SELECT * FROM papers") == []
+        assert db_manager._session is not None
+        db_manager.close()
 
     def test_query_with_invalid_sql(self, connected_db):
         """Test query with invalid SQL."""
@@ -418,10 +454,13 @@ class TestAddPaper:
         count = connected_db.get_paper_count()
         assert count == 1
 
-    def test_add_paper_without_connection(self, db_manager, sample_paper):
-        """Test add_paper raises error when not connected."""
-        with pytest.raises(DatabaseError, match="Not connected to database"):
-            db_manager.add_paper(sample_paper)
+    def test_add_paper_auto_connects(self, db_manager, sample_paper):
+        """add_paper() connects lazily and initializes the schema."""
+        uid = db_manager.add_paper(sample_paper)
+
+        assert uid is not None
+        assert db_manager.get_paper_count() == 1
+        db_manager.close()
 
     def test_add_paper_with_original_id(self, connected_db):
         """Test adding a paper with an original_id."""
@@ -530,8 +569,8 @@ class TestAddPapers:
         total_count = connected_db.get_paper_count()
         assert total_count == 2
 
-    def test_add_papers_without_connection(self, db_manager):
-        """Test add_papers raises error when not connected."""
+    def test_add_papers_auto_connects(self, db_manager):
+        """add_papers() connects lazily and initializes the schema."""
         papers = [
             LightweightPaper(
                 title="Paper",
@@ -544,8 +583,11 @@ class TestAddPapers:
             )
         ]
 
-        with pytest.raises(DatabaseError, match="Not connected to database"):
-            db_manager.add_papers(papers)
+        count = db_manager.add_papers(papers)
+
+        assert count == 1
+        assert db_manager.get_paper_count() == 1
+        db_manager.close()
 
     def test_add_papers_skips_erroneous_abstract_and_continues(self, connected_db, mocker):
         """Test that an import error on one abstract doesn't abort the rest."""
@@ -1363,16 +1405,12 @@ class TestValidationData:
         with pytest.raises(ValueError, match="Invalid data format"):
             connected_db.donate_validation_data(paper_priorities)
 
-    def test_donate_validation_data_not_connected(self):
-        """Test donation without connection raises DatabaseError."""
-        import pytest
-        from abstracts_explorer.database import DatabaseError
+    def test_donate_validation_data_auto_connects(self, db_manager):
+        """Test donation auto-connects when no explicit connection exists."""
+        count = db_manager.donate_validation_data({"test": {"priority": 5}})
 
-        db = DatabaseManager()
-        # Don't connect
-
-        with pytest.raises(DatabaseError, match="Not connected"):
-            db.donate_validation_data({"test": {"priority": 5}})
+        assert count == 1
+        db_manager.close()
 
 
 class TestChatDonation:
@@ -1688,10 +1726,10 @@ class TestGetConferenceYearsFromDb:
         assert result["NeurIPS"] == [2025, 2024]
         assert result["ICLR"] == [2024]
 
-    def test_returns_empty_dict_when_not_connected(self):
-        """Returns empty dict (not an error) when session is None."""
-        db = DatabaseManager()
-        assert db.get_conference_years_from_db() == {}
+    def test_returns_empty_dict_when_database_empty(self, db_manager):
+        """Returns empty dict for an empty auto-initialized database."""
+        assert db_manager.get_conference_years_from_db() == {}
+        db_manager.close()
 
 
 class TestResolveDefaultConferenceYear:

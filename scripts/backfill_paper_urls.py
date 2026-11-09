@@ -107,16 +107,13 @@ def get_conference_years_in_db(db: DatabaseManager) -> Dict[str, List[int]]:
     DatabaseError
         If the query fails.
     """
-    if not db._session:
-        raise DatabaseError("Not connected to database")
-
     try:
         stmt = (
             select(Paper.conference, Paper.year)
             .where(Paper.conference.in_(list(CONFERENCE_DOWNLOADERS.keys())))
             .distinct()
         )
-        rows = db._session.execute(stmt).all()
+        rows = db.session.execute(stmt).all()
 
         result: Dict[str, List[int]] = {}
         for conference, year in rows:
@@ -190,9 +187,6 @@ def find_papers_missing_urls(db: DatabaseManager, conference: str, year: int) ->
     DatabaseError
         If the query fails.
     """
-    if not db._session:
-        raise DatabaseError("Not connected to database")
-
     try:
         stmt = (
             select(Paper)
@@ -200,7 +194,7 @@ def find_papers_missing_urls(db: DatabaseManager, conference: str, year: int) ->
             .where(Paper.year == year)
             .where(Paper.paper_pdf_url.is_(None))
         )
-        return list(db._session.execute(stmt).scalars().all())
+        return list(db.session.execute(stmt).scalars().all())
     except DatabaseError:
         raise
     except Exception as e:
@@ -235,9 +229,6 @@ def get_url_updates_from_db(db: DatabaseManager, conference: str, year: int) -> 
     DatabaseError
         If the query fails.
     """
-    if not db._session:
-        raise DatabaseError("Not connected to database")
-
     try:
         stmt = (
             select(Paper)
@@ -245,7 +236,7 @@ def get_url_updates_from_db(db: DatabaseManager, conference: str, year: int) -> 
             .where(Paper.year == year)
             .where(Paper.paper_pdf_url.isnot(None))
         )
-        papers = db._session.execute(stmt).scalars().all()
+        papers = db.session.execute(stmt).scalars().all()
         return {
             p.uid: {
                 "paper_pdf_url": p.paper_pdf_url,
@@ -321,9 +312,9 @@ def backfill_urls(
 
     if not dry_run and updated > 0:
         try:
-            db._session.commit()
+            db.session.commit()
         except Exception as e:
-            db._session.rollback()
+            db.session.rollback()
             raise DatabaseError(f"Failed to commit URL updates: {e}") from e
 
     return updated, still_missing

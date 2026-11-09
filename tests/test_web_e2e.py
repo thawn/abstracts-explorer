@@ -187,8 +187,6 @@ def test_embeddings(test_database, tmp_path_factory):
     # This ensures we ALWAYS use the mock, never a real OpenAI connection
     em._openai_client = mock_client
 
-    em.connect()
-
     # Forcefully delete collection if it exists to ensure clean state
     try:
         em.client.delete_collection(name=collection_name)
@@ -201,7 +199,7 @@ def test_embeddings(test_database, tmp_path_factory):
     # Add embeddings for all test papers from the database
     set_test_db(str(test_database))
     db = DatabaseManager()
-    db.connect()
+
     papers = db.query("SELECT * FROM papers")
 
     # Add each paper to the embeddings database
@@ -242,7 +240,7 @@ def _prepopulate_clustering_cache(test_database, em, collection_name):
 
     set_test_db(str(test_database))
     db = DatabaseManager()
-    db.connect()
+
     db.create_tables()
 
     cm = ClusteringManager(em, db)
@@ -392,7 +390,6 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
             # Don't check file existence in tests - the database was created in a temp dir
             set_test_db(db_path)
             g.db = DatabaseManager()
-            g.db.connect()
             g.db.create_tables()  # Ensure all tables exist (including clustering_cache)
         return g.db
 

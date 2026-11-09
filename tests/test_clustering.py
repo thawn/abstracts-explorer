@@ -825,7 +825,6 @@ class TestClusteringCache:
         set_test_db(db_path)
 
         db = DatabaseManager()
-        db.connect()
         db.create_tables()
 
         # Create mock results
@@ -907,7 +906,6 @@ class TestClusteringCache:
         set_test_db(db_path)
 
         db = DatabaseManager()
-        db.connect()
         db.create_tables()
 
         # Save result without params
@@ -949,7 +947,6 @@ class TestClusteringCache:
         set_test_db(db_path)
 
         db = DatabaseManager()
-        db.connect()
         db.create_tables()
 
         results = {

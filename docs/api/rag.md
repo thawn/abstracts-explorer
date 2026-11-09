@@ -109,9 +109,7 @@ from abstracts_explorer.rag import RAGChat
 
 # Initialize components
 em = EmbeddingsManager()
-em.connect()
 db = DatabaseManager()
-db.connect()
 
 # Create RAG chat with MCP tools enabled (default)
 chat = RAGChat(em, db, enable_mcp_tools=True)

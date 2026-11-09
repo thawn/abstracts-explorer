@@ -319,7 +319,7 @@ class Evaluator:
     Examples
     --------
     >>> em = EmbeddingsManager()
-    >>> em.connect()
+    >>> em.init()
     >>> with DatabaseManager() as db:
     ...     evaluator = Evaluator(em, db)
     ...     pairs = evaluator.generate_qa_pairs(n_pairs_per_tool=2)
