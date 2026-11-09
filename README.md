@@ -105,4 +105,5 @@ docker compose up -d   # → http://localhost:5000
 ## Contributing
 
 Contributions welcome — see [Contributing Guide](https://thawn.github.io/abstracts-explorer/contributing.html).  
+Want support for another conference? [Request it here](https://github.com/thawn/abstracts-explorer/issues/new?template=conference-support-request.md).
 Apache License 2.0 — see [LICENSE](LICENSE).

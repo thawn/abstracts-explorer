@@ -7,8 +7,8 @@ Thank you for your interest in contributing to Abstracts Explorer!
 ### 1. Clone Repository
 
 ```bash
-git clone <repository-url>
-cd abstracts
+git clone https://github.com/thawn/abstracts-explorer.git
+cd abstracts-explorer
 ```
 
 ### 2. Install uv
