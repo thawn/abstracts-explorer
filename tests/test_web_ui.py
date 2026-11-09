@@ -1180,6 +1180,44 @@ class TestWebUIChatEndpointSuccess:
                     assert call_kwargs.kwargs["conferences"] is None
                     assert call_kwargs.kwargs["years"] is None
 
+    def test_chat_forwards_paper_priorities(self):
+        """Test that interesting-paper ratings are forwarded to RAG chat."""
+        from abstracts_explorer.web_ui.app import app
+
+        priorities = {"paper1": {"priority": 5, "searchTerm": "llms"}}
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_rag_chat") as mock_get_rag:
+                with patch("abstracts_explorer.web_ui.app.get_config") as mock_get_config:
+                    with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
+                        mock_config = Mock()
+                        mock_config.max_context_papers = 3
+                        mock_get_config.return_value = mock_config
+
+                        mock_db = Mock()
+                        mock_db.get_conferences.return_value = ["ICLR"]
+                        mock_get_db.return_value = mock_db
+
+                        mock_rag = Mock()
+                        mock_rag.query.return_value = {
+                            "response": "Test",
+                            "papers": [],
+                            "metadata": {},
+                        }
+                        mock_get_rag.return_value = mock_rag
+
+                        response = client.post(
+                            "/api/chat",
+                            json={
+                                "message": "Summarize my interesting papers",
+                                "paper_priorities": priorities,
+                            },
+                        )
+
+        assert response.status_code == 200
+        call_kwargs = mock_rag.query.call_args
+        assert call_kwargs.kwargs["paper_priorities"] == priorities
+
     def test_chat_with_reset_flag(self):
         """Test chat with reset=True (lines 249-253)."""
         from abstracts_explorer.web_ui.app import app
@@ -3342,3 +3380,58 @@ class TestTopicEvolutionEndpoint:
                     assert response.status_code == 500
                     data = response.get_json()
                     assert "error" in data
+
+
+class TestExportInterestingPapersPriorities:
+    """Tests for the interesting-paper export rating format."""
+
+    def test_export_rejects_legacy_scalar_priorities(self):
+        from abstracts_explorer.web_ui.app import app
+
+        with app.test_client() as client:
+            response = client.post(
+                "/api/export/interesting-papers",
+                json={
+                    "paper_ids": ["p1"],
+                    "priorities": {"p1": 5},
+                },
+            )
+
+        assert response.status_code == 400
+        data = response.get_json()
+        assert "error" in data
+        assert "Invalid rating format" in data["error"]
+
+    def test_export_accepts_dict_priorities(self):
+        import io
+
+        from abstracts_explorer.web_ui.app import app
+
+        paper = {
+            "uid": "p1",
+            "title": "Paper",
+            "year": 2026,
+            "conference": "ICLR",
+        }
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
+                with patch("abstracts_explorer.web_ui.app.export_papers_to_zip") as mock_export:
+                    mock_db = Mock()
+                    mock_db.get_paper_by_uid.return_value = paper
+                    mock_get_db.return_value = mock_db
+                    mock_export.return_value = io.BytesIO(b"zip-bytes")
+
+                    response = client.post(
+                        "/api/export/interesting-papers",
+                        json={
+                            "paper_ids": ["p1"],
+                            "priorities": {"p1": {"priority": 5, "searchTerm": "llms"}},
+                        },
+                    )
+
+        assert response.status_code == 200
+        mock_export.assert_called_once()
+        exported_papers = mock_export.call_args.args[0]
+        assert exported_papers[0]["priority"] == 5
+        assert exported_papers[0]["searchTerm"] == "llms"

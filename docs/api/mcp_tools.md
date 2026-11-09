@@ -8,7 +8,9 @@ format and handles tool execution.
 
 This module enables the LLM to automatically decide when to use clustering
 analysis tools to answer questions about conference topics, trends, and
-developments during RAG chat sessions.
+developments during RAG chat sessions. It also exposes
+`summarize_interesting_papers` and `recommend_related_papers`, which use the
+paper ratings forwarded from the web UI.
 
 ## Quick Start
 

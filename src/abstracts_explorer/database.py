@@ -1045,6 +1045,39 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Failed to retrieve paper by UID: {str(e)}") from e
 
+    def get_papers_by_uids(self, uids: List[str]) -> List[Dict[str, Any]]:
+        """
+        Retrieve multiple papers by their UIDs in a single query.
+
+        Parameters
+        ----------
+        uids : list of str
+            UIDs of the papers to retrieve.
+
+        Returns
+        -------
+        list of dict
+            Paper data dictionaries for all matching UIDs.  The order follows
+            the input *uids* list, and unknown UIDs are omitted.
+
+        Raises
+        ------
+        DatabaseError
+            If the query fails.
+        """
+        if not self._session:
+            raise DatabaseError("Not connected to database")
+
+        if not uids:
+            return []
+
+        try:
+            papers = self._session.execute(select(Paper).where(Paper.uid.in_(uids))).scalars().all()
+            by_uid = {paper.uid: self._paper_to_dict(paper) for paper in papers}
+            return [by_uid[uid] for uid in uids if uid in by_uid]
+        except Exception as e:
+            raise DatabaseError(f"Failed to retrieve papers by UIDs: {str(e)}") from e
+
     def get_paper_by_original_id_or_uid(self, paper_id: str) -> Optional[Dict[str, Any]]:
         """
         Retrieve a paper by its UID or original_id (whichever matches first).

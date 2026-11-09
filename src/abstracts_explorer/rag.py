@@ -17,9 +17,8 @@ import httpx
 
 from pydantic_ai import Agent, RunContext, Tool
 from pydantic_ai.messages import ModelMessage, ModelRequest
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.openai import OpenAIProvider
-from pydantic_ai.settings import ModelSettings
 
 from abstracts_explorer.config import get_config
 from abstracts_explorer.mcp_server import (
@@ -29,6 +28,8 @@ from abstracts_explorer.mcp_server import (
     analyze_topic_relevance as mcp_analyze_topic_relevance,
     get_cluster_visualization as mcp_get_cluster_visualization,
     get_paper_details as mcp_get_paper_details,
+    summarize_interesting_papers as mcp_summarize_interesting_papers,
+    recommend_related_papers as mcp_recommend_related_papers,
 )
 from abstracts_explorer.mcp_tools import format_tool_result_for_llm, _abbreviate_result
 
@@ -58,12 +59,17 @@ class RAGDeps:
         Default conferences for MCP clustering tools (from web UI selection).
     years : list of int
         Default years for MCP clustering tools (from web UI selection).
+    paper_priorities : dict
+        Paper ratings from the web UI (``localStorage.paperPriorities``).
+        Keys are paper UIDs; values are either star ratings or dicts with
+        ``priority`` and ``searchTerm`` fields.
     """
 
     tool_results: List[Dict[str, Any]] = field(default_factory=list)
     conferences: List[str] = field(default_factory=list)
     years: List[int] = field(default_factory=list)
     n_results: Optional[int] = None
+    paper_priorities: Dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -371,6 +377,110 @@ def _tool_get_paper_details(
     return format_tool_result_for_llm("get_paper_details", raw)
 
 
+def _tool_summarize_interesting_papers(
+    ctx: RunContext[RAGDeps],
+    conference: Optional[str] = None,
+    years: Optional[List[int]] = None,
+) -> str:
+    """Summarize the papers the user marked as interesting.
+
+    Use this tool when the user asks for a summary, overview, or recap of the
+    papers they starred, liked, marked, or rated as interesting. The user's
+    ratings are provided automatically by the web UI, so do not ask for paper
+    IDs.
+
+    Parameters
+    ----------
+    ctx : RunContext[RAGDeps]
+        Agent context with dependencies.
+    conference : str, optional
+        Conference filter (e.g. "ICLR" or "ICLR 2026"). When omitted, the
+        currently selected conference from the web UI is used automatically.
+    years : list of int, optional
+        Year filter. When omitted, the currently selected year from the web UI
+        is used automatically.
+    """
+    priorities = ctx.deps.paper_priorities or {}
+    if not priorities:
+        return (
+            "No papers have been marked as interesting yet. " "Rate papers with the star buttons in the web UI first."
+        )
+
+    conferences = [conference] if conference else (ctx.deps.conferences or None)
+    resolved_years = years if years is not None else (ctx.deps.years or None)
+
+    kwargs: Dict[str, Any] = {"priorities": priorities}
+    if conferences:
+        kwargs["conference"] = conferences[0]
+    if resolved_years:
+        kwargs["years"] = resolved_years
+
+    logger.info(
+        "Tool call: summarize_interesting_papers(conference=%s, years=%s, paper_count=%d)",
+        kwargs.get("conference"),
+        kwargs.get("years"),
+        len(priorities),
+    )
+    raw = mcp_summarize_interesting_papers(**kwargs)
+    logger.info("Tool result: summarize_interesting_papers → %s", _abbreviate_result(raw))
+    ctx.deps.tool_results.append({"name": "summarize_interesting_papers", "raw_result": raw})
+    return format_tool_result_for_llm("summarize_interesting_papers", raw)
+
+
+def _tool_recommend_related_papers(
+    ctx: RunContext[RAGDeps],
+    conferences: Optional[List[str]] = None,
+    years: Optional[List[int]] = None,
+    n_results: int = 10,
+) -> str:
+    """Recommend further papers based on the user's interesting papers.
+
+    Use this tool when the user asks for suggestions, recommendations, or
+    related papers based on the papers they starred, liked, marked, or rated
+    as interesting. Already-rated papers are excluded. The user's ratings are
+    provided automatically by the web UI, so do not ask for paper IDs.
+
+    Parameters
+    ----------
+    ctx : RunContext[RAGDeps]
+        Agent context with dependencies.
+    conferences : list of str, optional
+        Restrict recommendations to these conferences. When omitted, the
+        currently selected conferences from the web UI are used automatically.
+    years : list of int, optional
+        Restrict recommendations to these years. When omitted, the currently
+        selected years from the web UI are used automatically.
+    n_results : int, optional
+        Number of recommendations to return (default: 10).
+    """
+    priorities = ctx.deps.paper_priorities or {}
+    if not priorities:
+        return (
+            "No papers have been marked as interesting yet. " "Rate papers with the star buttons in the web UI first."
+        )
+
+    resolved_conferences = conferences if conferences else (ctx.deps.conferences or None)
+    resolved_years = years if years is not None else (ctx.deps.years or None)
+
+    kwargs: Dict[str, Any] = {"priorities": priorities, "n_results": n_results}
+    if resolved_conferences:
+        kwargs["conferences"] = resolved_conferences
+    if resolved_years:
+        kwargs["years"] = resolved_years
+
+    logger.info(
+        "Tool call: recommend_related_papers(conferences=%s, years=%s, n_results=%s, paper_count=%d)",
+        kwargs.get("conferences"),
+        kwargs.get("years"),
+        n_results,
+        len(priorities),
+    )
+    raw = mcp_recommend_related_papers(**kwargs)
+    logger.info("Tool result: recommend_related_papers → %s", _abbreviate_result(raw))
+    ctx.deps.tool_results.append({"name": "recommend_related_papers", "raw_result": raw})
+    return format_tool_result_for_llm("recommend_related_papers", raw)
+
+
 class RAGChat:
     """
     RAG chat interface for querying conference papers.
@@ -457,6 +567,9 @@ class RAGChat:
             "You are an AI assistant helping researchers analyze conference data. "
             "Use the available tools to search for papers, analyze topics, and understand trends. "
             "Present the information in a clear, easy-to-understand format. "
+            "When the user asks about papers they marked, starred, liked, or rated as interesting, "
+            "use the summarize_interesting_papers or recommend_related_papers tools; their ratings "
+            "are provided automatically by the web UI, so do not ask for paper IDs. "
             f"Today's date is {datetime.now().strftime('%Y-%m-%d')}. "
             "When referencing specific papers, cite them using local markdown links: "
             "[Paper-1](#paper-1), [Paper-2](#paper-2), etc."
@@ -551,6 +664,16 @@ class RAGChat:
                     Tool(_tool_get_topic_evolution, takes_ctx=True, name="get_topic_evolution"),
                     Tool(_tool_analyze_topic_relevance, takes_ctx=True, name="analyze_topic_relevance"),
                     Tool(_tool_get_cluster_visualization, takes_ctx=True, name="get_cluster_visualization"),
+                    Tool(
+                        _tool_summarize_interesting_papers,
+                        takes_ctx=True,
+                        name="summarize_interesting_papers",
+                    ),
+                    Tool(
+                        _tool_recommend_related_papers,
+                        takes_ctx=True,
+                        name="recommend_related_papers",
+                    ),
                 ]
             )
 
@@ -569,6 +692,7 @@ class RAGChat:
         conferences: Optional[List[str]] = None,
         years: Optional[List[int]] = None,
         available_conferences: Optional[List[str]] = None,
+        paper_priorities: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Query the RAG system with a question.
@@ -597,6 +721,9 @@ class RAGChat:
             All conference names available in the system (from registered plugins).
             Included in the system prompt so the LLM can inform the user about
             which conferences can be queried.
+        paper_priorities : dict, optional
+            Paper ratings from the web UI (``localStorage.paperPriorities``).
+            Used by the interesting-paper summary and recommendation tools.
 
         Returns
         -------
@@ -627,12 +754,14 @@ class RAGChat:
                 conferences=conferences or [],
                 years=years or [],
                 n_results=n_results,
+                paper_priorities=paper_priorities or {},
             )
 
             # Model settings
-            settings = ModelSettings(
+            settings = OpenAIChatModelSettings(
                 temperature=self.temperature,
                 max_tokens=1000,
+                openai_reasoning_effort="low",
             )
 
             # Build instructions first so we can update message history
@@ -724,9 +853,10 @@ class RAGChat:
         else:
             # Use only conversation history without tool calls
             try:
-                settings = ModelSettings(
+                settings = OpenAIChatModelSettings(
                     temperature=self.temperature,
                     max_tokens=1000,
+                    openai_reasoning_effort="low",
                 )
                 base_instructions = self._build_base_instructions()
                 run_kwargs: Dict[str, Any] = {
@@ -839,12 +969,24 @@ class RAGChat:
             Extracted papers.
         """
         papers: List[Dict[str, Any]] = []
+        seen_uids: set[str] = set()
         for tr in tool_results:
-            if tr["name"] in ("search_papers", "analyze_topic_relevance"):
+            if tr["name"] in (
+                "search_papers",
+                "analyze_topic_relevance",
+                "summarize_interesting_papers",
+                "recommend_related_papers",
+            ):
                 try:
                     result_json = json.loads(tr["raw_result"])
                     if "papers" in result_json:
-                        papers.extend(result_json.get("papers", []))
+                        for paper in result_json.get("papers", []):
+                            uid = str(paper.get("uid", ""))
+                            if uid and uid in seen_uids:
+                                continue
+                            papers.append(paper)
+                            if uid:
+                                seen_uids.add(uid)
                 except json.JSONDecodeError:
                     logger.warning(f"Failed to parse papers from {tr['name']} result")
         return papers

@@ -1820,3 +1820,19 @@ class TestResolveConferenceForUrl:
         result = mock_db.resolve_conference_for_url("customconf")
         assert result["conference"] == "CustomConf"
         assert result["error"] is None
+
+
+class TestGetPapersByUids:
+    """Tests for DatabaseManager.get_papers_by_uids."""
+
+    def test_batch_lookup_preserves_order_and_skips_missing(self, connected_db, sample_paper):
+        uid = connected_db.add_paper(sample_paper)
+
+        results = connected_db.get_papers_by_uids([uid, "missing-uid"])
+
+        assert len(results) == 1
+        assert results[0]["uid"] == uid
+        assert results[0]["title"] == "Test Paper"
+
+    def test_empty_input_returns_empty_list(self, connected_db):
+        assert connected_db.get_papers_by_uids([]) == []

@@ -1035,6 +1035,8 @@ class TestMCPServerIntegration:
             "get_paper_details",
             "get_topic_evolution",
             "search_papers",
+            "summarize_interesting_papers",
+            "recommend_related_papers",
         }
 
 
@@ -1430,3 +1432,129 @@ class TestGetPaperDetails:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestInterestingPaperMCPTools:
+    """Tests for the interesting-paper MCP tools."""
+
+    def test_summarize_without_ratings_returns_error(self):
+        from abstracts_explorer.mcp_server import summarize_interesting_papers
+
+        result = json.loads(summarize_interesting_papers())
+        assert "error" in result
+
+    @patch("abstracts_explorer.mcp_server._summarize_interesting_papers")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    def test_summarize_delegates_to_core(self, mock_db_class, mock_summarize):
+        from abstracts_explorer.mcp_server import summarize_interesting_papers
+
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+        mock_summarize.return_value = {"total_interesting": 1, "papers": []}
+
+        result = json.loads(
+            summarize_interesting_papers(
+                priorities={"p1": {"priority": 5, "searchTerm": "llms"}},
+                conference="ICLR",
+                years=[2026],
+            )
+        )
+
+        assert result["total_interesting"] == 1
+        mock_summarize.assert_called_once_with(
+            database=mock_db,
+            priorities={"p1": {"priority": 5, "searchTerm": "llms"}},
+            paper_ids=None,
+            conference="ICLR",
+            years=[2026],
+        )
+        mock_db.close.assert_called_once()
+
+    def test_recommend_without_ratings_returns_error(self):
+        from abstracts_explorer.mcp_server import recommend_related_papers
+
+        result = json.loads(recommend_related_papers())
+        assert "error" in result
+
+    @patch("abstracts_explorer.mcp_server._recommend_related_papers")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    def test_recommend_delegates_to_core(
+        self,
+        mock_db_class,
+        mock_em_class,
+        mock_config,
+        mock_recommend,
+    ):
+        from abstracts_explorer.mcp_server import recommend_related_papers
+
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config.return_value = mock_config_obj
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+        mock_recommend.return_value = {"papers": [], "recommendations_count": 0}
+
+        result = json.loads(
+            recommend_related_papers(
+                priorities={"p1": {"priority": 5}},
+                conferences=["ICLR"],
+                years=[2026],
+                n_results=3,
+            )
+        )
+
+        assert result["recommendations_count"] == 0
+        mock_recommend.assert_called_once_with(
+            database=mock_db,
+            embeddings_manager=mock_em,
+            priorities={"p1": {"priority": 5}},
+            paper_ids=None,
+            conferences=["ICLR"],
+            years=[2026],
+            n_results=3,
+            exclude_ids=None,
+        )
+        mock_em.close.assert_called_once()
+        mock_db.close.assert_called_once()
+
+
+class TestInterestingPaperLegacyFormatRejection:
+    """Legacy scalar ratings are rejected by the interesting-paper tools."""
+
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    def test_summarize_rejects_scalar_priorities(self, mock_db_class):
+        from abstracts_explorer.mcp_server import summarize_interesting_papers
+
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+
+        result = json.loads(summarize_interesting_papers(priorities={"p1": 5}))
+
+        assert "error" in result
+        assert "Invalid rating format" in result["error"]
+        mock_db.close.assert_called_once()
+
+    @patch("abstracts_explorer.mcp_server.get_config")
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    def test_recommend_rejects_scalar_priorities(self, mock_db_class, mock_em_class, mock_config):
+        from abstracts_explorer.mcp_server import recommend_related_papers
+
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config.return_value = mock_config_obj
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+
+        result = json.loads(recommend_related_papers(priorities={"p1": 5}))
+
+        assert "error" in result
+        assert "Invalid rating format" in result["error"]
+        mock_em.close.assert_called_once()
+        mock_db.close.assert_called_once()

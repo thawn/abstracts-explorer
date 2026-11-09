@@ -675,6 +675,7 @@ def chat():
     - sessions: list (optional) - Filter by sessions
     - years: list (optional) - Filter by years
     - conferences: list (optional) - Filter by conferences
+    - paper_priorities: dict (optional) - Interesting-paper ratings from the web UI
 
     Returns
     -------
@@ -687,6 +688,7 @@ def chat():
         message = data.get("message", "")
         n_papers = data.get("n_papers", config.max_context_papers)
         reset = data.get("reset", False)
+        paper_priorities = data.get("paper_priorities", {}) or {}
 
         # Get filters
         sessions = data.get("sessions", [])
@@ -729,6 +731,7 @@ def chat():
             conferences=conferences if conferences else None,
             years=[int(y) for y in years] if years else None,
             available_conferences=available_conferences,
+            paper_priorities=paper_priorities,
         )
 
         return jsonify(
@@ -1077,7 +1080,8 @@ def export_interesting_papers():
     paper_ids : list of int
         List of paper IDs to export
     priorities : dict
-        Dictionary mapping paper IDs to priority ratings (1-5)
+        Dictionary mapping paper IDs to dicts with ``priority`` and
+        ``searchTerm`` fields
     search_query : str, optional
         Search query context
 
@@ -1096,6 +1100,23 @@ def export_interesting_papers():
         if not paper_ids:
             return jsonify({"error": "No paper IDs provided"}), 400
 
+        if not isinstance(priorities, dict):
+            return jsonify({"error": "Invalid priorities format. Expected a dict keyed by paper UID."}), 400
+
+        for paper_uid, priority_data in priorities.items():
+            if not isinstance(priority_data, dict):
+                return (
+                    jsonify(
+                        {
+                            "error": (
+                                f"Invalid rating format for paper '{paper_uid}': expected a dict with "
+                                "'priority' and optional 'searchTerm'."
+                            )
+                        }
+                    ),
+                    400,
+                )
+
         # Fetch papers from database
         database = get_database()
         papers = []
@@ -1106,15 +1127,8 @@ def export_interesting_papers():
                     logger.warning(f"Paper {paper_id} not found")
                     continue
                 priority_data = priorities.get(str(paper_id), {})
-
-                # Handle both old format (int) and new format (dict with priority and searchTerm)
-                if isinstance(priority_data, dict):
-                    paper["priority"] = priority_data.get("priority", 0)
-                    paper["searchTerm"] = priority_data.get("searchTerm", "Unknown")
-                else:
-                    # Backward compatibility: old format was just an integer
-                    paper["priority"] = priority_data
-                    paper["searchTerm"] = search_query or "Unknown"
+                paper["priority"] = priority_data.get("priority", 0)
+                paper["searchTerm"] = priority_data.get("searchTerm", "Unknown")
 
                 papers.append(paper)
             except Exception:
