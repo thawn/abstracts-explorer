@@ -489,6 +489,89 @@ class TestRAGChatQuery:
                     chat.query("What is NLP?")
 
 
+class TestRAGChatSingleSystemMessage:
+    """Ensure instructions are sent as a single leading system message."""
+
+    def _make_mock_model(self, payloads):
+        import asyncio
+
+        import httpx
+        from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.providers.openai import OpenAIProvider
+
+        def handler(request):
+            body = json.loads(request.content)
+            payloads.append(body)
+            return httpx.Response(
+                200,
+                json={
+                    "id": "chatcmpl-test",
+                    "object": "chat.completion",
+                    "created": 0,
+                    "model": body.get("model", "test-model"),
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "ok"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                },
+            )
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        model = OpenAIChatModel(
+            "test-model",
+            provider=OpenAIProvider(
+                base_url="http://test/v1",
+                api_key="test-key",
+                http_client=client,
+            ),
+        )
+        return model, lambda: asyncio.run(client.aclose())
+
+    def test_query_sends_single_leading_system_message(self, mock_embeddings_manager, mock_database):
+        """Repeated queries must not send more than one system message."""
+        payloads = []
+        model, close_client = self._make_mock_model(payloads)
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+
+        try:
+            with chat.agent.override(model=model):
+                chat.query("first question", conferences=["NeurIPS"], years=[2025])
+                chat.query("second question", conferences=["ICLR"], years=[2024])
+        finally:
+            close_client()
+
+        assert len(payloads) == 2
+        for payload in payloads:
+            roles = [message["role"] for message in payload["messages"]]
+            assert roles.count("system") == 1
+            assert roles[0] == "system"
+
+        assert "NeurIPS" in payloads[0]["messages"][0]["content"]
+        assert "ICLR" in payloads[1]["messages"][0]["content"]
+        assert "NeurIPS" not in payloads[1]["messages"][0]["content"]
+
+    def test_chat_without_context_sends_single_system_message(self, mock_embeddings_manager, mock_database):
+        """The no-context chat path must also send exactly one system message."""
+        payloads = []
+        model, close_client = self._make_mock_model(payloads)
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+
+        try:
+            with chat.agent.override(model=model):
+                chat.chat("hello", use_context=False)
+        finally:
+            close_client()
+
+        assert len(payloads) == 1
+        roles = [message["role"] for message in payloads[0]["messages"]]
+        assert roles.count("system") == 1
+        assert roles[0] == "system"
+
+
 class TestRAGChatChat:
     """Test RAGChat chat method."""
 

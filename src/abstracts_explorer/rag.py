@@ -558,7 +558,6 @@ class RAGChat:
             ai_model,
             deps_type=RAGDeps,
             tools=tools,
-            instructions=self._build_base_instructions(),
         )
 
     def query(
@@ -729,15 +728,15 @@ class RAGChat:
                     temperature=self.temperature,
                     max_tokens=1000,
                 )
+                base_instructions = self._build_base_instructions()
                 run_kwargs: Dict[str, Any] = {
                     "deps": RAGDeps(),
                     "model_settings": settings,
+                    "instructions": base_instructions,
                 }
                 if self._message_history:
-                    base_instructions = self._build_base_instructions()
                     self._update_message_history_instructions(base_instructions)
                     run_kwargs["message_history"] = self._message_history
-                    run_kwargs["instructions"] = base_instructions
 
                 result = self.agent.run_sync(message, **run_kwargs)
                 self._message_history = result.all_messages()
