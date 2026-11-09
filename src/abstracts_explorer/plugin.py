@@ -319,8 +319,8 @@ def fetch_with_retries(
             return response
         except requests.RequestException as exc:
             last_error = exc
-            response = getattr(exc, "response", None)
-            status = getattr(response, "status_code", None)
+            error_response = getattr(exc, "response", None)
+            status = getattr(error_response, "status_code", None)
             if not isinstance(status, int):
                 status = None
             retryable = (
@@ -330,7 +330,7 @@ def fetch_with_retries(
             )
             if not retryable or attempt == max_attempts - 1:
                 break
-            retry_after = getattr(response, "headers", {}).get("Retry-After")
+            retry_after = getattr(error_response, "headers", {}).get("Retry-After")
             try:
                 delay = float(retry_after) if retry_after else 2**attempt
             except (TypeError, ValueError):

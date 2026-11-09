@@ -444,12 +444,12 @@ class AAAIDownloaderPlugin(LightweightDownloaderPlugin):
         if output_path and not force_download:
             cached = self._load_papers_json(output_path, "AAAI")
             if cached and all(paper.year == year and paper.conference == self.conference_name for paper in cached):
-                failures = self._load_failed_downloads(output_path, year)
-                if failures:
-                    logger.info("Retrying %d previously failed AAAI %d page(s).", len(failures), year)
+                cached_failures = self._load_failed_downloads(output_path, year)
+                if cached_failures:
+                    logger.info("Retrying %d previously failed AAAI %d page(s).", len(cached_failures), year)
                     return self._retry_failed(
                         cached,
-                        failures,
+                        cached_failures,
                         year,
                         output_path,
                         timeout,
