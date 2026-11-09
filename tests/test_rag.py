@@ -1916,3 +1916,105 @@ class TestParallelRAGRateLimiting:
 
         assert len(timestamps) > 0, "At least some queries should succeed"
         assert elapsed >= 2.0, f"Queries should be rate-limited. Got {elapsed:.2f}s"
+
+
+class TestRAGChatInterestingPaperTools:
+    """Tests for the interesting-paper summary and recommendation tools."""
+
+    @patch("abstracts_explorer.rag.mcp_summarize_interesting_papers")
+    def test_query_calls_summarize_interesting_papers(
+        self,
+        mock_summarize,
+        mock_embeddings_manager,
+        mock_database,
+    ):
+        mock_summarize.return_value = json.dumps({"total_interesting": 1, "papers": []})
+
+        def model_fn(messages, info):
+            for msg in messages:
+                for part in msg.parts:
+                    if getattr(part, "part_kind", None) == "tool-return":
+                        return ModelResponse(parts=[TextPart(content="You rated one interesting paper.")])
+            return ModelResponse(parts=[ToolCallPart(tool_name="summarize_interesting_papers", args={})])
+
+        chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
+
+        with chat.agent.override(model=FunctionModel(model_fn)):
+            result = chat.query(
+                "Summarize my interesting papers for ICLR 2026",
+                conferences=["ICLR"],
+                years=[2026],
+                paper_priorities={"p1": {"priority": 5, "searchTerm": "llms"}},
+            )
+
+        mock_summarize.assert_called_once_with(
+            priorities={"p1": {"priority": 5, "searchTerm": "llms"}},
+            conference="ICLR",
+            years=[2026],
+        )
+        assert "summarize_interesting_papers" in result["metadata"]["tools_executed"]
+
+    @patch("abstracts_explorer.rag.mcp_recommend_related_papers")
+    def test_query_calls_recommend_related_papers(
+        self,
+        mock_recommend,
+        mock_embeddings_manager,
+        mock_database,
+    ):
+        mock_recommend.return_value = json.dumps({"papers": [], "recommendations_count": 0})
+
+        def model_fn(messages, info):
+            for msg in messages:
+                for part in msg.parts:
+                    if getattr(part, "part_kind", None) == "tool-return":
+                        return ModelResponse(parts=[TextPart(content="Here are some suggestions.")])
+            return ModelResponse(parts=[ToolCallPart(tool_name="recommend_related_papers", args={})])
+
+        chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
+
+        with chat.agent.override(model=FunctionModel(model_fn)):
+            result = chat.query(
+                "Suggest papers based on my interesting papers",
+                conferences=["ICLR"],
+                years=[2026],
+                paper_priorities={"p1": {"priority": 5}},
+            )
+
+        mock_recommend.assert_called_once_with(
+            priorities={"p1": {"priority": 5}},
+            n_results=10,
+            conferences=["ICLR"],
+            years=[2026],
+        )
+        assert "recommend_related_papers" in result["metadata"]["tools_executed"]
+
+    def test_interesting_tools_without_ratings_return_message(
+        self,
+        mock_embeddings_manager,
+        mock_database,
+    ):
+        from abstracts_explorer.rag import RAGDeps, _tool_summarize_interesting_papers
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+
+        message = _tool_summarize_interesting_papers(ctx)
+        assert "No papers have been marked" in message
+
+
+def test_extract_papers_from_interesting_tools():
+    """Papers from the interesting-paper tools are extracted and de-duplicated."""
+    tool_results = [
+        {
+            "name": "summarize_interesting_papers",
+            "raw_result": json.dumps({"papers": [{"uid": "1", "title": "A"}]}),
+        },
+        {
+            "name": "recommend_related_papers",
+            "raw_result": json.dumps({"papers": [{"uid": "1", "title": "A"}, {"uid": "2", "title": "B"}]}),
+        },
+    ]
+
+    papers = RAGChat._extract_papers(tool_results)
+
+    assert [paper["uid"] for paper in papers] == ["1", "2"]

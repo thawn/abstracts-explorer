@@ -87,12 +87,16 @@ response = chat.query(
 
 ### What Are MCP Tools?
 
-MCP (Model Context Protocol) tools are specialized functions that the LLM can call to perform specific tasks. The RAG system includes four clustering tools:
+MCP (Model Context Protocol) tools are specialized functions that the LLM can call to perform specific tasks. The RAG system includes the following tools:
 
 1. **get_conference_topics** - Analyze overall conference topics
 2. **get_topic_evolution** - Track how topics evolve over time
 3. **search_papers** - Find recent papers in specific areas
-4. **get_cluster_visualization** - Generate cluster visualizations
+4. **analyze_topic_relevance** - Measure how prominent a topic is
+5. **get_cluster_visualization** - Generate cluster visualizations
+6. **get_paper_details** - Look up authors, links, sessions, and other metadata
+7. **summarize_interesting_papers** - Summarize the papers the user marked as interesting
+8. **recommend_related_papers** - Suggest related papers based on the user's interesting papers
 
 ### How It Works
 
@@ -126,6 +130,17 @@ print(response)
 response = chat.query("What are the latest papers on reinforcement learning?")
 print(response)
 # The LLM calls search_papers(topic_keywords="reinforcement learning")
+
+# Summarize interesting papers and recommend related work.
+# The web UI forwards these ratings automatically; API callers can pass them directly.
+response = chat.query(
+    "Summarize my interesting papers for ICLR 2026 and suggest related work",
+    conferences=["ICLR"],
+    years=[2026],
+    paper_priorities={"paper-uid": {"priority": 5, "searchTerm": "llms"}},
+)
+print(response)
+# The LLM calls summarize_interesting_papers and recommend_related_papers
 ```
 
 ### Tool Selection
@@ -135,6 +150,8 @@ The LLM automatically decides which tool(s) to use based on the question:
 - **Questions about "main topics", "themes", "areas"** → Uses `get_conference_topics`
 - **Questions about "evolution", "trends", "over time"** → Uses `get_topic_evolution`
 - **Questions about "recent", "latest", "new"** → Uses `search_papers`
+- **Questions about "papers I marked/starred/rated as interesting"** → Uses `summarize_interesting_papers`
+- **Questions about suggestions/recommendations based on interesting papers** → Uses `recommend_related_papers`
 - **Questions about specific papers** → Uses standard RAG (no tools)
 
 ### Disabling MCP Tools

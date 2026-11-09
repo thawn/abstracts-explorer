@@ -101,6 +101,27 @@ describe('Chat Module', () => {
             expect(body.n_papers).toBe(3);
         });
 
+        it('should include interesting paper priorities in the request', async () => {
+            localStorage.setItem('paperPriorities', JSON.stringify({
+                paper1: { priority: 5, searchTerm: 'llms' }
+            }));
+            State.loadPriorities();
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    response: { response: 'OK', papers: [] }
+                })
+            });
+
+            await sendChatMessage();
+
+            const body = JSON.parse(global.fetch.mock.calls[0][1].body);
+            expect(body.paper_priorities).toEqual({
+                paper1: { priority: 5, searchTerm: 'llms' }
+            });
+        });
+
         it('should handle error response', async () => {
             global.fetch.mockResolvedValueOnce({
                 ok: true,
@@ -741,6 +762,10 @@ describe('Chat Module', () => {
             expect(html).toContain('uncertainty quantification');
             // Paper details
             expect(html).toContain('Who are the authors');
+            // Interesting papers summary
+            expect(html).toContain('papers I marked as interesting');
+            // Interesting papers recommendations
+            expect(html).toContain('suggest other papers');
         });
 
         it('removeMcpToolsHint should add hide class when hint exists', () => {

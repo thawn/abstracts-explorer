@@ -103,6 +103,7 @@ jest.unstable_mockModule('../static/modules/utils/markdown-utils.js', () => ({
 
 jest.unstable_mockModule('../static/modules/state.js', () => ({
     setCurrentSearchTerm: jest.fn(),
+    getAllPaperPriorities: jest.fn(() => ({})),
     getState: jest.fn(() => ({})),
     setState: jest.fn()
 }));

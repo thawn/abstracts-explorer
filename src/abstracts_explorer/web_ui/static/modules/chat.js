@@ -8,7 +8,7 @@
 import { API_BASE } from './utils/constants.js';
 import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
 import { renderEmptyState } from './utils/ui-utils.js';
-import { setCurrentSearchTerm } from './state.js';
+import { setCurrentSearchTerm, getAllPaperPriorities } from './state.js';
 import { formatPaperCard } from './paper-card.js';
 import { renderMarkdownWithLatex } from './utils/markdown-utils.js';
 
@@ -67,6 +67,14 @@ export function buildMcpToolsHintHtml() {
                 <li class="flex items-start gap-2">
                     <i class="fas fa-info-circle text-indigo-400 mt-0.5 flex-shrink-0"></i>
                     <span><em>"Who are the authors of the paper titled 'Large Language Diffusion Models'?"</em></span>
+                </li>
+                <li class="flex items-start gap-2">
+                    <i class="fas fa-star text-yellow-400 mt-0.5 flex-shrink-0"></i>
+                    <span><em>"Give me a summary about the papers I marked as interesting for ICLR'26!"</em></span>
+                </li>
+                <li class="flex items-start gap-2">
+                    <i class="fas fa-wand-magic-sparkles text-pink-400 mt-0.5 flex-shrink-0"></i>
+                    <span><em>"Based on my interesting papers, suggest other papers that may interest me."</em></span>
                 </li>
             </ul>
         </div>`;
@@ -145,6 +153,13 @@ export async function sendChatMessage() {
             message,
             n_papers: nPapers
         };
+
+        // Forward the user's interesting-paper ratings so the chat can
+        // summarize them and recommend related papers.
+        const paperPriorities = getAllPaperPriorities();
+        if (paperPriorities && Object.keys(paperPriorities).length > 0) {
+            requestBody.paper_priorities = paperPriorities;
+        }
 
         // Add filters only if NOT all options are selected (all selected = no filter)
         if (sessions.length > 0 && sessions.length < chatSessionSelect.options.length) {

@@ -10,7 +10,8 @@ Model Context Protocol (MCP) is a protocol that allows tools and servers to prov
 
 ## Features
 
-The MCP server provides four main tools:
+The MCP server provides tools for conference analysis plus two personalized
+tools that work with the papers a user marked as interesting.
 
 ### 1. `get_conference_topics`
 
@@ -93,6 +94,45 @@ Generates visualization data for clustered embeddings.
 - Statistics
 
 **Example use case:** "Display a graphical representation of the paper clusters."
+
+### 5. `summarize_interesting_papers`
+
+Summarizes the papers a user marked, starred, liked, or rated as interesting.
+
+Ratings are stored in the browser (`localStorage.paperPriorities`) and are
+forwarded automatically by the web UI chat. The tool receives them as
+parameters; no ratings are persisted server-side.
+
+**Parameters:**
+- `paper_ids` (list of str, optional): Paper UIDs. When omitted, the keys of `priorities` are used.
+- `priorities` (dict, optional): Mapping of paper UID to a dict with `priority` and optional `searchTerm`.
+- `conference` (str, optional): Conference filter (e.g. `"ICLR"` or `"ICLR 2026"`).
+- `years` (list of int, optional): Year filter (e.g. `[2026]`).
+
+**Returns:** JSON with:
+- Total interesting papers and rating distribution/average
+- Conferences, years, sessions, search terms, and top keywords
+- Highest-rated papers and compact paper records
+
+**Example use case:** "Give me a summary about the papers I marked as interesting for ICLR'26!"
+
+### 6. `recommend_related_papers`
+
+Recommends further papers based on a rating-weighted embedding centroid of the
+user's interesting papers. Papers the user already rated are excluded.
+
+**Parameters:**
+- `paper_ids` (list of str, optional): Paper UIDs. When omitted, the keys of `priorities` are used.
+- `priorities` (dict, optional): Mapping of paper UID to a dict with `priority` and optional `searchTerm`.
+- `conferences` (list of str, optional): Restrict recommendations to these conferences. Defaults to the dominant conference of the interesting papers.
+- `years` (list of int, optional): Restrict recommendations to these years. Defaults to the years of the interesting papers.
+- `n_results` (int, optional): Number of recommendations (default: 10).
+- `exclude_ids` (list of str, optional): Additional UIDs to exclude.
+
+**Returns:** JSON with recommended papers, each including a relevance score and
+reasons (shared keywords, authors, session, or semantic closeness).
+
+**Example use case:** "Based on my interesting papers, suggest other papers that may interest me."
 
 ## Starting the MCP Server
 

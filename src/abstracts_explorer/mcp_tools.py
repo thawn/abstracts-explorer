@@ -22,6 +22,8 @@ from abstracts_explorer.mcp_server import (
     get_cluster_visualization,
     analyze_topic_relevance,
     get_paper_details,
+    summarize_interesting_papers,
+    recommend_related_papers,
 )
 
 logger = logging.getLogger(__name__)
@@ -219,6 +221,96 @@ def _normalize_get_paper_details_args(arguments: Dict[str, Any]) -> Dict[str, An
     # Normalize conference: list → first element string
     if "conference" in args and isinstance(args["conference"], list):
         args["conference"] = args["conference"][0] if args["conference"] else None
+
+    return args
+
+
+def _normalize_interesting_paper_tool_args(
+    arguments: Dict[str, Any],
+    array_conference: bool = True,
+) -> Dict[str, Any]:
+    """
+    Normalise argument shapes for the interesting-paper tools.
+
+    Handles common LLM quirks such as ``ids``/``paper_uids`` aliases,
+    singular ``year``/``conference`` fields, list-valued conferences, and
+    ``limit``/``num_results`` aliases for ``n_results``.
+
+    Parameters
+    ----------
+    arguments : dict
+        Raw tool arguments.
+    array_conference : bool, optional
+        When ``True`` (recommendation tool), conferences are exposed as
+        ``conferences`` (list).  When ``False`` (summary tool), they are
+        exposed as ``conference`` (single string).
+    """
+    args = dict(arguments)
+
+    for alias in ("ids", "paper_uids", "uids"):
+        if alias in args and "paper_ids" not in args:
+            args["paper_ids"] = args.pop(alias)
+        elif alias in args:
+            args.pop(alias)
+
+    if "paper_ids" in args and isinstance(args["paper_ids"], str):
+        args["paper_ids"] = [uid.strip() for uid in args["paper_ids"].split(",") if uid.strip()]
+
+    # Normalize year -> years
+    if "year" in args and "years" not in args:
+        year_val = args.pop("year")
+        args["years"] = year_val if isinstance(year_val, list) else [year_val]
+    elif "year" in args:
+        args.pop("year")
+
+    if "years" in args:
+        if not isinstance(args["years"], list):
+            args["years"] = [args["years"]]
+        converted_years = []
+        for year in args["years"]:
+            try:
+                converted_years.append(int(year))
+            except (TypeError, ValueError):
+                continue
+        args["years"] = converted_years or None
+
+    if array_conference:
+        # Normalize conference -> conferences
+        if "conference" in args and "conferences" not in args:
+            conference_val = args.pop("conference")
+            if isinstance(conference_val, list):
+                args["conferences"] = conference_val
+            elif conference_val is not None:
+                args["conferences"] = [conference_val]
+        elif "conference" in args:
+            args.pop("conference")
+
+        if "conferences" in args and isinstance(args["conferences"], str):
+            args["conferences"] = [args["conferences"]]
+    else:
+        # Normalize conferences -> conference (single value)
+        if "conferences" in args and "conference" not in args:
+            conference_val = args.pop("conferences")
+            if isinstance(conference_val, list):
+                args["conference"] = conference_val[0] if conference_val else None
+            elif conference_val is not None:
+                args["conference"] = conference_val
+        elif "conferences" in args:
+            args.pop("conferences")
+
+        if "conference" in args and isinstance(args["conference"], list):
+            args["conference"] = args["conference"][0] if args["conference"] else None
+
+    for alias in ("limit", "num_results", "max_results", "count"):
+        if alias in args and "n_results" not in args:
+            args["n_results"] = args.pop(alias)
+        elif alias in args:
+            args.pop(alias)
+    if "n_results" in args:
+        try:
+            args["n_results"] = int(args["n_results"])
+        except (ValueError, TypeError):
+            args.pop("n_results")
 
     return args
 
@@ -480,6 +572,101 @@ MCP_TOOLS_SCHEMA = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "summarize_interesting_papers",
+            "description": (
+                "Summarize the papers the user marked, starred, liked, or rated as interesting. "
+                "Use this tool when the user asks for an overview or summary of their interesting papers, "
+                "for example 'Give me a summary about the papers I marked as interesting for ICLR 2026'. "
+                "The web UI supplies the user's ratings automatically; do not ask the user for paper IDs. "
+                "Returns rating statistics, conferences, years, sessions, search terms, top keywords, "
+                "highest-rated papers, and compact paper records."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "paper_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional paper UIDs. Usually supplied automatically from the web UI.",
+                    },
+                    "priorities": {
+                        "type": "object",
+                        "description": (
+                            "Optional mapping of paper UID to a dict with 'priority' and optional "
+                            "'searchTerm'. Usually supplied automatically from the web UI."
+                        ),
+                    },
+                    "conference": {
+                        "type": "string",
+                        "description": "Filter by conference (e.g., 'ICLR' or 'ICLR 2026').",
+                    },
+                    "years": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Filter by years (e.g., [2026]).",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "recommend_related_papers",
+            "description": (
+                "Recommend further papers based on the papers the user marked as interesting. "
+                "Use this tool when the user asks for suggestions, recommendations, or related papers "
+                "based on their starred/interesting papers. "
+                "The web UI supplies the user's ratings automatically; do not ask the user for paper IDs. "
+                "Already-rated papers are excluded. Each recommendation includes a relevance score and reasons."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "paper_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional paper UIDs. Usually supplied automatically from the web UI.",
+                    },
+                    "priorities": {
+                        "type": "object",
+                        "description": (
+                            "Optional mapping of paper UID to a dict with 'priority' and optional "
+                            "'searchTerm'. Usually supplied automatically from the web UI."
+                        ),
+                    },
+                    "conferences": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Restrict recommendations to these conferences.",
+                    },
+                    "years": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Restrict recommendations to these years (e.g., [2026]).",
+                    },
+                    "n_results": {
+                        "type": "integer",
+                        "description": "Number of recommendations to return (default: 10).",
+                    },
+                    "exclude_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Additional paper UIDs to exclude.",
+                    },
+                    "collection_name": {
+                        "type": "string",
+                        "description": "Name of ChromaDB collection (optional).",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
 ]
 
 
@@ -535,6 +722,18 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
         elif tool_name == "get_paper_details":
             args = _filter_unknown_kwargs(get_paper_details, _normalize_get_paper_details_args(arguments))
             result = get_paper_details(**args)
+        elif tool_name == "summarize_interesting_papers":
+            args = _filter_unknown_kwargs(
+                summarize_interesting_papers,
+                _normalize_interesting_paper_tool_args(arguments, array_conference=False),
+            )
+            result = summarize_interesting_papers(**args)
+        elif tool_name == "recommend_related_papers":
+            args = _filter_unknown_kwargs(
+                recommend_related_papers,
+                _normalize_interesting_paper_tool_args(arguments),
+            )
+            result = recommend_related_papers(**args)
         else:
             # Return error JSON for unknown tools
             error_result = {"error": f"Unknown MCP tool: {tool_name}"}
@@ -650,6 +849,10 @@ def format_tool_result_for_llm(tool_name: str, result: str) -> str:
             return _format_visualization_result(result_data)
         elif tool_name == "get_paper_details":
             return _format_paper_details_result(result_data)
+        elif tool_name == "summarize_interesting_papers":
+            return _format_summarize_interesting_papers_result(result_data)
+        elif tool_name == "recommend_related_papers":
+            return _format_recommend_related_papers_result(result_data)
         else:
             # Return raw result for unknown tools
             return result
@@ -833,5 +1036,101 @@ def _format_paper_details_result(data: Dict[str, Any]) -> str:
         if abstract:
             snippet = abstract[:200] + "..." if len(abstract) > 200 else abstract
             lines.append(f"   Abstract: {snippet}")
+
+    return "\n".join(lines)
+
+
+def _format_summarize_interesting_papers_result(data: Dict[str, Any]) -> str:
+    """Format an interesting-paper summary for the LLM."""
+    total = data.get("total_interesting", 0)
+    filters = data.get("filters", {})
+    lines = [f"Interesting Papers Summary ({total} papers):\n"]
+
+    if filters.get("conferences") or filters.get("years"):
+        lines.append(f"Filters: conferences={filters.get('conferences')}, years={filters.get('years')}")
+
+    if data.get("warning"):
+        lines.append(f"Note: {data['warning']}")
+
+    if total == 0:
+        return "\n".join(lines)
+
+    lines.append(f"Rated papers: {data.get('rated_count', 0)}; average rating: {data.get('average_rating', 0)}/5")
+
+    distribution = data.get("rating_distribution", {})
+    if distribution:
+        dist_text = ", ".join(f"{rating}★: {count}" for rating, count in distribution.items() if count)
+        lines.append(f"Rating distribution: {dist_text}")
+
+    conferences = data.get("conferences", {})
+    if conferences:
+        lines.append("Conferences: " + ", ".join(f"{conf} ({count})" for conf, count in conferences.items()))
+
+    years = data.get("years", {})
+    if years:
+        lines.append("Years: " + ", ".join(f"{year} ({count})" for year, count in years.items()))
+
+    keywords = data.get("top_keywords", [])
+    if keywords:
+        lines.append("Top keywords: " + ", ".join(keywords[:10]))
+
+    search_terms = data.get("search_terms", [])
+    if search_terms:
+        lines.append(
+            "Search themes: "
+            + ", ".join(f"{item.get('search_term')} ({item.get('count')})" for item in search_terms[:8])
+        )
+
+    sessions = data.get("sessions", [])
+    if sessions:
+        lines.append(
+            "Sessions: " + ", ".join(f"{item.get('session')} ({item.get('count')})" for item in sessions[:8])
+        )
+
+    lines.append("\nHighest-rated papers:")
+    for paper in data.get("top_rated_papers", [])[:5]:
+        lines.append(f"  - {paper.get('title')} ({paper.get('priority')}/5)")
+
+    papers = data.get("papers", [])
+    if papers:
+        lines.append("\nPaper list:")
+        for paper in papers:
+            lines.append(
+                f"  - {paper.get('title')} — {paper.get('conference')} {paper.get('year')} "
+                f"({paper.get('priority')}/5, search term: {paper.get('searchTerm')})"
+            )
+        if data.get("papers_truncated"):
+            lines.append("  (paper list truncated)")
+
+    return "\n".join(lines)
+
+
+def _format_recommend_related_papers_result(data: Dict[str, Any]) -> str:
+    """Format related-paper recommendations for the LLM."""
+    papers = data.get("papers", [])
+    lines = [f"Recommended Papers ({len(papers)} found):\n"]
+
+    filters = data.get("filters", {})
+    if filters.get("conferences") or filters.get("years"):
+        lines.append(f"Scope: conferences={filters.get('conferences')}, years={filters.get('years')}")
+
+    if data.get("warning"):
+        lines.append(f"Note: {data['warning']}")
+
+    if not papers:
+        return "\n".join(lines)
+
+    for index, paper in enumerate(papers, 1):
+        score = paper.get("recommendation_score", 0)
+        lines.append(
+            f"\n{index}. {paper.get('title')} ({paper.get('conference')} {paper.get('year')}) "
+            f"— relevance: {score}"
+        )
+        reasons = paper.get("recommendation_reasons", [])
+        if reasons:
+            lines.append(f"   Why: {'; '.join(reasons)}")
+        abstract = paper.get("abstract_snippet", "")
+        if abstract:
+            lines.append(f"   Abstract: {abstract}")
 
     return "\n".join(lines)

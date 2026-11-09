@@ -16,7 +16,7 @@ Open source · Apache-2.0 · runs locally or on your institute's server.
 | **Embeddings** | Converts abstracts to vectors via an LLM embedding model (Blablador / LM Studio)           |
 | **Retrieval**  | Semantic (cosine similarity) search                                                        |
 | **Reasoning**  | RAG chat: the LLM reads relevant abstracts, then answers with citations                    |
-| **Agency**     | 6 MCP tools the LLM calls autonomously to analyse topics, trends, and clusters             |
+| **Agency**     | 8 MCP tools the LLM calls autonomously to analyse topics, trends, and clusters |
 | **Interface**  | Flask web UI — four tabs, no coding required                                               |
 
 ## Web UI
@@ -42,6 +42,8 @@ The LLM picks the right tool automatically from your plain-English question.
 | `search_papers`             | "Find papers about graph neural networks"              |
 | `get_cluster_visualization` | "Show me the topic landscape"                          |
 | `get_paper_details`         | "Who wrote that paper? Where is the poster?"           |
+| `summarize_interesting_papers` | "Summarize the papers I marked as interesting for ICLR'26" |
+| `recommend_related_papers`  | "Suggest other papers based on my interesting papers"  |
 
 ## Quick Start
 
