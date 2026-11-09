@@ -7,7 +7,7 @@ name = "abstracts-explorer"
 dynamic = ["version"]
 description = "Abstracts Explorer - A package to download conference data and search it with a LLM-based semantic search including document retrieval and question answering."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = {text = "Apache-2.0"}
 authors = [
     {name = "Your Name", email = "your.email@example.com"}
@@ -19,8 +19,9 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
     "requests>=2.31.0",
