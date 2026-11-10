@@ -1,6 +1,6 @@
 # Web UI Integration
 
-The web UI has been successfully integrated as an optional module in the `neurips_abstracts` package.
+The web UI has been successfully integrated as an optional module in the `abstracts_explorer` package.
 
 ## Installation
 

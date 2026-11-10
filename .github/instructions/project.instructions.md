@@ -190,31 +190,40 @@ Examples:
 
 ```python
 import pytest
+
+from abstracts_explorer.config import get_config
 from abstracts_explorer.database import DatabaseManager
+from abstracts_explorer.plugin import LightweightPaper
 
 @pytest.fixture
-def temp_db(tmp_path):
+def temp_db(tmp_path, monkeypatch):
     """Create a temporary test database."""
-    db_path = tmp_path / "test.db"
-    db = DatabaseManager(str(db_path))
+    monkeypatch.setenv("PAPER_DB", str(tmp_path / "test.db"))
+    get_config(reload=True)
+
+    db = DatabaseManager()
+    db.create_tables()
     yield db
     db.close()
 
 def test_add_paper(temp_db):
     """Test adding a paper to the database."""
-    paper_data = {
-        'openreview_id': 'test123',
-        'title': 'Test Paper',
-        'abstract': 'Test abstract',
-        'year': 2025,
-    }
-    
-    paper_id = temp_db.add_paper(paper_data)
-    assert paper_id is not None
-    
+    paper = LightweightPaper(
+        title="Test Paper",
+        authors=["Jane Doe"],
+        abstract="Test abstract",
+        session="Poster Session 1",
+        poster_position="P1",
+        year=2025,
+        conference="NeurIPS",
+    )
+
+    paper_uid = temp_db.add_paper(paper)
+    assert paper_uid is not None
+
     # Verify paper was added
-    paper = temp_db.get_paper_by_id(paper_id)
-    assert paper['title'] == 'Test Paper'
+    stored = temp_db.get_paper_by_uid(paper_uid)
+    assert stored["title"] == "Test Paper"
 ```
 
 #### Python Test Coverage Guidelines

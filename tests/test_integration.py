@@ -1,9 +1,8 @@
 """
-Integration tests for the neurips_abstracts package.
+Integration tests for the abstracts_explorer package.
 
-Note: This test file contains integration tests for the new schema with integer IDs
-and proper author relationships. Tests using the old schema have been removed.
-See test_authors.py for comprehensive tests of the new schema.
+Note: This test file contains integration tests for the lightweight paper schema
+used by the current plugins.
 """
 
 import pytest
