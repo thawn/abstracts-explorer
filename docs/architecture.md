@@ -296,7 +296,7 @@ graph TD
 
     subgraph "ClusteringManager"
         CLOAD["load_embeddings"]
-        CREDUC["reduce_dimensions<br/>(PCA / t-SNE / UMAP)"]
+        CREDUC["reduce_dimensions<br/>(PCA / t-SNE)"]
         CCLUST["cluster<br/>(K-Means / DBSCAN / Agglom / Spectral / Fuzzy)"]
         CKEYS["extract_cluster_keywords"]
         CLBL["generate_cluster_labels"]
