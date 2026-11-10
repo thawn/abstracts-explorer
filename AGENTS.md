@@ -52,6 +52,20 @@ Guidance for AI coding agents working on **abstracts-explorer** (Python package 
 - MCP: `MCPServer` from the `mcp` package; RAG chat auto-invokes MCP tools.
 - Web UI: Flask 3.0+, 20+ API routes in `web_ui/app.py` (frontend calls from `web_ui/static/modules/`), 15 ES6 modules, Waitress in production.
 
+## Suggest commit message
+
+**Whenever code is changed, suggest a commit message** after the changes are done. Use the format:
+
+```text
+commit message:
+
+[type]: Short description of reason for change (max 50 chars)
+
+[body with detailed explanation of what was changed and why, wrapped at 72 chars.]
+```
+
+Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
+
 ## Common Tasks
 
 - Feature: branch -> implement (types + NumPy docstrings) -> unit + integration tests -> update docs -> run tests -> PR.
