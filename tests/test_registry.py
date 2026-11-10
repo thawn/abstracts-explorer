@@ -1144,7 +1144,12 @@ class TestEmbeddingsExportImport:
 
         # Verify the filter was used
         call_kwargs = mock_collection.get.call_args[1]
-        assert call_kwargs["where"] == {"$and": [{"conference": "neurips"}, {"year": "2024"}]}
+        assert call_kwargs["where"] == {
+            "$and": [
+                {"conference": {"$in": ["neurips"]}},
+                {"year": {"$in": ["2024"]}},
+            ]
+        }
 
     def test_export_embeddings_converts_ndarray(self):
         """Numpy ndarrays in embeddings are converted to plain lists (JSON-serializable)."""

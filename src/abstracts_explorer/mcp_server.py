@@ -19,11 +19,10 @@ import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
 from collections import Counter
-from copy import deepcopy
 
 from mcp.server.mcpserver import MCPServer
 
-from abstracts_explorer.embeddings import EmbeddingsManager
+from abstracts_explorer.embeddings import EmbeddingsManager, build_chromadb_where_clause
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.clustering import ClusteringManager
 from abstracts_explorer.config import get_config
@@ -446,155 +445,6 @@ def get_conference_topics(
         return json.dumps({"error": str(e)}, indent=2)
 
 
-def merge_where_clause_with_conference(
-    where: Optional[Dict[str, Any]],
-    conference: Optional[str],
-) -> Optional[Dict[str, Any]]:
-    """
-    Merge a WHERE clause with a conference filter.
-
-    This helper function properly combines custom WHERE clauses with conference
-    filters, avoiding duplicates and handling nested operators correctly.
-
-    Parameters
-    ----------
-    where : dict, optional
-        Custom WHERE clause from user
-    conference : str, optional
-        Conference name to filter by
-
-    Returns
-    -------
-    dict or None
-        Merged WHERE clause, or None if both inputs are None
-
-    Raises
-    ------
-    ValueError
-        If WHERE clause is not a dict
-    """
-    # Validate where parameter
-    if where is not None and not isinstance(where, dict):
-        raise ValueError(f"WHERE clause must be a dict, got {type(where).__name__}")
-
-    # If no conference, just return a deep copy of WHERE clause (or None)
-    if not conference:
-        return deepcopy(where) if where else None
-
-    # If no WHERE clause, just return conference filter
-    if not where:
-        return {"conference": conference}
-
-    # Check if conference already exists anywhere in WHERE clause
-    def has_conference_filter(obj: Any) -> bool:
-        """Recursively check if conference filter exists in nested structure."""
-        if isinstance(obj, dict):
-            if "conference" in obj:
-                return True
-            # Check nested values
-            for value in obj.values():
-                if has_conference_filter(value):
-                    return True
-        elif isinstance(obj, list):
-            for item in obj:
-                if has_conference_filter(item):
-                    return True
-        return False
-
-    # If conference already in WHERE clause, don't add again - return deep copy
-    if has_conference_filter(where):
-        return deepcopy(where)
-
-    # Need to merge conference with WHERE clause - use deep copy to prevent mutations
-    where_filter = deepcopy(where)
-
-    # If WHERE already has $and, append to it
-    if "$and" in where_filter:
-        where_filter["$and"].append({"conference": conference})
-    else:
-        # Create new $and with existing filter and conference
-        where_filter = {"$and": [where_filter, {"conference": conference}]}
-
-    return where_filter
-
-
-def merge_where_clause_with_years(
-    where: Optional[Dict[str, Any]],
-    years: Optional[List[int]],
-) -> Optional[Dict[str, Any]]:
-    """
-    Merge a WHERE clause with a years filter.
-
-    This helper function properly combines custom WHERE clauses with a years
-    filter, avoiding duplicates and handling nested operators correctly.
-
-    Parameters
-    ----------
-    where : dict, optional
-        Custom WHERE clause from user
-    years : list of int, optional
-        List of years to filter by
-
-    Returns
-    -------
-    dict or None
-        Merged WHERE clause, or None if both inputs are None
-
-    Raises
-    ------
-    ValueError
-        If WHERE clause is not a dict
-    """
-    # Validate where parameter
-    if where is not None and not isinstance(where, dict):
-        raise ValueError(f"WHERE clause must be a dict, got {type(where).__name__}")
-
-    # If no years, just return a deep copy of WHERE clause (or None)
-    if not years:
-        return deepcopy(where) if where else None
-
-    # convert years to string because ChromaDB metadata is stored as strings
-    years_str: List[str] = [str(y) for y in years]
-
-    # If no WHERE clause, just return years filter
-    if not where:
-        return {"year": {"$in": years_str}}
-
-    # Check if year filter already exists anywhere in WHERE clause
-    def has_year_filter(obj: Any) -> bool:
-        """Recursively check if year filter exists in nested structure."""
-        if isinstance(obj, dict):
-            if "year" in obj:
-                return True
-            # Check nested values
-            for value in obj.values():
-                if has_year_filter(value):
-                    return True
-        elif isinstance(obj, list):
-            for item in obj:
-                if has_year_filter(item):
-                    return True
-        return False
-
-    # If year filter already in WHERE clause, don't add again - return deep copy
-    if has_year_filter(where):
-        return deepcopy(where)
-
-    # Need to merge years with WHERE clause - use deep copy to prevent mutations
-    where_filter = deepcopy(where)
-
-    year_filter = {"year": {"$in": years_str}}
-
-    # If WHERE already has $and, append to it
-    if "$and" in where_filter:
-        where_filter["$and"].append(year_filter)
-    else:
-        # Create new $and with existing filter and year filter
-        where_filter = {"$and": [where_filter, year_filter]}
-
-    return where_filter
-
-
 @mcp.tool()
 def get_topic_evolution(
     topic_keywords: str,
@@ -832,10 +682,13 @@ def search_papers(
         # Initialize database
         db = DatabaseManager()
 
-        # Validate custom WHERE clause and year filter
+        # Validate custom WHERE clause and merge conference/year filters
         try:
-            merge_where_clause_with_conference(where, conference)
-            merge_where_clause_with_years(where, years)
+            where = build_chromadb_where_clause(
+                conferences=[conference],
+                years=years,
+                base_where=where,
+            )
         except ValueError as e:
             logger.error(f"Invalid WHERE clause: {str(e)}")
             em.close()

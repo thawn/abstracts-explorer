@@ -1539,7 +1539,7 @@ class DatabaseManager:
         DatabaseError
             If the search fails.
         """
-        from abstracts_explorer.embeddings import EmbeddingsManager
+        from abstracts_explorer.embeddings import EmbeddingsManager, build_chromadb_where_clause
         from abstracts_explorer.paper_utils import PaperFormattingError, format_search_results
 
         if field_filters is None:
@@ -1573,26 +1573,12 @@ class DatabaseManager:
             if author_matches:
                 return author_matches
 
-        filter_conditions: List[Dict[str, Any]] = []
-        if sessions:
-            filter_conditions.append({"session": {"$in": sessions}})
-        if years:
-            filter_conditions.append({"year": {"$in": [str(y) for y in years]}})
-        if conferences:
-            filter_conditions.append({"conference": {"$in": conferences}})
-
-        if len(filter_conditions) > 1:
-            where_filter: Optional[Dict[str, Any]] = {"$and": filter_conditions}
-        elif len(filter_conditions) == 1:
-            where_filter = filter_conditions[0]
-        else:
-            where_filter = None
-
-        if where:
-            if where_filter is None:
-                where_filter = where
-            else:
-                where_filter = {"$and": [where, where_filter]}
+        where_filter = build_chromadb_where_clause(
+            conferences=conferences,
+            years=years,
+            sessions=sessions,
+            base_where=where,
+        )
 
         owns_manager = embeddings_manager is None
         em = embeddings_manager or EmbeddingsManager()

@@ -21,7 +21,7 @@ from tqdm import tqdm
 
 from abstracts_explorer.config import Config, get_config
 from abstracts_explorer.database import DatabaseManager, DatabaseError
-from abstracts_explorer.embeddings import EmbeddingsManager, EmbeddingsError
+from abstracts_explorer.embeddings import EmbeddingsManager, EmbeddingsError, build_chromadb_where_clause
 from abstracts_explorer.clustering import perform_clustering, compute_clusters_with_cache, ClusteringError
 from abstracts_explorer.rag import RAGChat, RAGError
 from abstracts_explorer.plugins import (
@@ -1147,6 +1147,8 @@ def delete_data_command(args: argparse.Namespace) -> int:
         # If resolution fails, use the raw value (might still be valid)
         pass
 
+    assert conference is not None
+
     print("Abstracts Explorer - Delete Conference/Year Data")
     print("=" * 70)
     print(f"Database:     {config.database_url}")
@@ -1176,7 +1178,12 @@ def delete_data_command(args: argparse.Namespace) -> int:
     embedding_count = 0
     try:
         em = EmbeddingsManager()
-        existing = em.collection.get(where={"$and": [{"conference": conference}, {"year": str(year)}]})
+        existing = em.collection.get(
+            where=build_chromadb_where_clause(
+                conferences=[conference],
+                years=[year],
+            )
+        )
         embedding_count = len(existing.get("ids", []))
         em.close()
     except Exception as e:

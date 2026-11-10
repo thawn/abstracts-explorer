@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from abstracts_explorer.database import DatabaseManager
-from abstracts_explorer.embeddings import EmbeddingsManager
+from abstracts_explorer.embeddings import EmbeddingsManager, build_chromadb_where_clause
 from abstracts_explorer.paper_utils import extract_top_keywords
 
 logger = logging.getLogger(__name__)
@@ -457,17 +457,7 @@ def _build_where_filter(
     years: Optional[Sequence[int]],
 ) -> Optional[Dict[str, Any]]:
     """Build a ChromaDB metadata filter from conference/year constraints."""
-    conditions: List[Dict[str, Any]] = []
-    if conferences:
-        conditions.append({"conference": {"$in": [str(conf) for conf in conferences]}})
-    if years:
-        conditions.append({"year": {"$in": [str(year) for year in years]}})
-
-    if not conditions:
-        return None
-    if len(conditions) == 1:
-        return conditions[0]
-    return {"$and": conditions}
+    return build_chromadb_where_clause(conferences=conferences, years=years)
 
 
 def _infer_scope(papers: List[Dict[str, Any]]) -> Tuple[Optional[List[str]], Optional[List[int]]]:

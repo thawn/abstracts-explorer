@@ -64,7 +64,7 @@ try:
 except ImportError:
     HAS_FUZZY = False
 
-from abstracts_explorer.embeddings import EmbeddingsManager
+from abstracts_explorer.embeddings import EmbeddingsManager, build_chromadb_where_clause
 from abstracts_explorer.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
@@ -290,20 +290,7 @@ class ClusteringManager:
 
         try:
             # Build where clause for conference/year filtering
-            # NOTE: ChromaDB stores all metadata as strings, so numeric years must
-            # be converted to strings for filtering.
-            filter_conditions: List[Dict[str, Any]] = []
-            if conferences:
-                filter_conditions.append({"conference": {"$in": conferences}})
-            if years:
-                year_strs = [str(y) for y in years]
-                filter_conditions.append({"year": {"$in": year_strs}})
-
-            where_filter: Optional[Dict[str, Any]] = None
-            if len(filter_conditions) > 1:
-                where_filter = {"$and": filter_conditions}
-            elif len(filter_conditions) == 1:
-                where_filter = filter_conditions[0]
+            where_filter = build_chromadb_where_clause(conferences, years)
 
             # Get embeddings from the collection (with optional filtering)
             get_kwargs: Dict[str, Any] = {"limit": limit, "include": ["embeddings", "metadatas"]}

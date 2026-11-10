@@ -409,9 +409,8 @@ graph TD
             RI["get_config → EmbeddingsManager → DatabaseManager<br/>(repeated in each tool function)"]
         end
 
-        subgraph "⚠ Duplicate: Where-clause merging"
-            WM1["merge_where_clause_with_conference"]
-            WM2["merge_where_clause_with_years"]
+        subgraph "Shared Where-clause Builder (embeddings.py)"
+            WB["build_chromadb_where_clause"]
         end
     end
 
@@ -429,8 +428,7 @@ graph TD
     EXEC --> N3 --> S4
     EXEC --> N4 --> S6
 
-    S1 --> WM1
-    S1 --> WM2
+    S1 --> WB
 
     style TW1 fill:#ffcccc,stroke:#cc0000
     style TW2 fill:#ffcccc,stroke:#cc0000

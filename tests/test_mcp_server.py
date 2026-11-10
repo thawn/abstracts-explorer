@@ -11,95 +11,11 @@ import numpy as np
 from abstracts_explorer.mcp_server import (
     load_clustering_data,
     analyze_cluster_topics,
-    merge_where_clause_with_conference,
     ClusterAnalysisError,
     _parse_conference_year,
 )
 from abstracts_explorer.clustering import ClusteringManager
 from abstracts_explorer.database import DatabaseManager
-
-
-class TestMergeWhereClauseWithConference:
-    """Tests for merge_where_clause_with_conference helper function."""
-
-    def test_both_none(self):
-        """Test merging when both WHERE and conference are None."""
-        result = merge_where_clause_with_conference(None, None)
-        assert result is None
-
-    def test_only_conference(self):
-        """Test merging with only conference filter."""
-        result = merge_where_clause_with_conference(None, "NeurIPS")
-        assert result == {"conference": "NeurIPS"}
-
-    def test_only_where(self):
-        """Test merging with only WHERE clause."""
-        where = {"year": 2024}
-        result = merge_where_clause_with_conference(where, None)
-        assert result == {"year": 2024}
-        assert result is not where  # Should be a deep copy
-
-    def test_deep_copy_prevents_mutation(self):
-        """Test that deep copy prevents mutations to nested structures."""
-        where = {"$and": [{"year": 2024}, {"session": "Oral"}]}
-        result = merge_where_clause_with_conference(where, "NeurIPS")
-
-        # Modify result
-        result["$and"].append({"modified": True})
-
-        # Original should be unchanged
-        assert len(where["$and"]) == 2
-        assert {"modified": True} not in where["$and"]
-
-    def test_simple_merge(self):
-        """Test merging simple WHERE clause with conference."""
-        where = {"year": 2024}
-        result = merge_where_clause_with_conference(where, "NeurIPS")
-        assert result == {"$and": [{"year": 2024}, {"conference": "NeurIPS"}]}
-
-    def test_merge_with_existing_and(self):
-        """Test merging when WHERE already has $and."""
-        where = {"$and": [{"year": 2024}, {"session": "Oral"}]}
-        result = merge_where_clause_with_conference(where, "NeurIPS")
-        assert "$and" in result
-        assert len(result["$and"]) == 3
-        # Verify all items are present
-        assert {"year": 2024} in result["$and"]
-        assert {"session": "Oral"} in result["$and"]
-        assert {"conference": "NeurIPS"} in result["$and"]
-
-    def test_conference_already_in_where_top_level(self):
-        """Test when conference already exists at top level."""
-        where = {"conference": "ICML"}
-        result = merge_where_clause_with_conference(where, "NeurIPS")
-        # Should not add duplicate, just return existing
-        assert result == {"conference": "ICML"}
-
-    def test_conference_in_nested_and(self):
-        """Test when conference exists in nested $and."""
-        where = {"$and": [{"conference": "ICML"}, {"year": 2024}]}
-        result = merge_where_clause_with_conference(where, "NeurIPS")
-        # Should detect existing conference and not add duplicate
-        assert result == {"$and": [{"conference": "ICML"}, {"year": 2024}]}
-
-    def test_conference_in_deeply_nested_structure(self):
-        """Test conference detection in deeply nested structure."""
-        where = {"$or": [{"$and": [{"conference": "ICML"}, {"year": 2024}]}, {"session": "Oral"}]}
-        result = merge_where_clause_with_conference(where, "NeurIPS")
-        # Should detect conference in nested structure
-        assert result == where
-
-    def test_invalid_where_type(self):
-        """Test that invalid WHERE type raises ValueError."""
-        with pytest.raises(ValueError) as exc_info:
-            merge_where_clause_with_conference("invalid", "NeurIPS")
-        assert "must be a dict" in str(exc_info.value)
-
-    def test_where_is_list(self):
-        """Test that list WHERE raises ValueError."""
-        with pytest.raises(ValueError) as exc_info:
-            merge_where_clause_with_conference([{"year": 2024}], "NeurIPS")
-        assert "must be a dict" in str(exc_info.value)
 
 
 class TestLoadClusteringData:
@@ -876,10 +792,16 @@ class TestTopicEvolutionAndRelevance:
         assert result["topic"] == "llm"
         assert result["papers_found"] >= 1
 
-        # Verify the DB search entry point received the filter arguments
+        # Verify the DB search entry point received the merged filter arguments
         mock_db.search_papers_semantic.assert_called_once()
         call_kwargs = mock_db.search_papers_semantic.call_args.kwargs
-        assert call_kwargs["where"] == {"session": "Oral"}
+        assert call_kwargs["where"] == {
+            "$and": [
+                {"session": "Oral"},
+                {"conference": {"$in": ["NeurIPS"]}},
+                {"year": {"$in": [str(current_year), str(current_year - 1)]}},
+            ]
+        }
         assert call_kwargs["conferences"] == ["NeurIPS"]
         assert call_kwargs["years"] == [current_year, current_year - 1]
 
@@ -928,10 +850,16 @@ class TestTopicEvolutionAndRelevance:
         result = json.loads(result_str)
         assert result["topic"] == "deep learning"
 
-        # Verify the complex filter was forwarded unchanged
+        # Verify the complex filter was forwarded with the conference merged in
         mock_db.search_papers_semantic.assert_called_once()
         call_kwargs = mock_db.search_papers_semantic.call_args.kwargs
-        assert call_kwargs["where"] == where_clause
+        assert call_kwargs["where"] == {
+            "$and": [
+                {"year": {"$gte": 2024}},
+                {"session": {"$in": ["Oral Session 1", "Spotlight Session"]}},
+                {"conference": {"$in": ["NeurIPS"]}},
+            ]
+        }
         assert call_kwargs["conferences"] == ["NeurIPS"]
 
     @patch("abstracts_explorer.mcp_server.load_clustering_data")

@@ -18,7 +18,7 @@ from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from abstracts_explorer.database import DatabaseManager
-from abstracts_explorer.embeddings import EmbeddingsManager
+from abstracts_explorer.embeddings import EmbeddingsManager, build_chromadb_where_clause
 from abstracts_explorer.rag import RAGChat
 from abstracts_explorer.config import get_config
 from abstracts_explorer.export_utils import export_papers_to_zip
@@ -702,22 +702,12 @@ def chat():
             rag.reset_conversation()
 
         # Build metadata filter
-        filter_conditions = []
-        if sessions:
-            filter_conditions.append({"session": {"$in": sessions}})
-        if years:
-            # Convert years to integers for ChromaDB
-            year_ints = [int(y) for y in years]
-            filter_conditions.append({"year": {"$in": year_ints}})
-        if conferences:
-            filter_conditions.append({"conference": {"$in": conferences}})
-
-        # Use $or operator if multiple conditions, otherwise use single condition
-        metadata_filter = None
-        if len(filter_conditions) > 1:
-            metadata_filter = {"$or": filter_conditions}
-        elif len(filter_conditions) == 1:
-            metadata_filter = filter_conditions[0]
+        metadata_filter = build_chromadb_where_clause(
+            sessions=sessions,
+            years=years,
+            conferences=conferences,
+            combine_with="$or",
+        )
 
         # Get response with filters
         database = get_database()
