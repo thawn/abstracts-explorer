@@ -225,10 +225,10 @@ def _normalize_args(arguments: Dict[str, Any], rules: List[NormRule]) -> Dict[st
             if not rule.convert_existing:
                 continue
         else:
-            alias = next((name for name in rule.aliases if name in args), None)
-            if alias is None:
+            matched_alias = next((name for name in rule.aliases if name in args), None)
+            if matched_alias is None:
                 continue
-            value = args.pop(alias)
+            value = args.pop(matched_alias)
             for other_alias in rule.aliases:
                 args.pop(other_alias, None)
 
