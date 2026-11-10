@@ -36,7 +36,7 @@ See the "Package Management with uv" section below for complete documentation.
 ### Python Style
 
 - **PEP 8 compliance**: Follow Python style guidelines
-- **Line length**: 88 characters (Black default)
+- **Line length**: 118 characters (Black)
 - **Type hints**: Use type hints for all function signatures
 - **Docstrings**: NumPy-style docstrings for all public functions/classes/methods
 
@@ -491,9 +491,6 @@ print(config.llm_backend_url)
 - **mcp**: Model Context Protocol for LLM integration
 - **sqlalchemy**: ORM for database abstraction (SQLite/PostgreSQL)
 - **psycopg2-binary**: PostgreSQL database driver
-- **numba**: JIT compilation for clustering performance
-- **llvmlite**: LLVM backend for Numba
-- **umap-learn**: UMAP dimensionality reduction
 - **scikit-fuzzy**: Fuzzy C-Means clustering
 
 ### Development Dependencies
@@ -627,8 +624,9 @@ open _build/html/index.html
 ### Branch Strategy
 
 - **main**: Production-ready code
-- **feature/***: New features
-- **bugfix/***: Bug fixes
+- **develop**: Development integration branch
+- **feat/***: New features
+- **fix/***: Bug fixes
 - **docs/***: Documentation updates
 
 ### Commit Messages
@@ -831,14 +829,13 @@ abstracts-explorer download --help
 ### Clustering Performance
 
 - **Slow clustering**: Enable caching with ClusteringCache
-- **Memory issues**: Reduce n_components or use PCA instead of t-SNE/UMAP
-- **Numba errors**: Ensure numba and llvmlite are installed correctly
+- **Memory issues**: Reduce n_components or use PCA instead of t-SNE
 
 ## Package Information
 
 - **Name**: abstracts-explorer
 - **Version**: Dynamic (managed by hatch-vcs)
-- **Python**: >=3.11
+- **Python**: >=3.12
 - **License**: Apache-2.0
 - **CLI Command**: `abstracts-explorer`
 
@@ -857,8 +854,8 @@ abstracts-explorer download --help
 - Automatic MCP tool integration for clustering questions
 
 ### Clustering & Visualization
-- 5 clustering algorithms: K-Means, DBSCAN, Agglomerative, Spectral, Fuzzy C-Means
-- 3 dimensionality reduction methods: PCA, t-SNE, UMAP
+- CLI/web/MCP pipeline uses Agglomerative clustering (ward, distance threshold 150) with t-SNE
+- `clustering.py` also exposes K-Means, DBSCAN, Spectral, Fuzzy C-Means and PCA/t-SNE
 - LLM-powered automatic cluster labeling
 - Interactive visualization in web UI
 - Database-backed caching for performance
@@ -914,8 +911,8 @@ abstracts-explorer download --help
 
 ### Clustering Architecture
 
-- **Reduction methods**: PCA, t-SNE, UMAP (configurable)
-- **Clustering algorithms**: K-Means, DBSCAN, Agglomerative, Spectral, Fuzzy C-Means
+- **Reduction methods**: PCA, t-SNE (UMAP removed); pipeline uses t-SNE
+- **Clustering algorithms**: K-Means, DBSCAN, Agglomerative, Spectral, Fuzzy C-Means; pipeline uses Agglomerative
 - **Auto-labeling**: LLM-powered cluster naming via TF-IDF keywords
 - **Caching**: Database-backed caching to avoid recomputation
 - **Visualization**: Interactive Plotly charts in web UI

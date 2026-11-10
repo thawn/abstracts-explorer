@@ -5,8 +5,9 @@ using dimensionality reduction and clustering algorithms.
 
 ## Features
 
-- Dimensionality reduction using PCA, t-SNE, and UMAP
+- Dimensionality reduction using PCA and t-SNE
 - Clustering using K-Means, DBSCAN, Agglomerative, Spectral, and Fuzzy C-Means
+- CLI/web/MCP pipeline fixed to Agglomerative clustering (ward, distance threshold 150) with t-SNE
 - Automatic cluster labeling using TF-IDF and LLM-based methods
 - Keyword extraction for each cluster
 - Representative paper selection based on cluster centroids
