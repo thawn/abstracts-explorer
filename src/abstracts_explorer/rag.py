@@ -11,7 +11,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Callable
 
 import httpx
 
@@ -81,6 +81,38 @@ class RAGDeps:
 # ---------------------------------------------------------------------------
 
 
+def _run_rag_tool(
+    ctx: RunContext[RAGDeps],
+    tool_name: str,
+    mcp_func: Callable[..., str],
+    kwargs: Dict[str, Any],
+) -> str:
+    """
+    Execute an MCP tool and record its result for post-processing.
+
+    Parameters
+    ----------
+    ctx : RunContext[RAGDeps]
+        Agent context with dependencies.
+    tool_name : str
+        Name of the tool as exposed to the LLM.
+    mcp_func : callable
+        MCP server function to invoke.
+    kwargs : dict
+        Keyword arguments for *mcp_func*.
+
+    Returns
+    -------
+    str
+        Human-readable tool result for the LLM.
+    """
+    logger.info("Tool call: %s(%s)", tool_name, kwargs)
+    raw = mcp_func(**kwargs)
+    logger.info("Tool result: %s → %s", tool_name, _abbreviate_result(raw))
+    ctx.deps.tool_results.append({"name": tool_name, "raw_result": raw})
+    return format_tool_result_for_llm(tool_name, raw)
+
+
 def _tool_search_papers(
     ctx: RunContext[RAGDeps],
     topic_keywords: str,
@@ -131,11 +163,7 @@ def _tool_search_papers(
     elif ctx.deps.conferences:
         kwargs["conference"] = ctx.deps.conferences[0]
 
-    logger.info("Tool call: search_papers(%s)", kwargs)
-    raw = mcp_search_papers(**kwargs)
-    logger.info("Tool result: search_papers → %s", _abbreviate_result(raw))
-    ctx.deps.tool_results.append({"name": "search_papers", "raw_result": raw})
-    return format_tool_result_for_llm("search_papers", raw)
+    return _run_rag_tool(ctx, "search_papers", mcp_search_papers, kwargs)
 
 
 def _tool_get_conference_topics(
@@ -169,11 +197,8 @@ def _tool_get_conference_topics(
 
     years = ctx.deps.years if ctx.deps.years else None
 
-    logger.info("Tool call: get_conference_topics(conferences=%s, years=%s)", conferences, years)
-    raw = mcp_get_conference_topics(conferences=conferences, years=years)
-    logger.info("Tool result: get_conference_topics → %s", _abbreviate_result(raw))
-    ctx.deps.tool_results.append({"name": "get_conference_topics", "raw_result": raw})
-    return format_tool_result_for_llm("get_conference_topics", raw)
+    kwargs = {"conferences": conferences, "years": years}
+    return _run_rag_tool(ctx, "get_conference_topics", mcp_get_conference_topics, kwargs)
 
 
 def _tool_get_topic_evolution(
@@ -219,11 +244,7 @@ def _tool_get_topic_evolution(
     if end_year is not None:
         kwargs["end_year"] = end_year
 
-    logger.info("Tool call: get_topic_evolution(%s)", kwargs)
-    raw = mcp_get_topic_evolution(**kwargs)
-    logger.info("Tool result: get_topic_evolution → %s", _abbreviate_result(raw))
-    ctx.deps.tool_results.append({"name": "get_topic_evolution", "raw_result": raw})
-    return format_tool_result_for_llm("get_topic_evolution", raw)
+    return _run_rag_tool(ctx, "get_topic_evolution", mcp_get_topic_evolution, kwargs)
 
 
 def _tool_analyze_topic_relevance(
@@ -273,11 +294,7 @@ def _tool_analyze_topic_relevance(
     elif ctx.deps.years:
         kwargs["years"] = ctx.deps.years
 
-    logger.info("Tool call: analyze_topic_relevance(%s)", kwargs)
-    raw = mcp_analyze_topic_relevance(**kwargs)
-    logger.info("Tool result: analyze_topic_relevance → %s", _abbreviate_result(raw))
-    ctx.deps.tool_results.append({"name": "analyze_topic_relevance", "raw_result": raw})
-    return format_tool_result_for_llm("analyze_topic_relevance", raw)
+    return _run_rag_tool(ctx, "analyze_topic_relevance", mcp_analyze_topic_relevance, kwargs)
 
 
 def _tool_get_cluster_visualization(
@@ -310,11 +327,8 @@ def _tool_get_cluster_visualization(
 
     years = ctx.deps.years if ctx.deps.years else None
 
-    logger.info("Tool call: get_cluster_visualization(conferences=%s, years=%s)", conferences, years)
-    raw = mcp_get_cluster_visualization(conferences=conferences, years=years)
-    logger.info("Tool result: get_cluster_visualization → %s", _abbreviate_result(raw))
-    ctx.deps.tool_results.append({"name": "get_cluster_visualization", "raw_result": raw})
-    return format_tool_result_for_llm("get_cluster_visualization", raw)
+    kwargs = {"conferences": conferences, "years": years}
+    return _run_rag_tool(ctx, "get_cluster_visualization", mcp_get_cluster_visualization, kwargs)
 
 
 def _tool_get_paper_details(
@@ -370,11 +384,7 @@ def _tool_get_paper_details(
     elif ctx.deps.years:
         kwargs["year"] = ctx.deps.years[0]
 
-    logger.info("Tool call: get_paper_details(%s)", kwargs)
-    raw = mcp_get_paper_details(**kwargs)
-    logger.info("Tool result: get_paper_details → %s", _abbreviate_result(raw))
-    ctx.deps.tool_results.append({"name": "get_paper_details", "raw_result": raw})
-    return format_tool_result_for_llm("get_paper_details", raw)
+    return _run_rag_tool(ctx, "get_paper_details", mcp_get_paper_details, kwargs)
 
 
 def _tool_summarize_interesting_papers(
@@ -415,16 +425,7 @@ def _tool_summarize_interesting_papers(
     if resolved_years:
         kwargs["years"] = resolved_years
 
-    logger.info(
-        "Tool call: summarize_interesting_papers(conference=%s, years=%s, paper_count=%d)",
-        kwargs.get("conference"),
-        kwargs.get("years"),
-        len(priorities),
-    )
-    raw = mcp_summarize_interesting_papers(**kwargs)
-    logger.info("Tool result: summarize_interesting_papers → %s", _abbreviate_result(raw))
-    ctx.deps.tool_results.append({"name": "summarize_interesting_papers", "raw_result": raw})
-    return format_tool_result_for_llm("summarize_interesting_papers", raw)
+    return _run_rag_tool(ctx, "summarize_interesting_papers", mcp_summarize_interesting_papers, kwargs)
 
 
 def _tool_recommend_related_papers(
@@ -468,17 +469,7 @@ def _tool_recommend_related_papers(
     if resolved_years:
         kwargs["years"] = resolved_years
 
-    logger.info(
-        "Tool call: recommend_related_papers(conferences=%s, years=%s, n_results=%s, paper_count=%d)",
-        kwargs.get("conferences"),
-        kwargs.get("years"),
-        n_results,
-        len(priorities),
-    )
-    raw = mcp_recommend_related_papers(**kwargs)
-    logger.info("Tool result: recommend_related_papers → %s", _abbreviate_result(raw))
-    ctx.deps.tool_results.append({"name": "recommend_related_papers", "raw_result": raw})
-    return format_tool_result_for_llm("recommend_related_papers", raw)
+    return _run_rag_tool(ctx, "recommend_related_papers", mcp_recommend_related_papers, kwargs)
 
 
 class RAGChat:

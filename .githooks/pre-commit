@@ -77,19 +77,20 @@ if [ -n "$PYTHON_FILES" ]; then
         echo "     Install with: uv pip install --system ruff"
     fi
     
-    # Check if mypy is available
-    if command -v mypy &> /dev/null; then
-        echo "  ✓ Running mypy..."
-        if ! mypy src/ --ignore-missing-imports 2>&1 | tail -1 | grep -q "Success"; then
-            echo ""
-            echo "❌ Mypy type checking failed! Please fix the errors above."
-            exit 1
-        fi
-        echo "  ✓ Mypy passed"
-    else
-        echo "  ⚠️  mypy not found, skipping type check"
-        echo "     Install with: uv pip install --system mypy types-requests"
+    # mypy is required for Python changes
+    if ! command -v mypy &> /dev/null; then
+        echo ""
+        echo "❌ mypy not found. Install it with: uv sync --all-extras"
+        exit 1
     fi
+
+    echo "  ✓ Running mypy..."
+    if ! mypy src/ --ignore-missing-imports; then
+        echo ""
+        echo "❌ Mypy type checking failed! Please fix the errors above."
+        exit 1
+    fi
+    echo "  ✓ Mypy passed"
     
     echo ""
     echo "✅ All linting checks passed!"

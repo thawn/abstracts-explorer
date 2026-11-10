@@ -17,13 +17,13 @@ Features:
 import logging
 import json
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from contextlib import contextmanager
+from typing import Any, Dict, List, Optional, Tuple, Iterator
 from collections import Counter
-from copy import deepcopy
 
 from mcp.server.mcpserver import MCPServer
 
-from abstracts_explorer.embeddings import EmbeddingsManager
+from abstracts_explorer.embeddings import EmbeddingsManager, build_chromadb_where_clause
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.clustering import ClusteringManager
 from abstracts_explorer.config import get_config
@@ -70,6 +70,9 @@ def load_clustering_data(
     # Use config defaults if not provided
     collection_name = collection_name or config.collection_name
 
+    em: Optional[EmbeddingsManager] = None
+    db: Optional[DatabaseManager] = None
+
     try:
         # Initialize embeddings manager
         em = EmbeddingsManager(
@@ -85,7 +88,74 @@ def load_clustering_data(
         return cm, db
 
     except Exception as e:
+        if em is not None:
+            em.close()
+        if db is not None:
+            db.close()
         raise ClusterAnalysisError(f"Failed to load clustering data: {str(e)}") from e
+
+
+@contextmanager
+def _get_mcp_resources(
+    collection_name: Optional[str] = None,
+    *,
+    with_embeddings: bool = True,
+) -> Iterator[Tuple[Optional[EmbeddingsManager], DatabaseManager]]:
+    """
+    Provide MCP tool resources and guarantee they are closed.
+
+    Parameters
+    ----------
+    collection_name : str, optional
+        ChromaDB collection name.  Uses the configured default when embeddings
+        are requested.
+    with_embeddings : bool, optional
+        Whether to create an ``EmbeddingsManager`` (default: ``True``).
+
+    Yields
+    ------
+    tuple
+        ``(embeddings_manager, database_manager)``; the embeddings manager is
+        ``None`` when *with_embeddings* is ``False``.
+    """
+    em: Optional[EmbeddingsManager] = None
+    db: Optional[DatabaseManager] = None
+    try:
+        if with_embeddings:
+            resolved_collection = collection_name or get_config().collection_name
+            em = EmbeddingsManager(collection_name=resolved_collection)
+        db = DatabaseManager()
+        yield em, db
+    finally:
+        if em is not None:
+            em.close()
+        if db is not None:
+            db.close()
+
+
+@contextmanager
+def _get_clustering_resources(
+    collection_name: Optional[str] = None,
+) -> Iterator[Tuple[ClusteringManager, DatabaseManager]]:
+    """
+    Provide clustering resources and guarantee they are closed.
+
+    Parameters
+    ----------
+    collection_name : str, optional
+        ChromaDB collection name.
+
+    Yields
+    ------
+    tuple
+        ``(clustering_manager, database_manager)``.
+    """
+    cm, db = load_clustering_data(collection_name)
+    try:
+        yield cm, db
+    finally:
+        cm.embeddings_manager.close()
+        db.close()
 
 
 def _apply_cached_cluster_labels(
@@ -334,9 +404,7 @@ def _get_conference_topics_for_single_conference(
         elif extracted_year not in years:
             years = sorted(years + [extracted_year])
 
-    cm, db = load_clustering_data(collection_name)
-
-    try:
+    with _get_clustering_resources(collection_name) as (cm, db):
         cached = _lookup_clustering_cache(db, config, conference, years)
 
         if not cached:
@@ -375,9 +443,6 @@ def _get_conference_topics_for_single_conference(
             "topic_sizes": topic_sizes,
             "topics": topics,
         }
-    finally:
-        cm.embeddings_manager.close()
-        db.close()
 
 
 @mcp.tool()
@@ -446,155 +511,6 @@ def get_conference_topics(
         return json.dumps({"error": str(e)}, indent=2)
 
 
-def merge_where_clause_with_conference(
-    where: Optional[Dict[str, Any]],
-    conference: Optional[str],
-) -> Optional[Dict[str, Any]]:
-    """
-    Merge a WHERE clause with a conference filter.
-
-    This helper function properly combines custom WHERE clauses with conference
-    filters, avoiding duplicates and handling nested operators correctly.
-
-    Parameters
-    ----------
-    where : dict, optional
-        Custom WHERE clause from user
-    conference : str, optional
-        Conference name to filter by
-
-    Returns
-    -------
-    dict or None
-        Merged WHERE clause, or None if both inputs are None
-
-    Raises
-    ------
-    ValueError
-        If WHERE clause is not a dict
-    """
-    # Validate where parameter
-    if where is not None and not isinstance(where, dict):
-        raise ValueError(f"WHERE clause must be a dict, got {type(where).__name__}")
-
-    # If no conference, just return a deep copy of WHERE clause (or None)
-    if not conference:
-        return deepcopy(where) if where else None
-
-    # If no WHERE clause, just return conference filter
-    if not where:
-        return {"conference": conference}
-
-    # Check if conference already exists anywhere in WHERE clause
-    def has_conference_filter(obj: Any) -> bool:
-        """Recursively check if conference filter exists in nested structure."""
-        if isinstance(obj, dict):
-            if "conference" in obj:
-                return True
-            # Check nested values
-            for value in obj.values():
-                if has_conference_filter(value):
-                    return True
-        elif isinstance(obj, list):
-            for item in obj:
-                if has_conference_filter(item):
-                    return True
-        return False
-
-    # If conference already in WHERE clause, don't add again - return deep copy
-    if has_conference_filter(where):
-        return deepcopy(where)
-
-    # Need to merge conference with WHERE clause - use deep copy to prevent mutations
-    where_filter = deepcopy(where)
-
-    # If WHERE already has $and, append to it
-    if "$and" in where_filter:
-        where_filter["$and"].append({"conference": conference})
-    else:
-        # Create new $and with existing filter and conference
-        where_filter = {"$and": [where_filter, {"conference": conference}]}
-
-    return where_filter
-
-
-def merge_where_clause_with_years(
-    where: Optional[Dict[str, Any]],
-    years: Optional[List[int]],
-) -> Optional[Dict[str, Any]]:
-    """
-    Merge a WHERE clause with a years filter.
-
-    This helper function properly combines custom WHERE clauses with a years
-    filter, avoiding duplicates and handling nested operators correctly.
-
-    Parameters
-    ----------
-    where : dict, optional
-        Custom WHERE clause from user
-    years : list of int, optional
-        List of years to filter by
-
-    Returns
-    -------
-    dict or None
-        Merged WHERE clause, or None if both inputs are None
-
-    Raises
-    ------
-    ValueError
-        If WHERE clause is not a dict
-    """
-    # Validate where parameter
-    if where is not None and not isinstance(where, dict):
-        raise ValueError(f"WHERE clause must be a dict, got {type(where).__name__}")
-
-    # If no years, just return a deep copy of WHERE clause (or None)
-    if not years:
-        return deepcopy(where) if where else None
-
-    # convert years to string because ChromaDB metadata is stored as strings
-    years_str: List[str] = [str(y) for y in years]
-
-    # If no WHERE clause, just return years filter
-    if not where:
-        return {"year": {"$in": years_str}}
-
-    # Check if year filter already exists anywhere in WHERE clause
-    def has_year_filter(obj: Any) -> bool:
-        """Recursively check if year filter exists in nested structure."""
-        if isinstance(obj, dict):
-            if "year" in obj:
-                return True
-            # Check nested values
-            for value in obj.values():
-                if has_year_filter(value):
-                    return True
-        elif isinstance(obj, list):
-            for item in obj:
-                if has_year_filter(item):
-                    return True
-        return False
-
-    # If year filter already in WHERE clause, don't add again - return deep copy
-    if has_year_filter(where):
-        return deepcopy(where)
-
-    # Need to merge years with WHERE clause - use deep copy to prevent mutations
-    where_filter = deepcopy(where)
-
-    year_filter = {"year": {"$in": years_str}}
-
-    # If WHERE already has $and, append to it
-    if "$and" in where_filter:
-        where_filter["$and"].append(year_filter)
-    else:
-        # Create new $and with existing filter and year filter
-        where_filter = {"$and": [where_filter, year_filter]}
-
-    return where_filter
-
-
 @mcp.tool()
 def get_topic_evolution(
     topic_keywords: str,
@@ -654,116 +570,106 @@ def get_topic_evolution(
         config = get_config()
         collection_name = collection_name or config.collection_name
 
-        # Initialize embeddings manager
-        em = EmbeddingsManager(
-            collection_name=collection_name,
-        )
+        with _get_mcp_resources(collection_name) as (em, db):
+            assert em is not None
+            logger.info(f"Analyzing topic evolution for: {topic_keywords}")
+            logger.info(f"Conferences: {conferences}")
+            logger.info(f"Distance threshold: {distance_threshold}")
 
-        # Initialize database
-        db = DatabaseManager()
+            # Embed the query once here and reuse for every (conference, year) pair
+            # to avoid redundant LLM API calls.
+            query_embedding = em.generate_embedding(topic_keywords)
 
-        logger.info(f"Analyzing topic evolution for: {topic_keywords}")
-        logger.info(f"Conferences: {conferences}")
-        logger.info(f"Distance threshold: {distance_threshold}")
+            conference_data: Dict[str, Dict[str, Any]] = {}
+            total_papers = 0
+            all_years: set[int] = set()
 
-        # Embed the query once here and reuse for every (conference, year) pair
-        # to avoid redundant LLM API calls.
-        query_embedding = em.generate_embedding(topic_keywords)
+            for conference in conferences:
+                # Determine year range from database for this conference
+                available_years = db.get_years(conference=conference)
+                if start_year is not None:
+                    available_years = [y for y in available_years if y >= start_year]
+                if end_year is not None:
+                    available_years = [y for y in available_years if y <= end_year]
 
-        conference_data: Dict[str, Dict[str, Any]] = {}
-        total_papers = 0
-        all_years: set[int] = set()
+                logger.info(f"Conference: {conference}, years: {available_years}")
 
-        for conference in conferences:
-            # Determine year range from database for this conference
-            available_years = db.get_years(conference=conference)
-            if start_year is not None:
-                available_years = [y for y in available_years if y >= start_year]
-            if end_year is not None:
-                available_years = [y for y in available_years if y <= end_year]
+                year_counts: Dict[int, int] = {}
+                year_relative: Dict[int, float] = {}
+                year_totals: Dict[int, int] = {}
+                year_distribution: Dict[int, list] = {}
 
-            logger.info(f"Conference: {conference}, years: {available_years}")
-
-            year_counts: Dict[int, int] = {}
-            year_relative: Dict[int, float] = {}
-            year_totals: Dict[int, int] = {}
-            year_distribution: Dict[int, list] = {}
-
-            for year in available_years:
-                result_data = em.find_papers_within_distance(
-                    database=db,
-                    query=topic_keywords,
-                    distance_threshold=distance_threshold,
-                    conferences=[conference],
-                    years=[year],
-                    query_embedding=query_embedding,
-                )
-
-                count = result_data["count"]
-                year_counts[year] = count
-                total_papers += count
-
-                # Get total papers for this conference+year for relative percentage
-                stats = db.get_stats(year=year, conference=conference)
-                total_for_year = stats["total_papers"]
-                year_totals[year] = total_for_year
-                if total_for_year > 0:
-                    year_relative[year] = round((count / total_for_year) * 100, 2)
-                else:
-                    year_relative[year] = 0.0
-
-                # Collect sample papers (top 3 closest)
-                sample_papers = []
-                for paper in result_data["papers"][:3]:
-                    sample_papers.append(
-                        {
-                            "title": paper.get("title", ""),
-                            "session": paper.get("session", ""),
-                            "distance": paper.get("distance"),
-                        }
+                for year in available_years:
+                    result_data = em.find_papers_within_distance(
+                        database=db,
+                        query=topic_keywords,
+                        distance_threshold=distance_threshold,
+                        conferences=[conference],
+                        years=[year],
+                        query_embedding=query_embedding,
                     )
-                year_distribution[year] = sample_papers
 
-            all_years.update(year_counts.keys())
+                    count = result_data["count"]
+                    year_counts[year] = count
+                    total_papers += count
 
-            # Sort by year
-            sorted_years = sorted(year_counts.keys())
+                    # Get total papers for this conference+year for relative percentage
+                    stats = db.get_stats(year=year, conference=conference)
+                    total_for_year = stats["total_papers"]
+                    year_totals[year] = total_for_year
+                    if total_for_year > 0:
+                        year_relative[year] = round((count / total_for_year) * 100, 2)
+                    else:
+                        year_relative[year] = 0.0
 
-            conference_data[conference] = {
-                "year_counts": dict(sorted(year_counts.items())),
-                "year_relative": dict(sorted(year_relative.items())),
-                "year_totals": dict(sorted(year_totals.items())),
-                "papers_by_year": {
-                    year: {
-                        "count": year_counts[year],
-                        "relative_percent": year_relative[year],
-                        "total_for_year": year_totals[year],
-                        "sample_papers": year_distribution[year],
-                    }
-                    for year in sorted_years
+                    # Collect sample papers (top 3 closest)
+                    sample_papers = []
+                    for paper in result_data["papers"][:3]:
+                        sample_papers.append(
+                            {
+                                "title": paper.get("title", ""),
+                                "session": paper.get("session", ""),
+                                "distance": paper.get("distance"),
+                            }
+                        )
+                    year_distribution[year] = sample_papers
+
+                all_years.update(year_counts.keys())
+
+                # Sort by year
+                sorted_years = sorted(year_counts.keys())
+
+                conference_data[conference] = {
+                    "year_counts": dict(sorted(year_counts.items())),
+                    "year_relative": dict(sorted(year_relative.items())),
+                    "year_totals": dict(sorted(year_totals.items())),
+                    "papers_by_year": {
+                        year: {
+                            "count": year_counts[year],
+                            "relative_percent": year_relative[year],
+                            "total_for_year": year_totals[year],
+                            "sample_papers": year_distribution[year],
+                        }
+                        for year in sorted_years
+                    },
+                }
+
+            sorted_all_years = sorted(all_years)
+
+            # Build result
+            result: Dict[str, Any] = {
+                "topic": topic_keywords,
+                "conferences": conferences,
+                "distance_threshold": distance_threshold,
+                "total_papers": total_papers,
+                "year_range": {
+                    "start": min(sorted_all_years) if sorted_all_years else None,
+                    "end": max(sorted_all_years) if sorted_all_years else None,
                 },
+                "conference_data": conference_data,
             }
 
-        sorted_all_years = sorted(all_years)
-
-        # Build result
-        result: Dict[str, Any] = {
-            "topic": topic_keywords,
-            "conferences": conferences,
-            "distance_threshold": distance_threshold,
-            "total_papers": total_papers,
-            "year_range": {
-                "start": min(sorted_all_years) if sorted_all_years else None,
-                "end": max(sorted_all_years) if sorted_all_years else None,
-            },
-            "conference_data": conference_data,
-        }
-
-        # Clean up
-        em.close()
-        db.close()
-
-        return json.dumps(result, indent=2)
+            return json.dumps(result, indent=2)
 
     except Exception as e:
         logger.error(f"Failed to get topic evolution: {str(e)}")
@@ -824,54 +730,46 @@ def search_papers(
         config = get_config()
         collection_name = collection_name or config.collection_name
 
-        # Initialize embeddings manager
-        em = EmbeddingsManager(
-            collection_name=collection_name,
-        )
+        with _get_mcp_resources(collection_name) as (em, db):
+            assert em is not None
 
-        # Initialize database
-        db = DatabaseManager()
+            # Validate custom WHERE clause and merge conference/year filters
+            try:
+                where = build_chromadb_where_clause(
+                    conferences=[conference],
+                    years=years,
+                    base_where=where,
+                )
+            except ValueError as e:
+                logger.error(f"Invalid WHERE clause: {str(e)}")
+                return json.dumps({"error": f"Invalid WHERE clause: {str(e)}"}, indent=2)
 
-        # Validate custom WHERE clause and year filter
-        try:
-            merge_where_clause_with_conference(where, conference)
-            merge_where_clause_with_years(where, years)
-        except ValueError as e:
-            logger.error(f"Invalid WHERE clause: {str(e)}")
-            em.close()
-            db.close()
-            return json.dumps({"error": f"Invalid WHERE clause: {str(e)}"}, indent=2)
+            # Search for papers
+            search_desc = f"papers from {years}" if years else "papers"
+            logger.info(f"Searching for {search_desc} about: {topic_keywords}")
+            if where:
+                logger.info(f"Applying WHERE filter: {where}")
+            if years:
+                logger.info(f"Year filter: {years}")
 
-        # Search for papers
-        search_desc = f"papers from {years}" if years else "papers"
-        logger.info(f"Searching for {search_desc} about: {topic_keywords}")
-        if where:
-            logger.info(f"Applying WHERE filter: {where}")
-        if years:
-            logger.info(f"Year filter: {years}")
+            papers = db.search_papers_semantic(
+                topic_keywords,
+                limit=n_results,
+                years=years,
+                conferences=[conference],
+                where=where,
+                embeddings_manager=em,
+            )
 
-        papers = db.search_papers_semantic(
-            topic_keywords,
-            limit=n_results,
-            years=years,
-            conferences=[conference],
-            where=where,
-            embeddings_manager=em,
-        )
+            result = {
+                "topic": topic_keywords,
+                "conference": conference,
+                "years_filter": years,
+                "papers_found": len(papers),
+                "papers": papers,
+            }
 
-        result = {
-            "topic": topic_keywords,
-            "conference": conference,
-            "years_filter": years,
-            "papers_found": len(papers),
-            "papers": papers,
-        }
-
-        # Clean up
-        em.close()
-        db.close()
-
-        return json.dumps(result, indent=2)
+            return json.dumps(result, indent=2)
 
     except Exception as e:
         logger.error(f"Failed to search papers: {str(e)}")
@@ -928,32 +826,30 @@ def get_paper_details(
         )
 
     try:
-        db = DatabaseManager()
+        with _get_mcp_resources(with_embeddings=False) as (_, db):
+            result_papers: List[Dict[str, Any]] = []
 
-        result_papers: List[Dict[str, Any]] = []
+            if paper_id:
+                # Exact lookup by uid or original_id (returns at most one paper)
+                paper = db.get_paper_by_original_id_or_uid(paper_id)
+                if paper is not None:
+                    result_papers = [paper]
 
-        if paper_id:
-            # Exact lookup by uid or original_id (returns at most one paper)
-            paper = db.get_paper_by_original_id_or_uid(paper_id)
-            if paper is not None:
-                result_papers = [paper]
+            if not result_papers and title:
+                # Keyword search on title with optional conference/year filters
+                result_papers = db.search_papers(
+                    keyword=title,
+                    conferences=[conference] if conference else None,
+                    years=[year] if year is not None else None,
+                    limit=limit,
+                )
 
-        if not result_papers and title:
-            # Keyword search on title with optional conference/year filters
-            result_papers = db.search_papers(
-                keyword=title,
-                conferences=[conference] if conference else None,
-                years=[year] if year is not None else None,
-                limit=limit,
-            )
+            result = {
+                "papers_found": len(result_papers),
+                "papers": result_papers,
+            }
 
-        result = {
-            "papers_found": len(result_papers),
-            "papers": result_papers,
-        }
-
-        db.close()
-        return json.dumps(result, indent=2, default=str)
+            return json.dumps(result, indent=2, default=str)
 
     except Exception as e:
         logger.error(f"Failed to get paper details: {str(e)}")
@@ -1008,21 +904,19 @@ def summarize_interesting_papers(
             indent=2,
         )
 
-    db = DatabaseManager()
     try:
-        result = _summarize_interesting_papers(
-            database=db,
-            priorities=priorities,
-            paper_ids=paper_ids,
-            conference=conference,
-            years=years,
-        )
-        return json.dumps(result, indent=2, default=str)
+        with _get_mcp_resources(with_embeddings=False) as (_, db):
+            result = _summarize_interesting_papers(
+                database=db,
+                priorities=priorities,
+                paper_ids=paper_ids,
+                conference=conference,
+                years=years,
+            )
+            return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Failed to summarize interesting papers: {str(e)}")
         return json.dumps({"error": str(e)}, indent=2)
-    finally:
-        db.close()
 
 
 @mcp.tool()
@@ -1087,26 +981,23 @@ def recommend_related_papers(
     config = get_config()
     collection_name = collection_name or config.collection_name
 
-    em = EmbeddingsManager(collection_name=collection_name)
-    db = DatabaseManager()
     try:
-        result = _recommend_related_papers(
-            database=db,
-            embeddings_manager=em,
-            priorities=priorities,
-            paper_ids=paper_ids,
-            conferences=conferences,
-            years=years,
-            n_results=n_results,
-            exclude_ids=exclude_ids,
-        )
-        return json.dumps(result, indent=2, default=str)
+        with _get_mcp_resources(collection_name) as (em, db):
+            assert em is not None
+            result = _recommend_related_papers(
+                database=db,
+                embeddings_manager=em,
+                priorities=priorities,
+                paper_ids=paper_ids,
+                conferences=conferences,
+                years=years,
+                n_results=n_results,
+                exclude_ids=exclude_ids,
+            )
+            return json.dumps(result, indent=2, default=str)
     except Exception as e:
         logger.error(f"Failed to recommend related papers: {str(e)}")
         return json.dumps({"error": str(e)}, indent=2)
-    finally:
-        em.close()
-        db.close()
 
 
 @mcp.tool()
@@ -1179,85 +1070,76 @@ def analyze_topic_relevance(
         config = get_config()
         collection_name = collection_name or config.collection_name
 
-        # Initialize embeddings manager
-        em = EmbeddingsManager(
-            collection_name=collection_name,
-        )
+        with _get_mcp_resources(collection_name) as (em, db):
+            assert em is not None
 
-        # Initialize database
-        db = DatabaseManager()
+            # Find papers within distance
+            logger.info(f"Analyzing relevance for topic: {topic}")
+            logger.info(f"Distance threshold: {distance_threshold}")
+            if conferences:
+                logger.info(f"Filtering by conferences: {conferences}")
+            if years:
+                logger.info(f"Filtering by years: {years}")
 
-        # Find papers within distance
-        logger.info(f"Analyzing relevance for topic: {topic}")
-        logger.info(f"Distance threshold: {distance_threshold}")
-        if conferences:
-            logger.info(f"Filtering by conferences: {conferences}")
-        if years:
-            logger.info(f"Filtering by years: {years}")
-
-        result_data = em.find_papers_within_distance(
-            database=db,
-            query=topic,
-            distance_threshold=distance_threshold,
-            conferences=conferences,
-            years=years,
-        )
-
-        # Analyze results
-        papers = result_data["papers"]
-        total_papers = len(papers)
-        total_considered = result_data.get("total_considered", total_papers)
-
-        # Count by conference
-        conference_counts: Counter[str] = Counter()
-        year_counts: Counter[int] = Counter()
-        for paper in papers:
-            if paper.get("conference"):
-                conference_counts[paper["conference"]] += 1
-            if paper.get("year"):
-                year_counts[paper["year"]] += 1
-
-        # Calculate relevance score (0-100 scale)
-        # Ratio of papers within distance threshold to total filtered papers
-        if total_considered > 0:
-            relevance_score = (total_papers / total_considered) * 100
-        else:
-            relevance_score = 0
-
-        # Get sample papers (top 5 closest)
-        sample_papers = []
-        for paper in papers[:5]:
-            sample_papers.append(
-                {
-                    "title": paper.get("title", ""),
-                    "year": paper.get("year"),
-                    "conference": paper.get("conference", ""),
-                    "distance": paper.get("distance"),
-                }
+            result_data = em.find_papers_within_distance(
+                database=db,
+                query=topic,
+                distance_threshold=distance_threshold,
+                conferences=conferences,
+                years=years,
             )
 
-        # Build result
-        result = {
-            "topic": topic,
-            "distance_threshold": distance_threshold,
-            "filters": {
-                "conferences": conferences,
-                "years": years,
-            },
-            "total_papers": total_papers,
-            "total_considered": total_considered,
-            "relevance_score": round(relevance_score, 1),
-            "conferences": dict(sorted(conference_counts.items(), key=lambda x: (-x[1], x[0]))),
-            "years": dict(sorted(year_counts.items(), key=lambda x: x[0])),
-            "sample_papers": sample_papers,
-            "closest_distance": papers[0].get("distance") if papers else None,
-        }
+            # Analyze results
+            papers = result_data["papers"]
+            total_papers = len(papers)
+            total_considered = result_data.get("total_considered", total_papers)
 
-        # Clean up
-        em.close()
-        db.close()
+            # Count by conference
+            conference_counts: Counter[str] = Counter()
+            year_counts: Counter[int] = Counter()
+            for paper in papers:
+                if paper.get("conference"):
+                    conference_counts[paper["conference"]] += 1
+                if paper.get("year"):
+                    year_counts[paper["year"]] += 1
 
-        return json.dumps(result, indent=2)
+            # Calculate relevance score (0-100 scale)
+            # Ratio of papers within distance threshold to total filtered papers
+            if total_considered > 0:
+                relevance_score = (total_papers / total_considered) * 100
+            else:
+                relevance_score = 0
+
+            # Get sample papers (top 5 closest)
+            sample_papers = []
+            for paper in papers[:5]:
+                sample_papers.append(
+                    {
+                        "title": paper.get("title", ""),
+                        "year": paper.get("year"),
+                        "conference": paper.get("conference", ""),
+                        "distance": paper.get("distance"),
+                    }
+                )
+
+            # Build result
+            result = {
+                "topic": topic,
+                "distance_threshold": distance_threshold,
+                "filters": {
+                    "conferences": conferences,
+                    "years": years,
+                },
+                "total_papers": total_papers,
+                "total_considered": total_considered,
+                "relevance_score": round(relevance_score, 1),
+                "conferences": dict(sorted(conference_counts.items(), key=lambda x: (-x[1], x[0]))),
+                "years": dict(sorted(year_counts.items(), key=lambda x: x[0])),
+                "sample_papers": sample_papers,
+                "closest_distance": papers[0].get("distance") if papers else None,
+            }
+
+            return json.dumps(result, indent=2)
 
     except Exception as e:
         logger.error(f"Failed to analyze topic relevance: {str(e)}")
@@ -1332,12 +1214,8 @@ def get_cluster_visualization(
                 elif extracted_year not in vis_years:
                     vis_years = sorted(vis_years + [extracted_year])
 
-            cm, db = load_clustering_data(collection_name)
-            try:
+            with _get_clustering_resources(collection_name) as (_, db):
                 cached = _lookup_clustering_cache(db, config, parsed_conf, vis_years)
-            finally:
-                cm.embeddings_manager.close()
-                db.close()
 
             if not cached:
                 return json.dumps(

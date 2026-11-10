@@ -19,13 +19,41 @@ from abstracts_explorer.mcp_tools import (
     _format_search_papers_result,
     _format_visualization_result,
     _format_paper_details_result,
-    _normalize_search_papers_args,
-    _normalize_get_topic_evolution_args,
-    _normalize_analyze_topic_relevance_args,
-    _normalize_get_paper_details_args,
-    _normalize_interesting_paper_tool_args,
+    _normalize_args,
+    SEARCH_PAPERS_RULES,
+    GET_TOPIC_EVOLUTION_RULES,
+    ANALYZE_TOPIC_RELEVANCE_RULES,
+    GET_PAPER_DETAILS_RULES,
+    INTERESTING_PAPER_ARRAY_RULES,
+    INTERESTING_PAPER_SINGLE_RULES,
     _filter_unknown_kwargs,
 )
+
+
+def _normalize_search_papers_args(arguments):
+    """Test convenience wrapper for the search-papers rule set."""
+    return _normalize_args(arguments, SEARCH_PAPERS_RULES)
+
+
+def _normalize_get_topic_evolution_args(arguments):
+    """Test convenience wrapper for the topic-evolution rule set."""
+    return _normalize_args(arguments, GET_TOPIC_EVOLUTION_RULES)
+
+
+def _normalize_analyze_topic_relevance_args(arguments):
+    """Test convenience wrapper for the topic-relevance rule set."""
+    return _normalize_args(arguments, ANALYZE_TOPIC_RELEVANCE_RULES)
+
+
+def _normalize_get_paper_details_args(arguments):
+    """Test convenience wrapper for the paper-details rule set."""
+    return _normalize_args(arguments, GET_PAPER_DETAILS_RULES)
+
+
+def _normalize_interesting_paper_tool_args(arguments, array_conference=True):
+    """Test convenience wrapper for the interesting-paper rule sets."""
+    rules = INTERESTING_PAPER_ARRAY_RULES if array_conference else INTERESTING_PAPER_SINGLE_RULES
+    return _normalize_args(arguments, rules)
 
 
 def test_get_mcp_tools_schema():
