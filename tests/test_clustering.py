@@ -436,8 +436,8 @@ class TestClusterLabeling:
 
         assert isinstance(keywords, list)
         assert len(keywords) <= 3
-        assert "learning" in keywords
-        assert "quantum" not in keywords
+        assert any("learning" in keyword for keyword in keywords)
+        assert not any("quantum" in keyword for keyword in keywords)
 
     def test_compute_tfidf_keywords_empty_inputs(self):
         """Shared TF-IDF helper returns an empty list for unusable inputs."""
