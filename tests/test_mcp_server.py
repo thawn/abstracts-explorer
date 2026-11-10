@@ -102,6 +102,69 @@ class TestLoadClusteringData:
         assert "Failed to load clustering data" in str(exc_info.value)
 
 
+class TestMCPResources:
+    """Tests for shared MCP resource context managers."""
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_mcp_resources_closes_on_exception(self, mock_config, mock_db_class, mock_em_class):
+        """Resources are closed when the managed block raises."""
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config.return_value = mock_config_obj
+        mock_em = Mock()
+        mock_db = Mock()
+        mock_em_class.return_value = mock_em
+        mock_db_class.return_value = mock_db
+
+        from abstracts_explorer.mcp_server import _get_mcp_resources
+
+        with pytest.raises(RuntimeError):
+            with _get_mcp_resources() as (em, db):
+                assert em is mock_em
+                assert db is mock_db
+                raise RuntimeError("boom")
+
+        mock_em.close.assert_called_once()
+        mock_db.close.assert_called_once()
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    def test_mcp_resources_without_embeddings(self, mock_db_class, mock_em_class):
+        """Database-only resources skip the embeddings manager."""
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+
+        from abstracts_explorer.mcp_server import _get_mcp_resources
+
+        with _get_mcp_resources(with_embeddings=False) as (em, db):
+            assert em is None
+            assert db is mock_db
+
+        mock_em_class.assert_not_called()
+        mock_db.close.assert_called_once()
+
+    @patch("abstracts_explorer.mcp_server.load_clustering_data")
+    def test_clustering_resources_closes_on_exception(self, mock_load):
+        """Clustering resources are closed when the managed block raises."""
+        mock_cm = Mock()
+        mock_cm.embeddings_manager = Mock()
+        mock_db = Mock()
+        mock_load.return_value = (mock_cm, mock_db)
+
+        from abstracts_explorer.mcp_server import _get_clustering_resources
+
+        with pytest.raises(RuntimeError):
+            with _get_clustering_resources() as (cm, db):
+                assert cm is mock_cm
+                assert db is mock_db
+                raise RuntimeError("boom")
+
+        mock_cm.embeddings_manager.close.assert_called_once()
+        mock_db.close.assert_called_once()
+
+
 class TestAnalyzeClusterTopics:
     """Tests for analyze_cluster_topics function."""
 
@@ -406,6 +469,76 @@ class TestMCPTools:
         call_args = mock_db.get_clustering_cache.call_args_list[0]
         assert call_args[1]["conference"] == "NeurIPS"
         assert call_args[1]["year"] == 2025
+
+
+class TestToolResourceCleanup:
+    """Tests that tool failures still release MCP resources."""
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_search_papers_closes_on_error(self, mock_config, mock_db_class, mock_em_class):
+        """search_papers closes resources when the database search fails."""
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config.return_value = mock_config_obj
+        mock_em = Mock()
+        mock_db = Mock()
+        mock_em_class.return_value = mock_em
+        mock_db_class.return_value = mock_db
+        mock_db.search_papers_semantic.side_effect = RuntimeError("boom")
+
+        from abstracts_explorer.mcp_server import search_papers
+
+        result = json.loads(search_papers(topic_keywords="transformers", conference="NeurIPS"))
+
+        assert "boom" in result["error"]
+        mock_em.close.assert_called_once()
+        mock_db.close.assert_called_once()
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_topic_evolution_closes_on_error(self, mock_config, mock_db_class, mock_em_class):
+        """get_topic_evolution closes resources when a database lookup fails."""
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config.return_value = mock_config_obj
+        mock_em = Mock()
+        mock_db = Mock()
+        mock_em_class.return_value = mock_em
+        mock_db_class.return_value = mock_db
+        mock_db.get_years.side_effect = RuntimeError("boom")
+
+        from abstracts_explorer.mcp_server import get_topic_evolution
+
+        result = json.loads(get_topic_evolution(topic_keywords="transformers", conferences=["NeurIPS"]))
+
+        assert "boom" in result["error"]
+        mock_em.close.assert_called_once()
+        mock_db.close.assert_called_once()
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_analyze_topic_relevance_closes_on_error(self, mock_config, mock_db_class, mock_em_class):
+        """analyze_topic_relevance closes resources when the search fails."""
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config.return_value = mock_config_obj
+        mock_em = Mock()
+        mock_db = Mock()
+        mock_em_class.return_value = mock_em
+        mock_db_class.return_value = mock_db
+        mock_em.find_papers_within_distance.side_effect = RuntimeError("boom")
+
+        from abstracts_explorer.mcp_server import analyze_topic_relevance
+
+        result = json.loads(analyze_topic_relevance(topic="transformers", conferences=["NeurIPS"]))
+
+        assert "boom" in result["error"]
+        mock_em.close.assert_called_once()
+        mock_db.close.assert_called_once()
 
 
 class TestParseConferenceYear:
@@ -1413,6 +1546,7 @@ class TestGetPaperDetails:
 
         assert "error" in result
         assert "DB connection failed" in result["error"]
+        mock_db.close.assert_called_once()
 
 
 if __name__ == "__main__":

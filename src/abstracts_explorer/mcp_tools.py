@@ -13,7 +13,8 @@ import copy
 import inspect
 import json
 import logging
-from typing import Callable, Dict, List, Any, Optional
+from dataclasses import dataclass
+from typing import Callable, Dict, List, Any, Optional, Tuple
 
 from abstracts_explorer.mcp_server import (
     get_conference_topics,
@@ -56,263 +57,200 @@ def _abbreviate_result(text: str, max_length: int = 200) -> str:
     return text[:max_length] + "…"
 
 
-def _normalize_search_papers_args(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Normalise argument shapes produced by LLMs for the ``search_papers`` tool.
+def _identity(value: Any) -> Any:
+    """Return *value* unchanged."""
+    return value
 
-    LLMs occasionally produce slightly wrong argument shapes, e.g. a singular
-    ``"year"`` key instead of ``"years"``, or a list for scalar string fields.
-    This function corrects those mismatches so the downstream function call
-    always receives the expected types.
 
-    Normalizations applied:
-    * ``year`` (int or list) → ``years`` (list of int)
-    * ``topic_keywords`` as a list → joined string
-    * ``conference`` as a list → first element string
-    * ``conferences`` (list, wrong field name) → ``conference`` (str, first element)
-    * ``limit``, ``num_results``, ``max_results``, ``count`` → ``n_results``
+def _as_list(value: Any) -> List[Any]:
+    """Wrap a scalar in a list; keep lists unchanged."""
+    return value if isinstance(value, list) else [value]
 
-    Parameters
-    ----------
-    arguments : dict
-        Raw arguments dict coming from the LLM / ``execute_mcp_tool`` caller.
 
-    Returns
-    -------
-    dict
-        A new dict with normalized argument values.
-    """
-    args = dict(arguments)
+def _join_list(value: Any) -> Any:
+    """Join a list of keywords into a space-separated string."""
+    if isinstance(value, list):
+        return " ".join(str(item) for item in value)
+    return value
 
-    # Normalize 'year' → 'years' (LLMs often use singular form)
-    if "year" in args and "years" not in args:
-        year_val = args.pop("year")
-        if isinstance(year_val, list):
-            args["years"] = year_val
-        else:
-            args["years"] = [year_val]
-    elif "year" in args:
-        args.pop("year")  # 'years' already present; drop the duplicate
 
-    # Normalize topic_keywords: list → space-joined string
-    if "topic_keywords" in args and isinstance(args["topic_keywords"], list):
-        args["topic_keywords"] = " ".join(str(k) for k in args["topic_keywords"])
+def _first_or_none(value: Any) -> Any:
+    """Return the first list element, or *value* when it is not a list."""
+    if isinstance(value, list):
+        return value[0] if value else None
+    return value
 
-    # Normalize conference: list → first element string
-    if "conference" in args and isinstance(args["conference"], list):
-        args["conference"] = args["conference"][0] if args["conference"] else None
 
-    # Normalize 'conferences' (wrong field name) → 'conference' if not already set
-    if "conferences" in args and "conference" not in args:
-        conferences_val = args.pop("conferences")
-        if isinstance(conferences_val, list) and conferences_val:
-            args["conference"] = conferences_val[0]
-        elif isinstance(conferences_val, str):
-            args["conference"] = conferences_val
-    elif "conferences" in args:
-        args.pop("conferences")  # 'conference' already present; drop duplicate
+def _first_int_or_none(value: Any) -> Optional[int]:
+    """Convert a scalar or first list element to an int."""
+    value = _first_or_none(value)
+    if value is None:
+        return None
+    return int(value)
 
-    # Normalize 'limit', 'num_results', 'max_results', 'count' → 'n_results'
-    for alias in ("limit", "num_results", "max_results", "count"):
-        if alias in args and "n_results" not in args:
-            args["n_results"] = args.pop(alias)
-        elif alias in args:
-            args.pop(alias)
-    if "n_results" in args:
+
+def _to_int_list_or_none(value: Any) -> Optional[List[int]]:
+    """Convert a value to a list of ints, discarding invalid entries."""
+    values = value if isinstance(value, list) else [value]
+    converted: List[int] = []
+    for item in values:
         try:
-            args["n_results"] = int(args["n_results"])
-        except (ValueError, TypeError):
-            args.pop("n_results")
+            converted.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    return converted or None
 
-    return args
+
+def _to_conference_list(value: Any) -> Any:
+    """Normalize a conference value to list form."""
+    if isinstance(value, list):
+        return value
+    if value is None:
+        return None
+    return [value]
 
 
-def _normalize_get_topic_evolution_args(arguments: Dict[str, Any]) -> Dict[str, Any]:
+def _to_paper_ids(value: Any) -> Any:
+    """Split a comma-separated paper ID string into a list."""
+    if isinstance(value, str):
+        return [uid.strip() for uid in value.split(",") if uid.strip()]
+    return value
+
+
+@dataclass(frozen=True)
+class NormRule:
     """
-    Normalise argument shapes produced by LLMs for the ``get_topic_evolution`` tool.
+    One normalization rule for LLM-generated tool arguments.
 
     Parameters
     ----------
-    arguments : dict
-        Raw arguments dict from the LLM.
-
-    Returns
-    -------
-    dict
-        A new dict with normalized argument values.
+    target : str
+        Canonical argument name.
+    aliases : tuple of str, optional
+        Alternate names produced by the LLM.  Aliases are dropped when the
+        canonical name is already present.
+    convert : callable, optional
+        Conversion applied to the selected value.
+    convert_existing : bool, optional
+        Whether to convert the value when the canonical name is already
+        present.  Defaults to ``True``.
+    drop_on_error : bool, optional
+        Remove the canonical argument when conversion raises.  Otherwise the
+        argument is set to ``None``.
     """
-    args = dict(arguments)
 
-    # Normalize topic_keywords: list → space-joined string
-    if "topic_keywords" in args and isinstance(args["topic_keywords"], list):
-        args["topic_keywords"] = " ".join(str(k) for k in args["topic_keywords"])
-
-    # Normalize start_year / end_year: list → first element int
-    for key in ("start_year", "end_year"):
-        if key in args and isinstance(args[key], list):
-            args[key] = args[key][0] if args[key] else None
-
-    return args
+    target: str
+    aliases: Tuple[str, ...] = ()
+    convert: Callable[[Any], Any] = _identity
+    convert_existing: bool = True
+    drop_on_error: bool = False
 
 
-def _normalize_analyze_topic_relevance_args(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Normalise argument shapes produced by LLMs for the ``analyze_topic_relevance`` tool.
+SEARCH_PAPERS_RULES = [
+    NormRule("years", ("year",), _as_list, convert_existing=False),
+    NormRule("topic_keywords", ("query",), _join_list),
+    NormRule("conference", ("conferences",), _first_or_none),
+    NormRule(
+        "n_results",
+        ("limit", "num_results", "max_results", "count"),
+        int,
+        drop_on_error=True,
+    ),
+]
 
-    Parameters
-    ----------
-    arguments : dict
-        Raw arguments dict from the LLM.
+GET_TOPIC_EVOLUTION_RULES = [
+    NormRule("topic_keywords", (), _join_list),
+    NormRule("start_year", (), _first_or_none),
+    NormRule("end_year", (), _first_or_none),
+]
 
-    Returns
-    -------
-    dict
-        A new dict with normalized argument values.
-    """
-    args = dict(arguments)
+ANALYZE_TOPIC_RELEVANCE_RULES = [
+    NormRule("topic", (), _join_list),
+    NormRule("conferences", ("conference",), _to_conference_list),
+]
 
-    # Normalize topic: list → space-joined string
-    if "topic" in args and isinstance(args["topic"], list):
-        args["topic"] = " ".join(str(k) for k in args["topic"])
-
-    # Normalize conference → conferences if wrong field name used
-    if "conference" in args and "conferences" not in args:
-        conf_val = args.pop("conference")
-        if isinstance(conf_val, str):
-            args["conferences"] = [conf_val]
-        elif isinstance(conf_val, list):
-            args["conferences"] = conf_val
-
-    return args
+GET_PAPER_DETAILS_RULES = [
+    NormRule("year", (), _first_int_or_none),
+    NormRule("conference", (), _first_or_none),
+]
 
 
-def _normalize_get_paper_details_args(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Normalise argument shapes produced by LLMs for the ``get_paper_details`` tool.
-
-    Normalizations applied:
-    * ``year`` as a list → first element int
-    * ``year`` as a string → int
-    * ``conference`` as a list → first element string
-
-    Parameters
-    ----------
-    arguments : dict
-        Raw arguments dict from the LLM.
-
-    Returns
-    -------
-    dict
-        A new dict with normalized argument values.
-    """
-    args = dict(arguments)
-
-    # Normalize year: list → first element
-    if "year" in args and isinstance(args["year"], list):
-        args["year"] = args["year"][0] if args["year"] else None
-
-    # Normalize year: string → int
-    if "year" in args and isinstance(args["year"], str):
-        try:
-            args["year"] = int(args["year"])
-        except (ValueError, TypeError):
-            args["year"] = None
-
-    # Normalize conference: list → first element string
-    if "conference" in args and isinstance(args["conference"], list):
-        args["conference"] = args["conference"][0] if args["conference"] else None
-
-    return args
-
-
-def _normalize_interesting_paper_tool_args(
-    arguments: Dict[str, Any],
-    array_conference: bool = True,
-) -> Dict[str, Any]:
-    """
-    Normalise argument shapes for the interesting-paper tools.
-
-    Handles common LLM quirks such as ``ids``/``paper_uids`` aliases,
-    singular ``year``/``conference`` fields, list-valued conferences, and
-    ``limit``/``num_results`` aliases for ``n_results``.
-
-    Parameters
-    ----------
-    arguments : dict
-        Raw tool arguments.
-    array_conference : bool, optional
-        When ``True`` (recommendation tool), conferences are exposed as
-        ``conferences`` (list).  When ``False`` (summary tool), they are
-        exposed as ``conference`` (single string).
-    """
-    args = dict(arguments)
-
-    for alias in ("ids", "paper_uids", "uids"):
-        if alias in args and "paper_ids" not in args:
-            args["paper_ids"] = args.pop(alias)
-        elif alias in args:
-            args.pop(alias)
-
-    if "paper_ids" in args and isinstance(args["paper_ids"], str):
-        args["paper_ids"] = [uid.strip() for uid in args["paper_ids"].split(",") if uid.strip()]
-
-    # Normalize year -> years
-    if "year" in args and "years" not in args:
-        year_val = args.pop("year")
-        args["years"] = year_val if isinstance(year_val, list) else [year_val]
-    elif "year" in args:
-        args.pop("year")
-
-    if "years" in args:
-        if not isinstance(args["years"], list):
-            args["years"] = [args["years"]]
-        converted_years = []
-        for year in args["years"]:
-            try:
-                converted_years.append(int(year))
-            except (TypeError, ValueError):
-                continue
-        args["years"] = converted_years or None
-
+def _interesting_paper_rules(array_conference: bool) -> List[NormRule]:
+    """Build normalization rules for the interesting-paper tools."""
     if array_conference:
-        # Normalize conference -> conferences
-        if "conference" in args and "conferences" not in args:
-            conference_val = args.pop("conference")
-            if isinstance(conference_val, list):
-                args["conferences"] = conference_val
-            elif conference_val is not None:
-                args["conferences"] = [conference_val]
-        elif "conference" in args:
-            args.pop("conference")
-
-        if "conferences" in args and isinstance(args["conferences"], str):
-            args["conferences"] = [args["conferences"]]
+        conference_rule = NormRule("conferences", ("conference",), _to_conference_list)
     else:
-        # Normalize conferences -> conference (single value)
-        if "conferences" in args and "conference" not in args:
-            conference_val = args.pop("conferences")
-            if isinstance(conference_val, list):
-                args["conference"] = conference_val[0] if conference_val else None
-            elif conference_val is not None:
-                args["conference"] = conference_val
-        elif "conferences" in args:
-            args.pop("conferences")
+        conference_rule = NormRule("conference", ("conferences",), _first_or_none)
 
-        if "conference" in args and isinstance(args["conference"], list):
-            args["conference"] = args["conference"][0] if args["conference"] else None
+    return [
+        NormRule("paper_ids", ("ids", "paper_uids", "uids"), _to_paper_ids),
+        NormRule("years", ("year",), _to_int_list_or_none),
+        conference_rule,
+        NormRule(
+            "n_results",
+            ("limit", "num_results", "max_results", "count"),
+            int,
+            drop_on_error=True,
+        ),
+    ]
 
-    for alias in ("limit", "num_results", "max_results", "count"):
-        if alias in args and "n_results" not in args:
-            args["n_results"] = args.pop(alias)
-        elif alias in args:
-            args.pop(alias)
-    if "n_results" in args:
+
+INTERESTING_PAPER_SINGLE_RULES = _interesting_paper_rules(array_conference=False)
+INTERESTING_PAPER_ARRAY_RULES = _interesting_paper_rules(array_conference=True)
+
+
+def _normalize_args(arguments: Dict[str, Any], rules: List[NormRule]) -> Dict[str, Any]:
+    """
+    Normalize argument shapes produced by LLMs using declarative rules.
+
+    Parameters
+    ----------
+    arguments : dict
+        Raw arguments dict from the LLM.
+    rules : list of NormRule
+        Rules to apply in order.
+
+    Returns
+    -------
+    dict
+        A new dict with normalized argument values.
+    """
+    args = dict(arguments)
+
+    for rule in rules:
+        if rule.target in args:
+            value = args[rule.target]
+            for alias in rule.aliases:
+                args.pop(alias, None)
+            if not rule.convert_existing:
+                continue
+        else:
+            alias = next((name for name in rule.aliases if name in args), None)
+            if alias is None:
+                continue
+            value = args.pop(alias)
+            for other_alias in rule.aliases:
+                args.pop(other_alias, None)
+
         try:
-            args["n_results"] = int(args["n_results"])
+            args[rule.target] = rule.convert(value)
         except (ValueError, TypeError):
-            args.pop("n_results")
+            if rule.drop_on_error:
+                args.pop(rule.target, None)
+            else:
+                args[rule.target] = None
 
     return args
+
+
+def _execute_tool(
+    func: Callable,
+    arguments: Dict[str, Any],
+    rules: List[NormRule],
+) -> Any:
+    """Normalize arguments, filter unknown keys, and invoke *func*."""
+    args = _filter_unknown_kwargs(func, _normalize_args(arguments, rules))
+    return func(**args)
 
 
 def _filter_unknown_kwargs(func: Callable, kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -701,39 +639,29 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
 
     try:
         if tool_name == "analyze_topic_relevance":
-            args = _filter_unknown_kwargs(analyze_topic_relevance, _normalize_analyze_topic_relevance_args(arguments))
-            result = analyze_topic_relevance(**args)
+            result = _execute_tool(analyze_topic_relevance, arguments, ANALYZE_TOPIC_RELEVANCE_RULES)
         elif tool_name == "get_conference_topics":
-            args = _filter_unknown_kwargs(get_conference_topics, arguments)
-            result = get_conference_topics(**args)
+            result = _execute_tool(get_conference_topics, arguments, [])
         elif tool_name == "get_topic_evolution":
-            args = _filter_unknown_kwargs(get_topic_evolution, _normalize_get_topic_evolution_args(arguments))
-            result = get_topic_evolution(**args)
+            result = _execute_tool(get_topic_evolution, arguments, GET_TOPIC_EVOLUTION_RULES)
         elif tool_name == "search_papers":
-            # Normalize argument names/types — LLMs may send 'query', 'year', or list values
-            args = _normalize_search_papers_args(arguments)
-            if "query" in args and "topic_keywords" not in args:
-                args["topic_keywords"] = args.pop("query")
-            args = _filter_unknown_kwargs(search_papers, args)
-            result = search_papers(**args)
+            result = _execute_tool(search_papers, arguments, SEARCH_PAPERS_RULES)
         elif tool_name == "get_cluster_visualization":
-            args = _filter_unknown_kwargs(get_cluster_visualization, arguments)
-            result = get_cluster_visualization(**args)
+            result = _execute_tool(get_cluster_visualization, arguments, [])
         elif tool_name == "get_paper_details":
-            args = _filter_unknown_kwargs(get_paper_details, _normalize_get_paper_details_args(arguments))
-            result = get_paper_details(**args)
+            result = _execute_tool(get_paper_details, arguments, GET_PAPER_DETAILS_RULES)
         elif tool_name == "summarize_interesting_papers":
-            args = _filter_unknown_kwargs(
+            result = _execute_tool(
                 summarize_interesting_papers,
-                _normalize_interesting_paper_tool_args(arguments, array_conference=False),
+                arguments,
+                INTERESTING_PAPER_SINGLE_RULES,
             )
-            result = summarize_interesting_papers(**args)
         elif tool_name == "recommend_related_papers":
-            args = _filter_unknown_kwargs(
+            result = _execute_tool(
                 recommend_related_papers,
-                _normalize_interesting_paper_tool_args(arguments),
+                arguments,
+                INTERESTING_PAPER_ARRAY_RULES,
             )
-            result = recommend_related_papers(**args)
         else:
             # Return error JSON for unknown tools
             error_result = {"error": f"Unknown MCP tool: {tool_name}"}

@@ -364,35 +364,26 @@ graph TD
         RCHAT["chat()"]
         RBUILD["_build_agent()"]
 
-        subgraph "⚠ Duplicate: Tool wrappers (6 identical patterns)"
+        subgraph "Explicit Tool Wrappers (8)"
             TW1["_tool_search_papers"]
             TW2["_tool_get_conference_topics"]
             TW3["_tool_get_topic_evolution"]
             TW4["_tool_analyze_topic_relevance"]
             TW5["_tool_get_cluster_visualization"]
             TW6["_tool_get_paper_details"]
+            TW7["_tool_summarize_interesting_papers"]
+            TW8["_tool_recommend_related_papers"]
         end
+
+        RH["_run_rag_tool<br/>(logging + result capture + formatting)"]
     end
 
     subgraph "MCP Tools (mcp_tools.py)"
         EXEC["execute_mcp_tool<br/>(dispatcher)"]
         SCHEMA["get_mcp_tools_schema"]
-
-        subgraph "⚠ Duplicate: Normalization (4 similar functions)"
-            N1["_normalize_search_papers_args"]
-            N2["_normalize_get_topic_evolution_args"]
-            N3["_normalize_analyze_topic_relevance_args"]
-            N4["_normalize_get_paper_details_args"]
-        end
-
-        subgraph "⚠ Duplicate: Formatters (6 similar functions)"
-            F1["_format_topic_relevance_result"]
-            F2["_format_conference_topics_result"]
-            F3["_format_topic_evolution_result"]
-            F4["_format_search_papers_result"]
-            F5["_format_visualization_result"]
-            F6["_format_paper_details_result"]
-        end
+        NORM["_normalize_args(arguments, rules)"]
+        RULES["NormRule rule tables"]
+        FORMAT["format_tool_result_for_llm"]
     end
 
     subgraph "MCP Server (mcp_server.py)"
@@ -403,18 +394,19 @@ graph TD
             S4["analyze_topic_relevance"]
             S5["get_cluster_visualization"]
             S6["get_paper_details"]
+            S7["summarize_interesting_papers"]
+            S8["recommend_related_papers"]
         end
 
-        subgraph "⚠ Duplicate: Resource init"
-            RI["get_config → EmbeddingsManager → DatabaseManager<br/>(repeated in each tool function)"]
-        end
+        RES["_get_mcp_resources()<br/>_get_clustering_resources()"]
 
         subgraph "Shared Where-clause Builder (embeddings.py)"
             WB["build_chromadb_where_clause"]
         end
     end
 
-    RBUILD --> TW1 & TW2 & TW3 & TW4 & TW5 & TW6
+    RBUILD --> TW1 & TW2 & TW3 & TW4 & TW5 & TW6 & TW7 & TW8
+    TW1 & TW2 & TW3 & TW4 & TW5 & TW6 & TW7 & TW8 --> RH
 
     TW1 --> S1
     TW2 --> S2
@@ -422,31 +414,18 @@ graph TD
     TW4 --> S4
     TW5 --> S5
     TW6 --> S6
+    TW7 --> S7
+    TW8 --> S8
 
-    EXEC --> N1 --> S1
-    EXEC --> N2 --> S3
-    EXEC --> N3 --> S4
-    EXEC --> N4 --> S6
+    EXEC --> NORM
+    NORM --> RULES
+    EXEC --> S1 & S2 & S3 & S4 & S5 & S6 & S7 & S8
+    EXEC --> FORMAT
 
     S1 --> WB
-
-    style TW1 fill:#ffcccc,stroke:#cc0000
-    style TW2 fill:#ffcccc,stroke:#cc0000
-    style TW3 fill:#ffcccc,stroke:#cc0000
-    style TW4 fill:#ffcccc,stroke:#cc0000
-    style TW5 fill:#ffcccc,stroke:#cc0000
-    style TW6 fill:#ffcccc,stroke:#cc0000
-    style N1 fill:#ffcccc,stroke:#cc0000
-    style N2 fill:#ffcccc,stroke:#cc0000
-    style N3 fill:#ffcccc,stroke:#cc0000
-    style N4 fill:#ffcccc,stroke:#cc0000
-    style F1 fill:#ffffcc,stroke:#cccc00
-    style F2 fill:#ffffcc,stroke:#cccc00
-    style F3 fill:#ffffcc,stroke:#cccc00
-    style F4 fill:#ffffcc,stroke:#cccc00
-    style F5 fill:#ffffcc,stroke:#cccc00
-    style F6 fill:#ffffcc,stroke:#cccc00
-    style RI fill:#ffcccc,stroke:#cc0000
+    S1 & S3 & S4 & S8 --> RES
+    S6 & S7 --> RES
+    S2 & S5 --> RES
 ```
 
 ## Web UI Request Flow
@@ -565,9 +544,9 @@ severity:
 | 2 | CLI command header printing | 15+ | cli.py | Medium |
 | 3 | TF-IDF keyword extraction | 2 | clustering.py | Medium |
 | 4 | LLM label generation (OpenAI call + fallback) | 3 | clustering.py | Medium |
-| 5 | RAG tool wrapper functions (identical pattern) | 6 | rag.py | Medium |
-| 6 | MCP argument normalization functions | 4 | mcp_tools.py | Medium |
-| 7 | Resource init in MCP tools (config → embed → db) | 6 | mcp_server.py | Medium |
+| 5 | RAG tool execution/logging tail | 8 | rag.py | Resolved (`_run_rag_tool`) |
+| 6 | MCP argument normalization functions | 8 tools | mcp_tools.py | Resolved (`NormRule` + `_normalize_args`) |
+| 7 | Resource init in MCP tools (config → embed → db) | 8 | mcp_server.py | Resolved (`_get_mcp_resources`) |
 | 8 | Conference/year argument resolution | 8+ | cli.py | Low |
 | 9 | Paper markdown formatting (session grouping) | 2 | export_utils.py | Low |
 | 10 | Error handling + traceback pattern | 15+ | cli.py | Low |
