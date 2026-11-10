@@ -9,7 +9,7 @@ import os
 import socket
 import pytest
 
-import httpx
+import httpx2
 import openai
 
 from abstracts_explorer.config import get_config
@@ -150,9 +150,9 @@ def check_lm_studio_available():
         finally:
             em.close()
 
-    except (httpx.HTTPError, openai.OpenAIError, OSError, ConnectionError):
-        # Catch network and API errors: the openai client uses httpx
-        # internally, so network errors surface as httpx/openai exceptions
+    except (httpx2.HTTPError, openai.OpenAIError, OSError, ConnectionError):
+        # Catch network and API errors: the openai client uses httpx2
+        # internally, so network errors surface as httpx2/openai exceptions
         # rather than requests exceptions.
         _lm_studio_available_cache = False
         return False

@@ -4,13 +4,10 @@ import asyncio
 import threading
 import time
 
-import httpx
+import httpx2
 import pytest
 
-from abstracts_explorer.embeddings import (
-    AsyncRateLimitedTransport,
-    RateLimitedTransport,
-)
+from abstracts_explorer.embeddings import RateLimitedTransport
 from abstracts_explorer.rate_limiter import (
     TokenBucketRateLimiter,
     get_global_rate_limiter,
@@ -257,12 +254,12 @@ class TestWaitressScenario:
 class TestAsyncTokenBucketAcquire:
     def test_async_acquire_single_token(self):
         limiter = TokenBucketRateLimiter(requests_per_minute=60)
-        asyncio.get_event_loop().run_until_complete(limiter.async_acquire(tokens=1.0))
+        asyncio.run(limiter.async_acquire(tokens=1.0))
         assert limiter._tokens == pytest.approx(59.0, abs=0.5)
 
     def test_async_acquire_multiple_tokens(self):
         limiter = TokenBucketRateLimiter(requests_per_minute=120)
-        asyncio.get_event_loop().run_until_complete(limiter.async_acquire(tokens=10.0))
+        asyncio.run(limiter.async_acquire(tokens=10.0))
         assert limiter._tokens == pytest.approx(110.0, abs=0.5)
 
     def test_async_blocks_until_token_available(self):
@@ -274,7 +271,7 @@ class TestAsyncTokenBucketAcquire:
             await limiter.async_acquire(tokens=1.0)
 
         start = time.monotonic()
-        asyncio.get_event_loop().run_until_complete(acquire())
+        asyncio.run(acquire())
         elapsed = time.monotonic() - start
 
         assert elapsed >= 0.8
@@ -286,32 +283,36 @@ class TestAsyncTokenBucketAcquire:
             await limiter.async_acquire(tokens=1.0)
 
         start = time.monotonic()
-        asyncio.get_event_loop().run_until_complete(acquire())
+        asyncio.run(acquire())
         elapsed = time.monotonic() - start
 
         assert elapsed < 0.1
 
 
-class TestAsyncRateLimitedTransport:
+class TestRateLimitedTransport:
     def test_transport_init_creates_global_limiter(self):
         set_global_rate_limiter(None)
-        _ = AsyncRateLimitedTransport(httpx.AsyncHTTPTransport(), requests_per_minute=60)
+        _ = RateLimitedTransport(httpx2.AsyncHTTPTransport(), requests_per_minute=60)
         gl = get_global_rate_limiter()
         assert gl is not None
         assert gl.requests_per_minute == 60
 
     def test_async_transport_forwards_request(self):
         set_global_rate_limiter(None)
-        async_transport = httpx.AsyncHTTPTransport()
-        transport = AsyncRateLimitedTransport(async_transport, requests_per_minute=60)
+
+        def handler(request):
+            return httpx2.Response(200, json={"ok": True})
+
+        transport = RateLimitedTransport(httpx2.MockTransport(handler), requests_per_minute=60)
 
         async def send():
-            request = httpx.Request("GET", "http://example.com")
+            request = httpx2.Request("GET", "http://example.com")
             response = await transport.handle_async_request(request)
             return response
 
-        response = asyncio.get_event_loop().run_until_complete(send())
+        response = asyncio.run(send())
         assert response.status_code == 200
+        assert response.json() == {"ok": True}
 
     def test_async_transport_acquires_token(self):
         set_global_rate_limiter(None)
@@ -319,21 +320,21 @@ class TestAsyncRateLimitedTransport:
         set_global_rate_limiter(limiter)
         before = limiter._tokens
 
-        transport = AsyncRateLimitedTransport(httpx.AsyncHTTPTransport(), requests_per_minute=60)
+        transport = RateLimitedTransport(httpx2.AsyncHTTPTransport(), requests_per_minute=60)
 
         async def send():
-            request = httpx.Request("GET", "http://example.com")
+            request = httpx2.Request("GET", "http://example.com")
             return await transport.handle_async_request(request)
 
-        asyncio.get_event_loop().run_until_complete(send())
+        asyncio.run(send())
         assert limiter._tokens < before
 
 
 class TestSyncAsyncSharedLimiter:
     def test_sync_and_async_share_same_limiter(self):
         set_global_rate_limiter(None)
-        sync_transport = RateLimitedTransport(httpx.HTTPTransport(), requests_per_minute=60)
-        async_transport = AsyncRateLimitedTransport(httpx.AsyncHTTPTransport(), requests_per_minute=60)
+        sync_transport = RateLimitedTransport(httpx2.HTTPTransport(), requests_per_minute=60)
+        async_transport = RateLimitedTransport(httpx2.AsyncHTTPTransport(), requests_per_minute=60)
         assert sync_transport._rate_limiter is async_transport._rate_limiter
 
     def test_async_depletes_tokens_for_sync(self):
@@ -343,13 +344,13 @@ class TestSyncAsyncSharedLimiter:
         limiter._last_update = time.monotonic()
         set_global_rate_limiter(limiter)
 
-        _ = AsyncRateLimitedTransport(httpx.AsyncHTTPTransport(), requests_per_minute=60)
+        _ = RateLimitedTransport(httpx2.AsyncHTTPTransport(), requests_per_minute=60)
 
         async def acquire_all():
             for _ in range(25):
                 await limiter.async_acquire(tokens=1.0)
 
-        asyncio.get_event_loop().run_until_complete(acquire_all())
+        asyncio.run(acquire_all())
         limiter._tokens = limiter._tokens  # no-op to confirm access
         sync_after = limiter._tokens
         assert sync_after <= 6
@@ -384,7 +385,7 @@ class TestMultithreadedAsyncRateLimiting:
             await asyncio.gather(*[worker() for _ in range(5)])
 
         start = time.monotonic()
-        asyncio.get_event_loop().run_until_complete(run_all())
+        asyncio.run(run_all())
         elapsed = time.monotonic() - start
 
         assert len(acquired) == 10
@@ -407,7 +408,7 @@ class TestMultithreadedAsyncRateLimiting:
         async def run_all():
             await asyncio.gather(*[worker() for _ in range(20)])
 
-        asyncio.get_event_loop().run_until_complete(run_all())
+        asyncio.run(run_all())
         assert len(completed) == 20
 
     def test_concurrent_async_tasks_spread(self):
@@ -427,7 +428,7 @@ class TestMultithreadedAsyncRateLimiting:
         async def run_all():
             await asyncio.gather(*[worker() for _ in range(10)])
 
-        asyncio.get_event_loop().run_until_complete(run_all())
+        asyncio.run(run_all())
 
         assert len(timestamps) == 10
         sorted_ts = sorted(timestamps)
@@ -461,7 +462,7 @@ class TestMultithreadedAsyncRateLimiting:
         threads = [threading.Thread(target=sync_worker) for _ in range(2)]
         for t in threads:
             t.start()
-        asyncio.get_event_loop().run_until_complete(run_async_tasks())
+        asyncio.run(run_async_tasks())
         for t in threads:
             t.join()
 
