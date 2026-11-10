@@ -48,6 +48,8 @@ dev = [
     "webdriver-manager>=4.0.0",
     "black>=26.3.1",
     "ruff>=0.15.16",
+    "mypy>=1.10.0",
+    "types-requests>=2.31.0",
   ]
 docs = [
     "sphinx>=7.0.0",

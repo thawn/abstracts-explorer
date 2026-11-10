@@ -71,6 +71,10 @@ This includes:
 - **pytest-mock**: For test mocking
 - **selenium**: For browser automation testing
 - **webdriver-manager**: For managing browser drivers
+- **black**: For code formatting
+- **ruff**: For linting
+- **mypy**: For type checking (required by the pre-commit hook)
+- **types-requests**: Type stubs for `requests`
 
 ### Web Interface Dependencies
 
