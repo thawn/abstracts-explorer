@@ -80,20 +80,23 @@ In the chat interface:
 ```python
 from abstracts_explorer.database import DatabaseManager
 
-# Open database
+# Open database (connection settings come from PAPER_DB)
 db = DatabaseManager()
 
-# Get all papers
-papers = db.get_all_papers()
+# Get all papers (limit=0 disables the default limit)
+papers = db.get_paper(limit=0)
 
-# Search by title
-results = db.search_papers(title="transformer")
+# Keyword search across title, abstract, and keywords
+results = db.search_papers(keyword="transformer")
 
-# Get papers by year
-papers_2025 = db.get_papers_by_year(2025)
+# Field-specific substring search
+title_matches = db.search_papers(field_filters={"title": "attention"})
 
-# Get authors for a paper
-authors = db.get_authors_for_paper(paper_id)
+# Filter by year
+papers_2025 = db.search_papers(years=[2025])
+
+# Authors are stored on the paper record as a semicolon-separated string
+authors = papers[0]["authors"] if papers else None
 ```
 
 ### Downloading Papers

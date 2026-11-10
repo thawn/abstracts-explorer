@@ -372,7 +372,7 @@ class TestAISTATSPluginDatabaseIntegration:
                 db.create_tables()
                 db.add_papers(data)
 
-                papers = db.query("SELECT uid, title, abstract, year, conference, authors FROM papers")
+                papers = db._query("SELECT uid, title, abstract, year, conference, authors FROM papers")
                 assert len(papers) == 1
 
                 paper = papers[0]

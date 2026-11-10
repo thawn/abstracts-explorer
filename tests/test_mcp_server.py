@@ -609,7 +609,7 @@ class TestTopicEvolutionAndRelevance:
         # Setup database mock
         mock_db = Mock()
         mock_db_class.return_value = mock_db
-        mock_db.get_years_for_conference.return_value = [2023, 2024]
+        mock_db.get_years.return_value = [2023, 2024]
         mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 100}
 
         # Import and call the tool
@@ -669,7 +669,7 @@ class TestTopicEvolutionAndRelevance:
         # Setup database mock - DB has years 2022-2025
         mock_db = Mock()
         mock_db_class.return_value = mock_db
-        mock_db.get_years_for_conference.return_value = [2022, 2023, 2024, 2025]
+        mock_db.get_years.return_value = [2022, 2023, 2024, 2025]
         mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 50}
 
         from abstracts_explorer.mcp_server import get_topic_evolution
@@ -721,7 +721,7 @@ class TestTopicEvolutionAndRelevance:
         # Setup database mock
         mock_db = Mock()
         mock_db_class.return_value = mock_db
-        mock_db.get_years_for_conference.return_value = [2024]
+        mock_db.get_years.return_value = [2024]
         mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 200}
 
         from abstracts_explorer.mcp_server import get_topic_evolution
@@ -783,7 +783,7 @@ class TestTopicEvolutionAndRelevance:
         # Setup database mock
         mock_db = Mock()
         mock_db_class.return_value = mock_db
-        mock_db.get_years_for_conference.return_value = [2023, 2024]
+        mock_db.get_years.return_value = [2023, 2024]
 
         def _get_stats(year, conference):
             if conference == "NeurIPS":
@@ -851,6 +851,16 @@ class TestTopicEvolutionAndRelevance:
 
         # Setup database mock
         mock_db = Mock()
+        mock_db.search_papers_semantic.return_value = [
+            {
+                "uid": "p1",
+                "title": "Paper 1",
+                "year": current_year,
+                "conference": "NeurIPS",
+                "session": "Oral",
+                "authors": [],
+            }
+        ]
         mock_db_class.return_value = mock_db
 
         # Import and call the tool with WHERE clause
@@ -866,13 +876,12 @@ class TestTopicEvolutionAndRelevance:
         assert result["topic"] == "llm"
         assert result["papers_found"] >= 1
 
-        # Verify search_similar was called with merged WHERE clause (session + conference)
-        mock_em.search_similar.assert_called_once()
-        call_args = mock_em.search_similar.call_args
-        where_arg = call_args[1]["where"]
-        assert "$and" in where_arg
-        assert {"session": "Oral"} in where_arg["$and"]
-        assert {"conference": "NeurIPS"} in where_arg["$and"]
+        # Verify the DB search entry point received the filter arguments
+        mock_db.search_papers_semantic.assert_called_once()
+        call_kwargs = mock_db.search_papers_semantic.call_args.kwargs
+        assert call_kwargs["where"] == {"session": "Oral"}
+        assert call_kwargs["conferences"] == ["NeurIPS"]
+        assert call_kwargs["years"] == [current_year, current_year - 1]
 
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
     @patch("abstracts_explorer.mcp_server.DatabaseManager")
@@ -902,6 +911,9 @@ class TestTopicEvolutionAndRelevance:
 
         # Setup database mock
         mock_db = Mock()
+        mock_db.search_papers_semantic.return_value = [
+            {"uid": "p1", "title": "Paper 1", "year": current_year, "conference": "NeurIPS", "authors": []}
+        ]
         mock_db_class.return_value = mock_db
 
         # Import and call the tool with complex WHERE clause
@@ -916,16 +928,11 @@ class TestTopicEvolutionAndRelevance:
         result = json.loads(result_str)
         assert result["topic"] == "deep learning"
 
-        # Verify search_similar was called with complex WHERE clause
-        mock_em.search_similar.assert_called_once()
-        call_args = mock_em.search_similar.call_args
-        where_arg = call_args[1]["where"]
-
-        # Should preserve the complex $and structure and add conference
-        assert "$and" in where_arg
-        assert {"year": {"$gte": 2024}} in where_arg["$and"]
-        assert {"session": {"$in": ["Oral Session 1", "Spotlight Session"]}} in where_arg["$and"]
-        assert {"conference": "NeurIPS"} in where_arg["$and"]
+        # Verify the complex filter was forwarded unchanged
+        mock_db.search_papers_semantic.assert_called_once()
+        call_kwargs = mock_db.search_papers_semantic.call_args.kwargs
+        assert call_kwargs["where"] == where_clause
+        assert call_kwargs["conferences"] == ["NeurIPS"]
 
     @patch("abstracts_explorer.mcp_server.load_clustering_data")
     @patch("abstracts_explorer.mcp_server.get_config")
@@ -1071,6 +1078,16 @@ class TestSearchPapersPaperCardFields:
             "distances": [[0.1]],
         }
         mock_db = Mock()
+        mock_db.search_papers_semantic.return_value = [
+            {
+                "uid": "abc123",
+                "title": "Test Paper",
+                "year": 2024,
+                "conference": "NeurIPS",
+                "authors": ["Alice", "Bob"],
+                "abstract": "Test abstract",
+            }
+        ]
         mock_db_class.return_value = mock_db
 
         from abstracts_explorer.mcp_server import search_papers
@@ -1119,6 +1136,16 @@ class TestSearchPapersPaperCardFields:
             "distances": [[0.1]],
         }
         mock_db = Mock()
+        mock_db.search_papers_semantic.return_value = [
+            {
+                "uid": "abc123",
+                "title": "Test Paper",
+                "year": 2024,
+                "conference": "NeurIPS",
+                "authors": ["Alice Smith", "Bob Jones", "Carol White"],
+                "abstract": "Test abstract",
+            }
+        ]
         mock_db_class.return_value = mock_db
 
         from abstracts_explorer.mcp_server import search_papers
@@ -1152,6 +1179,16 @@ class TestSearchPapersPaperCardFields:
             "distances": [[0.2]],
         }
         mock_db = Mock()
+        mock_db.search_papers_semantic.return_value = [
+            {
+                "uid": "xyz789",
+                "title": "No Authors Paper",
+                "year": 2024,
+                "conference": "ICLR",
+                "authors": [],
+                "abstract": "Abstract text",
+            }
+        ]
         mock_db_class.return_value = mock_db
 
         from abstracts_explorer.mcp_server import search_papers
@@ -1195,6 +1232,17 @@ class TestSearchPapersPaperCardFields:
             "distances": [[0.05]],
         }
         mock_db = Mock()
+        mock_db.search_papers_semantic.return_value = [
+            {
+                "uid": "p1",
+                "title": "Conference Paper",
+                "year": 2025,
+                "conference": "NeurIPS",
+                "session": "Oral",
+                "authors": ["Author A"],
+                "abstract": "Abstract",
+            }
+        ]
         mock_db_class.return_value = mock_db
 
         from abstracts_explorer.mcp_server import search_papers
@@ -1239,6 +1287,18 @@ class TestSearchPapersPaperCardFields:
             "distances": [[0.15]],
         }
         mock_db = Mock()
+        mock_db.search_papers_semantic.return_value = [
+            {
+                "uid": "p42",
+                "title": "Full Paper",
+                "year": 2024,
+                "conference": "ICML",
+                "session": "Best Paper Session",
+                "authors": ["First Author", "Second Author"],
+                "abstract": "This is the abstract text.",
+                "relevance_score": 0.85,
+            }
+        ]
         mock_db_class.return_value = mock_db
 
         from abstracts_explorer.mcp_server import search_papers
@@ -1315,7 +1375,7 @@ class TestGetPaperDetails:
         assert paper["authors"] == ["Smith, John", "Doe, Jane"]
         assert paper["paper_pdf_url"] == "https://example.com/paper.pdf"
         assert paper["keywords"] == "deep learning, transformers"
-        mock_db.search_papers.assert_called_once_with(keyword="Test Paper", conference=None, year=None, limit=5)
+        mock_db.search_papers.assert_called_once_with(keyword="Test Paper", conferences=None, years=None, limit=5)
 
     def test_lookup_by_paper_id(self):
         """get_paper_details performs exact UID/original_id lookup when paper_id is provided."""
@@ -1385,7 +1445,7 @@ class TestGetPaperDetails:
         with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
             get_paper_details(title="Paper", conference="ICLR", year=2024, limit=3)
 
-        mock_db.search_papers.assert_called_once_with(keyword="Paper", conference="ICLR", year=2024, limit=3)
+        mock_db.search_papers.assert_called_once_with(keyword="Paper", conferences=["ICLR"], years=[2024], limit=3)
 
     def test_limit_parameter(self):
         """limit parameter controls how many results are requested from DB."""
@@ -1397,7 +1457,7 @@ class TestGetPaperDetails:
         with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
             get_paper_details(title="Paper", limit=10)
 
-        mock_db.search_papers.assert_called_once_with(keyword="Paper", conference=None, year=None, limit=10)
+        mock_db.search_papers.assert_called_once_with(keyword="Paper", conferences=None, years=None, limit=10)
 
     def test_no_papers_found(self):
         """No matching papers returns papers_found=0 and empty list."""

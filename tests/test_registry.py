@@ -417,7 +417,7 @@ class TestDatabaseExportImport:
 
     def test_resolve_conference_name_from_db(self, tmp_path):
         """resolve_conference_name returns the DB-stored canonical name (case-insensitive match)."""
-        # Populate with mixed-case conference name (e.g. "ML4PS@Neurips")
+        # Populate with mixed-case conference name (e.g. "ML4PS")
         set_test_db(tmp_path / "db.db")
         db = DatabaseManager()
         db.create_tables()
@@ -430,16 +430,16 @@ class TestDatabaseExportImport:
                     session="Session 1",
                     poster_position="A1",
                     year=2025,
-                    conference="ML4PS@Neurips",
+                    conference="ML4PS",
                 ),
             ]
         )
 
         try:
             # Case-insensitive resolution should return stored canonical form
-            assert db.resolve_conference_name("ml4ps@neurips") == "ML4PS@Neurips"
-            assert db.resolve_conference_name("ML4PS@NEURIPS") == "ML4PS@Neurips"
-            assert db.resolve_conference_name("ML4PS@Neurips") == "ML4PS@Neurips"
+            assert db.resolve_conference_name("ml4ps") == "ML4PS"
+            assert db.resolve_conference_name("ML4PS") == "ML4PS"
+            assert db.resolve_conference_name("ML4PS") == "ML4PS"
             # Unknown conference raises DatabaseError
             from abstracts_explorer.database import DatabaseError
 
@@ -465,7 +465,7 @@ class TestDatabaseExportImport:
         """Import works correctly when conference name is resolved before calling import."""
         from abstracts_explorer.db_models import Paper
 
-        # Populate with mixed-case conference name (e.g. "ML4PS@Neurips")
+        # Populate with mixed-case conference name (e.g. "ML4PS")
         set_test_db(tmp_path / "db.db")
         db = DatabaseManager()
         db.create_tables()
@@ -478,7 +478,7 @@ class TestDatabaseExportImport:
                     session="Session 1",
                     poster_position="A1",
                     year=2025,
-                    conference="ML4PS@Neurips",
+                    conference="ML4PS",
                 ),
             ]
         )
@@ -486,11 +486,11 @@ class TestDatabaseExportImport:
         try:
             # Export with mixed-case conference
             export_path = tmp_path / "export.db"
-            db.export_papers_to_sqlite(export_path, "ML4PS@Neurips", 2025)
+            db.export_papers_to_sqlite(export_path, "ML4PS", 2025)
 
             # Resolve conference name first (as CLI would do), then import with exact name
-            resolved = db.resolve_conference_name("ml4ps@neurips")
-            assert resolved == "ML4PS@Neurips"
+            resolved = db.resolve_conference_name("ml4ps")
+            assert resolved == "ML4PS"
 
             count = db.import_papers_from_sqlite(export_path, resolved, 2025)
             assert count == 1

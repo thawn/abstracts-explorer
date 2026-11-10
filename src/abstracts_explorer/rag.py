@@ -925,12 +925,16 @@ class RAGChat:
                 for part in msg.parts:
                     part_kind = getattr(part, "part_kind", None)
                     if part_kind == "user-prompt":
-                        history.append({"role": "user", "content": part.content})
+                        content = getattr(part, "content", None)
+                        if isinstance(content, str):
+                            history.append({"role": "user", "content": content})
             elif kind == "response":
                 for part in msg.parts:
                     part_kind = getattr(part, "part_kind", None)
                     if part_kind == "text":
-                        history.append({"role": "assistant", "content": part.content})
+                        content = getattr(part, "content", None)
+                        if isinstance(content, str):
+                            history.append({"role": "assistant", "content": content})
         return history
 
     def export_conversation(self, output_path: Path) -> None:

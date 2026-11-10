@@ -160,7 +160,7 @@ def web_server(test_database, tmp_path_factory):
 
         set_test_db(str(test_database))
         db = DatabaseManager()
-        papers = db.query("SELECT * FROM papers")
+        papers = db._query("SELECT * FROM papers")
 
         for paper in papers:
             em.add_paper(paper)

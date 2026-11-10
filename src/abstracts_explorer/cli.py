@@ -20,7 +20,7 @@ import argcomplete
 from tqdm import tqdm
 
 from abstracts_explorer.config import Config, get_config
-from abstracts_explorer.database import DatabaseManager
+from abstracts_explorer.database import DatabaseManager, DatabaseError
 from abstracts_explorer.embeddings import EmbeddingsManager, EmbeddingsError
 from abstracts_explorer.clustering import perform_clustering, compute_clusters_with_cache, ClusteringError
 from abstracts_explorer.rag import RAGChat, RAGError
@@ -161,39 +161,33 @@ def _resolve_conference_arg(conference: Optional[str]) -> Optional[str]:
     return resolved_conference
 
 
-def _build_embeddings_where_clause(args: argparse.Namespace) -> Optional[str]:
+def _build_embeddings_where_filters(args: argparse.Namespace) -> Optional[Dict[str, Any]]:
     """
-    Build a SQL WHERE clause from --conference, --year, and --where arguments.
+    Build structured paper filters from --conference and --year arguments.
 
     The conference name in *args* is expected to already be resolved to its
-    canonical form (via ``DatabaseManager.resolve_conference_name``); an exact
-    comparison is used.
+    canonical form (via ``DatabaseManager.resolve_conference_name``).
 
     Parameters
     ----------
     args : argparse.Namespace
-        Command-line arguments that may contain conference, year, and where attributes.
+        Command-line arguments that may contain conference and year attributes.
 
     Returns
     -------
-    str or None
-        Combined WHERE clause string, or None if no filters specified.
+    dict or None
+        Structured where filters, or None if no filters were specified.
     """
-    conditions = []
+    where_filters: Dict[str, Any] = {}
     conference = getattr(args, "conference", None)
     year = getattr(args, "year", None)
-    where = getattr(args, "where", None)
 
     if conference:
-        # Escape single quotes; conference name is already resolved to canonical form
-        safe_conf = conference.replace("'", "''")
-        conditions.append(f"conference = '{safe_conf}'")
+        where_filters["conference"] = conference
     if year is not None:
-        conditions.append(f"year = {int(year)}")
-    if where:
-        conditions.append(f"({where})")
+        where_filters["year"] = int(year)
 
-    return " AND ".join(conditions) if conditions else None
+    return where_filters or None
 
 
 def _validate_embeddings_db(config: Config) -> bool:
@@ -242,7 +236,6 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         - force: Whether to reset existing collection
         - conference: Conference name to filter by (optional)
         - year: Year to filter by (optional)
-        - where: SQL WHERE clause to filter papers (optional)
 
     Returns
     -------
@@ -255,8 +248,8 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     conference = _resolve_conference_arg(getattr(args, "conference", None))
     args.conference = conference
 
-    # Build combined WHERE clause from --conference, --year, and --where
-    where_clause = _build_embeddings_where_clause(args)
+    # Build structured paper filters from --conference and --year
+    where_filters = _build_embeddings_where_filters(args)
 
     print("Abstracts Explorer - Embeddings Generator")
     print("=" * 70)
@@ -279,10 +272,8 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         total_papers = db.get_paper_count()
         print(f"\n📊 Found {total_papers:,} papers in database")
 
-        if where_clause:
-            # Count papers matching filter
-            filtered = db.query(f"SELECT COUNT(*) as count FROM papers WHERE {where_clause}")
-            filtered_count = filtered[0]["count"] if filtered else 0
+        if where_filters:
+            filtered_count = db.get_paper_count(where_filters=where_filters)
             print(f"📊 Filter will process {filtered_count:,} abstracts")
 
     # Initialize embeddings manager
@@ -362,9 +353,8 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
 
         # Determine total count for progress bar
         with DatabaseManager() as db:
-            if where_clause:
-                count_result = db.query(f"SELECT COUNT(*) as count FROM papers WHERE {where_clause}")
-                total_count = count_result[0]["count"] if count_result else 0
+            if where_filters:
+                total_count = db.get_paper_count(where_filters=where_filters)
             else:
                 total_count = db.get_paper_count()
 
@@ -377,7 +367,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
                 pbar.refresh()
 
             embedded_count = em.embed_from_database(
-                where_clause=where_clause,
+                where_filters=where_filters,
                 progress_callback=update_progress,
                 force_recreate=args.force,
             )
@@ -482,76 +472,60 @@ def search_command(args: argparse.Namespace) -> int:
             except Exception as e:
                 print(f"⚠️  Warning: Could not parse filter '{args.where}': {e}", file=sys.stderr)
 
-        # Add conference/year filters from dedicated options
-        if conference or year is not None:
-            if where_filter is None:
-                where_filter = {}
-            if conference:
-                # Conference name is already resolved to canonical form
-                where_filter["conference"] = conference
-            if year is not None:
-                # ChromaDB stores all metadata values as strings
-                where_filter["year"] = str(year)
-
-        # Perform search
+        # Perform search through the DatabaseManager search entry point
         print(f"\n🔍 Searching for: '{args.query}'...\n")
-        results = em.search_similar(
-            query=args.query,
-            n_results=args.n_results,
-            where=where_filter,
-        )
+        database = DatabaseManager()
+        try:
+            papers = database.search_papers_semantic(
+                args.query,
+                limit=args.n_results,
+                years=[year] if year is not None else None,
+                conferences=[conference] if conference else None,
+                distance_threshold=distance_threshold,
+                where=where_filter,
+                embeddings_manager=em,
+            )
+        finally:
+            database.close()
 
-        # Display results
-        if not results["ids"] or not results["ids"][0]:
+        if not papers:
             print("❌ No results found.")
             em.close()
             return 0
 
-        # Filter by distance threshold
-        ids = results["ids"][0]
-        metadatas = results["metadatas"][0]
-        distances = results["distances"][0]
-        documents = results.get("documents", [[]])[0]
-
-        filtered = [
-            (ids[i], metadatas[i], distances[i], documents[i] if documents else "")
-            for i in range(len(ids))
-            if distances[i] <= distance_threshold
-        ]
-
-        if not filtered:
-            print(f"❌ No results found within distance threshold {distance_threshold}.")
-            em.close()
-            return 0
-
-        num_results = len(filtered)
+        num_results = len(papers)
         print(f"✅ Found {num_results} similar paper(s):\n")
 
-        for i, (paper_id, metadata, distance, document) in enumerate(filtered):
-            similarity = 1 - distance if distance <= 1 else 0
+        for i, paper in enumerate(papers):
+            similarity = paper.get("similarity", 0.0)
 
-            print(f"{i + 1}. Paper ID: {paper_id}")
-            print(f"   Title: {metadata.get('title', 'N/A')}")
+            print(f"{i + 1}. Paper ID: {paper.get('uid', 'N/A')}")
+            print(f"   Title: {paper.get('title', 'N/A')}")
 
-            # Get author names from metadata
-            authors_display = metadata.get("authors", "N/A")
-
+            authors = paper.get("authors", [])
+            authors_display = "; ".join(authors) if isinstance(authors, list) else str(authors)
             print(f"   Authors: {authors_display}")
-            print(f"   Decision: {metadata.get('decision', 'N/A')}")
 
-            if metadata.get("topic"):
-                print(f"   Topic: {metadata.get('topic')}")
+            if paper.get("session"):
+                print(f"   Session: {paper.get('session')}")
 
-            if metadata.get("paper_url"):
-                print(f"   URL: {metadata.get('paper_url')}")
+            if paper.get("decision"):
+                print(f"   Decision: {paper.get('decision')}")
 
-            if metadata.get("poster_position"):
-                print(f"   Poster Position: {metadata.get('poster_position')}")
+            if paper.get("topic"):
+                print(f"   Topic: {paper.get('topic')}")
+
+            if paper.get("url") or paper.get("paper_url"):
+                print(f"   URL: {paper.get('url') or paper.get('paper_url')}")
+
+            if paper.get("poster_position"):
+                print(f"   Poster Position: {paper.get('poster_position')}")
 
             print(f"   Similarity: {similarity:.4f}")
 
-            if args.show_abstract and document:
-                abstract = document[:300] + "..." if len(document) > 300 else document
+            if args.show_abstract and paper.get("abstract"):
+                abstract = paper["abstract"]
+                abstract = abstract[:300] + "..." if len(abstract) > 300 else abstract
                 print(f"   Abstract: {abstract}")
 
             print()
@@ -640,11 +614,10 @@ def chat_command(args: argparse.Namespace) -> int:
         chat_conferences: Optional[List[str]] = None
         chat_years: Optional[List[int]] = None
         if conference:
-            rows = db.query(
-                "SELECT DISTINCT conference FROM papers WHERE LOWER(conference) = LOWER(?)",
-                (conference,),
-            )
-            stored_name = rows[0]["conference"] if rows else conference
+            try:
+                stored_name = db.resolve_conference_name(conference)
+            except DatabaseError:
+                stored_name = conference
             chat_conferences = [stored_name]
         if year is not None:
             chat_years = [year]
@@ -1164,6 +1137,9 @@ def delete_data_command(args: argparse.Namespace) -> int:
         print("❌ --year is required for the delete-data command.", file=sys.stderr)
         return 1
 
+    assert conference is not None
+    assert year is not None
+
     # Resolve conference name to canonical form
     try:
         conference = _resolve_conference_arg(conference)
@@ -1185,7 +1161,11 @@ def delete_data_command(args: argparse.Namespace) -> int:
     try:
         with DatabaseManager() as db:
             db.create_tables()
-            papers = db.search_papers(conference=conference, year=year, limit=0)
+            papers = db.search_papers(
+                conferences=[conference],
+                years=[year],
+                limit=0,
+            )
             paper_count = len(papers)
             cache_count = db.count_clustering_cache_by_conference_year(conference, year)
     except Exception as e:
@@ -3101,8 +3081,6 @@ Examples:
   # Embed only papers from 2025 (all conferences)
   abstracts-explorer create-embeddings --year 2025
 
-  # Combine with --where for additional filtering
-  abstracts-explorer create-embeddings --conference NeurIPS --where "award IS NOT NULL"
         """,
     )
     add_conference_year_args(embeddings_parser)
@@ -3133,12 +3111,6 @@ Examples:
         "--ignore-embedding-model-mismatch",
         action="store_true",
         help="Recreate embeddings after an embedding model mismatch without prompting",
-    )
-    embeddings_parser.add_argument(
-        "--where",
-        type=str,
-        default=None,
-        help="SQL WHERE clause to filter papers (e.g., \"decision LIKE '%%Accept%%'\")",
     )
     embeddings_parser.add_argument(
         "--requests-per-minute",
@@ -4127,12 +4099,6 @@ Examples:
         type=str,
         default=config.embedding_model,
         help=f"Name of the embedding model (default: {config.embedding_model})",
-    )
-    pre_process_parser.add_argument(
-        "--where",
-        type=str,
-        default=None,
-        help="SQL WHERE clause to filter papers for embedding",
     )
     pre_process_parser.add_argument(
         "--requests-per-minute",

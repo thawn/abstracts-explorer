@@ -18,7 +18,7 @@ from abstracts_explorer.cli import (
     main,
     search_command,
     setup_logging,
-    _build_embeddings_where_clause,
+    _build_embeddings_where_filters,
     _validate_embeddings_db,
     add_conference_year_args,
     pre_process_command,
@@ -55,69 +55,33 @@ def patch_get_config_for_test(monkeypatch, embeddings_path):
     monkeypatch.setattr("abstracts_explorer.cli.get_config", get_config_with_reload)
 
 
-class TestBuildEmbeddingsWhereClause:
-    """Test cases for _build_embeddings_where_clause helper."""
+class TestBuildEmbeddingsWhereFilters:
+    """Test cases for _build_embeddings_where_filters helper."""
 
     def test_no_filters(self):
         """No filters returns None."""
-        args = argparse.Namespace(conference=None, year=None, where=None)
-        assert _build_embeddings_where_clause(args) is None
+        args = argparse.Namespace(conference=None, year=None)
+        assert _build_embeddings_where_filters(args) is None
 
     def test_conference_only(self):
-        """Conference filter produces an exact-match WHERE clause."""
-        args = argparse.Namespace(conference="NeurIPS", year=None, where=None)
-        result = _build_embeddings_where_clause(args)
-        assert "conference = 'NeurIPS'" in result
+        """Conference filter produces an exact-match filter."""
+        args = argparse.Namespace(conference="NeurIPS", year=None)
+        assert _build_embeddings_where_filters(args) == {"conference": "NeurIPS"}
 
     def test_year_only(self):
-        """Year filter produces correct WHERE clause."""
-        args = argparse.Namespace(conference=None, year=2024, where=None)
-        assert _build_embeddings_where_clause(args) == "year = 2024"
+        """Year filter produces correct filter."""
+        args = argparse.Namespace(conference=None, year=2024)
+        assert _build_embeddings_where_filters(args) == {"year": 2024}
 
     def test_conference_and_year(self):
-        """Both conference and year produce combined WHERE clause."""
-        args = argparse.Namespace(conference="ICLR", year=2025, where=None)
-        result = _build_embeddings_where_clause(args)
-        assert "conference = 'ICLR'" in result
-        assert "year = 2025" in result
-        assert " AND " in result
-
-    def test_where_only(self):
-        """Raw --where produces parenthesised clause."""
-        args = argparse.Namespace(conference=None, year=None, where="award IS NOT NULL")
-        assert _build_embeddings_where_clause(args) == "(award IS NOT NULL)"
-
-    def test_conference_and_where(self):
-        """Conference + --where are combined with AND."""
-        args = argparse.Namespace(conference="NeurIPS", year=None, where="award IS NOT NULL")
-        result = _build_embeddings_where_clause(args)
-        assert "conference = 'NeurIPS'" in result
-        assert "(award IS NOT NULL)" in result
-        assert " AND " in result
-
-    def test_all_filters(self):
-        """All three filters are combined with AND."""
-        args = argparse.Namespace(conference="NeurIPS", year=2024, where="award IS NOT NULL")
-        result = _build_embeddings_where_clause(args)
-        assert "conference = 'NeurIPS'" in result
-        assert "year = 2024" in result
-        assert "(award IS NOT NULL)" in result
+        """Both conference and year produce combined filters."""
+        args = argparse.Namespace(conference="ICLR", year=2025)
+        assert _build_embeddings_where_filters(args) == {"conference": "ICLR", "year": 2025}
 
     def test_conference_with_quote(self):
-        """Single quotes in conference name are escaped."""
-        args = argparse.Namespace(conference="O'Reilly", year=None, where=None)
-        result = _build_embeddings_where_clause(args)
-        assert "O''Reilly" in result
-
-    def test_conference_exact_match(self):
-        """Conference name is used as-is (already resolved to canonical form)."""
-        args_lower = argparse.Namespace(conference="neurips", year=None, where=None)
-        args_upper = argparse.Namespace(conference="NeurIPS", year=None, where=None)
-        result_lower = _build_embeddings_where_clause(args_lower)
-        result_upper = _build_embeddings_where_clause(args_upper)
-        # Exact match — the literal value must match what was passed
-        assert "conference = 'neurips'" in result_lower
-        assert "conference = 'NeurIPS'" in result_upper
+        """Conference names are passed through unchanged."""
+        args = argparse.Namespace(conference="O'Reilly", year=None)
+        assert _build_embeddings_where_filters(args) == {"conference": "O'Reilly"}
 
 
 class TestValidateEmbeddingsDB:
@@ -1173,70 +1137,6 @@ class TestCLI:
         assert "Successfully generated embeddings for 2 abstracts" in captured.out
         assert "Vector database saved to" in captured.out
 
-    def test_create_embeddings_with_where_clause(self, tmp_path, capsys, monkeypatch):
-        """Test create-embeddings with WHERE clause filter."""
-        from abstracts_explorer import DatabaseManager
-
-        # Create a test database
-        db_path = tmp_path / "test.db"
-        set_test_db(db_path)
-        with DatabaseManager() as db:
-            db.create_tables()
-            papers = [
-                LightweightPaper(
-                    title="Paper 1",
-                    authors=["Author 1"],
-                    abstract="Abstract 1",
-                    session="Session 1",
-                    poster_position="P1",
-                    year=2025,
-                    conference="NeurIPS",
-                    award="Best Paper",
-                ),
-                LightweightPaper(
-                    title="Paper 2",
-                    authors=["Author 2"],
-                    abstract="Abstract 2",
-                    session="Session 2",
-                    poster_position="P2",
-                    year=2025,
-                    conference="NeurIPS",
-                    award=None,
-                ),
-            ]
-            db.add_papers(papers)
-
-        # Set EMBEDDING_DB and patch config reload
-        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
-
-        # Mock embeddings manager
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
-            mock_em = Mock()
-            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
-            mock_em.embed_from_database.return_value = 1
-            mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
-            mock_em.__enter__ = Mock(return_value=mock_em)
-            mock_em.__exit__ = Mock(return_value=False)
-            MockEM.return_value = mock_em
-
-            with patch.object(
-                sys,
-                "argv",
-                [
-                    "neurips-abstracts",
-                    "create-embeddings",
-                    "--where",
-                    "award IS NOT NULL",
-                ],
-            ):
-                exit_code = main()
-
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        assert "Filter will process 1 abstracts" in captured.out
-        assert "Successfully generated embeddings for 1 abstracts" in captured.out
-
     def test_create_embeddings_force_flag(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with --force flag."""
         from abstracts_explorer import DatabaseManager
@@ -1836,7 +1736,7 @@ class TestCLI:
 
         # Verify the WHERE clause was passed to embed_from_database
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
-        assert "conference = 'NeurIPS'" in call_kwargs["where_clause"]
+        assert call_kwargs["where_filters"]["conference"] == "NeurIPS"
 
     def test_create_embeddings_with_year(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with --year flag filters to one year."""
@@ -1898,7 +1798,7 @@ class TestCLI:
         assert "Filter will process 1 abstracts" in captured.out
 
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
-        assert "year = 2024" in call_kwargs["where_clause"]
+        assert call_kwargs["where_filters"]["year"] == 2024
 
     def test_create_embeddings_with_conference_and_year(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with both --conference and --year flags."""
@@ -1972,75 +1872,9 @@ class TestCLI:
         assert "Filter will process 1 abstracts" in captured.out
 
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
-        where = call_kwargs["where_clause"]
-        assert "conference = 'NeurIPS'" in where
-        assert "year = 2024" in where
-
-    def test_create_embeddings_conference_with_where(self, tmp_path, capsys, monkeypatch):
-        """Test create-embeddings combining --conference with --where clause."""
-        from abstracts_explorer import DatabaseManager
-
-        db_path = tmp_path / "test.db"
-        set_test_db(db_path)
-        with DatabaseManager() as db:
-            db.create_tables()
-            papers = [
-                LightweightPaper(
-                    title="Award Paper",
-                    abstract="Abstract 1",
-                    authors=["Author"],
-                    session="S1",
-                    poster_position="P1",
-                    year=2025,
-                    conference="NeurIPS",
-                    award="Best Paper",
-                ),
-                LightweightPaper(
-                    title="Regular Paper",
-                    abstract="Abstract 2",
-                    authors=["Author"],
-                    session="S2",
-                    poster_position="P2",
-                    year=2025,
-                    conference="NeurIPS",
-                ),
-            ]
-            db.add_papers(papers)
-
-        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
-
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
-            mock_em = Mock()
-            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
-            mock_em.embed_from_database.return_value = 1
-            mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
-            mock_em.__enter__ = Mock(return_value=mock_em)
-            mock_em.__exit__ = Mock(return_value=False)
-            MockEM.return_value = mock_em
-
-            with patch.object(
-                sys,
-                "argv",
-                [
-                    "neurips-abstracts",
-                    "create-embeddings",
-                    "--conference",
-                    "NeurIPS",
-                    "--where",
-                    "award IS NOT NULL",
-                ],
-            ):
-                exit_code = main()
-
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        assert "Filter will process 1 abstracts" in captured.out
-
-        call_kwargs = mock_em.embed_from_database.call_args.kwargs
-        where = call_kwargs["where_clause"]
-        assert "conference = 'NeurIPS'" in where
-        assert "(award IS NOT NULL)" in where
+        where = call_kwargs["where_filters"]
+        assert where["conference"] == "NeurIPS"
+        assert where["year"] == 2024
 
     def test_create_embeddings_default_embeds_all(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings without arguments embeds all papers."""
@@ -2098,7 +1932,7 @@ class TestCLI:
 
         # Verify no WHERE clause was passed (embeds all papers)
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
-        assert call_kwargs["where_clause"] is None
+        assert call_kwargs["where_filters"] is None
 
     def test_search_embeddings_not_found(self, tmp_path, capsys, monkeypatch):
         """Test search command with non-existent embeddings database."""
@@ -3024,9 +2858,9 @@ class TestCLI:
             mock_compute.return_value = mock_results
 
             mock_db_instance = Mock()
-            mock_db_instance.get_conferences.return_value = ["ML4PS@NeurIPS"]
+            mock_db_instance.get_conferences.return_value = ["ML4PS"]
             mock_db_instance.get_years.side_effect = lambda conference=None: [2023, 2024]
-            mock_db_instance.resolve_conference_name.return_value = "ML4PS@NeurIPS"
+            mock_db_instance.resolve_conference_name.return_value = "ML4PS"
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
@@ -3034,7 +2868,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "clustering", "pre-generate", "--conference", "ML4PS@NeurIPS"],
+                ["abstracts-explorer", "clustering", "pre-generate", "--conference", "ML4PS"],
             ):
                 exit_code = main()
 
@@ -3042,10 +2876,10 @@ class TestCLI:
         # 2 combos: 2023 + 2024
         assert mock_compute.call_count == 2
         all_calls = [(c[1]["conferences"], c[1]["years"]) for c in mock_compute.call_args_list]
-        assert (["ML4PS@NeurIPS"], [2023]) in all_calls
-        assert (["ML4PS@NeurIPS"], [2024]) in all_calls
+        assert (["ML4PS"], [2023]) in all_calls
+        assert (["ML4PS"], [2024]) in all_calls
         captured = capsys.readouterr()
-        assert "ML4PS@NeurIPS" in captured.out
+        assert "ML4PS" in captured.out
 
     def test_pre_generate_clustering_all_db_years_used(self, tmp_path, capsys, monkeypatch):
         """Test pre-generate-clustering uses all years from the database (no plugin filtering)."""
@@ -3159,10 +2993,10 @@ class TestCLI:
 
             # DatabaseManager used as context manager for conference resolution
             mock_db_instance = Mock()
-            mock_db_instance.get_conferences.return_value = ["ML4PS@NeurIPS", "NeurIPS"]
+            mock_db_instance.get_conferences.return_value = ["ML4PS", "NeurIPS"]
             mock_db_instance.get_years.side_effect = lambda conference=None: [2024]
             # resolve_conference_name returns the canonical form for "ml4ps@neurips"
-            mock_db_instance.resolve_conference_name.return_value = "ML4PS@NeurIPS"
+            mock_db_instance.resolve_conference_name.return_value = "ML4PS"
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
@@ -3186,7 +3020,7 @@ class TestCLI:
         assert exit_code == 0
         call_kwargs = mock_compute.call_args[1]
         # Should use the canonical spelling, not the user-supplied lower-case version
-        assert call_kwargs["conferences"] == ["ML4PS@NeurIPS"]
+        assert call_kwargs["conferences"] == ["ML4PS"]
         captured = capsys.readouterr()
         # Should print a resolution notice
         assert "ml4ps@neurips" in captured.out.lower()
@@ -3561,7 +3395,7 @@ class TestCLIEmbeddingsProgressAndStats:
 
             # Mock embed_from_database to simulate progress callbacks
 
-            def mock_embed(batch_size=10, where_clause=None, progress_callback=None, force_recreate=False):
+            def mock_embed(batch_size=10, where_filters=None, progress_callback=None, force_recreate=False):
                 # Simulate calling progress callback with (current, total) arguments
                 if progress_callback:
                     progress_callback(1, 3)
@@ -4080,7 +3914,7 @@ class TestDeleteDataCommand:
 
         # Verify papers deleted from DB
         with DatabaseManager() as db:
-            papers = db.search_papers(conference="NeurIPS", year=2024, limit=0)
+            papers = db.search_papers(conferences=["NeurIPS"], years=[2024], limit=0)
             assert len(papers) == 0
 
             # Verify clustering cache deleted

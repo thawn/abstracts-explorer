@@ -479,15 +479,16 @@ def get_available_filters_endpoint():
 
         configured_conf = config.default_conference or ""
         configured_year = config.default_year if config.default_year else None
-        effective_conf, effective_year = database.resolve_default_conference_year(configured_conf, configured_year)
+        default_result = database.confirm_default_conference_year_exists(configured_conf, configured_year)
 
         return jsonify(
             {
                 "conferences": conferences,
                 "years": years_sorted,
                 "conference_years": db_conference_years,
-                "default_conference": effective_conf,
-                "default_year": effective_year,
+                "default_conference": default_result["conference"],
+                "default_year": default_result["year"],
+                "default_conference_error": default_result["error"],
                 "default_distance_threshold": _SIMILAR_DISTANCE_THRESHOLD,
             }
         )
@@ -526,21 +527,22 @@ def search():
         if not query:
             return jsonify({"error": "Query is required"}), 400
 
+        database = get_database()
+
         if use_embeddings:
             # Semantic search using embeddings
             em = get_embeddings_manager()
-            database = get_database()
-            # Allow per-request override; fall back to the module-level default
             distance_threshold = float(data.get("distance_threshold", _SIMILAR_DISTANCE_THRESHOLD))
 
-            papers = em.search_papers_semantic(
+            papers = database.search_papers_keyword(
                 query=query,
-                database=database,
                 limit=limit,
                 sessions=sessions,
                 years=years,
                 conferences=conferences,
+                use_embeddings=True,
                 distance_threshold=distance_threshold,
+                embeddings_manager=em,
             )
 
             # Count total similar papers within distance threshold.
@@ -563,7 +565,6 @@ def search():
                 total_similar = None
         else:
             # Keyword search in database
-            database = get_database()
             papers = database.search_papers_keyword(
                 query=query,
                 limit=limit,
@@ -1032,7 +1033,7 @@ def papers_per_year():
         database = get_database()
 
         if conference:
-            years = database.get_years_for_conference(conference)
+            years = sorted(database.get_years(conference=conference))
         else:
             years = sorted(database.get_years())
 
@@ -1060,8 +1061,7 @@ def get_years():
     """
     try:
         database = get_database()
-        papers = database.query("SELECT DISTINCT year FROM papers WHERE year IS NOT NULL ORDER BY year")
-        years = [p["year"] for p in papers]
+        years = database.get_years()
         return jsonify({"years": years})
     except Exception as e:
         return jsonify({"error": str(e)}), 500

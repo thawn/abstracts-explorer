@@ -8,7 +8,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, cast
 
 from sqlalchemy import create_engine, event, select, delete, func, or_, and_, text
 from sqlalchemy.orm import sessionmaker, Session
@@ -134,7 +134,8 @@ class DatabaseManager:
         self.SessionLocal: Optional[sessionmaker] = None
         self._session: Optional[Session] = None
         self._schema_ready = False
-        self.connection = None  # Legacy attribute for backward compatibility (always None now)
+        self._raw_connection: Optional[Any] = None
+        self.connection: Optional[Any] = None  # Legacy attribute for backward compatibility
 
     @property
     def session(self) -> Session:
@@ -633,7 +634,7 @@ class DatabaseManager:
             self.session.commit()
 
             logger.info(f"Successfully donated chat transcript (rating={rating})")
-            return donation.id
+            return cast(int, donation.id)
 
         except ValueError:
             raise
@@ -747,7 +748,7 @@ class DatabaseManager:
             turn_counts = []
             for entry in all_entries:
                 try:
-                    turns = len(json.loads(entry.transcript))
+                    turns = len(json.loads(str(entry.transcript)))
                 except Exception:
                     turns = 0
                 turn_counts.append(turns)
@@ -845,7 +846,7 @@ class DatabaseManager:
             all_entries = self.session.query(ValidationData).all()
             total = len(all_entries)
             unique_papers = len({e.paper_uid for e in all_entries})
-            priorities = [e.priority for e in all_entries]
+            priorities = [int(e.priority) for e in all_entries]
             avg_priority = sum(priorities) / total if total > 0 else 0.0
             distribution: Dict[int, int] = {}
             for p in priorities:
@@ -943,12 +944,12 @@ class DatabaseManager:
             logger.error(f"Error deleting validation data: {e}", exc_info=True)
             raise DatabaseError(f"Failed to delete validation data: {e}")
 
-    def query(self, sql: str, parameters: tuple = ()) -> List[Dict[str, Any]]:
+    def _query(self, sql: str, parameters: tuple = ()) -> List[Dict[str, Any]]:
         """
-        Execute a SQL query and return results.
+        Execute a raw SQL query and return results.
 
-        Note: This method provides backward compatibility with raw SQL queries.
-        For new code, prefer using SQLAlchemy ORM methods.
+        This is a private helper.  Code outside this module must use the
+        SQLAlchemy-based public methods instead.
 
         Parameters
         ----------
@@ -966,14 +967,6 @@ class DatabaseManager:
         ------
         DatabaseError
             If query execution fails.
-
-        Examples
-        --------
-        >>> db = DatabaseManager()
-        >>> with db:
-        ...     results = db.query("SELECT * FROM papers WHERE session = ?", ("Poster",))
-        >>> for row in results:
-        ...     print(row['title'])
         """
         try:
             # Convert ? placeholders to :0, :1, :2 for SQLAlchemy
@@ -1002,14 +995,144 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Query failed: {str(e)}") from e
 
-    def get_paper_count(self) -> int:
+    def _build_where_conditions(self, where_filters: Optional[Dict[str, Any]]) -> List[Any]:
         """
-        Get the total number of papers in the database.
+        Translate a where-filter dictionary into SQLAlchemy conditions.
+
+        Filter keys are Paper column names (``author`` is accepted as an alias
+        for ``authors``).  A scalar value adds an equality condition.  A dict
+        value adds one or more operator conditions:
+
+        - ``$eq``, ``$ne``
+        - ``$in``, ``$nin``
+        - ``$contains`` (case-insensitive substring)
+        - ``$startswith``, ``$endswith``
+        - ``$gt``, ``$gte``, ``$lt``, ``$lte``
+
+        The logical operators ``$and``, ``$or`` and ``$not`` accept nested
+        filter dictionaries (``$not`` accepts one dict; the others accept a
+        list).
+        """
+        if not where_filters:
+            return []
+
+        columns = {c.name: c for c in Paper.__table__.columns if c.name != "created_at"}
+        alias_lower = {k.lower(): v for k, v in self.FIELD_ALIASES.items()}
+        conditions: List[Any] = []
+
+        for raw_key, value in where_filters.items():
+            key = raw_key.lower()
+
+            if key in ("$and", "$or"):
+                if not isinstance(value, list):
+                    raise DatabaseError(f"'{raw_key}' expects a list of filter dictionaries")
+                nested: List[List[Any]] = [self._build_where_conditions(item) for item in value]
+                flattened: List[Any] = [cond for group in nested for cond in group]
+                if flattened:
+                    conditions.append(and_(*flattened) if key == "$and" else or_(*flattened))
+                continue
+
+            if key == "$not":
+                if not isinstance(value, dict):
+                    raise DatabaseError("'$not' expects a filter dictionary")
+                not_conditions: List[Any] = self._build_where_conditions(value)
+                if not_conditions:
+                    conditions.append(~and_(*not_conditions))
+                continue
+
+            field_name = alias_lower.get(key, key)
+            column = columns.get(field_name)
+            if column is None:
+                raise DatabaseError(f"Unknown paper field: {raw_key}")
+
+            if isinstance(value, dict):
+                for op, operand in value.items():
+                    op_lower = op.lower()
+                    if op_lower == "$eq":
+                        conditions.append(column == operand)
+                    elif op_lower == "$ne":
+                        conditions.append(column != operand)
+                    elif op_lower == "$in":
+                        conditions.append(column.in_(operand))
+                    elif op_lower == "$nin":
+                        conditions.append(column.notin_(operand))
+                    elif op_lower == "$contains":
+                        conditions.append(column.ilike(f"%{operand}%"))
+                    elif op_lower == "$startswith":
+                        conditions.append(column.ilike(f"{operand}%"))
+                    elif op_lower == "$endswith":
+                        conditions.append(column.ilike(f"%{operand}"))
+                    elif op_lower == "$gt":
+                        conditions.append(column > operand)
+                    elif op_lower == "$gte":
+                        conditions.append(column >= operand)
+                    elif op_lower == "$lt":
+                        conditions.append(column < operand)
+                    elif op_lower == "$lte":
+                        conditions.append(column <= operand)
+                    else:
+                        raise DatabaseError(f"Unknown where-filter operator: {op}")
+            else:
+                conditions.append(column == value)
+
+        return conditions
+
+    def get_paper(
+        self,
+        where_filters: Optional[Dict[str, Any]] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve papers matching ``where_filters``.
+
+        This is the single authoritative paper-search method.  All other
+        paper retrieval methods delegate to it.
+
+        Parameters
+        ----------
+        where_filters : dict, optional
+            Mapping of Paper column names to filter values.  See
+            :meth:`_build_where_conditions` for the supported value forms.
+        limit : int, default=100
+            Maximum number of results.  ``0`` or ``None`` means no limit.
+
+        Returns
+        -------
+        list of dict
+            Matching papers as dictionaries.
+
+        Raises
+        ------
+        DatabaseError
+            If the query fails.
+        """
+        try:
+            stmt = select(Paper)
+            conditions = self._build_where_conditions(where_filters)
+            if conditions:
+                stmt = stmt.where(and_(*conditions))
+            if limit:
+                stmt = stmt.limit(limit)
+            papers = self.session.execute(stmt).scalars().all()
+            return [self._paper_to_dict(paper) for paper in papers]
+        except DatabaseError:
+            raise
+        except Exception as e:
+            raise DatabaseError(f"Failed to retrieve papers: {str(e)}") from e
+
+    def get_paper_count(self, where_filters: Optional[Dict[str, Any]] = None) -> int:
+        """
+        Count papers in the database, optionally filtered.
+
+        Parameters
+        ----------
+        where_filters : dict, optional
+            Mapping of Paper column names to filter values.
 
         Returns
         -------
         int
-            Number of papers.
+            Number of matching papers.
 
         Raises
         ------
@@ -1017,8 +1140,14 @@ class DatabaseManager:
             If query fails.
         """
         try:
-            count = self.session.execute(select(func.count()).select_from(Paper)).scalar()
+            stmt = select(func.count()).select_from(Paper)
+            conditions = self._build_where_conditions(where_filters)
+            if conditions:
+                stmt = stmt.where(and_(*conditions))
+            count = self.session.execute(stmt).scalar()
             return count or 0
+        except DatabaseError:
+            raise
         except Exception as e:
             raise DatabaseError(f"Failed to count papers: {str(e)}") from e
 
@@ -1041,11 +1170,8 @@ class DatabaseManager:
         DatabaseError
             If query fails.
         """
-        try:
-            paper = self.session.execute(select(Paper).where(Paper.uid == uid)).scalar_one_or_none()
-            return self._paper_to_dict(paper) if paper else None
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve paper by UID: {str(e)}") from e
+        papers = self.get_paper({"uid": uid}, limit=1)
+        return papers[0] if papers else None
 
     def get_papers_by_uids(self, uids: List[str]) -> List[Dict[str, Any]]:
         """
@@ -1070,20 +1196,13 @@ class DatabaseManager:
         if not uids:
             return []
 
-        try:
-            papers = self.session.execute(select(Paper).where(Paper.uid.in_(uids))).scalars().all()
-            by_uid = {paper.uid: self._paper_to_dict(paper) for paper in papers}
-            return [by_uid[uid] for uid in uids if uid in by_uid]
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve papers by UIDs: {str(e)}") from e
+        papers = self.get_paper({"uid": {"$in": uids}}, limit=0)
+        by_uid = {paper["uid"]: paper for paper in papers}
+        return [by_uid[uid] for uid in uids if uid in by_uid]
 
     def get_paper_by_original_id_or_uid(self, paper_id: str) -> Optional[Dict[str, Any]]:
         """
         Retrieve a paper by its UID or original_id (whichever matches first).
-
-        Tries uid first, then falls back to original_id. All formatting
-        (e.g. author deserialization) is performed inside this method so that
-        callers always receive a fully formatted paper dictionary.
 
         Parameters
         ----------
@@ -1100,13 +1219,11 @@ class DatabaseManager:
         DatabaseError
             If the database query fails.
         """
-        try:
-            paper = self.session.execute(
-                select(Paper).where((Paper.uid == paper_id) | (Paper.original_id == paper_id)).limit(1)
-            ).scalar_one_or_none()
-            return self._paper_to_dict(paper) if paper else None
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve paper by id/uid: {str(e)}") from e
+        papers = self.get_paper(
+            {"$or": [{"uid": paper_id}, {"original_id": paper_id}]},
+            limit=1,
+        )
+        return papers[0] if papers else None
 
     #: Paper model column names that can be used as ``field:"value"`` filters
     #: in search queries.  Internal columns (``uid``, ``created_at``) are
@@ -1121,16 +1238,17 @@ class DatabaseManager:
         self,
         keyword: Optional[str] = None,
         field_filters: Optional[Dict[str, str]] = None,
-        session: Optional[str] = None,
         sessions: Optional[List[str]] = None,
-        year: Optional[int] = None,
         years: Optional[List[int]] = None,
-        conference: Optional[str] = None,
         conferences: Optional[List[str]] = None,
         limit: int = 100,
     ) -> List[Dict[str, Any]]:
         """
-        Search for papers by various criteria (lightweight schema).
+        Search papers in the SQL database.
+
+        This method handles database search requests with keyword,
+        field-specific, session, year and conference filters.  It delegates
+        the actual query to :meth:`get_paper`.
 
         Parameters
         ----------
@@ -1138,18 +1256,12 @@ class DatabaseManager:
             Keyword to search in title, abstract, or keywords fields.
         field_filters : dict of str to str, optional
             Mapping of Paper column names to search values.  Each entry adds
-            a case-insensitive ILIKE ``%value%`` condition on the corresponding
-            column (e.g. ``{"authors": "Smith", "award": "Best Paper"}``).
-        session : str, optional
-            Single session to filter by (deprecated, use sessions instead).
+            a case-insensitive substring condition on the corresponding column
+            (e.g. ``{"authors": "Smith", "award": "Best Paper"}``).
         sessions : list[str], optional
             List of sessions to filter by (matches ANY).
-        year : int, optional
-            Single year to filter by (deprecated, use years instead).
         years : list[int], optional
             List of years to filter by (matches ANY).
-        conference : str, optional
-            Single conference to filter by (deprecated, use conferences instead).
         conferences : list[str], optional
             List of conferences to filter by (matches ANY).
         limit : int, default=100
@@ -1164,72 +1276,42 @@ class DatabaseManager:
         ------
         DatabaseError
             If search fails.
-
-        Examples
-        --------
-        >>> db = DatabaseManager("neurips.db")
-        >>> with db:
-        ...     papers = db.search_papers(keyword="neural network", limit=10)
-        >>> for paper in papers:
-        ...     print(paper['title'])
-
-        >>> # Search with multiple sessions
-        >>> papers = db.search_papers(sessions=["Session 1", "Session 2"])
-
-        >>> # Search with years
-        >>> papers = db.search_papers(years=[2024, 2025])
-
-        >>> # Search by field filter
-        >>> papers = db.search_papers(field_filters={"authors": "John Smith"})
         """
         try:
-            # Build query conditions
-            conditions = []
+            filter_terms: List[Dict[str, Any]] = []
 
             if keyword:
-                search_pattern = f"%{keyword}%"
-                conditions.append(
-                    or_(
-                        Paper.title.ilike(search_pattern),
-                        Paper.abstract.ilike(search_pattern),
-                        Paper.keywords.ilike(search_pattern),
-                    )
+                filter_terms.append(
+                    {
+                        "$or": [
+                            {"title": {"$contains": keyword}},
+                            {"abstract": {"$contains": keyword}},
+                            {"keywords": {"$contains": keyword}},
+                        ]
+                    }
                 )
 
             if field_filters:
                 for field_name, value in field_filters.items():
-                    col = getattr(Paper, field_name, None)
-                    if col is not None:
-                        conditions.append(col.ilike(f"%{value}%"))
+                    filter_terms.append({field_name: {"$contains": value}})
 
-            # Handle sessions (prefer list form, fall back to single)
-            session_list = sessions if sessions else ([session] if session else [])
-            if session_list:
-                conditions.append(Paper.session.in_(session_list))
+            if sessions:
+                filter_terms.append({"session": {"$in": sessions}})
+            if years:
+                filter_terms.append({"year": {"$in": years}})
+            if conferences:
+                filter_terms.append({"conference": {"$in": conferences}})
 
-            # Handle years (prefer list form, fall back to single)
-            year_list = years if years else ([year] if year else [])
-            if year_list:
-                conditions.append(Paper.year.in_(year_list))
+            if not filter_terms:
+                where_filters: Optional[Dict[str, Any]] = None
+            elif len(filter_terms) == 1:
+                where_filters = filter_terms[0]
+            else:
+                where_filters = {"$and": filter_terms}
 
-            # Handle conferences (prefer list form, fall back to single)
-            conference_list = conferences if conferences else ([conference] if conference else [])
-            if conference_list:
-                conditions.append(Paper.conference.in_(conference_list))
-
-            # Build query
-            stmt = select(Paper)
-            if conditions:
-                stmt = stmt.where(and_(*conditions))
-            if limit:
-                stmt = stmt.limit(limit)
-
-            # Execute query
-            results = self.session.execute(stmt).scalars().all()
-
-            # Convert ORM objects to dicts
-            return [self._paper_to_dict(paper) for paper in results]
-
+            return self.get_paper(where_filters, limit=limit)
+        except DatabaseError:
+            raise
         except Exception as e:
             raise DatabaseError(f"Search failed: {str(e)}") from e
 
@@ -1298,50 +1380,61 @@ class DatabaseManager:
         sessions: Optional[List[str]] = None,
         years: Optional[List[int]] = None,
         conferences: Optional[List[str]] = None,
+        *,
+        use_embeddings: bool = False,
+        distance_threshold: float = 1.1,
+        embeddings_manager: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Perform keyword-based search with filtering and field filter parsing.
+        Perform a user-query search, optionally using semantic embeddings.
 
-        This is a convenience method that wraps search_papers and formats
-        the results for web API consumption, including author parsing.
-
-        Supports ``field:"value"`` syntax for any Paper model column, e.g.
-        ``'authors:"John Smith" transformers'`` or ``'award:"Best Paper"'``.
+        This is the main search entry point for the web UI and CLI.  It parses
+        ``field:"value"`` filters from *query*, converts the remaining filter
+        arguments into structured where filters, and then delegates either to
+        :meth:`search_papers` or :meth:`search_papers_semantic`.
 
         Parameters
         ----------
         query : str
-            Keyword to search in title, abstract, or keywords fields.
-            May include ``field:"value"`` filters for any Paper column.
+            Search query text.  May include ``field:"value"`` filters.
         limit : int, optional
-            Maximum number of results, by default 10
+            Maximum number of results, by default 10.
         sessions : list of str, optional
-            Filter by paper sessions
+            Filter by paper sessions.
         years : list of int, optional
-            Filter by publication years
+            Filter by publication years.
         conferences : list of str, optional
-            Filter by conference names
+            Filter by conference names.
+        use_embeddings : bool, optional
+            Use semantic search instead of SQL keyword search.
+        distance_threshold : float, optional
+            Maximum embedding distance for semantic results.
 
         Returns
         -------
         list of dict
-            List of paper dictionaries with parsed authors
+            List of paper dictionaries.
 
-        Examples
-        --------
-        >>> papers = db.search_papers_keyword(
-        ...     "neural networks",
-        ...     limit=5,
-        ...     years=[2024, 2025]
-        ... )
-        >>> papers = db.search_papers_keyword('authors:"John Smith"')
-        >>> papers = db.search_papers_keyword('award:"Best Paper" transformers')
+        Raises
+        ------
+        DatabaseError
+            If the search fails.
         """
-        # Parse field filters from query
         field_filters, remaining_query = self.parse_field_filters(query)
 
-        # Keyword search in database with multiple filter support
-        papers = self.search_papers(
+        if use_embeddings:
+            return self.search_papers_semantic(
+                remaining_query,
+                limit=limit,
+                sessions=sessions,
+                years=years,
+                conferences=conferences,
+                distance_threshold=distance_threshold,
+                field_filters=field_filters,
+                embeddings_manager=embeddings_manager,
+            )
+
+        return self.search_papers(
             keyword=remaining_query if remaining_query else None,
             field_filters=field_filters if field_filters else None,
             sessions=sessions,
@@ -1350,7 +1443,180 @@ class DatabaseManager:
             limit=limit,
         )
 
+    @staticmethod
+    def _papers_from_chroma_results(results: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Build paper dictionaries from raw ChromaDB results as a fallback."""
+        ids = results.get("ids", [[]])[0] if results.get("ids") else []
+        if not ids:
+            return []
+
+        metadatas = results.get("metadatas", [[]])[0] if results.get("metadatas") else []
+        distances = results.get("distances", [[]])[0] if results.get("distances") else []
+        documents = results.get("documents", [[]])[0] if results.get("documents") else []
+
+        papers: List[Dict[str, Any]] = []
+        for idx, paper_id in enumerate(ids):
+            metadata = dict(metadatas[idx]) if idx < len(metadatas) and metadatas[idx] else {}
+            authors = metadata.get("authors", [])
+            if isinstance(authors, str):
+                authors = [name.strip() for name in authors.split(";") if name.strip()]
+
+            year = metadata.get("year")
+            try:
+                year = int(year) if year is not None else None
+            except (TypeError, ValueError):
+                pass
+
+            distance = distances[idx] if idx < len(distances) else None
+            paper: Dict[str, Any] = {
+                **metadata,
+                "uid": paper_id,
+                "title": metadata.get("title", ""),
+                "authors": authors,
+                "abstract": documents[idx] if idx < len(documents) else metadata.get("abstract", ""),
+                "session": metadata.get("session", ""),
+                "conference": metadata.get("conference", ""),
+                "year": year,
+                "poster_position": metadata.get("poster_position"),
+                "url": metadata.get("url") or metadata.get("paper_url"),
+            }
+            if distance is not None:
+                paper["distance"] = distance
+                paper["similarity"] = max(0.0, 1.0 - float(distance))
+            papers.append(paper)
+
         return papers
+
+    def search_papers_semantic(
+        self,
+        query: str,
+        limit: int = 10,
+        sessions: Optional[List[str]] = None,
+        years: Optional[List[int]] = None,
+        conferences: Optional[List[str]] = None,
+        distance_threshold: float = 1.1,
+        field_filters: Optional[Dict[str, str]] = None,
+        where: Optional[Dict[str, Any]] = None,
+        embeddings_manager: Optional[Any] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Perform semantic paper search using embeddings.
+
+        Field filters parsed from the query are applied through the SQL
+        database.  The remaining query text is used for the embedding
+        similarity search.  Author-name matches are returned first when the
+        query text matches an author.
+
+        Parameters
+        ----------
+        query : str
+            Semantic query text (field filters already removed when
+            *field_filters* is supplied).
+        limit : int, optional
+            Maximum number of results, by default 10.
+        sessions : list of str, optional
+            Filter by paper sessions.
+        years : list of int, optional
+            Filter by publication years.
+        conferences : list of str, optional
+            Filter by conference names.
+        distance_threshold : float, optional
+            Maximum embedding distance for results, by default 1.1.
+        field_filters : dict, optional
+            Field filters to apply in SQL.  When omitted, filters are parsed
+            from *query*.
+        where : dict, optional
+            Additional ChromaDB metadata filter.  Merged with the
+            session/year/conference filters.
+
+        Returns
+        -------
+        list of dict
+            Paper dictionaries ordered by relevance.
+
+        Raises
+        ------
+        DatabaseError
+            If the search fails.
+        """
+        from abstracts_explorer.embeddings import EmbeddingsManager
+        from abstracts_explorer.paper_utils import PaperFormattingError, format_search_results
+
+        if field_filters is None:
+            field_filters, query = self.parse_field_filters(query)
+        # Query consisting only of field filters: no meaningful embedding.
+        if field_filters and not query:
+            return self.search_papers(
+                field_filters=field_filters,
+                sessions=sessions,
+                years=years,
+                conferences=conferences,
+                limit=limit,
+            )
+
+        semantic_query = query
+        matching_uids: Optional[List[str]] = None
+
+        if field_filters:
+            matching_papers = self.search_papers(field_filters=field_filters, limit=0)
+            if not matching_papers:
+                return []
+            matching_uids = [paper["uid"] for paper in matching_papers]
+        else:
+            author_matches = self.search_papers(
+                field_filters={"authors": semantic_query},
+                sessions=sessions,
+                years=years,
+                conferences=conferences,
+                limit=limit,
+            )
+            if author_matches:
+                return author_matches
+
+        filter_conditions: List[Dict[str, Any]] = []
+        if sessions:
+            filter_conditions.append({"session": {"$in": sessions}})
+        if years:
+            filter_conditions.append({"year": {"$in": [str(y) for y in years]}})
+        if conferences:
+            filter_conditions.append({"conference": {"$in": conferences}})
+
+        if len(filter_conditions) > 1:
+            where_filter: Optional[Dict[str, Any]] = {"$and": filter_conditions}
+        elif len(filter_conditions) == 1:
+            where_filter = filter_conditions[0]
+        else:
+            where_filter = None
+
+        if where:
+            if where_filter is None:
+                where_filter = where
+            else:
+                where_filter = {"$and": [where, where_filter]}
+
+        owns_manager = embeddings_manager is None
+        em = embeddings_manager or EmbeddingsManager()
+        try:
+            results = em.search_similar(
+                semantic_query,
+                n_results=limit * 2,
+                where=where_filter,
+                ids=matching_uids,
+            )
+            try:
+                papers = format_search_results(results, self, include_documents=False)
+            except PaperFormattingError:
+                papers = []
+            if not papers:
+                # Keep semantic search usable when embeddings exist but the
+                # corresponding SQL rows are unavailable.
+                papers = self._papers_from_chroma_results(results)
+        finally:
+            if owns_manager:
+                em.close()
+
+        papers = [paper for paper in papers if paper.get("distance", 0.0) <= distance_threshold]
+        return papers[:limit]
 
     def get_stats(self, year: Optional[int] = None, conference: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -1379,24 +1645,13 @@ class DatabaseManager:
         >>> stats_2024 = db.get_stats(year=2024)
         >>> print(f"Papers in 2024: {stats_2024['total_papers']}")
         """
-        # Build WHERE clause for filtered count
-        conditions: List[str] = []
-        parameters: List[Any] = []
-
+        where_filters: Dict[str, Any] = {}
         if year is not None:
-            conditions.append("year = ?")
-            parameters.append(year)
-
+            where_filters["year"] = year
         if conference is not None:
-            conditions.append("conference = ?")
-            parameters.append(conference)
+            where_filters["conference"] = conference
 
-        if conditions:
-            where_clause = " AND ".join(conditions)
-            result = self.query(f"SELECT COUNT(*) as count FROM papers WHERE {where_clause}", tuple(parameters))
-            total_papers = result[0]["count"] if result else 0
-        else:
-            total_papers = self.get_paper_count()
+        total_papers = self.get_paper_count(where_filters=where_filters or None)
 
         return {
             "total_papers": total_papers,
@@ -1404,13 +1659,14 @@ class DatabaseManager:
             "conference": conference,
         }
 
-    def _paper_to_dict(self, paper: Paper) -> Dict[str, Any]:
+    @staticmethod
+    def _paper_to_dict(paper: Paper) -> Dict[str, Any]:
         """Convert Paper ORM object to dictionary."""
         return {
             "uid": paper.uid,
             "original_id": paper.original_id,
             "title": paper.title,
-            "authors": deserialize_authors_from_string(paper.authors),
+            "authors": deserialize_authors_from_string(str(paper.authors or "")),
             "abstract": paper.abstract,
             "session": paper.session,
             "poster_position": paper.poster_position,
@@ -1418,77 +1674,14 @@ class DatabaseManager:
             "poster_image_url": paper.poster_image_url,
             "url": paper.url,
             "room_name": paper.room_name,
-            "keywords": deserialize_keywords_from_string(paper.keywords),
-            "starttime": str(paper.starttime),  # Convert datetime to string for JSON serialization
-            "endtime": str(paper.endtime),  # Convert datetime to string for JSON serialization
+            "keywords": deserialize_keywords_from_string(str(paper.keywords or "")),
+            "starttime": str(paper.starttime) if paper.starttime is not None else None,
+            "endtime": str(paper.endtime) if paper.endtime is not None else None,
             "award": paper.award,
             "year": paper.year,
             "conference": paper.conference,
-            "created_at": str(paper.created_at),  # Convert datetime to string for JSON serialization
+            "created_at": str(paper.created_at) if paper.created_at is not None else None,
         }
-
-    def get_author_count(self) -> int:
-        """
-        Get the approximate number of unique authors in the database.
-
-        Note: This provides an estimate by counting unique author names
-        across all papers. The actual count may vary.
-
-        Returns
-        -------
-        int
-            Approximate number of unique authors.
-
-        Raises
-        ------
-        DatabaseError
-            If query fails.
-        """
-        try:
-            # Get all author fields
-            stmt = select(Paper.authors).where(and_(Paper.authors.isnot(None), Paper.authors != ""))
-            results = self.session.execute(stmt).scalars().all()
-
-            # Extract unique author names
-            author_names = set()
-            for authors_str in results:
-                if authors_str:
-                    for author in authors_str.split(";"):
-                        author_names.add(author.strip())
-
-            return len(author_names)
-        except Exception as e:
-            raise DatabaseError(f"Failed to count authors: {str(e)}") from e
-
-    def get_years_for_conference(self, conference: str) -> List[int]:
-        """
-        Get distinct years available for a specific conference.
-
-        Parameters
-        ----------
-        conference : str
-            Conference name to query.
-
-        Returns
-        -------
-        list of int
-            Sorted list of distinct years for the conference.
-
-        Raises
-        ------
-        DatabaseError
-            If query fails.
-        """
-        try:
-            stmt = (
-                select(Paper.year)
-                .distinct()
-                .where(and_(Paper.conference == conference, Paper.year.isnot(None)))
-                .order_by(Paper.year)
-            )
-            return list(self.session.execute(stmt).scalars().all())
-        except Exception as e:
-            raise DatabaseError(f"Failed to get years for conference: {str(e)}") from e
 
     def get_conference_years_from_db(self) -> Dict[str, List[int]]:
         """
@@ -1526,81 +1719,95 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Failed to get conference years from DB: {str(e)}") from e
 
-    def resolve_default_conference_year(
+    def confirm_default_conference_year_exists(
         self,
         configured_conference: str,
         configured_year: Optional[int],
-    ) -> tuple[str, Optional[int]]:
+    ) -> Dict[str, Any]:
         """
-        Resolve the effective default conference and year, guaranteeing they have data.
+        Confirm that the configured default conference/year exists in the database.
 
-        The configured values are used when they point at a conference/year that
-        actually has papers in the database.  When they do not, the method falls
-        back to the most recent conference/year combination present in the database.
+        Unlike the previous fallback logic, this method never guesses an
+        alternative.  If the configured default is missing, it returns a
+        structured error describing available data and how to fix the problem.
 
         Parameters
         ----------
         configured_conference : str
-            Conference name from the application configuration.  May be empty
-            or may not match any downloaded conference.
+            Conference name from the application configuration.
         configured_year : int or None
-            Year from the application configuration.  May be ``None`` or may
-            not have data for the matched conference.
+            Year from the application configuration.  ``0`` or ``None`` means
+            that no year is configured; only the conference is validated.
 
         Returns
         -------
-        tuple[str, int | None]
-            A ``(conference, year)`` pair that is guaranteed to have data in the
-            database, or the original configured values if the database is empty.
+        dict
+            Dictionary with keys:
 
-        Examples
-        --------
-        >>> db = DatabaseManager()
-        >>> with db:
-        ...     conf, year = db.resolve_default_conference_year("NeurIPS", 2024)
-        >>> print(conf, year)
-        NeurIPS 2024
+            - ``conference`` : str or None – canonical configured conference,
+              or ``None`` when it is unavailable.
+            - ``year`` : int or None – confirmed configured year, or ``None``.
+            - ``error`` : dict or None – error details when the default is
+              unavailable.  Contains ``message``, ``available_conferences``,
+              ``available_years`` and ``guidance``.
         """
-        db_conferences = self.get_conferences()
+        db_conference_years = self.get_conference_years_from_db()
+        available_conferences = sorted(db_conference_years.keys())
 
-        if not db_conferences:
-            # DB is empty – return configured values unchanged
-            return configured_conference, configured_year
+        if not configured_conference:
+            return {"conference": None, "year": None, "error": None}
 
-        # Try case-insensitive match of the configured conference against DB conferences
-        conf_matched = None
-        if configured_conference:
-            for db_conf in db_conferences:
-                if db_conf.lower() == configured_conference.lower():
-                    conf_matched = db_conf
-                    break
+        matched_conf: Optional[str] = None
+        for db_conf in available_conferences:
+            if db_conf.lower() == configured_conference.lower():
+                matched_conf = db_conf
+                break
 
-        if conf_matched:
-            effective_conf = conf_matched
-            years_for_conf = self.get_years(conference=conf_matched)
-            if configured_year and configured_year in years_for_conf:
-                effective_year: Optional[int] = configured_year
-            elif years_for_conf:
-                # Configured year not in DB for this conference – use the most recent one
-                effective_year = years_for_conf[0]
-            else:
-                effective_year = configured_year
-        else:
-            # Configured default has no data (or was not set) – fall back to the
-            # conference/year combination with the most recent year in the database.
-            best_conf: Optional[str] = None
-            best_year: Optional[int] = None
-            for conf in db_conferences:
-                years = self.get_years(conference=conf)
-                if years:
-                    most_recent = years[0]  # already sorted descending
-                    if best_year is None or most_recent > best_year:
-                        best_year = most_recent
-                        best_conf = conf
-            effective_conf = best_conf or configured_conference
-            effective_year = best_year if best_conf else configured_year
+        if matched_conf is None:
+            message = f"Configured default conference '{configured_conference}' has no data in the database."
+            if not available_conferences:
+                message = "The database is empty; the configured default conference cannot be used."
+            return {
+                "conference": None,
+                "year": None,
+                "error": {
+                    "message": message,
+                    "available_conferences": available_conferences,
+                    "available_years": [],
+                    "guidance": (
+                        "Populate the database with 'abstracts-explorer registry download "
+                        "--conference <name>' or run 'abstracts-explorer download --conference <name>' "
+                        "followed by 'abstracts-explorer create-embeddings', or configure a different "
+                        "default with DEFAULT_CONFERENCE and DEFAULT_YEAR."
+                    ),
+                },
+            }
 
-        return effective_conf, effective_year
+        available_years = db_conference_years.get(matched_conf, [])
+
+        if configured_year:
+            if configured_year not in available_years:
+                return {
+                    "conference": None,
+                    "year": None,
+                    "error": {
+                        "message": (
+                            f"Configured default year {configured_year} has no data for "
+                            f"conference '{matched_conf}'."
+                        ),
+                        "available_conferences": available_conferences,
+                        "available_years": available_years,
+                        "guidance": (
+                            "Choose an available year with DEFAULT_YEAR or populate this year with "
+                            "'abstracts-explorer registry download --conference <name> --year <year>' "
+                            "or 'abstracts-explorer download --conference <name> --year <year>' followed "
+                            "by 'abstracts-explorer create-embeddings'."
+                        ),
+                    },
+                }
+            return {"conference": matched_conf, "year": configured_year, "error": None}
+
+        return {"conference": matched_conf, "year": None, "error": None}
 
     def resolve_conference_name(self, conference: str) -> str:
         """
@@ -1621,8 +1828,8 @@ class DatabaseManager:
         ----------
         conference : str
             Conference name as supplied by the caller.  May differ in case or
-            spelling from the form stored in the database (e.g. ``ml4ps@neurips``
-            vs. ``ML4PS@Neurips``).
+            spelling from the form stored in the database (e.g. ``ml4ps``
+            vs. ``ML4PS``).
 
         Returns
         -------
@@ -1635,8 +1842,8 @@ class DatabaseManager:
         --------
         >>> with DatabaseManager() as db:
         ...     db.create_tables()
-        ...     canonical = db.resolve_conference_name("ml4ps@neurips")
-        ...     # Returns "ML4PS@Neurips" if that form is stored in the DB
+        ...     canonical = db.resolve_conference_name("ml4ps")
+        ...     # Returns "ML4PS" if that form is stored in the DB
         """
         # 1. Try case-insensitive match against conferences already in the DB
         try:
@@ -1766,7 +1973,7 @@ class DatabaseManager:
             if year is not None:
                 conditions.append(Paper.year == year)
 
-            stmt = select(Paper.session).distinct()
+            stmt: Any = select(Paper.session).distinct()
             if conditions:
                 stmt = stmt.where(and_(*conditions))
             stmt = stmt.where(and_(Paper.session.isnot(None), Paper.session != "")).order_by(Paper.session)
@@ -1804,7 +2011,7 @@ class DatabaseManager:
         >>> conferences = db.get_conferences(year=2025)
         """
         try:
-            stmt = (
+            stmt: Any = (
                 select(Paper.conference).distinct().where(and_(Paper.conference.isnot(None), Paper.conference != ""))
             )
             if year is not None:
@@ -1844,7 +2051,7 @@ class DatabaseManager:
         >>> years = db.get_years(conference="NeurIPS")
         """
         try:
-            stmt = select(Paper.year).distinct().where(Paper.year.isnot(None))
+            stmt: Any = select(Paper.year).distinct().where(Paper.year.isnot(None))
             if conference is not None:
                 stmt = stmt.where(Paper.conference == conference)
             stmt = stmt.order_by(Paper.year.desc())
@@ -1877,7 +2084,9 @@ class DatabaseManager:
         """
         try:
             # Get the most recent embedding model entry
-            stmt = select(EmbeddingsMetadata.embedding_model).order_by(EmbeddingsMetadata.updated_at.desc()).limit(1)
+            stmt: Any = (
+                select(EmbeddingsMetadata.embedding_model).order_by(EmbeddingsMetadata.updated_at.desc()).limit(1)
+            )
             result = self.session.execute(stmt).scalar_one_or_none()
             return result
         except Exception as e:
@@ -2163,7 +2372,7 @@ class DatabaseManager:
                 delete(Paper).where(and_(Paper.conference == conference, Paper.year == year))
             )
             self.session.commit()
-            count = result.rowcount if result.rowcount is not None else 0
+            count = getattr(result, "rowcount", 0) or 0
             logger.info(f"Deleted {count} papers for {conference}/{year}")
             return count
 
@@ -2332,7 +2541,7 @@ class DatabaseManager:
             count = len(entries)
 
             for entry in entries:
-                entry.embedding_model = new_model
+                setattr(entry, "embedding_model", new_model)
 
             self.session.commit()
             logger.info(f"Updated {count} clustering cache entries from model {old_model!r} to {new_model!r}")
@@ -2495,7 +2704,7 @@ class DatabaseManager:
             )
             self.session.add(pair)
             self.session.commit()
-            return pair.id
+            return cast(int, pair.id)
         except Exception as e:
             self._rollback()
             raise DatabaseError(f"Failed to add eval QA pair: {str(e)}") from e
@@ -2679,7 +2888,7 @@ class DatabaseManager:
         """
         try:
             result = self.session.execute(delete(EvalQAPair).where(EvalQAPair.verified == 1))
-            count = result.rowcount
+            count = getattr(result, "rowcount", 0) or 0
             self.session.commit()
             return count
         except Exception as e:
@@ -2711,7 +2920,7 @@ class DatabaseManager:
             if run_id is not None:
                 stmt = stmt.where(EvalResult.run_id == run_id)
             result = self.session.execute(stmt)
-            count = result.rowcount
+            count = getattr(result, "rowcount", 0) or 0
             self.session.commit()
             return count
         except Exception as e:
@@ -2778,7 +2987,7 @@ class DatabaseManager:
             )
             self.session.add(result)
             self.session.commit()
-            return result.id
+            return cast(int, result.id)
         except Exception as e:
             self._rollback()
             raise DatabaseError(f"Failed to add eval result: {str(e)}") from e
@@ -2859,7 +3068,7 @@ class DatabaseManager:
             If query fails.
         """
         try:
-            stmt = (
+            stmt: Any = (
                 select(EvalResult.run_id).group_by(EvalResult.run_id).order_by(func.min(EvalResult.created_at).asc())
             )
             return [row.run_id for row in self.session.execute(stmt).all()]
@@ -2911,7 +3120,7 @@ class DatabaseManager:
             errors = sum(1 for r in results if r["error"])
 
             # Determine the timestamp of the earliest result in this run
-            stmt = select(func.min(EvalResult.created_at)).where(EvalResult.run_id == run_id)
+            stmt: Any = select(func.min(EvalResult.created_at)).where(EvalResult.run_id == run_id)
             run_date = self.session.execute(stmt).scalar()
 
             return {
@@ -2982,8 +3191,8 @@ class DatabaseManager:
                     export_session.add(HierarchicalLabelCache(**entry_dict))
 
                 # Export embeddings metadata
-                for entry in self.session.execute(select(EmbeddingsMetadata)).scalars():
-                    entry_dict = {c.name: getattr(entry, c.name) for c in EmbeddingsMetadata.__table__.columns}
+                for meta_entry in self.session.execute(select(EmbeddingsMetadata)).scalars():
+                    entry_dict = {c.name: getattr(meta_entry, c.name) for c in EmbeddingsMetadata.__table__.columns}
                     export_session.add(EmbeddingsMetadata(**entry_dict))
 
                 export_session.commit()
@@ -3041,11 +3250,11 @@ class DatabaseManager:
                 imported_meta = source_session.execute(select(EmbeddingsMetadata)).scalars().first()
                 if imported_meta:
                     existing_meta = self.session.execute(select(EmbeddingsMetadata)).scalars().first()
-                    if existing_meta and normalize_model_name(existing_meta.embedding_model) != normalize_model_name(
-                        imported_meta.embedding_model
-                    ):
+                    if existing_meta and normalize_model_name(
+                        str(existing_meta.embedding_model)
+                    ) != normalize_model_name(str(imported_meta.embedding_model)):
                         raise EmbeddingModelConflictError(
-                            existing_meta.embedding_model, imported_meta.embedding_model
+                            str(existing_meta.embedding_model), str(imported_meta.embedding_model)
                         )
 
                 # Delete existing papers for this conference+year
@@ -3053,8 +3262,9 @@ class DatabaseManager:
 
                 # Delete only hierarchical label cache entries whose
                 # embedding_model matches one from the imported data
-                imported_models_result = (
-                    source_session.execute(select(HierarchicalLabelCache.embedding_model).distinct()).scalars().all()
+                imported_models_result: List[str] = cast(
+                    List[str],
+                    source_session.execute(select(HierarchicalLabelCache.embedding_model).distinct()).scalars().all(),
                 )
                 if imported_models_result:
                     self.session.execute(

@@ -310,7 +310,7 @@ class RegistryClient:
 
         with DatabaseManager() as db:
             db.create_tables()
-            return db.get_years_for_conference(conference)
+            return db.get_years(conference=conference)
 
     @staticmethod
     def _get_embedding_model_database() -> Optional[str]:

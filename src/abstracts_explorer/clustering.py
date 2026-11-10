@@ -1386,6 +1386,7 @@ Only respond with the label, nothing else. Do not add formatting."""
             Generated label
         """
         # Get a few representative paper titles from the cluster
+        assert self.cluster_labels is not None
         cluster_indices = np.where(self.cluster_labels == cluster_id)[0]
         sample_size = min(5, len(cluster_indices))
 

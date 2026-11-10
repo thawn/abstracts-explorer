@@ -685,6 +685,28 @@ class TestExecuteMCPToolE2E:
         }
 
         mock_db = Mock()
+        mock_db.search_papers_semantic.return_value = [
+            {
+                "uid": "p1",
+                "title": "Paper 1",
+                "year": 2025,
+                "conference": "NeurIPS",
+                "session": "ML",
+                "authors": [],
+                "abstract": "Abstract 1",
+                "relevance_score": 0.9,
+            },
+            {
+                "uid": "p2",
+                "title": "Paper 2",
+                "year": 2025,
+                "conference": "NeurIPS",
+                "session": "DL",
+                "authors": [],
+                "abstract": "Abstract 2",
+                "relevance_score": 0.7,
+            },
+        ]
 
         with (
             patch("abstracts_explorer.mcp_server.EmbeddingsManager", return_value=mock_em),
@@ -804,7 +826,7 @@ class TestExecuteMCPToolE2E:
 
         mock_em.find_papers_within_distance.side_effect = _find_papers
         mock_db = Mock()
-        mock_db.get_years_for_conference.return_value = [2022, 2023, 2024]
+        mock_db.get_years.return_value = [2022, 2023, 2024]
         mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 100}
 
         with (

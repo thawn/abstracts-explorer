@@ -34,50 +34,8 @@ from tests.helpers import requires_lm_studio, create_test_db_with_paper
 
 @pytest.fixture
 def mock_database():
-    """Create a mock database manager that returns papers for UIDs "1", "2", "3"."""
-    mock_db = Mock()
-
-    # Set up mock to return papers based on UID (string)
-    def mock_query_side_effect(sql, params):
-        paper_uid = params[0] if params else None
-        papers_map: dict[str, dict] = {
-            "1": {
-                "uid": "1",
-                "title": "Attention Is All You Need",
-                "abstract": "We propose the Transformer...",
-                "authors": "Vaswani et al.",
-                "session": "Oral",
-                "year": 2017,
-                "conference": "NeurIPS",
-            },
-            "2": {
-                "uid": "2",
-                "title": "BERT: Pre-training of Deep Bidirectional Transformers",
-                "abstract": "We introduce BERT...",
-                "authors": "Devlin et al.",
-                "session": "Poster",
-                "year": 2019,
-                "conference": "NeurIPS",
-            },
-            "3": {
-                "uid": "3",
-                "title": "GPT-3: Language Models are Few-Shot Learners",
-                "abstract": "We train GPT-3...",
-                "authors": "Brown et al.",
-                "session": "Oral",
-                "year": 2020,
-                "conference": "NeurIPS",
-            },
-        }
-        paper = papers_map.get(paper_uid) if isinstance(paper_uid, str) else None
-        return [paper] if paper else []
-
-    mock_db.query.side_effect = mock_query_side_effect
-    mock_db.get_conferences.return_value = ["NeurIPS"]
-    mock_db.get_years.return_value = [2025, 2024]
-    mock_db.get_sessions.return_value = []
-
-    return mock_db
+    """Create a minimal mock database manager."""
+    return Mock()
 
 
 @pytest.fixture
@@ -1226,7 +1184,7 @@ class TestRAGChatIntegration:
         )
 
         # Get the generated UID from the database
-        papers = db.query("SELECT uid FROM papers LIMIT 1")
+        papers = db._query("SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
 
         chroma_path = tmp_path / "chroma_integration"
@@ -1290,7 +1248,7 @@ class TestRAGChatIntegration:
             },
         )
 
-        papers = db.query("SELECT uid FROM papers LIMIT 1")
+        papers = db._query("SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
 
         chroma_path = tmp_path / "chroma_conversation"
@@ -1354,7 +1312,7 @@ class TestRAGChatIntegration:
             },
         )
 
-        papers = db.query("SELECT uid FROM papers LIMIT 1")
+        papers = db._query("SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
 
         chroma_path = tmp_path / "chroma_export"
@@ -1849,7 +1807,7 @@ class TestParallelRAGRateLimiting:
             },
         )
 
-        papers = db.query("SELECT uid FROM papers LIMIT 1")
+        papers = db._query("SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
 
         chroma_path = tmp_path / "chroma_parallel"

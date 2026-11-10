@@ -676,7 +676,7 @@ def get_topic_evolution(
 
         for conference in conferences:
             # Determine year range from database for this conference
-            available_years = db.get_years_for_conference(conference)
+            available_years = db.get_years(conference=conference)
             if start_year is not None:
                 available_years = [y for y in available_years if y >= start_year]
             if end_year is not None:
@@ -832,51 +832,32 @@ def search_papers(
         # Initialize database
         db = DatabaseManager()
 
-        # Build metadata filter using helper function
+        # Validate custom WHERE clause and year filter
         try:
-            where_filter = merge_where_clause_with_conference(where, conference)
-            where_filter = merge_where_clause_with_years(where_filter, years)
+            merge_where_clause_with_conference(where, conference)
+            merge_where_clause_with_years(where, years)
         except ValueError as e:
             logger.error(f"Invalid WHERE clause: {str(e)}")
+            em.close()
+            db.close()
             return json.dumps({"error": f"Invalid WHERE clause: {str(e)}"}, indent=2)
 
         # Search for papers
         search_desc = f"papers from {years}" if years else "papers"
         logger.info(f"Searching for {search_desc} about: {topic_keywords}")
-        if where_filter:
-            logger.info(f"Applying WHERE filter: {where_filter}")
+        if where:
+            logger.info(f"Applying WHERE filter: {where}")
         if years:
             logger.info(f"Year filter: {years}")
 
-        results = em.search_similar(
-            query=topic_keywords,
-            n_results=n_results,
-            where=where_filter,
+        papers = db.search_papers_semantic(
+            topic_keywords,
+            limit=n_results,
+            years=years,
+            conferences=[conference],
+            where=where,
+            embeddings_manager=em,
         )
-
-        # Filter and format results
-        papers = []
-        if results["ids"] and results["ids"][0]:
-            for idx, paper_id in enumerate(results["ids"][0]):
-                metadata = results["metadatas"][0][idx]
-
-                papers.append(
-                    {
-                        "uid": paper_id,
-                        "title": metadata.get("title", ""),
-                        "authors": metadata.get("authors", []),
-                        "year": metadata.get("year"),
-                        "conference": metadata.get("conference", ""),
-                        "session": metadata.get("session", ""),
-                        "abstract": (
-                            results["documents"][0][idx] if "documents" in results and results["documents"][0] else ""
-                        ),
-                        "relevance_score": 1.0 - results["distances"][0][idx] if "distances" in results else None,
-                    }
-                )
-
-                if len(papers) >= n_results:
-                    break
 
         result = {
             "topic": topic_keywords,
@@ -961,8 +942,8 @@ def get_paper_details(
             # Keyword search on title with optional conference/year filters
             result_papers = db.search_papers(
                 keyword=title,
-                conference=conference,
-                year=year,
+                conferences=[conference] if conference else None,
+                years=[year] if year is not None else None,
                 limit=limit,
             )
 

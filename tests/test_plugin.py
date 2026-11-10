@@ -875,7 +875,7 @@ class TestML4PSPluginYearConference:
         assert len(lightweight_papers) == 1
         paper = lightweight_papers[0]
         assert paper["year"] == expected_year
-        assert paper["conference"] == "ML4PS@Neurips"
+        assert paper["conference"] == "ML4PS"
 
     def test_ml4ps_lightweight_format_preserves_fields(self):
         """Test that ML4PS plugin preserves all required fields."""
@@ -904,7 +904,7 @@ class TestML4PSPluginYearConference:
         assert paper["session"] == f"ML4PhysicalSciences {expected_year} Workshop - Spotlight"
         assert paper["id"] == 42
         assert paper["year"] == expected_year
-        assert paper["conference"] == "ML4PS@Neurips"
+        assert paper["conference"] == "ML4PS"
         assert paper["award"] == "Best Paper, Outstanding Poster"
 
 
@@ -955,7 +955,7 @@ class TestDatabaseYearConferenceIntegration:
                 db.add_papers(data)
 
                 # Query papers and verify year and conference
-                papers = db.query("SELECT uid, title, year, conference FROM papers ORDER BY title")
+                papers = db._query("SELECT uid, title, year, conference FROM papers ORDER BY title")
                 assert len(papers) == 2
 
                 # Check first paper (Test Paper 1)
@@ -969,11 +969,11 @@ class TestDatabaseYearConferenceIntegration:
                 assert papers[1]["conference"] == "NeurIPS"
 
                 # Test filtering by year
-                papers_2024 = db.query("SELECT * FROM papers WHERE year = 2024")
+                papers_2024 = db._query("SELECT * FROM papers WHERE year = 2024")
                 assert len(papers_2024) == 2
 
                 # Test filtering by conference
-                papers = db.query("SELECT * FROM papers WHERE conference = 'NeurIPS'")
+                papers = db._query("SELECT * FROM papers WHERE conference = 'NeurIPS'")
                 assert len(papers) == 2
 
     def test_ml4ps_year_conference_in_database(self):
@@ -1018,25 +1018,25 @@ class TestDatabaseYearConferenceIntegration:
                 db.add_papers(papers_to_insert)
 
                 # Query papers and verify year and conference
-                papers = db.query("SELECT uid, title, year, conference FROM papers ORDER BY uid")
+                papers = db._query("SELECT uid, title, year, conference FROM papers ORDER BY title")
                 assert len(papers) == 2
 
                 # Check first paper
                 assert papers[0]["title"] == "ML4PS Paper 1"
                 assert papers[0]["year"] == expected_year
-                assert papers[0]["conference"] == "ML4PS@Neurips"
+                assert papers[0]["conference"] == "ML4PS"
 
                 # Check second paper
                 assert papers[1]["title"] == "ML4PS Paper 2"
                 assert papers[1]["year"] == expected_year
-                assert papers[1]["conference"] == "ML4PS@Neurips"
+                assert papers[1]["conference"] == "ML4PS"
 
                 # Test filtering by year
-                papers_for_year = db.query(f"SELECT * FROM papers WHERE year = {expected_year}")
+                papers_for_year = db._query(f"SELECT * FROM papers WHERE year = {expected_year}")
                 assert len(papers_for_year) == 2
 
                 # Test filtering by conference
-                ml4ps_papers = db.query("SELECT * FROM papers WHERE conference = 'ML4PS@Neurips'")
+                ml4ps_papers = db._query("SELECT * FROM papers WHERE conference = 'ML4PS'")
                 assert len(ml4ps_papers) == 2
 
 
