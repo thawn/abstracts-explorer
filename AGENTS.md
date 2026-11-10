@@ -19,7 +19,7 @@ Guidance for AI coding agents working on **abstracts-explorer** (Python package 
 
 ## Layout
 
-- `src/abstracts_explorer/`: `database.py` (SQLAlchemy), `db_models.py`, `embeddings.py` (ChromaDB), `clustering.py`, `rag.py`, `mcp_server.py`, `mcp_tools.py`, `export_utils.py`, `config.py`, `cli.py`, `plugin.py`, `plugins/`, `web_ui/` (Flask + modular ES6).
+- `src/abstracts_explorer/`: `database.py` (SQLAlchemy), `db_models.py`, `embeddings.py` (ChromaDB), `clustering.py`, `rag.py`, `mcp_server.py`, `mcp_tools.py`, `interesting_papers.py`, `evaluation.py`, `registry.py`, `rate_limiter.py`, `export_utils.py`, `config.py`, `cli.py`, `plugin.py`, `plugins/`, `web_ui/` (Flask + modular ES6).
 - `tests/`: pytest suite.
 - `docs/`: Sphinx (Markdown).
 - `src/abstracts_explorer/web_ui/tests/`: Jest tests.
@@ -28,6 +28,7 @@ Guidance for AI coding agents working on **abstracts-explorer** (Python package 
 
 - One test file per source module, same base name (e.g. `database.py` -> `tests/test_database.py`).
 - Separate files allowed by test type: `test_integration.py`, `test_web_integration.py`, `test_web_e2e.py`.
+- Reuse shared fixtures/helpers in `tests/conftest.py` and `tests/helpers.py` rather than duplicating setup.
 - Python: pytest + pytest-mock. Coverage target >90%.
 - JavaScript: Jest + jsdom. Coverage target >80%.
 - Mock external services (APIs, LLM backends, DBs). Tests must skip gracefully when optional services are unavailable.
@@ -40,7 +41,7 @@ Guidance for AI coding agents working on **abstracts-explorer** (Python package 
 ## Configuration
 
 - Priority: CLI args > env vars > `.env` > built-in defaults.
-- Key vars: `CHAT_MODEL`, `EMBEDDING_MODEL`, `LLM_BACKEND_URL`, `LLM_BACKEND_AUTH_TOKEN`, `PAPER_DB` (SQLite path or PostgreSQL URL), `EMBEDDING_DB_PATH`, `COLLECTION_NAME`, `MAX_CONTEXT_PAPERS`.
+- Key vars: `CHAT_MODEL`, `EMBEDDING_MODEL`, `LLM_BACKEND_URL`, `LLM_BACKEND_AUTH_TOKEN`, `PAPER_DB` (SQLite path or PostgreSQL URL), `EMBEDDING_DB`, `COLLECTION_NAME`, `MAX_CONTEXT_PAPERS`, `DATA_DIR`.
 - Access via `get_config()` from `abstracts_explorer.config`.
 - Never commit `.env` or secrets.
 
@@ -48,8 +49,8 @@ Guidance for AI coding agents working on **abstracts-explorer** (Python package 
 
 - DB: SQLAlchemy 2.0+, SQLite default / PostgreSQL supported. Models: `Paper`, `EmbeddingsMetadata`, `ClusteringCache`.
 - Clustering: CLI/web/MCP pipeline is fixed to Agglomerative (ward, distance threshold 150) + t-SNE. `clustering.py` still exposes 5 algorithms (K-Means, DBSCAN, Agglomerative, Spectral, Fuzzy C-Means) and PCA/t-SNE; UMAP was removed. LLM auto-labeling + DB-backed cache.
-- MCP: FastMCP server; RAG chat auto-invokes MCP tools.
-- Web UI: Flask 3.0+, 25+ API routes, 15 ES6 modules, Waitress in production.
+- MCP: `MCPServer` from the `mcp` package; RAG chat auto-invokes MCP tools.
+- Web UI: Flask 3.0+, 20+ API routes in `web_ui/app.py` (frontend calls from `web_ui/static/modules/`), 15 ES6 modules, Waitress in production.
 
 ## Common Tasks
 
@@ -60,6 +61,6 @@ Guidance for AI coding agents working on **abstracts-explorer** (Python package 
 
 ## Git
 
-- Branches: `main` for releases,`develop` for development, `feat/*`, `fix/*`, `docs/*`.
+- Branches: `main` (releases), `develop` (integration), feature branches `author/brief-description` from `develop`, `hotfix-*` from `main` (see `docs/branching_strategy.md`).
 - Clear descriptive commit messages; only commit when explicitly asked, otherwise suggest a commit message.
-- Do not commit `*.db`, `chroma_db/`, `_build/`, `.env`, `__pycache__/`.
+- Do not commit `*.db`, `chroma_db/`, `_build/`, `.env`, `__pycache__/`. `uv.lock` and `package-lock.json` are tracked.
