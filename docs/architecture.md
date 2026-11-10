@@ -303,15 +303,17 @@ graph TD
         CHRCH["generate_hierarchical_labels"]
         CRES["get_clustering_results"]
 
-        subgraph "⚠ Duplicate: TF-IDF extraction"
+        subgraph "Shared keyword extraction"
             T1["extract_cluster_keywords"]
-            T2["_extract_keywords_for_samples<br/>⚠ nearly identical to T1"]
+            T2["_extract_keywords_for_samples"]
+            T3["_compute_tfidf_keywords<br/>(shared TF-IDF implementation)"]
         end
 
-        subgraph "⚠ Duplicate: LLM label generation"
+        subgraph "Shared LLM label generation"
             L1["_generate_llm_label"]
-            L2["_generate_parent_label_llm<br/>⚠ same pattern as L1"]
-            L3["_generate_llm_label_from_keywords<br/>⚠ same pattern as L1"]
+            L2["_generate_parent_label_llm"]
+            L3["_generate_llm_label_from_keywords"]
+            L4["_call_llm_for_label<br/>(shared call + fallback)"]
         end
 
         subgraph "⚠ Duplicate: Where-clause building"
