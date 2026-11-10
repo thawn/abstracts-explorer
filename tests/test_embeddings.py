@@ -1748,7 +1748,7 @@ class TestRateLimiting:
         em = EmbeddingsManager(requests_per_minute=30)
         # Trigger lazy initialization of the OpenAI client
         client = em.openai_client
-        # The underlying httpx client should use our rate-limited transport
+        # The underlying httpx2 client should use our rate-limited transport
         assert isinstance(client._client._transport, RateLimitedTransport)
         transport = client._client._transport
         assert isinstance(transport._rate_limiter, TokenBucketRateLimiter)
@@ -1771,21 +1771,21 @@ class TestRateLimiting:
 
     def test_rate_limited_transport_sleeps_when_tokens_exhausted(self):
         """Test that RateLimitedTransport blocks when token bucket is empty."""
-        import httpx
+        import httpx2
         from abstracts_explorer.embeddings import RateLimitedTransport
         from abstracts_explorer.rate_limiter import set_global_rate_limiter
 
         set_global_rate_limiter(None)
 
-        mock_inner = Mock()
-        mock_inner.handle_request.return_value = Mock(spec=httpx.Response)
+        mock_inner = Mock(spec=httpx2.BaseTransport)
+        mock_inner.handle_request.return_value = Mock(spec=httpx2.Response)
 
         transport = RateLimitedTransport(mock_inner, requests_per_minute=60)
         transport._rate_limiter._tokens = 0.0
         transport._rate_limiter._last_update = time.monotonic()
 
         start = time.monotonic()
-        transport.handle_request(Mock(spec=httpx.Request))
+        transport.handle_request(Mock(spec=httpx2.Request))
         elapsed = time.monotonic() - start
 
         assert elapsed >= 0.8
@@ -1793,20 +1793,20 @@ class TestRateLimiting:
 
     def test_rate_limited_transport_no_wait_when_tokens_available(self):
         """Test that RateLimitedTransport does not wait when tokens are available."""
-        import httpx
+        import httpx2
         from abstracts_explorer.embeddings import RateLimitedTransport
         from abstracts_explorer.rate_limiter import set_global_rate_limiter
 
         set_global_rate_limiter(None)
 
-        mock_inner = Mock()
-        mock_inner.handle_request.return_value = Mock(spec=httpx.Response)
+        mock_inner = Mock(spec=httpx2.BaseTransport)
+        mock_inner.handle_request.return_value = Mock(spec=httpx2.Response)
 
         transport = RateLimitedTransport(mock_inner, requests_per_minute=60)
         transport._rate_limiter._tokens = 60.0
 
         start = time.monotonic()
-        transport.handle_request(Mock(spec=httpx.Request))
+        transport.handle_request(Mock(spec=httpx2.Request))
         elapsed = time.monotonic() - start
 
         assert elapsed < 0.1
@@ -1814,20 +1814,20 @@ class TestRateLimiting:
 
     def test_rate_limited_transport_forwards_response(self):
         """Test that RateLimitedTransport forwards the response from inner transport."""
-        import httpx
+        import httpx2
         from abstracts_explorer.embeddings import RateLimitedTransport
         from abstracts_explorer.rate_limiter import set_global_rate_limiter
 
         set_global_rate_limiter(None)
 
-        mock_inner = Mock()
-        mock_response = Mock(spec=httpx.Response)
+        mock_inner = Mock(spec=httpx2.BaseTransport)
+        mock_response = Mock(spec=httpx2.Response)
         mock_inner.handle_request.return_value = mock_response
 
         transport = RateLimitedTransport(mock_inner, requests_per_minute=60)
         transport._rate_limiter._tokens = 60.0
 
-        result = transport.handle_request(Mock(spec=httpx.Request))
+        result = transport.handle_request(Mock(spec=httpx2.Request))
 
         assert result is mock_response
         mock_inner.handle_request.assert_called_once()

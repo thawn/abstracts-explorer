@@ -36,7 +36,8 @@ dependencies = [
     "scikit-fuzzy>=0.4.2",
     "argcomplete>=3.1.0",
     "oras>=0.2.42",
-    "pydantic-ai-slim[openai]>=1.0.0",
+    "pydantic-ai-slim[openai]>=2.32.0",
+    "httpx2>=2.7",
 ]
 
 [project.optional-dependencies]

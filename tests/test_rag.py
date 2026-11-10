@@ -7,6 +7,8 @@ Tests that require a running LM Studio instance are skipped if it's not availabl
 """
 
 import json
+import warnings
+
 import pytest
 from unittest.mock import Mock, patch
 
@@ -453,14 +455,14 @@ class TestRAGChatSingleSystemMessage:
     def _make_mock_model(self, payloads):
         import asyncio
 
-        import httpx
+        import httpx2
         from pydantic_ai.models.openai import OpenAIChatModel
         from pydantic_ai.providers.openai import OpenAIProvider
 
         def handler(request):
             body = json.loads(request.content)
             payloads.append(body)
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 json={
                     "id": "chatcmpl-test",
@@ -478,7 +480,7 @@ class TestRAGChatSingleSystemMessage:
                 },
             )
 
-        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
         model = OpenAIChatModel(
             "test-model",
             provider=OpenAIProvider(
@@ -528,6 +530,33 @@ class TestRAGChatSingleSystemMessage:
         roles = [message["role"] for message in payloads[0]["messages"]]
         assert roles.count("system") == 1
         assert roles[0] == "system"
+
+
+class TestRAGChatHTTPClient:
+    """Verify the rate-limited provider uses httpx2 without legacy warnings."""
+
+    def test_rate_limited_agent_uses_httpx2(self, mock_embeddings_manager, mock_database, monkeypatch):
+        """The rate-limited provider should use an httpx2 client and transport."""
+        import asyncio
+
+        import httpx2
+
+        from abstracts_explorer.embeddings import RateLimitedTransport
+
+        config = get_config()
+        monkeypatch.setattr(config, "requests_per_minute", 60)
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            chat = RAGChat(mock_embeddings_manager, mock_database)
+
+        assert not any("legacy `httpx.AsyncClient`" in str(warning.message) for warning in caught)
+
+        provider = getattr(chat.agent.model, "provider")
+        async_client = provider._client._client
+        assert isinstance(async_client, httpx2.AsyncClient)
+        assert isinstance(async_client._transport, RateLimitedTransport)
+        asyncio.run(async_client.aclose())
 
 
 class TestRAGChatChat:

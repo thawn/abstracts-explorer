@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Dict, Optional, Any, Callable
 
-import httpx
+import httpx2
 
 from pydantic_ai import Agent, RunContext, Tool
 from pydantic_ai.messages import ModelMessage, ModelRequest
@@ -627,12 +627,12 @@ class RAGChat:
         requests_per_minute = config.requests_per_minute
 
         # Build rate-limited async HTTP client when RPM > 0.
-        http_client: Optional[httpx.AsyncClient] = None
+        http_client: Optional[httpx2.AsyncClient] = None
         if requests_per_minute > 0:
-            from abstracts_explorer.embeddings import AsyncRateLimitedTransport
+            from abstracts_explorer.embeddings import RateLimitedTransport
 
-            transport = AsyncRateLimitedTransport(httpx.AsyncHTTPTransport(), requests_per_minute=requests_per_minute)
-            http_client = httpx.AsyncClient(transport=transport)
+            transport = RateLimitedTransport(httpx2.AsyncHTTPTransport(), requests_per_minute=requests_per_minute)
+            http_client = httpx2.AsyncClient(transport=transport)
 
         # Create OpenAI-compatible model
         provider = OpenAIProvider(
