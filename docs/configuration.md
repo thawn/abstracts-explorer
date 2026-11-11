@@ -29,7 +29,7 @@ nano .env
 
 - **CHAT_MODEL**: The LLM model to use for RAG chat (default: `gemma-3-4b-it-qat`)
 - **CHAT_TEMPERATURE**: Temperature for LLM responses, 0.0-2.0 (default: `0.7`)
-- **CHAT_MAX_TOKENS**: Maximum tokens in LLM responses (default: `1000`)
+- **CHAT_MAX_TOKENS**: Maximum tokens in LLM responses (default: `2000`)
 
 ### Embedding Model Settings
 
@@ -104,7 +104,7 @@ DATA_DIR=data
 
 CHAT_MODEL=diffbot-small-xl-2508
 CHAT_TEMPERATURE=0.7
-CHAT_MAX_TOKENS=1000
+CHAT_MAX_TOKENS=2000
 
 EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b
 
@@ -130,7 +130,7 @@ DATA_DIR=data
 
 CHAT_MODEL=diffbot-small-xl-2508
 CHAT_TEMPERATURE=0.7
-CHAT_MAX_TOKENS=1000
+CHAT_MAX_TOKENS=2000
 
 EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b
 

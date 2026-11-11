@@ -159,7 +159,7 @@ DATA_DIR = "data"
 
 CHAT_MODEL = "diffbot-small-xl-2508"
 CHAT_TEMPERATURE = 0.7
-CHAT_MAX_TOKENS = 1000
+CHAT_MAX_TOKENS = 2000
 
 EMBEDDING_MODEL = "text-embedding-qwen3-embedding-4b"
 EMBEDDING_DB_PATH = "chroma_db"
