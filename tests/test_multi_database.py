@@ -8,6 +8,8 @@ including PostgreSQL. PostgreSQL tests are skipped if PostgreSQL is not availabl
 import pytest
 import os
 
+from sqlalchemy import create_engine
+
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.plugin import LightweightPaper
 from abstracts_explorer.config import get_config
@@ -27,6 +29,17 @@ skip_without_postgres = pytest.mark.skipif(
 
 class TestMultiDatabaseBackend:
     """Test multi-database backend support."""
+
+    def test_default_postgresql_url_uses_psycopg_driver(self):
+        """Plain ``postgresql://`` URLs must use the installed psycopg v3 driver."""
+        engine = create_engine("postgresql://user:password@localhost/abstracts")
+        try:
+            assert engine.dialect.driver == "psycopg"
+            dbapi = engine.dialect.dbapi
+            assert dbapi is not None
+            assert dbapi.__name__ == "psycopg"
+        finally:
+            engine.dispose()
 
     def test_sqlite_via_paper_db_path(self, tmp_path):
         """Test using SQLite via PAPER_DB environment variable (path)."""

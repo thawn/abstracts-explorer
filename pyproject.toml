@@ -32,12 +32,12 @@ dependencies = [
     "numpy>=1.24.0",
     "mcp>=2.0.0,<3",
     "sqlalchemy>=2.0.0",
-    "psycopg2-binary>=2.9.0",
     "scikit-fuzzy>=0.4.2",
     "argcomplete>=3.1.0",
     "oras>=0.2.42",
     "pydantic-ai-slim[openai]>=2.32.0",
     "httpx2>=2.7",
+    "psycopg[binary]>=3.2",
 ]
 
 [project.optional-dependencies]

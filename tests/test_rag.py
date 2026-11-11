@@ -199,6 +199,7 @@ class TestRAGChatInit:
         assert chat.model == "deepseek-v4.1-flash-at-hzdr"
         assert chat.max_context_papers > 0
         assert 0 <= chat.temperature <= 1
+        assert chat.max_tokens == get_config().chat_max_tokens
         assert chat.conversation_history == []
         assert chat.agent is not None
 

@@ -29,7 +29,7 @@ nano .env
 
 - **CHAT_MODEL**: The LLM model to use for RAG chat (default: `gemma-3-4b-it-qat`)
 - **CHAT_TEMPERATURE**: Temperature for LLM responses, 0.0-2.0 (default: `0.7`)
-- **CHAT_MAX_TOKENS**: Maximum tokens in LLM responses (default: `1000`)
+- **CHAT_MAX_TOKENS**: Maximum tokens in LLM responses (default: `2000`)
 
 ### Embedding Model Settings
 
@@ -56,6 +56,10 @@ nano .env
 The configuration automatically detects the database type based on the format:
 - URLs starting with `postgresql://`, `sqlite://`, or other database schemes are treated as database URLs
 - Other values are treated as SQLite file paths (relative to DATA_DIR unless absolute)
+
+PostgreSQL connections use the `psycopg` v3 driver, which is installed with the
+package. Plain `postgresql://` URLs select this driver automatically; no
+`postgresql+psycopg://` prefix is required.
 
 #### Embedding Database
 
@@ -100,7 +104,7 @@ DATA_DIR=data
 
 CHAT_MODEL=diffbot-small-xl-2508
 CHAT_TEMPERATURE=0.7
-CHAT_MAX_TOKENS=1000
+CHAT_MAX_TOKENS=2000
 
 EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b
 
@@ -126,7 +130,7 @@ DATA_DIR=data
 
 CHAT_MODEL=diffbot-small-xl-2508
 CHAT_TEMPERATURE=0.7
-CHAT_MAX_TOKENS=1000
+CHAT_MAX_TOKENS=2000
 
 EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b
 
