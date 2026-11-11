@@ -57,6 +57,10 @@ The configuration automatically detects the database type based on the format:
 - URLs starting with `postgresql://`, `sqlite://`, or other database schemes are treated as database URLs
 - Other values are treated as SQLite file paths (relative to DATA_DIR unless absolute)
 
+PostgreSQL connections use the `psycopg` v3 driver, which is installed with the
+package. Plain `postgresql://` URLs select this driver automatically; no
+`postgresql+psycopg://` prefix is required.
+
 #### Embedding Database
 
 - **EMBEDDING_DB**: ChromaDB location. Can be either:
