@@ -536,6 +536,7 @@ class RAGChat:
         self.model = model or config.chat_model
         self.max_context_papers = max_context_papers or config.max_context_papers
         self.temperature = temperature or config.chat_temperature
+        self.max_tokens = config.chat_max_tokens
         self.enable_mcp_tools = enable_mcp_tools
 
         # Message history for multi-turn conversation
@@ -750,7 +751,7 @@ class RAGChat:
             # Model settings
             settings = OpenAIChatModelSettings(
                 temperature=self.temperature,
-                max_tokens=1000,
+                max_tokens=self.max_tokens,
                 openai_reasoning_effort="low",
             )
 
@@ -845,7 +846,7 @@ class RAGChat:
             try:
                 settings = OpenAIChatModelSettings(
                     temperature=self.temperature,
-                    max_tokens=1000,
+                    max_tokens=self.max_tokens,
                     openai_reasoning_effort="low",
                 )
                 base_instructions = self._build_base_instructions()

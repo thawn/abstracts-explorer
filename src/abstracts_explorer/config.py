@@ -174,7 +174,7 @@ class Config:
         # Chat/Language Model Settings
         self.chat_model = self._get_env("CHAT_MODEL", default="diffbot-small-xl-2508")
         self.chat_temperature = self._get_env_float("CHAT_TEMPERATURE", default=0.7)
-        self.chat_max_tokens = self._get_env_int("CHAT_MAX_TOKENS", default=1000)
+        self.chat_max_tokens = self._get_env_int("CHAT_MAX_TOKENS", default=2000)
         self.cluster_label_model = self._get_env("CLUSTER_LABEL_MODEL", default="alias-fast")
 
         # Embedding Model Settings
