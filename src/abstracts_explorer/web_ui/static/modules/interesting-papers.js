@@ -515,6 +515,17 @@ export function handleJSONFileLoad(event) {
                 throw new Error('Invalid JSON format: missing or invalid paperPriorities');
             }
 
+            // Ratings must be objects with a priority (and optional searchTerm).
+            // Legacy scalar ratings are no longer supported.
+            for (const [paperId, rating] of Object.entries(importData.paperPriorities)) {
+                if (typeof rating !== 'object' || rating === null || Array.isArray(rating)) {
+                    throw new Error(
+                        `Invalid rating format for paper '${paperId}': expected an object with ` +
+                        "'priority' and optional 'searchTerm'."
+                    );
+                }
+            }
+
             const existingCount = getPaperIdsWithPriorities().length;
             let shouldProceed = true;
 

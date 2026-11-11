@@ -15,7 +15,9 @@ Official AAAI proceedings downloader via Open Journal Systems.
 - **Scope**: AAAI sections only; excludes frontmatter and co-located IAAI/EAAI sections
 
 See the [plugin guide](../../../docs/plugins.md#aaai) for usage, available fields,
-caching, and source limitations.
+caching, and source limitations. Failed issue/article pages are skipped and
+recorded in a sibling `.failed.json` file; the next download retries them
+automatically. Delete that sidecar file to skip retries.
 
 ### neurips
 

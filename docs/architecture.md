@@ -235,7 +235,6 @@ graph TD
             SESS["get_sessions(conference, year)"]
             CONF["get_conferences(year)"]
             YEARS["get_years(conference)"]
-            YFC["get_years_for_conference(conference)<br/>⚠ duplicate of get_years"]
             CY["get_conference_years_from_db()"]
         end
 
@@ -268,13 +267,11 @@ graph TD
     SV1 --> SESS
     SV1 --> CONF
     SV1 --> YEARS
-    YEARS -.->|"duplicate"| YFC
     SV1 --> CGET
     SV1 --> QA
     SV1 --> ER
     SV1 --> EXPS
 
-    style YFC fill:#ffcccc,stroke:#cc0000
     style SV1 fill:#ffcccc,stroke:#cc0000
     style KWSEARCH fill:#ffffcc,stroke:#cccc00
 ```
@@ -287,34 +284,36 @@ graph TD
         ECONN["connect() → ChromaDB"]
         ECOL["create_collection()"]
         EADD["add_paper → generate_embedding → store"]
-        ESRCH["search_similar / search_papers_semantic"]
+        ESRCH["search_similar (low level)"]
         EFIND["find_papers_within_distance"]
         EIMP["import/export_embeddings"]
 
         subgraph "⚠ Duplicate: Where-clause building"
-            W1["search_papers_semantic:<br/>build $and/$in filter"]
+            W1["DatabaseManager.search_papers_semantic:<br/>author + SQL filters + Chroma query"]
             W2["find_papers_within_distance:<br/>build $and/$in filter"]
         end
     end
 
     subgraph "ClusteringManager"
         CLOAD["load_embeddings"]
-        CREDUC["reduce_dimensions<br/>(PCA / t-SNE / UMAP)"]
+        CREDUC["reduce_dimensions<br/>(PCA / t-SNE)"]
         CCLUST["cluster<br/>(K-Means / DBSCAN / Agglom / Spectral / Fuzzy)"]
         CKEYS["extract_cluster_keywords"]
         CLBL["generate_cluster_labels"]
         CHRCH["generate_hierarchical_labels"]
         CRES["get_clustering_results"]
 
-        subgraph "⚠ Duplicate: TF-IDF extraction"
+        subgraph "Shared keyword extraction"
             T1["extract_cluster_keywords"]
-            T2["_extract_keywords_for_samples<br/>⚠ nearly identical to T1"]
+            T2["_extract_keywords_for_samples"]
+            T3["_compute_tfidf_keywords<br/>(shared TF-IDF implementation)"]
         end
 
-        subgraph "⚠ Duplicate: LLM label generation"
+        subgraph "Shared LLM label generation"
             L1["_generate_llm_label"]
-            L2["_generate_parent_label_llm<br/>⚠ same pattern as L1"]
-            L3["_generate_llm_label_from_keywords<br/>⚠ same pattern as L1"]
+            L2["_generate_parent_label_llm"]
+            L3["_generate_llm_label_from_keywords"]
+            L4["_call_llm_for_label<br/>(shared call + fallback)"]
         end
 
         subgraph "⚠ Duplicate: Where-clause building"
@@ -365,35 +364,26 @@ graph TD
         RCHAT["chat()"]
         RBUILD["_build_agent()"]
 
-        subgraph "⚠ Duplicate: Tool wrappers (6 identical patterns)"
+        subgraph "Explicit Tool Wrappers (8)"
             TW1["_tool_search_papers"]
             TW2["_tool_get_conference_topics"]
             TW3["_tool_get_topic_evolution"]
             TW4["_tool_analyze_topic_relevance"]
             TW5["_tool_get_cluster_visualization"]
             TW6["_tool_get_paper_details"]
+            TW7["_tool_summarize_interesting_papers"]
+            TW8["_tool_recommend_related_papers"]
         end
+
+        RH["_run_rag_tool<br/>(logging + result capture + formatting)"]
     end
 
     subgraph "MCP Tools (mcp_tools.py)"
         EXEC["execute_mcp_tool<br/>(dispatcher)"]
         SCHEMA["get_mcp_tools_schema"]
-
-        subgraph "⚠ Duplicate: Normalization (4 similar functions)"
-            N1["_normalize_search_papers_args"]
-            N2["_normalize_get_topic_evolution_args"]
-            N3["_normalize_analyze_topic_relevance_args"]
-            N4["_normalize_get_paper_details_args"]
-        end
-
-        subgraph "⚠ Duplicate: Formatters (6 similar functions)"
-            F1["_format_topic_relevance_result"]
-            F2["_format_conference_topics_result"]
-            F3["_format_topic_evolution_result"]
-            F4["_format_search_papers_result"]
-            F5["_format_visualization_result"]
-            F6["_format_paper_details_result"]
-        end
+        NORM["_normalize_args(arguments, rules)"]
+        RULES["NormRule rule tables"]
+        FORMAT["format_tool_result_for_llm"]
     end
 
     subgraph "MCP Server (mcp_server.py)"
@@ -404,19 +394,19 @@ graph TD
             S4["analyze_topic_relevance"]
             S5["get_cluster_visualization"]
             S6["get_paper_details"]
+            S7["summarize_interesting_papers"]
+            S8["recommend_related_papers"]
         end
 
-        subgraph "⚠ Duplicate: Resource init"
-            RI["get_config → EmbeddingsManager → DatabaseManager<br/>(repeated in each tool function)"]
-        end
+        RES["_get_mcp_resources()<br/>_get_clustering_resources()"]
 
-        subgraph "⚠ Duplicate: Where-clause merging"
-            WM1["merge_where_clause_with_conference"]
-            WM2["merge_where_clause_with_years"]
+        subgraph "Shared Where-clause Builder (embeddings.py)"
+            WB["build_chromadb_where_clause"]
         end
     end
 
-    RBUILD --> TW1 & TW2 & TW3 & TW4 & TW5 & TW6
+    RBUILD --> TW1 & TW2 & TW3 & TW4 & TW5 & TW6 & TW7 & TW8
+    TW1 & TW2 & TW3 & TW4 & TW5 & TW6 & TW7 & TW8 --> RH
 
     TW1 --> S1
     TW2 --> S2
@@ -424,32 +414,18 @@ graph TD
     TW4 --> S4
     TW5 --> S5
     TW6 --> S6
+    TW7 --> S7
+    TW8 --> S8
 
-    EXEC --> N1 --> S1
-    EXEC --> N2 --> S3
-    EXEC --> N3 --> S4
-    EXEC --> N4 --> S6
+    EXEC --> NORM
+    NORM --> RULES
+    EXEC --> S1 & S2 & S3 & S4 & S5 & S6 & S7 & S8
+    EXEC --> FORMAT
 
-    S1 --> WM1
-    S1 --> WM2
-
-    style TW1 fill:#ffcccc,stroke:#cc0000
-    style TW2 fill:#ffcccc,stroke:#cc0000
-    style TW3 fill:#ffcccc,stroke:#cc0000
-    style TW4 fill:#ffcccc,stroke:#cc0000
-    style TW5 fill:#ffcccc,stroke:#cc0000
-    style TW6 fill:#ffcccc,stroke:#cc0000
-    style N1 fill:#ffcccc,stroke:#cc0000
-    style N2 fill:#ffcccc,stroke:#cc0000
-    style N3 fill:#ffcccc,stroke:#cc0000
-    style N4 fill:#ffcccc,stroke:#cc0000
-    style F1 fill:#ffffcc,stroke:#cccc00
-    style F2 fill:#ffffcc,stroke:#cccc00
-    style F3 fill:#ffffcc,stroke:#cccc00
-    style F4 fill:#ffffcc,stroke:#cccc00
-    style F5 fill:#ffffcc,stroke:#cccc00
-    style F6 fill:#ffffcc,stroke:#cccc00
-    style RI fill:#ffcccc,stroke:#cc0000
+    S1 --> WB
+    S1 & S3 & S4 & S8 --> RES
+    S6 & S7 --> RES
+    S2 & S5 --> RES
 ```
 
 ## Web UI Request Flow
@@ -564,22 +540,17 @@ severity:
 
 | # | Pattern | Occurrences | Modules | Severity |
 |---|---------|-------------|---------|----------|
-| 1 | Session validation boilerplate (`if not self._session`) | 30+ | database.py | High |
-| 2 | ChromaDB where-clause construction (`$and/$in` filters) | 5+ | embeddings.py, clustering.py, mcp_server.py | High |
-| 3 | EmbeddingsManager initialization sequence | 6 | cli.py | High |
-| 4 | LM Studio connection test + error message | 4 | cli.py | Medium |
-| 5 | Embeddings DB path validation | 4 | cli.py | Medium |
-| 6 | CLI command header printing | 15+ | cli.py | Medium |
-| 7 | TF-IDF keyword extraction | 2 | clustering.py | Medium |
-| 8 | LLM label generation (OpenAI call + fallback) | 3 | clustering.py | Medium |
-| 9 | RAG tool wrapper functions (identical pattern) | 6 | rag.py | Medium |
-| 10 | MCP argument normalization functions | 4 | mcp_tools.py | Medium |
-| 11 | Resource init in MCP tools (config → embed → db) | 6 | mcp_server.py | Medium |
-| 12 | Conference/year argument resolution | 8+ | cli.py | Low |
-| 13 | Paper markdown formatting (session grouping) | 2 | export_utils.py | Low |
-| 14 | Error handling + traceback pattern | 15+ | cli.py | Low |
-| 15 | Faceting query pattern | 4 | database.py | Low |
-| 16 | Eval CRUD parallel structures | 2×5 | database.py | Low |
-| 17 | Progress callback definitions | 4 | registry.py | Low |
-| 18 | Web route error handling (try/except/jsonify) | 22 | web_ui/app.py | Low |
-| 19 | `get_years_for_conference` duplicates `get_years` | 2 | database.py | Low |
+| 1 | ChromaDB where-clause construction (`$and/$in` filters) | 5+ | embeddings.py, clustering.py, mcp_server.py | High |
+| 2 | CLI command header printing | 15+ | cli.py | Medium |
+| 3 | TF-IDF keyword extraction | 2 | clustering.py | Medium |
+| 4 | LLM label generation (OpenAI call + fallback) | 3 | clustering.py | Medium |
+| 5 | RAG tool execution/logging tail | 8 | rag.py | Resolved (`_run_rag_tool`) |
+| 6 | MCP argument normalization functions | 8 tools | mcp_tools.py | Resolved (`NormRule` + `_normalize_args`) |
+| 7 | Resource init in MCP tools (config → embed → db) | 8 | mcp_server.py | Resolved (`_get_mcp_resources`) |
+| 8 | Conference/year argument resolution | 8+ | cli.py | Low |
+| 9 | Paper markdown formatting (session grouping) | 2 | export_utils.py | Low |
+| 10 | Error handling + traceback pattern | 15+ | cli.py | Low |
+| 11 | Faceting query pattern | 4 | database.py | Low |
+| 12 | Eval CRUD parallel structures | 2×5 | database.py | Low |
+| 13 | Progress callback definitions | 4 | registry.py | Low |
+| 14 | Web route error handling (try/except/jsonify) | 22 | web_ui/app.py | Low |

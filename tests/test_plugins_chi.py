@@ -653,7 +653,7 @@ class TestCHIPluginDatabaseIntegration:
             count = db.add_papers(papers)
             assert count == len(papers)
 
-            rows = db.query("SELECT title, year, conference, authors FROM papers")
+            rows = db._query("SELECT title, year, conference, authors FROM papers")
             titles = [r["title"] for r in rows]
             assert "Test Paper One" in titles
             assert "Test Best Paper" in titles
@@ -674,7 +674,7 @@ class TestCHIPluginDatabaseIntegration:
             db.create_tables()
             db.add_papers(papers)
 
-            rows = db.query("SELECT authors FROM papers WHERE title = 'Test Paper One'")
+            rows = db._query("SELECT authors FROM papers WHERE title = 'Test Paper One'")
             assert rows
             authors_str = rows[0]["authors"]
             assert "Alice Smith" in authors_str
@@ -691,6 +691,6 @@ class TestCHIPluginDatabaseIntegration:
             db.create_tables()
             db.add_papers(papers)
 
-            rows = db.query("SELECT award FROM papers WHERE title = 'Test Best Paper'")
+            rows = db._query("SELECT award FROM papers WHERE title = 'Test Best Paper'")
             assert rows
             assert rows[0]["award"] == "Best Paper Award"

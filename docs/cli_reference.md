@@ -30,6 +30,10 @@ abstracts-explorer download [OPTIONS]
 - `--force`: Force re-download even if papers exist
 - `--cache/--no-cache`: Enable/disable caching (default: enabled)
 
+Some plugins (currently AAAI) record failed page URLs in `<cache>.failed.json`.
+The next download retries those URLs automatically; delete the sidecar file to
+skip those retries.
+
 **Examples:**
 
 ```bash
@@ -59,6 +63,8 @@ abstracts-explorer create-embeddings [OPTIONS]
 - `--collection-name TEXT`: Collection name in ChromaDB (default: from config)
 - `--model TEXT`: Embedding model to use (default: from config)
 - `--force`: Recreate embeddings even if they exist
+- `--ignore-embedding-model-mismatch`: Recreate embeddings after an embedding
+  model mismatch without prompting
 
 **Examples:**
 
@@ -73,6 +79,52 @@ uv run abstracts-explorer create-embeddings \
 
 # Force recreation
 uv run abstracts-explorer create-embeddings --force
+```
+
+### pre-process
+
+Run the full data-preparation pipeline: download → create-embeddings →
+clustering pre-generate.
+
+**Usage:**
+
+```bash
+abstracts-explorer pre-process [OPTIONS]
+```
+
+**Options:**
+
+- `--conference TEXT`: Limit to a single conference (default: all)
+- `--year INTEGER`: Limit to a single year (default: all available)
+- `--force`: Force re-download, reset embeddings and recompute clustering
+- `--no-overlap-post-process`: Run embeddings and clustering in one worker
+  instead of overlapping them
+- `--collection TEXT`: ChromaDB collection name (default: from config)
+- `--lm-studio-url TEXT`: OpenAI-compatible API URL (default: from config)
+- `--model TEXT`: Embedding model (default: from config)
+- `--requests-per-minute INTEGER`: API rate limit, 0 disables it
+- `--ignore-embedding-model-mismatch`: Recreate embeddings after an embedding
+  model mismatch without prompting
+
+The pipeline is parallel: each conference/year unit is embedded and clustered
+as soon as its download finishes, while the remaining downloads keep running.
+Embeddings and clustering also overlap, so clustering of one unit runs while
+embeddings for the next unit are created. Use `--no-overlap-post-process` to
+run those two stages in a single worker. To run the steps without any
+post-processing, use the `download`, `create-embeddings`, and
+`clustering pre-generate` commands individually.
+
+**Examples:**
+
+```bash
+# Run the full parallel pipeline
+uv run abstracts-explorer pre-process
+
+# Process a single conference and year
+uv run abstracts-explorer pre-process --conference neurips --year 2025
+
+# Recreate embeddings after switching models without prompting
+uv run abstracts-explorer pre-process --ignore-embedding-model-mismatch --model my-new-model
 ```
 
 ### search

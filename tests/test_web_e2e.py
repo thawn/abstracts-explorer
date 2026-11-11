@@ -187,8 +187,6 @@ def test_embeddings(test_database, tmp_path_factory):
     # This ensures we ALWAYS use the mock, never a real OpenAI connection
     em._openai_client = mock_client
 
-    em.connect()
-
     # Forcefully delete collection if it exists to ensure clean state
     try:
         em.client.delete_collection(name=collection_name)
@@ -201,8 +199,8 @@ def test_embeddings(test_database, tmp_path_factory):
     # Add embeddings for all test papers from the database
     set_test_db(str(test_database))
     db = DatabaseManager()
-    db.connect()
-    papers = db.query("SELECT * FROM papers")
+
+    papers = db._query("SELECT * FROM papers")
 
     # Add each paper to the embeddings database
     for paper in papers:
@@ -242,7 +240,7 @@ def _prepopulate_clustering_cache(test_database, em, collection_name):
 
     set_test_db(str(test_database))
     db = DatabaseManager()
-    db.connect()
+
     db.create_tables()
 
     cm = ClusteringManager(em, db)
@@ -282,6 +280,20 @@ def _prepopulate_clustering_cache(test_database, em, collection_name):
         results=results,
         n_clusters=None,
         clustering_params={"linkage": "ward", "distance_threshold": 150.0},
+    )
+
+    # The clustering tab requests results for the selected conference/year
+    # (NeurIPS 2025 in the test data), which are cached under separate keys.
+    db.save_clustering_cache(
+        embedding_model=config.embedding_model,
+        reduction_method="tsne",
+        n_components=2,
+        clustering_method="agglomerative",
+        results=results,
+        n_clusters=None,
+        clustering_params={"linkage": "ward", "distance_threshold": 150.0},
+        conference="NeurIPS",
+        year=2025,
     )
     db.close()
 
@@ -378,7 +390,6 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
             # Don't check file existence in tests - the database was created in a temp dir
             set_test_db(db_path)
             g.db = DatabaseManager()
-            g.db.connect()
             g.db.create_tables()  # Ensure all tables exist (including clustering_cache)
         return g.db
 
@@ -2085,9 +2096,6 @@ class TestAdvancedSearchE2E:
 
 @pytest.mark.e2e
 @pytest.mark.slow
-@pytest.mark.skip(
-    reason="Clustering tab tests are currently too slow because of the large number of papers in test data. Need to use smaller dataset for testing."
-)
 class TestClusteringTabE2E:
     """Test clustering tab functionality with Selenium."""
 
@@ -2212,7 +2220,7 @@ class TestClusteringTabE2E:
 
         # Check for paper details panel with timeout
         try:
-            details_panel = wait.until(EC.presence_of_element_located((By.ID, "selected-paper-details")), timeout=5)
+            details_panel = wait.until(EC.presence_of_element_located((By.ID, "selected-paper-details")))
             # Panel might be hidden initially
             assert details_panel is not None, "Selected paper details panel should exist"
         except TimeoutException:

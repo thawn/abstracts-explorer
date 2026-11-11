@@ -7,11 +7,14 @@ embeddings and stores them in ChromaDB for efficient similarity search.
 """
 
 import logging
+import sys
+import threading
+from copy import deepcopy
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
-import httpx
+import httpx2
 from openai import OpenAI
 import chromadb
 from chromadb.config import Settings
@@ -22,24 +25,122 @@ from abstracts_explorer.database import DatabaseManager, normalize_model_name
 logger = logging.getLogger(__name__)
 
 
-class RateLimitedTransport(httpx.BaseTransport):
-    """
-    An httpx transport that enforces a maximum requests-per-minute rate.
+def _contains_metadata_key(value: Any, key: str) -> bool:
+    """Recursively check whether *key* appears in a ChromaDB where clause."""
+    if isinstance(value, dict):
+        if key in value:
+            return True
+        return any(_contains_metadata_key(item, key) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_metadata_key(item, key) for item in value)
+    return False
 
-    Wraps an existing transport and acquires tokens from a shared token bucket
-    rate limiter before forwarding requests.  This provides thread-safe, global
-    rate limiting that works correctly under Waitress's multi-threaded WSGI
-    server.
+
+def build_chromadb_where_clause(
+    conferences: Optional[Sequence[str]] = None,
+    years: Optional[Sequence[int]] = None,
+    sessions: Optional[Sequence[str]] = None,
+    base_where: Optional[Dict[str, Any]] = None,
+    combine_with: str = "$and",
+) -> Optional[Dict[str, Any]]:
+    """
+    Build a ChromaDB ``where`` clause from metadata filters.
+
+    The helper centralizes all ChromaDB metadata-filter composition.  It
+    converts years to strings (ChromaDB stores metadata as strings), combines
+    multiple conditions with ``$and`` (or ``$or``), and merges an optional
+    user-supplied base clause without duplicating existing
+    conference/year/session filters.
 
     Parameters
     ----------
-    transport : httpx.BaseTransport
+    conferences : sequence of str, optional
+        Conference names to filter by.
+    years : sequence of int, optional
+        Publication years to filter by.
+    sessions : sequence of str, optional
+        Session names to filter by.
+    base_where : dict, optional
+        Existing ChromaDB where clause to merge with the filters.
+    combine_with : str, optional
+        Logical operator used to combine conditions, either ``"$and"``
+        (default) or ``"$or"``.
+
+    Returns
+    -------
+    dict or None
+        A new where clause, or ``None`` when no filters were supplied.
+
+    Raises
+    ------
+    ValueError
+        If *base_where* is not a dict, *combine_with* is invalid, or the
+        base clause contains an invalid logical-operator value.
+
+    Examples
+    --------
+    >>> build_chromadb_where_clause(["NeurIPS"], [2024])
+    {'$and': [{'conference': {'$in': ['NeurIPS']}}, {'year': {'$in': ['2024']}}]}
+    >>> build_chromadb_where_clause(base_where={"session": "Oral"})
+    {'session': 'Oral'}
+    """
+    if base_where is not None and not isinstance(base_where, dict):
+        raise ValueError(f"WHERE clause must be a dict, got {type(base_where).__name__}")
+    if combine_with not in ("$and", "$or"):
+        raise ValueError(f"combine_with must be '$and' or '$or', got {combine_with!r}")
+
+    where = deepcopy(base_where) if base_where else None
+
+    conditions: List[Dict[str, Any]] = []
+    if conferences and not _contains_metadata_key(where, "conference"):
+        conference_values = [conferences] if isinstance(conferences, str) else list(conferences)
+        conditions.append({"conference": {"$in": conference_values}})
+    if years and not _contains_metadata_key(where, "year"):
+        year_values = [years] if isinstance(years, (str, int)) else list(years)
+        conditions.append({"year": {"$in": [str(year) for year in year_values]}})
+    if sessions and not _contains_metadata_key(where, "session"):
+        session_values = [sessions] if isinstance(sessions, str) else list(sessions)
+        conditions.append({"session": {"$in": session_values}})
+
+    if not conditions:
+        return where
+
+    if where is None:
+        return conditions[0] if len(conditions) == 1 else {combine_with: conditions}
+
+    existing_combined = where.get(combine_with)
+    if existing_combined is not None:
+        if not isinstance(existing_combined, list):
+            raise ValueError(f"WHERE clause '{combine_with}' value must be a list")
+        existing_combined.extend(conditions)
+        return where
+
+    return {combine_with: [where, *conditions]}
+
+
+class RateLimitedTransport(httpx2.BaseTransport, httpx2.AsyncBaseTransport):
+    """
+    An httpx2 transport that enforces a maximum requests-per-minute rate.
+
+    Supports both synchronous and asynchronous clients.  Wraps an existing
+    transport and acquires tokens from a shared token bucket rate limiter before
+    forwarding requests.  This provides thread-safe, global rate limiting that
+    works correctly under Waitress's multi-threaded WSGI server as well as with
+    Pydantic AI's async OpenAI provider.
+
+    Parameters
+    ----------
+    transport : httpx2.BaseTransport or httpx2.AsyncBaseTransport
         The underlying transport to delegate requests to.
     requests_per_minute : int
         Maximum number of requests per minute. Must be > 0.
     """
 
-    def __init__(self, transport: httpx.BaseTransport, requests_per_minute: int) -> None:
+    def __init__(
+        self,
+        transport: httpx2.BaseTransport | httpx2.AsyncBaseTransport,
+        requests_per_minute: int,
+    ) -> None:
         from abstracts_explorer.rate_limiter import (
             TokenBucketRateLimiter,
             get_global_rate_limiter,
@@ -56,59 +157,31 @@ class RateLimitedTransport(httpx.BaseTransport):
 
         self._rate_limiter = global_rate_limiter
 
-    def handle_request(self, request: httpx.Request) -> httpx.Response:
+    def handle_request(self, request: httpx2.Request) -> httpx2.Response:
         """Send *request* after acquiring a rate-limit token."""
+        if not isinstance(self._transport, httpx2.BaseTransport):
+            raise TypeError("Cannot use a synchronous client with an async transport.")
         self._rate_limiter.acquire(tokens=1.0)
         response = self._transport.handle_request(request)
         return response
 
-    def close(self) -> None:
-        """Close the underlying transport."""
-        self._transport.close()
-
-
-class AsyncRateLimitedTransport(httpx.AsyncBaseTransport):
-    """
-    An async httpx transport that enforces a maximum requests-per-minute rate.
-
-    Wraps an existing async transport and acquires tokens from a shared token bucket
-    rate limiter before forwarding requests.  This provides thread-safe, global
-    rate limiting that works with Pydantic AI's async OpenAI provider.
-
-    Parameters
-    ----------
-    transport : httpx.AsyncBaseTransport
-        The underlying async transport to delegate requests to.
-    requests_per_minute : int
-        Maximum number of requests per minute. Must be > 0.
-    """
-
-    def __init__(self, transport: httpx.AsyncBaseTransport, requests_per_minute: int) -> None:
-        from abstracts_explorer.rate_limiter import (
-            TokenBucketRateLimiter,
-            get_global_rate_limiter,
-            set_global_rate_limiter,
-        )
-
-        self._transport = transport
-        self._rpm = requests_per_minute
-
-        global_rate_limiter = get_global_rate_limiter()
-        if global_rate_limiter is None:
-            global_rate_limiter = TokenBucketRateLimiter(requests_per_minute=requests_per_minute)
-            set_global_rate_limiter(global_rate_limiter)
-
-        self._rate_limiter = global_rate_limiter
-
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
         """Send *request* after acquiring a rate-limit token asynchronously."""
+        if not isinstance(self._transport, httpx2.AsyncBaseTransport):
+            raise TypeError("Cannot use an async client with a synchronous transport.")
         await self._rate_limiter.async_acquire(tokens=1.0)
         response = await self._transport.handle_async_request(request)
         return response
 
+    def close(self) -> None:
+        """Close the underlying sync transport."""
+        if isinstance(self._transport, httpx2.BaseTransport):
+            self._transport.close()
+
     async def aclose(self) -> None:
         """Close the underlying async transport."""
-        await self._transport.aclose()
+        if isinstance(self._transport, httpx2.AsyncBaseTransport):
+            await self._transport.aclose()
 
 
 class EmbeddingsError(Exception):
@@ -204,6 +277,7 @@ class EmbeddingsManager:
         self.collection_name = collection_name or config.collection_name
         self._client: Optional[Any] = None  # chromadb.Client
         self._collection: Optional[Any] = None  # chromadb.Collection
+        self._init_lock = threading.RLock()
 
         # OpenAI client - lazy loaded on first use to avoid API calls during test collection
         self._openai_client: Optional[OpenAI] = None
@@ -229,7 +303,9 @@ class EmbeddingsManager:
             If connecting to ChromaDB fails.
         """
         if self._client is None:
-            self.connect()
+            with self._init_lock:
+                if self._client is None:
+                    self.connect()
         assert self._client is not None  # connect() always sets _client or raises EmbeddingsError
         return self._client
 
@@ -256,7 +332,9 @@ class EmbeddingsManager:
             If connecting to ChromaDB or creating the collection fails.
         """
         if self._collection is None:
-            self.create_collection()
+            with self._init_lock:
+                if self._collection is None:
+                    self.create_collection()
         return self._collection
 
     @collection.setter
@@ -269,7 +347,7 @@ class EmbeddingsManager:
         Get the OpenAI client, creating it lazily on first access.
 
         When ``requests_per_minute`` is greater than 0 a :class:`RateLimitedTransport`
-        is wrapped around the default httpx transport and passed as the ``http_client``
+        is wrapped around the default httpx2 transport and passed as the ``http_client``
         argument so that every HTTP request is automatically throttled.
 
         This lazy loading prevents API calls during test collection.
@@ -280,10 +358,10 @@ class EmbeddingsManager:
             Initialized OpenAI client instance.
         """
         if self._openai_client is None:
-            http_client: Optional[httpx.Client] = None
+            http_client: Optional[Any] = None
             if self.requests_per_minute > 0:
-                transport = RateLimitedTransport(httpx.HTTPTransport(), self.requests_per_minute)
-                http_client = httpx.Client(transport=transport)
+                transport = RateLimitedTransport(httpx2.HTTPTransport(), self.requests_per_minute)
+                http_client = httpx2.Client(transport=transport)
             self._openai_client = OpenAI(
                 base_url=f"{self.lm_studio_url}/v1",
                 api_key=self.llm_backend_auth_token or "lm-studio-local",
@@ -349,6 +427,30 @@ class EmbeddingsManager:
         """Context manager exit."""
         self.close()
 
+    def init(self, reset: bool = False) -> None:
+        """
+        Connect to ChromaDB and create or retrieve the collection.
+
+        Parameters
+        ----------
+        reset : bool, optional
+            If True, delete the existing collection before creating it,
+            by default False.
+
+        Raises
+        ------
+        EmbeddingsError
+            If connecting to ChromaDB or creating the collection fails.
+
+        Examples
+        --------
+        >>> em = EmbeddingsManager()
+        >>> em.init()
+        """
+        with self._init_lock:
+            self.connect()
+            self.create_collection(reset=reset)
+
     def test_lm_studio_connection(self) -> bool:
         """
         Test connection to OpenAI-compatible API endpoint.
@@ -373,12 +475,44 @@ class EmbeddingsManager:
             logger.warning(f"Failed to connect to OpenAI API: {str(e)}")
             return False
 
+    def verbose_api_connection_test(self, model_hint: Optional[str] = None) -> bool:
+        """
+        Test the OpenAI-compatible API connection and print user-facing messages.
+
+        Parameters
+        ----------
+        model_hint : str, optional
+            Description of the expected model shown in the failure message.
+            If None, a message using ``self.model_name`` is shown.
+
+        Returns
+        -------
+        bool
+            True if the connection is successful, False otherwise.
+
+        Examples
+        --------
+        >>> em = EmbeddingsManager()
+        >>> if em.verbose_api_connection_test():
+        ...     print("API is accessible")
+        """
+        print("\n🔌 Testing OpenAI API connection...")
+        if not self.test_lm_studio_connection():
+            print("\n❌ Failed to connect to OpenAI API!", file=sys.stderr)
+            print("\nPlease ensure:", file=sys.stderr)
+            print(f"  - OpenAI-compatible API is running at {self.lm_studio_url}", file=sys.stderr)
+            hint = model_hint or f"The {self.model_name} model is loaded"
+            print(f"  - {hint}", file=sys.stderr)
+            return False
+        print("✅ Successfully connected to OpenAI API")
+        return True
+
     def generate_embedding(self, text: str) -> List[float]:
         """
         Generate embedding for a given text using OpenAI-compatible API.
 
         Rate limiting (if configured via ``requests_per_minute``) is handled
-        transparently by the underlying ``httpx`` transport.
+        transparently by the underlying ``httpx2`` transport.
 
         Parameters
         ----------
@@ -435,9 +569,7 @@ class EmbeddingsManager:
         Examples
         --------
         >>> em = EmbeddingsManager()
-        >>> em.connect()
-        >>> em.create_collection()
-        >>> em.create_collection(reset=True)  # Reset existing collection
+        >>> em.init(reset=True)  # Reset an existing collection
         """
         try:
             if reset:
@@ -478,8 +610,7 @@ class EmbeddingsManager:
         Examples
         --------
         >>> em = EmbeddingsManager()
-        >>> em.connect()
-        >>> em.create_collection()
+        >>> em.init()
         >>> em.paper_exists("uid1")
         False
         >>> em.add_paper(paper_dict)
@@ -517,8 +648,7 @@ class EmbeddingsManager:
         Examples
         --------
         >>> em = EmbeddingsManager()
-        >>> em.connect()
-        >>> em.create_collection()
+        >>> em.init()
         >>> em.paper_needs_update({"id": 1, "abstract": "Updated abstract"})
         True
         >>> em.paper_needs_update({"id": 1, "abstract": "This paper presents..."})
@@ -672,8 +802,7 @@ class EmbeddingsManager:
         Examples
         --------
         >>> em = EmbeddingsManager()
-        >>> em.connect()
-        >>> em.create_collection()
+        >>> em.init()
         >>> em.add_paper(paper_dict)
         """
         try:
@@ -730,8 +859,7 @@ class EmbeddingsManager:
         Examples
         --------
         >>> em = EmbeddingsManager()
-        >>> em.connect()
-        >>> em.create_collection()
+        >>> em.init()
         >>> results = em.search_similar("deep learning transformers", n_results=5, where={"year": 2025})
         >>> for i, paper_id in enumerate(results['ids'][0]):
         ...     print(f"{i+1}. Paper {paper_id}: {results['metadatas'][0][i]}")
@@ -782,8 +910,7 @@ class EmbeddingsManager:
         Examples
         --------
         >>> em = EmbeddingsManager()
-        >>> em.connect()
-        >>> em.create_collection()
+        >>> em.init()
         >>> stats = em.get_collection_stats()
         >>> print(f"Collection has {stats['count']} papers")
         """
@@ -822,7 +949,6 @@ class EmbeddingsManager:
         try:
             # Use DatabaseManager to check the stored model
             db_manager = DatabaseManager()
-            db_manager.connect()
 
             stored_model = db_manager.get_embedding_model()
             db_manager.close()
@@ -840,7 +966,7 @@ class EmbeddingsManager:
 
     def embed_from_database(
         self,
-        where_clause: Optional[str] = None,
+        where_filters: Optional[Dict[str, Any]] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None,
         force_recreate: bool = False,
     ) -> int:
@@ -851,8 +977,10 @@ class EmbeddingsManager:
 
         Parameters
         ----------
-        where_clause : str, optional
-            SQL WHERE clause to filter papers (e.g., "decision = 'Accept'")
+        where_filters : dict, optional
+            Structured filters passed to
+            :meth:`~abstracts_explorer.database.DatabaseManager.get_paper`
+            (e.g. ``{"conference": "NeurIPS", "year": 2025}``).
         progress_callback : callable, optional
             Callback function to report progress. Called with (current, total) number of papers processed.
         force_recreate : bool, optional
@@ -871,26 +999,20 @@ class EmbeddingsManager:
         Examples
         --------
         >>> em = EmbeddingsManager()
-        >>> em.connect()
-        >>> em.create_collection()
+        >>> em.init()
         >>> count = em.embed_from_database()
         >>> print(f"Embedded {count} papers")
         >>> # Only embed accepted papers
-        >>> count = em.embed_from_database(where_clause="decision = 'Accept'")
+        >>> count = em.embed_from_database(where_filters={"award": {"$ne": None}})
         """
         try:
             # Use DatabaseManager for database operations
             db_manager = DatabaseManager()
-            db_manager.connect()
 
             # Store the embedding model in the database
             db_manager.set_embedding_model(self.model_name)
 
-            query = "SELECT * FROM papers"
-            if where_clause:
-                query += f" WHERE {where_clause}"
-
-            rows = db_manager.query(query)
+            rows = db_manager.get_paper(where_filters, limit=0)
             total = len(rows)
 
             logger.debug(f"Found {total} papers to embed")
@@ -933,171 +1055,6 @@ class EmbeddingsManager:
 
         except Exception as e:
             raise EmbeddingsError(f"Failed to embed from database: {str(e)}") from e
-
-    def search_papers_semantic(
-        self,
-        query: str,
-        database,
-        limit: int = 10,
-        sessions: Optional[List[str]] = None,
-        years: Optional[List[int]] = None,
-        conferences: Optional[List[str]] = None,
-        distance_threshold: float = 1.1,
-    ) -> List[Dict[str, Any]]:
-        """
-        Perform semantic search for papers using embeddings.
-
-        This function combines embedding-based similarity search with metadata filtering
-        and retrieves complete paper information from the database.
-
-        Supports ``field:"value"`` syntax in the query for filtering by any
-        Paper model column.  Recognised filters are resolved against the SQL
-        database (using ILIKE substring matching), and only the matching paper
-        UIDs are forwarded to ChromaDB as a ``{"uid": {"$in": …}}`` condition.
-        The remaining query text is used for the semantic similarity search.
-
-        In addition, the query text is always checked against the ``authors``
-        field in the SQL database (unless an explicit ``authors:`` filter is
-        already present in the query).  Papers that match the query as an author
-        name are prepended to the results so that author matches appear first.
-
-        Parameters
-        ----------
-        query : str
-            Search query text.  May include ``field:"value"`` filters.
-        database : DatabaseManager
-            Database manager for retrieving full paper details
-        limit : int, optional
-            Maximum number of results to return, by default 10
-        sessions : list of str, optional
-            Filter by paper sessions
-        years : list of int, optional
-            Filter by publication years
-        conferences : list of str, optional
-            Filter by conference names
-        distance_threshold : float, optional
-            Maximum distance (in embedding space) for a result to be included.
-            Papers with a distance greater than this value are excluded from
-            the results. By default 1.1, matching the threshold used by
-            :meth:`count_papers_within_distance`.
-
-        Returns
-        -------
-        list of dict
-            List of paper dictionaries with complete information
-
-        Raises
-        ------
-        EmbeddingsError
-            If search fails
-
-        Examples
-        --------
-        >>> papers = em.search_papers_semantic(
-        ...     "transformers in vision",
-        ...     database=db,
-        ...     limit=5,
-        ...     years=[2024, 2025]
-        ... )
-        >>> papers = em.search_papers_semantic(
-        ...     'authors:"Vaswani" attention',
-        ...     database=db,
-        ... )
-        """
-        from abstracts_explorer.paper_utils import format_search_results, PaperFormattingError
-        from abstracts_explorer.database import DatabaseManager
-
-        # Parse field-specific filters from query
-        field_filters, remaining_query = DatabaseManager.parse_field_filters(query)
-
-        # When the query consists only of field filters (no remaining keywords),
-        # bypass the embedding search entirely and return SQL results directly.
-        # This avoids generating a meaningless embedding for the raw filter syntax
-        # and allows field-filter searches to work without an LLM backend.
-        if field_filters and not remaining_query:
-            return database.search_papers(
-                field_filters=field_filters,
-                sessions=sessions,
-                years=years,
-                conferences=conferences,
-                limit=limit,
-            )
-
-        semantic_query = remaining_query if remaining_query else query
-
-        # Build metadata filter for embeddings search.
-        # NOTE: All metadata is stored as strings in ChromaDB (see add_paper, line 445).
-        # ChromaDB only supports $eq, $ne, $in, $nin, $gt, $gte, $lt, $lte operators on
-        # metadata fields — substring matching is NOT supported.
-        #
-        # For field filters parsed from the query (which require ILIKE/substring matching)
-        # we therefore query the SQL database first and pass only the matching paper UIDs
-        # to ChromaDB as a {"uid": {"$in": [...]}} condition.
-        filter_conditions: List[Dict[str, Any]] = []
-
-        matching_uids: Optional[List[str]] = None
-
-        if field_filters:
-            # Use the SQL database for substring-capable ILIKE filtering
-            matching_papers = database.search_papers(field_filters=field_filters, limit=0)
-            if not matching_papers:
-                # No papers satisfy the field filters — no results possible
-                return []
-            matching_uids = [p["uid"] for p in matching_papers]
-        else:
-            # still check whether the remaining query matches any author names, even if there are no explicit field filters for authors
-            author_search_filters = {**field_filters, "authors": semantic_query}
-            author_matches = database.search_papers(
-                field_filters=author_search_filters,
-                sessions=sessions,
-                years=years,
-                conferences=conferences,
-                limit=limit,
-            )
-            if author_matches:
-                logger.info(f"Author name matches found for query '{semantic_query}': {len(author_matches)} papers")
-                return author_matches
-
-        if sessions:
-            filter_conditions.append({"session": {"$in": sessions}})
-        if years:
-            # Convert years to strings to match ChromaDB metadata storage format
-            year_strs: List[str] = [str(y) for y in years]
-            filter_conditions.append({"year": {"$in": year_strs}})
-        if conferences:
-            filter_conditions.append({"conference": {"$in": conferences}})
-
-        # Use $and operator if multiple conditions, otherwise use single condition
-        where_filter: Optional[Dict[str, Any]] = None
-        if len(filter_conditions) > 1:
-            where_filter = {"$and": filter_conditions}
-        elif len(filter_conditions) == 1:
-            where_filter = filter_conditions[0]
-
-        logger.info(
-            f"Semantic search - query: {semantic_query}, filter: sessions={sessions}, "
-            f"years={years}, conferences={conferences}, field_filters={field_filters}"
-        )
-        logger.info(f"Where filter: {where_filter}")
-        logger.info(f"Matching UIDs from SQL filter: {matching_uids}")
-
-        results = self.search_similar(semantic_query, n_results=limit * 2, where=where_filter, ids=matching_uids)
-
-        logger.info(f"Search results count: {len(results.get('ids', [[]])[0]) if results else 0}")
-
-        # Transform ChromaDB results to paper format using shared utility
-        try:
-            papers = format_search_results(results, database, include_documents=False)
-        except PaperFormattingError:
-            # No valid papers found
-            papers = []
-
-        # Filter out papers that exceed the distance threshold
-        papers = [p for p in papers if p.get("distance", 0.0) <= distance_threshold]
-
-        logger.info(f"Search results count: {len(papers)}, after applying distance threshold of {distance_threshold}")
-
-        return papers[:limit]
 
     def count_papers_within_distance(
         self,
@@ -1199,10 +1156,8 @@ class EmbeddingsManager:
         Examples
         --------
         >>> em = EmbeddingsManager()
-        >>> em.connect()
-        >>> em.create_collection()
+        >>> em.init()
         >>> db = DatabaseManager()
-        >>> db.connect()
         >>> results = em.find_papers_within_distance(db, "machine learning", 1.1)
         >>> print(f"Found {results['count']} papers")
         >>>
@@ -1231,28 +1186,7 @@ class EmbeddingsManager:
             # Build where clause for filtering
             # NOTE: All metadata is stored as strings in ChromaDB (see add_paper method),
             # so we must convert filter values to strings for matching.
-            where_clause: Optional[Dict[str, Any]] = None
-            if conferences or years:
-                filters: list[Dict[str, Any]] = []
-                if conferences:
-                    if len(conferences) == 1:
-                        filters.append({"conference": conferences[0]})
-                    else:
-                        filters.append({"conference": {"$in": conferences}})
-
-                if years:
-                    # Convert years to strings to match ChromaDB metadata storage format
-                    year_strs: List[str] = [str(y) for y in years]
-                    if len(year_strs) == 1:
-                        filters.append({"year": year_strs[0]})
-                    else:
-                        filters.append({"year": {"$in": year_strs}})
-
-                # Combine filters with $and if multiple
-                if len(filters) == 1:
-                    where_clause = filters[0]
-                else:
-                    where_clause = {"$and": filters}
+            where_clause = build_chromadb_where_clause(conferences, years)
 
             # Query papers and get distances.
             # Cap n_results to avoid ChromaDB / SQLite "too many SQL variables"
@@ -1343,8 +1277,7 @@ class EmbeddingsManager:
         Examples
         --------
         >>> em = EmbeddingsManager()
-        >>> em.connect()
-        >>> em.create_collection()
+        >>> em.init()
         >>> deleted = em.delete_embeddings_by_filter(conference="NeurIPS", year=2024)
         >>> print(f"Deleted {deleted} embeddings")
         """
@@ -1352,17 +1285,11 @@ class EmbeddingsManager:
             raise ValueError("At least one of 'conference' or 'year' must be provided.")
 
         try:
-            filter_conditions: List[Dict[str, Any]] = []
-            if conference is not None:
-                filter_conditions.append({"conference": conference})
-            if year is not None:
-                filter_conditions.append({"year": str(year)})
-
-            where_filter: Dict[str, Any]
-            if len(filter_conditions) > 1:
-                where_filter = {"$and": filter_conditions}
-            else:
-                where_filter = filter_conditions[0]
+            where_filter = build_chromadb_where_clause(
+                conferences=[conference] if conference is not None else None,
+                years=[year] if year is not None else None,
+            )
+            assert where_filter is not None
 
             existing = self.collection.get(where=where_filter)
             ids_to_delete = existing.get("ids", [])
@@ -1410,12 +1337,10 @@ class EmbeddingsManager:
         try:
             results = self.collection.get(
                 include=["documents", "embeddings", "metadatas"],
-                where={
-                    "$and": [
-                        {"conference": conference},
-                        {"year": str(year)},
-                    ]
-                },
+                where=build_chromadb_where_clause(
+                    conferences=[conference],
+                    years=[year],
+                ),
             )
             embeddings = results.get("embeddings", [])
             # ChromaDB may return embeddings as numpy ndarrays; convert to plain lists
@@ -1474,12 +1399,10 @@ class EmbeddingsManager:
             # Remove existing embeddings for this conference+year
             try:
                 existing = self.collection.get(
-                    where={
-                        "$and": [
-                            {"conference": conference},
-                            {"year": str(year)},
-                        ]
-                    },
+                    where=build_chromadb_where_clause(
+                        conferences=[conference],
+                        years=[year],
+                    ),
                 )
                 if existing["ids"]:
                     self.collection.delete(ids=existing["ids"])

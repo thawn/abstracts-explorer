@@ -18,11 +18,16 @@ from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from abstracts_explorer.database import DatabaseManager
-from abstracts_explorer.embeddings import EmbeddingsManager
+from abstracts_explorer.embeddings import EmbeddingsManager, build_chromadb_where_clause
 from abstracts_explorer.rag import RAGChat
 from abstracts_explorer.config import get_config
 from abstracts_explorer.export_utils import export_papers_to_zip
 from abstracts_explorer.paper_utils import extract_top_keywords
+from abstracts_explorer.web_ui.api_utils import (
+    ApiError,
+    api_error_handler,
+    get_conference_year_params,
+)
 
 # Import version
 try:
@@ -81,7 +86,6 @@ def get_database():
     if "db" not in g:
         # Database configuration comes from config file
         g.db = DatabaseManager()
-        g.db.connect()  # Explicitly connect to the database
         g.db.create_tables()  # Ensure all tables exist (including new ones like clustering_cache)
     return g.db
 
@@ -103,8 +107,6 @@ def get_embeddings_manager():
             model_name=config.embedding_model,
             collection_name=config.collection_name,
         )
-        embeddings_manager.connect()  # Connect to ChromaDB
-        embeddings_manager.create_collection()  # Get or create the collection
     return embeddings_manager
 
 
@@ -332,6 +334,7 @@ def health():
 
 
 @app.route("/api/stats")
+@api_error_handler
 def stats():
     """
     Get database statistics, optionally filtered by year and conference.
@@ -345,27 +348,16 @@ def stats():
     dict
         Statistics including paper count, year, and conference
     """
-    try:
-        # Get optional query parameters
-        year_param = request.args.get("year")
-        conference_param = request.args.get("conference")
+    conference, year = get_conference_year_params(request)
 
-        # Convert year to int if provided
-        year = int(year_param) if year_param else None
-        conference = conference_param if conference_param else None
+    database = get_database()
+    stats_data = database.get_stats(year=year, conference=conference)
 
-        database = get_database()
-        stats_data = database.get_stats(year=year, conference=conference)
-
-        return jsonify(stats_data)
-    except ValueError as e:
-        return jsonify({"error": f"Invalid year parameter: {str(e)}"}), 400
-    except Exception as e:
-        logger.error(f"Error in stats endpoint: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+    return jsonify(stats_data)
 
 
 @app.route("/api/embedding-model-check")
+@api_error_handler
 def check_embedding_model():
     """
     Check if the embedding model in the configuration matches the one in the database.
@@ -378,47 +370,44 @@ def check_embedding_model():
         - current_model: str - Current model from configuration
         - warning: str or None - Warning message if incompatible
     """
-    try:
-        config = get_config()
-        database = get_database()
+    config = get_config()
+    database = get_database()
 
-        # Get the stored embedding model from the database
-        stored_model = database.get_embedding_model()
-        current_model = config.embedding_model
+    # Get the stored embedding model from the database
+    stored_model = database.get_embedding_model()
+    current_model = config.embedding_model
 
-        # Check compatibility
-        if stored_model is None:
-            # No model stored yet, considered compatible
-            compatible = True
-            warning = None
-        elif stored_model == current_model:
-            # Models match
-            compatible = True
-            warning = None
-        else:
-            # Models differ
-            compatible = False
-            warning = (
-                f"Embedding model mismatch detected! The embeddings were created with '{stored_model}' "
-                f"but the current configuration uses '{current_model}'. Embeddings from different models "
-                f"are incompatible. Please recreate the embeddings using: "
-                f"neurips-abstracts create-embeddings --force"
-            )
-
-        return jsonify(
-            {
-                "compatible": compatible,
-                "stored_model": stored_model,
-                "current_model": current_model,
-                "warning": warning,
-            }
+    # Check compatibility
+    if stored_model is None:
+        # No model stored yet, considered compatible
+        compatible = True
+        warning = None
+    elif stored_model == current_model:
+        # Models match
+        compatible = True
+        warning = None
+    else:
+        # Models differ
+        compatible = False
+        warning = (
+            f"Embedding model mismatch detected! The embeddings were created with '{stored_model}' "
+            f"but the current configuration uses '{current_model}'. Embeddings from different models "
+            f"are incompatible. Please recreate the embeddings using: "
+            f"neurips-abstracts create-embeddings --force"
         )
-    except Exception as e:
-        logger.error(f"Error in embedding-model-check endpoint: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+
+    return jsonify(
+        {
+            "compatible": compatible,
+            "stored_model": stored_model,
+            "current_model": current_model,
+            "warning": warning,
+        }
+    )
 
 
 @app.route("/api/filters")
+@api_error_handler
 def get_filters():
     """
     Get available filter options, optionally filtered by year and conference.
@@ -432,25 +421,15 @@ def get_filters():
     dict
         Dictionary with sessions list filtered by the given conference/year
     """
-    try:
-        # Get optional query parameters
-        year_param = request.args.get("year")
-        conference_param = request.args.get("conference")
+    conference, year = get_conference_year_params(request)
 
-        # Convert year to int if provided
-        year = int(year_param) if year_param else None
-        conference = conference_param if conference_param else None
-
-        database = get_database()
-        sessions = database.get_sessions(conference=conference, year=year)
-        return jsonify({"sessions": sessions})
-    except ValueError as e:
-        return jsonify({"error": f"Invalid year parameter: {str(e)}"}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    database = get_database()
+    sessions = database.get_sessions(conference=conference, year=year)
+    return jsonify({"sessions": sessions})
 
 
 @app.route("/api/available-filters")
+@api_error_handler
 def get_available_filters_endpoint():
     """
     Get available conferences and years from the database.
@@ -468,38 +447,36 @@ def get_available_filters_endpoint():
         - default_conference: conference to pre-select (guaranteed to have DB data, if any exists)
         - default_year: year to pre-select (guaranteed to have DB data for the default conference)
     """
-    try:
-        config = get_config()
-        database = get_database()
+    config = get_config()
+    database = get_database()
 
-        db_conference_years = database.get_conference_years_from_db()
+    db_conference_years = database.get_conference_years_from_db()
 
-        conferences = sorted(db_conference_years.keys())
-        all_years: set = set()
-        for years in db_conference_years.values():
-            all_years.update(years)
-        years_sorted = sorted(all_years, reverse=True)
+    conferences = sorted(db_conference_years.keys())
+    all_years: set = set()
+    for years in db_conference_years.values():
+        all_years.update(years)
+    years_sorted = sorted(all_years, reverse=True)
 
-        configured_conf = config.default_conference or ""
-        configured_year = config.default_year if config.default_year else None
-        effective_conf, effective_year = database.resolve_default_conference_year(configured_conf, configured_year)
+    configured_conf = config.default_conference or ""
+    configured_year = config.default_year if config.default_year else None
+    default_result = database.confirm_default_conference_year_exists(configured_conf, configured_year)
 
-        return jsonify(
-            {
-                "conferences": conferences,
-                "years": years_sorted,
-                "conference_years": db_conference_years,
-                "default_conference": effective_conf,
-                "default_year": effective_year,
-                "default_distance_threshold": _SIMILAR_DISTANCE_THRESHOLD,
-            }
-        )
-    except Exception as e:
-        logger.error(f"Error in available-filters endpoint: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+    return jsonify(
+        {
+            "conferences": conferences,
+            "years": years_sorted,
+            "conference_years": db_conference_years,
+            "default_conference": default_result["conference"],
+            "default_year": default_result["year"],
+            "default_conference_error": default_result["error"],
+            "default_distance_threshold": _SIMILAR_DISTANCE_THRESHOLD,
+        }
+    )
 
 
 @app.route("/api/search", methods=["POST"])
+@api_error_handler
 def search():
     """
     Search for papers.
@@ -517,84 +494,81 @@ def search():
     dict
         Search results with papers
     """
-    try:
-        data = request.get_json()
-        query = data.get("query", "")
-        use_embeddings = data.get("use_embeddings", False)
-        limit = data.get("limit", 10)
-        sessions = data.get("sessions", [])
-        years = data.get("years", [])
-        conferences = data.get("conferences", [])
+    data = request.get_json()
+    query = data.get("query", "")
+    use_embeddings = data.get("use_embeddings", False)
+    limit = data.get("limit", 10)
+    sessions = data.get("sessions", [])
+    years = data.get("years", [])
+    conferences = data.get("conferences", [])
 
-        if not query:
-            return jsonify({"error": "Query is required"}), 400
+    if not query:
+        return jsonify({"error": "Query is required"}), 400
 
-        if use_embeddings:
-            # Semantic search using embeddings
-            em = get_embeddings_manager()
-            database = get_database()
-            # Allow per-request override; fall back to the module-level default
-            distance_threshold = float(data.get("distance_threshold", _SIMILAR_DISTANCE_THRESHOLD))
+    database = get_database()
 
-            papers = em.search_papers_semantic(
-                query=query,
-                database=database,
-                limit=limit,
-                sessions=sessions,
-                years=years,
-                conferences=conferences,
-                distance_threshold=distance_threshold,
-            )
+    if use_embeddings:
+        # Semantic search using embeddings
+        em = get_embeddings_manager()
+        distance_threshold = float(data.get("distance_threshold", _SIMILAR_DISTANCE_THRESHOLD))
 
-            # Count total similar papers within distance threshold.
-            # Parse field filters to determine the semantic portion of the query;
-            # when the query consists only of field filters there is no meaningful
-            # embedding to compare against, so skip the count.
-            _, remaining_query = DatabaseManager.parse_field_filters(query)
-            if remaining_query:
-                try:
-                    total_similar = em.count_papers_within_distance(
-                        database=database,
-                        query=remaining_query,
-                        distance_threshold=distance_threshold,
-                        conferences=conferences if conferences else None,
-                        years=years if years else None,
-                    )
-                except Exception:
-                    total_similar = None
-            else:
+        papers = database.search_papers_keyword(
+            query=query,
+            limit=limit,
+            sessions=sessions,
+            years=years,
+            conferences=conferences,
+            use_embeddings=True,
+            distance_threshold=distance_threshold,
+            embeddings_manager=em,
+        )
+
+        # Count total similar papers within distance threshold.
+        # Parse field filters to determine the semantic portion of the query;
+        # when the query consists only of field filters there is no meaningful
+        # embedding to compare against, so skip the count.
+        _, remaining_query = DatabaseManager.parse_field_filters(query)
+        if remaining_query:
+            try:
+                total_similar = em.count_papers_within_distance(
+                    database=database,
+                    query=remaining_query,
+                    distance_threshold=distance_threshold,
+                    conferences=conferences if conferences else None,
+                    years=years if years else None,
+                )
+            except Exception:
                 total_similar = None
         else:
-            # Keyword search in database
-            database = get_database()
-            papers = database.search_papers_keyword(
-                query=query,
-                limit=limit,
-                sessions=sessions,
-                years=years,
-                conferences=conferences,
-            )
             total_similar = None
+    else:
+        # Keyword search in database
+        papers = database.search_papers_keyword(
+            query=query,
+            limit=limit,
+            sessions=sessions,
+            years=years,
+            conferences=conferences,
+        )
+        total_similar = None
 
-        related_topics = extract_top_keywords(papers)
+    related_topics = extract_top_keywords(papers)
 
-        response_data = {
-            "papers": papers,
-            "count": len(papers),
-            "query": query,
-            "use_embeddings": use_embeddings,
-            "related_topics": related_topics,
-        }
-        if total_similar is not None:
-            response_data["total_similar"] = total_similar
+    response_data = {
+        "papers": papers,
+        "count": len(papers),
+        "query": query,
+        "use_embeddings": use_embeddings,
+        "related_topics": related_topics,
+    }
+    if total_similar is not None:
+        response_data["total_similar"] = total_similar
 
-        return jsonify(response_data)
-    except Exception as e:
-        logger.error(f"Error in search endpoint: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+    return jsonify(response_data)
 
 
 @app.route("/api/paper/<string:paper_uid>")
+@api_error_handler
 def get_paper(paper_uid):
     """
     Get a specific paper by UID.
@@ -609,17 +583,15 @@ def get_paper(paper_uid):
     dict
         Paper details including authors
     """
-    try:
-        database = get_database()
-        paper = database.get_paper_by_uid(paper_uid)
-        if paper is None:
-            return jsonify({"error": f"Paper with uid={paper_uid} not found"}), 404
-        return jsonify(paper)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    database = get_database()
+    paper = database.get_paper_by_uid(paper_uid)
+    if paper is None:
+        return jsonify({"error": f"Paper with uid={paper_uid} not found"}), 404
+    return jsonify(paper)
 
 
 @app.route("/api/papers/batch", methods=["POST"])
+@api_error_handler
 def get_papers_batch():
     """
     Get multiple papers by their UIDs.
@@ -634,36 +606,33 @@ def get_papers_batch():
     dict
         Dictionary with 'papers' key containing list of paper details
     """
-    try:
-        data = request.json
-        paper_ids = data.get("paper_ids", [])
+    data = request.json
+    paper_ids = data.get("paper_ids", [])
 
-        if not paper_ids:
-            return jsonify({"error": "No paper IDs provided"}), 400
+    if not paper_ids:
+        return jsonify({"error": "No paper IDs provided"}), 400
 
-        database = get_database()
-        papers = []
+    database = get_database()
+    papers = []
 
-        for paper_uid in paper_ids:
-            try:
-                # Convert to string if needed (JavaScript might send as string or int)
-                paper_uid_str = str(paper_uid)
-                paper = database.get_paper_by_uid(paper_uid_str)
-                if paper is not None:
-                    papers.append(paper)
-                else:
-                    logger.warning(f"Paper {paper_uid} not found in database")
-            except Exception as e:
-                logger.warning(f"Error fetching paper {paper_uid}: {e}")
-                continue
+    for paper_uid in paper_ids:
+        try:
+            # Convert to string if needed (JavaScript might send as string or int)
+            paper_uid_str = str(paper_uid)
+            paper = database.get_paper_by_uid(paper_uid_str)
+            if paper is not None:
+                papers.append(paper)
+            else:
+                logger.warning(f"Paper {paper_uid} not found in database")
+        except Exception as e:
+            logger.warning(f"Error fetching paper {paper_uid}: {e}")
+            continue
 
-        return jsonify({"papers": papers})
-    except Exception as e:
-        logger.error(f"Error fetching papers batch: {e}")
-        return jsonify({"error": str(e)}), 500
+    return jsonify({"papers": papers})
 
 
 @app.route("/api/chat", methods=["POST"])
+@api_error_handler
 def chat():
     """
     Chat with RAG system.
@@ -675,73 +644,64 @@ def chat():
     - sessions: list (optional) - Filter by sessions
     - years: list (optional) - Filter by years
     - conferences: list (optional) - Filter by conferences
+    - paper_priorities: dict (optional) - Interesting-paper ratings from the web UI
 
     Returns
     -------
     dict
         Chat response with papers used
     """
-    try:
-        config = get_config()  # Get config lazily
-        data = request.get_json()
-        message = data.get("message", "")
-        n_papers = data.get("n_papers", config.max_context_papers)
-        reset = data.get("reset", False)
+    config = get_config()  # Get config lazily
+    data = request.get_json()
+    message = data.get("message", "")
+    n_papers = data.get("n_papers", config.max_context_papers)
+    reset = data.get("reset", False)
+    paper_priorities = data.get("paper_priorities", {}) or {}
 
-        # Get filters
-        sessions = data.get("sessions", [])
-        years = data.get("years", [])
-        conferences = data.get("conferences", [])
+    # Get filters
+    sessions = data.get("sessions", [])
+    years = data.get("years", [])
+    conferences = data.get("conferences", [])
 
-        if not message:
-            return jsonify({"error": "Message is required"}), 400
+    if not message:
+        return jsonify({"error": "Message is required"}), 400
 
-        rag = get_rag_chat()
+    rag = get_rag_chat()
 
-        if reset:
-            rag.reset_conversation()
+    if reset:
+        rag.reset_conversation()
 
-        # Build metadata filter
-        filter_conditions = []
-        if sessions:
-            filter_conditions.append({"session": {"$in": sessions}})
-        if years:
-            # Convert years to integers for ChromaDB
-            year_ints = [int(y) for y in years]
-            filter_conditions.append({"year": {"$in": year_ints}})
-        if conferences:
-            filter_conditions.append({"conference": {"$in": conferences}})
+    # Build metadata filter
+    metadata_filter = build_chromadb_where_clause(
+        sessions=sessions,
+        years=years,
+        conferences=conferences,
+        combine_with="$or",
+    )
 
-        # Use $or operator if multiple conditions, otherwise use single condition
-        metadata_filter = None
-        if len(filter_conditions) > 1:
-            metadata_filter = {"$or": filter_conditions}
-        elif len(filter_conditions) == 1:
-            metadata_filter = filter_conditions[0]
+    # Get response with filters
+    database = get_database()
+    available_conferences = database.get_conferences()
+    response = rag.query(
+        message,
+        n_results=n_papers,
+        metadata_filter=metadata_filter,
+        conferences=conferences if conferences else None,
+        years=[int(y) for y in years] if years else None,
+        available_conferences=available_conferences,
+        paper_priorities=paper_priorities,
+    )
 
-        # Get response with filters
-        database = get_database()
-        available_conferences = database.get_conferences()
-        response = rag.query(
-            message,
-            n_results=n_papers,
-            metadata_filter=metadata_filter,
-            conferences=conferences if conferences else None,
-            years=[int(y) for y in years] if years else None,
-            available_conferences=available_conferences,
-        )
-
-        return jsonify(
-            {
-                "response": response,
-                "message": message,
-            }
-        )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return jsonify(
+        {
+            "response": response,
+            "message": message,
+        }
+    )
 
 
 @app.route("/api/chat/reset", methods=["POST"])
+@api_error_handler
 def reset_chat():
     """
     Reset the chat conversation.
@@ -751,16 +711,14 @@ def reset_chat():
     dict
         Success message
     """
-    try:
-        session_id = _get_session_id()
-        if session_id in _rag_chat_cache:
-            _rag_chat_cache[session_id].reset_conversation()
-        return jsonify({"success": True, "message": "Conversation reset"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    session_id = _get_session_id()
+    if session_id in _rag_chat_cache:
+        _rag_chat_cache[session_id].reset_conversation()
+    return jsonify({"success": True, "message": "Conversation reset"})
 
 
 @app.route("/api/clusters/compute", methods=["POST"])
+@api_error_handler
 def compute_clusters():
     """
     Return pre-computed clustering results from the database cache.
@@ -782,57 +740,53 @@ def compute_clusters():
     dict
         Clustering results with points, statistics, and metadata
     """
-    try:
-        data = request.get_json() or {}
+    data = request.get_json() or {}
 
-        conferences = data.get("conferences") or None  # list[str] or None
-        years = data.get("years") or None  # list[int] or None
+    conferences = data.get("conferences") or None  # list[str] or None
+    years = data.get("years") or None  # list[int] or None
 
-        # Get config and database
-        config = get_config()
-        database = get_database()
+    # Get config and database
+    config = get_config()
+    database = get_database()
 
-        # Get current embedding model
-        current_model = config.embedding_model
+    # Get current embedding model
+    current_model = config.embedding_model
 
-        # Fixed clustering parameters (only true clustering params, not conference/year)
-        clustering_params = {"linkage": "ward", "distance_threshold": 150.0}
+    # Fixed clustering parameters (only true clustering params, not conference/year)
+    clustering_params = {"linkage": "ward", "distance_threshold": 150.0}
 
-        # Determine single conference/year for cache lookup
-        cache_conference = conferences[0] if conferences and len(conferences) == 1 else None
-        cache_year = years[0] if years and len(years) == 1 else None
+    # Determine single conference/year for cache lookup
+    cache_conference = conferences[0] if conferences and len(conferences) == 1 else None
+    cache_year = years[0] if years and len(years) == 1 else None
 
-        # Look up pre-computed results from the cache
-        cached = database.get_clustering_cache(
-            embedding_model=current_model,
-            reduction_method="tsne",
-            n_components=2,
-            clustering_method="agglomerative",
-            n_clusters=None,
-            clustering_params=clustering_params if clustering_params else None,
-            conference=cache_conference,
-            year=cache_year,
-        )
+    # Look up pre-computed results from the cache
+    cached = database.get_clustering_cache(
+        embedding_model=current_model,
+        reduction_method="tsne",
+        n_components=2,
+        clustering_method="agglomerative",
+        n_clusters=None,
+        clustering_params=clustering_params if clustering_params else None,
+        conference=cache_conference,
+        year=cache_year,
+    )
 
-        if cached:
-            return jsonify(cached)
+    if cached:
+        return jsonify(cached)
 
-        return (
-            jsonify(
-                {
-                    "error": "No pre-computed clustering data available for this conference/year combination. "
-                    "Run 'abstracts-explorer clustering pre-generate' to generate clustering data.",
-                }
-            ),
-            404,
-        )
-
-    except Exception as e:
-        logger.error(f"Error retrieving clusters: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+    return (
+        jsonify(
+            {
+                "error": "No pre-computed clustering data available for this conference/year combination. "
+                "Run 'abstracts-explorer clustering pre-generate' to generate clustering data.",
+            }
+        ),
+        404,
+    )
 
 
 @app.route("/api/clusters/cached")
+@api_error_handler
 def get_cached_clusters():
     """
     Get previously computed clusters from cache file.
@@ -848,35 +802,31 @@ def get_cached_clusters():
     dict
         Clustering results from cache file
     """
+    cache_file = request.args.get("file", "clusters.json")
+    cache_path = Path(cache_file)
+
+    if not cache_path.exists():
+        return (
+            jsonify(
+                {
+                    "error": f"Cached clusters file not found: {cache_file}",
+                    "hint": "Run 'abstracts-explorer cluster-embeddings --output clusters.json' first",
+                }
+            ),
+            404,
+        )
+
     try:
-        cache_file = request.args.get("file", "clusters.json")
-        cache_path = Path(cache_file)
-
-        if not cache_path.exists():
-            return (
-                jsonify(
-                    {
-                        "error": f"Cached clusters file not found: {cache_file}",
-                        "hint": "Run 'abstracts-explorer cluster-embeddings --output clusters.json' first",
-                    }
-                ),
-                404,
-            )
-
         with open(cache_path, "r", encoding="utf-8") as f:
             results = json.load(f)
-
-        return jsonify(results)
-
     except json.JSONDecodeError as e:
-        logger.error(f"Error parsing cached clusters: {e}", exc_info=True)
-        return jsonify({"error": f"Invalid JSON in cache file: {str(e)}"}), 500
-    except Exception as e:
-        logger.error(f"Error loading cached clusters: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+        raise ApiError(f"Invalid JSON in cache file: {e}", 500) from e
+
+    return jsonify(results)
 
 
 @app.route("/api/clusters/default-count")
+@api_error_handler
 def get_default_cluster_count():
     """
     Get the recommended default number of clusters based on embeddings count.
@@ -888,25 +838,22 @@ def get_default_cluster_count():
         - n_clusters: Recommended number of clusters
         - n_papers: Number of papers in embeddings collection
     """
-    try:
-        from abstracts_explorer.clustering import calculate_default_clusters
+    from abstracts_explorer.clustering import calculate_default_clusters
 
-        em = get_embeddings_manager()
+    em = get_embeddings_manager()
 
-        # Get embeddings count
-        collection_stats = em.get_collection_stats()
-        n_papers = collection_stats["count"]
+    # Get embeddings count
+    collection_stats = em.get_collection_stats()
+    n_papers = collection_stats["count"]
 
-        # Calculate default
-        n_clusters = calculate_default_clusters(n_papers)
+    # Calculate default
+    n_clusters = calculate_default_clusters(n_papers)
 
-        return jsonify({"n_clusters": n_clusters, "n_papers": n_papers})
-    except Exception as e:
-        logger.error(f"Error calculating default cluster count: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+    return jsonify({"n_clusters": n_clusters, "n_papers": n_papers})
 
 
 @app.route("/api/clusters/search", methods=["POST"])
+@api_error_handler
 def search_custom_cluster():
     """
     Find papers within a specified distance from a custom search query.
@@ -934,38 +881,34 @@ def search_custom_cluster():
             "count": int - Number of papers found
         }
     """
-    try:
-        data = request.get_json()
+    data = request.get_json()
 
-        if not data or "query" not in data:
-            return jsonify({"error": "Missing required field: query"}), 400
+    if not data or "query" not in data:
+        return jsonify({"error": "Missing required field: query"}), 400
 
-        query = data["query"]
-        distance_threshold = data.get("distance", 1.1)
-        conferences = data.get("conferences")
-        years = data.get("years")
+    query = data["query"]
+    distance_threshold = data.get("distance", 1.1)
+    conferences = data.get("conferences")
+    years = data.get("years")
 
-        # Get embeddings manager and database
-        em = get_embeddings_manager()
-        database = get_database()
+    # Get embeddings manager and database
+    em = get_embeddings_manager()
+    database = get_database()
 
-        # Call EmbeddingsManager method directly
-        results = em.find_papers_within_distance(
-            database=database,
-            query=query,
-            distance_threshold=distance_threshold,
-            conferences=conferences,
-            years=years,
-        )
+    # Call EmbeddingsManager method directly
+    results = em.find_papers_within_distance(
+        database=database,
+        query=query,
+        distance_threshold=distance_threshold,
+        conferences=conferences,
+        years=years,
+    )
 
-        return jsonify(results)
-
-    except Exception as e:
-        logger.error(f"Error searching custom cluster: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+    return jsonify(results)
 
 
 @app.route("/api/topic-evolution", methods=["POST"])
+@api_error_handler(error_message="Failed to compute topic evolution")
 def topic_evolution():
     """
     Get topic evolution data for a given topic across years.
@@ -986,33 +929,29 @@ def topic_evolution():
     dict
         Topic evolution data with per-conference year_counts and year_relative
     """
-    try:
-        data = request.get_json()
+    data = request.get_json()
 
-        if not data or "topic_keywords" not in data:
-            return jsonify({"error": "Missing required field: topic_keywords"}), 400
+    if not data or "topic_keywords" not in data:
+        return jsonify({"error": "Missing required field: topic_keywords"}), 400
 
-        topic_keywords = data["topic_keywords"]
-        conferences = data.get("conferences")
-        distance_threshold = data.get("distance_threshold", 1.1)
+    topic_keywords = data["topic_keywords"]
+    conferences = data.get("conferences")
+    distance_threshold = data.get("distance_threshold", 1.1)
 
-        from abstracts_explorer.mcp_server import get_topic_evolution as mcp_get_topic_evolution
+    from abstracts_explorer.mcp_server import get_topic_evolution as mcp_get_topic_evolution
 
-        result_json = mcp_get_topic_evolution(
-            topic_keywords=topic_keywords,
-            conferences=conferences,
-            distance_threshold=distance_threshold,
-        )
+    result_json = mcp_get_topic_evolution(
+        topic_keywords=topic_keywords,
+        conferences=conferences,
+        distance_threshold=distance_threshold,
+    )
 
-        result = json.loads(result_json)
-        return jsonify(result)
-
-    except Exception as e:
-        logger.error(f"Error in topic evolution endpoint: {e}", exc_info=True)
-        return jsonify({"error": "Failed to compute topic evolution"}), 500
+    result = json.loads(result_json)
+    return jsonify(result)
 
 
 @app.route("/api/papers-per-year")
+@api_error_handler(error_message="Failed to load papers per year data")
 def papers_per_year():
     """
     Get paper counts per year for a conference.
@@ -1027,28 +966,24 @@ def papers_per_year():
     dict
         Dictionary with year_counts mapping year to paper count
     """
-    try:
-        conference = request.args.get("conference")
-        database = get_database()
+    conference = request.args.get("conference")
+    database = get_database()
 
-        if conference:
-            years = database.get_years_for_conference(conference)
-        else:
-            years = sorted(database.get_years())
+    if conference:
+        years = sorted(database.get_years(conference=conference))
+    else:
+        years = sorted(database.get_years())
 
-        year_counts = {}
-        for year in years:
-            stats = database.get_stats(year=year, conference=conference)
-            year_counts[year] = stats["total_papers"]
+    year_counts = {}
+    for year in years:
+        stats = database.get_stats(year=year, conference=conference)
+        year_counts[year] = stats["total_papers"]
 
-        return jsonify({"year_counts": year_counts, "conference": conference})
-
-    except Exception as e:
-        logger.error(f"Error in papers-per-year endpoint: {e}", exc_info=True)
-        return jsonify({"error": "Failed to load papers per year data"}), 500
+    return jsonify({"year_counts": year_counts, "conference": conference})
 
 
 @app.route("/api/years")
+@api_error_handler
 def get_years():
     """
     Get available years in the database.
@@ -1058,16 +993,13 @@ def get_years():
     dict
         List of available years
     """
-    try:
-        database = get_database()
-        papers = database.query("SELECT DISTINCT year FROM papers WHERE year IS NOT NULL ORDER BY year")
-        years = [p["year"] for p in papers]
-        return jsonify({"years": years})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    database = get_database()
+    years = database.get_years()
+    return jsonify({"years": years})
 
 
 @app.route("/api/export/interesting-papers", methods=["POST"])
+@api_error_handler
 def export_interesting_papers():
     """
     Export interesting papers to a zip file with folder structure.
@@ -1077,7 +1009,8 @@ def export_interesting_papers():
     paper_ids : list of int
         List of paper IDs to export
     priorities : dict
-        Dictionary mapping paper IDs to priority ratings (1-5)
+        Dictionary mapping paper IDs to dicts with ``priority`` and
+        ``searchTerm`` fields
     search_query : str, optional
         Search query context
 
@@ -1086,60 +1019,66 @@ def export_interesting_papers():
     file
         Zip file containing folder structure with README.md and search term markdown files
     """
-    try:
-        data = request.json
-        paper_ids = data.get("paper_ids", [])
-        priorities = data.get("priorities", {})
-        search_query = data.get("search_query", "")
-        sort_order = data.get("sort_order", "search-rating-poster")
+    data = request.json
+    paper_ids = data.get("paper_ids", [])
+    priorities = data.get("priorities", {})
+    search_query = data.get("search_query", "")
+    sort_order = data.get("sort_order", "search-rating-poster")
 
-        if not paper_ids:
-            return jsonify({"error": "No paper IDs provided"}), 400
+    if not paper_ids:
+        return jsonify({"error": "No paper IDs provided"}), 400
 
-        # Fetch papers from database
-        database = get_database()
-        papers = []
-        for paper_id in paper_ids:
-            try:
-                paper = database.get_paper_by_uid(str(paper_id))
-                if paper is None:
-                    logger.warning(f"Paper {paper_id} not found")
-                    continue
-                priority_data = priorities.get(str(paper_id), {})
+    if not isinstance(priorities, dict):
+        return jsonify({"error": "Invalid priorities format. Expected a dict keyed by paper UID."}), 400
 
-                # Handle both old format (int) and new format (dict with priority and searchTerm)
-                if isinstance(priority_data, dict):
-                    paper["priority"] = priority_data.get("priority", 0)
-                    paper["searchTerm"] = priority_data.get("searchTerm", "Unknown")
-                else:
-                    # Backward compatibility: old format was just an integer
-                    paper["priority"] = priority_data
-                    paper["searchTerm"] = search_query or "Unknown"
+    for paper_uid, priority_data in priorities.items():
+        if not isinstance(priority_data, dict):
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            f"Invalid rating format for paper '{paper_uid}': expected a dict with "
+                            "'priority' and optional 'searchTerm'."
+                        )
+                    }
+                ),
+                400,
+            )
 
-                papers.append(paper)
-            except Exception:
+    # Fetch papers from database
+    database = get_database()
+    papers = []
+    for paper_id in paper_ids:
+        try:
+            paper = database.get_paper_by_uid(str(paper_id))
+            if paper is None:
                 logger.warning(f"Paper {paper_id} not found")
                 continue
+            priority_data = priorities.get(str(paper_id), {})
+            paper["priority"] = priority_data.get("priority", 0)
+            paper["searchTerm"] = priority_data.get("searchTerm", "Unknown")
 
-        if not papers:
-            return jsonify({"error": "No papers found"}), 404
+            papers.append(paper)
+        except Exception:
+            logger.warning(f"Paper {paper_id} not found")
+            continue
 
-        # Use export utility function to sort and generate ZIP
-        zip_buffer = export_papers_to_zip(papers, search_query, sort_order)
+    if not papers:
+        return jsonify({"error": "No papers found"}), 404
 
-        return send_file(
-            zip_buffer,
-            mimetype="application/zip",
-            as_attachment=True,
-            download_name=f'interesting-papers-{papers[0].get("year", "2025")}.zip',
-        )
+    # Use export utility function to sort and generate ZIP
+    zip_buffer = export_papers_to_zip(papers, search_query, sort_order)
 
-    except Exception as e:
-        logger.error(f"Error exporting interesting papers: {e}")
-        return jsonify({"error": str(e)}), 500
+    return send_file(
+        zip_buffer,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=f'interesting-papers-{papers[0].get("year", "2025")}.zip',
+    )
 
 
 @app.route("/api/donate-data", methods=["POST"])
+@api_error_handler
 def donate_data():
     """
     Donate anonymized interesting papers data for validation purposes.
@@ -1154,37 +1093,32 @@ def donate_data():
     dict
         Success message with count of donated papers
     """
+    data = request.json
+    paper_priorities = data.get("paperPriorities", {})
+
+    if not paper_priorities:
+        return jsonify({"error": "No data provided"}), 400
+
+    database = get_database()
+
     try:
-        data = request.json
-        paper_priorities = data.get("paperPriorities", {})
+        # Use DatabaseManager's donate_validation_data method
+        donated_count = database.donate_validation_data(paper_priorities)
+    except ValueError as e:
+        # Validation errors return 400
+        raise ApiError(str(e), 400) from e
 
-        if not paper_priorities:
-            return jsonify({"error": "No data provided"}), 400
-
-        database = get_database()
-
-        try:
-            # Use DatabaseManager's donate_validation_data method
-            donated_count = database.donate_validation_data(paper_priorities)
-
-            return jsonify(
-                {
-                    "success": True,
-                    "message": f"Successfully donated {donated_count} paper(s). Thank you for contributing!",
-                    "count": donated_count,
-                }
-            )
-
-        except ValueError as e:
-            # Validation errors return 400
-            return jsonify({"error": str(e)}), 400
-
-    except Exception as e:
-        logger.error(f"Error donating data: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+    return jsonify(
+        {
+            "success": True,
+            "message": f"Successfully donated {donated_count} paper(s). Thank you for contributing!",
+            "count": donated_count,
+        }
+    )
 
 
 @app.route("/api/donate-chat", methods=["POST"])
+@api_error_handler
 def donate_chat():
     """
     Donate a chat transcript with thumbs up/down feedback.
@@ -1201,33 +1135,27 @@ def donate_chat():
     dict
         Success message with donation ID.
     """
+    data = request.json
+    rating = data.get("rating")
+    transcript = data.get("transcript")
+
+    if not rating or not transcript:
+        return jsonify({"error": "Both 'rating' and 'transcript' are required"}), 400
+
+    database = get_database()
+
     try:
-        data = request.json
-        rating = data.get("rating")
-        transcript = data.get("transcript")
+        donation_id = database.donate_chat_transcript(rating, transcript)
+    except ValueError as e:
+        raise ApiError(str(e), 400) from e
 
-        if not rating or not transcript:
-            return jsonify({"error": "Both 'rating' and 'transcript' are required"}), 400
-
-        database = get_database()
-
-        try:
-            donation_id = database.donate_chat_transcript(rating, transcript)
-
-            return jsonify(
-                {
-                    "success": True,
-                    "message": "Thank you for your feedback! 🎉❤️",
-                    "id": donation_id,
-                }
-            )
-
-        except ValueError as e:
-            return jsonify({"error": str(e)}), 400
-
-    except Exception as e:
-        logger.error(f"Error donating chat transcript: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+    return jsonify(
+        {
+            "success": True,
+            "message": "Thank you for your feedback! 🎉❤️",
+            "id": donation_id,
+        }
+    )
 
 
 @app.errorhandler(404)

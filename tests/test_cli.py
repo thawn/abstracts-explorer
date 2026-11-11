@@ -6,23 +6,29 @@ including the download and create-embeddings commands.
 """
 
 import sys
+import json
 import logging
 import argparse
 import contextlib
+import threading
+from pathlib import Path
 from unittest.mock import Mock, patch
 import pytest
 from abstracts_explorer.cli import (
     main,
     search_command,
     setup_logging,
-    _build_embeddings_where_clause,
+    _build_embeddings_where_filters,
+    _validate_embeddings_db,
     add_conference_year_args,
     pre_process_command,
+    download_command,
+    create_embeddings_command,
 )
 from abstracts_explorer.database import DatabaseManager
-from abstracts_explorer.plugin import LightweightPaper
+from abstracts_explorer.plugin import LightweightPaper, get_failed_downloads_path
 from tests.conftest import set_test_db
-from abstracts_explorer.config import get_config
+from abstracts_explorer.config import Config, get_config
 
 
 def patch_get_config_for_test(monkeypatch, embeddings_path):
@@ -49,69 +55,68 @@ def patch_get_config_for_test(monkeypatch, embeddings_path):
     monkeypatch.setattr("abstracts_explorer.cli.get_config", get_config_with_reload)
 
 
-class TestBuildEmbeddingsWhereClause:
-    """Test cases for _build_embeddings_where_clause helper."""
+class TestBuildEmbeddingsWhereFilters:
+    """Test cases for _build_embeddings_where_filters helper."""
 
     def test_no_filters(self):
         """No filters returns None."""
-        args = argparse.Namespace(conference=None, year=None, where=None)
-        assert _build_embeddings_where_clause(args) is None
+        args = argparse.Namespace(conference=None, year=None)
+        assert _build_embeddings_where_filters(args) is None
 
     def test_conference_only(self):
-        """Conference filter produces an exact-match WHERE clause."""
-        args = argparse.Namespace(conference="NeurIPS", year=None, where=None)
-        result = _build_embeddings_where_clause(args)
-        assert "conference = 'NeurIPS'" in result
+        """Conference filter produces an exact-match filter."""
+        args = argparse.Namespace(conference="NeurIPS", year=None)
+        assert _build_embeddings_where_filters(args) == {"conference": "NeurIPS"}
 
     def test_year_only(self):
-        """Year filter produces correct WHERE clause."""
-        args = argparse.Namespace(conference=None, year=2024, where=None)
-        assert _build_embeddings_where_clause(args) == "year = 2024"
+        """Year filter produces correct filter."""
+        args = argparse.Namespace(conference=None, year=2024)
+        assert _build_embeddings_where_filters(args) == {"year": 2024}
 
     def test_conference_and_year(self):
-        """Both conference and year produce combined WHERE clause."""
-        args = argparse.Namespace(conference="ICLR", year=2025, where=None)
-        result = _build_embeddings_where_clause(args)
-        assert "conference = 'ICLR'" in result
-        assert "year = 2025" in result
-        assert " AND " in result
-
-    def test_where_only(self):
-        """Raw --where produces parenthesised clause."""
-        args = argparse.Namespace(conference=None, year=None, where="award IS NOT NULL")
-        assert _build_embeddings_where_clause(args) == "(award IS NOT NULL)"
-
-    def test_conference_and_where(self):
-        """Conference + --where are combined with AND."""
-        args = argparse.Namespace(conference="NeurIPS", year=None, where="award IS NOT NULL")
-        result = _build_embeddings_where_clause(args)
-        assert "conference = 'NeurIPS'" in result
-        assert "(award IS NOT NULL)" in result
-        assert " AND " in result
-
-    def test_all_filters(self):
-        """All three filters are combined with AND."""
-        args = argparse.Namespace(conference="NeurIPS", year=2024, where="award IS NOT NULL")
-        result = _build_embeddings_where_clause(args)
-        assert "conference = 'NeurIPS'" in result
-        assert "year = 2024" in result
-        assert "(award IS NOT NULL)" in result
+        """Both conference and year produce combined filters."""
+        args = argparse.Namespace(conference="ICLR", year=2025)
+        assert _build_embeddings_where_filters(args) == {"conference": "ICLR", "year": 2025}
 
     def test_conference_with_quote(self):
-        """Single quotes in conference name are escaped."""
-        args = argparse.Namespace(conference="O'Reilly", year=None, where=None)
-        result = _build_embeddings_where_clause(args)
-        assert "O''Reilly" in result
+        """Conference names are passed through unchanged."""
+        args = argparse.Namespace(conference="O'Reilly", year=None)
+        assert _build_embeddings_where_filters(args) == {"conference": "O'Reilly"}
 
-    def test_conference_exact_match(self):
-        """Conference name is used as-is (already resolved to canonical form)."""
-        args_lower = argparse.Namespace(conference="neurips", year=None, where=None)
-        args_upper = argparse.Namespace(conference="NeurIPS", year=None, where=None)
-        result_lower = _build_embeddings_where_clause(args_lower)
-        result_upper = _build_embeddings_where_clause(args_upper)
-        # Exact match — the literal value must match what was passed
-        assert "conference = 'neurips'" in result_lower
-        assert "conference = 'NeurIPS'" in result_upper
+
+class TestValidateEmbeddingsDB:
+    """Test cases for the _validate_embeddings_db helper."""
+
+    def test_missing_local_path(self, tmp_path, capsys):
+        """Missing local embeddings path returns False and prints guidance."""
+        config = Config()
+        config.embedding_db = str(tmp_path / "missing")
+
+        assert _validate_embeddings_db(config) is False
+        captured = capsys.readouterr()
+        assert "Embeddings database not found" in captured.err
+        assert "create-embeddings" in captured.err
+
+    def test_existing_local_path(self, tmp_path, capsys):
+        """Existing local embeddings path returns True without output."""
+        path = tmp_path / "embeddings"
+        path.mkdir()
+        config = Config()
+        config.embedding_db = str(path)
+
+        assert _validate_embeddings_db(config) is True
+        captured = capsys.readouterr()
+        assert captured.err == ""
+
+    @pytest.mark.parametrize("url", ["http://localhost:8000", "https://chromadb.example.com"])
+    def test_http_urls_are_valid(self, url, capsys):
+        """HTTP(S) URLs are always considered valid."""
+        config = Config()
+        config.embedding_db = url
+
+        assert _validate_embeddings_db(config) is True
+        captured = capsys.readouterr()
+        assert captured.err == ""
 
 
 class TestAddConferenceYearArgs:
@@ -246,6 +251,123 @@ class TestCLI:
         assert "Downloaded 2 papers" in captured.out
         assert "Database updated:" in captured.out
         assert output_db.exists()
+
+    def test_download_command_invokes_unit_callback(self, tmp_path, capsys):
+        """download_command reports each successfully committed unit via callback."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        mock_plugin = Mock()
+        mock_plugin.plugin_name = "neurips"
+        mock_plugin.plugin_description = "NeurIPS Test Plugin"
+        mock_plugin.supported_years = [2025]
+        mock_plugin.download.return_value = [
+            LightweightPaper(
+                title="Paper 1",
+                abstract="Abstract 1",
+                authors=["Author 1"],
+                session="Session 1",
+                poster_position="P1",
+                year=2025,
+                conference="NeurIPS",
+            )
+        ]
+
+        completed = []
+        args = argparse.Namespace(
+            conference="neurips",
+            year=2025,
+            output=str(output_db),
+            force=True,
+            list_plugins=False,
+            max_workers=20,
+            input_file=None,
+            verbose=0,
+        )
+
+        with patch("abstracts_explorer.cli.get_plugin", return_value=mock_plugin):
+            rc = download_command(args, on_unit_complete=lambda c, y, n: completed.append((c, y, n)))
+
+        assert rc == 0
+        assert completed == [("NeurIPS", 2025, 1)]
+
+    def test_download_command_skips_callback_for_empty_units(self, tmp_path):
+        """Units that downloaded no papers do not trigger post-processing."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        mock_plugin = Mock()
+        mock_plugin.plugin_name = "neurips"
+        mock_plugin.plugin_description = "NeurIPS Test Plugin"
+        mock_plugin.supported_years = [2025]
+        mock_plugin.download.return_value = []
+
+        completed = []
+        args = argparse.Namespace(
+            conference="neurips",
+            year=2025,
+            output=str(output_db),
+            force=True,
+            list_plugins=False,
+            max_workers=20,
+            input_file=None,
+            verbose=0,
+        )
+
+        with patch("abstracts_explorer.cli.get_plugin", return_value=mock_plugin):
+            rc = download_command(args, on_unit_complete=lambda c, y, n: completed.append((c, y, n)))
+
+        assert rc == 0
+        assert completed == []
+
+    def test_download_reports_failed_urls_sidecar(self, tmp_path, capsys):
+        """A failed-URL sidecar is reported with automatic retry guidance."""
+        output_db = tmp_path / "test.db"
+        set_test_db(output_db)
+
+        mock_plugin = Mock()
+        mock_plugin.plugin_name = "aaai"
+        mock_plugin.plugin_description = "AAAI Test Plugin"
+        mock_plugin.download.return_value = []
+
+        json_path = tmp_path / "aaai_2025.json"
+        failed_path = Path(get_failed_downloads_path(str(json_path)))
+        failed_path.write_text(
+            json.dumps(
+                {
+                    "conference": "AAAI",
+                    "year": 2025,
+                    "failed": [{"url": "https://example.com/article", "type": "article"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with patch("abstracts_explorer.cli.get_plugin") as mock_get_plugin:
+            mock_get_plugin.return_value = mock_plugin
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "abstracts-explorer",
+                    "download",
+                    "--conference",
+                    "aaai",
+                    "--year",
+                    "2025",
+                    "--output",
+                    str(output_db),
+                ],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "1 page(s) failed" in captured.err
+        assert f"failed URLs saved to {failed_path}" in captured.err
+        assert "They will be retried automatically on the next run." in captured.err
+        assert "Delete this file to skip retrying them." in captured.err
 
     def test_download_command_failure(self, tmp_path, capsys):
         """Test download command handles errors gracefully."""
@@ -550,7 +672,7 @@ class TestCLI:
         mock_get_plugin.assert_called_once_with("neurips")
 
     def test_pre_process_command_success(self, tmp_path, capsys, monkeypatch):
-        """Test pre-process command chains download → embeddings → clustering."""
+        """Test the parallel pre-process pipeline post-processes each downloaded unit."""
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
         with (
@@ -558,7 +680,13 @@ class TestCLI:
             patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
             patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
         ):
-            mock_download.return_value = 0
+
+            def fake_download(download_args, on_unit_complete=None):
+                if on_unit_complete:
+                    on_unit_complete("NeurIPS", 2025, 2)
+                return 0
+
+            mock_download.side_effect = fake_download
             mock_embed.return_value = 0
             mock_cluster.return_value = 0
 
@@ -567,12 +695,10 @@ class TestCLI:
 
         assert rc == 0
         captured = capsys.readouterr()
-        assert "Step 1/3" in captured.out
-        assert "Step 2/3" in captured.out
-        assert "Step 3/3" in captured.out
         assert "completed successfully" in captured.out
+        assert "1 succeeded, 0 failed" in captured.out
 
-        # Verify each sub-command was called
+        # Verify each sub-command was called once for the downloaded unit
         mock_download.assert_called_once()
         mock_embed.assert_called_once()
         mock_cluster.assert_called_once()
@@ -582,8 +708,17 @@ class TestCLI:
         assert download_args.conference == "neurips"
         assert download_args.year == 2025
 
+        embed_args = mock_embed.call_args[0][0]
+        assert embed_args.conference == "NeurIPS"
+        assert embed_args.year == 2025
+        assert embed_args.non_interactive is True
+
+        cluster_args = mock_cluster.call_args[0][0]
+        assert cluster_args.conference == "NeurIPS"
+        assert cluster_args.year == 2025
+
     def test_pre_process_command_download_fails(self, tmp_path, capsys, monkeypatch):
-        """Test pre-process command stops on download failure."""
+        """Test pre-process command reports download failure and skips post-processing."""
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
         with (
@@ -611,12 +746,27 @@ class TestCLI:
             patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
             patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
         ):
-            mock_download.return_value = 0
+
+            def fake_download(download_args, on_unit_complete=None):
+                if on_unit_complete:
+                    on_unit_complete("ICLR", 2024, 1)
+                return 0
+
+            mock_download.side_effect = fake_download
             mock_embed.return_value = 0
             mock_cluster.return_value = 0
 
             with patch.object(
-                sys, "argv", ["abstracts-explorer", "pre-process", "--conference", "iclr", "--year", "2024"]
+                sys,
+                "argv",
+                [
+                    "abstracts-explorer",
+                    "pre-process",
+                    "--conference",
+                    "iclr",
+                    "--year",
+                    "2024",
+                ],
             ):
                 rc = main()
 
@@ -628,22 +778,259 @@ class TestCLI:
         download_args = mock_download.call_args[0][0]
         assert download_args.conference == "iclr"
         assert download_args.year == 2024
-        """Test create-embeddings with non-existent database."""
+
+    def test_pre_process_forwards_embedding_and_clustering_options(self, tmp_path, capsys, monkeypatch):
+        """Embedding and clustering options are forwarded to the pipeline steps."""
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with (
+            patch("abstracts_explorer.cli.download_command") as mock_download,
+            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+        ):
+
+            def fake_download(download_args, on_unit_complete=None):
+                if on_unit_complete:
+                    on_unit_complete("NeurIPS", 2024, 3)
+                return 0
+
+            mock_download.side_effect = fake_download
+            mock_embed.return_value = 0
+            mock_cluster.return_value = 0
+
+            args = argparse.Namespace(
+                conference=None,
+                year=None,
+                force=False,
+                verbose=0,
+                collection="custom-collection",
+                lm_studio_url="http://example.test:1234/v1",
+                model="custom-embedding-model",
+                where="year = 2024",
+                requests_per_minute=42,
+                ignore_embedding_model_mismatch=True,
+            )
+            rc = pre_process_command(args)
+
+        assert rc == 0
+        embed_args = mock_embed.call_args[0][0]
+        assert embed_args.collection == "custom-collection"
+        assert embed_args.lm_studio_url == "http://example.test:1234/v1"
+        assert embed_args.model == "custom-embedding-model"
+        assert embed_args.where == "year = 2024"
+        assert embed_args.requests_per_minute == 42
+        assert embed_args.ignore_embedding_model_mismatch is True
+
+        cluster_args = mock_cluster.call_args[0][0]
+        assert cluster_args.collection == "custom-collection"
+        assert cluster_args.requests_per_minute == 42
+
+    def test_pre_process_continues_after_unit_failure(self, tmp_path, capsys, monkeypatch):
+        """A failing unit does not stop post-processing of other units."""
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with (
+            patch("abstracts_explorer.cli.download_command") as mock_download,
+            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+        ):
+
+            def fake_download(download_args, on_unit_complete=None):
+                if on_unit_complete:
+                    on_unit_complete("NeurIPS", 2024, 1)
+                    on_unit_complete("ICLR", 2024, 1)
+                return 0
+
+            mock_download.side_effect = fake_download
+
+            def fake_embed(embed_args):
+                return 1 if embed_args.conference == "NeurIPS" else 0
+
+            mock_embed.side_effect = fake_embed
+            mock_cluster.return_value = 0
+
+            args = argparse.Namespace(conference=None, year=None, force=False, verbose=0)
+            rc = pre_process_command(args)
+
+        assert rc == 1
+        # Both units attempted embeddings; only ICLR reached clustering
+        assert mock_embed.call_count == 2
+        mock_cluster.assert_called_once()
+        assert mock_cluster.call_args[0][0].conference == "ICLR"
+        captured = capsys.readouterr()
+        assert "NeurIPS 2024: create-embeddings" in captured.err
+        assert "1 succeeded, 1 failed" in captured.out
+
+    def test_pre_process_zero_paper_units_are_skipped(self, tmp_path, capsys, monkeypatch):
+        """Units with no downloaded papers are not post-processed."""
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with (
+            patch("abstracts_explorer.cli.download_command") as mock_download,
+            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+        ):
+
+            def fake_download(download_args, on_unit_complete=None):
+                if on_unit_complete:
+                    on_unit_complete("EmptyConf", 2024, 0)
+                return 0
+
+            mock_download.side_effect = fake_download
+            mock_embed.return_value = 0
+            mock_cluster.return_value = 0
+
+            args = argparse.Namespace(conference=None, year=None, force=False, verbose=0)
+            rc = pre_process_command(args)
+
+        assert rc == 0
+        mock_embed.assert_not_called()
+        mock_cluster.assert_not_called()
+
+    def test_pre_process_overlaps_embeddings_and_clustering(self, tmp_path, monkeypatch):
+        """Embeddings for the next unit overlap clustering of the previous unit."""
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        cluster_first_started = threading.Event()
+        embed_second_started = threading.Event()
+        overlap_observed = {}
+
+        with (
+            patch("abstracts_explorer.cli.download_command") as mock_download,
+            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+        ):
+
+            def fake_download(download_args, on_unit_complete=None):
+                if on_unit_complete:
+                    on_unit_complete("First", 2024, 1)
+                    on_unit_complete("Second", 2024, 1)
+                return 0
+
+            def fake_embed(embed_args):
+                if embed_args.conference == "Second":
+                    # Only start the second embedding once clustering of the
+                    # first unit has started; this can only succeed if the two
+                    # stages run in separate workers.
+                    cluster_first_started.wait(timeout=2)
+                    embed_second_started.set()
+                return 0
+
+            def fake_cluster(cluster_args):
+                if cluster_args.conference == "First":
+                    cluster_first_started.set()
+                    overlap_observed["value"] = embed_second_started.wait(timeout=2)
+                return 0
+
+            mock_download.side_effect = fake_download
+            mock_embed.side_effect = fake_embed
+            mock_cluster.side_effect = fake_cluster
+
+            args = argparse.Namespace(conference=None, year=None, force=False, verbose=0)
+            rc = pre_process_command(args)
+
+        assert rc == 0
+        assert overlap_observed.get("value") is True
+
+    def test_pre_process_no_overlap_flag_serializes_post_processing(self, tmp_path, monkeypatch):
+        """--no-overlap-post-process runs embeddings and clustering in one worker."""
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        embed_second_started = threading.Event()
+        no_overlap = {}
+
+        with (
+            patch("abstracts_explorer.cli.download_command") as mock_download,
+            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+        ):
+
+            def fake_download(download_args, on_unit_complete=None):
+                if on_unit_complete:
+                    on_unit_complete("First", 2024, 1)
+                    on_unit_complete("Second", 2024, 1)
+                return 0
+
+            def fake_embed(embed_args):
+                if embed_args.conference == "Second":
+                    embed_second_started.set()
+                return 0
+
+            def fake_cluster(cluster_args):
+                if cluster_args.conference == "First":
+                    no_overlap["value"] = not embed_second_started.wait(timeout=0.2)
+                return 0
+
+            mock_download.side_effect = fake_download
+            mock_embed.side_effect = fake_embed
+            mock_cluster.side_effect = fake_cluster
+
+            args = argparse.Namespace(
+                conference=None,
+                year=None,
+                force=False,
+                verbose=0,
+                no_overlap_post_process=True,
+            )
+            rc = pre_process_command(args)
+
+        assert rc == 0
+        assert no_overlap.get("value") is True
+
+    def test_pre_process_clustering_failure_continues_with_other_units(self, tmp_path, capsys, monkeypatch):
+        """A clustering failure is recorded without stopping other units."""
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with (
+            patch("abstracts_explorer.cli.download_command") as mock_download,
+            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+        ):
+
+            def fake_download(download_args, on_unit_complete=None):
+                if on_unit_complete:
+                    on_unit_complete("NeurIPS", 2024, 1)
+                    on_unit_complete("ICLR", 2024, 1)
+                return 0
+
+            mock_download.side_effect = fake_download
+            mock_embed.return_value = 0
+
+            def fake_cluster(cluster_args):
+                return 1 if cluster_args.conference == "NeurIPS" else 0
+
+            mock_cluster.side_effect = fake_cluster
+
+            args = argparse.Namespace(conference=None, year=None, force=False, verbose=0)
+            rc = pre_process_command(args)
+
+        assert rc == 1
+        assert mock_embed.call_count == 2
+        assert mock_cluster.call_count == 2
+        captured = capsys.readouterr()
+        assert "Clustering: 1 succeeded, 1 failed" in captured.out
+        assert "NeurIPS 2024: clustering pre-generate" in captured.err
+
+    def test_create_embeddings_missing_database_auto_creates(self, tmp_path, capsys, monkeypatch):
+        """create-embeddings auto-creates a missing database."""
         nonexistent_db = tmp_path / "nonexistent.db"
         set_test_db(nonexistent_db)
 
-        # The exception will be raised and not caught, so we expect it to propagate
-        with patch.object(
-            sys,
-            "argv",
-            ["neurips-abstracts", "create-embeddings"],
-        ):
-            # Should raise DatabaseError because database/tables don't exist
-            with pytest.raises(Exception) as exc_info:
-                main()
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+            mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
+            mock_em.verbose_api_connection_test.return_value = False
+            MockEM.return_value = mock_em
 
-        # Verify it's a database-related error
-        assert "table" in str(exc_info.value).lower() or "database" in str(exc_info.value).lower()
+            with patch.object(
+                sys,
+                "argv",
+                ["neurips-abstracts", "create-embeddings"],
+            ):
+                exit_code = main()
+
+        assert exit_code == 1
+        assert nonexistent_db.exists()
 
     def test_create_embeddings_lm_studio_not_available(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings when OpenAI API is not available."""
@@ -674,7 +1061,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.test_lm_studio_connection.return_value = False
+            mock_em.verbose_api_connection_test.return_value = False
             MockEM.return_value = mock_em
 
             with patch.object(
@@ -688,8 +1075,7 @@ class TestCLI:
                 exit_code = main()
 
         assert exit_code == 1
-        captured = capsys.readouterr()
-        assert "Failed to connect to OpenAI API" in captured.err
+        mock_em.verbose_api_connection_test.assert_called_once()
 
     def test_create_embeddings_success(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings command completes successfully."""
@@ -729,7 +1115,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.verbose_api_connection_test.return_value = True
             mock_em.embed_from_database.return_value = 2
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 2}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -750,70 +1136,6 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Successfully generated embeddings for 2 abstracts" in captured.out
         assert "Vector database saved to" in captured.out
-
-    def test_create_embeddings_with_where_clause(self, tmp_path, capsys, monkeypatch):
-        """Test create-embeddings with WHERE clause filter."""
-        from abstracts_explorer import DatabaseManager
-
-        # Create a test database
-        db_path = tmp_path / "test.db"
-        set_test_db(db_path)
-        with DatabaseManager() as db:
-            db.create_tables()
-            papers = [
-                LightweightPaper(
-                    title="Paper 1",
-                    authors=["Author 1"],
-                    abstract="Abstract 1",
-                    session="Session 1",
-                    poster_position="P1",
-                    year=2025,
-                    conference="NeurIPS",
-                    award="Best Paper",
-                ),
-                LightweightPaper(
-                    title="Paper 2",
-                    authors=["Author 2"],
-                    abstract="Abstract 2",
-                    session="Session 2",
-                    poster_position="P2",
-                    year=2025,
-                    conference="NeurIPS",
-                    award=None,
-                ),
-            ]
-            db.add_papers(papers)
-
-        # Set EMBEDDING_DB and patch config reload
-        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
-
-        # Mock embeddings manager
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
-            mock_em = Mock()
-            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.test_lm_studio_connection.return_value = True
-            mock_em.embed_from_database.return_value = 1
-            mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
-            mock_em.__enter__ = Mock(return_value=mock_em)
-            mock_em.__exit__ = Mock(return_value=False)
-            MockEM.return_value = mock_em
-
-            with patch.object(
-                sys,
-                "argv",
-                [
-                    "neurips-abstracts",
-                    "create-embeddings",
-                    "--where",
-                    "award IS NOT NULL",
-                ],
-            ):
-                exit_code = main()
-
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        assert "Filter will process 1 abstracts" in captured.out
-        assert "Successfully generated embeddings for 1 abstracts" in captured.out
 
     def test_create_embeddings_force_flag(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with --force flag."""
@@ -847,7 +1169,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.verbose_api_connection_test.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -869,8 +1191,105 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Resetting existing collection" in captured.out
 
-        # Verify create_collection was called with reset=True
-        mock_em.create_collection.assert_called_once_with(reset=True)
+        # Verify init was called with reset=True
+        mock_em.init.assert_called_once_with(reset=True)
+
+    def _create_mismatch_test_args(self):
+        return argparse.Namespace(
+            conference=None,
+            year=None,
+            collection="test",
+            lm_studio_url="http://localhost:1234/v1",
+            model="new-model",
+            force=False,
+            where=None,
+            requests_per_minute=0,
+            verbose=0,
+        )
+
+    def test_create_embeddings_ignore_model_mismatch_recreates(self, tmp_path, capsys, monkeypatch):
+        """--ignore-embedding-model-mismatch recreates embeddings without prompting."""
+        from abstracts_explorer import DatabaseManager
+
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
+        with DatabaseManager() as db:
+            db.create_tables()
+            db.add_papers(
+                [
+                    LightweightPaper(
+                        title="Test",
+                        abstract="Abstract",
+                        authors=["Test Author"],
+                        session="Test Session",
+                        poster_position="P1",
+                        year=2025,
+                        conference="NeurIPS",
+                    )
+                ]
+            )
+
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+            mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (False, "old-model", "new-model")
+            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.embed_from_database.return_value = 1
+            mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
+            MockEM.return_value = mock_em
+
+            with patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "create-embeddings", "--ignore-embedding-model-mismatch"],
+            ):
+                rc = main()
+
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "ignore-embedding-model-mismatch detected" in captured.out
+        mock_em.init.assert_called_once_with(reset=True)
+
+    def test_create_embeddings_non_interactive_mismatch_fails(self, tmp_path, capsys, monkeypatch):
+        """In non-interactive mode a model mismatch fails instead of prompting."""
+        from abstracts_explorer import DatabaseManager
+
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
+        with DatabaseManager() as db:
+            db.create_tables()
+            db.add_papers(
+                [
+                    LightweightPaper(
+                        title="Test",
+                        abstract="Abstract",
+                        authors=["Test Author"],
+                        session="Test Session",
+                        poster_position="P1",
+                        year=2025,
+                        conference="NeurIPS",
+                    )
+                ]
+            )
+
+        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
+
+        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+            mock_em = Mock()
+            mock_em.check_model_compatibility.return_value = (False, "old-model", "new-model")
+            mock_em.verbose_api_connection_test.return_value = True
+            MockEM.return_value = mock_em
+
+            args = self._create_mismatch_test_args()
+            args.ignore_embedding_model_mismatch = False
+            args.non_interactive = True
+            rc = create_embeddings_command(args)
+
+        assert rc == 1
+        mock_em.embed_from_database.assert_not_called()
+        captured = capsys.readouterr()
+        assert "ignore-embedding-model-mismatch" in captured.err
 
     def test_create_embeddings_force_with_conference_does_not_reset_collection(self, tmp_path, capsys, monkeypatch):
         """--force --conference should delete only matching embeddings, not reset whole collection."""
@@ -898,7 +1317,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.verbose_api_connection_test.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.delete_embeddings_by_filter.return_value = 0
@@ -927,8 +1346,8 @@ class TestCLI:
         assert "Removing existing embeddings" in captured.out
         assert "conference=NeurIPS" in captured.out
 
-        # create_collection must be called with reset=False (not wipe the collection)
-        mock_em.create_collection.assert_called_once_with(reset=False)
+        # init must be called with reset=False (not wipe the collection)
+        mock_em.init.assert_called_once_with(reset=False)
         # delete_embeddings_by_filter must be called with the conference
         mock_em.delete_embeddings_by_filter.assert_called_once_with(conference="NeurIPS", year=None)
 
@@ -958,7 +1377,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.verbose_api_connection_test.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.delete_embeddings_by_filter.return_value = 2
@@ -987,7 +1406,7 @@ class TestCLI:
         # Reports the number removed
         assert "Removed 2" in captured.out
 
-        mock_em.create_collection.assert_called_once_with(reset=False)
+        mock_em.init.assert_called_once_with(reset=False)
         mock_em.delete_embeddings_by_filter.assert_called_once_with(conference=None, year=2024)
 
     def test_create_embeddings_force_with_conference_and_year(self, tmp_path, capsys, monkeypatch):
@@ -1016,7 +1435,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.verbose_api_connection_test.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.delete_embeddings_by_filter.return_value = 5
@@ -1046,7 +1465,7 @@ class TestCLI:
         assert "conference=NeurIPS" in captured.out
         assert "year=2024" in captured.out
 
-        mock_em.create_collection.assert_called_once_with(reset=False)
+        mock_em.init.assert_called_once_with(reset=False)
         mock_em.delete_embeddings_by_filter.assert_called_once_with(conference="NeurIPS", year=2024)
 
         """Test create-embeddings with --requests-per-minute flag."""
@@ -1075,7 +1494,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.verbose_api_connection_test.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1129,7 +1548,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.verbose_api_connection_test.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1185,7 +1604,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, custom_model)
-            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.verbose_api_connection_test.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1241,8 +1660,8 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.test_lm_studio_connection.return_value = True
-            mock_em.connect.side_effect = EmbeddingsError("Connection failed")
+            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.init.side_effect = EmbeddingsError("Connection failed")
             MockEM.return_value = mock_em
 
             with patch.object(
@@ -1291,7 +1710,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.verbose_api_connection_test.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1317,7 +1736,7 @@ class TestCLI:
 
         # Verify the WHERE clause was passed to embed_from_database
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
-        assert "conference = 'NeurIPS'" in call_kwargs["where_clause"]
+        assert call_kwargs["where_filters"]["conference"] == "NeurIPS"
 
     def test_create_embeddings_with_year(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with --year flag filters to one year."""
@@ -1354,7 +1773,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.verbose_api_connection_test.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1379,7 +1798,7 @@ class TestCLI:
         assert "Filter will process 1 abstracts" in captured.out
 
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
-        assert "year = 2024" in call_kwargs["where_clause"]
+        assert call_kwargs["where_filters"]["year"] == 2024
 
     def test_create_embeddings_with_conference_and_year(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings with both --conference and --year flags."""
@@ -1425,7 +1844,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.verbose_api_connection_test.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1453,75 +1872,9 @@ class TestCLI:
         assert "Filter will process 1 abstracts" in captured.out
 
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
-        where = call_kwargs["where_clause"]
-        assert "conference = 'NeurIPS'" in where
-        assert "year = 2024" in where
-
-    def test_create_embeddings_conference_with_where(self, tmp_path, capsys, monkeypatch):
-        """Test create-embeddings combining --conference with --where clause."""
-        from abstracts_explorer import DatabaseManager
-
-        db_path = tmp_path / "test.db"
-        set_test_db(db_path)
-        with DatabaseManager() as db:
-            db.create_tables()
-            papers = [
-                LightweightPaper(
-                    title="Award Paper",
-                    abstract="Abstract 1",
-                    authors=["Author"],
-                    session="S1",
-                    poster_position="P1",
-                    year=2025,
-                    conference="NeurIPS",
-                    award="Best Paper",
-                ),
-                LightweightPaper(
-                    title="Regular Paper",
-                    abstract="Abstract 2",
-                    authors=["Author"],
-                    session="S2",
-                    poster_position="P2",
-                    year=2025,
-                    conference="NeurIPS",
-                ),
-            ]
-            db.add_papers(papers)
-
-        patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
-
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
-            mock_em = Mock()
-            mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.test_lm_studio_connection.return_value = True
-            mock_em.embed_from_database.return_value = 1
-            mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
-            mock_em.__enter__ = Mock(return_value=mock_em)
-            mock_em.__exit__ = Mock(return_value=False)
-            MockEM.return_value = mock_em
-
-            with patch.object(
-                sys,
-                "argv",
-                [
-                    "neurips-abstracts",
-                    "create-embeddings",
-                    "--conference",
-                    "NeurIPS",
-                    "--where",
-                    "award IS NOT NULL",
-                ],
-            ):
-                exit_code = main()
-
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        assert "Filter will process 1 abstracts" in captured.out
-
-        call_kwargs = mock_em.embed_from_database.call_args.kwargs
-        where = call_kwargs["where_clause"]
-        assert "conference = 'NeurIPS'" in where
-        assert "(award IS NOT NULL)" in where
+        where = call_kwargs["where_filters"]
+        assert where["conference"] == "NeurIPS"
+        assert where["year"] == 2024
 
     def test_create_embeddings_default_embeds_all(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings without arguments embeds all papers."""
@@ -1558,7 +1911,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.verbose_api_connection_test.return_value = True
             mock_em.embed_from_database.return_value = 2
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 2}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1579,7 +1932,7 @@ class TestCLI:
 
         # Verify no WHERE clause was passed (embeds all papers)
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
-        assert call_kwargs["where_clause"] is None
+        assert call_kwargs["where_filters"] is None
 
     def test_search_embeddings_not_found(self, tmp_path, capsys, monkeypatch):
         """Test search command with non-existent embeddings database."""
@@ -1615,7 +1968,7 @@ class TestCLI:
         # Mock embeddings manager with OpenAI API unavailable
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
-            mock_em.test_lm_studio_connection.return_value = False
+            mock_em.verbose_api_connection_test.return_value = False
             MockEM.return_value = mock_em
 
             with patch.object(
@@ -1630,8 +1983,7 @@ class TestCLI:
                 exit_code = main()
 
         assert exit_code == 1
-        captured = capsys.readouterr()
-        assert "Failed to connect to OpenAI API" in captured.err
+        mock_em.verbose_api_connection_test.assert_called_once()
 
     def test_search_success(self, tmp_path, capsys, monkeypatch):
         """Test search command completes successfully."""
@@ -1644,7 +1996,7 @@ class TestCLI:
         # Mock embeddings manager with results
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
-            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.verbose_api_connection_test.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 100}
             mock_em.search_similar.return_value = {
                 "ids": [["123", "456"]],
@@ -1701,7 +2053,7 @@ class TestCLI:
         # Mock embeddings manager
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
-            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.verbose_api_connection_test.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 10}
             mock_em.search_similar.return_value = {
                 "ids": [["789"]],
@@ -1741,7 +2093,7 @@ class TestCLI:
         # Mock embeddings manager
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
-            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.verbose_api_connection_test.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 50}
             mock_em.search_similar.return_value = {
                 "ids": [["111"]],
@@ -1790,7 +2142,7 @@ class TestCLI:
         # Mock embeddings manager with empty results
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
-            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.verbose_api_connection_test.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 100}
             mock_em.search_similar.return_value = {"ids": [[]], "distances": [[]], "metadatas": [[]]}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1844,7 +2196,7 @@ class TestCLI:
         # Mock embeddings manager
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
-            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.verbose_api_connection_test.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.search_similar.return_value = {
                 "ids": [["1"]],
@@ -1899,7 +2251,7 @@ class TestCLI:
         # Mock embeddings manager
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
-            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.verbose_api_connection_test.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.search_similar.return_value = {
                 "ids": [["1"]],
@@ -1928,17 +2280,12 @@ class TestCLI:
 
     def test_search_with_db_path_lookup_error(self, tmp_path, capsys, monkeypatch):
         """Test search command when database connection fails (no longer relevant)."""
-        from abstracts_explorer.database import DatabaseManager
-
         embeddings_path = tmp_path / "embeddings"
         embeddings_path.mkdir()
 
-        # Create an empty database using DatabaseManager
+        # Point the database at a temporary location
         db_path = tmp_path / "test.db"
         set_test_db(db_path)
-        db = DatabaseManager()
-        db.connect()
-        db.close()
 
         # Set EMBEDDING_DB and patch config reload
         patch_get_config_for_test(monkeypatch, embeddings_path)
@@ -1946,7 +2293,7 @@ class TestCLI:
         # Mock embeddings manager
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
-            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.verbose_api_connection_test.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.search_similar.return_value = {
                 "ids": [["1"]],
@@ -1984,7 +2331,7 @@ class TestCLI:
         # Mock embeddings manager to raise unexpected exception
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
-            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.verbose_api_connection_test.return_value = True
             mock_em.get_collection_stats.side_effect = Exception("Unexpected error")
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
@@ -2161,8 +2508,10 @@ class TestCLI:
 
     def test_clear_clustering_cache_error(self, tmp_path, capsys):
         """Test clear-clustering-cache command handles errors gracefully."""
-        # Set a database path that doesn't exist and can't be created
-        set_test_db("/nonexistent/path/test.db")
+        # Parent "directory" is a regular file, so the DB can't be created on any OS
+        blocker = tmp_path / "blocker"
+        blocker.write_text("not a directory")
+        set_test_db(blocker / "test.db")
 
         # Run clear-clustering-cache command
         with patch.object(
@@ -2191,37 +2540,20 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Embeddings database not found" in captured.err
 
-    def test_pre_generate_clustering_calls_create_collection(self, tmp_path, capsys, monkeypatch):
-        """Test pre-generate-clustering calls create_collection() before compute_clusters_with_cache.
-
-        This is a regression test: previously the command called em.connect() but
-        forgot em.create_collection(), causing ``get_collection_stats()`` to raise
-        ``EmbeddingsError: Collection not initialized. Call create_collection() first.``
-        """
+    def test_pre_generate_clustering_calls_compute(self, tmp_path, capsys, monkeypatch):
+        """Test pre-generate-clustering invokes the clustering pipeline."""
 
         embeddings_path = tmp_path / "chroma_db"
         embeddings_path.mkdir()
         patch_get_config_for_test(monkeypatch, embeddings_path)
         set_test_db(tmp_path / "test.db")
 
-        call_order = []
-
         with (
             patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
         ):
-            mock_em = Mock()
-
-            def track_connect():
-                call_order.append("connect")
-
-            def track_create_collection(reset=False):
-                call_order.append("create_collection")
-
-            mock_em.connect.side_effect = track_connect
-            mock_em.create_collection.side_effect = track_create_collection
-            mock_em_class.return_value = mock_em
+            mock_em_class.return_value = Mock()
             mock_compute.return_value = {
                 "points": [],
                 "statistics": {"total_papers": 5, "n_clusters": 2, "n_noise": 0, "cluster_sizes": {}},
@@ -2238,12 +2570,7 @@ class TestCLI:
                 exit_code = main()
 
         assert exit_code == 0
-        # create_collection must be called after connect and before compute_clusters_with_cache
-        assert "connect" in call_order, "em.connect() was not called"
-        assert "create_collection" in call_order, "em.create_collection() was not called (regression)"
-        assert call_order.index("connect") < call_order.index(
-            "create_collection"
-        ), "em.connect() must be called before em.create_collection()"
+        mock_em_class.assert_called_once()
         mock_compute.assert_called_once()
 
     def test_pre_generate_clustering_success(self, tmp_path, capsys, monkeypatch):
@@ -2531,9 +2858,9 @@ class TestCLI:
             mock_compute.return_value = mock_results
 
             mock_db_instance = Mock()
-            mock_db_instance.get_conferences.return_value = ["ML4PS@NeurIPS"]
+            mock_db_instance.get_conferences.return_value = ["ML4PS"]
             mock_db_instance.get_years.side_effect = lambda conference=None: [2023, 2024]
-            mock_db_instance.resolve_conference_name.return_value = "ML4PS@NeurIPS"
+            mock_db_instance.resolve_conference_name.return_value = "ML4PS"
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
@@ -2541,7 +2868,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "clustering", "pre-generate", "--conference", "ML4PS@NeurIPS"],
+                ["abstracts-explorer", "clustering", "pre-generate", "--conference", "ML4PS"],
             ):
                 exit_code = main()
 
@@ -2549,10 +2876,10 @@ class TestCLI:
         # 2 combos: 2023 + 2024
         assert mock_compute.call_count == 2
         all_calls = [(c[1]["conferences"], c[1]["years"]) for c in mock_compute.call_args_list]
-        assert (["ML4PS@NeurIPS"], [2023]) in all_calls
-        assert (["ML4PS@NeurIPS"], [2024]) in all_calls
+        assert (["ML4PS"], [2023]) in all_calls
+        assert (["ML4PS"], [2024]) in all_calls
         captured = capsys.readouterr()
-        assert "ML4PS@NeurIPS" in captured.out
+        assert "ML4PS" in captured.out
 
     def test_pre_generate_clustering_all_db_years_used(self, tmp_path, capsys, monkeypatch):
         """Test pre-generate-clustering uses all years from the database (no plugin filtering)."""
@@ -2666,10 +2993,10 @@ class TestCLI:
 
             # DatabaseManager used as context manager for conference resolution
             mock_db_instance = Mock()
-            mock_db_instance.get_conferences.return_value = ["ML4PS@NeurIPS", "NeurIPS"]
+            mock_db_instance.get_conferences.return_value = ["ML4PS", "NeurIPS"]
             mock_db_instance.get_years.side_effect = lambda conference=None: [2024]
             # resolve_conference_name returns the canonical form for "ml4ps@neurips"
-            mock_db_instance.resolve_conference_name.return_value = "ML4PS@NeurIPS"
+            mock_db_instance.resolve_conference_name.return_value = "ML4PS"
             mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
@@ -2693,7 +3020,7 @@ class TestCLI:
         assert exit_code == 0
         call_kwargs = mock_compute.call_args[1]
         # Should use the canonical spelling, not the user-supplied lower-case version
-        assert call_kwargs["conferences"] == ["ML4PS@NeurIPS"]
+        assert call_kwargs["conferences"] == ["ML4PS"]
         captured = capsys.readouterr()
         # Should print a resolution notice
         assert "ml4ps@neurips" in captured.out.lower()
@@ -2751,14 +3078,13 @@ class TestCLI:
 
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
-            mock_em.test_lm_studio_connection.return_value = False
+            mock_em.verbose_api_connection_test.return_value = False
             MockEM.return_value = mock_em
 
             exit_code = chat_command(args)
 
         assert exit_code == 1
-        captured = capsys.readouterr()
-        assert "Failed to connect to OpenAI API" in captured.err
+        mock_em.verbose_api_connection_test.assert_called_once()
 
     def test_chat_rag_error(self, tmp_path, capsys, monkeypatch):
         """Test chat command with RAG error."""
@@ -2790,7 +3116,7 @@ class TestCLI:
 
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
-            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.verbose_api_connection_test.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 100}
             MockEM.return_value = mock_em
 
@@ -3064,12 +3390,12 @@ class TestCLIEmbeddingsProgressAndStats:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.test_lm_studio_connection.return_value = True
+            mock_em.verbose_api_connection_test.return_value = True
             mock_em.collection_exists.return_value = False
 
             # Mock embed_from_database to simulate progress callbacks
 
-            def mock_embed(batch_size=10, where_clause=None, progress_callback=None, force_recreate=False):
+            def mock_embed(batch_size=10, where_filters=None, progress_callback=None, force_recreate=False):
                 # Simulate calling progress callback with (current, total) arguments
                 if progress_callback:
                     progress_callback(1, 3)
@@ -3588,7 +3914,7 @@ class TestDeleteDataCommand:
 
         # Verify papers deleted from DB
         with DatabaseManager() as db:
-            papers = db.search_papers(conference="NeurIPS", year=2024, limit=0)
+            papers = db.search_papers(conferences=["NeurIPS"], years=[2024], limit=0)
             assert len(papers) == 0
 
             # Verify clustering cache deleted

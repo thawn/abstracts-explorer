@@ -8,9 +8,9 @@ import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, cast
 
-from sqlalchemy import create_engine, select, delete, func, or_, and_, text
+from sqlalchemy import create_engine, event, select, delete, func, or_, and_, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError, ProgrammingError, IntegrityError
@@ -105,14 +105,17 @@ class DatabaseManager:
     SessionLocal : sessionmaker or None
         SQLAlchemy session factory.
     _session : Session or None
-        Active database session if connected.
+        Internal active database session.
+    session : Session
+        Lazy session property.  The first access connects to the database and
+        creates any missing tables.
 
     Examples
     --------
     >>> # Database configuration comes from config file
     >>> db = DatabaseManager()
-    >>> db.connect()
-    >>> db.create_tables()
+    >>> db.get_paper_count()  # connects and creates tables automatically
+    0
     >>> db.close()
     """
 
@@ -130,19 +133,49 @@ class DatabaseManager:
         self.engine: Optional[Engine] = None
         self.SessionLocal: Optional[sessionmaker] = None
         self._session: Optional[Session] = None
-        self.connection = None  # Legacy attribute for backward compatibility (always None now)
+        self._schema_ready = False
+        self._raw_connection: Optional[Any] = None
+        self.connection: Optional[Any] = None  # Legacy attribute for backward compatibility
+
+    @property
+    def session(self) -> Session:
+        """
+        Return the active database session, connecting lazily if needed.
+
+        The first access calls :meth:`connect` and :meth:`create_tables` so
+        that the database schema is available automatically.
+
+        Returns
+        -------
+        Session
+            Active SQLAlchemy session.
+
+        Raises
+        ------
+        DatabaseError
+            If connecting to the database or creating the schema fails.
+        """
+        if self._session is None:
+            self.connect()
+        if not self._schema_ready:
+            self.create_tables()
+        assert self._session is not None
+        return self._session
 
     def connect(self) -> None:
         """
         Connect to the database.
 
-        Creates the database file if it doesn't exist (SQLite only).
+        Does nothing if already connected. Creates the database file if it
+        does not exist (SQLite only).
 
         Raises
         ------
         DatabaseError
             If connection fails.
         """
+        if self._session is not None:
+            return
         try:
             # Create parent directories for SQLite
             if self.database_url.startswith("sqlite:///"):
@@ -153,14 +186,29 @@ class DatabaseManager:
             # Create engine with appropriate settings
             connect_args = {}
             if self.database_url.startswith("sqlite"):
-                # SQLite-specific settings
-                connect_args = {"check_same_thread": False}
+                # SQLite-specific settings. ``timeout`` is the busy timeout used
+                # while another connection holds a write lock.
+                connect_args = {"check_same_thread": False, "timeout": 30}
 
             self.engine = create_engine(
                 self.database_url,
                 connect_args=connect_args,
                 echo=False,  # Set to True for SQL debugging
             )
+
+            if self.database_url.startswith("sqlite"):
+
+                @event.listens_for(self.engine, "connect")
+                def _set_sqlite_pragmas(dbapi_connection: Any, connection_record: Any) -> None:
+                    cursor = dbapi_connection.cursor()
+                    try:
+                        # WAL allows reads while a write transaction is active;
+                        # busy_timeout makes writers wait instead of failing
+                        # immediately with "database is locked".
+                        cursor.execute("PRAGMA journal_mode=WAL")
+                        cursor.execute("PRAGMA busy_timeout=30000")
+                    finally:
+                        cursor.close()
 
             # Create session factory
             self.SessionLocal = sessionmaker(
@@ -171,6 +219,7 @@ class DatabaseManager:
 
             # Create a session
             self._session = self.SessionLocal()
+            self._schema_ready = False
 
             # Set legacy connection attribute to provide raw database connection for backward compatibility
             # This allows tests to use .connection.cursor()
@@ -192,6 +241,11 @@ class DatabaseManager:
                     return f"{protocol_user}:***@{parts[1]}"
         return url
 
+    def _rollback(self) -> None:
+        """Roll back the active session if one exists."""
+        if self._session is not None:
+            self._session.rollback()
+
     def close(self) -> None:
         """
         Close the database connection.
@@ -201,6 +255,7 @@ class DatabaseManager:
         if self._session:
             self._session.close()
             self._session = None
+        self._schema_ready = False
         if hasattr(self, "_raw_connection") and self._raw_connection:
             self._raw_connection.close()
             self._raw_connection = None
@@ -213,7 +268,6 @@ class DatabaseManager:
 
     def __enter__(self):
         """Context manager entry."""
-        self.connect()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -269,13 +323,15 @@ class DatabaseManager:
         DatabaseError
             If table creation fails.
         """
-        if not self.engine:
-            raise DatabaseError("Not connected to database")
+        if self.engine is None:
+            self.connect()
+        assert self.engine is not None
 
         try:
             # Create tables only if they don't exist (checkfirst=True is the default)
             # This makes the operation idempotent
             Base.metadata.create_all(bind=self.engine, checkfirst=True)
+            self._schema_ready = True
             logger.debug("Database tables created successfully")
         except (OperationalError, ProgrammingError, IntegrityError) as e:
             # These exceptions can occur when tables already exist, especially with:
@@ -285,6 +341,7 @@ class DatabaseManager:
             error_msg = str(e).lower()
             if any(x in error_msg for x in ["already exists", "duplicate", "pg_type_typname_nsp_index"]):
                 # Tables already exist - this is fine, just log it
+                self._schema_ready = True
                 logger.debug(f"Tables already exist (this is normal): {str(e)}")
                 return
             # For other database errors, re-raise with context
@@ -330,9 +387,6 @@ class DatabaseManager:
         ...     paper_uid = db.add_paper(paper)
         >>> print(f"Inserted paper with UID: {paper_uid}")
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             # Extract validated fields from LightweightPaper
             paper_id = paper.original_id if paper.original_id else None
@@ -346,7 +400,7 @@ class DatabaseManager:
             uid = self.compute_uid(title, paper_id, paper.conference, paper.year)
 
             # Check if paper already exists (by UID)
-            existing = self._session.execute(select(Paper).where(Paper.uid == uid)).scalar_one_or_none()
+            existing = self.session.execute(select(Paper).where(Paper.uid == uid)).scalar_one_or_none()
 
             if existing:
                 logger.debug(f"Skipping duplicate paper: {title} (uid: {uid})")
@@ -379,13 +433,13 @@ class DatabaseManager:
                 conference=paper.conference,
             )
 
-            self._session.add(new_paper)
-            self._session.commit()
+            self.session.add(new_paper)
+            self.session.commit()
 
             return uid
 
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to add paper: {str(e)}") from e
 
     def add_papers(self, papers: List[LightweightPaper]) -> int:
@@ -436,9 +490,6 @@ class DatabaseManager:
         ...     count = db.add_papers(papers)
         >>> print(f"Inserted {count} papers")
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         inserted_count = 0
         skipped_count = 0
 
@@ -497,9 +548,6 @@ class DatabaseManager:
         if not paper_priorities:
             raise ValueError("No data provided")
 
-        if self._session is None:
-            raise DatabaseError("Not connected to database")
-
         try:
             donated_count = 0
             for paper_uid, priority_data in paper_priorities.items():
@@ -512,11 +560,11 @@ class DatabaseManager:
 
                 # Create validation data entry
                 validation_entry = ValidationData(paper_uid=paper_uid, priority=priority, search_term=search_term)
-                self._session.add(validation_entry)
+                self.session.add(validation_entry)
                 donated_count += 1
 
             # Commit all changes
-            self._session.commit()
+            self.session.commit()
 
             logger.info(f"Successfully donated {donated_count} papers to validation data")
             return donated_count
@@ -525,7 +573,7 @@ class DatabaseManager:
             # Re-raise validation errors without rollback
             raise
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             logger.error(f"Error donating validation data: {e}", exc_info=True)
             raise DatabaseError(f"Failed to donate validation data: {e}")
 
@@ -575,9 +623,6 @@ class DatabaseManager:
             if not isinstance(msg, dict) or "role" not in msg or "text" not in msg:
                 raise ValueError("Each message must be a dict with 'role' and 'text' keys.")
 
-        if self._session is None:
-            raise DatabaseError("Not connected to database")
-
         try:
             import json
 
@@ -585,16 +630,16 @@ class DatabaseManager:
                 rating=rating,
                 transcript=json.dumps(transcript),
             )
-            self._session.add(donation)
-            self._session.commit()
+            self.session.add(donation)
+            self.session.commit()
 
             logger.info(f"Successfully donated chat transcript (rating={rating})")
-            return donation.id
+            return cast(int, donation.id)
 
         except ValueError:
             raise
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             logger.error(f"Error donating chat transcript: {e}", exc_info=True)
             raise DatabaseError(f"Failed to donate chat transcript: {e}")
 
@@ -636,13 +681,10 @@ class DatabaseManager:
         >>> with db:
         ...     donations = db.get_chat_donations(limit=10, rating='up')
         """
-        if self._session is None:
-            raise DatabaseError("Not connected to database")
-
         try:
             import json
 
-            query = self._session.query(ChatDonation)
+            query = self.session.query(ChatDonation)
             if rating is not None:
                 query = query.filter(ChatDonation.rating == rating)
             query = query.order_by(ChatDonation.donated_at.desc())
@@ -696,20 +738,17 @@ class DatabaseManager:
         ...     stats = db.get_chat_donation_stats()
         ...     print(f"Total donations: {stats['total']}")
         """
-        if self._session is None:
-            raise DatabaseError("Not connected to database")
-
         try:
             import json
 
-            all_entries = self._session.query(ChatDonation).all()
+            all_entries = self.session.query(ChatDonation).all()
             total = len(all_entries)
             up = sum(1 for e in all_entries if e.rating == "up")
             down = sum(1 for e in all_entries if e.rating == "down")
             turn_counts = []
             for entry in all_entries:
                 try:
-                    turns = len(json.loads(entry.transcript))
+                    turns = len(json.loads(str(entry.transcript)))
                 except Exception:
                     turns = 0
                 turn_counts.append(turns)
@@ -756,11 +795,8 @@ class DatabaseManager:
         >>> with db:
         ...     data = db.get_validation_data(limit=20)
         """
-        if self._session is None:
-            raise DatabaseError("Not connected to database")
-
         try:
-            query = self._session.query(ValidationData).order_by(ValidationData.donated_at.desc())
+            query = self.session.query(ValidationData).order_by(ValidationData.donated_at.desc())
             if offset:
                 query = query.offset(offset)
             if limit is not None:
@@ -806,14 +842,11 @@ class DatabaseManager:
         ...     stats = db.get_validation_data_stats()
         ...     print(f"Total data donations: {stats['total']}")
         """
-        if self._session is None:
-            raise DatabaseError("Not connected to database")
-
         try:
-            all_entries = self._session.query(ValidationData).all()
+            all_entries = self.session.query(ValidationData).all()
             total = len(all_entries)
             unique_papers = len({e.paper_uid for e in all_entries})
-            priorities = [e.priority for e in all_entries]
+            priorities = [int(e.priority) for e in all_entries]
             avg_priority = sum(priorities) / total if total > 0 else 0.0
             distribution: Dict[int, int] = {}
             for p in priorities:
@@ -855,21 +888,18 @@ class DatabaseManager:
         ...     deleted = db.delete_chat_donations()
         ...     print(f"Deleted {deleted} donations")
         """
-        if self._session is None:
-            raise DatabaseError("Not connected to database")
-
         try:
-            query = self._session.query(ChatDonation)
+            query = self.session.query(ChatDonation)
             if ids is not None:
                 query = query.filter(ChatDonation.id.in_(ids))
             count = query.count()
             query.delete(synchronize_session=False)
-            self._session.commit()
+            self.session.commit()
             logger.info(f"Deleted {count} chat donation(s)")
             return count
 
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             logger.error(f"Error deleting chat donations: {e}", exc_info=True)
             raise DatabaseError(f"Failed to delete chat donations: {e}")
 
@@ -899,30 +929,27 @@ class DatabaseManager:
         ...     deleted = db.delete_validation_data()
         ...     print(f"Deleted {deleted} entries")
         """
-        if self._session is None:
-            raise DatabaseError("Not connected to database")
-
         try:
-            query = self._session.query(ValidationData)
+            query = self.session.query(ValidationData)
             if ids is not None:
                 query = query.filter(ValidationData.id.in_(ids))
             count = query.count()
             query.delete(synchronize_session=False)
-            self._session.commit()
+            self.session.commit()
             logger.info(f"Deleted {count} validation data entry(ies)")
             return count
 
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             logger.error(f"Error deleting validation data: {e}", exc_info=True)
             raise DatabaseError(f"Failed to delete validation data: {e}")
 
-    def query(self, sql: str, parameters: tuple = ()) -> List[Dict[str, Any]]:
+    def _query(self, sql: str, parameters: tuple = ()) -> List[Dict[str, Any]]:
         """
-        Execute a SQL query and return results.
+        Execute a raw SQL query and return results.
 
-        Note: This method provides backward compatibility with raw SQL queries.
-        For new code, prefer using SQLAlchemy ORM methods.
+        This is a private helper.  Code outside this module must use the
+        SQLAlchemy-based public methods instead.
 
         Parameters
         ----------
@@ -940,18 +967,7 @@ class DatabaseManager:
         ------
         DatabaseError
             If query execution fails.
-
-        Examples
-        --------
-        >>> db = DatabaseManager()
-        >>> with db:
-        ...     results = db.query("SELECT * FROM papers WHERE session = ?", ("Poster",))
-        >>> for row in results:
-        ...     print(row['title'])
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             # Convert ? placeholders to :0, :1, :2 for SQLAlchemy
             # Count the number of ? placeholders
@@ -966,7 +982,7 @@ class DatabaseManager:
             param_dict = {f"param{i}": parameters[i] for i in range(len(parameters))}
 
             # Execute raw SQL using text()
-            result = self._session.execute(text(converted_sql), param_dict)
+            result = self.session.execute(text(converted_sql), param_dict)
 
             # Convert result to list of dicts
             rows = []
@@ -979,26 +995,159 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Query failed: {str(e)}") from e
 
-    def get_paper_count(self) -> int:
+    def _build_where_conditions(self, where_filters: Optional[Dict[str, Any]]) -> List[Any]:
         """
-        Get the total number of papers in the database.
+        Translate a where-filter dictionary into SQLAlchemy conditions.
+
+        Filter keys are Paper column names (``author`` is accepted as an alias
+        for ``authors``).  A scalar value adds an equality condition.  A dict
+        value adds one or more operator conditions:
+
+        - ``$eq``, ``$ne``
+        - ``$in``, ``$nin``
+        - ``$contains`` (case-insensitive substring)
+        - ``$startswith``, ``$endswith``
+        - ``$gt``, ``$gte``, ``$lt``, ``$lte``
+
+        The logical operators ``$and``, ``$or`` and ``$not`` accept nested
+        filter dictionaries (``$not`` accepts one dict; the others accept a
+        list).
+        """
+        if not where_filters:
+            return []
+
+        columns = {c.name: c for c in Paper.__table__.columns if c.name != "created_at"}
+        alias_lower = {k.lower(): v for k, v in self.FIELD_ALIASES.items()}
+        conditions: List[Any] = []
+
+        for raw_key, value in where_filters.items():
+            key = raw_key.lower()
+
+            if key in ("$and", "$or"):
+                if not isinstance(value, list):
+                    raise DatabaseError(f"'{raw_key}' expects a list of filter dictionaries")
+                nested: List[List[Any]] = [self._build_where_conditions(item) for item in value]
+                flattened: List[Any] = [cond for group in nested for cond in group]
+                if flattened:
+                    conditions.append(and_(*flattened) if key == "$and" else or_(*flattened))
+                continue
+
+            if key == "$not":
+                if not isinstance(value, dict):
+                    raise DatabaseError("'$not' expects a filter dictionary")
+                not_conditions: List[Any] = self._build_where_conditions(value)
+                if not_conditions:
+                    conditions.append(~and_(*not_conditions))
+                continue
+
+            field_name = alias_lower.get(key, key)
+            column = columns.get(field_name)
+            if column is None:
+                raise DatabaseError(f"Unknown paper field: {raw_key}")
+
+            if isinstance(value, dict):
+                for op, operand in value.items():
+                    op_lower = op.lower()
+                    if op_lower == "$eq":
+                        conditions.append(column == operand)
+                    elif op_lower == "$ne":
+                        conditions.append(column != operand)
+                    elif op_lower == "$in":
+                        conditions.append(column.in_(operand))
+                    elif op_lower == "$nin":
+                        conditions.append(column.notin_(operand))
+                    elif op_lower == "$contains":
+                        conditions.append(column.ilike(f"%{operand}%"))
+                    elif op_lower == "$startswith":
+                        conditions.append(column.ilike(f"{operand}%"))
+                    elif op_lower == "$endswith":
+                        conditions.append(column.ilike(f"%{operand}"))
+                    elif op_lower == "$gt":
+                        conditions.append(column > operand)
+                    elif op_lower == "$gte":
+                        conditions.append(column >= operand)
+                    elif op_lower == "$lt":
+                        conditions.append(column < operand)
+                    elif op_lower == "$lte":
+                        conditions.append(column <= operand)
+                    else:
+                        raise DatabaseError(f"Unknown where-filter operator: {op}")
+            else:
+                conditions.append(column == value)
+
+        return conditions
+
+    def get_paper(
+        self,
+        where_filters: Optional[Dict[str, Any]] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve papers matching ``where_filters``.
+
+        This is the single authoritative paper-search method.  All other
+        paper retrieval methods delegate to it.
+
+        Parameters
+        ----------
+        where_filters : dict, optional
+            Mapping of Paper column names to filter values.  See
+            :meth:`_build_where_conditions` for the supported value forms.
+        limit : int, default=100
+            Maximum number of results.  ``0`` or ``None`` means no limit.
+
+        Returns
+        -------
+        list of dict
+            Matching papers as dictionaries.
+
+        Raises
+        ------
+        DatabaseError
+            If the query fails.
+        """
+        try:
+            stmt = select(Paper)
+            conditions = self._build_where_conditions(where_filters)
+            if conditions:
+                stmt = stmt.where(and_(*conditions))
+            if limit:
+                stmt = stmt.limit(limit)
+            papers = self.session.execute(stmt).scalars().all()
+            return [self._paper_to_dict(paper) for paper in papers]
+        except DatabaseError:
+            raise
+        except Exception as e:
+            raise DatabaseError(f"Failed to retrieve papers: {str(e)}") from e
+
+    def get_paper_count(self, where_filters: Optional[Dict[str, Any]] = None) -> int:
+        """
+        Count papers in the database, optionally filtered.
+
+        Parameters
+        ----------
+        where_filters : dict, optional
+            Mapping of Paper column names to filter values.
 
         Returns
         -------
         int
-            Number of papers.
+            Number of matching papers.
 
         Raises
         ------
         DatabaseError
             If query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
-            count = self._session.execute(select(func.count()).select_from(Paper)).scalar()
+            stmt = select(func.count()).select_from(Paper)
+            conditions = self._build_where_conditions(where_filters)
+            if conditions:
+                stmt = stmt.where(and_(*conditions))
+            count = self.session.execute(stmt).scalar()
             return count or 0
+        except DatabaseError:
+            raise
         except Exception as e:
             raise DatabaseError(f"Failed to count papers: {str(e)}") from e
 
@@ -1021,22 +1170,39 @@ class DatabaseManager:
         DatabaseError
             If query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
+        papers = self.get_paper({"uid": uid}, limit=1)
+        return papers[0] if papers else None
 
-        try:
-            paper = self._session.execute(select(Paper).where(Paper.uid == uid)).scalar_one_or_none()
-            return self._paper_to_dict(paper) if paper else None
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve paper by UID: {str(e)}") from e
+    def get_papers_by_uids(self, uids: List[str]) -> List[Dict[str, Any]]:
+        """
+        Retrieve multiple papers by their UIDs in a single query.
+
+        Parameters
+        ----------
+        uids : list of str
+            UIDs of the papers to retrieve.
+
+        Returns
+        -------
+        list of dict
+            Paper data dictionaries for all matching UIDs.  The order follows
+            the input *uids* list, and unknown UIDs are omitted.
+
+        Raises
+        ------
+        DatabaseError
+            If the query fails.
+        """
+        if not uids:
+            return []
+
+        papers = self.get_paper({"uid": {"$in": uids}}, limit=0)
+        by_uid = {paper["uid"]: paper for paper in papers}
+        return [by_uid[uid] for uid in uids if uid in by_uid]
 
     def get_paper_by_original_id_or_uid(self, paper_id: str) -> Optional[Dict[str, Any]]:
         """
         Retrieve a paper by its UID or original_id (whichever matches first).
-
-        Tries uid first, then falls back to original_id. All formatting
-        (e.g. author deserialization) is performed inside this method so that
-        callers always receive a fully formatted paper dictionary.
 
         Parameters
         ----------
@@ -1053,16 +1219,11 @@ class DatabaseManager:
         DatabaseError
             If the database query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
-        try:
-            paper = self._session.execute(
-                select(Paper).where((Paper.uid == paper_id) | (Paper.original_id == paper_id)).limit(1)
-            ).scalar_one_or_none()
-            return self._paper_to_dict(paper) if paper else None
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve paper by id/uid: {str(e)}") from e
+        papers = self.get_paper(
+            {"$or": [{"uid": paper_id}, {"original_id": paper_id}]},
+            limit=1,
+        )
+        return papers[0] if papers else None
 
     #: Paper model column names that can be used as ``field:"value"`` filters
     #: in search queries.  Internal columns (``uid``, ``created_at``) are
@@ -1077,16 +1238,17 @@ class DatabaseManager:
         self,
         keyword: Optional[str] = None,
         field_filters: Optional[Dict[str, str]] = None,
-        session: Optional[str] = None,
         sessions: Optional[List[str]] = None,
-        year: Optional[int] = None,
         years: Optional[List[int]] = None,
-        conference: Optional[str] = None,
         conferences: Optional[List[str]] = None,
         limit: int = 100,
     ) -> List[Dict[str, Any]]:
         """
-        Search for papers by various criteria (lightweight schema).
+        Search papers in the SQL database.
+
+        This method handles database search requests with keyword,
+        field-specific, session, year and conference filters.  It delegates
+        the actual query to :meth:`get_paper`.
 
         Parameters
         ----------
@@ -1094,18 +1256,12 @@ class DatabaseManager:
             Keyword to search in title, abstract, or keywords fields.
         field_filters : dict of str to str, optional
             Mapping of Paper column names to search values.  Each entry adds
-            a case-insensitive ILIKE ``%value%`` condition on the corresponding
-            column (e.g. ``{"authors": "Smith", "award": "Best Paper"}``).
-        session : str, optional
-            Single session to filter by (deprecated, use sessions instead).
+            a case-insensitive substring condition on the corresponding column
+            (e.g. ``{"authors": "Smith", "award": "Best Paper"}``).
         sessions : list[str], optional
             List of sessions to filter by (matches ANY).
-        year : int, optional
-            Single year to filter by (deprecated, use years instead).
         years : list[int], optional
             List of years to filter by (matches ANY).
-        conference : str, optional
-            Single conference to filter by (deprecated, use conferences instead).
         conferences : list[str], optional
             List of conferences to filter by (matches ANY).
         limit : int, default=100
@@ -1120,75 +1276,42 @@ class DatabaseManager:
         ------
         DatabaseError
             If search fails.
-
-        Examples
-        --------
-        >>> db = DatabaseManager("neurips.db")
-        >>> with db:
-        ...     papers = db.search_papers(keyword="neural network", limit=10)
-        >>> for paper in papers:
-        ...     print(paper['title'])
-
-        >>> # Search with multiple sessions
-        >>> papers = db.search_papers(sessions=["Session 1", "Session 2"])
-
-        >>> # Search with years
-        >>> papers = db.search_papers(years=[2024, 2025])
-
-        >>> # Search by field filter
-        >>> papers = db.search_papers(field_filters={"authors": "John Smith"})
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
-            # Build query conditions
-            conditions = []
+            filter_terms: List[Dict[str, Any]] = []
 
             if keyword:
-                search_pattern = f"%{keyword}%"
-                conditions.append(
-                    or_(
-                        Paper.title.ilike(search_pattern),
-                        Paper.abstract.ilike(search_pattern),
-                        Paper.keywords.ilike(search_pattern),
-                    )
+                filter_terms.append(
+                    {
+                        "$or": [
+                            {"title": {"$contains": keyword}},
+                            {"abstract": {"$contains": keyword}},
+                            {"keywords": {"$contains": keyword}},
+                        ]
+                    }
                 )
 
             if field_filters:
                 for field_name, value in field_filters.items():
-                    col = getattr(Paper, field_name, None)
-                    if col is not None:
-                        conditions.append(col.ilike(f"%{value}%"))
+                    filter_terms.append({field_name: {"$contains": value}})
 
-            # Handle sessions (prefer list form, fall back to single)
-            session_list = sessions if sessions else ([session] if session else [])
-            if session_list:
-                conditions.append(Paper.session.in_(session_list))
+            if sessions:
+                filter_terms.append({"session": {"$in": sessions}})
+            if years:
+                filter_terms.append({"year": {"$in": years}})
+            if conferences:
+                filter_terms.append({"conference": {"$in": conferences}})
 
-            # Handle years (prefer list form, fall back to single)
-            year_list = years if years else ([year] if year else [])
-            if year_list:
-                conditions.append(Paper.year.in_(year_list))
+            if not filter_terms:
+                where_filters: Optional[Dict[str, Any]] = None
+            elif len(filter_terms) == 1:
+                where_filters = filter_terms[0]
+            else:
+                where_filters = {"$and": filter_terms}
 
-            # Handle conferences (prefer list form, fall back to single)
-            conference_list = conferences if conferences else ([conference] if conference else [])
-            if conference_list:
-                conditions.append(Paper.conference.in_(conference_list))
-
-            # Build query
-            stmt = select(Paper)
-            if conditions:
-                stmt = stmt.where(and_(*conditions))
-            if limit:
-                stmt = stmt.limit(limit)
-
-            # Execute query
-            results = self._session.execute(stmt).scalars().all()
-
-            # Convert ORM objects to dicts
-            return [self._paper_to_dict(paper) for paper in results]
-
+            return self.get_paper(where_filters, limit=limit)
+        except DatabaseError:
+            raise
         except Exception as e:
             raise DatabaseError(f"Search failed: {str(e)}") from e
 
@@ -1257,50 +1380,61 @@ class DatabaseManager:
         sessions: Optional[List[str]] = None,
         years: Optional[List[int]] = None,
         conferences: Optional[List[str]] = None,
+        *,
+        use_embeddings: bool = False,
+        distance_threshold: float = 1.1,
+        embeddings_manager: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Perform keyword-based search with filtering and field filter parsing.
+        Perform a user-query search, optionally using semantic embeddings.
 
-        This is a convenience method that wraps search_papers and formats
-        the results for web API consumption, including author parsing.
-
-        Supports ``field:"value"`` syntax for any Paper model column, e.g.
-        ``'authors:"John Smith" transformers'`` or ``'award:"Best Paper"'``.
+        This is the main search entry point for the web UI and CLI.  It parses
+        ``field:"value"`` filters from *query*, converts the remaining filter
+        arguments into structured where filters, and then delegates either to
+        :meth:`search_papers` or :meth:`search_papers_semantic`.
 
         Parameters
         ----------
         query : str
-            Keyword to search in title, abstract, or keywords fields.
-            May include ``field:"value"`` filters for any Paper column.
+            Search query text.  May include ``field:"value"`` filters.
         limit : int, optional
-            Maximum number of results, by default 10
+            Maximum number of results, by default 10.
         sessions : list of str, optional
-            Filter by paper sessions
+            Filter by paper sessions.
         years : list of int, optional
-            Filter by publication years
+            Filter by publication years.
         conferences : list of str, optional
-            Filter by conference names
+            Filter by conference names.
+        use_embeddings : bool, optional
+            Use semantic search instead of SQL keyword search.
+        distance_threshold : float, optional
+            Maximum embedding distance for semantic results.
 
         Returns
         -------
         list of dict
-            List of paper dictionaries with parsed authors
+            List of paper dictionaries.
 
-        Examples
-        --------
-        >>> papers = db.search_papers_keyword(
-        ...     "neural networks",
-        ...     limit=5,
-        ...     years=[2024, 2025]
-        ... )
-        >>> papers = db.search_papers_keyword('authors:"John Smith"')
-        >>> papers = db.search_papers_keyword('award:"Best Paper" transformers')
+        Raises
+        ------
+        DatabaseError
+            If the search fails.
         """
-        # Parse field filters from query
         field_filters, remaining_query = self.parse_field_filters(query)
 
-        # Keyword search in database with multiple filter support
-        papers = self.search_papers(
+        if use_embeddings:
+            return self.search_papers_semantic(
+                remaining_query,
+                limit=limit,
+                sessions=sessions,
+                years=years,
+                conferences=conferences,
+                distance_threshold=distance_threshold,
+                field_filters=field_filters,
+                embeddings_manager=embeddings_manager,
+            )
+
+        return self.search_papers(
             keyword=remaining_query if remaining_query else None,
             field_filters=field_filters if field_filters else None,
             sessions=sessions,
@@ -1309,7 +1443,166 @@ class DatabaseManager:
             limit=limit,
         )
 
+    @staticmethod
+    def _papers_from_chroma_results(results: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Build paper dictionaries from raw ChromaDB results as a fallback."""
+        ids = results.get("ids", [[]])[0] if results.get("ids") else []
+        if not ids:
+            return []
+
+        metadatas = results.get("metadatas", [[]])[0] if results.get("metadatas") else []
+        distances = results.get("distances", [[]])[0] if results.get("distances") else []
+        documents = results.get("documents", [[]])[0] if results.get("documents") else []
+
+        papers: List[Dict[str, Any]] = []
+        for idx, paper_id in enumerate(ids):
+            metadata = dict(metadatas[idx]) if idx < len(metadatas) and metadatas[idx] else {}
+            authors = metadata.get("authors", [])
+            if isinstance(authors, str):
+                authors = [name.strip() for name in authors.split(";") if name.strip()]
+
+            year = metadata.get("year")
+            try:
+                year = int(year) if year is not None else None
+            except (TypeError, ValueError):
+                pass
+
+            distance = distances[idx] if idx < len(distances) else None
+            paper: Dict[str, Any] = {
+                **metadata,
+                "uid": paper_id,
+                "title": metadata.get("title", ""),
+                "authors": authors,
+                "abstract": documents[idx] if idx < len(documents) else metadata.get("abstract", ""),
+                "session": metadata.get("session", ""),
+                "conference": metadata.get("conference", ""),
+                "year": year,
+                "poster_position": metadata.get("poster_position"),
+                "url": metadata.get("url") or metadata.get("paper_url"),
+            }
+            if distance is not None:
+                paper["distance"] = distance
+                paper["similarity"] = max(0.0, 1.0 - float(distance))
+            papers.append(paper)
+
         return papers
+
+    def search_papers_semantic(
+        self,
+        query: str,
+        limit: int = 10,
+        sessions: Optional[List[str]] = None,
+        years: Optional[List[int]] = None,
+        conferences: Optional[List[str]] = None,
+        distance_threshold: float = 1.1,
+        field_filters: Optional[Dict[str, str]] = None,
+        where: Optional[Dict[str, Any]] = None,
+        embeddings_manager: Optional[Any] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Perform semantic paper search using embeddings.
+
+        Field filters parsed from the query are applied through the SQL
+        database.  The remaining query text is used for the embedding
+        similarity search.  Author-name matches are returned first when the
+        query text matches an author.
+
+        Parameters
+        ----------
+        query : str
+            Semantic query text (field filters already removed when
+            *field_filters* is supplied).
+        limit : int, optional
+            Maximum number of results, by default 10.
+        sessions : list of str, optional
+            Filter by paper sessions.
+        years : list of int, optional
+            Filter by publication years.
+        conferences : list of str, optional
+            Filter by conference names.
+        distance_threshold : float, optional
+            Maximum embedding distance for results, by default 1.1.
+        field_filters : dict, optional
+            Field filters to apply in SQL.  When omitted, filters are parsed
+            from *query*.
+        where : dict, optional
+            Additional ChromaDB metadata filter.  Merged with the
+            session/year/conference filters.
+
+        Returns
+        -------
+        list of dict
+            Paper dictionaries ordered by relevance.
+
+        Raises
+        ------
+        DatabaseError
+            If the search fails.
+        """
+        from abstracts_explorer.embeddings import EmbeddingsManager, build_chromadb_where_clause
+        from abstracts_explorer.paper_utils import PaperFormattingError, format_search_results
+
+        if field_filters is None:
+            field_filters, query = self.parse_field_filters(query)
+        # Query consisting only of field filters: no meaningful embedding.
+        if field_filters and not query:
+            return self.search_papers(
+                field_filters=field_filters,
+                sessions=sessions,
+                years=years,
+                conferences=conferences,
+                limit=limit,
+            )
+
+        semantic_query = query
+        matching_uids: Optional[List[str]] = None
+
+        if field_filters:
+            matching_papers = self.search_papers(field_filters=field_filters, limit=0)
+            if not matching_papers:
+                return []
+            matching_uids = [paper["uid"] for paper in matching_papers]
+        else:
+            author_matches = self.search_papers(
+                field_filters={"authors": semantic_query},
+                sessions=sessions,
+                years=years,
+                conferences=conferences,
+                limit=limit,
+            )
+            if author_matches:
+                return author_matches
+
+        where_filter = build_chromadb_where_clause(
+            conferences=conferences,
+            years=years,
+            sessions=sessions,
+            base_where=where,
+        )
+
+        owns_manager = embeddings_manager is None
+        em = embeddings_manager or EmbeddingsManager()
+        try:
+            results = em.search_similar(
+                semantic_query,
+                n_results=limit * 2,
+                where=where_filter,
+                ids=matching_uids,
+            )
+            try:
+                papers = format_search_results(results, self, include_documents=False)
+            except PaperFormattingError:
+                papers = []
+            if not papers:
+                # Keep semantic search usable when embeddings exist but the
+                # corresponding SQL rows are unavailable.
+                papers = self._papers_from_chroma_results(results)
+        finally:
+            if owns_manager:
+                em.close()
+
+        papers = [paper for paper in papers if paper.get("distance", 0.0) <= distance_threshold]
+        return papers[:limit]
 
     def get_stats(self, year: Optional[int] = None, conference: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -1338,24 +1631,13 @@ class DatabaseManager:
         >>> stats_2024 = db.get_stats(year=2024)
         >>> print(f"Papers in 2024: {stats_2024['total_papers']}")
         """
-        # Build WHERE clause for filtered count
-        conditions: List[str] = []
-        parameters: List[Any] = []
-
+        where_filters: Dict[str, Any] = {}
         if year is not None:
-            conditions.append("year = ?")
-            parameters.append(year)
-
+            where_filters["year"] = year
         if conference is not None:
-            conditions.append("conference = ?")
-            parameters.append(conference)
+            where_filters["conference"] = conference
 
-        if conditions:
-            where_clause = " AND ".join(conditions)
-            result = self.query(f"SELECT COUNT(*) as count FROM papers WHERE {where_clause}", tuple(parameters))
-            total_papers = result[0]["count"] if result else 0
-        else:
-            total_papers = self.get_paper_count()
+        total_papers = self.get_paper_count(where_filters=where_filters or None)
 
         return {
             "total_papers": total_papers,
@@ -1363,13 +1645,14 @@ class DatabaseManager:
             "conference": conference,
         }
 
-    def _paper_to_dict(self, paper: Paper) -> Dict[str, Any]:
+    @staticmethod
+    def _paper_to_dict(paper: Paper) -> Dict[str, Any]:
         """Convert Paper ORM object to dictionary."""
         return {
             "uid": paper.uid,
             "original_id": paper.original_id,
             "title": paper.title,
-            "authors": deserialize_authors_from_string(paper.authors),
+            "authors": deserialize_authors_from_string(str(paper.authors or "")),
             "abstract": paper.abstract,
             "session": paper.session,
             "poster_position": paper.poster_position,
@@ -1377,83 +1660,14 @@ class DatabaseManager:
             "poster_image_url": paper.poster_image_url,
             "url": paper.url,
             "room_name": paper.room_name,
-            "keywords": deserialize_keywords_from_string(paper.keywords),
-            "starttime": str(paper.starttime),  # Convert datetime to string for JSON serialization
-            "endtime": str(paper.endtime),  # Convert datetime to string for JSON serialization
+            "keywords": deserialize_keywords_from_string(str(paper.keywords or "")),
+            "starttime": str(paper.starttime) if paper.starttime is not None else None,
+            "endtime": str(paper.endtime) if paper.endtime is not None else None,
             "award": paper.award,
             "year": paper.year,
             "conference": paper.conference,
-            "created_at": str(paper.created_at),  # Convert datetime to string for JSON serialization
+            "created_at": str(paper.created_at) if paper.created_at is not None else None,
         }
-
-    def get_author_count(self) -> int:
-        """
-        Get the approximate number of unique authors in the database.
-
-        Note: This provides an estimate by counting unique author names
-        across all papers. The actual count may vary.
-
-        Returns
-        -------
-        int
-            Approximate number of unique authors.
-
-        Raises
-        ------
-        DatabaseError
-            If query fails.
-        """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
-        try:
-            # Get all author fields
-            stmt = select(Paper.authors).where(and_(Paper.authors.isnot(None), Paper.authors != ""))
-            results = self._session.execute(stmt).scalars().all()
-
-            # Extract unique author names
-            author_names = set()
-            for authors_str in results:
-                if authors_str:
-                    for author in authors_str.split(";"):
-                        author_names.add(author.strip())
-
-            return len(author_names)
-        except Exception as e:
-            raise DatabaseError(f"Failed to count authors: {str(e)}") from e
-
-    def get_years_for_conference(self, conference: str) -> List[int]:
-        """
-        Get distinct years available for a specific conference.
-
-        Parameters
-        ----------
-        conference : str
-            Conference name to query.
-
-        Returns
-        -------
-        list of int
-            Sorted list of distinct years for the conference.
-
-        Raises
-        ------
-        DatabaseError
-            If query fails.
-        """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
-        try:
-            stmt = (
-                select(Paper.year)
-                .distinct()
-                .where(and_(Paper.conference == conference, Paper.year.isnot(None)))
-                .order_by(Paper.year)
-            )
-            return list(self._session.execute(stmt).scalars().all())
-        except Exception as e:
-            raise DatabaseError(f"Failed to get years for conference: {str(e)}") from e
 
     def get_conference_years_from_db(self) -> Dict[str, List[int]]:
         """
@@ -1466,7 +1680,7 @@ class DatabaseManager:
         dict[str, list[int]]
             Mapping of conference name to list of years (descending) that have
             at least one paper in the database.  Returns an empty dict when the
-            database is empty or not connected.
+            database is empty.
 
         Raises
         ------
@@ -1476,14 +1690,10 @@ class DatabaseManager:
         Examples
         --------
         >>> db = DatabaseManager()
-        >>> with db:
-        ...     mapping = db.get_conference_years_from_db()
+        >>> mapping = db.get_conference_years_from_db()
         >>> print(mapping)
         {'NeurIPS': [2025, 2024], 'ICLR': [2024]}
         """
-        if not self._session:
-            return {}
-
         try:
             conferences_in_db = self.get_conferences()
             result: Dict[str, List[int]] = {}
@@ -1495,81 +1705,95 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Failed to get conference years from DB: {str(e)}") from e
 
-    def resolve_default_conference_year(
+    def confirm_default_conference_year_exists(
         self,
         configured_conference: str,
         configured_year: Optional[int],
-    ) -> tuple[str, Optional[int]]:
+    ) -> Dict[str, Any]:
         """
-        Resolve the effective default conference and year, guaranteeing they have data.
+        Confirm that the configured default conference/year exists in the database.
 
-        The configured values are used when they point at a conference/year that
-        actually has papers in the database.  When they do not, the method falls
-        back to the most recent conference/year combination present in the database.
+        Unlike the previous fallback logic, this method never guesses an
+        alternative.  If the configured default is missing, it returns a
+        structured error describing available data and how to fix the problem.
 
         Parameters
         ----------
         configured_conference : str
-            Conference name from the application configuration.  May be empty
-            or may not match any downloaded conference.
+            Conference name from the application configuration.
         configured_year : int or None
-            Year from the application configuration.  May be ``None`` or may
-            not have data for the matched conference.
+            Year from the application configuration.  ``0`` or ``None`` means
+            that no year is configured; only the conference is validated.
 
         Returns
         -------
-        tuple[str, int | None]
-            A ``(conference, year)`` pair that is guaranteed to have data in the
-            database, or the original configured values if the database is empty.
+        dict
+            Dictionary with keys:
 
-        Examples
-        --------
-        >>> db = DatabaseManager()
-        >>> with db:
-        ...     conf, year = db.resolve_default_conference_year("NeurIPS", 2024)
-        >>> print(conf, year)
-        NeurIPS 2024
+            - ``conference`` : str or None – canonical configured conference,
+              or ``None`` when it is unavailable.
+            - ``year`` : int or None – confirmed configured year, or ``None``.
+            - ``error`` : dict or None – error details when the default is
+              unavailable.  Contains ``message``, ``available_conferences``,
+              ``available_years`` and ``guidance``.
         """
-        db_conferences = self.get_conferences()
+        db_conference_years = self.get_conference_years_from_db()
+        available_conferences = sorted(db_conference_years.keys())
 
-        if not db_conferences:
-            # DB is empty – return configured values unchanged
-            return configured_conference, configured_year
+        if not configured_conference:
+            return {"conference": None, "year": None, "error": None}
 
-        # Try case-insensitive match of the configured conference against DB conferences
-        conf_matched = None
-        if configured_conference:
-            for db_conf in db_conferences:
-                if db_conf.lower() == configured_conference.lower():
-                    conf_matched = db_conf
-                    break
+        matched_conf: Optional[str] = None
+        for db_conf in available_conferences:
+            if db_conf.lower() == configured_conference.lower():
+                matched_conf = db_conf
+                break
 
-        if conf_matched:
-            effective_conf = conf_matched
-            years_for_conf = self.get_years(conference=conf_matched)
-            if configured_year and configured_year in years_for_conf:
-                effective_year: Optional[int] = configured_year
-            elif years_for_conf:
-                # Configured year not in DB for this conference – use the most recent one
-                effective_year = years_for_conf[0]
-            else:
-                effective_year = configured_year
-        else:
-            # Configured default has no data (or was not set) – fall back to the
-            # conference/year combination with the most recent year in the database.
-            best_conf: Optional[str] = None
-            best_year: Optional[int] = None
-            for conf in db_conferences:
-                years = self.get_years(conference=conf)
-                if years:
-                    most_recent = years[0]  # already sorted descending
-                    if best_year is None or most_recent > best_year:
-                        best_year = most_recent
-                        best_conf = conf
-            effective_conf = best_conf or configured_conference
-            effective_year = best_year if best_conf else configured_year
+        if matched_conf is None:
+            message = f"Configured default conference '{configured_conference}' has no data in the database."
+            if not available_conferences:
+                message = "The database is empty; the configured default conference cannot be used."
+            return {
+                "conference": None,
+                "year": None,
+                "error": {
+                    "message": message,
+                    "available_conferences": available_conferences,
+                    "available_years": [],
+                    "guidance": (
+                        "Populate the database with 'abstracts-explorer registry download "
+                        "--conference <name>' or run 'abstracts-explorer download --conference <name>' "
+                        "followed by 'abstracts-explorer create-embeddings', or configure a different "
+                        "default with DEFAULT_CONFERENCE and DEFAULT_YEAR."
+                    ),
+                },
+            }
 
-        return effective_conf, effective_year
+        available_years = db_conference_years.get(matched_conf, [])
+
+        if configured_year:
+            if configured_year not in available_years:
+                return {
+                    "conference": None,
+                    "year": None,
+                    "error": {
+                        "message": (
+                            f"Configured default year {configured_year} has no data for "
+                            f"conference '{matched_conf}'."
+                        ),
+                        "available_conferences": available_conferences,
+                        "available_years": available_years,
+                        "guidance": (
+                            "Choose an available year with DEFAULT_YEAR or populate this year with "
+                            "'abstracts-explorer registry download --conference <name> --year <year>' "
+                            "or 'abstracts-explorer download --conference <name> --year <year>' followed "
+                            "by 'abstracts-explorer create-embeddings'."
+                        ),
+                    },
+                }
+            return {"conference": matched_conf, "year": configured_year, "error": None}
+
+        return {"conference": matched_conf, "year": None, "error": None}
 
     def resolve_conference_name(self, conference: str) -> str:
         """
@@ -1590,8 +1814,8 @@ class DatabaseManager:
         ----------
         conference : str
             Conference name as supplied by the caller.  May differ in case or
-            spelling from the form stored in the database (e.g. ``ml4ps@neurips``
-            vs. ``ML4PS@Neurips``).
+            spelling from the form stored in the database (e.g. ``ml4ps``
+            vs. ``ML4PS``).
 
         Returns
         -------
@@ -1604,12 +1828,9 @@ class DatabaseManager:
         --------
         >>> with DatabaseManager() as db:
         ...     db.create_tables()
-        ...     canonical = db.resolve_conference_name("ml4ps@neurips")
-        ...     # Returns "ML4PS@Neurips" if that form is stored in the DB
+        ...     canonical = db.resolve_conference_name("ml4ps")
+        ...     # Returns "ML4PS" if that form is stored in the DB
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         # 1. Try case-insensitive match against conferences already in the DB
         try:
             for conf in self.get_conferences():
@@ -1720,7 +1941,7 @@ class DatabaseManager:
         Raises
         ------
         DatabaseError
-            If query fails or not connected.
+            If query fails.
 
         Examples
         --------
@@ -1731,9 +1952,6 @@ class DatabaseManager:
         ['Session 1', 'Session 2', ...]
         >>> sessions = db.get_sessions(conference="NeurIPS", year=2025)
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             conditions: list = []
             if conference is not None:
@@ -1741,12 +1959,12 @@ class DatabaseManager:
             if year is not None:
                 conditions.append(Paper.year == year)
 
-            stmt = select(Paper.session).distinct()
+            stmt: Any = select(Paper.session).distinct()
             if conditions:
                 stmt = stmt.where(and_(*conditions))
             stmt = stmt.where(and_(Paper.session.isnot(None), Paper.session != "")).order_by(Paper.session)
 
-            return list(self._session.execute(stmt).scalars().all())
+            return list(self.session.execute(stmt).scalars().all())
         except Exception as e:
             raise DatabaseError(f"Failed to get sessions: {str(e)}") from e
 
@@ -1767,7 +1985,7 @@ class DatabaseManager:
         Raises
         ------
         DatabaseError
-            If query fails or not connected.
+            If query fails.
 
         Examples
         --------
@@ -1778,18 +1996,15 @@ class DatabaseManager:
         ['ICLR', 'NeurIPS']
         >>> conferences = db.get_conferences(year=2025)
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
-            stmt = (
+            stmt: Any = (
                 select(Paper.conference).distinct().where(and_(Paper.conference.isnot(None), Paper.conference != ""))
             )
             if year is not None:
                 stmt = stmt.where(Paper.year == year)
             stmt = stmt.order_by(Paper.conference)
 
-            return list(self._session.execute(stmt).scalars().all())
+            return list(self.session.execute(stmt).scalars().all())
         except Exception as e:
             raise DatabaseError(f"Failed to get conferences: {str(e)}") from e
 
@@ -1810,7 +2025,7 @@ class DatabaseManager:
         Raises
         ------
         DatabaseError
-            If query fails or not connected.
+            If query fails.
 
         Examples
         --------
@@ -1821,16 +2036,13 @@ class DatabaseManager:
         [2025, 2024, 2023]
         >>> years = db.get_years(conference="NeurIPS")
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
-            stmt = select(Paper.year).distinct().where(Paper.year.isnot(None))
+            stmt: Any = select(Paper.year).distinct().where(Paper.year.isnot(None))
             if conference is not None:
                 stmt = stmt.where(Paper.conference == conference)
             stmt = stmt.order_by(Paper.year.desc())
 
-            return list(self._session.execute(stmt).scalars().all())
+            return list(self.session.execute(stmt).scalars().all())
         except Exception as e:
             raise DatabaseError(f"Failed to get years: {str(e)}") from e
 
@@ -1856,13 +2068,12 @@ class DatabaseManager:
         >>> print(model)
         'text-embedding-qwen3-embedding-4b'
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             # Get the most recent embedding model entry
-            stmt = select(EmbeddingsMetadata.embedding_model).order_by(EmbeddingsMetadata.updated_at.desc()).limit(1)
-            result = self._session.execute(stmt).scalar_one_or_none()
+            stmt: Any = (
+                select(EmbeddingsMetadata.embedding_model).order_by(EmbeddingsMetadata.updated_at.desc()).limit(1)
+            )
+            result = self.session.execute(stmt).scalar_one_or_none()
             return result
         except Exception as e:
             raise DatabaseError(f"Failed to get embedding model: {str(e)}") from e
@@ -1890,30 +2101,27 @@ class DatabaseManager:
         >>> with db:
         ...     db.set_embedding_model("text-embedding-qwen3-embedding-4b")
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             # Check if any record exists
             count_stmt = select(func.count()).select_from(EmbeddingsMetadata)
-            count = self._session.execute(count_stmt).scalar()
+            count = self.session.execute(count_stmt).scalar()
 
             if count and count > 0:
                 # Update the most recent record
                 # Get the most recent entry
                 latest_stmt = select(EmbeddingsMetadata).order_by(EmbeddingsMetadata.updated_at.desc()).limit(1)
-                latest = self._session.execute(latest_stmt).scalar_one()
+                latest = self.session.execute(latest_stmt).scalar_one()
                 latest.embedding_model = model_name
                 latest.updated_at = datetime.now(timezone.utc)
             else:
                 # Insert new record
                 new_metadata = EmbeddingsMetadata(embedding_model=model_name)
-                self._session.add(new_metadata)
+                self.session.add(new_metadata)
 
-            self._session.commit()
+            self.session.commit()
             logger.info(f"Set embedding model to: {model_name}")
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to set embedding model: {str(e)}") from e
 
     def get_clustering_cache(
@@ -1970,9 +2178,6 @@ class DatabaseManager:
         DatabaseError
             If query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             import json
 
@@ -2007,7 +2212,7 @@ class DatabaseManager:
 
             # Get all matching results (we'll filter by params in Python)
             stmt = stmt.order_by(ClusteringCache.created_at.desc())
-            results = self._session.execute(stmt).scalars().all()
+            results = self.session.execute(stmt).scalars().all()
 
             if not results:
                 return None
@@ -2087,9 +2292,6 @@ class DatabaseManager:
         DatabaseError
             If save fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             import json
 
@@ -2117,8 +2319,8 @@ class DatabaseManager:
                 results_json=results_json,
             )
 
-            self._session.add(cache_entry)
-            self._session.commit()
+            self.session.add(cache_entry)
+            self.session.commit()
 
             logger.info(
                 f"Saved clustering cache: {clustering_method} with {n_clusters} clusters, "
@@ -2127,7 +2329,7 @@ class DatabaseManager:
             )
 
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to save clustering cache: {str(e)}") from e
 
     def delete_papers_by_conference_year(self, conference: str, year: int) -> int:
@@ -2151,20 +2353,17 @@ class DatabaseManager:
         DatabaseError
             If deletion fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
-            result = self._session.execute(
+            result = self.session.execute(
                 delete(Paper).where(and_(Paper.conference == conference, Paper.year == year))
             )
-            self._session.commit()
-            count = result.rowcount if result.rowcount is not None else 0
+            self.session.commit()
+            count = getattr(result, "rowcount", 0) or 0
             logger.info(f"Deleted {count} papers for {conference}/{year}")
             return count
 
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to delete papers for {conference}/{year}: {str(e)}") from e
 
     def delete_clustering_cache_by_conference_year(self, conference: str, year: int) -> int:
@@ -2188,25 +2387,22 @@ class DatabaseManager:
         DatabaseError
             If deletion fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             stmt = select(ClusteringCache).where(
                 and_(ClusteringCache.conference == conference, ClusteringCache.year == year)
             )
-            entries = self._session.execute(stmt).scalars().all()
+            entries = self.session.execute(stmt).scalars().all()
             count = len(entries)
 
             for entry in entries:
-                self._session.delete(entry)
+                self.session.delete(entry)
 
-            self._session.commit()
+            self.session.commit()
             logger.info(f"Deleted {count} clustering cache entries for {conference}/{year}")
             return count
 
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to delete clustering cache for {conference}/{year}: {str(e)}") from e
 
     def count_clustering_cache_by_conference_year(self, conference: str, year: int) -> int:
@@ -2230,11 +2426,8 @@ class DatabaseManager:
         DatabaseError
             If the query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
-            result = self._session.execute(
+            result = self.session.execute(
                 select(func.count())
                 .select_from(ClusteringCache)
                 .where(and_(ClusteringCache.conference == conference, ClusteringCache.year == year))
@@ -2266,9 +2459,6 @@ class DatabaseManager:
         DatabaseError
             If deletion fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             if embedding_model:
                 # Delete only for specific model
@@ -2277,13 +2467,13 @@ class DatabaseManager:
                 # Delete all
                 stmt = select(ClusteringCache)
 
-            entries = self._session.execute(stmt).scalars().all()
+            entries = self.session.execute(stmt).scalars().all()
             count = len(entries)
 
             for entry in entries:
-                self._session.delete(entry)
+                self.session.delete(entry)
 
-            self._session.commit()
+            self.session.commit()
 
             if embedding_model:
                 logger.info(f"Cleared {count} clustering cache entries for model: {embedding_model}")
@@ -2293,7 +2483,7 @@ class DatabaseManager:
             return count
 
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to clear clustering cache: {str(e)}") from e
 
     def update_clustering_cache_embedding_model(self, old_model: str, new_model: str) -> int:
@@ -2331,23 +2521,20 @@ class DatabaseManager:
         ...         "old-model", "new-model"
         ...     )
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             stmt = select(ClusteringCache).where(ClusteringCache.embedding_model == old_model)
-            entries = self._session.execute(stmt).scalars().all()
+            entries = self.session.execute(stmt).scalars().all()
             count = len(entries)
 
             for entry in entries:
-                entry.embedding_model = new_model
+                setattr(entry, "embedding_model", new_model)
 
-            self._session.commit()
+            self.session.commit()
             logger.info(f"Updated {count} clustering cache entries from model {old_model!r} to {new_model!r}")
             return count
 
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to update clustering cache embedding model: {str(e)}") from e
 
     # ------------------------------------------------------------------
@@ -2384,9 +2571,6 @@ class DatabaseManager:
         DatabaseError
             If query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             import json
 
@@ -2401,7 +2585,7 @@ class DatabaseManager:
                 .order_by(HierarchicalLabelCache.created_at.desc())
                 .limit(1)
             )
-            result = self._session.execute(stmt).scalars().first()
+            result = self.session.execute(stmt).scalars().first()
             if result is None:
                 return None
             raw = json.loads(result.labels_json)
@@ -2434,9 +2618,6 @@ class DatabaseManager:
         DatabaseError
             If save fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             import json
 
@@ -2446,15 +2627,15 @@ class DatabaseManager:
                 linkage=linkage,
                 labels_json=labels_json,
             )
-            self._session.add(entry)
-            self._session.commit()
+            self.session.add(entry)
+            self.session.commit()
             logger.info(
                 f"Saved hierarchical label cache: {len(labels)} labels, "
                 f"model={embedding_model}, linkage={linkage}"
             )
 
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to save hierarchical label cache: {str(e)}") from e
 
     # ------------------------------------------------------------------ #
@@ -2498,9 +2679,6 @@ class DatabaseManager:
         DatabaseError
             If insertion fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             pair = EvalQAPair(
                 conversation_id=conversation_id,
@@ -2510,11 +2688,11 @@ class DatabaseManager:
                 tool_name=tool_name,
                 source_info=source_info,
             )
-            self._session.add(pair)
-            self._session.commit()
-            return pair.id
+            self.session.add(pair)
+            self.session.commit()
+            return cast(int, pair.id)
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to add eval QA pair: {str(e)}") from e
 
     def get_eval_qa_pairs(
@@ -2551,9 +2729,6 @@ class DatabaseManager:
         DatabaseError
             If query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             stmt = select(EvalQAPair)
             if verified_only:
@@ -2568,7 +2743,7 @@ class DatabaseManager:
             if limit:
                 stmt = stmt.limit(limit)
 
-            rows = self._session.execute(stmt).scalars().all()
+            rows = self.session.execute(stmt).scalars().all()
             return [
                 {
                     "id": r.id,
@@ -2605,14 +2780,11 @@ class DatabaseManager:
         DatabaseError
             If query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             stmt = select(func.count()).select_from(EvalQAPair)
             if verified_only:
                 stmt = stmt.where(EvalQAPair.verified == 1)
-            return self._session.execute(stmt).scalar() or 0
+            return self.session.execute(stmt).scalar() or 0
         except Exception as e:
             raise DatabaseError(f"Failed to count eval QA pairs: {str(e)}") from e
 
@@ -2639,24 +2811,21 @@ class DatabaseManager:
         DatabaseError
             If update fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         allowed = {"query", "expected_answer", "tool_name", "verified", "source_info"}
         to_set = {k: v for k, v in fields.items() if k in allowed}
         if not to_set:
             return False
 
         try:
-            pair = self._session.get(EvalQAPair, pair_id)
+            pair = self.session.get(EvalQAPair, pair_id)
             if pair is None:
                 return False
             for k, v in to_set.items():
                 setattr(pair, k, v)
-            self._session.commit()
+            self.session.commit()
             return True
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to update eval QA pair: {str(e)}") from e
 
     def delete_eval_qa_pair(self, pair_id: int) -> bool:
@@ -2678,18 +2847,15 @@ class DatabaseManager:
         DatabaseError
             If deletion fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
-            pair = self._session.get(EvalQAPair, pair_id)
+            pair = self.session.get(EvalQAPair, pair_id)
             if pair is None:
                 return False
-            self._session.delete(pair)
-            self._session.commit()
+            self.session.delete(pair)
+            self.session.commit()
             return True
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to delete eval QA pair: {str(e)}") from e
 
     def delete_verified_eval_qa_pairs(self) -> int:
@@ -2706,16 +2872,13 @@ class DatabaseManager:
         DatabaseError
             If deletion fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
-            result = self._session.execute(delete(EvalQAPair).where(EvalQAPair.verified == 1))
-            count = result.rowcount
-            self._session.commit()
+            result = self.session.execute(delete(EvalQAPair).where(EvalQAPair.verified == 1))
+            count = getattr(result, "rowcount", 0) or 0
+            self.session.commit()
             return count
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to delete verified eval QA pairs: {str(e)}") from e
 
     def delete_eval_results(self, run_id: Optional[str] = None) -> int:
@@ -2738,19 +2901,16 @@ class DatabaseManager:
         DatabaseError
             If deletion fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             stmt = delete(EvalResult)
             if run_id is not None:
                 stmt = stmt.where(EvalResult.run_id == run_id)
-            result = self._session.execute(stmt)
-            count = result.rowcount
-            self._session.commit()
+            result = self.session.execute(stmt)
+            count = getattr(result, "rowcount", 0) or 0
+            self.session.commit()
             return count
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to delete eval results: {str(e)}") from e
 
     def add_eval_result(
@@ -2799,9 +2959,6 @@ class DatabaseManager:
         DatabaseError
             If insertion fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             result = EvalResult(
                 run_id=run_id,
@@ -2814,11 +2971,11 @@ class DatabaseManager:
                 error=error,
                 judge_reasoning=judge_reasoning,
             )
-            self._session.add(result)
-            self._session.commit()
-            return result.id
+            self.session.add(result)
+            self.session.commit()
+            return cast(int, result.id)
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to add eval result: {str(e)}") from e
 
     def get_eval_results(
@@ -2849,9 +3006,6 @@ class DatabaseManager:
         DatabaseError
             If query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             stmt = select(EvalResult)
             if run_id:
@@ -2862,7 +3016,7 @@ class DatabaseManager:
             if limit:
                 stmt = stmt.limit(limit)
 
-            rows = self._session.execute(stmt).scalars().all()
+            rows = self.session.execute(stmt).scalars().all()
             return [
                 {
                     "id": r.id,
@@ -2899,14 +3053,11 @@ class DatabaseManager:
         DatabaseError
             If query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
-            stmt = (
+            stmt: Any = (
                 select(EvalResult.run_id).group_by(EvalResult.run_id).order_by(func.min(EvalResult.created_at).asc())
             )
-            return [row.run_id for row in self._session.execute(stmt).all()]
+            return [row.run_id for row in self.session.execute(stmt).all()]
         except Exception as e:
             raise DatabaseError(f"Failed to get eval run IDs: {str(e)}") from e
 
@@ -2936,9 +3087,6 @@ class DatabaseManager:
         DatabaseError
             If query fails.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             results = self.get_eval_results(run_id=run_id)
             if not results:
@@ -2958,8 +3106,8 @@ class DatabaseManager:
             errors = sum(1 for r in results if r["error"])
 
             # Determine the timestamp of the earliest result in this run
-            stmt = select(func.min(EvalResult.created_at)).where(EvalResult.run_id == run_id)
-            run_date = self._session.execute(stmt).scalar()
+            stmt: Any = select(func.min(EvalResult.created_at)).where(EvalResult.run_id == run_id)
+            run_date = self.session.execute(stmt).scalar()
 
             return {
                 "total": total,
@@ -3008,9 +3156,6 @@ class DatabaseManager:
         DatabaseError
             If the export fails or no papers are found.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
 
             output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -3021,19 +3166,19 @@ class DatabaseManager:
             with Session(export_engine) as export_session:
                 # Export papers filtered by conference and year
                 query = select(Paper).where(and_(Paper.conference == conference, Paper.year == year))
-                for paper in self._session.execute(query).scalars():
+                for paper in self.session.execute(query).scalars():
                     paper_dict = {c.name: getattr(paper, c.name) for c in Paper.__table__.columns}
                     export_session.add(Paper(**paper_dict))
                     paper_count += 1
 
                 # Export hierarchical label cache
-                for entry in self._session.execute(select(HierarchicalLabelCache)).scalars():
+                for entry in self.session.execute(select(HierarchicalLabelCache)).scalars():
                     entry_dict = {c.name: getattr(entry, c.name) for c in HierarchicalLabelCache.__table__.columns}
                     export_session.add(HierarchicalLabelCache(**entry_dict))
 
                 # Export embeddings metadata
-                for entry in self._session.execute(select(EmbeddingsMetadata)).scalars():
-                    entry_dict = {c.name: getattr(entry, c.name) for c in EmbeddingsMetadata.__table__.columns}
+                for meta_entry in self.session.execute(select(EmbeddingsMetadata)).scalars():
+                    entry_dict = {c.name: getattr(meta_entry, c.name) for c in EmbeddingsMetadata.__table__.columns}
                     export_session.add(EmbeddingsMetadata(**entry_dict))
 
                 export_session.commit()
@@ -3079,9 +3224,6 @@ class DatabaseManager:
         DatabaseError
             If the import fails or the embedding model is inconsistent.
         """
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             source_engine = create_engine(
                 f"sqlite:///{sqlite_path}",
@@ -3093,54 +3235,55 @@ class DatabaseManager:
                 # --- Validate EmbeddingsMetadata consistency ---
                 imported_meta = source_session.execute(select(EmbeddingsMetadata)).scalars().first()
                 if imported_meta:
-                    existing_meta = self._session.execute(select(EmbeddingsMetadata)).scalars().first()
-                    if existing_meta and normalize_model_name(existing_meta.embedding_model) != normalize_model_name(
-                        imported_meta.embedding_model
-                    ):
+                    existing_meta = self.session.execute(select(EmbeddingsMetadata)).scalars().first()
+                    if existing_meta and normalize_model_name(
+                        str(existing_meta.embedding_model)
+                    ) != normalize_model_name(str(imported_meta.embedding_model)):
                         raise EmbeddingModelConflictError(
-                            existing_meta.embedding_model, imported_meta.embedding_model
+                            str(existing_meta.embedding_model), str(imported_meta.embedding_model)
                         )
 
                 # Delete existing papers for this conference+year
-                self._session.execute(delete(Paper).where(and_(Paper.conference == conference, Paper.year == year)))
+                self.session.execute(delete(Paper).where(and_(Paper.conference == conference, Paper.year == year)))
 
                 # Delete only hierarchical label cache entries whose
                 # embedding_model matches one from the imported data
-                imported_models_result = (
-                    source_session.execute(select(HierarchicalLabelCache.embedding_model).distinct()).scalars().all()
+                imported_models_result: List[str] = cast(
+                    List[str],
+                    source_session.execute(select(HierarchicalLabelCache.embedding_model).distinct()).scalars().all(),
                 )
                 if imported_models_result:
-                    self._session.execute(
+                    self.session.execute(
                         delete(HierarchicalLabelCache).where(
                             HierarchicalLabelCache.embedding_model.in_(imported_models_result)
                         )
                     )
 
-                self._session.commit()
+                self.session.commit()
 
                 # Import papers — use merge() to handle any UID collisions
                 # (e.g. the same paper existing under a different conference
                 # casing that the DELETE above didn't catch).
                 for paper in source_session.execute(select(Paper)).scalars():
                     paper_dict = {c.name: getattr(paper, c.name) for c in Paper.__table__.columns}
-                    self._session.merge(Paper(**paper_dict))
+                    self.session.merge(Paper(**paper_dict))
                     paper_count += 1
 
                 # Import hierarchical labels
                 for entry in source_session.execute(select(HierarchicalLabelCache)).scalars():
                     entry_dict = {c.name: getattr(entry, c.name) for c in HierarchicalLabelCache.__table__.columns}
-                    self._session.add(HierarchicalLabelCache(**entry_dict))
+                    self.session.add(HierarchicalLabelCache(**entry_dict))
 
                 # Import embeddings metadata (only if not already present)
                 if imported_meta:
-                    existing_meta = self._session.execute(select(EmbeddingsMetadata)).scalars().first()
+                    existing_meta = self.session.execute(select(EmbeddingsMetadata)).scalars().first()
                     if not existing_meta:
                         meta_dict = {
                             c.name: getattr(imported_meta, c.name) for c in EmbeddingsMetadata.__table__.columns
                         }
-                        self._session.add(EmbeddingsMetadata(**meta_dict))
+                        self.session.add(EmbeddingsMetadata(**meta_dict))
 
-                self._session.commit()
+                self.session.commit()
 
             source_engine.dispose()
             return paper_count
@@ -3148,7 +3291,7 @@ class DatabaseManager:
         except DatabaseError:
             raise
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to import papers: {str(e)}") from e
 
     # ------------------------------------------------------------------
@@ -3184,9 +3327,6 @@ class DatabaseManager:
         """
         import json as _json
 
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             entries: List[Dict[str, Any]] = []
             stmt = select(ClusteringCache).where(
@@ -3195,7 +3335,7 @@ class DatabaseManager:
                     ClusteringCache.year == year,
                 )
             )
-            for entry in self._session.execute(stmt).scalars():
+            for entry in self.session.execute(stmt).scalars():
                 row: Dict[str, Any] = {}
                 for col in ClusteringCache.__table__.columns:
                     if col.name == "id":
@@ -3257,12 +3397,9 @@ class DatabaseManager:
         """
         import json as _json
 
-        if not self._session:
-            raise DatabaseError("Not connected to database")
-
         try:
             # Delete existing matching entries using column-based filtering.
-            self._session.execute(
+            self.session.execute(
                 delete(ClusteringCache).where(
                     and_(
                         ClusteringCache.conference == conference,
@@ -3270,7 +3407,7 @@ class DatabaseManager:
                     )
                 )
             )
-            self._session.flush()
+            self.session.flush()
 
             # For PostgreSQL the auto-increment sequence can fall out of sync when rows
             # were previously inserted with explicit primary-key values (e.g. by an older
@@ -3281,7 +3418,7 @@ class DatabaseManager:
             # new row gets a safe ID regardless of sequence history.
             db_url = self.database_url.lower()
             if "postgresql" in db_url or "postgres" in db_url:
-                self._session.execute(
+                self.session.execute(
                     text(
                         "SELECT setval("
                         "  pg_get_serial_sequence('clustering_cache', 'id'),"
@@ -3290,7 +3427,7 @@ class DatabaseManager:
                         ")"
                     )
                 )
-                self._session.flush()
+                self.session.flush()
 
             count = 0
             for item in data.get("entries", []):
@@ -3333,14 +3470,14 @@ class DatabaseManager:
                         if actual is not None:
                             row["n_clusters"] = int(actual)
 
-                self._session.add(ClusteringCache(**row))
+                self.session.add(ClusteringCache(**row))
                 count += 1
 
-            self._session.commit()
+            self.session.commit()
             return count
 
         except DatabaseError:
             raise
         except Exception as e:
-            self._session.rollback()
+            self._rollback()
             raise DatabaseError(f"Failed to import clustering cache: {str(e)}") from e

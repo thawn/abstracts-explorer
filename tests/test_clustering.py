@@ -10,6 +10,7 @@ from abstracts_explorer.clustering import (
     ClusteringManager,
     ClusteringError,
     calculate_default_clusters,
+    _compute_tfidf_keywords,
 )
 
 
@@ -422,6 +423,121 @@ class TestClusterLabeling:
         # Reasoning must be suppressed where the back-end supports it
         assert call_kwargs["reasoning_effort"] == "low"
 
+    def test_compute_tfidf_keywords_extracts_distinctive_terms(self):
+        """Shared TF-IDF helper ranks terms for the selected documents."""
+        documents = [
+            "machine learning neural networks",
+            "machine learning deep neural networks",
+            "quantum physics particle collisions",
+            "quantum physics particle accelerator",
+        ]
+
+        keywords = _compute_tfidf_keywords(documents, [0, 1], n_keywords=3, min_df=1)
+
+        assert isinstance(keywords, list)
+        assert len(keywords) <= 3
+        assert any("learning" in keyword for keyword in keywords)
+        assert not any("quantum" in keyword for keyword in keywords)
+
+    def test_compute_tfidf_keywords_empty_inputs(self):
+        """Shared TF-IDF helper returns an empty list for unusable inputs."""
+        assert _compute_tfidf_keywords([], [0], n_keywords=5) == []
+        assert _compute_tfidf_keywords(["some text"], [], n_keywords=5) == []
+        assert _compute_tfidf_keywords(["some text"], [0], n_keywords=0) == []
+
+    def test_compute_tfidf_keywords_respects_min_df(self):
+        """Shared TF-IDF helper filters terms below the minimum document frequency."""
+        documents = ["alpha beta", "alpha gamma", "delta epsilon"]
+
+        keywords = _compute_tfidf_keywords(documents, [0], n_keywords=5, min_df=2)
+
+        assert keywords == ["alpha"]
+
+    def test_extract_keywords_for_samples(self, mock_embeddings_manager, mock_collection_with_data):
+        """_extract_keywords_for_samples delegates to the shared TF-IDF helper."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+
+        keywords = cm._extract_keywords_for_samples(["paper_0", "paper_1"], max_keywords=3)
+
+        assert isinstance(keywords, list)
+        assert len(keywords) <= 3
+
+    def test_extract_keywords_for_samples_unknown_ids(self, mock_embeddings_manager, mock_collection_with_data):
+        """Unknown paper IDs produce no keywords."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+
+        assert cm._extract_keywords_for_samples(["missing-paper"], max_keywords=3) == []
+
+    def test_call_llm_for_label_returns_llm_label(self, mock_embeddings_manager, mocker):
+        """_call_llm_for_label returns the stripped LLM response."""
+        mock_response = mocker.MagicMock()
+        mock_response.choices = [mocker.MagicMock()]
+        mock_response.choices[0].message.content = "  'Generated Label'  "
+
+        mock_openai_client = mocker.MagicMock()
+        mock_openai_client.chat.completions.create.return_value = mock_response
+        mock_embeddings_manager.openai_client = mock_openai_client
+
+        cm = ClusteringManager(mock_embeddings_manager)
+        result = cm._call_llm_for_label("user prompt", "fallback label")
+
+        assert result == "Generated Label"
+
+    def test_call_llm_for_label_returns_fallback_on_error(self, mock_embeddings_manager, mocker):
+        """_call_llm_for_label returns the fallback when the LLM call fails."""
+        mock_openai_client = mocker.MagicMock()
+        mock_openai_client.chat.completions.create.side_effect = RuntimeError("API down")
+        mock_embeddings_manager.openai_client = mock_openai_client
+
+        cm = ClusteringManager(mock_embeddings_manager)
+        result = cm._call_llm_for_label("user prompt", "fallback label")
+
+        assert result == "fallback label"
+
+    def test_generate_llm_label_from_keywords_uses_shared_helper(self, mock_embeddings_manager, mocker):
+        """_generate_llm_label_from_keywords delegates to _call_llm_for_label."""
+        cm = ClusteringManager(mock_embeddings_manager)
+        helper = mocker.patch.object(cm, "_call_llm_for_label", return_value="Keyword Label")
+
+        result = cm._generate_llm_label_from_keywords(["machine", "learning", "neural"])
+
+        assert result == "Keyword Label"
+        call_args = helper.call_args.args
+        assert "machine, learning, neural" in call_args[0]
+        assert call_args[1] == "machine, learning, neural"
+
+    def test_generate_parent_label_llm_uses_shared_helper(self, mock_embeddings_manager, mocker):
+        """_generate_parent_label_llm delegates to _call_llm_for_label."""
+        cm = ClusteringManager(mock_embeddings_manager)
+        helper = mocker.patch.object(cm, "_call_llm_for_label", return_value="Parent Label")
+        child_labels = ["Machine Learning", "Deep Learning"]
+
+        result = cm._generate_parent_label_llm(child_labels, [])
+
+        assert result == "Parent Label"
+        call_args = helper.call_args.args
+        assert call_args[0]
+        assert call_args[1] == cm._generate_parent_label_fallback(child_labels)
+
+    def test_generate_llm_label_uses_shared_helper(self, mock_embeddings_manager, mock_collection_with_data, mocker):
+        """_generate_llm_label delegates to _call_llm_for_label."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager)
+        cm.load_embeddings()
+        cm.cluster(method="kmeans", n_clusters=3, use_reduced=False)
+        helper = mocker.patch.object(cm, "_call_llm_for_label", return_value="Cluster Label")
+
+        result = cm._generate_llm_label(0, ["machine", "learning"])
+
+        assert result == "Cluster Label"
+        call_args = helper.call_args.args
+        assert "machine, learning" in call_args[0]
+        assert call_args[1] == "machine, learning"
+
     def test_generate_cluster_labels_llm_truncated_content_falls_back(
         self, mock_embeddings_manager, mock_collection_with_data, mocker
     ):
@@ -825,7 +941,6 @@ class TestClusteringCache:
         set_test_db(db_path)
 
         db = DatabaseManager()
-        db.connect()
         db.create_tables()
 
         # Create mock results
@@ -907,7 +1022,6 @@ class TestClusteringCache:
         set_test_db(db_path)
 
         db = DatabaseManager()
-        db.connect()
         db.create_tables()
 
         # Save result without params
@@ -949,7 +1063,6 @@ class TestClusteringCache:
         set_test_db(db_path)
 
         db = DatabaseManager()
-        db.connect()
         db.create_tables()
 
         results = {

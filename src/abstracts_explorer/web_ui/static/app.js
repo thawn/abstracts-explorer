@@ -42,7 +42,8 @@ import {
     closeSettings,
     handleYearChange,
     handleConferenceChange,
-    dismissConferenceError
+    dismissConferenceError,
+    dismissDefaultFilterError
 } from './modules/filters.js';
 import {
     switchTab,
@@ -221,6 +222,7 @@ function attachToWindow() {
     window.handleYearChange = handleYearChange;
     window.handleConferenceChange = handleConferenceChange;
     window.dismissConferenceError = dismissConferenceError;
+    window.dismissDefaultFilterError = dismissDefaultFilterError;
 
     // Tabs module
     window.switchTab = switchTab;

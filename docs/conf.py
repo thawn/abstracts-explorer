@@ -127,4 +127,7 @@ intersphinx_mapping = {
 
 # Configure intersphinx to not fail on network errors
 intersphinx_timeout = 5  # Timeout after 5 seconds instead of hanging
-suppress_warnings = ["app.add_node"]  # Suppress node warnings
+suppress_warnings = [
+    "app.add_node",
+    "sphinx_autodoc_typehints.guarded_import",
+]  # Suppress node warnings and third-party guarded import noise

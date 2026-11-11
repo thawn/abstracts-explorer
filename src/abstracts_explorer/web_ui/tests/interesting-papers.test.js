@@ -18,6 +18,7 @@ import {
     displayInterestingPapers,
     generateInterestingPapersMarkdown,
     loadInterestingPapersFromJSON,
+    handleJSONFileLoad,
     switchInterestingSession,
     changeInterestingPapersSortOrder
 } from '../static/modules/interesting-papers.js';
@@ -416,5 +417,69 @@ describe('Interesting Papers Module', () => {
             const storedOrder = localStorage.getItem('interestingPapersSortOrder');
             expect(storedOrder).toBe('rating-poster-search');
         });
+    });
+});
+
+
+describe('Interesting Papers JSON import rating format', () => {
+    beforeEach(() => {
+        global.alert = jest.fn();
+        global.confirm = jest.fn(() => true);
+        const store = {};
+        global.localStorage = {
+            getItem: jest.fn((key) => store[key] || null),
+            setItem: jest.fn((key, value) => { store[key] = value.toString(); }),
+            removeItem: jest.fn((key) => { delete store[key]; }),
+            clear: jest.fn(() => {
+                for (const key in store) {
+                    delete store[key];
+                }
+            })
+        };
+        loadPriorities();
+        global.FileReader = class {
+            readAsText(file) {
+                this.result = file._content;
+                this.onload({ target: { result: this.result } });
+            }
+        };
+    });
+
+    test('rejects legacy scalar ratings', () => {
+        handleJSONFileLoad({
+            target: {
+                files: [{
+                    name: 'ratings.json',
+                    _content: JSON.stringify({
+                        paperPriorities: { paper1: 5 }
+                    })
+                }],
+                value: 'ratings.json'
+            }
+        });
+
+        expect(global.alert).toHaveBeenCalledWith(
+            expect.stringContaining('Invalid rating format')
+        );
+    });
+
+    test('accepts dict ratings', () => {
+        handleJSONFileLoad({
+            target: {
+                files: [{
+                    name: 'ratings.json',
+                    _content: JSON.stringify({
+                        paperPriorities: {
+                            paper1: { priority: 5, searchTerm: 'llms' }
+                        }
+                    })
+                }],
+                value: 'ratings.json'
+            }
+        });
+
+        expect(global.alert).toHaveBeenCalledWith(
+            expect.not.stringContaining('Invalid rating format')
+        );
     });
 });

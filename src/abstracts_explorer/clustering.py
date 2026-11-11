@@ -30,8 +30,7 @@ Example
 >>>
 >>> # Initialize managers
 >>> em = EmbeddingsManager()
->>> em.connect()
->>> em.create_collection()
+>>> em.init()
 >>> cm = ClusteringManager(em)
 >>>
 >>> # Load and cluster embeddings
@@ -65,7 +64,7 @@ try:
 except ImportError:
     HAS_FUZZY = False
 
-from abstracts_explorer.embeddings import EmbeddingsManager
+from abstracts_explorer.embeddings import EmbeddingsManager, build_chromadb_where_clause
 from abstracts_explorer.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
@@ -113,6 +112,58 @@ def calculate_default_clusters(n_papers: int, min_clusters: int = 2, max_cluster
     n_clusters = max(min_clusters, min(max_clusters, n_papers // 100))
 
     return n_clusters
+
+
+def _compute_tfidf_keywords(
+    documents: List[str],
+    target_indices: List[int],
+    n_keywords: int,
+    min_df: int = 2,
+) -> List[str]:
+    """
+    Compute top TF-IDF keywords for selected documents within a corpus.
+
+    Fits a TF-IDF vectorizer on the full corpus, then ranks terms by their
+    mean TF-IDF weight across ``target_indices``.
+
+    Parameters
+    ----------
+    documents : List[str]
+        Full corpus of documents used to fit the vectorizer.
+    target_indices : List[int]
+        Indices into ``documents`` identifying the documents to summarize.
+    n_keywords : int
+        Maximum number of keywords to return.
+    min_df : int, optional
+        Minimum document frequency for a term, by default 2
+
+    Returns
+    -------
+    List[str]
+        Keywords ordered by descending mean TF-IDF score. Empty if no
+        valid documents or no positive-scoring terms are found.
+    """
+    if not documents or not target_indices or n_keywords <= 0:
+        return []
+
+    try:
+        tfidf = TfidfVectorizer(
+            max_features=1000,
+            min_df=min_df,
+            stop_words="english",
+            ngram_range=(1, 2),
+        )
+        tfidf_matrix = tfidf.fit_transform(documents)
+        feature_names = tfidf.get_feature_names_out()
+
+        target_matrix = tfidf_matrix[np.asarray(target_indices)]
+        target_tfidf = np.asarray(target_matrix.mean(axis=0)).ravel()
+        top_indices = target_tfidf.argsort()[-n_keywords:][::-1]
+        keywords = [str(feature_names[i]) for i in top_indices if target_tfidf[i] > 0]
+        return keywords[:n_keywords]
+    except Exception as e:
+        logger.warning(f"Failed to extract keywords: {e}")
+        return []
 
 
 class ClusteringManager:
@@ -166,8 +217,7 @@ class ClusteringManager:
     Examples
     --------
     >>> em = EmbeddingsManager()
-    >>> em.connect()
-    >>> em.create_collection()
+    >>> em.init()
     >>> cm = ClusteringManager(em)
     >>> cm.load_embeddings()
     >>> reduced = cm.reduce_dimensions(method='pca', n_components=2)
@@ -240,20 +290,7 @@ class ClusteringManager:
 
         try:
             # Build where clause for conference/year filtering
-            # NOTE: ChromaDB stores all metadata as strings, so numeric years must
-            # be converted to strings for filtering.
-            filter_conditions: List[Dict[str, Any]] = []
-            if conferences:
-                filter_conditions.append({"conference": {"$in": conferences}})
-            if years:
-                year_strs = [str(y) for y in years]
-                filter_conditions.append({"year": {"$in": year_strs}})
-
-            where_filter: Optional[Dict[str, Any]] = None
-            if len(filter_conditions) > 1:
-                where_filter = {"$and": filter_conditions}
-            elif len(filter_conditions) == 1:
-                where_filter = filter_conditions[0]
+            where_filter = build_chromadb_where_clause(conferences, years)
 
             # Get embeddings from the collection (with optional filtering)
             get_kwargs: Dict[str, Any] = {"limit": limit, "include": ["embeddings", "metadatas"]}
@@ -985,6 +1022,36 @@ class ClusteringManager:
             raise ValueError("LLM returned empty content")
         return content.strip().strip("\"'")
 
+    def _call_llm_for_label(
+        self,
+        prompt: str,
+        fallback: str,
+        system_prompt: str = "You are a research paper categorization expert.",
+    ) -> str:
+        """
+        Generate a label with the LLM, falling back to a static label on failure.
+
+        Parameters
+        ----------
+        prompt : str
+            User message containing the labeling instructions.
+        fallback : str
+            Label to return if the LLM call fails or returns no content.
+        system_prompt : str, optional
+            System message for the LLM, by default
+            ``"You are a research paper categorization expert."``
+
+        Returns
+        -------
+        str
+            LLM-generated label, or ``fallback`` when generation fails.
+        """
+        try:
+            return self._llm_chat_label(system_prompt, prompt)
+        except Exception as e:
+            logger.warning(f"LLM API call failed: {e}")
+            return fallback
+
     def _generate_parent_label_llm(self, child_labels: List[str], sample_indices: List[int]) -> str:
         """
         Generate a parent cluster label by summarizing child labels using LLM.
@@ -1026,17 +1093,14 @@ The label should generalize the themes of the child clusters.
 Only respond with the label, nothing else. Do not add formatting."""
         logger.debug(f"Generating LLM parent label with prompt: {prompt}")
 
-        try:
-            label = self._llm_chat_label(
-                "You are a research paper categorization expert. Generate concise labels that generalize child cluster themes.",
-                prompt,
-            )
-            logger.debug(f"Generated LLM parent label: {label}")
-            return label
-
-        except Exception as e:
-            logger.warning(f"LLM API call failed: {e}")
-            return self._generate_parent_label_fallback(child_labels)
+        return self._call_llm_for_label(
+            prompt,
+            self._generate_parent_label_fallback(child_labels),
+            system_prompt=(
+                "You are a research paper categorization expert. "
+                "Generate concise labels that generalize child cluster themes."
+            ),
+        )
 
     def _generate_parent_label_fallback(self, child_labels: List[str]) -> str:
         """
@@ -1078,53 +1142,19 @@ Only respond with the label, nothing else. Do not add formatting."""
         List[str]
             List of extracted keywords
         """
-        from sklearn.feature_extraction.text import TfidfVectorizer
-
         if not self.metadatas or not self.paper_ids:
             return []
 
         # Find indices for the given paper IDs
-        sample_indices = []
         paper_id_to_idx = {pid: idx for idx, pid in enumerate(self.paper_ids)}
-        for paper_id in sample_paper_ids:
-            if paper_id in paper_id_to_idx:
-                sample_indices.append(paper_id_to_idx[paper_id])
+        sample_indices = [paper_id_to_idx[paper_id] for paper_id in sample_paper_ids if paper_id in paper_id_to_idx]
 
         if not sample_indices:
             return []
 
-        # Collect documents for these samples
-        sample_docs = []
-        for idx in sample_indices:
-            doc_text = EmbeddingsManager.embedding_text_from_paper(self.metadatas[idx])
-            sample_docs.append(doc_text)
+        all_docs = [EmbeddingsManager.embedding_text_from_paper(metadata) for metadata in self.metadatas]
 
-        if not sample_docs:
-            return []
-
-        # Collect all documents for TF-IDF comparison
-        all_docs = []
-        for metadata in self.metadatas:
-            doc_text = EmbeddingsManager.embedding_text_from_paper(metadata)
-            all_docs.append(doc_text)
-
-        try:
-            # Fit TF-IDF on all documents
-            tfidf = TfidfVectorizer(max_features=1000, min_df=2, stop_words="english", ngram_range=(1, 2))
-            tfidf_matrix = tfidf.fit_transform(all_docs)
-            feature_names = tfidf.get_feature_names_out()
-
-            # Calculate mean TF-IDF for sample documents
-            sample_tfidf = tfidf_matrix[sample_indices].mean(axis=0).A1
-
-            # Get top keywords
-            top_indices = sample_tfidf.argsort()[-max_keywords:][::-1]
-            keywords = [feature_names[i] for i in top_indices if sample_tfidf[i] > 0]
-
-            return keywords[:max_keywords]
-        except Exception as e:
-            logger.warning(f"Failed to extract keywords: {e}")
-            return []
+        return _compute_tfidf_keywords(all_docs, sample_indices, max_keywords, min_df=2)
 
     def _generate_llm_label_from_keywords(self, keywords: List[str]) -> str:
         """
@@ -1146,16 +1176,11 @@ Only respond with the label, nothing else. Do not add formatting."""
 Generate a concise, descriptive label (3-5 words) that captures the main theme.
 Only respond with the label, nothing else. Do not add formatting."""
 
-        try:
-            return self._llm_chat_label(
-                "You are a research paper categorization expert.",
-                prompt,
-            )
-
-        except Exception as e:
-            logger.warning(f"LLM API call failed: {e}")
-            # Fallback to keyword concatenation
-            return ", ".join(keywords[:3])
+        return self._call_llm_for_label(
+            prompt,
+            ", ".join(keywords[:3]),
+            system_prompt="You are a research paper categorization expert.",
+        )
 
     def get_cluster_statistics(self) -> Dict[str, Any]:
         """
@@ -1247,46 +1272,26 @@ Only respond with the label, nothing else. Do not add formatting."""
 
             self.cluster_keywords = {}
 
+            all_docs = [EmbeddingsManager.embedding_text_from_paper(metadata) for metadata in self.metadatas]
+
             for cluster_id in cluster_ids:
                 # Get indices of papers in this cluster
                 cluster_indices = np.where(self.cluster_labels == cluster_id)[0]
 
-                # Collect documents (titles and abstracts) for this cluster
-                cluster_docs = []
-                for idx in cluster_indices:
-                    doc_text = EmbeddingsManager.embedding_text_from_paper(self.metadatas[idx])
-                    cluster_docs.append(doc_text)
-
-                if not cluster_docs:
+                if len(cluster_indices) == 0:
                     logger.warning(f"No documents found for cluster {cluster_id}")
                     self.cluster_keywords[cluster_id] = []
                     continue
 
-                # Use TF-IDF to extract keywords
                 # Compare cluster documents against all documents to find distinctive terms
-                all_docs = []
-                for metadata in self.metadatas:
-                    doc_text = EmbeddingsManager.embedding_text_from_paper(metadata)
-                    all_docs.append(doc_text)
-
-                # Fit TF-IDF on all documents
-                tfidf = TfidfVectorizer(
-                    max_features=1000,
+                keywords = _compute_tfidf_keywords(
+                    all_docs,
+                    cluster_indices.tolist(),
+                    n_keywords,
                     min_df=min_df,
-                    stop_words="english",
-                    ngram_range=(1, 2),  # Include unigrams and bigrams
                 )
-                tfidf_matrix = tfidf.fit_transform(all_docs)
-                feature_names = tfidf.get_feature_names_out()
 
-                # Calculate mean TF-IDF for cluster documents
-                cluster_tfidf = tfidf_matrix[cluster_indices].mean(axis=0).A1
-
-                # Get top keywords by TF-IDF score
-                top_indices = cluster_tfidf.argsort()[-n_keywords:][::-1]
-                keywords = [feature_names[i] for i in top_indices if cluster_tfidf[i] > 0]
-
-                self.cluster_keywords[cluster_id] = keywords[:n_keywords]
+                self.cluster_keywords[cluster_id] = keywords
                 logger.debug(f"Cluster {cluster_id}: {len(keywords)} keywords extracted")
 
             logger.info(f"Extracted keywords for {len(self.cluster_keywords)} clusters")
@@ -1388,6 +1393,7 @@ Only respond with the label, nothing else. Do not add formatting."""
             Generated label
         """
         # Get a few representative paper titles from the cluster
+        assert self.cluster_labels is not None
         cluster_indices = np.where(self.cluster_labels == cluster_id)[0]
         sample_size = min(5, len(cluster_indices))
 
@@ -1411,19 +1417,17 @@ Top keywords: {', '.join(keywords)}
 Sample paper titles:
 {sample_titles_str}
 
-Generate a concise, descriptive label (3-5 words) that captures the main theme of this cluster. 
+        Generate a concise, descriptive label (3-5 words) that captures the main theme of this cluster.
 Only respond with the label, nothing else. Do not add formatting."""
 
-        try:
-            return self._llm_chat_label(
-                "You are a research paper categorization expert. Generate concise, descriptive labels for clusters of papers.",
-                prompt,
-            )
-
-        except Exception as e:
-            logger.warning(f"LLM API call failed: {e}")
-            # Fallback to keyword-based label
-            return ", ".join(keywords[:3])
+        return self._call_llm_for_label(
+            prompt,
+            ", ".join(keywords[:3]),
+            system_prompt=(
+                "You are a research paper categorization expert. "
+                "Generate concise, descriptive labels for clusters of papers."
+            ),
+        )
 
     def get_cluster_representative_papers(
         self,
@@ -1772,8 +1776,6 @@ def perform_clustering(
         em = EmbeddingsManager(
             collection_name=collection_name,
         )
-        em.connect()
-        em.create_collection()
 
         # Initialize clustering manager
         cm = ClusteringManager(em)

@@ -2,6 +2,7 @@
 Tests for MCP server functionality.
 """
 
+import asyncio
 import json
 import pytest
 from unittest.mock import Mock, patch
@@ -10,95 +11,11 @@ import numpy as np
 from abstracts_explorer.mcp_server import (
     load_clustering_data,
     analyze_cluster_topics,
-    merge_where_clause_with_conference,
     ClusterAnalysisError,
     _parse_conference_year,
 )
 from abstracts_explorer.clustering import ClusteringManager
 from abstracts_explorer.database import DatabaseManager
-
-
-class TestMergeWhereClauseWithConference:
-    """Tests for merge_where_clause_with_conference helper function."""
-
-    def test_both_none(self):
-        """Test merging when both WHERE and conference are None."""
-        result = merge_where_clause_with_conference(None, None)
-        assert result is None
-
-    def test_only_conference(self):
-        """Test merging with only conference filter."""
-        result = merge_where_clause_with_conference(None, "NeurIPS")
-        assert result == {"conference": "NeurIPS"}
-
-    def test_only_where(self):
-        """Test merging with only WHERE clause."""
-        where = {"year": 2024}
-        result = merge_where_clause_with_conference(where, None)
-        assert result == {"year": 2024}
-        assert result is not where  # Should be a deep copy
-
-    def test_deep_copy_prevents_mutation(self):
-        """Test that deep copy prevents mutations to nested structures."""
-        where = {"$and": [{"year": 2024}, {"session": "Oral"}]}
-        result = merge_where_clause_with_conference(where, "NeurIPS")
-
-        # Modify result
-        result["$and"].append({"modified": True})
-
-        # Original should be unchanged
-        assert len(where["$and"]) == 2
-        assert {"modified": True} not in where["$and"]
-
-    def test_simple_merge(self):
-        """Test merging simple WHERE clause with conference."""
-        where = {"year": 2024}
-        result = merge_where_clause_with_conference(where, "NeurIPS")
-        assert result == {"$and": [{"year": 2024}, {"conference": "NeurIPS"}]}
-
-    def test_merge_with_existing_and(self):
-        """Test merging when WHERE already has $and."""
-        where = {"$and": [{"year": 2024}, {"session": "Oral"}]}
-        result = merge_where_clause_with_conference(where, "NeurIPS")
-        assert "$and" in result
-        assert len(result["$and"]) == 3
-        # Verify all items are present
-        assert {"year": 2024} in result["$and"]
-        assert {"session": "Oral"} in result["$and"]
-        assert {"conference": "NeurIPS"} in result["$and"]
-
-    def test_conference_already_in_where_top_level(self):
-        """Test when conference already exists at top level."""
-        where = {"conference": "ICML"}
-        result = merge_where_clause_with_conference(where, "NeurIPS")
-        # Should not add duplicate, just return existing
-        assert result == {"conference": "ICML"}
-
-    def test_conference_in_nested_and(self):
-        """Test when conference exists in nested $and."""
-        where = {"$and": [{"conference": "ICML"}, {"year": 2024}]}
-        result = merge_where_clause_with_conference(where, "NeurIPS")
-        # Should detect existing conference and not add duplicate
-        assert result == {"$and": [{"conference": "ICML"}, {"year": 2024}]}
-
-    def test_conference_in_deeply_nested_structure(self):
-        """Test conference detection in deeply nested structure."""
-        where = {"$or": [{"$and": [{"conference": "ICML"}, {"year": 2024}]}, {"session": "Oral"}]}
-        result = merge_where_clause_with_conference(where, "NeurIPS")
-        # Should detect conference in nested structure
-        assert result == where
-
-    def test_invalid_where_type(self):
-        """Test that invalid WHERE type raises ValueError."""
-        with pytest.raises(ValueError) as exc_info:
-            merge_where_clause_with_conference("invalid", "NeurIPS")
-        assert "must be a dict" in str(exc_info.value)
-
-    def test_where_is_list(self):
-        """Test that list WHERE raises ValueError."""
-        with pytest.raises(ValueError) as exc_info:
-            merge_where_clause_with_conference([{"year": 2024}], "NeurIPS")
-        assert "must be a dict" in str(exc_info.value)
 
 
 class TestLoadClusteringData:
@@ -131,11 +48,8 @@ class TestLoadClusteringData:
         mock_em_class.assert_called_once_with(
             collection_name="papers",
         )
-        mock_em.connect.assert_called_once()
-        mock_em.create_collection.assert_called_once()
 
         mock_db_class.assert_called_once_with()
-        mock_db.connect.assert_called_once()
 
         mock_cm_class.assert_called_once_with(mock_em, mock_db)
 
@@ -186,6 +100,69 @@ class TestLoadClusteringData:
             load_clustering_data()
 
         assert "Failed to load clustering data" in str(exc_info.value)
+
+
+class TestMCPResources:
+    """Tests for shared MCP resource context managers."""
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_mcp_resources_closes_on_exception(self, mock_config, mock_db_class, mock_em_class):
+        """Resources are closed when the managed block raises."""
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config.return_value = mock_config_obj
+        mock_em = Mock()
+        mock_db = Mock()
+        mock_em_class.return_value = mock_em
+        mock_db_class.return_value = mock_db
+
+        from abstracts_explorer.mcp_server import _get_mcp_resources
+
+        with pytest.raises(RuntimeError):
+            with _get_mcp_resources() as (em, db):
+                assert em is mock_em
+                assert db is mock_db
+                raise RuntimeError("boom")
+
+        mock_em.close.assert_called_once()
+        mock_db.close.assert_called_once()
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    def test_mcp_resources_without_embeddings(self, mock_db_class, mock_em_class):
+        """Database-only resources skip the embeddings manager."""
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+
+        from abstracts_explorer.mcp_server import _get_mcp_resources
+
+        with _get_mcp_resources(with_embeddings=False) as (em, db):
+            assert em is None
+            assert db is mock_db
+
+        mock_em_class.assert_not_called()
+        mock_db.close.assert_called_once()
+
+    @patch("abstracts_explorer.mcp_server.load_clustering_data")
+    def test_clustering_resources_closes_on_exception(self, mock_load):
+        """Clustering resources are closed when the managed block raises."""
+        mock_cm = Mock()
+        mock_cm.embeddings_manager = Mock()
+        mock_db = Mock()
+        mock_load.return_value = (mock_cm, mock_db)
+
+        from abstracts_explorer.mcp_server import _get_clustering_resources
+
+        with pytest.raises(RuntimeError):
+            with _get_clustering_resources() as (cm, db):
+                assert cm is mock_cm
+                assert db is mock_db
+                raise RuntimeError("boom")
+
+        mock_cm.embeddings_manager.close.assert_called_once()
+        mock_db.close.assert_called_once()
 
 
 class TestAnalyzeClusterTopics:
@@ -494,6 +471,76 @@ class TestMCPTools:
         assert call_args[1]["year"] == 2025
 
 
+class TestToolResourceCleanup:
+    """Tests that tool failures still release MCP resources."""
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_search_papers_closes_on_error(self, mock_config, mock_db_class, mock_em_class):
+        """search_papers closes resources when the database search fails."""
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config.return_value = mock_config_obj
+        mock_em = Mock()
+        mock_db = Mock()
+        mock_em_class.return_value = mock_em
+        mock_db_class.return_value = mock_db
+        mock_db.search_papers_semantic.side_effect = RuntimeError("boom")
+
+        from abstracts_explorer.mcp_server import search_papers
+
+        result = json.loads(search_papers(topic_keywords="transformers", conference="NeurIPS"))
+
+        assert "boom" in result["error"]
+        mock_em.close.assert_called_once()
+        mock_db.close.assert_called_once()
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_get_topic_evolution_closes_on_error(self, mock_config, mock_db_class, mock_em_class):
+        """get_topic_evolution closes resources when a database lookup fails."""
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config.return_value = mock_config_obj
+        mock_em = Mock()
+        mock_db = Mock()
+        mock_em_class.return_value = mock_em
+        mock_db_class.return_value = mock_db
+        mock_db.get_years.side_effect = RuntimeError("boom")
+
+        from abstracts_explorer.mcp_server import get_topic_evolution
+
+        result = json.loads(get_topic_evolution(topic_keywords="transformers", conferences=["NeurIPS"]))
+
+        assert "boom" in result["error"]
+        mock_em.close.assert_called_once()
+        mock_db.close.assert_called_once()
+
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    def test_analyze_topic_relevance_closes_on_error(self, mock_config, mock_db_class, mock_em_class):
+        """analyze_topic_relevance closes resources when the search fails."""
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config.return_value = mock_config_obj
+        mock_em = Mock()
+        mock_db = Mock()
+        mock_em_class.return_value = mock_em
+        mock_db_class.return_value = mock_db
+        mock_em.find_papers_within_distance.side_effect = RuntimeError("boom")
+
+        from abstracts_explorer.mcp_server import analyze_topic_relevance
+
+        result = json.loads(analyze_topic_relevance(topic="transformers", conferences=["NeurIPS"]))
+
+        assert "boom" in result["error"]
+        mock_em.close.assert_called_once()
+        mock_db.close.assert_called_once()
+
+
 class TestParseConferenceYear:
     """Tests for _parse_conference_year helper."""
 
@@ -611,7 +658,7 @@ class TestTopicEvolutionAndRelevance:
         # Setup database mock
         mock_db = Mock()
         mock_db_class.return_value = mock_db
-        mock_db.get_years_for_conference.return_value = [2023, 2024]
+        mock_db.get_years.return_value = [2023, 2024]
         mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 100}
 
         # Import and call the tool
@@ -671,7 +718,7 @@ class TestTopicEvolutionAndRelevance:
         # Setup database mock - DB has years 2022-2025
         mock_db = Mock()
         mock_db_class.return_value = mock_db
-        mock_db.get_years_for_conference.return_value = [2022, 2023, 2024, 2025]
+        mock_db.get_years.return_value = [2022, 2023, 2024, 2025]
         mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 50}
 
         from abstracts_explorer.mcp_server import get_topic_evolution
@@ -723,7 +770,7 @@ class TestTopicEvolutionAndRelevance:
         # Setup database mock
         mock_db = Mock()
         mock_db_class.return_value = mock_db
-        mock_db.get_years_for_conference.return_value = [2024]
+        mock_db.get_years.return_value = [2024]
         mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 200}
 
         from abstracts_explorer.mcp_server import get_topic_evolution
@@ -785,7 +832,7 @@ class TestTopicEvolutionAndRelevance:
         # Setup database mock
         mock_db = Mock()
         mock_db_class.return_value = mock_db
-        mock_db.get_years_for_conference.return_value = [2023, 2024]
+        mock_db.get_years.return_value = [2023, 2024]
 
         def _get_stats(year, conference):
             if conference == "NeurIPS":
@@ -853,6 +900,16 @@ class TestTopicEvolutionAndRelevance:
 
         # Setup database mock
         mock_db = Mock()
+        mock_db.search_papers_semantic.return_value = [
+            {
+                "uid": "p1",
+                "title": "Paper 1",
+                "year": current_year,
+                "conference": "NeurIPS",
+                "session": "Oral",
+                "authors": [],
+            }
+        ]
         mock_db_class.return_value = mock_db
 
         # Import and call the tool with WHERE clause
@@ -868,13 +925,18 @@ class TestTopicEvolutionAndRelevance:
         assert result["topic"] == "llm"
         assert result["papers_found"] >= 1
 
-        # Verify search_similar was called with merged WHERE clause (session + conference)
-        mock_em.search_similar.assert_called_once()
-        call_args = mock_em.search_similar.call_args
-        where_arg = call_args[1]["where"]
-        assert "$and" in where_arg
-        assert {"session": "Oral"} in where_arg["$and"]
-        assert {"conference": "NeurIPS"} in where_arg["$and"]
+        # Verify the DB search entry point received the merged filter arguments
+        mock_db.search_papers_semantic.assert_called_once()
+        call_kwargs = mock_db.search_papers_semantic.call_args.kwargs
+        assert call_kwargs["where"] == {
+            "$and": [
+                {"session": "Oral"},
+                {"conference": {"$in": ["NeurIPS"]}},
+                {"year": {"$in": [str(current_year), str(current_year - 1)]}},
+            ]
+        }
+        assert call_kwargs["conferences"] == ["NeurIPS"]
+        assert call_kwargs["years"] == [current_year, current_year - 1]
 
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
     @patch("abstracts_explorer.mcp_server.DatabaseManager")
@@ -904,6 +966,9 @@ class TestTopicEvolutionAndRelevance:
 
         # Setup database mock
         mock_db = Mock()
+        mock_db.search_papers_semantic.return_value = [
+            {"uid": "p1", "title": "Paper 1", "year": current_year, "conference": "NeurIPS", "authors": []}
+        ]
         mock_db_class.return_value = mock_db
 
         # Import and call the tool with complex WHERE clause
@@ -918,16 +983,17 @@ class TestTopicEvolutionAndRelevance:
         result = json.loads(result_str)
         assert result["topic"] == "deep learning"
 
-        # Verify search_similar was called with complex WHERE clause
-        mock_em.search_similar.assert_called_once()
-        call_args = mock_em.search_similar.call_args
-        where_arg = call_args[1]["where"]
-
-        # Should preserve the complex $and structure and add conference
-        assert "$and" in where_arg
-        assert {"year": {"$gte": 2024}} in where_arg["$and"]
-        assert {"session": {"$in": ["Oral Session 1", "Spotlight Session"]}} in where_arg["$and"]
-        assert {"conference": "NeurIPS"} in where_arg["$and"]
+        # Verify the complex filter was forwarded with the conference merged in
+        mock_db.search_papers_semantic.assert_called_once()
+        call_kwargs = mock_db.search_papers_semantic.call_args.kwargs
+        assert call_kwargs["where"] == {
+            "$and": [
+                {"year": {"$gte": 2024}},
+                {"session": {"$in": ["Oral Session 1", "Spotlight Session"]}},
+                {"conference": {"$in": ["NeurIPS"]}},
+            ]
+        }
+        assert call_kwargs["conferences"] == ["NeurIPS"]
 
     @patch("abstracts_explorer.mcp_server.load_clustering_data")
     @patch("abstracts_explorer.mcp_server.get_config")
@@ -1019,11 +1085,24 @@ class TestMCPServerIntegration:
 
     def test_mcp_server_initialization(self):
         """Test that MCP server initializes correctly."""
+        from mcp.server.mcpserver import MCPServer
+
         from abstracts_explorer.mcp_server import mcp
 
         assert mcp is not None
-        # Verify tools are registered
-        # Note: We can't easily test tool registration without running the server
+        assert isinstance(mcp, MCPServer)
+
+        tool_names = {tool.name for tool in asyncio.run(mcp.list_tools())}
+        assert tool_names == {
+            "analyze_topic_relevance",
+            "get_cluster_visualization",
+            "get_conference_topics",
+            "get_paper_details",
+            "get_topic_evolution",
+            "search_papers",
+            "summarize_interesting_papers",
+            "recommend_related_papers",
+        }
 
 
 class TestSearchPapersPaperCardFields:
@@ -1060,6 +1139,16 @@ class TestSearchPapersPaperCardFields:
             "distances": [[0.1]],
         }
         mock_db = Mock()
+        mock_db.search_papers_semantic.return_value = [
+            {
+                "uid": "abc123",
+                "title": "Test Paper",
+                "year": 2024,
+                "conference": "NeurIPS",
+                "authors": ["Alice", "Bob"],
+                "abstract": "Test abstract",
+            }
+        ]
         mock_db_class.return_value = mock_db
 
         from abstracts_explorer.mcp_server import search_papers
@@ -1108,6 +1197,16 @@ class TestSearchPapersPaperCardFields:
             "distances": [[0.1]],
         }
         mock_db = Mock()
+        mock_db.search_papers_semantic.return_value = [
+            {
+                "uid": "abc123",
+                "title": "Test Paper",
+                "year": 2024,
+                "conference": "NeurIPS",
+                "authors": ["Alice Smith", "Bob Jones", "Carol White"],
+                "abstract": "Test abstract",
+            }
+        ]
         mock_db_class.return_value = mock_db
 
         from abstracts_explorer.mcp_server import search_papers
@@ -1141,6 +1240,16 @@ class TestSearchPapersPaperCardFields:
             "distances": [[0.2]],
         }
         mock_db = Mock()
+        mock_db.search_papers_semantic.return_value = [
+            {
+                "uid": "xyz789",
+                "title": "No Authors Paper",
+                "year": 2024,
+                "conference": "ICLR",
+                "authors": [],
+                "abstract": "Abstract text",
+            }
+        ]
         mock_db_class.return_value = mock_db
 
         from abstracts_explorer.mcp_server import search_papers
@@ -1184,6 +1293,17 @@ class TestSearchPapersPaperCardFields:
             "distances": [[0.05]],
         }
         mock_db = Mock()
+        mock_db.search_papers_semantic.return_value = [
+            {
+                "uid": "p1",
+                "title": "Conference Paper",
+                "year": 2025,
+                "conference": "NeurIPS",
+                "session": "Oral",
+                "authors": ["Author A"],
+                "abstract": "Abstract",
+            }
+        ]
         mock_db_class.return_value = mock_db
 
         from abstracts_explorer.mcp_server import search_papers
@@ -1228,6 +1348,18 @@ class TestSearchPapersPaperCardFields:
             "distances": [[0.15]],
         }
         mock_db = Mock()
+        mock_db.search_papers_semantic.return_value = [
+            {
+                "uid": "p42",
+                "title": "Full Paper",
+                "year": 2024,
+                "conference": "ICML",
+                "session": "Best Paper Session",
+                "authors": ["First Author", "Second Author"],
+                "abstract": "This is the abstract text.",
+                "relevance_score": 0.85,
+            }
+        ]
         mock_db_class.return_value = mock_db
 
         from abstracts_explorer.mcp_server import search_papers
@@ -1304,7 +1436,7 @@ class TestGetPaperDetails:
         assert paper["authors"] == ["Smith, John", "Doe, Jane"]
         assert paper["paper_pdf_url"] == "https://example.com/paper.pdf"
         assert paper["keywords"] == "deep learning, transformers"
-        mock_db.search_papers.assert_called_once_with(keyword="Test Paper", conference=None, year=None, limit=5)
+        mock_db.search_papers.assert_called_once_with(keyword="Test Paper", conferences=None, years=None, limit=5)
 
     def test_lookup_by_paper_id(self):
         """get_paper_details performs exact UID/original_id lookup when paper_id is provided."""
@@ -1374,7 +1506,7 @@ class TestGetPaperDetails:
         with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
             get_paper_details(title="Paper", conference="ICLR", year=2024, limit=3)
 
-        mock_db.search_papers.assert_called_once_with(keyword="Paper", conference="ICLR", year=2024, limit=3)
+        mock_db.search_papers.assert_called_once_with(keyword="Paper", conferences=["ICLR"], years=[2024], limit=3)
 
     def test_limit_parameter(self):
         """limit parameter controls how many results are requested from DB."""
@@ -1386,7 +1518,7 @@ class TestGetPaperDetails:
         with patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db):
             get_paper_details(title="Paper", limit=10)
 
-        mock_db.search_papers.assert_called_once_with(keyword="Paper", conference=None, year=None, limit=10)
+        mock_db.search_papers.assert_called_once_with(keyword="Paper", conferences=None, years=None, limit=10)
 
     def test_no_papers_found(self):
         """No matching papers returns papers_found=0 and empty list."""
@@ -1414,7 +1546,134 @@ class TestGetPaperDetails:
 
         assert "error" in result
         assert "DB connection failed" in result["error"]
+        mock_db.close.assert_called_once()
 
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestInterestingPaperMCPTools:
+    """Tests for the interesting-paper MCP tools."""
+
+    def test_summarize_without_ratings_returns_error(self):
+        from abstracts_explorer.mcp_server import summarize_interesting_papers
+
+        result = json.loads(summarize_interesting_papers())
+        assert "error" in result
+
+    @patch("abstracts_explorer.mcp_server._summarize_interesting_papers")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    def test_summarize_delegates_to_core(self, mock_db_class, mock_summarize):
+        from abstracts_explorer.mcp_server import summarize_interesting_papers
+
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+        mock_summarize.return_value = {"total_interesting": 1, "papers": []}
+
+        result = json.loads(
+            summarize_interesting_papers(
+                priorities={"p1": {"priority": 5, "searchTerm": "llms"}},
+                conference="ICLR",
+                years=[2026],
+            )
+        )
+
+        assert result["total_interesting"] == 1
+        mock_summarize.assert_called_once_with(
+            database=mock_db,
+            priorities={"p1": {"priority": 5, "searchTerm": "llms"}},
+            paper_ids=None,
+            conference="ICLR",
+            years=[2026],
+        )
+        mock_db.close.assert_called_once()
+
+    def test_recommend_without_ratings_returns_error(self):
+        from abstracts_explorer.mcp_server import recommend_related_papers
+
+        result = json.loads(recommend_related_papers())
+        assert "error" in result
+
+    @patch("abstracts_explorer.mcp_server._recommend_related_papers")
+    @patch("abstracts_explorer.mcp_server.get_config")
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    def test_recommend_delegates_to_core(
+        self,
+        mock_db_class,
+        mock_em_class,
+        mock_config,
+        mock_recommend,
+    ):
+        from abstracts_explorer.mcp_server import recommend_related_papers
+
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config.return_value = mock_config_obj
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+        mock_recommend.return_value = {"papers": [], "recommendations_count": 0}
+
+        result = json.loads(
+            recommend_related_papers(
+                priorities={"p1": {"priority": 5}},
+                conferences=["ICLR"],
+                years=[2026],
+                n_results=3,
+            )
+        )
+
+        assert result["recommendations_count"] == 0
+        mock_recommend.assert_called_once_with(
+            database=mock_db,
+            embeddings_manager=mock_em,
+            priorities={"p1": {"priority": 5}},
+            paper_ids=None,
+            conferences=["ICLR"],
+            years=[2026],
+            n_results=3,
+            exclude_ids=None,
+        )
+        mock_em.close.assert_called_once()
+        mock_db.close.assert_called_once()
+
+
+class TestInterestingPaperLegacyFormatRejection:
+    """Legacy scalar ratings are rejected by the interesting-paper tools."""
+
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    def test_summarize_rejects_scalar_priorities(self, mock_db_class):
+        from abstracts_explorer.mcp_server import summarize_interesting_papers
+
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+
+        result = json.loads(summarize_interesting_papers(priorities={"p1": 5}))
+
+        assert "error" in result
+        assert "Invalid rating format" in result["error"]
+        mock_db.close.assert_called_once()
+
+    @patch("abstracts_explorer.mcp_server.get_config")
+    @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp_server.DatabaseManager")
+    def test_recommend_rejects_scalar_priorities(self, mock_db_class, mock_em_class, mock_config):
+        from abstracts_explorer.mcp_server import recommend_related_papers
+
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config.return_value = mock_config_obj
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+
+        result = json.loads(recommend_related_papers(priorities={"p1": 5}))
+
+        assert "error" in result
+        assert "Invalid rating format" in result["error"]
+        mock_em.close.assert_called_once()
+        mock_db.close.assert_called_once()

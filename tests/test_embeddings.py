@@ -49,6 +49,26 @@ class TestEmbeddingsManager:
             assert em._client is not None
         assert embeddings_manager._client is None
 
+    def test_init_connects_and_creates_collection(self, embeddings_manager):
+        """Test that init connects and creates the collection."""
+        embeddings_manager.connect = Mock()
+        embeddings_manager.create_collection = Mock()
+
+        embeddings_manager.init()
+
+        embeddings_manager.connect.assert_called_once_with()
+        embeddings_manager.create_collection.assert_called_once_with(reset=False)
+
+    def test_init_reset(self, embeddings_manager):
+        """Test that init forwards the reset flag to create_collection."""
+        embeddings_manager.connect = Mock()
+        embeddings_manager.create_collection = Mock()
+
+        embeddings_manager.init(reset=True)
+
+        embeddings_manager.connect.assert_called_once_with()
+        embeddings_manager.create_collection.assert_called_once_with(reset=True)
+
     def test_test_lm_studio_connection_success(self, embeddings_manager):
         """Test successful LM Studio connection."""
         result = embeddings_manager.test_lm_studio_connection()
@@ -61,6 +81,38 @@ class TestEmbeddingsManager:
         embeddings_manager.openai_client.models.list.side_effect = Exception("Connection error")
         result = embeddings_manager.test_lm_studio_connection()
         assert result is False
+
+    def test_verbose_api_connection_test_success(self, embeddings_manager, capsys):
+        """Test verbose connection test prints success messages."""
+        result = embeddings_manager.verbose_api_connection_test()
+
+        assert result is True
+        captured = capsys.readouterr()
+        assert "Testing OpenAI API connection" in captured.out
+        assert "Successfully connected to OpenAI API" in captured.out
+        assert captured.err == ""
+
+    def test_verbose_api_connection_test_failure(self, embeddings_manager, capsys):
+        """Test verbose connection test prints failure details."""
+        embeddings_manager.openai_client.models.list.side_effect = Exception("Connection error")
+
+        result = embeddings_manager.verbose_api_connection_test()
+
+        assert result is False
+        captured = capsys.readouterr()
+        assert "Failed to connect to OpenAI API" in captured.err
+        assert embeddings_manager.lm_studio_url in captured.err
+        assert embeddings_manager.model_name in captured.err
+
+    def test_verbose_api_connection_test_model_hint(self, embeddings_manager, capsys):
+        """Test verbose connection test uses a custom model hint."""
+        embeddings_manager.openai_client.models.list.side_effect = Exception("Connection error")
+
+        result = embeddings_manager.verbose_api_connection_test(model_hint="A language model is loaded")
+
+        assert result is False
+        captured = capsys.readouterr()
+        assert "A language model is loaded" in captured.err
 
     def test_generate_embedding_success(self, embeddings_manager):
         """Test successful embedding generation."""
@@ -86,7 +138,6 @@ class TestEmbeddingsManager:
 
     def test_create_collection(self, embeddings_manager):
         """Test creating a collection."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
         assert embeddings_manager.collection is not None
         embeddings_manager.close()
@@ -101,7 +152,6 @@ class TestEmbeddingsManager:
 
     def test_create_collection_reset(self, embeddings_manager):
         """Test resetting a collection."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
         embeddings_manager.create_collection(reset=True)
         assert embeddings_manager.collection is not None
@@ -109,7 +159,6 @@ class TestEmbeddingsManager:
 
     def test_delete_embeddings_by_filter_no_filter_raises(self, embeddings_manager):
         """delete_embeddings_by_filter with no args raises ValueError."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
         with pytest.raises(ValueError):
             embeddings_manager.delete_embeddings_by_filter()
@@ -117,7 +166,6 @@ class TestEmbeddingsManager:
 
     def test_delete_embeddings_by_filter_conference(self, embeddings_manager, mock_lm_studio):
         """delete_embeddings_by_filter(conference=...) removes only matching papers."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         papers = [
@@ -141,7 +189,6 @@ class TestEmbeddingsManager:
 
     def test_delete_embeddings_by_filter_year(self, embeddings_manager, mock_lm_studio):
         """delete_embeddings_by_filter(year=...) removes only papers from that year."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         papers = [
@@ -160,7 +207,6 @@ class TestEmbeddingsManager:
 
     def test_delete_embeddings_by_filter_conference_and_year(self, embeddings_manager, mock_lm_studio):
         """delete_embeddings_by_filter(conference=..., year=...) scopes to exact slice."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         papers = [
@@ -181,7 +227,6 @@ class TestEmbeddingsManager:
 
     def test_delete_embeddings_by_filter_nothing_to_delete(self, embeddings_manager, mock_lm_studio):
         """delete_embeddings_by_filter returns 0 when no matching embeddings exist."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         papers = [
@@ -197,7 +242,6 @@ class TestEmbeddingsManager:
 
     def test_add_paper(self, embeddings_manager, mock_lm_studio):
         """Test adding a paper."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         paper = {
@@ -214,7 +258,6 @@ class TestEmbeddingsManager:
 
     def test_add_paper_empty_abstract(self, embeddings_manager, mock_lm_studio):
         """Test adding a paper with empty abstract but non-empty title."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         # Should work with title even if abstract is empty
@@ -244,7 +287,6 @@ class TestEmbeddingsManager:
 
     def test_add_multiple_papers(self, embeddings_manager, mock_lm_studio):
         """Test adding multiple papers."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         papers = [
@@ -262,7 +304,6 @@ class TestEmbeddingsManager:
 
     def test_add_papers_with_empty_abstracts(self, embeddings_manager, mock_lm_studio):
         """Test adding papers with some empty abstracts."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         papers = [
@@ -279,7 +320,6 @@ class TestEmbeddingsManager:
 
     def test_search_similar(self, embeddings_manager, mock_lm_studio):
         """Test similarity search."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         # Add some papers (all required LightweightPaper fields needed for metadata parsing)
@@ -320,7 +360,6 @@ class TestEmbeddingsManager:
 
     def test_search_similar_empty_query(self, embeddings_manager):
         """Test search with empty query."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         with pytest.raises(EmbeddingsError, match="Query cannot be empty"):
@@ -339,7 +378,6 @@ class TestEmbeddingsManager:
 
     def test_get_collection_stats(self, embeddings_manager, mock_lm_studio):
         """Test getting collection statistics."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         stats = embeddings_manager.get_collection_stats()
@@ -368,7 +406,6 @@ class TestEmbeddingsManager:
 
     def test_embed_from_database(self, embeddings_manager, test_database, mock_lm_studio):
         """Test embedding papers from database."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         count = embeddings_manager.embed_from_database()
@@ -382,10 +419,9 @@ class TestEmbeddingsManager:
 
     def test_embed_from_database_with_filter(self, embeddings_manager, test_database, mock_lm_studio):
         """Test embedding papers from database with filter."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
-        count = embeddings_manager.embed_from_database(where_clause="session LIKE '%ML%'")
+        count = embeddings_manager.embed_from_database(where_filters={"session": {"$contains": "ML"}})
 
         # Should only embed papers in ML sessions with non-empty abstracts (paper1)
         assert count == 1
@@ -394,20 +430,19 @@ class TestEmbeddingsManager:
         assert stats["count"] == 1
         embeddings_manager.close()
 
-    def test_embed_from_database_not_found(self, embeddings_manager, tmp_path):
-        """Test embedding from non-existent database."""
+    def test_embed_from_database_creates_empty_database(self, embeddings_manager, tmp_path):
+        """Embedding from a non-existent database creates it and embeds nothing."""
 
         # Set PAPER_DB to a nonexistent database
         nonexistent_db = tmp_path / "nonexistent.db"
         set_test_db(nonexistent_db)
 
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
-        # The error message will now be about SQL syntax, not "database not found"
-        # because the database_url is constructed and the error happens during query
-        with pytest.raises(EmbeddingsError, match="Failed to embed from database"):
-            embeddings_manager.embed_from_database()
+        count = embeddings_manager.embed_from_database()
+
+        assert count == 0
+        assert nonexistent_db.exists()
 
         embeddings_manager.close()
 
@@ -422,7 +457,6 @@ class TestEmbeddingsManager:
 
     def test_embed_from_database_with_progress_callback(self, embeddings_manager, test_database, mock_lm_studio):
         """Test embedding papers from database with progress callback."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         progress_calls = []
@@ -451,7 +485,6 @@ class TestEmbeddingsManager:
         with DatabaseManager() as db:
             db.create_tables()
 
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         count = embeddings_manager.embed_from_database()
@@ -494,7 +527,6 @@ class TestEmbeddingsManager:
                 )
             db._session.commit()
 
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         count = embeddings_manager.embed_from_database()
@@ -503,37 +535,20 @@ class TestEmbeddingsManager:
         assert count == 3
         embeddings_manager.close()
 
-    def test_embed_from_database_sql_error(self, embeddings_manager, tmp_path):
-        """Test embedding from database with SQL error."""
+    def test_embed_from_database_sql_error(self, embeddings_manager, tmp_path, monkeypatch):
+        """Test embedding from database with a SQL error."""
         from abstracts_explorer.database import DatabaseManager
 
-        # Create database with only embeddings_metadata, but missing papers table
         db_path = tmp_path / "bad.db"
-
-        # Use DatabaseManager to connect, but manually create only embeddings_metadata table
-        # to simulate a corrupted/incomplete database
         set_test_db(db_path)
-        db = DatabaseManager()
-        db.connect()
 
-        cursor = db.connection.cursor()
-        # Create embeddings_metadata table
-        cursor.execute("""
-            CREATE TABLE embeddings_metadata (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                embedding_model TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        # Note: NOT creating the papers table to trigger error
-        db.connection.commit()
-        db.close()
+        def fail_query(self, *args, **kwargs):
+            raise RuntimeError("simulated query failure")
 
-        embeddings_manager.connect()
+        monkeypatch.setattr(DatabaseManager, "get_paper", fail_query)
+
         embeddings_manager.create_collection()
 
-        # Should raise EmbeddingsError due to missing papers table
         with pytest.raises(EmbeddingsError, match="Failed to embed from database"):
             embeddings_manager.embed_from_database()
 
@@ -541,7 +556,6 @@ class TestEmbeddingsManager:
 
     def test_embed_from_database_with_metadata_fields(self, embeddings_manager, test_database, mock_lm_studio):
         """Test that metadata fields from lightweight schema are included."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         count = embeddings_manager.embed_from_database()
@@ -570,7 +584,6 @@ class TestEmbeddingsManager:
 
     def test_paper_exists(self, embeddings_manager, mock_lm_studio):
         """Test paper_exists method."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         # Initially paper should not exist
@@ -603,7 +616,6 @@ class TestEmbeddingsManager:
 
     def test_embed_from_database_skip_existing(self, embeddings_manager, test_database, mock_lm_studio):
         """Test that embed_from_database skips papers that already exist."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         # First run - should embed all 3 papers
@@ -632,7 +644,6 @@ class TestEmbeddingsManager:
         """
         from unittest.mock import patch
 
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         paper = {
@@ -652,17 +663,17 @@ class TestEmbeddingsManager:
 
 
 def test_check_model_compatibility_no_database(embeddings_manager, tmp_path):
-    """Test checking model compatibility when database does not exist."""
+    """Checking model compatibility creates an empty database and reports no stored model."""
 
     non_existent_db = tmp_path / "nonexistent.db"
     set_test_db(non_existent_db)
 
-    # Since the database doesn't exist, this will raise an error when trying to connect
-    # The behavior has changed - we no longer check if db exists before connecting
-    from abstracts_explorer.embeddings import EmbeddingsError
+    compatible, stored_model, current_model = embeddings_manager.check_model_compatibility()
 
-    with pytest.raises(EmbeddingsError, match="Failed to check model compatibility"):
-        embeddings_manager.check_model_compatibility()
+    assert compatible is True
+    assert stored_model is None
+    assert current_model == embeddings_manager.model_name
+    assert non_existent_db.exists()
 
 
 def test_check_model_compatibility_no_model_stored(embeddings_manager, tmp_path):
@@ -750,7 +761,6 @@ def test_embed_from_database_stores_model(embeddings_manager, test_database):
     # Set env var for test_database fixture
     set_test_db(test_database)
 
-    embeddings_manager.connect()
     embeddings_manager.create_collection()
 
     # Embed papers
@@ -808,30 +818,29 @@ def test_search_papers_semantic_with_year_filter(embeddings_manager, tmp_path, m
             db.add_paper(paper)
 
     # Embed papers
-    embeddings_manager.connect()
     embeddings_manager.create_collection()
     embeddings_manager.embed_from_database()
 
     # Test search without filter - should return both papers
     with DatabaseManager() as db:
-        results_all = embeddings_manager.search_papers_semantic("paper", database=db, limit=10)
+        results_all = db.search_papers_semantic("paper", limit=10)
         assert len(results_all) == 2, f"Expected 2 papers without filter, got {len(results_all)}"
 
     # Test search with year filter [2024] - should return only 2024 paper
     with DatabaseManager() as db:
-        results_2024 = embeddings_manager.search_papers_semantic("paper", database=db, limit=10, years=[2024])
+        results_2024 = db.search_papers_semantic("paper", limit=10, years=[2024])
         assert len(results_2024) == 1, f"Expected 1 paper with year=2024 filter, got {len(results_2024)}"
         assert results_2024[0]["year"] == 2024, f"Expected year 2024, got {results_2024[0]['year']}"
 
     # Test search with year filter [2025] - should return only 2025 paper
     with DatabaseManager() as db:
-        results_2025 = embeddings_manager.search_papers_semantic("paper", database=db, limit=10, years=[2025])
+        results_2025 = db.search_papers_semantic("paper", limit=10, years=[2025])
         assert len(results_2025) == 1, f"Expected 1 paper with year=2025 filter, got {len(results_2025)}"
         assert results_2025[0]["year"] == 2025, f"Expected year 2025, got {results_2025[0]['year']}"
 
     # Test search with multiple year filters - should return both papers
     with DatabaseManager() as db:
-        results_both = embeddings_manager.search_papers_semantic("paper", database=db, limit=10, years=[2024, 2025])
+        results_both = db.search_papers_semantic("paper", limit=10, years=[2024, 2025])
         assert len(results_both) == 2, f"Expected 2 papers with years=[2024, 2025] filter, got {len(results_both)}"
 
     embeddings_manager.close()
@@ -886,16 +895,14 @@ def test_search_papers_semantic_field_filter_partial_match(embeddings_manager, t
         for paper in papers:
             db.add_paper(paper)
 
-    embeddings_manager.connect()
     embeddings_manager.create_collection()
     embeddings_manager.embed_from_database()
 
     # This query previously triggered:
     #   "Expected where operator … got $contains in query."
     with DatabaseManager() as db:
-        results = embeddings_manager.search_papers_semantic(
+        results = db.search_papers_semantic(
             'authors:"Vaswani" attention',
-            database=db,
             limit=10,
         )
 
@@ -905,9 +912,8 @@ def test_search_papers_semantic_field_filter_partial_match(embeddings_manager, t
 
     # Confirm the non-matching paper is excluded
     with DatabaseManager() as db:
-        no_results = embeddings_manager.search_papers_semantic(
+        no_results = db.search_papers_semantic(
             'authors:"Lecun" attention',
-            database=db,
             limit=10,
         )
     assert len(no_results) == 0, f"Expected 0 results for unknown author, got {len(no_results)}"
@@ -956,15 +962,13 @@ def test_search_papers_semantic_field_filter_only(embeddings_manager, tmp_path, 
             db.add_paper(paper)
 
     # Connect embeddings (but note: the search should NOT need to generate embeddings)
-    embeddings_manager.connect()
     embeddings_manager.create_collection()
     # Don't embed papers - field-filter-only queries should not need ChromaDB
 
     # Query with only a field filter (no remaining keywords)
     with DatabaseManager() as db:
-        results = embeddings_manager.search_papers_semantic(
+        results = db.search_papers_semantic(
             'authors:"Vaswani"',
-            database=db,
             limit=10,
         )
 
@@ -976,9 +980,8 @@ def test_search_papers_semantic_field_filter_only(embeddings_manager, tmp_path, 
 
     # Test with the 'author' alias
     with DatabaseManager() as db:
-        results = embeddings_manager.search_papers_semantic(
+        results = db.search_papers_semantic(
             'author:"Vaswani"',
-            database=db,
             limit=10,
         )
 
@@ -987,9 +990,8 @@ def test_search_papers_semantic_field_filter_only(embeddings_manager, tmp_path, 
 
     # Test with no matching results
     with DatabaseManager() as db:
-        results = embeddings_manager.search_papers_semantic(
+        results = db.search_papers_semantic(
             'authors:"Nonexistent"',
-            database=db,
             limit=10,
         )
     assert len(results) == 0
@@ -1032,23 +1034,20 @@ def test_search_papers_semantic_field_filter_only_with_filters(embeddings_manage
         for paper in papers:
             db.add_paper(paper)
 
-    embeddings_manager.connect()
     embeddings_manager.create_collection()
 
     # Both papers by John Smith
     with DatabaseManager() as db:
-        results = embeddings_manager.search_papers_semantic(
+        results = db.search_papers_semantic(
             'authors:"John Smith"',
-            database=db,
             limit=10,
         )
     assert len(results) == 2
 
     # Filter by year
     with DatabaseManager() as db:
-        results = embeddings_manager.search_papers_semantic(
+        results = db.search_papers_semantic(
             'authors:"John Smith"',
-            database=db,
             limit=10,
             years=[2024],
         )
@@ -1057,9 +1056,8 @@ def test_search_papers_semantic_field_filter_only_with_filters(embeddings_manage
 
     # Filter by conference
     with DatabaseManager() as db:
-        results = embeddings_manager.search_papers_semantic(
+        results = db.search_papers_semantic(
             'authors:"John Smith"',
-            database=db,
             limit=10,
             conferences=["ICLR"],
         )
@@ -1108,16 +1106,14 @@ def test_search_papers_semantic_implicit_author_match(embeddings_manager, tmp_pa
         for paper in papers:
             db.add_paper(paper)
 
-    embeddings_manager.connect()
     embeddings_manager.create_collection()
     embeddings_manager.embed_from_database()
 
     # Search for "LeCun" without the author: field prefix — should still find
     # the LeCun paper first (implicit author match).
     with DatabaseManager() as db:
-        results = embeddings_manager.search_papers_semantic(
+        results = db.search_papers_semantic(
             "LeCun",
-            database=db,
             limit=10,
         )
 
@@ -1165,14 +1161,12 @@ def test_search_papers_semantic_implicit_author_match_no_duplicate(embeddings_ma
         for paper in papers:
             db.add_paper(paper)
 
-    embeddings_manager.connect()
     embeddings_manager.create_collection()
     embeddings_manager.embed_from_database()
 
     with DatabaseManager() as db:
-        results = embeddings_manager.search_papers_semantic(
+        results = db.search_papers_semantic(
             "LeCun",
-            database=db,
             limit=10,
         )
 
@@ -1210,15 +1204,13 @@ def test_search_papers_semantic_no_author_match_falls_back_to_semantic(embedding
         for paper in papers:
             db.add_paper(paper)
 
-    embeddings_manager.connect()
     embeddings_manager.create_collection()
     embeddings_manager.embed_from_database()
 
     # Query that does NOT match any author name
     with DatabaseManager() as db:
-        results = embeddings_manager.search_papers_semantic(
+        results = db.search_papers_semantic(
             "transformer architecture",
-            database=db,
             limit=10,
         )
 
@@ -1272,7 +1264,6 @@ def test_search_papers_semantic_distance_threshold(embeddings_manager, tmp_path,
         for paper in papers:
             db.add_paper(paper)
 
-    embeddings_manager.connect()
     embeddings_manager.create_collection()
     embeddings_manager.embed_from_database()
 
@@ -1288,15 +1279,15 @@ def test_search_papers_semantic_distance_threshold(embeddings_manager, tmp_path,
     with mock_patch.object(embeddings_manager, "search_similar", return_value=mock_results):
         with DatabaseManager() as db:
             # With default threshold (1.1): only the close paper should be returned
-            results = embeddings_manager.search_papers_semantic("query", database=db, limit=10)
+            results = db.search_papers_semantic("query", limit=10, embeddings_manager=embeddings_manager)
             titles = [r["title"] for r in results]
             assert "Close Paper" in titles, "Close paper (distance 0.5) should be within threshold 1.1"
             assert "Far Paper" not in titles, "Far paper (distance 1.5) should be outside threshold 1.1"
 
         with DatabaseManager() as db:
             # With higher threshold (2.0): both papers should be returned
-            results_high = embeddings_manager.search_papers_semantic(
-                "query", database=db, limit=10, distance_threshold=2.0
+            results_high = db.search_papers_semantic(
+                "query", limit=10, distance_threshold=2.0, embeddings_manager=embeddings_manager
             )
             titles_high = [r["title"] for r in results_high]
             assert "Close Paper" in titles_high, "Close paper should be returned with threshold 2.0"
@@ -1304,8 +1295,8 @@ def test_search_papers_semantic_distance_threshold(embeddings_manager, tmp_path,
 
         with DatabaseManager() as db:
             # With very low threshold (0.1): no papers should be returned
-            results_none = embeddings_manager.search_papers_semantic(
-                "query", database=db, limit=10, distance_threshold=0.1
+            results_none = db.search_papers_semantic(
+                "query", limit=10, distance_threshold=0.1, embeddings_manager=embeddings_manager
             )
             assert len(results_none) == 0, "No papers should be returned with threshold 0.1"
 
@@ -1432,7 +1423,6 @@ class TestImportEmbeddings:
         contains Python lists (after being parsed through LightweightPaper) but
         ChromaDB only accepts scalar values.
         """
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         # Simulate data as it would appear after export_embeddings() + JSON round-trip:
@@ -1467,7 +1457,6 @@ class TestImportEmbeddings:
 
     def test_import_embeddings_authors_stored_with_consistent_separator(self, embeddings_manager):
         """Test that after importing with list authors, they are stored consistently with the DB format."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         data = {
@@ -1508,7 +1497,6 @@ class TestExportImportRoundTrip:
         This tests the full cycle: add a paper with list authors → export to dict →
         import back from that dict → verify authors are stored correctly.
         """
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         # Add a paper via add_paper (as would happen from embed_from_database)
@@ -1562,7 +1550,6 @@ class TestExportImportRoundTrip:
 
     def test_export_import_round_trip_with_keywords(self, embeddings_manager):
         """Test that keywords survive an export→import round-trip."""
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
 
         paper = {
@@ -1636,7 +1623,6 @@ class TestEmbeddingsMetadataRoundTrip:
         assert uid is not None
 
         # Embed the paper from the database (embedding API call is mocked in the fixture)
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
         embedded_count = embeddings_manager.embed_from_database()
         assert embedded_count == 1
@@ -1690,7 +1676,6 @@ class TestEmbeddingsMetadataRoundTrip:
 
         assert uid is not None
 
-        embeddings_manager.connect()
         embeddings_manager.create_collection()
         embedded_count = embeddings_manager.embed_from_database()
         assert embedded_count == 1
@@ -1763,7 +1748,7 @@ class TestRateLimiting:
         em = EmbeddingsManager(requests_per_minute=30)
         # Trigger lazy initialization of the OpenAI client
         client = em.openai_client
-        # The underlying httpx client should use our rate-limited transport
+        # The underlying httpx2 client should use our rate-limited transport
         assert isinstance(client._client._transport, RateLimitedTransport)
         transport = client._client._transport
         assert isinstance(transport._rate_limiter, TokenBucketRateLimiter)
@@ -1786,21 +1771,21 @@ class TestRateLimiting:
 
     def test_rate_limited_transport_sleeps_when_tokens_exhausted(self):
         """Test that RateLimitedTransport blocks when token bucket is empty."""
-        import httpx
+        import httpx2
         from abstracts_explorer.embeddings import RateLimitedTransport
         from abstracts_explorer.rate_limiter import set_global_rate_limiter
 
         set_global_rate_limiter(None)
 
-        mock_inner = Mock()
-        mock_inner.handle_request.return_value = Mock(spec=httpx.Response)
+        mock_inner = Mock(spec=httpx2.BaseTransport)
+        mock_inner.handle_request.return_value = Mock(spec=httpx2.Response)
 
         transport = RateLimitedTransport(mock_inner, requests_per_minute=60)
         transport._rate_limiter._tokens = 0.0
         transport._rate_limiter._last_update = time.monotonic()
 
         start = time.monotonic()
-        transport.handle_request(Mock(spec=httpx.Request))
+        transport.handle_request(Mock(spec=httpx2.Request))
         elapsed = time.monotonic() - start
 
         assert elapsed >= 0.8
@@ -1808,20 +1793,20 @@ class TestRateLimiting:
 
     def test_rate_limited_transport_no_wait_when_tokens_available(self):
         """Test that RateLimitedTransport does not wait when tokens are available."""
-        import httpx
+        import httpx2
         from abstracts_explorer.embeddings import RateLimitedTransport
         from abstracts_explorer.rate_limiter import set_global_rate_limiter
 
         set_global_rate_limiter(None)
 
-        mock_inner = Mock()
-        mock_inner.handle_request.return_value = Mock(spec=httpx.Response)
+        mock_inner = Mock(spec=httpx2.BaseTransport)
+        mock_inner.handle_request.return_value = Mock(spec=httpx2.Response)
 
         transport = RateLimitedTransport(mock_inner, requests_per_minute=60)
         transport._rate_limiter._tokens = 60.0
 
         start = time.monotonic()
-        transport.handle_request(Mock(spec=httpx.Request))
+        transport.handle_request(Mock(spec=httpx2.Request))
         elapsed = time.monotonic() - start
 
         assert elapsed < 0.1
@@ -1829,20 +1814,20 @@ class TestRateLimiting:
 
     def test_rate_limited_transport_forwards_response(self):
         """Test that RateLimitedTransport forwards the response from inner transport."""
-        import httpx
+        import httpx2
         from abstracts_explorer.embeddings import RateLimitedTransport
         from abstracts_explorer.rate_limiter import set_global_rate_limiter
 
         set_global_rate_limiter(None)
 
-        mock_inner = Mock()
-        mock_response = Mock(spec=httpx.Response)
+        mock_inner = Mock(spec=httpx2.BaseTransport)
+        mock_response = Mock(spec=httpx2.Response)
         mock_inner.handle_request.return_value = mock_response
 
         transport = RateLimitedTransport(mock_inner, requests_per_minute=60)
         transport._rate_limiter._tokens = 60.0
 
-        result = transport.handle_request(Mock(spec=httpx.Request))
+        result = transport.handle_request(Mock(spec=httpx2.Request))
 
         assert result is mock_response
         mock_inner.handle_request.assert_called_once()

@@ -6,24 +6,28 @@ including downloading data, creating databases, and generating embeddings.
 """
 
 import argparse
+import json
 import logging
+import queue
 import sys
+import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import argcomplete
 
 from tqdm import tqdm
 
-from abstracts_explorer.config import get_config
-from abstracts_explorer.database import DatabaseManager
-from abstracts_explorer.embeddings import EmbeddingsManager, EmbeddingsError
+from abstracts_explorer.config import Config, get_config
+from abstracts_explorer.database import DatabaseManager, DatabaseError
+from abstracts_explorer.embeddings import EmbeddingsManager, EmbeddingsError, build_chromadb_where_clause
 from abstracts_explorer.clustering import perform_clustering, compute_clusters_with_cache, ClusteringError
 from abstracts_explorer.rag import RAGChat, RAGError
 from abstracts_explorer.plugins import (
     DownloaderPlugin,
     LightweightPaper,
+    get_failed_downloads_path,
     get_plugin,
     get_all_plugins,
     list_plugins,
@@ -157,39 +161,61 @@ def _resolve_conference_arg(conference: Optional[str]) -> Optional[str]:
     return resolved_conference
 
 
-def _build_embeddings_where_clause(args: argparse.Namespace) -> Optional[str]:
+def _build_embeddings_where_filters(args: argparse.Namespace) -> Optional[Dict[str, Any]]:
     """
-    Build a SQL WHERE clause from --conference, --year, and --where arguments.
+    Build structured paper filters from --conference and --year arguments.
 
     The conference name in *args* is expected to already be resolved to its
-    canonical form (via ``DatabaseManager.resolve_conference_name``); an exact
-    comparison is used.
+    canonical form (via ``DatabaseManager.resolve_conference_name``).
 
     Parameters
     ----------
     args : argparse.Namespace
-        Command-line arguments that may contain conference, year, and where attributes.
+        Command-line arguments that may contain conference and year attributes.
 
     Returns
     -------
-    str or None
-        Combined WHERE clause string, or None if no filters specified.
+    dict or None
+        Structured where filters, or None if no filters were specified.
     """
-    conditions = []
+    where_filters: Dict[str, Any] = {}
     conference = getattr(args, "conference", None)
     year = getattr(args, "year", None)
-    where = getattr(args, "where", None)
 
     if conference:
-        # Escape single quotes; conference name is already resolved to canonical form
-        safe_conf = conference.replace("'", "''")
-        conditions.append(f"conference = '{safe_conf}'")
+        where_filters["conference"] = conference
     if year is not None:
-        conditions.append(f"year = {int(year)}")
-    if where:
-        conditions.append(f"({where})")
+        where_filters["year"] = int(year)
 
-    return " AND ".join(conditions) if conditions else None
+    return where_filters or None
+
+
+def _validate_embeddings_db(config: Config) -> bool:
+    """
+    Validate that the configured local embeddings database exists.
+
+    HTTP(S) URLs are always considered valid because the database is remote.
+
+    Parameters
+    ----------
+    config : Config
+        Configuration containing the ``embedding_db`` setting.
+
+    Returns
+    -------
+    bool
+        True if the embeddings database is usable, False otherwise.
+    """
+    if config.embedding_db.startswith("http://") or config.embedding_db.startswith("https://"):
+        return True
+
+    embeddings_path = Path(config.embedding_db)
+    if not embeddings_path.exists():
+        print(f"❌ Error: Embeddings database not found: {embeddings_path}", file=sys.stderr)
+        print("\nYou can create embeddings using:", file=sys.stderr)
+        print("  abstracts-explorer create-embeddings", file=sys.stderr)
+        return False
+    return True
 
 
 def create_embeddings_command(args: argparse.Namespace) -> int:
@@ -210,7 +236,6 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         - force: Whether to reset existing collection
         - conference: Conference name to filter by (optional)
         - year: Year to filter by (optional)
-        - where: SQL WHERE clause to filter papers (optional)
 
     Returns
     -------
@@ -223,8 +248,8 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     conference = _resolve_conference_arg(getattr(args, "conference", None))
     args.conference = conference
 
-    # Build combined WHERE clause from --conference, --year, and --where
-    where_clause = _build_embeddings_where_clause(args)
+    # Build structured paper filters from --conference and --year
+    where_filters = _build_embeddings_where_filters(args)
 
     print("Abstracts Explorer - Embeddings Generator")
     print("=" * 70)
@@ -247,10 +272,8 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         total_papers = db.get_paper_count()
         print(f"\n📊 Found {total_papers:,} papers in database")
 
-        if where_clause:
-            # Count papers matching filter
-            filtered = db.query(f"SELECT COUNT(*) as count FROM papers WHERE {where_clause}")
-            filtered_count = filtered[0]["count"] if filtered else 0
+        if where_filters:
+            filtered_count = db.get_paper_count(where_filters=where_filters)
             print(f"📊 Filter will process {filtered_count:,} abstracts")
 
     # Initialize embeddings manager
@@ -273,7 +296,19 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
             print(f"   Current model: {current_model}")
             print("\n   Embeddings created with different models are incompatible.")
 
-            if not args.force:
+            if args.force:
+                print("   --force flag detected: will recreate embeddings with new model")
+            elif getattr(args, "ignore_embedding_model_mismatch", False):
+                print("   --ignore-embedding-model-mismatch detected: " "will recreate embeddings with new model")
+                args.force = True
+            elif getattr(args, "non_interactive", False):
+                print(
+                    "\n   Re-run with --ignore-embedding-model-mismatch to recreate the "
+                    "embeddings without prompting.",
+                    file=sys.stderr,
+                )
+                return 1
+            else:
                 print("\n   Use --force to recreate embeddings with the new model.")
                 print("   This will delete existing embeddings and recreate them.\n")
                 response = input("Do you want to recreate embeddings with the new model? (y/N): ")
@@ -282,21 +317,10 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
                     return 1
                 # User confirmed, set force flag
                 args.force = True
-            else:
-                print("   --force flag detected: will recreate embeddings with new model")
 
         # Test connection
-        print("🔌 Testing OpenAI API connection...")
-        if not em.test_lm_studio_connection():
-            print("\n❌ Failed to connect to OpenAI API!", file=sys.stderr)
-            print("\nPlease ensure:", file=sys.stderr)
-            print(f"  - OpenAI-compatible API is running at {args.lm_studio_url}", file=sys.stderr)
-            print(f"  - The {args.model} model is loaded", file=sys.stderr)
+        if not em.verbose_api_connection_test():
             return 1
-        print("✅ Successfully connected to OpenAI API\n")
-
-        # Connect to ChromaDB
-        em.connect()
 
         # Create or reset collection.
         # When --force is combined with --conference / --year, only delete the
@@ -317,7 +341,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         else:
             print(f"📁 Creating collection '{args.collection}'...")
 
-        em.create_collection(reset=args.force and not filtered_force)
+        em.init(reset=args.force and not filtered_force)
 
         if filtered_force:
             deleted = em.delete_embeddings_by_filter(conference=conference, year=year)
@@ -329,9 +353,8 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
 
         # Determine total count for progress bar
         with DatabaseManager() as db:
-            if where_clause:
-                count_result = db.query(f"SELECT COUNT(*) as count FROM papers WHERE {where_clause}")
-                total_count = count_result[0]["count"] if count_result else 0
+            if where_filters:
+                total_count = db.get_paper_count(where_filters=where_filters)
             else:
                 total_count = db.get_paper_count()
 
@@ -344,7 +367,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
                 pbar.refresh()
 
             embedded_count = em.embed_from_database(
-                where_clause=where_clause,
+                where_filters=where_filters,
                 progress_callback=update_progress,
                 force_recreate=args.force,
             )
@@ -399,13 +422,8 @@ def search_command(args: argparse.Namespace) -> int:
     config = get_config()
 
     # Validate embeddings database exists (for local paths only)
-    if not config.embedding_db.startswith("http://") and not config.embedding_db.startswith("https://"):
-        embeddings_path = Path(config.embedding_db)
-        if not embeddings_path.exists():
-            print(f"❌ Error: Embeddings database not found: {embeddings_path}", file=sys.stderr)
-            print("\nYou can create embeddings using:", file=sys.stderr)
-            print("  abstracts-explorer create-embeddings", file=sys.stderr)
-            return 1
+    if not _validate_embeddings_db(config):
+        return 1
 
     # Resolve conference name once to canonical form
     conference = _resolve_conference_arg(getattr(args, "conference", None))
@@ -434,16 +452,8 @@ def search_command(args: argparse.Namespace) -> int:
         )
 
         # Test OpenAI API connection
-        if not em.test_lm_studio_connection():
-            print("\n❌ Failed to connect to OpenAI API!", file=sys.stderr)
-            print("\nPlease ensure:", file=sys.stderr)
-            print(f"  - OpenAI-compatible API is running at {args.lm_studio_url}", file=sys.stderr)
-            print(f"  - The {args.model} model is loaded", file=sys.stderr)
+        if not em.verbose_api_connection_test():
             return 1
-
-        # Connect to ChromaDB
-        em.connect()
-        em.create_collection()
 
         # Check collection stats
         stats = em.get_collection_stats()
@@ -462,76 +472,60 @@ def search_command(args: argparse.Namespace) -> int:
             except Exception as e:
                 print(f"⚠️  Warning: Could not parse filter '{args.where}': {e}", file=sys.stderr)
 
-        # Add conference/year filters from dedicated options
-        if conference or year is not None:
-            if where_filter is None:
-                where_filter = {}
-            if conference:
-                # Conference name is already resolved to canonical form
-                where_filter["conference"] = conference
-            if year is not None:
-                # ChromaDB stores all metadata values as strings
-                where_filter["year"] = str(year)
-
-        # Perform search
+        # Perform search through the DatabaseManager search entry point
         print(f"\n🔍 Searching for: '{args.query}'...\n")
-        results = em.search_similar(
-            query=args.query,
-            n_results=args.n_results,
-            where=where_filter,
-        )
+        database = DatabaseManager()
+        try:
+            papers = database.search_papers_semantic(
+                args.query,
+                limit=args.n_results,
+                years=[year] if year is not None else None,
+                conferences=[conference] if conference else None,
+                distance_threshold=distance_threshold,
+                where=where_filter,
+                embeddings_manager=em,
+            )
+        finally:
+            database.close()
 
-        # Display results
-        if not results["ids"] or not results["ids"][0]:
+        if not papers:
             print("❌ No results found.")
             em.close()
             return 0
 
-        # Filter by distance threshold
-        ids = results["ids"][0]
-        metadatas = results["metadatas"][0]
-        distances = results["distances"][0]
-        documents = results.get("documents", [[]])[0]
-
-        filtered = [
-            (ids[i], metadatas[i], distances[i], documents[i] if documents else "")
-            for i in range(len(ids))
-            if distances[i] <= distance_threshold
-        ]
-
-        if not filtered:
-            print(f"❌ No results found within distance threshold {distance_threshold}.")
-            em.close()
-            return 0
-
-        num_results = len(filtered)
+        num_results = len(papers)
         print(f"✅ Found {num_results} similar paper(s):\n")
 
-        for i, (paper_id, metadata, distance, document) in enumerate(filtered):
-            similarity = 1 - distance if distance <= 1 else 0
+        for i, paper in enumerate(papers):
+            similarity = paper.get("similarity", 0.0)
 
-            print(f"{i + 1}. Paper ID: {paper_id}")
-            print(f"   Title: {metadata.get('title', 'N/A')}")
+            print(f"{i + 1}. Paper ID: {paper.get('uid', 'N/A')}")
+            print(f"   Title: {paper.get('title', 'N/A')}")
 
-            # Get author names from metadata
-            authors_display = metadata.get("authors", "N/A")
-
+            authors = paper.get("authors", [])
+            authors_display = "; ".join(authors) if isinstance(authors, list) else str(authors)
             print(f"   Authors: {authors_display}")
-            print(f"   Decision: {metadata.get('decision', 'N/A')}")
 
-            if metadata.get("topic"):
-                print(f"   Topic: {metadata.get('topic')}")
+            if paper.get("session"):
+                print(f"   Session: {paper.get('session')}")
 
-            if metadata.get("paper_url"):
-                print(f"   URL: {metadata.get('paper_url')}")
+            if paper.get("decision"):
+                print(f"   Decision: {paper.get('decision')}")
 
-            if metadata.get("poster_position"):
-                print(f"   Poster Position: {metadata.get('poster_position')}")
+            if paper.get("topic"):
+                print(f"   Topic: {paper.get('topic')}")
+
+            if paper.get("url") or paper.get("paper_url"):
+                print(f"   URL: {paper.get('url') or paper.get('paper_url')}")
+
+            if paper.get("poster_position"):
+                print(f"   Poster Position: {paper.get('poster_position')}")
 
             print(f"   Similarity: {similarity:.4f}")
 
-            if args.show_abstract and document:
-                abstract = document[:300] + "..." if len(document) > 300 else document
+            if args.show_abstract and paper.get("abstract"):
+                abstract = paper["abstract"]
+                abstract = abstract[:300] + "..." if len(abstract) > 300 else abstract
                 print(f"   Abstract: {abstract}")
 
             print()
@@ -595,13 +589,8 @@ def chat_command(args: argparse.Namespace) -> int:
         print("=" * 70)
 
         # Check embeddings exist (for local paths only)
-        if not config.embedding_db.startswith("http://") and not config.embedding_db.startswith("https://"):
-            embeddings_path = Path(config.embedding_db)
-            if not embeddings_path.exists():
-                print(f"\n❌ Error: Embeddings database not found: {embeddings_path}", file=sys.stderr)
-                print("\nYou can create embeddings using:", file=sys.stderr)
-                print("  abstracts-explorer create-embeddings", file=sys.stderr)
-                return 1
+        if not _validate_embeddings_db(config):
+            return 1
 
         # Initialize embeddings manager
         em = EmbeddingsManager(
@@ -611,20 +600,8 @@ def chat_command(args: argparse.Namespace) -> int:
         )
 
         # Test OpenAI API connection
-        print("\n🔌 Testing OpenAI API connection...")
-        if not em.test_lm_studio_connection():
-            print("\n❌ Failed to connect to OpenAI API!", file=sys.stderr)
-            print("\nPlease ensure:", file=sys.stderr)
-            print(f"  - OpenAI-compatible API is running at {args.lm_studio_url}", file=sys.stderr)
-            print("  - A language model is loaded", file=sys.stderr)
+        if not em.verbose_api_connection_test(model_hint="A language model is loaded"):
             return 1
-        print("✅ Successfully connected to OpenAI API")
-
-        # Connect to embeddings
-        em.connect()
-
-        # Get or create the collection (should already exist for chat)
-        em.create_collection(reset=False)
 
         # Get collection stats
         stats = em.get_collection_stats()
@@ -632,17 +609,15 @@ def chat_command(args: argparse.Namespace) -> int:
 
         # Initialize database connection
         db = DatabaseManager()
-        db.connect()
 
         # Build conference/year context for RAG queries (case-insensitive via DB lookup)
         chat_conferences: Optional[List[str]] = None
         chat_years: Optional[List[int]] = None
         if conference:
-            rows = db.query(
-                "SELECT DISTINCT conference FROM papers WHERE LOWER(conference) = LOWER(?)",
-                (conference,),
-            )
-            stored_name = rows[0]["conference"] if rows else conference
+            try:
+                stored_name = db.resolve_conference_name(conference)
+            except DatabaseError:
+                stored_name = conference
             chat_conferences = [stored_name]
         if year is not None:
             chat_years = [year]
@@ -784,7 +759,27 @@ def _download_single(
     return plugin.download(year=year, output_path=str(json_path), force_download=force, **kwargs)
 
 
-def download_command(args: argparse.Namespace) -> int:
+def _report_failed_downloads(json_path: Path) -> None:
+    """Notify the user about recorded failed URLs and automatic retries."""
+    failed_path = Path(get_failed_downloads_path(str(json_path)))
+    if not failed_path.exists():
+        return
+    try:
+        data = json.loads(failed_path.read_text(encoding="utf-8"))
+        failures = data.get("failed", []) if isinstance(data, dict) else []
+        count = len(failures) if isinstance(failures, list) else 0
+        label = f"{count} page(s)" if count else "Some pages"
+    except (OSError, json.JSONDecodeError):
+        label = "Some pages"
+    print(f"⚠️  {label} failed; failed URLs saved to {failed_path}", file=sys.stderr)
+    print("   They will be retried automatically on the next run.", file=sys.stderr)
+    print("   Delete this file to skip retrying them.", file=sys.stderr)
+
+
+def download_command(
+    args: argparse.Namespace,
+    on_unit_complete: Optional[Callable[[str, int, int], None]] = None,
+) -> int:
     """
     Download conference data and create database.
 
@@ -800,6 +795,10 @@ def download_command(args: argparse.Namespace) -> int:
         - output: Path for intermediate JSON files
         - force: Whether to force re-download
         - list_plugins: Whether to list available plugins
+    on_unit_complete : callable, optional
+        Called after each successfully downloaded ``(conference, year)`` unit
+        has been committed to the database.  Receives the canonical conference
+        name, the year, and the number of downloaded papers.
 
     Returns
     -------
@@ -865,6 +864,8 @@ def download_command(args: argparse.Namespace) -> int:
             try:
                 papers = _download_single(plugin, yr, output_path, args.force, args)
                 print(f"✅ Downloaded {len(papers):,} papers for {plugin.plugin_name} {yr}")
+                json_path = output_path.parent / f"{plugin.plugin_name}_{yr}.json"
+                _report_failed_downloads(json_path)
 
                 with DatabaseManager() as db:
                     db.create_tables()
@@ -872,6 +873,18 @@ def download_command(args: argparse.Namespace) -> int:
                     print(f"✅ Loaded {count:,} papers into database")
 
                 total_papers += len(papers)
+
+                if on_unit_complete is not None and papers:
+                    unit_conference = papers[0].conference or plugin.plugin_name
+                    try:
+                        on_unit_complete(unit_conference, yr, len(papers))
+                    except Exception as callback_error:
+                        logger.warning(
+                            "Post-processing callback failed for %s %s: %s",
+                            unit_conference,
+                            yr,
+                            callback_error,
+                        )
 
             except Exception as e:
                 msg = f"{plugin.plugin_name} {yr}: {e}"
@@ -981,13 +994,8 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
     config = get_config()
 
     # Validate embeddings database exists (for local paths only)
-    if not config.embedding_db.startswith("http://") and not config.embedding_db.startswith("https://"):
-        embeddings_path = Path(config.embedding_db)
-        if not embeddings_path.exists():
-            print(f"❌ Error: Embeddings database not found: {embeddings_path}", file=sys.stderr)
-            print("\nYou can create embeddings using:", file=sys.stderr)
-            print("  abstracts-explorer create-embeddings", file=sys.stderr)
-            return 1
+    if not _validate_embeddings_db(config):
+        return 1
 
     print("Abstracts Explorer - Clustering")
     print("=" * 70)
@@ -1129,12 +1137,17 @@ def delete_data_command(args: argparse.Namespace) -> int:
         print("❌ --year is required for the delete-data command.", file=sys.stderr)
         return 1
 
+    assert conference is not None
+    assert year is not None
+
     # Resolve conference name to canonical form
     try:
         conference = _resolve_conference_arg(conference)
     except Exception:
         # If resolution fails, use the raw value (might still be valid)
         pass
+
+    assert conference is not None
 
     print("Abstracts Explorer - Delete Conference/Year Data")
     print("=" * 70)
@@ -1150,7 +1163,11 @@ def delete_data_command(args: argparse.Namespace) -> int:
     try:
         with DatabaseManager() as db:
             db.create_tables()
-            papers = db.search_papers(conference=conference, year=year, limit=0)
+            papers = db.search_papers(
+                conferences=[conference],
+                years=[year],
+                limit=0,
+            )
             paper_count = len(papers)
             cache_count = db.count_clustering_cache_by_conference_year(conference, year)
     except Exception as e:
@@ -1161,9 +1178,12 @@ def delete_data_command(args: argparse.Namespace) -> int:
     embedding_count = 0
     try:
         em = EmbeddingsManager()
-        em.connect()
-        em.create_collection(reset=False)
-        existing = em.collection.get(where={"$and": [{"conference": conference}, {"year": str(year)}]})
+        existing = em.collection.get(
+            where=build_chromadb_where_clause(
+                conferences=[conference],
+                years=[year],
+            )
+        )
         embedding_count = len(existing.get("ids", []))
         em.close()
     except Exception as e:
@@ -1201,8 +1221,6 @@ def delete_data_command(args: argparse.Namespace) -> int:
     # 2. Delete embeddings from ChromaDB
     try:
         em = EmbeddingsManager()
-        em.connect()
-        em.create_collection(reset=False)
         deleted_embeddings = em.delete_embeddings_by_filter(conference=conference, year=year)
         em.close()
         print(f"✅ Deleted {deleted_embeddings:,} embedding(s) from ChromaDB.")
@@ -1262,15 +1280,8 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     config = get_config()
 
     # Validate embeddings database exists (for local paths only)
-    if not config.embedding_db.startswith("http://") and not config.embedding_db.startswith("https://"):
-        from pathlib import Path
-
-        embeddings_path = Path(config.embedding_db)
-        if not embeddings_path.exists():
-            print(f"❌ Error: Embeddings database not found: {embeddings_path}", file=sys.stderr)
-            print("\nYou can create embeddings using:", file=sys.stderr)
-            print("  abstracts-explorer create-embeddings", file=sys.stderr)
-            return 1
+    if not _validate_embeddings_db(config):
+        return 1
 
     # Resolve conference name once to canonical form
     resolved_conference = _resolve_conference_arg(getattr(args, "conference", None))
@@ -1318,8 +1329,6 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
             collection_name=args.collection,
             requests_per_minute=args.requests_per_minute,
         )
-        em.connect()
-        em.create_collection()
 
         success_count = 0
         fail_count = 0
@@ -1391,7 +1400,7 @@ def mcp_server_command(args: argparse.Namespace) -> int:
         Command-line arguments containing:
         - host: Host to bind to
         - port: Port to bind to
-        - transport: Transport method (sse or stdio)
+        - transport: Transport method (streamable-http or stdio)
 
     Returns
     -------
@@ -1693,14 +1702,8 @@ def eval_run_command(args: argparse.Namespace) -> int:
             collection_name=args.collection,
         )
 
-        print("\n🔌 Testing OpenAI API connection...")
-        if not em.test_lm_studio_connection():
-            print("\n❌ Failed to connect to OpenAI API!", file=sys.stderr)
+        if not em.verbose_api_connection_test():
             return 1
-        print("✅ Connected")
-
-        em.connect()
-        em.create_collection(reset=False)
 
         with DatabaseManager() as db:
             db.create_tables()
@@ -2574,12 +2577,310 @@ def registry_delete_command(args: argparse.Namespace) -> int:
         return 1
 
 
+def _build_pre_process_embeddings_args(
+    args: argparse.Namespace,
+    config: Any,
+    conference: Optional[str],
+    year: Optional[int],
+    force: bool,
+    non_interactive: bool = False,
+) -> argparse.Namespace:
+    """Build the ``create-embeddings`` argument namespace for a pipeline unit."""
+    return argparse.Namespace(
+        conference=conference,
+        year=year,
+        collection=getattr(args, "collection", config.collection_name),
+        lm_studio_url=getattr(args, "lm_studio_url", config.llm_backend_url),
+        model=getattr(args, "model", config.embedding_model),
+        force=force,
+        where=getattr(args, "where", None),
+        requests_per_minute=getattr(args, "requests_per_minute", config.requests_per_minute),
+        ignore_embedding_model_mismatch=getattr(args, "ignore_embedding_model_mismatch", False),
+        non_interactive=non_interactive,
+        verbose=getattr(args, "verbose", 0),
+    )
+
+
+def _build_pre_process_clustering_args(
+    args: argparse.Namespace,
+    config: Any,
+    conference: Optional[str],
+    year: Optional[int],
+    force: bool,
+) -> argparse.Namespace:
+    """Build the ``clustering pre-generate`` argument namespace for a pipeline unit."""
+    return argparse.Namespace(
+        conference=conference,
+        year=year,
+        collection=getattr(args, "collection", config.collection_name),
+        force=force,
+        requests_per_minute=getattr(args, "requests_per_minute", config.requests_per_minute),
+        verbose=getattr(args, "verbose", 0),
+    )
+
+
+def _post_process_worker(
+    unit_queue: "queue.Queue[Optional[Tuple[str, int, int]]]",
+    args: argparse.Namespace,
+    config: Any,
+    force: bool,
+    successes: List[str],
+    failures: List[Tuple[str, str]],
+) -> None:
+    """Embed and cluster downloaded units sequentially as they become available."""
+    while True:
+        unit = unit_queue.get()
+        if unit is None:
+            unit_queue.task_done()
+            return
+
+        unit_conference, unit_year, paper_count = unit
+        label = f"{unit_conference} {unit_year}"
+
+        try:
+            if paper_count <= 0:
+                print(f"⏭️  Skipping {label}: no papers downloaded")
+                continue
+
+            print(f"\n🧮 [{label}] Creating embeddings...")
+            rc = create_embeddings_command(
+                _build_pre_process_embeddings_args(
+                    args,
+                    config,
+                    unit_conference,
+                    unit_year,
+                    force,
+                    non_interactive=True,
+                )
+            )
+            if rc != 0:
+                failures.append((label, "create-embeddings"))
+                print(f"❌ [{label}] Create-embeddings failed (exit code {rc})", file=sys.stderr)
+                continue
+
+            print(f"\n🔮 [{label}] Pre-generating clustering results...")
+            rc = pre_generate_clustering_command(
+                _build_pre_process_clustering_args(args, config, unit_conference, unit_year, force)
+            )
+            if rc != 0:
+                failures.append((label, "clustering pre-generate"))
+                print(f"❌ [{label}] Clustering pre-generate failed (exit code {rc})", file=sys.stderr)
+                continue
+
+            successes.append(label)
+        except Exception as e:
+            failures.append((label, str(e)))
+            print(f"❌ [{label}] Unexpected error: {e}", file=sys.stderr)
+        finally:
+            unit_queue.task_done()
+
+
+def _embedding_worker(
+    unit_queue: "queue.Queue[Optional[Tuple[str, int, int]]]",
+    clustering_queue: "queue.Queue[Optional[Tuple[str, int]]]",
+    args: argparse.Namespace,
+    config: Any,
+    force: bool,
+    successes: List[str],
+    failures: List[Tuple[str, str]],
+) -> None:
+    """Embed downloaded units and hand each completed unit to the clustering worker."""
+    try:
+        while True:
+            unit = unit_queue.get()
+            if unit is None:
+                return
+
+            unit_conference, unit_year, paper_count = unit
+            label = f"{unit_conference} {unit_year}"
+
+            try:
+                if paper_count <= 0:
+                    print(f"⏭️  Skipping {label}: no papers downloaded")
+                    continue
+
+                print(f"\n🧮 [{label}] Creating embeddings...")
+                rc = create_embeddings_command(
+                    _build_pre_process_embeddings_args(
+                        args,
+                        config,
+                        unit_conference,
+                        unit_year,
+                        force,
+                        non_interactive=True,
+                    )
+                )
+                if rc != 0:
+                    failures.append((label, "create-embeddings"))
+                    print(f"❌ [{label}] Create-embeddings failed (exit code {rc})", file=sys.stderr)
+                    continue
+
+                successes.append(label)
+                clustering_queue.put((unit_conference, unit_year))
+            except Exception as e:
+                failures.append((label, str(e)))
+                print(f"❌ [{label}] Unexpected error while creating embeddings: {e}", file=sys.stderr)
+    finally:
+        # Always terminate the downstream worker, even if this worker fails.
+        clustering_queue.put(None)
+
+
+def _clustering_worker(
+    clustering_queue: "queue.Queue[Optional[Tuple[str, int]]]",
+    args: argparse.Namespace,
+    config: Any,
+    force: bool,
+    successes: List[str],
+    failures: List[Tuple[str, str]],
+) -> None:
+    """Pre-generate clustering results for units whose embeddings are ready."""
+    while True:
+        unit = clustering_queue.get()
+        if unit is None:
+            return
+
+        unit_conference, unit_year = unit
+        label = f"{unit_conference} {unit_year}"
+
+        try:
+            print(f"\n🔮 [{label}] Pre-generating clustering results...")
+            rc = pre_generate_clustering_command(
+                _build_pre_process_clustering_args(args, config, unit_conference, unit_year, force)
+            )
+            if rc != 0:
+                failures.append((label, "clustering pre-generate"))
+                print(f"❌ [{label}] Clustering pre-generate failed (exit code {rc})", file=sys.stderr)
+                continue
+
+            successes.append(label)
+        except Exception as e:
+            failures.append((label, str(e)))
+            print(f"❌ [{label}] Unexpected error while clustering: {e}", file=sys.stderr)
+
+
+def _download_into_queue(
+    download_args: argparse.Namespace,
+    unit_queue: "queue.Queue[Optional[Tuple[str, int, int]]]",
+) -> int:
+    """Download units, enqueueing each completed unit and a final sentinel."""
+
+    def on_unit_complete(unit_conference: str, unit_year: int, paper_count: int) -> None:
+        if paper_count > 0:
+            unit_queue.put((unit_conference, unit_year, paper_count))
+
+    print("\n📥 Downloading conference data and post-processing units in parallel...")
+    try:
+        return download_command(download_args, on_unit_complete=on_unit_complete)
+    finally:
+        unit_queue.put(None)
+
+
+def _pre_process_parallel(
+    args: argparse.Namespace,
+    config: Any,
+    download_args: argparse.Namespace,
+    overlap: bool = True,
+) -> int:
+    """Download units and post-process each unit as soon as it is committed."""
+    force = getattr(args, "force", False)
+    unit_queue: "queue.Queue[Optional[Tuple[str, int, int]]]" = queue.Queue()
+
+    if overlap:
+        clustering_queue: "queue.Queue[Optional[Tuple[str, int]]]" = queue.Queue()
+        embedding_successes: List[str] = []
+        embedding_failures: List[Tuple[str, str]] = []
+        clustering_successes: List[str] = []
+        clustering_failures: List[Tuple[str, str]] = []
+
+        embedding_worker = threading.Thread(
+            target=_embedding_worker,
+            args=(
+                unit_queue,
+                clustering_queue,
+                args,
+                config,
+                force,
+                embedding_successes,
+                embedding_failures,
+            ),
+            name="pre-process-embeddings",
+            daemon=True,
+        )
+        clustering_worker = threading.Thread(
+            target=_clustering_worker,
+            args=(
+                clustering_queue,
+                args,
+                config,
+                force,
+                clustering_successes,
+                clustering_failures,
+            ),
+            name="pre-process-clustering",
+            daemon=True,
+        )
+        embedding_worker.start()
+        clustering_worker.start()
+
+        rc_download = _download_into_queue(download_args, unit_queue)
+        embedding_worker.join()
+        clustering_worker.join()
+
+        print("\n" + "=" * 70)
+        print(f"📊 Embeddings: {len(embedding_successes)} succeeded, {len(embedding_failures)} failed")
+        print(f"📊 Clustering: {len(clustering_successes)} succeeded, {len(clustering_failures)} failed")
+        if clustering_successes:
+            print("   ✅ " + ", ".join(clustering_successes))
+        for label, reason in embedding_failures:
+            print(f"   ❌ {label}: {reason}", file=sys.stderr)
+        for label, reason in clustering_failures:
+            print(f"   ❌ {label}: {reason}", file=sys.stderr)
+
+        rc = 0
+        if rc_download != 0:
+            rc = rc_download
+        if embedding_failures or clustering_failures:
+            rc = 1
+    else:
+        successes: List[str] = []
+        failures: List[Tuple[str, str]] = []
+        worker = threading.Thread(
+            target=_post_process_worker,
+            args=(unit_queue, args, config, force, successes, failures),
+            name="pre-process-post",
+            daemon=True,
+        )
+        worker.start()
+
+        rc_download = _download_into_queue(download_args, unit_queue)
+        worker.join()
+
+        print("\n" + "=" * 70)
+        print(f"📊 Post-processing: {len(successes)} succeeded, {len(failures)} failed")
+        if successes:
+            print("   ✅ " + ", ".join(successes))
+        for label, reason in failures:
+            print(f"   ❌ {label}: {reason}", file=sys.stderr)
+
+        rc = 0
+        if rc_download != 0:
+            rc = rc_download
+        if failures:
+            rc = 1
+
+    if rc == 0:
+        print("\n✅ Pre-process pipeline completed successfully!")
+    return rc
+
+
 def pre_process_command(args: argparse.Namespace) -> int:
     """
     Run the full pre-processing pipeline: download → create-embeddings → clustering pre-generate.
 
-    This command chains the three main data-preparation steps in the correct order,
-    passing the same ``--conference`` and ``--year`` filters to each step.
+    Each ``(conference, year)`` unit is post-processed as soon as its download
+    is committed, while the remaining downloads continue in the background.
+    By default embeddings and clustering run in separate workers so that
+    clustering of one unit overlaps embeddings of the next.
 
     Parameters
     ----------
@@ -2588,6 +2889,11 @@ def pre_process_command(args: argparse.Namespace) -> int:
         - conference: Conference to process (optional; all conferences if omitted)
         - year: Year to process (optional; all available years if omitted)
         - force: Force re-download / reset embeddings / force recompute clustering
+        - ignore_embedding_model_mismatch: Recreate embeddings on model mismatch
+          without prompting
+        - no_overlap_post_process: Run embeddings and clustering in one worker
+        - collection, lm_studio_url, model, where, requests_per_minute: Forwarded
+          to the embeddings and clustering steps
 
     Returns
     -------
@@ -2608,11 +2914,11 @@ def pre_process_command(args: argparse.Namespace) -> int:
     if year is not None:
         print(f"Year:       {year}")
     print(f"Force:      {force}")
+    print(f"Collection: {getattr(args, 'collection', config.collection_name)}")
+    print(f"Model:      {getattr(args, 'model', config.embedding_model)}")
     print("Steps: download → create-embeddings → clustering pre-generate")
     print("=" * 70)
 
-    # Step 1: Download
-    print("\n📥 Step 1/3: Downloading conference data...")
     download_args = argparse.Namespace(
         conference=conference,
         year=year,
@@ -2623,46 +2929,9 @@ def pre_process_command(args: argparse.Namespace) -> int:
         input_file=None,
         verbose=verbose,
     )
-    rc = download_command(download_args)
-    if rc != 0:
-        print(f"\n❌ Download step failed (exit code {rc})", file=sys.stderr)
-        return rc
 
-    # Step 2: Create embeddings
-    print("\n🧮 Step 2/3: Creating embeddings...")
-    embeddings_args = argparse.Namespace(
-        conference=conference,
-        year=year,
-        collection=config.collection_name,
-        lm_studio_url=config.llm_backend_url,
-        model=config.embedding_model,
-        force=force,
-        where=None,
-        requests_per_minute=config.requests_per_minute,
-        verbose=verbose,
-    )
-    rc = create_embeddings_command(embeddings_args)
-    if rc != 0:
-        print(f"\n❌ Create-embeddings step failed (exit code {rc})", file=sys.stderr)
-        return rc
-
-    # Step 3: Clustering pre-generate
-    print("\n🔮 Step 3/3: Pre-generating clustering results...")
-    clustering_args = argparse.Namespace(
-        conference=conference,
-        year=year,
-        collection=config.collection_name,
-        force=force,
-        requests_per_minute=config.requests_per_minute,
-        verbose=verbose,
-    )
-    rc = pre_generate_clustering_command(clustering_args)
-    if rc != 0:
-        print(f"\n❌ Clustering pre-generate step failed (exit code {rc})", file=sys.stderr)
-        return rc
-
-    print("\n✅ Pre-process pipeline completed successfully!")
-    return 0
+    overlap = not getattr(args, "no_overlap_post_process", False)
+    return _pre_process_parallel(args, config, download_args, overlap=overlap)
 
 
 def main() -> int:
@@ -2819,8 +3088,6 @@ Examples:
   # Embed only papers from 2025 (all conferences)
   abstracts-explorer create-embeddings --year 2025
 
-  # Combine with --where for additional filtering
-  abstracts-explorer create-embeddings --conference NeurIPS --where "award IS NOT NULL"
         """,
     )
     add_conference_year_args(embeddings_parser)
@@ -2848,10 +3115,9 @@ Examples:
         help="Reset collection if it already exists",
     )
     embeddings_parser.add_argument(
-        "--where",
-        type=str,
-        default=None,
-        help="SQL WHERE clause to filter papers (e.g., \"decision LIKE '%%Accept%%'\")",
+        "--ignore-embedding-model-mismatch",
+        action="store_true",
+        help="Recreate embeddings after an embedding model mismatch without prompting",
     )
     embeddings_parser.add_argument(
         "--requests-per-minute",
@@ -3161,7 +3427,7 @@ The MCP server exposes tools that allow LLM-based assistants to:
 - Generate cluster visualizations
 
 Examples:
-  # Start MCP server on default port (8000)
+  # Start MCP server on default port (8000) using streamable HTTP
   abstracts-explorer mcp-server
   
   # Start on custom host and port
@@ -3186,9 +3452,9 @@ Examples:
     mcp_parser.add_argument(
         "--transport",
         type=str,
-        choices=["sse", "stdio"],
-        default="sse",
-        help="Transport method: sse (HTTP/SSE) or stdio (default: sse)",
+        choices=["streamable-http", "stdio"],
+        default="streamable-http",
+        help="Transport method: streamable-http (HTTP) or stdio (default: streamable-http)",
     )
 
     # Eval command (with sub-subcommands)
@@ -3778,16 +4044,22 @@ Examples:
         help="Run the full pre-processing pipeline (download → create-embeddings → clustering pre-generate)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="""
-Run the full pre-processing pipeline in order:
+Run the full pre-processing pipeline:
   1. download          - Download conference data
   2. create-embeddings - Generate embeddings for abstracts
   3. clustering pre-generate - Pre-generate clustering results for the web UI
 
-All three steps receive the same --conference and --year filters.
-Other options for each step use their default values (from config).
+By default the pipeline is parallel: each conference/year unit is embedded and
+clustered as soon as its download finishes, while the remaining downloads keep
+running.  Embeddings and clustering also overlap, so clustering of one unit runs
+while embeddings for the next unit are being created.  Use
+--no-overlap-post-process to run embeddings and clustering in a single worker.
+
+All steps receive the same --conference and --year filters.  The embedding and
+clustering options below are forwarded to the respective steps.
 
 Examples:
-  # Process all conferences and years
+  # Process all conferences and years (parallel pipeline)
   abstracts-explorer pre-process
 
   # Process only NeurIPS (all years)
@@ -3798,13 +4070,53 @@ Examples:
 
   # Re-process, overwriting existing data
   abstracts-explorer pre-process --conference neurips --force
+
+  # Recreate embeddings after switching embedding models, without prompting
+  abstracts-explorer pre-process --ignore-embedding-model-mismatch --model my-new-model
+
+  # Do not overlap embeddings and clustering
+  abstracts-explorer pre-process --no-overlap-post-process
         """,
     )
     add_conference_year_args(pre_process_parser)
     pre_process_parser.add_argument(
         "--force",
         action="store_true",
-        help="Force re-download and reset embeddings even if they already exist",
+        help="Force re-download and reset embeddings/clustering even if they already exist",
+    )
+    pre_process_parser.add_argument(
+        "--no-overlap-post-process",
+        action="store_true",
+        help="Run embeddings and clustering in a single worker instead of overlapping them",
+    )
+    pre_process_parser.add_argument(
+        "--collection",
+        type=str,
+        default=config.collection_name,
+        help=f"Name for the ChromaDB collection (default: {config.collection_name})",
+    )
+    pre_process_parser.add_argument(
+        "--lm-studio-url",
+        type=str,
+        default=config.llm_backend_url,
+        help=f"URL for LM Studio API (default: {config.llm_backend_url})",
+    )
+    pre_process_parser.add_argument(
+        "--model",
+        type=str,
+        default=config.embedding_model,
+        help=f"Name of the embedding model (default: {config.embedding_model})",
+    )
+    pre_process_parser.add_argument(
+        "--requests-per-minute",
+        type=int,
+        default=config.requests_per_minute,
+        help=f"Maximum number of API requests per minute, 0 to disable rate limiting (default: {config.requests_per_minute})",
+    )
+    pre_process_parser.add_argument(
+        "--ignore-embedding-model-mismatch",
+        action="store_true",
+        help="Recreate embeddings after an embedding model mismatch without prompting",
     )
 
     argcomplete.autocomplete(parser)

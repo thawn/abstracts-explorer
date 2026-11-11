@@ -19,12 +19,41 @@ from abstracts_explorer.mcp_tools import (
     _format_search_papers_result,
     _format_visualization_result,
     _format_paper_details_result,
-    _normalize_search_papers_args,
-    _normalize_get_topic_evolution_args,
-    _normalize_analyze_topic_relevance_args,
-    _normalize_get_paper_details_args,
+    _normalize_args,
+    SEARCH_PAPERS_RULES,
+    GET_TOPIC_EVOLUTION_RULES,
+    ANALYZE_TOPIC_RELEVANCE_RULES,
+    GET_PAPER_DETAILS_RULES,
+    INTERESTING_PAPER_ARRAY_RULES,
+    INTERESTING_PAPER_SINGLE_RULES,
     _filter_unknown_kwargs,
 )
+
+
+def _normalize_search_papers_args(arguments):
+    """Test convenience wrapper for the search-papers rule set."""
+    return _normalize_args(arguments, SEARCH_PAPERS_RULES)
+
+
+def _normalize_get_topic_evolution_args(arguments):
+    """Test convenience wrapper for the topic-evolution rule set."""
+    return _normalize_args(arguments, GET_TOPIC_EVOLUTION_RULES)
+
+
+def _normalize_analyze_topic_relevance_args(arguments):
+    """Test convenience wrapper for the topic-relevance rule set."""
+    return _normalize_args(arguments, ANALYZE_TOPIC_RELEVANCE_RULES)
+
+
+def _normalize_get_paper_details_args(arguments):
+    """Test convenience wrapper for the paper-details rule set."""
+    return _normalize_args(arguments, GET_PAPER_DETAILS_RULES)
+
+
+def _normalize_interesting_paper_tool_args(arguments, array_conference=True):
+    """Test convenience wrapper for the interesting-paper rule sets."""
+    rules = INTERESTING_PAPER_ARRAY_RULES if array_conference else INTERESTING_PAPER_SINGLE_RULES
+    return _normalize_args(arguments, rules)
 
 
 def test_get_mcp_tools_schema():
@@ -33,7 +62,7 @@ def test_get_mcp_tools_schema():
 
     # Should return a list of tool definitions
     assert isinstance(schema, list)
-    assert len(schema) == 6  # 6 MCP tools (including get_paper_details)
+    assert len(schema) == 8  # 8 MCP tools (including interesting-paper tools)
 
     # Check structure of first tool
     tool = schema[0]
@@ -51,6 +80,8 @@ def test_get_mcp_tools_schema():
     assert "search_papers" in tool_names
     assert "get_cluster_visualization" in tool_names
     assert "get_paper_details" in tool_names
+    assert "summarize_interesting_papers" in tool_names
+    assert "recommend_related_papers" in tool_names
 
 
 def test_execute_mcp_tool_cluster_topics():
@@ -197,8 +228,7 @@ def test_format_search_papers_result():
 def test_format_search_papers_result_more_than_five_papers():
     """Test that formatting search papers includes all results when more than 5 papers are found."""
     papers = [
-        {"title": f"Paper Number {i}", "year": 2024, "abstract": f"Abstract text for paper {i}"}
-        for i in range(1, 9)
+        {"title": f"Paper Number {i}", "year": 2024, "abstract": f"Abstract text for paper {i}"} for i in range(1, 9)
     ]
     data = {
         "topic": "Transformers",
@@ -683,6 +713,28 @@ class TestExecuteMCPToolE2E:
         }
 
         mock_db = Mock()
+        mock_db.search_papers_semantic.return_value = [
+            {
+                "uid": "p1",
+                "title": "Paper 1",
+                "year": 2025,
+                "conference": "NeurIPS",
+                "session": "ML",
+                "authors": [],
+                "abstract": "Abstract 1",
+                "relevance_score": 0.9,
+            },
+            {
+                "uid": "p2",
+                "title": "Paper 2",
+                "year": 2025,
+                "conference": "NeurIPS",
+                "session": "DL",
+                "authors": [],
+                "abstract": "Abstract 2",
+                "relevance_score": 0.7,
+            },
+        ]
 
         with (
             patch("abstracts_explorer.mcp_server.EmbeddingsManager", return_value=mock_em),
@@ -802,7 +854,7 @@ class TestExecuteMCPToolE2E:
 
         mock_em.find_papers_within_distance.side_effect = _find_papers
         mock_db = Mock()
-        mock_db.get_years_for_conference.return_value = [2022, 2023, 2024]
+        mock_db.get_years.return_value = [2022, 2023, 2024]
         mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 100}
 
         with (
@@ -1413,3 +1465,126 @@ class TestExecuteMCPToolLogging:
         assert len(log_lines) == 1
         # Long result should be truncated
         assert len(log_lines[0]) < len(mock_result) + 100
+
+
+# ---------------------------------------------------------------------------
+# Interesting-paper tools
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_interesting_paper_tool_args():
+    """Interesting-paper argument aliases and types are normalised."""
+    result = _normalize_interesting_paper_tool_args(
+        {
+            "ids": ["a", "b"],
+            "year": "2026",
+            "conference": "ICLR",
+            "limit": "5",
+        }
+    )
+
+    assert result["paper_ids"] == ["a", "b"]
+    assert result["years"] == [2026]
+    assert result["conferences"] == ["ICLR"]
+    assert result["n_results"] == 5
+
+
+def test_execute_mcp_tool_summarize_interesting_papers():
+    """execute_mcp_tool dispatches summarize_interesting_papers."""
+    mock_result = json.dumps({"total_interesting": 2, "papers": []})
+    with patch(
+        "abstracts_explorer.mcp_tools.summarize_interesting_papers",
+        return_value=mock_result,
+    ) as mock_tool:
+        result = execute_mcp_tool(
+            "summarize_interesting_papers",
+            {
+                "paper_ids": ["a"],
+                "priorities": {"a": {"priority": 4, "searchTerm": "x"}},
+                "conference": "ICLR",
+                "year": 2026,
+            },
+        )
+
+    assert result == mock_result
+    mock_tool.assert_called_once_with(
+        paper_ids=["a"],
+        priorities={"a": {"priority": 4, "searchTerm": "x"}},
+        conference="ICLR",
+        years=[2026],
+    )
+
+
+def test_execute_mcp_tool_recommend_related_papers():
+    """execute_mcp_tool dispatches recommend_related_papers."""
+    mock_result = json.dumps({"papers": [], "recommendations_count": 0})
+    with patch(
+        "abstracts_explorer.mcp_tools.recommend_related_papers",
+        return_value=mock_result,
+    ) as mock_tool:
+        result = execute_mcp_tool(
+            "recommend_related_papers",
+            {"priorities": {"a": {"priority": 5}}, "conferences": ["ICLR"], "years": [2026], "n_results": 3},
+        )
+
+    assert result == mock_result
+    mock_tool.assert_called_once_with(
+        priorities={"a": {"priority": 5}},
+        conferences=["ICLR"],
+        years=[2026],
+        n_results=3,
+    )
+
+
+def test_format_summarize_interesting_papers_result():
+    """The interesting-paper summary is formatted for the LLM."""
+    data = {
+        "total_interesting": 2,
+        "rated_count": 2,
+        "average_rating": 4.0,
+        "rating_distribution": {"5": 1, "4": 1},
+        "conferences": {"ICLR": 2},
+        "years": {"2026": 2},
+        "top_keywords": ["transformers", "alignment"],
+        "search_terms": [{"search_term": "llms", "count": 2}],
+        "sessions": [{"session": "Oral", "count": 2}],
+        "top_rated_papers": [{"title": "Paper A", "priority": 5}],
+        "papers": [
+            {
+                "title": "Paper A",
+                "conference": "ICLR",
+                "year": 2026,
+                "priority": 5,
+                "searchTerm": "llms",
+            }
+        ],
+    }
+
+    formatted = format_tool_result_for_llm("summarize_interesting_papers", json.dumps(data))
+
+    assert "Interesting Papers Summary" in formatted
+    assert "Paper A" in formatted
+    assert "transformers" in formatted
+
+
+def test_format_recommend_related_papers_result():
+    """Recommendations are formatted with scores and reasons."""
+    data = {
+        "papers": [
+            {
+                "title": "Paper B",
+                "conference": "ICLR",
+                "year": 2026,
+                "recommendation_score": 0.87,
+                "recommendation_reasons": ["Shares keywords: alignment"],
+                "abstract_snippet": "An abstract",
+            }
+        ],
+        "filters": {"conferences": ["ICLR"], "years": [2026]},
+    }
+
+    formatted = format_tool_result_for_llm("recommend_related_papers", json.dumps(data))
+
+    assert "Recommended Papers" in formatted
+    assert "Paper B" in formatted
+    assert "Shares keywords" in formatted

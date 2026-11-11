@@ -103,6 +103,21 @@ class TestDatabaseManager:
 
         db_manager.close()
 
+    def test_connect_enables_wal_and_busy_timeout(self, db_manager):
+        """SQLite connections use WAL and a 30s busy timeout for concurrent access."""
+        db_manager.connect()
+
+        cursor = db_manager.connection.cursor()
+        try:
+            journal_mode = cursor.execute("PRAGMA journal_mode").fetchone()[0]
+            busy_timeout = cursor.execute("PRAGMA busy_timeout").fetchone()[0]
+        finally:
+            cursor.close()
+        db_manager.close()
+
+        assert str(journal_mode).lower() == "wal"
+        assert busy_timeout == 30000
+
     def test_connect_creates_directories(self, tmp_path):
         """Test that connect creates parent directories."""
         db_path = tmp_path / "subdir" / "another" / "test.db"
@@ -134,14 +149,48 @@ class TestDatabaseManager:
         set_test_db(db_path)
 
         with DatabaseManager() as db:
+            assert db._session is None
+            db.create_tables()
             assert db.connection is not None
 
         # Connection should be closed after exiting context
         assert db.connection is None
 
+    def test_session_property_lazily_connects(self, db_manager):
+        """The session property connects and initializes the schema on first access."""
+        assert db_manager._session is None
+        assert db_manager._schema_ready is False
+
+        session = db_manager.session
+
+        assert session is db_manager._session
+        assert db_manager._schema_ready is True
+        assert db_manager.session is session
+        db_manager.close()
+
+    def test_session_property_reconnects_after_close(self, db_manager):
+        """The session property reconnects after close()."""
+        first_session = db_manager.session
+        db_manager.close()
+
+        second_session = db_manager.session
+
+        assert second_session is not first_session
+        assert second_session is db_manager._session
+        db_manager.close()
+
+    def test_connect_is_idempotent(self, db_manager):
+        """Calling connect() while connected keeps the existing session."""
+        db_manager.connect()
+        first_session = db_manager.session
+
+        db_manager.connect()
+
+        assert db_manager.session is first_session
+        db_manager.close()
+
     def test_create_tables(self, db_manager):
         """Test table creation."""
-        db_manager.connect()
         db_manager.create_tables()
 
         # Check if tables exist
@@ -153,15 +202,16 @@ class TestDatabaseManager:
 
         db_manager.close()
 
-    def test_create_tables_without_connection(self, db_manager):
-        """Test create_tables raises error when not connected."""
-        with pytest.raises(DatabaseError, match="Not connected to database"):
-            db_manager.create_tables()
+    def test_create_tables_auto_connects(self, db_manager):
+        """create_tables() connects lazily when needed."""
+        db_manager.create_tables()
+
+        assert db_manager._session is not None
+        assert db_manager._schema_ready is True
+        db_manager.close()
 
     def test_create_tables_idempotent(self, db_manager):
         """Test that create_tables can be called multiple times without error."""
-        db_manager.connect()
-
         # Call create_tables multiple times - should not raise errors
         db_manager.create_tables()
         db_manager.create_tables()
@@ -175,15 +225,16 @@ class TestDatabaseManager:
 
         db_manager.close()
 
-    def test_query_without_connection(self, db_manager):
-        """Test query raises error when not connected."""
-        with pytest.raises(DatabaseError, match="Not connected to database"):
-            db_manager.query("SELECT * FROM papers")
+    def test_query_auto_connects(self, db_manager):
+        """Querying an uninitialized database creates the schema lazily."""
+        assert db_manager._query("SELECT * FROM papers") == []
+        assert db_manager._session is not None
+        db_manager.close()
 
     def test_query_with_invalid_sql(self, connected_db):
         """Test query with invalid SQL."""
         with pytest.raises(DatabaseError, match="Query failed"):
-            connected_db.query("SELECT * FROM nonexistent_table")
+            connected_db._query("SELECT * FROM nonexistent_table")
 
     def test_get_paper_count_empty(self, connected_db):
         """Test getting paper count on empty database."""
@@ -349,7 +400,7 @@ class TestAddPaper:
         assert isinstance(paper_uid, str)
 
         # Verify paper was added
-        result = connected_db.query("SELECT * FROM papers WHERE uid = ?", (paper_uid,))
+        result = connected_db._query("SELECT * FROM papers WHERE uid = ?", (paper_uid,))
         assert len(result) == 1
 
         row = result[0]
@@ -372,7 +423,7 @@ class TestAddPaper:
         assert paper_uid is not None
 
         # Verify paper was added
-        result = connected_db.query("SELECT * FROM papers WHERE uid = ?", (paper_uid,))
+        result = connected_db._query("SELECT * FROM papers WHERE uid = ?", (paper_uid,))
         assert len(result) == 1
 
         row = result[0]
@@ -403,10 +454,13 @@ class TestAddPaper:
         count = connected_db.get_paper_count()
         assert count == 1
 
-    def test_add_paper_without_connection(self, db_manager, sample_paper):
-        """Test add_paper raises error when not connected."""
-        with pytest.raises(DatabaseError, match="Not connected to database"):
-            db_manager.add_paper(sample_paper)
+    def test_add_paper_auto_connects(self, db_manager, sample_paper):
+        """add_paper() connects lazily and initializes the schema."""
+        uid = db_manager.add_paper(sample_paper)
+
+        assert uid is not None
+        assert db_manager.get_paper_count() == 1
+        db_manager.close()
 
     def test_add_paper_with_original_id(self, connected_db):
         """Test adding a paper with an original_id."""
@@ -425,7 +479,7 @@ class TestAddPaper:
         assert paper_uid is not None
 
         # Verify the original_id was stored
-        result = connected_db.query("SELECT * FROM papers WHERE uid = ?", (paper_uid,))
+        result = connected_db._query("SELECT * FROM papers WHERE uid = ?", (paper_uid,))
         assert len(result) == 1
         assert result[0]["original_id"] == "12345"
 
@@ -433,7 +487,7 @@ class TestAddPaper:
         """Test that add_paper generates a UID correctly."""
         paper_uid = connected_db.add_paper(sample_paper)
 
-        result = connected_db.query("SELECT uid FROM papers WHERE uid = ?", (paper_uid,))
+        result = connected_db._query("SELECT uid FROM papers WHERE uid = ?", (paper_uid,))
         assert len(result) == 1
 
         uid = result[0]["uid"]
@@ -515,8 +569,8 @@ class TestAddPapers:
         total_count = connected_db.get_paper_count()
         assert total_count == 2
 
-    def test_add_papers_without_connection(self, db_manager):
-        """Test add_papers raises error when not connected."""
+    def test_add_papers_auto_connects(self, db_manager):
+        """add_papers() connects lazily and initializes the schema."""
         papers = [
             LightweightPaper(
                 title="Paper",
@@ -529,8 +583,11 @@ class TestAddPapers:
             )
         ]
 
-        with pytest.raises(DatabaseError, match="Not connected to database"):
-            db_manager.add_papers(papers)
+        count = db_manager.add_papers(papers)
+
+        assert count == 1
+        assert db_manager.get_paper_count() == 1
+        db_manager.close()
 
     def test_add_papers_skips_erroneous_abstract_and_continues(self, connected_db, mocker):
         """Test that an import error on one abstract doesn't abort the rest."""
@@ -1348,16 +1405,12 @@ class TestValidationData:
         with pytest.raises(ValueError, match="Invalid data format"):
             connected_db.donate_validation_data(paper_priorities)
 
-    def test_donate_validation_data_not_connected(self):
-        """Test donation without connection raises DatabaseError."""
-        import pytest
-        from abstracts_explorer.database import DatabaseError
+    def test_donate_validation_data_auto_connects(self, db_manager):
+        """Test donation auto-connects when no explicit connection exists."""
+        count = db_manager.donate_validation_data({"test": {"priority": 5}})
 
-        db = DatabaseManager()
-        # Don't connect
-
-        with pytest.raises(DatabaseError, match="Not connected"):
-            db.donate_validation_data({"test": {"priority": 5}})
+        assert count == 1
+        db_manager.close()
 
 
 class TestChatDonation:
@@ -1673,73 +1726,72 @@ class TestGetConferenceYearsFromDb:
         assert result["NeurIPS"] == [2025, 2024]
         assert result["ICLR"] == [2024]
 
-    def test_returns_empty_dict_when_not_connected(self):
-        """Returns empty dict (not an error) when session is None."""
-        db = DatabaseManager()
-        assert db.get_conference_years_from_db() == {}
+    def test_returns_empty_dict_when_database_empty(self, db_manager):
+        """Returns empty dict for an empty auto-initialized database."""
+        assert db_manager.get_conference_years_from_db() == {}
+        db_manager.close()
 
 
-class TestResolveDefaultConferenceYear:
-    """Tests for DatabaseManager.resolve_default_conference_year()."""
+class TestConfirmDefaultConferenceYearExists:
+    """Tests for DatabaseManager.confirm_default_conference_year_exists()."""
 
     def _make_mock_db(self, conferences_with_years):
-        """Return a partial mock that delegates resolve_default_conference_year to the real method."""
+        """Return a partial mock that delegates the confirmation to the real method."""
         from unittest.mock import MagicMock
 
         mock_db = MagicMock()
-        mock_db.get_conferences.return_value = sorted(conferences_with_years.keys())
-        mock_db.get_years.side_effect = lambda conference=None: (
-            conferences_with_years.get(conference, [])
-            if conference
-            else sorted({y for years in conferences_with_years.values() for y in years}, reverse=True)
-        )
         mock_db.get_conference_years_from_db.return_value = conferences_with_years
-        mock_db.resolve_default_conference_year.side_effect = (
-            lambda conf, year: DatabaseManager.resolve_default_conference_year(mock_db, conf, year)
+        mock_db.confirm_default_conference_year_exists.side_effect = (
+            lambda conf, year: DatabaseManager.confirm_default_conference_year_exists(mock_db, conf, year)
         )
         return mock_db
 
     def test_returns_configured_values_when_match_exists(self):
         """Configured conference and year are returned when they match DB data."""
         mock_db = self._make_mock_db({"NeurIPS": [2025, 2024]})
-        conf, year = mock_db.resolve_default_conference_year("NeurIPS", 2024)
-        assert conf == "NeurIPS"
-        assert year == 2024
+        result = mock_db.confirm_default_conference_year_exists("NeurIPS", 2024)
+        assert result == {"conference": "NeurIPS", "year": 2024, "error": None}
 
     def test_case_insensitive_conference_match(self):
         """Conference name is matched case-insensitively."""
         mock_db = self._make_mock_db({"NeurIPS": [2025, 2024]})
-        conf, year = mock_db.resolve_default_conference_year("neurips", 2025)
-        assert conf == "NeurIPS"
-        assert year == 2025
+        result = mock_db.confirm_default_conference_year_exists("neurips", 2025)
+        assert result["conference"] == "NeurIPS"
+        assert result["year"] == 2025
+        assert result["error"] is None
 
-    def test_falls_back_to_most_recent_year_when_configured_year_missing(self):
-        """Most recent DB year is used when configured year has no data."""
+    def test_does_not_fall_back_when_configured_year_missing(self):
+        """A missing configured year returns an error instead of picking another year."""
         mock_db = self._make_mock_db({"NeurIPS": [2025, 2024]})
-        conf, year = mock_db.resolve_default_conference_year("NeurIPS", 2020)
-        assert conf == "NeurIPS"
-        assert year == 2025
+        result = mock_db.confirm_default_conference_year_exists("NeurIPS", 2020)
+        assert result["conference"] is None
+        assert result["year"] is None
+        assert "2020" in result["error"]["message"]
+        assert result["error"]["available_years"] == [2025, 2024]
 
-    def test_falls_back_when_configured_conference_has_no_data(self):
-        """Falls back to most-recent conference/year when configured conference is absent."""
+    def test_does_not_fall_back_when_configured_conference_missing(self):
+        """A missing configured conference returns an error and available options."""
         mock_db = self._make_mock_db({"ICLR": [2024]})
-        conf, year = mock_db.resolve_default_conference_year("ICML", 2024)
-        assert conf == "ICLR"
-        assert year == 2024
+        result = mock_db.confirm_default_conference_year_exists("ICML", 2024)
+        assert result["conference"] is None
+        assert result["year"] is None
+        assert "ICML" in result["error"]["message"]
+        assert result["error"]["available_conferences"] == ["ICLR"]
+        assert "registry download" in result["error"]["guidance"]
 
-    def test_most_recent_conference_chosen_when_no_default_configured(self):
-        """Selects the conference with the most recent year when no default is set."""
+    def test_no_default_configured_returns_no_error(self):
+        """An empty configured conference is not validated."""
         mock_db = self._make_mock_db({"NeurIPS": [2024], "ICLR": [2025]})
-        conf, year = mock_db.resolve_default_conference_year("", None)
-        assert conf == "ICLR"
-        assert year == 2025
+        result = mock_db.confirm_default_conference_year_exists("", None)
+        assert result == {"conference": None, "year": None, "error": None}
 
-    def test_returns_configured_values_when_db_empty(self):
-        """Configured values are returned unchanged when the DB has no data."""
+    def test_empty_database_returns_error(self):
+        """An empty database returns an informative error for any configured default."""
         mock_db = self._make_mock_db({})
-        conf, year = mock_db.resolve_default_conference_year("NeurIPS", 2024)
-        assert conf == "NeurIPS"
-        assert year == 2024
+        result = mock_db.confirm_default_conference_year_exists("NeurIPS", 2024)
+        assert result["conference"] is None
+        assert "empty" in result["error"]["message"]
+        assert result["error"]["available_conferences"] == []
 
 
 class TestResolveConferenceForUrl:
@@ -1805,3 +1857,59 @@ class TestResolveConferenceForUrl:
         result = mock_db.resolve_conference_for_url("customconf")
         assert result["conference"] == "CustomConf"
         assert result["error"] is None
+
+
+class TestGetPapersByUids:
+    """Tests for DatabaseManager.get_papers_by_uids."""
+
+    def test_batch_lookup_preserves_order_and_skips_missing(self, connected_db, sample_paper):
+        uid = connected_db.add_paper(sample_paper)
+
+        results = connected_db.get_papers_by_uids([uid, "missing-uid"])
+
+        assert len(results) == 1
+        assert results[0]["uid"] == uid
+        assert results[0]["title"] == "Test Paper"
+
+    def test_empty_input_returns_empty_list(self, connected_db):
+        assert connected_db.get_papers_by_uids([]) == []
+
+
+class TestGetPaperWhereFilters:
+    """Tests for the low-level get_paper where-filter authority."""
+
+    def test_in_filter(self, connected_db, sample_paper, sample_paper_minimal):
+        connected_db.add_paper(sample_paper)
+        connected_db.add_paper(sample_paper_minimal)
+
+        results = connected_db.get_paper({"year": {"$in": [2024]}})
+        assert len(results) == 1
+        assert results[0]["title"] == "Minimal Paper"
+
+    def test_or_filter(self, connected_db, sample_paper, sample_paper_minimal):
+        connected_db.add_paper(sample_paper)
+        connected_db.add_paper(sample_paper_minimal)
+
+        results = connected_db.get_paper(
+            {"$or": [{"conference": "NeurIPS"}, {"conference": "ICLR"}]},
+            limit=0,
+        )
+        assert {paper["conference"] for paper in results} == {"NeurIPS", "ICLR"}
+
+    def test_contains_filter(self, connected_db, sample_paper):
+        connected_db.add_paper(sample_paper)
+
+        results = connected_db.get_paper({"title": {"$contains": "test"}})
+        assert len(results) == 1
+        assert results[0]["title"] == "Test Paper"
+
+    def test_unknown_field_raises(self, connected_db):
+        with pytest.raises(DatabaseError, match="Unknown paper field"):
+            connected_db.get_paper({"nonexistent": "value"})
+
+    def test_count_uses_where_filters(self, connected_db, sample_paper, sample_paper_minimal):
+        connected_db.add_paper(sample_paper)
+        connected_db.add_paper(sample_paper_minimal)
+
+        assert connected_db.get_paper_count({"year": 2025}) == 1
+        assert connected_db.get_paper_count({"conference": {"$in": ["NeurIPS", "ICLR"]}}) == 2

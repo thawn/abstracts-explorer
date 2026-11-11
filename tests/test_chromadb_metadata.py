@@ -14,7 +14,6 @@ from unittest.mock import Mock
 from abstracts_explorer.plugin import validate_lightweight_paper, prepare_chroma_db_paper_data
 from abstracts_explorer.embeddings import EmbeddingsManager
 
-
 # Test embedding dimension for mock embeddings
 MOCK_EMBEDDING_DIMENSION = 4096
 
@@ -72,7 +71,6 @@ def test_chroma_collection(tmp_path_factory, monkeypatch_session):
     # Initialize embeddings manager
     em = EmbeddingsManager(collection_name=collection_name)
     em._openai_client = mock_client  # Inject mock
-    em.connect()
     em.create_collection(reset=True)
 
     # Add test papers with diverse metadata

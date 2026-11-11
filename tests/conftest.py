@@ -280,7 +280,6 @@ def connected_db(db_manager):
     -----
     Automatically closes the database connection after the test.
     """
-    db_manager.connect()
     db_manager.create_tables()
     yield db_manager
     db_manager.close()
@@ -520,6 +519,9 @@ def embeddings_manager(tmp_path, monkeypatch):
 
     # Set the embedding_db path via environment variable
     monkeypatch.setenv("EMBEDDING_DB", str(chroma_path))
+    # Keep the default collection name in sync with the fixture manager so that
+    # managers created inside production code use the same test collection.
+    monkeypatch.setenv("COLLECTION_NAME", "test_collection")
 
     # Force config reload to pick up the environment variable
     # Use .env.test for consistent test configuration

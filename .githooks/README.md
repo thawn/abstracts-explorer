@@ -106,11 +106,13 @@ chmod +x .git/hooks/pre-commit
 
 For the pre-commit hook to work fully, you need to install:
 
-- **black**: Python code formatter (`uv sync --extra dev`)
-- **ruff**: Python linter (optional, `uv pip install ruff`)
-- **mypy**: Python type checker (optional, `uv pip install mypy types-requests`)
+- **black**: Python code formatter (`uv sync --all-extras`)
+- **ruff**: Python linter (`uv sync --all-extras`)
+- **mypy**: Python type checker (`uv sync --all-extras`)
 
-The hook will skip checks for any missing tools and warn you.
+`mypy` and `types-requests` are included in the `dev` optional dependencies.
+If mypy is unavailable, the pre-commit hook fails instead of silently skipping
+the type check. Black and ruff are still skipped with a warning when missing.
 
 ## More Information
 

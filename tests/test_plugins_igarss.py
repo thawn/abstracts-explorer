@@ -693,7 +693,7 @@ class TestIGARSSPluginDatabaseIntegration:
                 db.create_tables()
                 db.add_papers(papers)
 
-                rows = db.query("SELECT uid, title, abstract, year, conference, authors FROM papers")
+                rows = db._query("SELECT uid, title, abstract, year, conference, authors FROM papers")
                 assert len(rows) == 2
 
                 titles = {r["title"] for r in rows}

@@ -38,6 +38,7 @@ def natural_sort_key(s: str) -> List:
     >>> sorted(["A10", "A2", "A1"], key=natural_sort_key)
     ['A1', 'A2', 'A10']
     """
+
     def atoi(text):
         return int(text) if text.isdigit() else text
 
@@ -162,6 +163,80 @@ def get_poster_url(paper: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _group_papers_by_session(papers: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Group papers by their session name.
+
+    Parameters
+    ----------
+    papers : list of dict
+        Paper dictionaries to group.
+
+    Returns
+    -------
+    dict
+        Mapping of session name to papers. Papers without a session are placed
+        under ``"No Session"``.
+    """
+    sessions: Dict[str, List[Dict[str, Any]]] = {}
+    for paper in papers:
+        session = paper.get("session") or "No Session"
+        sessions.setdefault(session, []).append(paper)
+    return sessions
+
+
+def _format_paper_block(paper: Dict[str, Any]) -> str:
+    """
+    Format a single paper as a markdown block.
+
+    Parameters
+    ----------
+    paper : dict
+        Paper dictionary to format.
+
+    Returns
+    -------
+    str
+        Markdown block for the paper, terminated by a horizontal rule.
+    """
+    markdown = ""
+    stars = "⭐" * paper.get("priority", 0)
+    markdown += f"### {paper.get('title', 'Untitled')}\n\n"
+    markdown += f"**Rating:** {stars} ({paper.get('priority', 0)}/5)\n\n"
+
+    if paper.get("searchTerm"):
+        markdown += f"**Search Term:** {paper.get('searchTerm')}\n\n"
+
+    if paper.get("authors"):
+        authors = ", ".join(paper["authors"]) if isinstance(paper["authors"], list) else paper["authors"]
+        markdown += f"**Authors:** {authors}\n\n"
+
+    if paper.get("poster_position"):
+        markdown += f"**Poster:** {paper['poster_position']}\n\n"
+
+    pdf_url = paper.get("paper_pdf_url")
+    if not pdf_url and paper.get("paper_url"):
+        pdf_url = paper["paper_url"].replace("/forum?id=", "/pdf?id=")
+    if pdf_url:
+        markdown += f"**PDF:** [View on OpenReview]({pdf_url})\n\n"
+
+    if paper.get("paper_url"):
+        markdown += f"**Paper URL:** {paper['paper_url']}\n\n"
+
+    if paper.get("url"):
+        markdown += f"**Source URL:** {paper['url']}\n\n"
+
+    if paper.get("abstract"):
+        markdown += f"**Abstract:**\n\n{paper['abstract']}\n\n"
+
+    poster_url = get_poster_url(paper)
+    if poster_url:
+        markdown += f"**Poster Image:** ![Poster]({poster_url})\n\n"
+
+    markdown += "---\n\n"
+    return markdown
+
+
 def generate_all_papers_markdown(papers: List[Dict[str, Any]], title: str) -> str:
     """
     Generate markdown for all papers in a single file.
@@ -189,57 +264,15 @@ def generate_all_papers_markdown(papers: List[Dict[str, Any]], title: str) -> st
     markdown += f"**Papers:** {len(papers)}\n\n"
     markdown += "---\n\n"
 
-    # Group by session
-    sessions: Dict[str, List[Dict[str, Any]]] = {}
-    for paper in papers:
-        session = paper.get("session") or "No Session"
-        if session not in sessions:
-            sessions[session] = []
-        sessions[session].append(paper)
+    sessions = _group_papers_by_session(papers)
 
-    # Write each session
     for session in sorted(sessions.keys()):
         session_papers = sessions[session]
         markdown += f"## {session}\n\n"
         markdown += f"**Papers in this session:** {len(session_papers)}\n\n"
 
         for paper in session_papers:
-            stars = "⭐" * paper.get("priority", 0)
-            markdown += f"### {paper.get('title', 'Untitled')}\n\n"
-            markdown += f"**Rating:** {stars} ({paper.get('priority', 0)}/5)\n\n"
-
-            if paper.get("searchTerm"):
-                markdown += f"**Search Term:** {paper.get('searchTerm')}\n\n"
-
-            if paper.get("authors"):
-                authors = ", ".join(paper["authors"]) if isinstance(paper["authors"], list) else paper["authors"]
-                markdown += f"**Authors:** {authors}\n\n"
-
-            if paper.get("poster_position"):
-                markdown += f"**Poster:** {paper['poster_position']}\n\n"
-
-            # Link to PDF on OpenReview
-            pdf_url = paper.get("paper_pdf_url")
-            if not pdf_url and paper.get("paper_url"):
-                pdf_url = paper["paper_url"].replace("/forum?id=", "/pdf?id=")
-            if pdf_url:
-                markdown += f"**PDF:** [View on OpenReview]({pdf_url})\n\n"
-
-            if paper.get("paper_url"):
-                markdown += f"**Paper URL:** {paper['paper_url']}\n\n"
-
-            if paper.get("url"):
-                markdown += f"**Source URL:** {paper['url']}\n\n"
-
-            if paper.get("abstract"):
-                markdown += f"**Abstract:**\n\n{paper['abstract']}\n\n"
-
-            # Link to poster image
-            poster_url = get_poster_url(paper)
-            if poster_url:
-                markdown += f"**Poster Image:** ![Poster]({poster_url})\n\n"
-
-            markdown += "---\n\n"
+            markdown += _format_paper_block(paper)
 
     return markdown
 
@@ -271,54 +304,15 @@ def generate_search_term_markdown(search_term: str, papers: List[Dict[str, Any]]
     markdown += f"**Papers:** {len(papers)}\n\n"
     markdown += "---\n\n"
 
-    # Group by session
-    sessions: Dict[str, List[Dict[str, Any]]] = {}
-    for paper in papers:
-        session = paper.get("session") or "No Session"
-        if session not in sessions:
-            sessions[session] = []
-        sessions[session].append(paper)
+    sessions = _group_papers_by_session(papers)
 
-    # Write each session
     for session in sorted(sessions.keys()):
         session_papers = sessions[session]
         markdown += f"## {session}\n\n"
         markdown += f"**Papers in this session:** {len(session_papers)}\n\n"
 
         for paper in session_papers:
-            stars = "⭐" * paper.get("priority", 0)
-            markdown += f"### {paper.get('title', 'Untitled')}\n\n"
-            markdown += f"**Rating:** {stars} ({paper.get('priority', 0)}/5)\n\n"
-
-            if paper.get("authors"):
-                authors = ", ".join(paper["authors"]) if isinstance(paper["authors"], list) else paper["authors"]
-                markdown += f"**Authors:** {authors}\n\n"
-
-            if paper.get("poster_position"):
-                markdown += f"**Poster:** {paper['poster_position']}\n\n"
-
-            # Link to PDF on OpenReview
-            pdf_url = paper.get("paper_pdf_url")
-            if not pdf_url and paper.get("paper_url"):
-                pdf_url = paper["paper_url"].replace("/forum?id=", "/pdf?id=")
-            if pdf_url:
-                markdown += f"**PDF:** [View on OpenReview]({pdf_url})\n\n"
-
-            if paper.get("paper_url"):
-                markdown += f"**Paper URL:** {paper['paper_url']}\n\n"
-
-            if paper.get("url"):
-                markdown += f"**Source URL:** {paper['url']}\n\n"
-
-            if paper.get("abstract"):
-                markdown += f"**Abstract:**\n\n{paper['abstract']}\n\n"
-
-            # Link to poster image
-            poster_url = get_poster_url(paper)
-            if poster_url:
-                markdown += f"**Poster Image:** ![Poster]({poster_url})\n\n"
-
-            markdown += "---\n\n"
+            markdown += _format_paper_block(paper)
 
     return markdown
 
@@ -602,18 +596,16 @@ def generate_folder_structure_export(
 
 
 def export_papers_to_zip(
-    papers: List[Dict[str, Any]],
-    search_query: str,
-    sort_order: str = "search-rating-poster"
+    papers: List[Dict[str, Any]], search_query: str, sort_order: str = "search-rating-poster"
 ) -> BytesIO:
     """
     Export papers with priorities to a ZIP file, handling sorting and formatting.
-    
+
     This is a convenience function that handles the complete export workflow:
     - Sorts papers based on the specified sort order
     - Generates the ZIP file structure
     - Returns the buffer ready for sending
-    
+
     Parameters
     ----------
     papers : list
@@ -622,12 +614,12 @@ def export_papers_to_zip(
         Search query context for the export
     sort_order : str, optional
         Sort order: 'search-rating-poster', 'rating-poster-search', or 'poster-search-rating'
-        
+
     Returns
     -------
     BytesIO
         Buffer containing the generated ZIP file
-        
+
     Examples
     --------
     >>> papers = [{"title": "Paper 1", "priority": 5, "searchTerm": "AI"}]
@@ -670,6 +662,6 @@ def export_papers_to_zip(
                 natural_sort_key(p.get("poster_position") or ""),
             )
         )
-    
+
     # Generate zip file with folder structure
     return generate_folder_structure_export(papers, search_query, sort_order)

@@ -19,9 +19,11 @@ set -euo pipefail
 # ── defaults ──────────────────────────────────────────────────────────────────
 VARIANT="caddy"
 BRANCH="main"
+ABSTRACTS_EXPLORER_TAG="${ABSTRACTS_EXPLORER_TAG:-latest}"
 BASE_URL=""  # set after parsing args
 DEPLOY_DIR="$HOME/abstracts-explorer"
 QUADLET_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/containers/systemd"
+ENVIRONMENT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/environment.d"
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 info()  { printf '\033[1;34m▸ %s\033[0m\n' "$*"; }
@@ -69,6 +71,10 @@ case "$VARIANT" in
     *) die "Invalid variant '$VARIANT'. Use 'nginx' or 'caddy'." ;;
 esac
 
+if [[ ! "$ABSTRACTS_EXPLORER_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+    die "Invalid ABSTRACTS_EXPLORER_TAG '$ABSTRACTS_EXPLORER_TAG'."
+fi
+
 BASE_URL="https://raw.githubusercontent.com/thawn/abstracts-explorer/${BRANCH}"
 
 # ── pre-flight checks ────────────────────────────────────────────────────────
@@ -83,6 +89,13 @@ info "Installing Abstracts Explorer (variant: $VARIANT, branch: $BRANCH)"
 info "Creating directory structure under $DEPLOY_DIR"
 mkdir -p "$DEPLOY_DIR"
 mkdir -p "$QUADLET_DIR"
+mkdir -p "$ENVIRONMENT_DIR"
+
+printf 'ABSTRACTS_EXPLORER_TAG=%s\n' "$ABSTRACTS_EXPLORER_TAG" \
+    > "$ENVIRONMENT_DIR/abstracts-explorer.conf"
+chmod 644 "$ENVIRONMENT_DIR/abstracts-explorer.conf"
+systemctl --user set-environment "ABSTRACTS_EXPLORER_TAG=$ABSTRACTS_EXPLORER_TAG"
+ok "Container tag '$ABSTRACTS_EXPLORER_TAG' configured for this user"
 
 if [ "$VARIANT" = "nginx" ]; then
     mkdir -p "$DEPLOY_DIR/nginx" "$DEPLOY_DIR/certs"

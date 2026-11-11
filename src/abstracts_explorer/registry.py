@@ -58,6 +58,33 @@ from abstracts_explorer.config import get_config
 
 logger = logging.getLogger(__name__)
 
+
+def _make_progress_callback(
+    progress_callback: Optional[Callable[[str], None]],
+) -> Callable[[str], None]:
+    """
+    Create a progress callback that also logs each message.
+
+    Parameters
+    ----------
+    progress_callback : callable, optional
+        Function called with status messages.
+
+    Returns
+    -------
+    callable
+        Function that invokes *progress_callback* when provided and logs the
+        message at INFO level.
+    """
+
+    def _progress(msg: str) -> None:
+        if progress_callback:
+            progress_callback(msg)
+        logger.info(msg)
+
+    return _progress
+
+
 # Custom media types for abstracts-explorer artifacts
 PAPER_DB_MEDIA_TYPE = "application/vnd.abstracts-explorer.paper-db.v1.tar+gzip"
 EMBEDDING_DB_MEDIA_TYPE = "application/vnd.abstracts-explorer.embedding-db.v1.tar+gzip"
@@ -310,7 +337,7 @@ class RegistryClient:
 
         with DatabaseManager() as db:
             db.create_tables()
-            return db.get_years_for_conference(conference)
+            return db.get_years(conference=conference)
 
     @staticmethod
     def _get_embedding_model_database() -> Optional[str]:
@@ -482,7 +509,7 @@ class RegistryClient:
 
         # 2. Reset the ChromaDB collection
         em = EmbeddingsManager()
-        em.create_collection(reset=True)
+        em.init(reset=True)
 
     def _export_year(
         self,
@@ -901,10 +928,7 @@ class RegistryClient:
             If upload fails or required data is missing.
         """
 
-        def _progress(msg: str) -> None:
-            if progress_callback:
-                progress_callback(msg)
-            logger.info(msg)
+        _progress = _make_progress_callback(progress_callback)
 
         # --- Determine embedding model (needed for auto-tag) ---
         embedding_model = self._get_embedding_model_database()
@@ -1083,10 +1107,7 @@ class RegistryClient:
         if tag is None:
             tag = _build_tag(conference, year, embedding_model=embedding_model)
 
-        def _progress(msg: str) -> None:
-            if progress_callback:
-                progress_callback(msg)
-            logger.info(msg)
+        _progress = _make_progress_callback(progress_callback)
 
         target = f"{self.repository}:{tag}"
 
@@ -1260,10 +1281,7 @@ class RegistryClient:
         if not conferences:
             raise RegistryError("No conference data found in local database.")
 
-        def _progress(msg: str) -> None:
-            if progress_callback:
-                progress_callback(msg)
-            logger.info(msg)
+        _progress = _make_progress_callback(progress_callback)
 
         _progress(f"Found {len(conferences)} conference(s): {conferences}")
 
@@ -1315,10 +1333,7 @@ class RegistryClient:
         if not conference_tags:
             raise RegistryError("No conference-level tags found in registry.")
 
-        def _progress(msg: str) -> None:
-            if progress_callback:
-                progress_callback(msg)
-            logger.info(msg)
+        _progress = _make_progress_callback(progress_callback)
 
         _progress(
             f"Found {len(conference_tags)} conference tag(s) in registry (skipping {len(tags) - len(conference_tags)} year-specific tag(s))"
@@ -1598,10 +1613,7 @@ class RegistryClient:
         except InvalidVersion as e:
             raise ValueError(f"Invalid version string '{below_version}': {e}") from e
 
-        def _progress(msg: str) -> None:
-            if progress_callback:
-                progress_callback(msg)
-            logger.info(msg)
+        _progress = _make_progress_callback(progress_callback)
 
         _progress(f"Fetching package versions from GitHub Packages API ({self.repository}) …")
         all_versions = self._list_github_package_versions()

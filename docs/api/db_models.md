@@ -45,5 +45,5 @@ with Session(engine) as session:
    :members:
    :undoc-members:
    :show-inheritance:
-   :exclude-members: metadata, registry
+   :exclude-members: metadata, registry, datetime, timezone, Column, Float, Integer, String, Text, DateTime, func, DeclarativeBase
 ```

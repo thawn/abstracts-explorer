@@ -7,6 +7,8 @@ Tests that require a running LM Studio instance are skipped if it's not availabl
 """
 
 import json
+import warnings
+
 import pytest
 from unittest.mock import Mock, patch
 
@@ -34,50 +36,8 @@ from tests.helpers import requires_lm_studio, create_test_db_with_paper
 
 @pytest.fixture
 def mock_database():
-    """Create a mock database manager that returns papers for UIDs "1", "2", "3"."""
-    mock_db = Mock()
-
-    # Set up mock to return papers based on UID (string)
-    def mock_query_side_effect(sql, params):
-        paper_uid = params[0] if params else None
-        papers_map: dict[str, dict] = {
-            "1": {
-                "uid": "1",
-                "title": "Attention Is All You Need",
-                "abstract": "We propose the Transformer...",
-                "authors": "Vaswani et al.",
-                "session": "Oral",
-                "year": 2017,
-                "conference": "NeurIPS",
-            },
-            "2": {
-                "uid": "2",
-                "title": "BERT: Pre-training of Deep Bidirectional Transformers",
-                "abstract": "We introduce BERT...",
-                "authors": "Devlin et al.",
-                "session": "Poster",
-                "year": 2019,
-                "conference": "NeurIPS",
-            },
-            "3": {
-                "uid": "3",
-                "title": "GPT-3: Language Models are Few-Shot Learners",
-                "abstract": "We train GPT-3...",
-                "authors": "Brown et al.",
-                "session": "Oral",
-                "year": 2020,
-                "conference": "NeurIPS",
-            },
-        }
-        paper = papers_map.get(paper_uid) if isinstance(paper_uid, str) else None
-        return [paper] if paper else []
-
-    mock_db.query.side_effect = mock_query_side_effect
-    mock_db.get_conferences.return_value = ["NeurIPS"]
-    mock_db.get_years.return_value = [2025, 2024]
-    mock_db.get_sessions.return_value = []
-
-    return mock_db
+    """Create a minimal mock database manager."""
+    return Mock()
 
 
 @pytest.fixture
@@ -236,7 +196,7 @@ class TestRAGChatInit:
         assert chat.embeddings_manager == mock_embeddings_manager
         assert chat.database == mock_database
         assert chat.lm_studio_url == "https://api.helmholtz-blablador.fz-juelich.de"
-        assert chat.model == "alias-code"
+        assert chat.model == "deepseek-v4.1-flash-at-hzdr"
         assert chat.max_context_papers > 0
         assert 0 <= chat.temperature <= 1
         assert chat.conversation_history == []
@@ -487,6 +447,116 @@ class TestRAGChatQuery:
             with chat.agent.override(model=TestModel()):
                 with pytest.raises(RAGError, match="Query failed"):
                     chat.query("What is NLP?")
+
+
+class TestRAGChatSingleSystemMessage:
+    """Ensure instructions are sent as a single leading system message."""
+
+    def _make_mock_model(self, payloads):
+        import asyncio
+
+        import httpx2
+        from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.providers.openai import OpenAIProvider
+
+        def handler(request):
+            body = json.loads(request.content)
+            payloads.append(body)
+            return httpx2.Response(
+                200,
+                json={
+                    "id": "chatcmpl-test",
+                    "object": "chat.completion",
+                    "created": 0,
+                    "model": body.get("model", "test-model"),
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "ok"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                },
+            )
+
+        client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+        model = OpenAIChatModel(
+            "test-model",
+            provider=OpenAIProvider(
+                base_url="http://test/v1",
+                api_key="test-key",
+                http_client=client,
+            ),
+        )
+        return model, lambda: asyncio.run(client.aclose())
+
+    def test_query_sends_single_leading_system_message(self, mock_embeddings_manager, mock_database):
+        """Repeated queries must not send more than one system message."""
+        payloads = []
+        model, close_client = self._make_mock_model(payloads)
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+
+        try:
+            with chat.agent.override(model=model):
+                chat.query("first question", conferences=["NeurIPS"], years=[2025])
+                chat.query("second question", conferences=["ICLR"], years=[2024])
+        finally:
+            close_client()
+
+        assert len(payloads) == 2
+        for payload in payloads:
+            roles = [message["role"] for message in payload["messages"]]
+            assert roles.count("system") == 1
+            assert roles[0] == "system"
+
+        assert "NeurIPS" in payloads[0]["messages"][0]["content"]
+        assert "ICLR" in payloads[1]["messages"][0]["content"]
+        assert "NeurIPS" not in payloads[1]["messages"][0]["content"]
+
+    def test_chat_without_context_sends_single_system_message(self, mock_embeddings_manager, mock_database):
+        """The no-context chat path must also send exactly one system message."""
+        payloads = []
+        model, close_client = self._make_mock_model(payloads)
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+
+        try:
+            with chat.agent.override(model=model):
+                chat.chat("hello", use_context=False)
+        finally:
+            close_client()
+
+        assert len(payloads) == 1
+        roles = [message["role"] for message in payloads[0]["messages"]]
+        assert roles.count("system") == 1
+        assert roles[0] == "system"
+
+
+class TestRAGChatHTTPClient:
+    """Verify the rate-limited provider uses httpx2 without legacy warnings."""
+
+    def test_rate_limited_agent_uses_httpx2(self, mock_embeddings_manager, mock_database, monkeypatch):
+        """The rate-limited provider should use an httpx2 client and transport."""
+        import asyncio
+
+        import httpx2
+
+        from abstracts_explorer.embeddings import RateLimitedTransport
+
+        config = get_config()
+        monkeypatch.setattr(config, "requests_per_minute", 60)
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            chat = RAGChat(mock_embeddings_manager, mock_database)
+
+        assert not any("legacy `httpx.AsyncClient`" in str(warning.message) for warning in caught)
+
+        provider = getattr(chat.agent.model, "provider")
+        async_client = provider._client._client
+        assert isinstance(async_client, httpx2.AsyncClient)
+        assert isinstance(async_client._transport, RateLimitedTransport)
+        asyncio.run(async_client.aclose())
 
 
 class TestRAGChatChat:
@@ -1143,13 +1213,12 @@ class TestRAGChatIntegration:
         )
 
         # Get the generated UID from the database
-        papers = db.query("SELECT uid FROM papers LIMIT 1")
+        papers = db._query("SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
 
         chroma_path = tmp_path / "chroma_integration"
         set_test_embedding_db(chroma_path)
         em = EmbeddingsManager()
-        em.connect()
         em.create_collection(reset=True)
 
         # Add test paper to ChromaDB using the generated UID from database
@@ -1208,13 +1277,12 @@ class TestRAGChatIntegration:
             },
         )
 
-        papers = db.query("SELECT uid FROM papers LIMIT 1")
+        papers = db._query("SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
 
         chroma_path = tmp_path / "chroma_conversation"
         set_test_embedding_db(chroma_path)
         em = EmbeddingsManager()
-        em.connect()
         em.create_collection(reset=True)
 
         em.add_paper(
@@ -1273,13 +1341,12 @@ class TestRAGChatIntegration:
             },
         )
 
-        papers = db.query("SELECT uid FROM papers LIMIT 1")
+        papers = db._query("SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
 
         chroma_path = tmp_path / "chroma_export"
         set_test_embedding_db(chroma_path)
         em = EmbeddingsManager()
-        em.connect()
         em.create_collection(reset=True)
 
         em.add_paper(
@@ -1769,13 +1836,12 @@ class TestParallelRAGRateLimiting:
             },
         )
 
-        papers = db.query("SELECT uid FROM papers LIMIT 1")
+        papers = db._query("SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
 
         chroma_path = tmp_path / "chroma_parallel"
         set_test_embedding_db(chroma_path)
         em = EmbeddingsManager()
-        em.connect()
         em.create_collection(reset=True)
         em.add_paper(
             {
@@ -1833,3 +1899,105 @@ class TestParallelRAGRateLimiting:
 
         assert len(timestamps) > 0, "At least some queries should succeed"
         assert elapsed >= 2.0, f"Queries should be rate-limited. Got {elapsed:.2f}s"
+
+
+class TestRAGChatInterestingPaperTools:
+    """Tests for the interesting-paper summary and recommendation tools."""
+
+    @patch("abstracts_explorer.rag.mcp_summarize_interesting_papers")
+    def test_query_calls_summarize_interesting_papers(
+        self,
+        mock_summarize,
+        mock_embeddings_manager,
+        mock_database,
+    ):
+        mock_summarize.return_value = json.dumps({"total_interesting": 1, "papers": []})
+
+        def model_fn(messages, info):
+            for msg in messages:
+                for part in msg.parts:
+                    if getattr(part, "part_kind", None) == "tool-return":
+                        return ModelResponse(parts=[TextPart(content="You rated one interesting paper.")])
+            return ModelResponse(parts=[ToolCallPart(tool_name="summarize_interesting_papers", args={})])
+
+        chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
+
+        with chat.agent.override(model=FunctionModel(model_fn)):
+            result = chat.query(
+                "Summarize my interesting papers for ICLR 2026",
+                conferences=["ICLR"],
+                years=[2026],
+                paper_priorities={"p1": {"priority": 5, "searchTerm": "llms"}},
+            )
+
+        mock_summarize.assert_called_once_with(
+            priorities={"p1": {"priority": 5, "searchTerm": "llms"}},
+            conference="ICLR",
+            years=[2026],
+        )
+        assert "summarize_interesting_papers" in result["metadata"]["tools_executed"]
+
+    @patch("abstracts_explorer.rag.mcp_recommend_related_papers")
+    def test_query_calls_recommend_related_papers(
+        self,
+        mock_recommend,
+        mock_embeddings_manager,
+        mock_database,
+    ):
+        mock_recommend.return_value = json.dumps({"papers": [], "recommendations_count": 0})
+
+        def model_fn(messages, info):
+            for msg in messages:
+                for part in msg.parts:
+                    if getattr(part, "part_kind", None) == "tool-return":
+                        return ModelResponse(parts=[TextPart(content="Here are some suggestions.")])
+            return ModelResponse(parts=[ToolCallPart(tool_name="recommend_related_papers", args={})])
+
+        chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
+
+        with chat.agent.override(model=FunctionModel(model_fn)):
+            result = chat.query(
+                "Suggest papers based on my interesting papers",
+                conferences=["ICLR"],
+                years=[2026],
+                paper_priorities={"p1": {"priority": 5}},
+            )
+
+        mock_recommend.assert_called_once_with(
+            priorities={"p1": {"priority": 5}},
+            n_results=10,
+            conferences=["ICLR"],
+            years=[2026],
+        )
+        assert "recommend_related_papers" in result["metadata"]["tools_executed"]
+
+    def test_interesting_tools_without_ratings_return_message(
+        self,
+        mock_embeddings_manager,
+        mock_database,
+    ):
+        from abstracts_explorer.rag import RAGDeps, _tool_summarize_interesting_papers
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+
+        message = _tool_summarize_interesting_papers(ctx)
+        assert "No papers have been marked" in message
+
+
+def test_extract_papers_from_interesting_tools():
+    """Papers from the interesting-paper tools are extracted and de-duplicated."""
+    tool_results = [
+        {
+            "name": "summarize_interesting_papers",
+            "raw_result": json.dumps({"papers": [{"uid": "1", "title": "A"}]}),
+        },
+        {
+            "name": "recommend_related_papers",
+            "raw_result": json.dumps({"papers": [{"uid": "1", "title": "A"}, {"uid": "2", "title": "B"}]}),
+        },
+    ]
+
+    papers = RAGChat._extract_papers(tool_results)
+
+    assert [paper["uid"] for paper in papers] == ["1", "2"]

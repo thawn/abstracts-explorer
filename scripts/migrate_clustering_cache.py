@@ -43,8 +43,7 @@ def parse_args() -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(
         description=(
-            "Migrate existing clustering cache entries to fill the new "
-            "conference, year, and n_clusters columns."
+            "Migrate existing clustering cache entries to fill the new conference, year, and n_clusters columns."
         )
     )
     parser.add_argument(
@@ -76,8 +75,8 @@ def add_missing_columns(db: DatabaseManager) -> list[str]:
     DatabaseError
         If a column cannot be added.
     """
-    if not db.engine:
-        raise DatabaseError("Not connected to database")
+    db.session  # Ensure the database is connected and the schema exists
+    assert db.engine is not None
 
     inspector = inspect(db.engine)
 
@@ -131,11 +130,9 @@ def migrate_clustering_cache(db: DatabaseManager) -> int:
     DatabaseError
         If the migration fails.
     """
-    if not db._session:
-        raise DatabaseError("Not connected to database")
-
     try:
-        entries = db._session.execute(select(ClusteringCache)).scalars().all()
+        session = db.session
+        entries = session.execute(select(ClusteringCache)).scalars().all()
         migrated = 0
         for entry in entries:
             changed = False
@@ -175,13 +172,13 @@ def migrate_clustering_cache(db: DatabaseManager) -> int:
             if changed:
                 migrated += 1
 
-        db._session.commit()
+        db.session.commit()
         return migrated
 
     except DatabaseError:
         raise
     except Exception as e:
-        db._session.rollback()
+        db.session.rollback()
         raise DatabaseError(f"Failed to migrate clustering cache: {str(e)}") from e
 
 
@@ -208,7 +205,7 @@ def main() -> int:
             if added:
                 print(f"Added missing columns: {', '.join(added)}")
             # Expire all ORM state so SQLAlchemy re-reads the updated schema
-            db._session.expire_all()
+            db.session.expire_all()
             count = migrate_clustering_cache(db)
             if count == 0:
                 print("✅ No cache entries needed migration.")
@@ -223,4 +220,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

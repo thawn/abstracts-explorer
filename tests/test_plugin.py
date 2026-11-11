@@ -9,6 +9,7 @@ This module tests all plugin-related functionality including:
 """
 
 import pytest
+import requests
 import tempfile
 from pathlib import Path
 from pydantic import ValidationError
@@ -19,6 +20,7 @@ from tests.conftest import set_test_db
 from abstracts_explorer.plugin import (
     sanitize_author_names,
     convert_to_lightweight_schema,
+    fetch_with_retries,
     validate_lightweight_paper,
     LightweightPaper,
     resolve_conference_from_url,
@@ -588,6 +590,86 @@ class TestIntegration:
 
 
 # ============================================================
+# HTTP Retry Helper Tests
+# ============================================================
+
+
+class TestFetchWithRetries:
+    """Tests for the reusable HTTP retry helper."""
+
+    @staticmethod
+    def _response(status=200, headers=None):
+        response = Mock(status_code=status, headers=headers or {})
+        if status >= 400:
+            response.raise_for_status.side_effect = requests.HTTPError(str(status), response=response)
+        return response
+
+    def test_successful_request(self, monkeypatch):
+        """A successful request is returned without retrying."""
+        sleep = Mock()
+        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        session = Mock()
+        response = self._response()
+        session.get.return_value = response
+
+        result = fetch_with_retries(session, "https://example.com", timeout=7, verify=False)
+
+        assert result is response
+        session.get.assert_called_once_with("https://example.com", timeout=7, verify=False)
+        sleep.assert_not_called()
+
+    def test_transient_failure_retries(self, monkeypatch):
+        """A dropped connection is retried and then succeeds."""
+        sleep = Mock()
+        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        session = Mock()
+        response = self._response()
+        session.get.side_effect = [requests.ConnectionError("reset"), response]
+
+        result = fetch_with_retries(session, "https://example.com", timeout=7, request_delay=0.5)
+
+        assert result is response
+        assert session.get.call_count == 2
+        sleep.assert_any_call(1)
+
+    def test_persistent_server_error_is_retried_then_raised(self, monkeypatch):
+        """Persistent HTTP 503 responses are retried before raising."""
+        sleep = Mock()
+        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        session = Mock()
+        session.get.return_value = self._response(503)
+
+        with pytest.raises(requests.HTTPError, match="503"):
+            fetch_with_retries(session, "https://example.com", timeout=7)
+
+        assert session.get.call_count == 3
+
+    def test_permanent_http_error_not_retried(self, monkeypatch):
+        """Missing pages are not retried."""
+        sleep = Mock()
+        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        session = Mock()
+        session.get.return_value = self._response(404)
+
+        with pytest.raises(requests.HTTPError, match="404"):
+            fetch_with_retries(session, "https://example.com", timeout=7)
+
+        assert session.get.call_count == 1
+
+    def test_retry_after_is_honored(self, monkeypatch):
+        """Rate-limit responses respect the server's Retry-After header."""
+        sleep = Mock()
+        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        session = Mock()
+        session.get.return_value = self._response(429, {"Retry-After": "7"})
+
+        with pytest.raises(requests.HTTPError, match="429"):
+            fetch_with_retries(session, "https://example.com", timeout=7)
+
+        sleep.assert_any_call(7)
+
+
+# ============================================================
 # Tests from test_plugin_year_conference.py
 # ============================================================
 
@@ -793,7 +875,7 @@ class TestML4PSPluginYearConference:
         assert len(lightweight_papers) == 1
         paper = lightweight_papers[0]
         assert paper["year"] == expected_year
-        assert paper["conference"] == "ML4PS@Neurips"
+        assert paper["conference"] == "ML4PS"
 
     def test_ml4ps_lightweight_format_preserves_fields(self):
         """Test that ML4PS plugin preserves all required fields."""
@@ -822,7 +904,7 @@ class TestML4PSPluginYearConference:
         assert paper["session"] == f"ML4PhysicalSciences {expected_year} Workshop - Spotlight"
         assert paper["id"] == 42
         assert paper["year"] == expected_year
-        assert paper["conference"] == "ML4PS@Neurips"
+        assert paper["conference"] == "ML4PS"
         assert paper["award"] == "Best Paper, Outstanding Poster"
 
 
@@ -873,7 +955,7 @@ class TestDatabaseYearConferenceIntegration:
                 db.add_papers(data)
 
                 # Query papers and verify year and conference
-                papers = db.query("SELECT uid, title, year, conference FROM papers ORDER BY title")
+                papers = db._query("SELECT uid, title, year, conference FROM papers ORDER BY title")
                 assert len(papers) == 2
 
                 # Check first paper (Test Paper 1)
@@ -887,11 +969,11 @@ class TestDatabaseYearConferenceIntegration:
                 assert papers[1]["conference"] == "NeurIPS"
 
                 # Test filtering by year
-                papers_2024 = db.query("SELECT * FROM papers WHERE year = 2024")
+                papers_2024 = db._query("SELECT * FROM papers WHERE year = 2024")
                 assert len(papers_2024) == 2
 
                 # Test filtering by conference
-                papers = db.query("SELECT * FROM papers WHERE conference = 'NeurIPS'")
+                papers = db._query("SELECT * FROM papers WHERE conference = 'NeurIPS'")
                 assert len(papers) == 2
 
     def test_ml4ps_year_conference_in_database(self):
@@ -936,25 +1018,25 @@ class TestDatabaseYearConferenceIntegration:
                 db.add_papers(papers_to_insert)
 
                 # Query papers and verify year and conference
-                papers = db.query("SELECT uid, title, year, conference FROM papers ORDER BY uid")
+                papers = db._query("SELECT uid, title, year, conference FROM papers ORDER BY title")
                 assert len(papers) == 2
 
                 # Check first paper
                 assert papers[0]["title"] == "ML4PS Paper 1"
                 assert papers[0]["year"] == expected_year
-                assert papers[0]["conference"] == "ML4PS@Neurips"
+                assert papers[0]["conference"] == "ML4PS"
 
                 # Check second paper
                 assert papers[1]["title"] == "ML4PS Paper 2"
                 assert papers[1]["year"] == expected_year
-                assert papers[1]["conference"] == "ML4PS@Neurips"
+                assert papers[1]["conference"] == "ML4PS"
 
                 # Test filtering by year
-                papers_for_year = db.query(f"SELECT * FROM papers WHERE year = {expected_year}")
+                papers_for_year = db._query(f"SELECT * FROM papers WHERE year = {expected_year}")
                 assert len(papers_for_year) == 2
 
                 # Test filtering by conference
-                ml4ps_papers = db.query("SELECT * FROM papers WHERE conference = 'ML4PS@Neurips'")
+                ml4ps_papers = db._query("SELECT * FROM papers WHERE conference = 'ML4PS'")
                 assert len(ml4ps_papers) == 2
 
 

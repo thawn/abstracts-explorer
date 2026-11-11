@@ -110,7 +110,7 @@ class TestExportImportRoundTrip:
         # Verify papers are there
         with DatabaseManager() as db:
             db.create_tables()
-            papers = db.search_papers(conference="neurips", year=2024)
+            papers = db.search_papers(conferences=["neurips"], years=[2024])
         assert len(papers) == 3
         titles = {p["title"] for p in papers}
         assert all(f"Paper {i} for neurips 2024" in titles for i in range(3))
@@ -164,7 +164,7 @@ class TestExportImportRoundTrip:
         assert imported == 3
         with DatabaseManager() as db:
             db.create_tables()
-            papers = db.search_papers(conference="neurips", year=2024)
+            papers = db.search_papers(conferences=["neurips"], years=[2024])
         assert len(papers) == 3
 
     def test_import_does_not_affect_other_conferences(self, tmp_path):
@@ -194,7 +194,7 @@ class TestExportImportRoundTrip:
         # iclr/2024 must be untouched
         with DatabaseManager() as db:
             db.create_tables()
-            iclr_papers = db.search_papers(conference="iclr", year=2024)
+            iclr_papers = db.search_papers(conferences=["iclr"], years=[2024])
         assert len(iclr_papers) == 4
 
     def test_embedding_model_conflict_raises_error(self, tmp_path):
@@ -416,7 +416,7 @@ class TestImportYearIntegration:
         # Paper DB should be rolled back — no papers for neurips/2024
         with DatabaseManager() as db:
             db.create_tables()
-            papers = db.search_papers(conference="neurips", year=2024)
+            papers = db.search_papers(conferences=["neurips"], years=[2024])
         assert len(papers) == 0
 
 
@@ -635,15 +635,15 @@ class TestTagHelpers:
 
 
 # ---------------------------------------------------------------------------
-# get_years_for_conference
+# get_years
 # ---------------------------------------------------------------------------
 
 
-class TestGetYearsForConference:
-    """Tests for DatabaseManager.get_years_for_conference."""
+class TestGetYears:
+    """Tests for DatabaseManager.get_years."""
 
     def test_returns_distinct_years(self, tmp_path):
-        """get_years_for_conference returns the unique years for a conference."""
+        """get_years returns the unique years for a conference."""
         set_test_db(tmp_path / "test.db")
         with DatabaseManager() as db:
             db.create_tables()
@@ -653,19 +653,19 @@ class TestGetYearsForConference:
 
         with DatabaseManager() as db:
             db.create_tables()
-            years = db.get_years_for_conference("neurips")
+            years = db.get_years(conference="neurips")
 
         assert sorted(years) == [2024, 2025]
 
     def test_returns_empty_for_unknown_conference(self, tmp_path):
-        """get_years_for_conference returns [] when no papers exist."""
+        """get_years returns [] when no papers exist."""
         set_test_db(tmp_path / "test.db")
         with DatabaseManager() as db:
             db.create_tables()
 
         with DatabaseManager() as db:
             db.create_tables()
-            years = db.get_years_for_conference("unknown")
+            years = db.get_years(conference="unknown")
 
         assert years == []
 

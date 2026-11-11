@@ -58,6 +58,9 @@ that vacuums journal entries older than 7 days.
 An install script automates the full setup:
 
 ```bash
+# Optional: choose the Abstracts Explorer container tag (defaults to latest):
+export ABSTRACTS_EXPLORER_TAG=v1.2.3
+
 # Caddy variant (automatic Let's Encrypt — default):
 curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/main/scripts/install-podman.sh | bash
 
@@ -68,11 +71,22 @@ curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/main/scrip
 
 The script:
 1. Downloads all quadlet, configuration, and environment files
-2. Installs the system socket units (requires `sudo`)
-3. Enables lingering for your user
-4. Generates a secure database password and stores it as a Podman secret
+2. Saves `ABSTRACTS_EXPLORER_TAG` in the user's `environment.d` configuration
+3. Installs the system socket units (requires `sudo`)
+4. Enables lingering for your user
+5. Generates a secure database password and stores it as a Podman secret
    (skipped if the secret already exists)
-5. Prints the remaining manual steps
+6. Prints the remaining manual steps
+
+The configured tag is used by both Quadlet and the update script. To change it
+later, update `ABSTRACTS_EXPLORER_TAG` in
+`~/.config/environment.d/abstracts-explorer.conf`, set the value in the current
+user manager, then run the update script:
+
+```bash
+systemctl --user set-environment ABSTRACTS_EXPLORER_TAG=v1.2.3
+~/abstracts-explorer/update-podman.sh
+```
 
 After the script finishes, you only need to:
 

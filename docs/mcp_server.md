@@ -10,19 +10,17 @@ Model Context Protocol (MCP) is a protocol that allows tools and servers to prov
 
 ## Features
 
-The MCP server provides four main tools:
+The MCP server provides tools for conference analysis plus two personalized
+tools that work with the papers a user marked as interesting.
 
 ### 1. `get_conference_topics`
 
 Analyzes clustered embeddings to identify the most frequently mentioned topics in each cluster.
 
 **Parameters:**
-- `n_clusters` (int): Number of clusters to create (default: 8)
-- `reduction_method` (str): Dimensionality reduction method - 'pca' or 'tsne' (default: 'pca')
-- `clustering_method` (str): Clustering algorithm - 'kmeans', 'dbscan', 'agglomerative', 'spectral', or 'fuzzy_cmeans' (default: 'kmeans')
-- `embeddings_path` (str, optional): Path to ChromaDB embeddings database
+- `conferences` (list of str): Conference names to analyze (e.g., `["NeurIPS"]`). Required.
+- `years` (list of int, optional): Filter by specific years
 - `collection_name` (str, optional): Name of ChromaDB collection
-- `db_path` (str, optional): Path to SQLite database
 
 **Returns:** JSON with cluster statistics and topics for each cluster, including:
 - Keywords and their frequencies
@@ -77,14 +75,10 @@ Finds the most important recent developments in a specific topic.
 Generates visualization data for clustered embeddings.
 
 **Parameters:**
-- `n_clusters` (int): Number of clusters (default: 8)
-- `reduction_method` (str): Reduction method - 'pca' or 'tsne' (default: 'tsne')
-- `clustering_method` (str): Clustering method - 'kmeans', 'dbscan', 'agglomerative', 'spectral', or 'fuzzy_cmeans' (default: 'kmeans')
-- `n_components` (int): Number of dimensions - 2 or 3 (default: 2)
+- `conferences` (list of str): Conference names to retrieve visualization for (e.g., `["NeurIPS"]`). Required.
+- `years` (list of int, optional): Filter by specific years
 - `output_path` (str, optional): Path to save visualization JSON
-- `embeddings_path` (str, optional): Path to ChromaDB embeddings database
 - `collection_name` (str, optional): Name of ChromaDB collection
-- `db_path` (str, optional): Path to SQLite database
 
 **Returns:** JSON with visualization data including:
 - Point coordinates (x, y, optionally z)
@@ -93,6 +87,45 @@ Generates visualization data for clustered embeddings.
 - Statistics
 
 **Example use case:** "Display a graphical representation of the paper clusters."
+
+### 5. `summarize_interesting_papers`
+
+Summarizes the papers a user marked, starred, liked, or rated as interesting.
+
+Ratings are stored in the browser (`localStorage.paperPriorities`) and are
+forwarded automatically by the web UI chat. The tool receives them as
+parameters; no ratings are persisted server-side.
+
+**Parameters:**
+- `paper_ids` (list of str, optional): Paper UIDs. When omitted, the keys of `priorities` are used.
+- `priorities` (dict, optional): Mapping of paper UID to a dict with `priority` and optional `searchTerm`.
+- `conference` (str, optional): Conference filter (e.g. `"ICLR"` or `"ICLR 2026"`).
+- `years` (list of int, optional): Year filter (e.g. `[2026]`).
+
+**Returns:** JSON with:
+- Total interesting papers and rating distribution/average
+- Conferences, years, sessions, search terms, and top keywords
+- Highest-rated papers and compact paper records
+
+**Example use case:** "Give me a summary about the papers I marked as interesting for ICLR'26!"
+
+### 6. `recommend_related_papers`
+
+Recommends further papers based on a rating-weighted embedding centroid of the
+user's interesting papers. Papers the user already rated are excluded.
+
+**Parameters:**
+- `paper_ids` (list of str, optional): Paper UIDs. When omitted, the keys of `priorities` are used.
+- `priorities` (dict, optional): Mapping of paper UID to a dict with `priority` and optional `searchTerm`.
+- `conferences` (list of str, optional): Restrict recommendations to these conferences. Defaults to the dominant conference of the interesting papers.
+- `years` (list of int, optional): Restrict recommendations to these years. Defaults to the years of the interesting papers.
+- `n_results` (int, optional): Number of recommendations (default: 10).
+- `exclude_ids` (list of str, optional): Additional UIDs to exclude.
+
+**Returns:** JSON with recommended papers, each including a relevance score and
+reasons (shared keywords, authors, session, or semantic closeness).
+
+**Example use case:** "Based on my interesting papers, suggest other papers that may interest me."
 
 ## Starting the MCP Server
 
@@ -104,7 +137,7 @@ Start the server with default settings:
 abstracts-explorer mcp-server
 ```
 
-This starts the server on `http://127.0.0.1:8000` with SSE transport.
+This starts the server on `http://127.0.0.1:8000/mcp` with streamable HTTP transport.
 
 ### Custom Host and Port
 
@@ -152,9 +185,7 @@ from abstracts_explorer.database import DatabaseManager
 
 # Initialize components
 em = EmbeddingsManager()
-em.connect()
 db = DatabaseManager()
-db.connect()
 
 # Create RAG chat (MCP tools enabled by default)
 chat = RAGChat(em, db, enable_mcp_tools=True)
@@ -192,18 +223,16 @@ When an LLM assistant needs to analyze topics, it can call:
 {
   "tool": "get_conference_topics",
   "arguments": {
-    "n_clusters": 8,
-    "reduction_method": "tsne",
-    "clustering_method": "kmeans"
+    "conferences": ["NeurIPS"],
+    "years": [2024, 2025]
   }
 }
 ```
 
 The server will:
-1. Load embeddings from ChromaDB
-2. Perform clustering
-3. Analyze topics in each cluster
-4. Return structured JSON results
+1. Load pre-computed clustering results from the database cache
+2. Analyze topics in each cluster
+3. Return structured JSON results
 
 ## API Reference
 
@@ -251,7 +280,7 @@ Before using the MCP server, ensure:
 
 1. **Embeddings are created**: Run `abstracts-explorer create-embeddings` first
 2. **Database exists**: Download papers with `abstracts-explorer download`
-3. **MCP package installed**: `uv sync` or `pip install mcp>=1.0.0`
+3. **MCP package installed**: `uv sync` or `pip install "mcp>=2.0.0,<3"`
 
 ## Troubleshooting
 
@@ -283,54 +312,14 @@ abstracts-explorer mcp-server --port 8001
 
 ## Advanced Usage
 
-### Custom Clustering Parameters
+### Clustering Configuration
 
-Each tool accepts clustering parameters. Examples:
+The MCP tools read pre-computed clustering results from the database cache. The
+pipeline is fixed to Agglomerative clustering (ward linkage, distance threshold
+150) with t-SNE dimensionality reduction. Generate the cache with:
 
-**For DBSCAN:**
-```python
-{
-  "clustering_method": "dbscan",
-  "eps": 0.5,
-  "min_samples": 5
-}
-```
-
-**For Agglomerative Clustering:**
-```python
-{
-  "clustering_method": "agglomerative",
-  "n_clusters": 10,
-  "linkage": "ward"
-}
-```
-
-Or with distance threshold:
-```python
-{
-  "clustering_method": "agglomerative",
-  "distance_threshold": 5.0,
-  "linkage": "average"
-}
-```
-
-**For Spectral Clustering:**
-```python
-{
-  "clustering_method": "spectral",
-  "n_clusters": 8,
-  "affinity": "nearest_neighbors",
-  "n_neighbors": 10
-}
-```
-
-**For Fuzzy C-Means:**
-```python
-{
-  "clustering_method": "fuzzy_cmeans",
-  "n_clusters": 8,
-  "m": 2.0  # Fuzziness parameter
-}
+```bash
+abstracts-explorer clustering pre-generate --conference NeurIPS
 ```
 
 ### Filtering by Conference
@@ -341,7 +330,7 @@ Analyze specific conferences:
 # get_topic_evolution arguments
 {
   "topic_keywords": "neural networks",
-  "conference": "neurips",
+  "conferences": ["NeurIPS"],
   "start_year": 2020,
   "end_year": 2024
 }

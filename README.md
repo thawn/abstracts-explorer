@@ -16,7 +16,7 @@ Open source · Apache-2.0 · runs locally or on your institute's server.
 | **Embeddings** | Converts abstracts to vectors via an LLM embedding model (Blablador / LM Studio)           |
 | **Retrieval**  | Semantic (cosine similarity) search                                                        |
 | **Reasoning**  | RAG chat: the LLM reads relevant abstracts, then answers with citations                    |
-| **Agency**     | 6 MCP tools the LLM calls autonomously to analyse topics, trends, and clusters             |
+| **Agency**     | 8 MCP tools the LLM calls autonomously to analyse topics, trends, and clusters |
 | **Interface**  | Flask web UI — four tabs, no coding required                                               |
 
 ## Web UI
@@ -42,6 +42,8 @@ The LLM picks the right tool automatically from your plain-English question.
 | `search_papers`             | "Find papers about graph neural networks"              |
 | `get_cluster_visualization` | "Show me the topic landscape"                          |
 | `get_paper_details`         | "Who wrote that paper? Where is the poster?"           |
+| `summarize_interesting_papers` | "Summarize the papers I marked as interesting for ICLR'26" |
+| `recommend_related_papers`  | "Suggest other papers based on my interesting papers"  |
 
 ## Quick Start
 
@@ -52,6 +54,29 @@ curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/main/scrip
 ```
 
 ### Option B — Local Python
+
+The web UI needs an OpenAI-compatible LLM backend for AI chat and embeddings. Copy the
+configuration template and edit `.env` to match your backend:
+
+```bash
+cp .env.example .env
+```
+
+For local use, start LM Studio's server and load chat and embedding models, then set
+`CHAT_MODEL` and `EMBEDDING_MODEL` in `.env` to their model identifiers. The default
+backend URL is `http://localhost:1234`. For a remote backend such as Blablador, set
+its URL and API token instead; for example:
+
+```dotenv
+LLM_BACKEND_URL=https://api.helmholtz-blablador.fz-juelich.de
+LLM_BACKEND_AUTH_TOKEN=your_blablador_token
+CHAT_MODEL=alias-code
+EMBEDDING_MODEL=alias-embedding
+```
+
+Configure these settings before generating embeddings or starting the web UI. See the
+[configuration guide](https://thawn.github.io/abstracts-explorer/configuration.html)
+for details.
 
 ```bash
 uv sync --all-extras
@@ -82,4 +107,5 @@ docker compose up -d   # → http://localhost:5000
 ## Contributing
 
 Contributions welcome — see [Contributing Guide](https://thawn.github.io/abstracts-explorer/contributing.html).  
+Want support for another conference? [Request it here](https://github.com/thawn/abstracts-explorer/issues/new?template=conference-support-request.md).
 Apache License 2.0 — see [LICENSE](LICENSE).
