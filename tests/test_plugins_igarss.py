@@ -8,6 +8,7 @@ Test suite for the IGARSS conference data downloader plugin.
 import json
 import pytest
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch, Mock, call
 import requests
@@ -141,6 +142,15 @@ class TestStripHighlightTags:
 class TestIGARSSPluginMetadata:
     """Test plugin metadata and initialization."""
 
+    @pytest.fixture(autouse=True)
+    def _mock_current_year_probe(self, monkeypatch):
+        """Avoid live IEEE Xplore requests while testing metadata."""
+        monkeypatch.setattr(
+            IGARSSDownloaderPlugin,
+            "_check_current_year_available",
+            lambda self, year: True,
+        )
+
     def test_plugin_name(self):
         plugin = IGARSSDownloaderPlugin()
         assert plugin.plugin_name == "igarss"
@@ -193,6 +203,59 @@ class TestIGARSSPluginMetadata:
         plugin = IGARSSDownloaderPlugin(timeout=60, verify_ssl=False)
         assert plugin.timeout == 60
         assert plugin.verify_ssl is False
+
+
+# ---------------------------------------------------------------------------
+# Current-year availability tests
+# ---------------------------------------------------------------------------
+
+
+class TestIGARSSPluginCurrentYear:
+    """Test current-year availability detection via the IEEE Xplore API."""
+
+    def test_current_year_available(self):
+        plugin = IGARSSDownloaderPlugin()
+        response = _make_search_response([], total_records=1304)
+        with patch.object(plugin._session, "post", return_value=response) as mock_post:
+            assert plugin._check_current_year_available(2026) is True
+        payload = mock_post.call_args.kwargs["json"]
+        assert "2026" in payload["queryText"]
+        assert payload["pageNumber"] == 1
+        assert mock_post.call_args.kwargs["timeout"] == 3
+
+    def test_current_year_unavailable(self):
+        plugin = IGARSSDownloaderPlugin()
+        response = _make_search_response([], total_records=0)
+        with patch.object(plugin._session, "post", return_value=response):
+            assert plugin._check_current_year_available(2026) is False
+
+    def test_current_year_request_failure(self):
+        plugin = IGARSSDownloaderPlugin()
+        with patch.object(plugin._session, "post", side_effect=requests.RequestException("boom")):
+            assert plugin._check_current_year_available(2026) is False
+
+    def test_current_year_invalid_json(self):
+        plugin = IGARSSDownloaderPlugin()
+        response = Mock()
+        response.raise_for_status = Mock()
+        response.json.side_effect = ValueError("bad json")
+        with patch.object(plugin._session, "post", return_value=response):
+            assert plugin._check_current_year_available(2026) is False
+
+    def test_supported_years_includes_current_year_when_available(self):
+        plugin = IGARSSDownloaderPlugin()
+        with patch.object(plugin, "_check_current_year_available", return_value=True):
+            assert datetime.now().year in plugin.supported_years
+
+    def test_supported_years_excludes_current_year_when_unavailable(self):
+        plugin = IGARSSDownloaderPlugin()
+        with patch.object(plugin, "_check_current_year_available", return_value=False):
+            assert datetime.now().year not in plugin.supported_years
+
+    def test_validate_year_accepts_current_year_when_available(self):
+        plugin = IGARSSDownloaderPlugin()
+        with patch.object(plugin, "_check_current_year_available", return_value=True):
+            plugin.validate_year(datetime.now().year)
 
 
 # ---------------------------------------------------------------------------

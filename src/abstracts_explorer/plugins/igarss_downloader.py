@@ -172,6 +172,43 @@ class IGARSSDownloaderPlugin(LightweightDownloaderPlugin):
             "pageNumber": page_number,
         }
 
+    def _check_current_year_available(self, current_year: int) -> bool:
+        """
+        Check whether IEEE Xplore already has records for *current_year*.
+
+        Queries the IEEE Xplore REST search API directly because the generic
+        HEAD probe in the base class is rejected by IEEE Xplore and the HTML
+        search page exists even for years without published proceedings.
+
+        Parameters
+        ----------
+        current_year : int
+            Year to probe.
+
+        Returns
+        -------
+        bool
+            ``True`` when the search API reports at least one record.
+        """
+        payload = self._build_search_payload(current_year, 1)
+        try:
+            response = self._session.post(
+                self._API_URL,
+                json=payload,
+                timeout=3,
+                verify=self.verify_ssl,
+            )
+            response.raise_for_status()
+            total_records = response.json().get("totalRecords", 0)
+            return int(total_records) > 0
+        except (requests.RequestException, ValueError, TypeError, AttributeError):
+            logger.debug(
+                "%s: current-year availability check failed for year %d",
+                self.plugin_name,
+                current_year,
+            )
+            return False
+
     def _fetch_page(
         self,
         year: int,
