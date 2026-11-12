@@ -6,6 +6,7 @@ Downloads abstracts from the AGU annual meeting's public m-anage meeting API.
 """
 
 import logging
+import string
 import time
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -42,8 +43,8 @@ class AGUDownloaderPlugin(LightweightDownloaderPlugin):
     _MAX_FETCH_ATTEMPTS = 6
     _RETRY_BASE_DELAY = 5.0
     _MAX_RETRY_DELAY = 120.0
-    _MAX_BATCH_ROUNDS = 4
     _RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
+    _PEOPLE_INDEX_LETTERS = tuple(string.ascii_uppercase)
 
     def __init__(self, timeout: int = 30, verify_ssl: bool = True):
         """
@@ -146,33 +147,20 @@ class AGUDownloaderPlugin(LightweightDownloaderPlugin):
             verify_ssl,
             {"date": datetime.now().isoformat(timespec="seconds")},
         )
-        session_refs: Set[str] = set()
-        for program in self._records(programs):
-            for session_key in ("ChildList_Session", "ChildList_SessionReadOnly", "ChildList_UnscheduledSession"):
-                session_refs.update(program.get(session_key) or [])
+        programs = self._records(programs)
+        sessions = self._fetch_sessions(api_url, programs, timeout, verify_ssl, request_delay)
+        papers = self._fetch_papers(api_url, sessions, timeout, verify_ssl, request_delay)
+        if not papers:
+            raise RuntimeError(f"No abstracts with authors found for AGU {year}")
 
-        sessions = self._fetch_batch_records(api_url, sorted(session_refs), timeout, verify_ssl, request_delay)
-        slot_refs = {
-            slot_ref for session in sessions.values() for slot_ref in (session.get("ChildList_PaperSlot") or [])
-        }
-        slots = self._fetch_batch_records(api_url, sorted(slot_refs), timeout, verify_ssl, request_delay)
-
-        slot_by_paper: Dict[str, Dict[str, Any]] = {}
-        paper_refs: Set[str] = set()
-        for slot in slots.values():
-            for paper_ref in slot.get("ChildList_Entry") or []:
-                paper_refs.add(paper_ref)
-                slot_by_paper.setdefault(paper_ref, slot)
-
-        papers = self._fetch_batch_records(api_url, sorted(paper_refs), timeout, verify_ssl, request_delay)
         person_refs = {
             person_ref for paper in papers.values() for person_ref in (paper.get("ChildList_Person") or [])
         }
-        people = self._fetch_batch_records(api_url, sorted(person_refs), timeout, verify_ssl, request_delay)
+        people = self._fetch_people(api_url, sorted(person_refs), timeout, verify_ssl, request_delay)
 
         unique_papers: Dict[Any, LightweightPaper] = {}
-        for paper_ref, paper_data in papers.items():
-            paper = self._convert_paper(paper_data, slot_by_paper.get(paper_ref, {}), people, year, meeting_url)
+        for paper_data in papers.values():
+            paper = self._convert_paper(paper_data, {}, people, year, meeting_url)
             if paper is None:
                 continue
             paper_key: Any = (
@@ -298,41 +286,180 @@ class AGUDownloaderPlugin(LightweightDownloaderPlugin):
         Fetch m-anage records in bounded BatchRead requests.
 
         m-anage may answer a BatchRead with only some of the requested records,
-        listing the rest under ``unanswered``. Missing records are retried for a
-        few rounds so slow or rate-limited responses do not silently drop data.
+        listing the rest under ``unanswered`` or ``single``. As the m-anage web
+        app does, records missing from the batch response are fetched
+        individually so throttling does not silently drop data.
         """
         records: Dict[str, Dict[str, Any]] = {}
-        pending = list(refs)
-        for round_index in range(self._MAX_BATCH_ROUNDS):
-            if not pending:
-                break
-            missing: List[str] = []
-            for start in range(0, len(pending), self._BATCH_SIZE):
-                batch = pending[start : start + self._BATCH_SIZE]
-                payload = self._fetch_json(
-                    f"{api_url}/BatchRead/0",
-                    timeout,
-                    verify_ssl,
-                    {"ids": ",".join(batch)},
-                )
-                models = payload.get("models", {}) if isinstance(payload, dict) else {}
-                if isinstance(models, dict):
-                    records.update({ref: record for ref, record in models.items() if isinstance(record, dict)})
-                missing.extend(ref for ref in batch if ref not in records)
+        single_fetches = 0
+        for start in range(0, len(refs), self._BATCH_SIZE):
+            batch = refs[start : start + self._BATCH_SIZE]
+            payload = self._fetch_json(
+                f"{api_url}/BatchRead/0",
+                timeout,
+                verify_ssl,
+                {"ids": ",".join(batch)},
+            )
+            models = payload.get("models", {}) if isinstance(payload, dict) else {}
+            if isinstance(models, dict):
+                records.update({ref: record for ref, record in models.items() if isinstance(record, dict)})
+
+            refused = payload.get("refused", {}) if isinstance(payload, dict) else {}
+            for ref in batch:
+                if ref in records:
+                    continue
+                status = refused.get(ref) if isinstance(refused, dict) else None
+                try:
+                    status_code = int(status) if status is not None else None
+                except (TypeError, ValueError):
+                    status_code = None
+                if status_code is not None and status_code not in self._RETRYABLE_STATUSES:
+                    logger.debug("Skipping unavailable AGU record %s (HTTP %s)", ref, status_code)
+                    continue
+
+                record = self._fetch_json(f"{api_url}/{ref}", timeout, verify_ssl)
+                if isinstance(record, dict):
+                    records[ref] = record
+                single_fetches += 1
                 if request_delay > 0:
                     time.sleep(request_delay)
-            if missing and round_index < self._MAX_BATCH_ROUNDS - 1:
-                logger.warning(
-                    "AGU m-anage returned %d incomplete record(s); retrying (round %d/%d)",
-                    len(missing),
-                    round_index + 2,
-                    self._MAX_BATCH_ROUNDS,
-                )
-            pending = missing
 
-        if pending:
-            logger.warning("AGU m-anage did not return %d record(s) after retries", len(pending))
+            if request_delay > 0 and start + self._BATCH_SIZE < len(refs):
+                time.sleep(request_delay)
+
+        if single_fetches:
+            logger.info(
+                "Fetched %d AGU record(s) individually after incomplete batch responses",
+                single_fetches,
+            )
         return records
+
+    def _fetch_sessions(
+        self,
+        api_url: str,
+        programs: List[Dict[str, Any]],
+        timeout: int,
+        verify_ssl: bool,
+        request_delay: float,
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Fetch all sessions through the program child-list endpoints.
+
+        Program-level child lists return complete session records and avoid the
+        partial BatchRead responses that m-anage produces under load.
+        """
+        sessions: Dict[str, Dict[str, Any]] = {}
+        fallback_refs: Set[str] = set()
+        params = {"date": datetime.now().isoformat(timespec="seconds")}
+        session_keys = ("ChildList_Session", "ChildList_SessionReadOnly", "ChildList_UnscheduledSession")
+
+        for program in programs:
+            parent = str(program.get("_url") or f"Program/{program.get('id')}")
+            for session_key in session_keys:
+                refs = program.get(session_key) or []
+                if not refs:
+                    continue
+                data = self._fetch_json(f"{api_url}/{parent}/{session_key}", timeout, verify_ssl, params)
+                for record in self._records(data):
+                    ref = str(record.get("_url") or f"Session/{record.get('id')}")
+                    sessions[ref] = record
+                fallback_refs.update(ref for ref in refs if ref not in sessions)
+                if request_delay > 0:
+                    time.sleep(request_delay)
+
+        if fallback_refs:
+            sessions.update(
+                self._fetch_batch_records(api_url, sorted(fallback_refs), timeout, verify_ssl, request_delay)
+            )
+        return sessions
+
+    def _fetch_papers(
+        self,
+        api_url: str,
+        sessions: Dict[str, Dict[str, Any]],
+        timeout: int,
+        verify_ssl: bool,
+        request_delay: float,
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Fetch full paper records through the session child-list endpoints.
+
+        Session child lists return complete paper records, avoiding the partial
+        BatchRead responses m-anage produces under load. Sessions without a
+        direct paper list fall back to their paper slots.
+        """
+        papers: Dict[str, Dict[str, Any]] = {}
+        expected_refs: Set[str] = set()
+        slot_refs: Set[str] = set()
+        params = {"date": datetime.now().isoformat(timespec="seconds")}
+
+        for session in sessions.values():
+            session_ref = str(session.get("_url") or f"Session/{session.get('id')}")
+            refs = session.get("ChildList_Paper") or []
+            if not refs:
+                slot_refs.update(session.get("ChildList_PaperSlot") or [])
+                continue
+            expected_refs.update(refs)
+            data = self._fetch_json(f"{api_url}/{session_ref}/ChildList_Paper", timeout, verify_ssl, params)
+            for paper in self._records(data):
+                ref = str(paper.get("_url") or f"Paper/{paper.get('id')}")
+                papers[ref] = paper
+            if request_delay > 0:
+                time.sleep(request_delay)
+
+        if slot_refs:
+            slots = self._fetch_batch_records(api_url, sorted(slot_refs), timeout, verify_ssl, request_delay)
+            for slot in slots.values():
+                expected_refs.update(slot.get("ChildList_Entry") or [])
+
+        missing = sorted(ref for ref in expected_refs if ref not in papers)
+        if missing:
+            papers.update(self._fetch_batch_records(api_url, missing, timeout, verify_ssl, request_delay))
+        return papers
+
+    def _fetch_people(
+        self,
+        api_url: str,
+        person_refs: List[str],
+        timeout: int,
+        verify_ssl: bool,
+        request_delay: float,
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Fetch people through the alphabetic people index.
+
+        The people index returns every person for a letter in one request, so
+        the complete people directory takes only a few requests. Any referenced
+        people missing from the index are fetched through BatchRead.
+        """
+        if not person_refs:
+            return {}
+
+        people: Dict[str, Dict[str, Any]] = {}
+        params = {"date": datetime.now().isoformat(timespec="seconds")}
+        for letter in self._PEOPLE_INDEX_LETTERS:
+            try:
+                data = self._fetch_json(
+                    f"{api_url}/PeopleIndex/{letter}/ChildList_Person",
+                    timeout,
+                    verify_ssl,
+                    params,
+                )
+            except RuntimeError as exc:
+                if "HTTP 404" in str(exc):
+                    logger.debug("No AGU people index for letter %s", letter)
+                    continue
+                raise
+            for person in self._records(data):
+                ref = str(person.get("_url") or f"Person/{person.get('id')}")
+                people[ref] = person
+            if request_delay > 0:
+                time.sleep(request_delay)
+
+        missing = sorted(ref for ref in person_refs if ref not in people)
+        if missing:
+            people.update(self._fetch_batch_records(api_url, missing, timeout, verify_ssl, request_delay))
+        return people
 
     @staticmethod
     def _records(payload: Any) -> List[Dict[str, Any]]:
