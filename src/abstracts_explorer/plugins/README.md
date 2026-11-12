@@ -60,7 +60,7 @@ Example demonstrating the lightweight plugin API.
 
 ## Plugin APIs
 
-The package provides two plugin APIs with different complexity levels:
+The package provides three plugin APIs with different complexity levels:
 
 ### Full Schema API (`DownloaderPlugin`)
 
@@ -167,9 +167,50 @@ class MyLightweightPlugin(LightweightDownloaderPlugin):
         }
 ```
 
+### HTTP API (`HTTPDownloaderPlugin`)
+
+Extends the lightweight API with a shared `requests.Session`, retry/backoff handling,
+a session-wide 429 cooldown, and JSON/HTML fetch helpers.
+
+**Use when:**
+- Downloading from a public HTTP API or website
+- You want consistent retry and rate-limit handling
+- The source returns JSON or HTML
+
+**Configuration:**
+- `_USER_AGENT`: HTTP user agent
+- `_ACCEPT`: optional `Accept` header
+- `_SOURCE_LABEL`: label used in error messages
+- `_MAX_FETCH_ATTEMPTS`, `_RETRY_BASE_DELAY`, `_MAX_RETRY_DELAY`
+
+**Helpers:**
+- `_fetch_json(url, timeout, verify_ssl, params=None)`
+- `_fetch_soup(url, timeout, verify_ssl, request_delay=0.0)`
+
+**Example:**
+
+```python
+from abstracts_explorer.plugins import HTTPDownloaderPlugin
+
+class MyHTTPPlugin(HTTPDownloaderPlugin):
+    plugin_name = "myhttp"
+    plugin_description = "My HTTP API downloader"
+    _start_year = 2020
+    _SOURCE_LABEL = "my conference"
+    _USER_AGENT = "abstracts-explorer myhttp downloader"
+
+    def get_url(self, year):
+        return f"https://example.com/{year}"
+
+    def download(self, year=None, output_path=None, force_download=False, **kwargs):
+        payload = self._fetch_json(self.get_url(year), self.timeout, self.verify_ssl)
+        # Convert payload to LightweightPaper objects...
+        return []
+```
+
 ## Creating a New Plugin
 
-1. **Choose your API**: Full schema or lightweight
+1. **Choose your API**: Full schema, lightweight, or HTTP/lightweight
 2. **Create a Python file** in this directory
 3. **Implement the plugin class**
 4. **Register the plugin** (auto-register on import)

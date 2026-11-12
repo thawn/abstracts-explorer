@@ -328,14 +328,6 @@ class TestAGURetryHandling:
     def test_session_uses_browser_user_agent(self, agu_plugin):
         assert "Mozilla" in agu_plugin._session.headers["User-Agent"]
 
-    def test_retry_delay_uses_retry_after_header(self, agu_plugin):
-        exc = self._http_error(429, {"Retry-After": "7"})
-        assert agu_plugin._retry_delay(exc, 0) == 7.0
-
-    def test_retry_delay_falls_back_to_exponential_backoff(self, agu_plugin):
-        exc = self._http_error(503)
-        assert agu_plugin._retry_delay(exc, 1) == 10.0
-
     def test_fetch_retries_429_and_then_succeeds(self, agu_plugin):
         rate_limited = _response({})
         rate_limited.raise_for_status.side_effect = self._http_error(429, {"Retry-After": "7"})
@@ -343,7 +335,7 @@ class TestAGURetryHandling:
 
         with (
             patch.object(agu_plugin._session, "get", side_effect=[rate_limited, success]) as mock_get,
-            patch("abstracts_explorer.plugins.agu_downloader.time.sleep") as mock_sleep,
+            patch("abstracts_explorer.plugin.time.sleep") as mock_sleep,
         ):
             result = agu_plugin._fetch_json("https://example.com/api", 30, True)
 
@@ -359,7 +351,7 @@ class TestAGURetryHandling:
 
         with (
             patch.object(agu_plugin._session, "get", return_value=rate_limited) as mock_get,
-            patch("abstracts_explorer.plugins.agu_downloader.time.sleep"),
+            patch("abstracts_explorer.plugin.time.sleep"),
         ):
             with pytest.raises(RuntimeError, match="429"):
                 agu_plugin._fetch_json("https://example.com/api", 30, True)

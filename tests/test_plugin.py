@@ -18,6 +18,8 @@ from unittest.mock import patch, Mock
 from abstracts_explorer.database import DatabaseManager
 from tests.conftest import set_test_db
 from abstracts_explorer.plugin import (
+    HTTPDownloaderPlugin,
+    RateLimitCooldown,
     sanitize_author_names,
     convert_to_lightweight_schema,
     fetch_with_retries,
@@ -670,6 +672,182 @@ class TestFetchWithRetries:
             fetch_with_retries(session, "https://example.com", timeout=7)
 
         sleep.assert_any_call(7)
+
+    def test_params_are_forwarded(self, monkeypatch):
+        """Query parameters are forwarded only when provided."""
+        sleep = Mock()
+        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        session = Mock()
+        session.get.return_value = self._response()
+
+        fetch_with_retries(
+            session,
+            "https://example.com",
+            timeout=7,
+            params={"ids": "Person/1"},
+        )
+
+        session.get.assert_called_once_with(
+            "https://example.com",
+            timeout=7,
+            verify=True,
+            params={"ids": "Person/1"},
+        )
+
+    def test_custom_backoff_and_cap(self, monkeypatch):
+        """Custom retry base delays and caps are applied."""
+        sleep = Mock()
+        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        session = Mock()
+        session.get.side_effect = [requests.ConnectionError("reset"), self._response()]
+
+        fetch_with_retries(
+            session,
+            "https://example.com",
+            timeout=7,
+            retry_base_delay=5,
+            max_retry_delay=3,
+        )
+
+        sleep.assert_any_call(3)
+
+    def test_http_date_retry_after_is_honored(self, monkeypatch):
+        """HTTP-date Retry-After values are converted to a delay."""
+        sleep = Mock()
+        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        session = Mock()
+        session.get.return_value = self._response(
+            429,
+            {"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"},
+        )
+
+        with pytest.raises(requests.HTTPError, match="429"):
+            fetch_with_retries(session, "https://example.com", timeout=7)
+
+        assert sleep.call_count >= 1
+
+    def test_cooldown_is_used_for_rate_limits(self, monkeypatch):
+        """A shared cooldown defers and waits across retry attempts."""
+        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", Mock())
+        cooldown = Mock()
+        session = Mock()
+        success = self._response()
+        session.get.side_effect = [self._response(429, {"Retry-After": "7"}), success]
+
+        result = fetch_with_retries(
+            session,
+            "https://example.com",
+            timeout=7,
+            cooldown=cooldown,
+        )
+
+        assert result is success
+        cooldown.defer.assert_called_once_with(7)
+        assert cooldown.wait.call_count == 2
+
+
+class TestRateLimitCooldown:
+    """Tests for the shared rate-limit cooldown."""
+
+    def test_wait_sleeps_until_deferred_time(self, monkeypatch):
+        clock = {"now": 100.0}
+        sleeps = []
+        monkeypatch.setattr("abstracts_explorer.plugin.time.monotonic", lambda: clock["now"])
+        monkeypatch.setattr(
+            "abstracts_explorer.plugin.time.sleep",
+            lambda delay: (sleeps.append(delay), clock.__setitem__("now", clock["now"] + delay)),
+        )
+        cooldown = RateLimitCooldown()
+        cooldown.defer(5)
+        cooldown.wait()
+
+        assert sleeps == [5]
+        cooldown.wait()
+        assert sleeps == [5]
+
+    def test_defer_keeps_longest_window(self, monkeypatch):
+        clock = {"now": 100.0}
+        monkeypatch.setattr("abstracts_explorer.plugin.time.monotonic", lambda: clock["now"])
+        cooldown = RateLimitCooldown()
+        cooldown.defer(10)
+        cooldown.defer(3)
+
+        sleeps = []
+        monkeypatch.setattr(
+            "abstracts_explorer.plugin.time.sleep",
+            lambda delay: sleeps.append(delay),
+        )
+        cooldown.wait()
+        assert sleeps == [10]
+
+
+class _TestHTTPDownloaderPlugin(HTTPDownloaderPlugin):
+    """Minimal concrete HTTP plugin for testing the shared base class."""
+
+    plugin_name = "test_http"
+    plugin_description = "Test HTTP plugin"
+    conference_name = "TEST"
+    _USER_AGENT = "test-agent"
+    _ACCEPT = "application/json"
+    _SOURCE_LABEL = "test data"
+
+    def download(self, year=None, output_path=None, force_download=False, **kwargs):
+        return []
+
+    def get_metadata(self):
+        return {"name": self.plugin_name}
+
+
+class TestHTTPDownloaderPlugin:
+    """Tests for the shared HTTP downloader base class."""
+
+    @staticmethod
+    def _response(data=None, text="<html></html>"):
+        response = Mock(text=text)
+        response.json.return_value = data
+        response.raise_for_status = Mock()
+        return response
+
+    def test_session_configuration(self):
+        plugin = _TestHTTPDownloaderPlugin(timeout=12, verify_ssl=False)
+
+        assert plugin.timeout == 12
+        assert plugin.verify_ssl is False
+        assert plugin._session.headers["User-Agent"] == "test-agent"
+        assert plugin._session.headers["Accept"] == "application/json"
+
+    def test_fetch_json(self):
+        plugin = _TestHTTPDownloaderPlugin()
+        response = self._response({"ok": True})
+        with patch.object(plugin._session, "get", return_value=response):
+            assert plugin._fetch_json("https://example.com", 30, True) == {"ok": True}
+
+    def test_fetch_soup(self):
+        plugin = _TestHTTPDownloaderPlugin()
+        response = self._response(text="<html><body>Hello</body></html>")
+        with patch.object(plugin._session, "get", return_value=response):
+            soup = plugin._fetch_soup("https://example.com", 30, True)
+
+        assert soup.get_text(strip=True) == "Hello"
+
+    def test_fetch_json_wraps_http_errors(self):
+        plugin = _TestHTTPDownloaderPlugin()
+        response = Mock(status_code=503, headers={})
+        response.raise_for_status.side_effect = requests.HTTPError("503", response=response)
+        with (
+            patch.object(plugin._session, "get", return_value=response),
+            patch("abstracts_explorer.plugin.time.sleep"),
+        ):
+            with pytest.raises(RuntimeError, match="Failed to fetch test data"):
+                plugin._fetch_json("https://example.com", 30, True)
+
+    def test_fetch_json_wraps_decode_errors(self):
+        plugin = _TestHTTPDownloaderPlugin()
+        response = self._response()
+        response.json.side_effect = ValueError("invalid json")
+        with patch.object(plugin._session, "get", return_value=response):
+            with pytest.raises(RuntimeError, match="Failed to decode test data JSON"):
+                plugin._fetch_json("https://example.com", 30, True)
 
 
 # ============================================================
