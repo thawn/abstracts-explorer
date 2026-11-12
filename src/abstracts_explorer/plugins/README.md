@@ -43,6 +43,14 @@ HAICON (Helmholtz AI Conference) data downloader via ConfTool.
 - **Source**: <https://www.conftool.pro/haicon26/> (conference website: <https://haicon.cc/>)
 - **API**: Lightweight schema
 
+### agu
+
+AGU annual meeting abstracts from the public m-anage meeting API.
+- **File**: `agu_downloader.py`
+- **Years**: 2025 onward
+- **Source**: <https://studio.m-anage.com/agu/agu26/meetingapp.cgi>
+- **API**: Lightweight schema
+
 ### example_lightweight
 
 Example demonstrating the lightweight plugin API.

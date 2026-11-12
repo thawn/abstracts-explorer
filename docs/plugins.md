@@ -88,6 +88,18 @@ uv run abstracts-explorer download --plugin haicon --year 2026 --db-path data/ha
 - **Source**: [ConfTool](https://www.conftool.pro/haicon26/) / [haicon.cc](https://haicon.cc/)
 - **Fields**: Lightweight schema (title, authors, abstract, session, keywords, start time)
 
+### agu
+
+AGU annual meeting abstracts from the public m-anage program API.
+
+```bash
+uv run abstracts-explorer download --plugin agu --year 2026 --db-path data/agu.db
+```
+
+- **Years**: 2025 onward
+- **Source**: [AGU26 program](https://studio.m-anage.com/agu/agu26/meetingapp.cgi)
+- **Fields**: Lightweight schema (title, authors, abstract, session, and presentation number when available)
+
 ## Using Plugins via CLI
 
 ### List Available Plugins
