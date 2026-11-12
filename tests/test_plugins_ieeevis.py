@@ -16,6 +16,9 @@ from abstracts_explorer.plugins.ieeevis_downloader import IEEEVISDownloaderPlugi
 from abstracts_explorer.database import DatabaseManager
 from tests.conftest import set_test_db
 
+pytestmark = pytest.mark.usefixtures("mock_current_year_probe")
+
+
 # ---------------------------------------------------------------------------
 # Sample data helpers
 # ---------------------------------------------------------------------------
@@ -142,15 +145,6 @@ def _make_mock_response(papers):
 
 class TestIEEEVISPluginMetadata:
     """Test plugin metadata and initialization."""
-
-    @pytest.fixture(autouse=True)
-    def _mock_current_year_probe(self, monkeypatch):
-        """Avoid live IEEE VIS requests while testing metadata."""
-        monkeypatch.setattr(
-            IEEEVISDownloaderPlugin,
-            "_check_current_year_available",
-            lambda self, year: True,
-        )
 
     def test_plugin_name(self):
         plugin = IEEEVISDownloaderPlugin()

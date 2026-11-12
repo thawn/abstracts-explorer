@@ -19,6 +19,8 @@ from abstracts_explorer.plugins import (
     list_plugins,
 )
 
+pytestmark = pytest.mark.usefixtures("mock_current_year_probe")
+
 
 def _check_ml4ps_website_available() -> bool:
     """Return True if the ML4PS website is reachable."""
@@ -32,6 +34,12 @@ def _check_ml4ps_website_available() -> bool:
 # ============================================================================
 # Fixtures
 # ============================================================================
+
+
+@pytest.fixture(autouse=True)
+def _mock_network_delays(monkeypatch):
+    """Avoid retry backoff sleeps in unit tests."""
+    monkeypatch.setattr("abstracts_explorer.plugins.ml4ps_downloader.time.sleep", lambda seconds: None)
 
 
 @pytest.fixture

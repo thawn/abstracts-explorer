@@ -13,6 +13,20 @@ from abstracts_explorer.rate_limiter import (
     get_global_rate_limiter,
     set_global_rate_limiter,
 )
+from tests.helpers import FakeTime
+
+
+@pytest.fixture
+def fake_time(monkeypatch):
+    """Replace the rate limiter's clock and sleepers with a virtual clock."""
+    clock = FakeTime()
+
+    async def fake_async_sleep(seconds: float) -> None:
+        clock.sleep(seconds)
+
+    monkeypatch.setattr("abstracts_explorer.rate_limiter.time", clock)
+    monkeypatch.setattr("abstracts_explorer.rate_limiter.asyncio.sleep", fake_async_sleep)
+    return clock
 
 
 class TestTokenBucketInitialization:
@@ -76,25 +90,27 @@ class TestTokenBucketRefill:
 
 
 class TestTokenBucketBlocking:
-    def test_blocks_until_token_available(self):
+    def test_blocks_until_token_available(self, fake_time):
         limiter = TokenBucketRateLimiter(requests_per_minute=60)
         limiter._tokens = 0.0
-        limiter._last_update = time.monotonic()
+        limiter._last_update = fake_time.monotonic()
 
-        start = time.monotonic()
+        start = fake_time.monotonic()
         limiter.acquire(tokens=1.0)
-        elapsed = time.monotonic() - start
+        elapsed = fake_time.monotonic() - start
 
-        assert elapsed >= 0.8
+        assert elapsed == pytest.approx(1.0, abs=0.01)
+        assert sum(fake_time.sleeps) == pytest.approx(1.0, abs=0.01)
 
-    def test_does_not_block_when_token_available(self):
+    def test_does_not_block_when_token_available(self, fake_time):
         limiter = TokenBucketRateLimiter(requests_per_minute=60)
 
-        start = time.monotonic()
+        start = fake_time.monotonic()
         limiter.acquire(tokens=1.0)
-        elapsed = time.monotonic() - start
+        elapsed = fake_time.monotonic() - start
 
-        assert elapsed < 0.1
+        assert elapsed == 0.0
+        assert fake_time.sleeps == []
 
 
 class TestTokenBucketReset:
@@ -123,10 +139,10 @@ class TestGlobalRateLimiter:
 
 
 class TestMultithreadedRateLimiting:
-    def test_concurrent_acquire_total_requests(self):
+    def test_concurrent_acquire_total_requests(self, fake_time):
         limiter = TokenBucketRateLimiter(requests_per_minute=120)
         limiter._tokens = 2.0
-        limiter._last_update = time.monotonic()
+        limiter._last_update = fake_time.monotonic()
 
         acquired = []
         lock = threading.Lock()
@@ -135,24 +151,24 @@ class TestMultithreadedRateLimiting:
             for _ in range(2):
                 limiter.acquire(tokens=1.0)
                 with lock:
-                    acquired.append(time.monotonic())
+                    acquired.append(fake_time.monotonic())
 
         threads = [threading.Thread(target=worker) for _ in range(5)]
 
-        start = time.monotonic()
+        start = fake_time.monotonic()
         for t in threads:
             t.start()
         for t in threads:
             t.join()
-        elapsed = time.monotonic() - start
+        elapsed = fake_time.monotonic() - start
 
         assert len(acquired) == 10
-        assert elapsed >= 2.0
+        assert elapsed == pytest.approx(4.0, abs=0.2)
 
-    def test_concurrent_acquire_spread(self):
+    def test_concurrent_acquire_spread(self, fake_time):
         limiter = TokenBucketRateLimiter(requests_per_minute=60)
         limiter._tokens = 1.0
-        limiter._last_update = time.monotonic()
+        limiter._last_update = fake_time.monotonic()
 
         timestamps = []
         lock = threading.Lock()
@@ -160,25 +176,25 @@ class TestMultithreadedRateLimiting:
         def worker():
             limiter.acquire(tokens=1.0)
             with lock:
-                timestamps.append(time.monotonic())
+                timestamps.append(fake_time.monotonic())
 
         threads = [threading.Thread(target=worker) for _ in range(10)]
 
+        start = fake_time.monotonic()
         for t in threads:
             t.start()
         for t in threads:
             t.join()
+        elapsed = fake_time.monotonic() - start
 
         assert len(timestamps) == 10
-        sorted_ts = sorted(timestamps)
-        for i in range(1, len(sorted_ts)):
-            gap = sorted_ts[i] - sorted_ts[i - 1]
-            assert gap >= 0.5
+        assert elapsed == pytest.approx(9.0, abs=0.2)
+        assert len(fake_time.sleeps) >= 9
 
-    def test_no_deadlock_many_threads(self):
+    def test_no_deadlock_many_threads(self, fake_time):
         limiter = TokenBucketRateLimiter(requests_per_minute=600)
         limiter._tokens = 50.0
-        limiter._last_update = time.monotonic()
+        limiter._last_update = fake_time.monotonic()
 
         completed = []
         lock = threading.Lock()
@@ -191,19 +207,21 @@ class TestMultithreadedRateLimiting:
 
         threads = [threading.Thread(target=worker) for _ in range(20)]
 
+        start = fake_time.monotonic()
         for t in threads:
             t.start()
         for t in threads:
             t.join()
 
         assert len(completed) == 20
+        assert fake_time.monotonic() - start == pytest.approx(1.0, abs=0.2)
 
 
 class TestWaitressScenario:
-    def test_six_threads_simultaneous_burst(self):
+    def test_six_threads_simultaneous_burst(self, fake_time):
         limiter = TokenBucketRateLimiter(requests_per_minute=60)
         limiter._tokens = 3.0
-        limiter._last_update = time.monotonic()
+        limiter._last_update = fake_time.monotonic()
 
         timestamps = []
         lock = threading.Lock()
@@ -215,21 +233,20 @@ class TestWaitressScenario:
 
         threads = [threading.Thread(target=worker, args=(i,)) for i in range(6)]
 
-        start = time.monotonic()
+        start = fake_time.monotonic()
         for t in threads:
             t.start()
         for t in threads:
             t.join()
-        elapsed = time.monotonic() - start
+        elapsed = fake_time.monotonic() - start
 
         assert len(timestamps) == 6
-        assert elapsed >= 2.0
-        assert elapsed < 10.0
+        assert elapsed == pytest.approx(3.0, abs=0.2)
 
-    def test_waitress_threads_no_requests_lost(self):
+    def test_waitress_threads_no_requests_lost(self, fake_time):
         limiter = TokenBucketRateLimiter(requests_per_minute=120)
         limiter._tokens = 30.0
-        limiter._last_update = time.monotonic()
+        limiter._last_update = fake_time.monotonic()
 
         success_count = []
         lock = threading.Lock()
@@ -242,13 +259,15 @@ class TestWaitressScenario:
 
         threads = [threading.Thread(target=worker) for _ in range(6)]
 
+        start = fake_time.monotonic()
         for t in threads:
             t.start()
         for t in threads:
             t.join()
+        elapsed = fake_time.monotonic() - start
 
         assert len(success_count) == 6
-        assert len(success_count) == 6
+        assert elapsed == pytest.approx(3.0, abs=0.2)
 
 
 class TestAsyncTokenBucketAcquire:
@@ -262,31 +281,33 @@ class TestAsyncTokenBucketAcquire:
         asyncio.run(limiter.async_acquire(tokens=10.0))
         assert limiter._tokens == pytest.approx(110.0, abs=0.5)
 
-    def test_async_blocks_until_token_available(self):
+    def test_async_blocks_until_token_available(self, fake_time):
         limiter = TokenBucketRateLimiter(requests_per_minute=60)
         limiter._tokens = 0.0
-        limiter._last_update = time.monotonic()
+        limiter._last_update = fake_time.monotonic()
 
         async def acquire():
             await limiter.async_acquire(tokens=1.0)
 
-        start = time.monotonic()
+        start = fake_time.monotonic()
         asyncio.run(acquire())
-        elapsed = time.monotonic() - start
+        elapsed = fake_time.monotonic() - start
 
-        assert elapsed >= 0.8
+        assert elapsed == pytest.approx(1.0, abs=0.01)
+        assert sum(fake_time.sleeps) == pytest.approx(1.0, abs=0.01)
 
-    def test_async_does_not_block_when_token_available(self):
+    def test_async_does_not_block_when_token_available(self, fake_time):
         limiter = TokenBucketRateLimiter(requests_per_minute=60)
 
         async def acquire():
             await limiter.async_acquire(tokens=1.0)
 
-        start = time.monotonic()
+        start = fake_time.monotonic()
         asyncio.run(acquire())
-        elapsed = time.monotonic() - start
+        elapsed = fake_time.monotonic() - start
 
-        assert elapsed < 0.1
+        assert elapsed == 0.0
+        assert fake_time.sleeps == []
 
 
 class TestRateLimitedTransport:
@@ -367,10 +388,10 @@ class TestSyncAsyncSharedLimiter:
 
 
 class TestMultithreadedAsyncRateLimiting:
-    def test_concurrent_async_acquire_total_requests(self):
+    def test_concurrent_async_acquire_total_requests(self, fake_time):
         limiter = TokenBucketRateLimiter(requests_per_minute=120)
         limiter._tokens = 2.0
-        limiter._last_update = time.monotonic()
+        limiter._last_update = fake_time.monotonic()
 
         acquired = []
         lock = threading.Lock()
@@ -379,22 +400,22 @@ class TestMultithreadedAsyncRateLimiting:
             for _ in range(2):
                 await limiter.async_acquire(tokens=1.0)
                 with lock:
-                    acquired.append(time.monotonic())
+                    acquired.append(fake_time.monotonic())
 
         async def run_all():
             await asyncio.gather(*[worker() for _ in range(5)])
 
-        start = time.monotonic()
+        start = fake_time.monotonic()
         asyncio.run(run_all())
-        elapsed = time.monotonic() - start
+        elapsed = fake_time.monotonic() - start
 
         assert len(acquired) == 10
-        assert elapsed >= 2.0
+        assert elapsed == pytest.approx(4.0, abs=0.2)
 
-    def test_no_deadlock_async_many_tasks(self):
+    def test_no_deadlock_async_many_tasks(self, fake_time):
         limiter = TokenBucketRateLimiter(requests_per_minute=600)
         limiter._tokens = 50.0
-        limiter._last_update = time.monotonic()
+        limiter._last_update = fake_time.monotonic()
 
         completed = []
         lock = threading.Lock()
@@ -408,14 +429,18 @@ class TestMultithreadedAsyncRateLimiting:
         async def run_all():
             await asyncio.gather(*[worker() for _ in range(20)])
 
+        start = fake_time.monotonic()
         asyncio.run(run_all())
-        assert len(completed) == 20
+        elapsed = fake_time.monotonic() - start
 
-    def test_concurrent_async_tasks_spread(self):
+        assert len(completed) == 20
+        assert elapsed == pytest.approx(1.0, abs=0.2)
+
+    def test_concurrent_async_tasks_spread(self, fake_time):
         """Multiple concurrent async tasks should be spread out over time, not all fire at once."""
         limiter = TokenBucketRateLimiter(requests_per_minute=60)
         limiter._tokens = 1.0
-        limiter._last_update = time.monotonic()
+        limiter._last_update = fake_time.monotonic()
 
         timestamps = []
         lock = threading.Lock()
@@ -423,24 +448,24 @@ class TestMultithreadedAsyncRateLimiting:
         async def worker():
             await limiter.async_acquire(tokens=1.0)
             with lock:
-                timestamps.append(time.monotonic())
+                timestamps.append(fake_time.monotonic())
 
         async def run_all():
             await asyncio.gather(*[worker() for _ in range(10)])
 
+        start = fake_time.monotonic()
         asyncio.run(run_all())
+        elapsed = fake_time.monotonic() - start
 
         assert len(timestamps) == 10
-        sorted_ts = sorted(timestamps)
-        for i in range(1, len(sorted_ts)):
-            gap = sorted_ts[i] - sorted_ts[i - 1]
-            assert gap >= 0.5
+        assert elapsed == pytest.approx(9.0, abs=0.2)
+        assert len(fake_time.sleeps) >= 9
 
-    def test_async_and_sync_interleaved(self):
+    def test_async_and_sync_interleaved(self, fake_time):
         """Sync and async acquires should interleave correctly, consuming the same token pool."""
         limiter = TokenBucketRateLimiter(requests_per_minute=60)
         limiter._tokens = 5.0
-        limiter._last_update = time.monotonic()
+        limiter._last_update = fake_time.monotonic()
 
         acquired = []
         lock = threading.Lock()
@@ -458,7 +483,6 @@ class TestMultithreadedAsyncRateLimiting:
         async def run_async_tasks():
             await asyncio.gather(*[async_worker() for _ in range(3)])
 
-        # Launch 2 sync threads and 3 async tasks all competing for 5 tokens + refill
         threads = [threading.Thread(target=sync_worker) for _ in range(2)]
         for t in threads:
             t.start()
@@ -469,3 +493,4 @@ class TestMultithreadedAsyncRateLimiting:
         assert len(acquired) == 5
         assert acquired.count("sync") == 2
         assert acquired.count("async") == 3
+        assert fake_time.sleeps == []

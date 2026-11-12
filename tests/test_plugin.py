@@ -32,6 +32,9 @@ from abstracts_explorer.plugins.neurips_downloader import NeurIPSDownloaderPlugi
 from abstracts_explorer.plugins.icml_downloader import ICMLDownloaderPlugin
 from abstracts_explorer.plugins.ml4ps_downloader import ML4PSDownloaderPlugin
 
+pytestmark = pytest.mark.usefixtures("mock_current_year_probe")
+
+
 # ============================================================
 # Tests from test_plugin_helpers.py
 # ============================================================

@@ -16,6 +16,8 @@ from abstracts_explorer.plugins.iclr_downloader import ICLRDownloaderPlugin
 from abstracts_explorer.database import DatabaseManager
 from tests.conftest import set_test_db
 
+pytestmark = pytest.mark.usefixtures("mock_current_year_probe")
+
 
 class TestICLRPlugin:
     """Test suite for ICLR downloader plugin."""

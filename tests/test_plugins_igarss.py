@@ -19,6 +19,16 @@ from abstracts_explorer.plugins.igarss_downloader import (
 )
 from abstracts_explorer.database import DatabaseManager
 from tests.conftest import set_test_db
+from tests.helpers import mock_plugin_current_year_probe
+
+
+@pytest.fixture(autouse=True)
+def _mock_network_delays(monkeypatch, request):
+    """Avoid live IEEE Xplore probes and pagination delays in unit tests."""
+    if getattr(request.node.cls, "__name__", "") != "TestIGARSSPluginCurrentYear":
+        mock_plugin_current_year_probe(monkeypatch)
+    monkeypatch.setattr("abstracts_explorer.plugins.igarss_downloader.time.sleep", lambda seconds: None)
+
 
 # ---------------------------------------------------------------------------
 # Sample data helpers
@@ -141,15 +151,6 @@ class TestStripHighlightTags:
 
 class TestIGARSSPluginMetadata:
     """Test plugin metadata and initialization."""
-
-    @pytest.fixture(autouse=True)
-    def _mock_current_year_probe(self, monkeypatch):
-        """Avoid live IEEE Xplore requests while testing metadata."""
-        monkeypatch.setattr(
-            IGARSSDownloaderPlugin,
-            "_check_current_year_available",
-            lambda self, year: True,
-        )
 
     def test_plugin_name(self):
         plugin = IGARSSDownloaderPlugin()

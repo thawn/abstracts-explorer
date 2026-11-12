@@ -16,6 +16,8 @@ from abstracts_explorer.plugins.aistats_downloader import AISTATSDownloaderPlugi
 from abstracts_explorer.database import DatabaseManager
 from tests.conftest import set_test_db
 
+pytestmark = pytest.mark.usefixtures("mock_current_year_probe")
+
 
 class TestAISTATSPlugin:
     """Test suite for AISTATS downloader plugin."""
