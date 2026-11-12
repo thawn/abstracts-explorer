@@ -39,7 +39,7 @@ def _check_ml4ps_website_available() -> bool:
 @pytest.fixture(autouse=True)
 def _mock_network_delays(monkeypatch):
     """Avoid retry backoff sleeps in unit tests."""
-    monkeypatch.setattr("abstracts_explorer.plugins.ml4ps_downloader.time.sleep", lambda seconds: None)
+    monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", lambda seconds: None)
 
 
 @pytest.fixture
@@ -837,7 +837,7 @@ class TestML4PSWebScraping:
 
     def test_fetch_page_failure(self, ml4ps_plugin):
         """Test page fetching with network error."""
-        with patch.object(ml4ps_plugin.session, "get", side_effect=requests.RequestException("Network error")):
+        with patch.object(ml4ps_plugin.session, "get", side_effect=requests.ConnectionError("Network error")):
             soup = ml4ps_plugin._fetch_page("https://example.com")
             assert soup is None
 
@@ -847,9 +847,9 @@ class TestML4PSWebScraping:
             ml4ps_plugin.session,
             "get",
             side_effect=[
-                requests.RequestException("Error 1"),
-                requests.RequestException("Error 2"),
-                requests.RequestException("Error 3"),
+                requests.ConnectionError("Error 1"),
+                requests.ConnectionError("Error 2"),
+                requests.ConnectionError("Error 3"),
             ],
         ) as mock_get:
             soup = ml4ps_plugin._fetch_page("https://example.com", max_retries=3)
@@ -866,8 +866,8 @@ class TestML4PSWebScraping:
             ml4ps_plugin.session,
             "get",
             side_effect=[
-                requests.RequestException("Network error"),
-                requests.RequestException("Network error"),
+                requests.ConnectionError("Network error"),
+                requests.ConnectionError("Network error"),
                 mock_response,
             ],
         ):
@@ -888,7 +888,7 @@ class TestML4PSWebScraping:
             ml4ps_plugin.session,
             "get",
             side_effect=[
-                requests.RequestException("Network error"),
+                requests.ConnectionError("Network error"),
                 mock_response,
             ],
         ) as mock_get:
@@ -943,7 +943,7 @@ class TestML4PSWebScraping:
 
     def test_scrape_papers_fetch_page_fails(self, ml4ps_plugin):
         """Test scraping when page fetch fails."""
-        with patch.object(ml4ps_plugin.session, "get", side_effect=requests.RequestException("Network error")):
+        with patch.object(ml4ps_plugin.session, "get", side_effect=requests.ConnectionError("Network error")):
             papers = ml4ps_plugin._scrape_papers()
 
             assert papers == []

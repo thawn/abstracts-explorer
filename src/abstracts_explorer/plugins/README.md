@@ -180,12 +180,14 @@ a session-wide 429 cooldown, and JSON/HTML fetch helpers.
 **Configuration:**
 - `_USER_AGENT`: HTTP user agent
 - `_ACCEPT`: optional `Accept` header
+- `_EXTRA_HEADERS`: additional session headers
 - `_SOURCE_LABEL`: label used in error messages
 - `_MAX_FETCH_ATTEMPTS`, `_RETRY_BASE_DELAY`, `_MAX_RETRY_DELAY`
 
 **Helpers:**
-- `_fetch_json(url, timeout, verify_ssl, params=None)`
-- `_fetch_soup(url, timeout, verify_ssl, request_delay=0.0)`
+- `_request(url, timeout, verify_ssl, ..., method="GET", json_body=None)`
+- `_fetch_json(url, timeout, verify_ssl, params=None, method="GET", json_body=None)`
+- `_fetch_soup(url, timeout, verify_ssl, request_delay=0.0, max_attempts=None)`
 
 **Example:**
 

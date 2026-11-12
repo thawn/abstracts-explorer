@@ -72,7 +72,7 @@ class TestAISTATSPlugin:
             plugin.get_url(2025) == "https://virtual.aistats.org/static/virtual/data/aistats-2025-orals-posters.json"
         )
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_success(self, mock_get):
         """Test successful download of AISTATS data."""
         mock_response = Mock()
@@ -111,7 +111,7 @@ class TestAISTATSPlugin:
             assert paper.year == 2025
             assert paper.conference == "AISTATS"
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_with_default_year(self, mock_get):
         """Test download with default year (2025)."""
         mock_response = Mock()
@@ -140,7 +140,7 @@ class TestAISTATSPlugin:
         assert len(data) == 1
         assert data[0].year == 2025
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_with_save_to_file(self, mock_get):
         """Test download with saving to file."""
         mock_response = Mock()
@@ -191,7 +191,7 @@ class TestAISTATSPlugin:
                 json.dump(test_data, f)
 
             plugin = AISTATSDownloaderPlugin()
-            with patch("abstracts_explorer.plugins.json_conference_downloader.requests.get") as mock_get:
+            with patch("requests.Session.get") as mock_get:
                 data = plugin.download(year=2025, output_path=str(output_path))
 
                 mock_get.assert_not_called()
@@ -200,7 +200,7 @@ class TestAISTATSPlugin:
                 assert len(data) == 1
                 assert data[0].title == "Cached Paper"
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_force_redownload(self, mock_get):
         """Test force re-download even when file exists."""
         mock_response = Mock()
@@ -234,7 +234,7 @@ class TestAISTATSPlugin:
             assert len(data) == 1
             assert data[0].title == "Fresh Paper"
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_request_exception(self, mock_get):
         """Test handling of request exceptions."""
         mock_get.side_effect = requests.exceptions.RequestException("Connection error")
@@ -244,7 +244,7 @@ class TestAISTATSPlugin:
         with pytest.raises(RuntimeError, match="Failed to download"):
             plugin.download(year=2025)
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_invalid_json(self, mock_get):
         """Test handling of invalid JSON response."""
         mock_response = Mock()
@@ -256,7 +256,7 @@ class TestAISTATSPlugin:
         with pytest.raises(RuntimeError, match="Invalid JSON response"):
             plugin.download(year=2025)
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_custom_timeout(self, mock_get):
         """Test download with custom timeout."""
         mock_response = Mock()
@@ -269,7 +269,7 @@ class TestAISTATSPlugin:
         call_kwargs = mock_get.call_args[1]
         assert call_kwargs["timeout"] == 60
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_kwargs_override(self, mock_get):
         """Test that kwargs can override default timeout and verify_ssl."""
         mock_response = Mock()
@@ -283,7 +283,7 @@ class TestAISTATSPlugin:
         assert call_kwargs["timeout"] == 90
         assert call_kwargs["verify"] is False
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_full_aistats_record(self, mock_get):
         """Test that optional AISTATS fields are correctly mapped."""
         mock_response = Mock()
@@ -338,7 +338,7 @@ class TestAISTATSPlugin:
 class TestAISTATSPluginDatabaseIntegration:
     """Test AISTATS plugin integration with database."""
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_aistats_data_in_database(self, mock_get):
         """Test that AISTATS data can be stored in the database."""
         mock_response = Mock()

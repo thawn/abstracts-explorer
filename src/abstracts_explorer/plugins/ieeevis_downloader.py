@@ -5,9 +5,7 @@ IEEE VIS Official Downloader Plugin
 Plugin for downloading papers from the official IEEE VIS conference.
 """
 
-import json
 import logging
-import requests
 from bs4 import BeautifulSoup, Tag
 from typing import Any, Dict, List, Optional
 
@@ -46,6 +44,7 @@ class IEEEVISDownloaderPlugin(JSONConferenceDownloaderPlugin):
     plugin_description = "Official IEEE VIS conference data downloader"
     _start_year = 2025
     conference_name = "IEEE VIS"
+    _SOURCE_LABEL = "IEEE VIS data"
 
     #: First year whose program is published as an HTML page rather than JSON.
     _HTML_PROGRAM_START_YEAR = 2026
@@ -312,9 +311,8 @@ class IEEEVISDownloaderPlugin(JSONConferenceDownloaderPlugin):
         url = self.get_url(year)
 
         try:
-            response = requests.get(url, timeout=timeout, verify=verify_ssl)
-            response.raise_for_status()
-        except requests.exceptions.RequestException as e:
+            response = self._request(url, timeout, verify_ssl)
+        except RuntimeError as e:
             raise RuntimeError(f"Failed to download from {url}: {str(e)}") from e
 
         if self._uses_html_program(year):
@@ -326,7 +324,7 @@ class IEEEVISDownloaderPlugin(JSONConferenceDownloaderPlugin):
 
         try:
             data = response.json()
-        except json.JSONDecodeError as e:
+        except ValueError as e:
             raise RuntimeError(f"Invalid JSON response from {url}: {str(e)}") from e
 
         # IEEE VIS returns a direct JSON array, not {"results": [...]}

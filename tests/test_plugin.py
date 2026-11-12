@@ -789,6 +789,7 @@ class _TestHTTPDownloaderPlugin(HTTPDownloaderPlugin):
     conference_name = "TEST"
     _USER_AGENT = "test-agent"
     _ACCEPT = "application/json"
+    _EXTRA_HEADERS = {"X-Test": "yes"}
     _SOURCE_LABEL = "test data"
 
     def download(self, year=None, output_path=None, force_download=False, **kwargs):
@@ -815,6 +816,7 @@ class TestHTTPDownloaderPlugin:
         assert plugin.verify_ssl is False
         assert plugin._session.headers["User-Agent"] == "test-agent"
         assert plugin._session.headers["Accept"] == "application/json"
+        assert plugin._session.headers["X-Test"] == "yes"
 
     def test_fetch_json(self):
         plugin = _TestHTTPDownloaderPlugin()
@@ -849,6 +851,37 @@ class TestHTTPDownloaderPlugin:
             with pytest.raises(RuntimeError, match="Failed to decode test data JSON"):
                 plugin._fetch_json("https://example.com", 30, True)
 
+    def test_post_request_uses_json_body(self):
+        plugin = _TestHTTPDownloaderPlugin()
+        response = self._response({"ok": True})
+        with patch.object(plugin._session, "post", return_value=response) as mock_post:
+            result = plugin._fetch_json(
+                "https://example.com",
+                30,
+                True,
+                method="POST",
+                json_body={"q": "test"},
+            )
+
+        assert result == {"ok": True}
+        mock_post.assert_called_once_with(
+            "https://example.com",
+            json={"q": "test"},
+            timeout=30,
+            verify=True,
+        )
+
+    def test_per_call_max_attempts(self):
+        plugin = _TestHTTPDownloaderPlugin()
+        with (
+            patch.object(plugin._session, "get", side_effect=requests.ConnectionError("down")) as mock_get,
+            patch("abstracts_explorer.plugin.time.sleep"),
+        ):
+            with pytest.raises(RuntimeError, match="Failed to fetch test data"):
+                plugin._request("https://example.com", 30, True, max_attempts=2)
+
+        assert mock_get.call_count == 2
+
 
 # ============================================================
 # Tests from test_plugin_year_conference.py
@@ -858,7 +891,7 @@ class TestHTTPDownloaderPlugin:
 class TestConferencePluginYearFields:
     """Test that NeurIPS plugin sets year and conference fields."""
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_neurips_plugin_adds_year_and_conference(self, mock_get):
         """Test that NeurIPS plugin adds year and conference to each paper."""
         # Mock the requests.get to return test data
@@ -900,7 +933,7 @@ class TestConferencePluginYearFields:
             assert paper.year == 2024
             assert paper.conference == "NeurIPS"
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_neurips_plugin_preserves_existing_fields(self, mock_get):
         """Test that NeurIPS plugin preserves existing paper fields."""
         # Mock the requests.get to return test data with existing fields
@@ -945,7 +978,7 @@ class TestConferencePluginYearFields:
 class TestICMLPluginYearConference:
     """Test that ICML plugin sets year and conference fields."""
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_icml_plugin_adds_year_and_conference(self, mock_get):
         """Test that ICML plugin adds year and conference to each paper."""
         # Mock the requests.get to return test data
@@ -987,7 +1020,7 @@ class TestICMLPluginYearConference:
             assert paper.year == 2025
             assert paper.conference == "ICML"
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_icml_plugin_preserves_existing_fields(self, mock_get):
         """Test that ICML plugin preserves existing paper fields."""
         # Mock the requests.get to return test data with existing fields
@@ -1092,7 +1125,7 @@ class TestML4PSPluginYearConference:
 class TestDatabaseYearConferenceIntegration:
     """Test that year and conference fields are properly stored in the database."""
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_neurips_year_conference_in_database(self, mock_get):
         """Test that year and conference are stored in database from NeurIPS plugin."""
         # Mock the requests.get to return test data
