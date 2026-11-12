@@ -31,7 +31,7 @@ class AGUDownloaderPlugin(LightweightDownloaderPlugin):
     plugin_description = "AGU annual meeting data downloader via m-anage"
     conference_name = "AGU"
     _start_year = 2025
-    _BATCH_SIZE = 100
+    _BATCH_SIZE = 20
     _REQUEST_DELAY = 0.1
     _BASE_URL = "https://studio.m-anage.com/agu/agu{short_year}"
 

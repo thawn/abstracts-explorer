@@ -74,6 +74,25 @@ class TestAGUPluginProperties:
 
 
 class TestAGUDownload:
+    def test_batch_reads_respect_api_limit(self, agu_plugin):
+        refs = [f"Session/{index}" for index in range(21)]
+
+        def mock_get(url, params=None, **kwargs):
+            batch_refs = (params or {})["ids"].split(",")
+            return _response({"models": {ref: {"_url": ref} for ref in batch_refs}})
+
+        with patch.object(agu_plugin._session, "get", side_effect=mock_get) as mock_request:
+            records = agu_plugin._fetch_batch_records(
+                "https://studio.m-anage.com/agu/agu26/meetingapi.cgi",
+                refs,
+                timeout=30,
+                verify_ssl=True,
+                request_delay=0,
+            )
+
+        assert len(records) == 21
+        assert [len(call.kwargs["params"]["ids"].split(",")) for call in mock_request.call_args_list] == [20, 1]
+
     def test_downloads_and_deduplicates_abstracts(self, agu_plugin):
         def mock_get(url, params=None, **kwargs):
             return _api_response(url, params or {})
