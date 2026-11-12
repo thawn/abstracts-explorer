@@ -121,6 +121,7 @@ abstracts-explorer registry download [OPTIONS]
 **Download behavior:**
 
 - Existing local data for the specified conference/year is **replaced** (no merge)
+- The replace confirmation prompt is shown **only when matching local data already exists**; a fresh download proceeds without prompting
 - Both paper database and embeddings are always downloaded together to ensure consistency
 - If the downloaded data was created with a different embedding model than the local database, the download is rejected to prevent data corruption
 
