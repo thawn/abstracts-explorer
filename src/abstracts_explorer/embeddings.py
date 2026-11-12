@@ -1227,7 +1227,12 @@ class EmbeddingsManager:
                     break
 
             count = len(matching)
-            selected = matching if max_papers is None else matching[:max_papers]
+            if max_papers is None:
+                selected = matching
+            else:
+                # Python slicing is safe when max_papers exceeds len(matching).
+                # Clamp negative values so they don't select from the end.
+                selected = matching[: max(0, max_papers)]
 
             # Fetch paper details in batches to avoid one database round-trip
             # per matching paper (a major bottleneck for large collections).

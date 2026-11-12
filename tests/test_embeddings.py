@@ -1886,6 +1886,44 @@ class TestFindPapersWithinDistance:
         assert result["count"] == 2
         assert len(result["papers"]) == 1
 
+    def test_find_papers_with_max_papers_larger_than_matches(self):
+        """max_papers larger than the match count returns all matches."""
+        manager = self._make_manager()
+        database = Mock()
+        database.get_papers_by_uids.return_value = [
+            {"uid": "paper-a", "title": "A"},
+            {"uid": "paper-b", "title": "B"},
+        ]
+
+        result = manager.find_papers_within_distance(
+            database=database,
+            query="query",
+            distance_threshold=1.0,
+            query_embedding=[0.1],
+            max_papers=100,
+        )
+
+        database.get_papers_by_uids.assert_called_once_with(["paper-a", "paper-b"])
+        assert result["count"] == 2
+        assert len(result["papers"]) == 2
+
+    def test_find_papers_with_negative_max_papers_returns_no_details(self):
+        """Negative max_papers is clamped to zero instead of slicing from the end."""
+        manager = self._make_manager()
+        database = Mock()
+
+        result = manager.find_papers_within_distance(
+            database=database,
+            query="query",
+            distance_threshold=1.0,
+            query_embedding=[0.1],
+            max_papers=-1,
+        )
+
+        database.get_papers_by_uids.assert_not_called()
+        assert result["count"] == 2
+        assert result["papers"] == []
+
     def test_count_papers_within_distance_skips_database_lookup(self):
         """Counting matches does not fetch paper details."""
         manager = self._make_manager()
