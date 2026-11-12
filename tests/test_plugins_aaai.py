@@ -646,7 +646,7 @@ def test_http_error(aaai_site):
     get.side_effect = None
     get.return_value = response
     with pytest.raises(RuntimeError, match="Failed to fetch AAAI"):
-        plugin._fetch_page(BASE, 7, True, 0)
+        plugin._fetch_soup(BASE, 7, True, 0)
 
 
 @pytest.mark.parametrize(

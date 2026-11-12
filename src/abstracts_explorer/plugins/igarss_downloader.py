@@ -18,12 +18,11 @@ import re
 import time
 from typing import Any, Dict, List, Optional
 
-import requests
 from requests.adapters import HTTPAdapter
 from pydantic import ValidationError
 
 from abstracts_explorer.plugin import (
-    LightweightDownloaderPlugin,
+    HTTPDownloaderPlugin,
     LightweightPaper,
     sanitize_author_names,
 )
@@ -31,7 +30,7 @@ from abstracts_explorer.plugin import (
 logger = logging.getLogger(__name__)
 
 
-class IGARSSDownloaderPlugin(LightweightDownloaderPlugin):
+class IGARSSDownloaderPlugin(HTTPDownloaderPlugin):
     """
     Plugin for downloading papers from the IGARSS conference via IEEE Xplore.
 
@@ -94,6 +93,19 @@ class IGARSSDownloaderPlugin(LightweightDownloaderPlugin):
     #: Default delay between paginated requests (seconds).
     _PAGE_DELAY = 1.0
 
+    _USER_AGENT = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    )
+    _ACCEPT = "application/json, text/plain, */*"
+    _EXTRA_HEADERS = {
+        "Content-Type": "application/json",
+        "Origin": "https://ieeexplore.ieee.org",
+        "Referer": "https://ieeexplore.ieee.org/search/searchresult.jsp",
+    }
+    _SOURCE_LABEL = "IGARSS data"
+
     def __init__(self, timeout: int = 30, verify_ssl: bool = True):
         """
         Initialize the IGARSS downloader plugin.
@@ -105,22 +117,7 @@ class IGARSSDownloaderPlugin(LightweightDownloaderPlugin):
         verify_ssl : bool, optional
             Whether to verify SSL certificates (default: True).
         """
-        self.timeout = timeout
-        self.verify_ssl = verify_ssl
-        self._session = requests.Session()
-        self._session.headers.update(
-            {
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
-                "Accept": "application/json, text/plain, */*",
-                "Content-Type": "application/json",
-                "Origin": "https://ieeexplore.ieee.org",
-                "Referer": "https://ieeexplore.ieee.org/search/searchresult.jsp",
-            }
-        )
+        super().__init__(timeout=timeout, verify_ssl=verify_ssl)
         adapter = HTTPAdapter(pool_maxsize=5)
         self._session.mount("https://", adapter)
         self._session.mount("http://", adapter)
@@ -192,16 +189,17 @@ class IGARSSDownloaderPlugin(LightweightDownloaderPlugin):
         """
         payload = self._build_search_payload(current_year, 1)
         try:
-            response = self._session.post(
+            response = self._request(
                 self._API_URL,
-                json=payload,
-                timeout=3,
-                verify=self.verify_ssl,
+                3,
+                self.verify_ssl,
+                method="POST",
+                json_body=payload,
+                max_attempts=1,
             )
-            response.raise_for_status()
             total_records = response.json().get("totalRecords", 0)
             return int(total_records) > 0
-        except (requests.RequestException, ValueError, TypeError, AttributeError):
+        except (RuntimeError, ValueError, TypeError, AttributeError):
             logger.debug(
                 "%s: current-year availability check failed for year %d",
                 self.plugin_name,
@@ -243,19 +241,19 @@ class IGARSSDownloaderPlugin(LightweightDownloaderPlugin):
         payload = self._build_search_payload(year, page_number)
 
         try:
-            response = self._session.post(
+            response = self._request(
                 self._API_URL,
-                json=payload,
-                timeout=timeout,
-                verify=verify_ssl,
+                timeout,
+                verify_ssl,
+                method="POST",
+                json_body=payload,
             )
-            response.raise_for_status()
-        except requests.exceptions.RequestException as e:
+        except RuntimeError as e:
             raise RuntimeError(f"Failed to fetch IGARSS {year} page {page_number} from IEEE Xplore: {e}") from e
 
         try:
             return response.json()
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, ValueError) as e:
             raise RuntimeError(f"Invalid JSON response from IEEE Xplore (page {page_number}): {e}") from e
 
     def _convert_paper(self, record: Dict[str, Any], year: int) -> Optional[LightweightPaper]:

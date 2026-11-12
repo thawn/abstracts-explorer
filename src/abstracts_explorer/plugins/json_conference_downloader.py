@@ -9,10 +9,9 @@ This reduces code duplication between similar conference data downloaders.
 from typing import Any, Dict, List, Optional
 import logging
 import json
-import requests
 
 from abstracts_explorer.plugin import (
-    DownloaderPlugin,
+    HTTPDownloaderPlugin,
     convert_to_lightweight_schema,
     LightweightPaper,
     validate_lightweight_papers,
@@ -21,7 +20,7 @@ from abstracts_explorer.plugin import (
 logger = logging.getLogger(__name__)
 
 
-class JSONConferenceDownloaderPlugin(DownloaderPlugin):
+class JSONConferenceDownloaderPlugin(HTTPDownloaderPlugin):
     """
     Base class for conference downloaders that fetch JSON data from a URL.
 
@@ -42,20 +41,7 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
     plugin_name = "json_conference_base"
     plugin_description = "Base class for JSON conference downloaders"
     conference_name = "Conference"
-
-    def __init__(self, timeout: int = 30, verify_ssl: bool = True):
-        """
-        Initialize the JSON conference downloader plugin.
-
-        Parameters
-        ----------
-        timeout : int, default=30
-            Request timeout in seconds
-        verify_ssl : bool, default=True
-            Whether to verify SSL certificates
-        """
-        self.timeout = timeout
-        self.verify_ssl = verify_ssl
+    _SOURCE_LABEL = "conference data"
 
     def get_companion_abstracts_url(self, year: int) -> Optional[str]:
         """
@@ -102,15 +88,14 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
             return
 
         try:
-            response = requests.get(url, timeout=timeout, verify=verify_ssl)
-            response.raise_for_status()
-        except requests.exceptions.RequestException as exc:
+            response = self._request(url, timeout, verify_ssl, max_attempts=1)
+        except RuntimeError as exc:
             logger.warning("Failed to download companion abstracts from %s: %s", url, exc)
             return
 
         try:
             abstracts = response.json()
-        except json.JSONDecodeError as exc:
+        except (json.JSONDecodeError, ValueError) as exc:
             logger.warning("Invalid JSON in companion abstracts response from %s: %s", url, exc)
             return
 
@@ -194,14 +179,13 @@ class JSONConferenceDownloaderPlugin(DownloaderPlugin):
 
         # Download the data
         try:
-            response = requests.get(url, timeout=timeout, verify=verify_ssl)
-            response.raise_for_status()
-        except requests.exceptions.RequestException as e:
+            response = self._request(url, timeout, verify_ssl)
+        except RuntimeError as e:
             raise RuntimeError(f"Failed to download from {url}: {str(e)}") from e
 
         try:
             data = response.json()
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, ValueError) as e:
             raise RuntimeError(f"Invalid JSON response from {url}: {str(e)}") from e
 
         # Convert papers to lightweight schema

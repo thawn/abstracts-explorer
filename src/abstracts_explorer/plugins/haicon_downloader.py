@@ -18,12 +18,11 @@ import re
 import time
 from typing import Any, Dict, List, Optional, Set
 
-import requests
 from bs4 import BeautifulSoup
 from pydantic import ValidationError
 
 from abstracts_explorer.plugin import (
-    LightweightDownloaderPlugin,
+    HTTPDownloaderPlugin,
     LightweightPaper,
     sanitize_author_names,
 )
@@ -31,7 +30,7 @@ from abstracts_explorer.plugin import (
 logger = logging.getLogger(__name__)
 
 
-class HAICONDownloaderPlugin(LightweightDownloaderPlugin):
+class HAICONDownloaderPlugin(HTTPDownloaderPlugin):
     """
     Plugin for downloading papers from the Helmholtz AI Conference (HAICON).
 
@@ -74,27 +73,10 @@ class HAICONDownloaderPlugin(LightweightDownloaderPlugin):
     #: Delay in seconds between paginated HTTP requests.
     _REQUEST_DELAY = 0.5
 
-    def __init__(self, timeout: int = 30, verify_ssl: bool = True):
-        """
-        Initialise the HAICON downloader plugin.
-
-        Parameters
-        ----------
-        timeout : int, optional
-            HTTP request timeout in seconds (default: 30).
-        verify_ssl : bool, optional
-            Whether to verify SSL certificates (default: ``True``).
-        """
-        self.timeout = timeout
-        self.verify_ssl = verify_ssl
-        self._session = requests.Session()
-        self._session.headers.update(
-            {
-                "User-Agent": ("Mozilla/5.0 (X11; Linux x86_64; rv:120.0) " "Gecko/20100101 Firefox/120.0"),
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.5",
-            }
-        )
+    _USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
+    _ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    _EXTRA_HEADERS = {"Accept-Language": "en-US,en;q=0.5"}
+    _SOURCE_LABEL = "HAICON data"
 
     # ------------------------------------------------------------------
     # Public interface
@@ -269,12 +251,9 @@ class HAICONDownloaderPlugin(LightweightDownloaderPlugin):
         """
         url = f"{base_url}/sessions.php"
         try:
-            response = self._session.get(url, timeout=timeout, verify=verify_ssl)
-            response.raise_for_status()
-        except requests.exceptions.RequestException as exc:
+            soup = self._fetch_soup(url, timeout, verify_ssl)
+        except RuntimeError as exc:
             raise RuntimeError(f"Failed to fetch HAICON sessions overview from {url}: {exc}") from exc
-
-        soup = BeautifulSoup(response.text, "html.parser")
         session_ids: Set[int] = set()
 
         for link in soup.find_all("a", href=True):
@@ -327,17 +306,14 @@ class HAICONDownloaderPlugin(LightweightDownloaderPlugin):
         )
 
         try:
-            response = self._session.get(url, timeout=timeout, verify=verify_ssl)
-            response.raise_for_status()
-        except requests.exceptions.RequestException as exc:
+            soup = self._fetch_soup(url, timeout, verify_ssl)
+        except RuntimeError as exc:
             logger.warning(
                 "Failed to fetch session %d: %s – skipping",
                 session_id,
                 exc,
             )
             return []
-
-        soup = BeautifulSoup(response.text, "html.parser")
 
         # Extract session name from the page header
         session_name = self._extract_session_name(soup)

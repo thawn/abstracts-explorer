@@ -63,7 +63,7 @@ class TestJSONConferenceDownloader:
 
         assert plugin.get_companion_abstracts_url(2025) == expected_url
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_inline_abstracts_do_not_fetch_companion(self, mock_get):
         """Keep historical inline abstracts without another request."""
         mock_get.return_value = make_response({"results": [make_paper(1, "Existing abstract")]})
@@ -73,7 +73,7 @@ class TestJSONConferenceDownloader:
         assert [paper.abstract for paper in papers] == ["Existing abstract"]
         mock_get.assert_called_once()
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_merges_companion_abstracts(self, mock_get):
         """Join split abstracts to paper records by stringified ID."""
         mock_get.side_effect = [
@@ -90,7 +90,7 @@ class TestJSONConferenceDownloader:
         companion_url = mock_get.call_args_list[1].args[0]
         assert companion_url.endswith("example-2025-abstracts.json")
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_partial_companion_coverage_keeps_valid_papers(self, mock_get, caplog):
         """Preserve inline and matched papers while reporting unmatched records."""
         mock_get.side_effect = [
@@ -128,7 +128,7 @@ class TestJSONConferenceDownloader:
             make_response([]),
         ],
     )
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_reports_unusable_companion_response(
         self,
         mock_get,
@@ -147,7 +147,7 @@ class TestJSONConferenceDownloader:
         assert [paper.abstract for paper in papers] == ["Existing abstract"]
         assert "companion abstracts" in caplog.text
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_empty_event_payload_does_not_fetch_companion(self, mock_get):
         """Do not request companion data for an empty event payload."""
         mock_get.return_value = make_response({"results": []})
@@ -155,7 +155,7 @@ class TestJSONConferenceDownloader:
         assert ExampleJSONDownloader().download(year=2025) == []
         mock_get.assert_called_once()
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_reports_when_no_source_records_are_valid(self, mock_get, caplog):
         """Report a non-empty source that produces no valid papers."""
         mock_get.side_effect = [
@@ -169,7 +169,7 @@ class TestJSONConferenceDownloader:
         assert papers == []
         assert "No valid papers produced from 1 source records" in caplog.text
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_reports_when_conversion_drops_all_source_records(self, mock_get, caplog):
         """Report a non-empty source even when conversion drops every record."""
         mock_get.return_value = make_response({"results": [{"id": 1, "abstract": "Existing abstract"}]})

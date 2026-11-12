@@ -8,21 +8,19 @@ Downloads abstracts from the AGU annual meeting's public m-anage meeting API.
 import logging
 import string
 import time
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 
-import requests
 from bs4 import BeautifulSoup
 from pydantic import ValidationError
 from tqdm import tqdm
 
-from abstracts_explorer.plugin import LightweightDownloaderPlugin, LightweightPaper, sanitize_author_names
+from abstracts_explorer.plugin import HTTPDownloaderPlugin, LightweightPaper, sanitize_author_names
 
 logger = logging.getLogger(__name__)
 
 
-class AGUDownloaderPlugin(LightweightDownloaderPlugin):
+class AGUDownloaderPlugin(HTTPDownloaderPlugin):
     """
     Download abstracts from the AGU annual meeting program.
 
@@ -44,34 +42,14 @@ class AGUDownloaderPlugin(LightweightDownloaderPlugin):
     _MAX_FETCH_ATTEMPTS = 6
     _RETRY_BASE_DELAY = 5.0
     _MAX_RETRY_DELAY = 120.0
-    _RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
     _PEOPLE_INDEX_LETTERS = tuple(string.ascii_uppercase)
-
-    def __init__(self, timeout: int = 30, verify_ssl: bool = True):
-        """
-        Initialize the AGU downloader.
-
-        Parameters
-        ----------
-        timeout : int, optional
-            HTTP request timeout in seconds (default: 30).
-        verify_ssl : bool, optional
-            Whether to verify SSL certificates (default: True).
-        """
-        self.timeout = timeout
-        self.verify_ssl = verify_ssl
-        self._rate_limit_until = 0.0
-        self._session = requests.Session()
-        self._session.headers.update(
-            {
-                "User-Agent": (
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/126.0.0.0 Safari/537.36"
-                ),
-                "Accept": "application/json, text/plain, */*",
-            }
-        )
+    _USER_AGENT = (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/126.0.0.0 Safari/537.36"
+    )
+    _ACCEPT = "application/json, text/plain, */*"
+    _SOURCE_LABEL = "AGU meeting data"
 
     def get_url(self, year: int) -> str:
         """
@@ -203,80 +181,6 @@ class AGUDownloaderPlugin(LightweightDownloaderPlugin):
                 "progress": "bool – Show a progress bar while fetching papers (default: auto)",
             },
         }
-
-    def _fetch_json(
-        self,
-        url: str,
-        timeout: int,
-        verify_ssl: bool,
-        params: Optional[Dict[str, str]] = None,
-    ) -> Any:
-        """
-        Fetch and decode one m-anage API response with retry handling.
-
-        Transient failures (HTTP 429/5xx and connection errors) are retried
-        with exponential backoff. A 429 response sets a session-wide cooldown
-        based on the ``Retry-After`` header so subsequent requests also wait.
-        """
-        for attempt in range(self._MAX_FETCH_ATTEMPTS):
-            self._wait_for_rate_limit()
-            try:
-                response = self._session.get(url, params=params, timeout=timeout, verify=verify_ssl)
-                response.raise_for_status()
-                return response.json()
-            except (requests.RequestException, ValueError) as exc:
-                status = self._status_code(exc)
-                retryable = (
-                    status in self._RETRYABLE_STATUSES
-                    if status is not None
-                    else isinstance(exc, (requests.ConnectionError, requests.Timeout))
-                )
-                if not retryable or attempt == self._MAX_FETCH_ATTEMPTS - 1:
-                    detail = f"HTTP {status}: {exc}" if status is not None else str(exc)
-                    raise RuntimeError(f"Failed to fetch AGU meeting data from {url}: {detail}") from exc
-
-                delay = self._retry_delay(exc, attempt)
-                if status == 429:
-                    self._rate_limit_until = max(self._rate_limit_until, time.monotonic() + delay)
-                    logger.warning("AGU m-anage rate limit hit; waiting %.0f seconds before retrying %s", delay, url)
-                else:
-                    logger.warning("Retrying AGU request to %s in %.0f seconds after: %s", url, delay, exc)
-                    time.sleep(delay)
-
-        raise RuntimeError(f"Failed to fetch AGU meeting data from {url}")
-
-    def _wait_for_rate_limit(self) -> None:
-        """Wait until the session-wide rate-limit cooldown has elapsed."""
-        remaining = self._rate_limit_until - time.monotonic()
-        if remaining > 0:
-            time.sleep(remaining)
-            self._rate_limit_until = 0.0
-
-    @staticmethod
-    def _status_code(exc: Exception) -> Optional[int]:
-        """Return the HTTP status code attached to an exception, if any."""
-        response = getattr(exc, "response", None)
-        status = getattr(response, "status_code", None)
-        return status if isinstance(status, int) else None
-
-    def _retry_delay(self, exc: Exception, attempt: int) -> float:
-        """Compute the retry delay, honouring ``Retry-After`` when present."""
-        response = getattr(exc, "response", None)
-        headers = getattr(response, "headers", {}) or {}
-        retry_after = headers.get("Retry-After")
-        delay = self._RETRY_BASE_DELAY * (2**attempt)
-        if retry_after:
-            try:
-                delay = float(retry_after)
-            except (TypeError, ValueError):
-                try:
-                    retry_at = parsedate_to_datetime(str(retry_after))
-                    if retry_at.tzinfo is None:
-                        retry_at = retry_at.replace(tzinfo=timezone.utc)
-                    delay = (retry_at - datetime.now(timezone.utc)).total_seconds()
-                except (TypeError, ValueError, OverflowError):
-                    pass
-        return max(0.0, min(delay, self._MAX_RETRY_DELAY))
 
     def _fetch_batch_records(
         self,

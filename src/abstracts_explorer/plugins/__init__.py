@@ -25,6 +25,7 @@ from abstracts_explorer.plugin import (
     # Plugin base classes
     DownloaderPlugin,
     LightweightDownloaderPlugin,
+    HTTPDownloaderPlugin,
     # Registry
     PluginRegistry,
     register_plugin,
@@ -35,6 +36,7 @@ from abstracts_explorer.plugin import (
     # Conversion utilities
     convert_to_lightweight_schema,
     # HTTP utilities
+    RateLimitCooldown,
     fetch_with_retries,
     get_failed_downloads_path,
     # Pydantic models
@@ -62,6 +64,7 @@ __all__ = [
     # Plugin base classes
     "DownloaderPlugin",
     "LightweightDownloaderPlugin",
+    "HTTPDownloaderPlugin",
     # Registry
     "PluginRegistry",
     "register_plugin",
@@ -72,6 +75,7 @@ __all__ = [
     # Conversion utilities
     "convert_to_lightweight_schema",
     # HTTP utilities
+    "RateLimitCooldown",
     "fetch_with_retries",
     "get_failed_downloads_path",
     # Pydantic models

@@ -374,7 +374,7 @@ class TestIEEEVISHTMLProgram:
         assert all(paper.abstract for paper in papers)
         assert len(papers) == 2
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_2026_uses_html_program(self, mock_get):
         mock_response = Mock()
         mock_response.text = SAMPLE_HTML_2026
@@ -388,7 +388,7 @@ class TestIEEEVISHTMLProgram:
         assert len(papers) == 2
         assert all(paper.year == 2026 for paper in papers)
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_2026_decodes_utf8(self, mock_get):
         response = requests.Response()
         response.status_code = 200
@@ -404,7 +404,7 @@ class TestIEEEVISHTMLProgram:
         by_title = {paper.title: paper for paper in papers}
         assert "Başak Oral" in by_title["Proper Title One"].authors
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_2026_saves_to_file(self, mock_get):
         mock_response = Mock()
         mock_response.text = SAMPLE_HTML_2026
@@ -422,7 +422,7 @@ class TestIEEEVISHTMLProgram:
             assert all(paper["year"] == 2026 for paper in saved)
             assert all(paper["conference"] == "IEEE VIS" for paper in saved)
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_2026_request_exception(self, mock_get):
         mock_get.side_effect = requests.exceptions.RequestException("Connection error")
 
@@ -444,7 +444,7 @@ class TestIEEEVISHTMLProgram:
 class TestIEEEVISDownload:
     """Test the download() method."""
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_success(self, mock_get):
         mock_get.return_value = _make_mock_response([SAMPLE_PAPER_1, SAMPLE_PAPER_2])
 
@@ -460,7 +460,7 @@ class TestIEEEVISDownload:
             assert p.year == 2025
             assert p.conference == "IEEE VIS"
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_default_year(self, mock_get):
         mock_get.return_value = _make_mock_response([SAMPLE_PAPER_1])
 
@@ -470,7 +470,7 @@ class TestIEEEVISDownload:
         assert "2025" in mock_get.call_args[0][0]
         assert papers[0].year == 2025
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_saves_to_file(self, mock_get):
         mock_get.return_value = _make_mock_response([SAMPLE_PAPER_1])
 
@@ -508,14 +508,14 @@ class TestIEEEVISDownload:
                 json.dump(cached, f)
 
             plugin = IEEEVISDownloaderPlugin()
-            with patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get") as mock_get:
+            with patch("requests.Session.get") as mock_get:
                 papers = plugin.download(year=2025, output_path=str(output_path))
                 mock_get.assert_not_called()
 
             assert len(papers) == 1
             assert papers[0].title == "Cached Paper"
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_force_redownload(self, mock_get):
         mock_get.return_value = _make_mock_response([SAMPLE_PAPER_2])
 
@@ -532,7 +532,7 @@ class TestIEEEVISDownload:
             assert len(papers) == 1
             assert papers[0].title == "Test VIS Paper Two"
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_request_exception(self, mock_get):
         mock_get.side_effect = requests.exceptions.RequestException("Connection error")
 
@@ -540,7 +540,7 @@ class TestIEEEVISDownload:
         with pytest.raises(RuntimeError, match="Failed to download"):
             plugin.download(year=2025)
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_invalid_json(self, mock_get):
         mock_response = Mock()
         mock_response.json.side_effect = json.JSONDecodeError("Invalid JSON", "", 0)
@@ -550,7 +550,7 @@ class TestIEEEVISDownload:
         with pytest.raises(RuntimeError, match="Invalid JSON response"):
             plugin.download(year=2025)
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_unexpected_json_structure(self, mock_get):
         """When the API returns a dict instead of a list, return an empty list gracefully."""
         mock_response = Mock()
@@ -561,7 +561,7 @@ class TestIEEEVISDownload:
         papers = plugin.download(year=2025)
         assert papers == []
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_skips_papers_without_title(self, mock_get):
         no_title = dict(SAMPLE_PAPER_1)
         no_title["title"] = ""
@@ -573,7 +573,7 @@ class TestIEEEVISDownload:
         assert len(papers) == 1
         assert papers[0].title == "Test VIS Paper Two"
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_custom_timeout(self, mock_get):
         mock_get.return_value = _make_mock_response([])
 
@@ -582,7 +582,7 @@ class TestIEEEVISDownload:
 
         assert mock_get.call_args[1]["timeout"] == 60
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_kwargs_override(self, mock_get):
         mock_get.return_value = _make_mock_response([])
 
@@ -601,7 +601,7 @@ class TestIEEEVISDownload:
 class TestIEEEVISPluginDatabaseIntegration:
     """Test that IEEE VIS plugin data can be stored in the database."""
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_ieeevis_data_in_database(self, mock_get):
         mock_get.return_value = _make_mock_response([SAMPLE_PAPER_1, SAMPLE_PAPER_2])
 
