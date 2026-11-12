@@ -1056,24 +1056,174 @@ class EmbeddingsManager:
         except Exception as e:
             raise EmbeddingsError(f"Failed to embed from database: {str(e)}") from e
 
-    def count_papers_within_distance(
+    def _query_collection(
         self,
-        database,
         query: str,
-        distance_threshold: float = 1.1,
+        include: List[str],
         conferences: Optional[List[str]] = None,
         years: Optional[List[int]] = None,
-    ) -> int:
+        query_embedding: Optional[List[float]] = None,
+    ) -> Dict[str, Any]:
         """
-        Count papers within a distance threshold.
+        Run a distance query against the embeddings collection.
 
-        Delegates to :meth:`find_papers_within_distance` and returns only the
-        count of matching papers.
+        This helper only handles ChromaDB mechanics.  Result interpretation
+        (counting, metadata shaping, database hydration) is left to the
+        calling methods.
+
+        Parameters
+        ----------
+        query : str
+            The search query text.
+        include : list[str]
+            Fields to include in the ChromaDB query result (for example
+            ``["distances"]`` or ``["distances", "metadatas"]``).
+        conferences : list[str], optional
+            Filter results to only include papers from these conferences.
+        years : list[int], optional
+            Filter results to only include papers from these years.
+        query_embedding : list[float], optional
+            Pre-computed embedding for the query.  When omitted, an embedding
+            is generated with :meth:`generate_embedding`.
+
+        Returns
+        -------
+        dict
+            Dictionary with ``query_embedding``, ``ids``, ``distances``,
+            ``metadatas`` (empty when not requested), and ``total_considered``.
+
+        Raises
+        ------
+        EmbeddingsError
+            If the query is empty, the collection is empty, or no results are
+            returned.
+        """
+        if not query or not query.strip():
+            raise EmbeddingsError("Query cannot be empty")
+
+        if query_embedding is None:
+            query_embedding = self.generate_embedding(query)
+
+        total_count = self.collection.count()
+        if total_count == 0:
+            raise EmbeddingsError("No papers in collection")
+
+        where_clause = build_chromadb_where_clause(conferences, years)
+        n_results_query = min(total_count, _MAX_QUERY_RESULTS)
+
+        results = self.collection.query(
+            query_embeddings=[query_embedding],
+            n_results=n_results_query,
+            include=include,
+            where=where_clause,
+        )
+
+        paper_ids = results["ids"][0] if results.get("ids") else []
+        distances = results["distances"][0] if results.get("distances") else []
+        metadatas = results["metadatas"][0] if results.get("metadatas") else []
+
+        if not paper_ids:
+            raise EmbeddingsError("No results from collection query")
+
+        return {
+            "query_embedding": query_embedding,
+            "ids": paper_ids,
+            "distances": distances,
+            "metadatas": metadatas,
+            "total_considered": len(paper_ids),
+        }
+
+    @staticmethod
+    def _matching_pairs(
+        paper_ids: List[str],
+        distances: List[float],
+        distance_threshold: float,
+    ) -> List[Tuple[str, float]]:
+        """
+        Return identifier/distance pairs within a distance threshold.
+
+        Parameters
+        ----------
+        paper_ids : list[str]
+            Paper identifiers, sorted by distance.
+        distances : list[float]
+            Distances corresponding to ``paper_ids``.
+        distance_threshold : float
+            Maximum distance to include.
+
+        Returns
+        -------
+        list of tuple
+            ``(paper_id, distance)`` pairs within the threshold.
+        """
+        pairs: List[Tuple[str, float]] = []
+        for paper_id, distance in zip(paper_ids, distances):
+            if distance > distance_threshold:
+                break
+            pairs.append((paper_id, float(distance)))
+        return pairs
+
+    def _fetch_paper_info_for_matches(
+        self,
+        database,
+        matches: List[Tuple[str, float]],
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch full paper records for embedding matches.
 
         Parameters
         ----------
         database : DatabaseManager
-            Database manager instance for retrieving paper details.
+            Database manager used to retrieve paper details.
+        matches : list of tuple
+            ``(paper_id, distance)`` pairs.
+
+        Returns
+        -------
+        list of dict
+            Paper dictionaries with an added ``distance`` field.
+        """
+        from abstracts_explorer.paper_utils import PaperFormattingError
+
+        if not matches:
+            return []
+
+        selected_ids = [paper_id for paper_id, _ in matches]
+        distance_by_id = dict(matches)
+        fetched_papers: List[Dict[str, Any]] = []
+        batch_size = 500
+        for start in range(0, len(selected_ids), batch_size):
+            batch = selected_ids[start : start + batch_size]
+            try:
+                fetched_papers.extend(database.get_papers_by_uids(batch))
+            except PaperFormattingError:
+                logger.warning("Some papers were not found in the database, skipping")
+
+        papers_by_id = {paper["uid"]: paper for paper in fetched_papers if paper}
+
+        papers: List[Dict[str, Any]] = []
+        for paper_id in selected_ids:
+            paper = papers_by_id.get(paper_id)
+            if paper is None:
+                logger.warning(f"Paper {paper_id} not found in database, skipping")
+                continue
+            paper["distance"] = distance_by_id[paper_id]
+            papers.append(paper)
+        return papers
+
+    def count_papers_within_distance(
+        self,
+        query: str,
+        distance_threshold: float = 1.1,
+        conferences: Optional[List[str]] = None,
+        years: Optional[List[int]] = None,
+        query_embedding: Optional[List[float]] = None,
+    ) -> int:
+        """
+        Count papers within a distance threshold without fetching paper records.
+
+        Parameters
+        ----------
         query : str
             The search query text.
         distance_threshold : float, optional
@@ -1082,6 +1232,8 @@ class EmbeddingsManager:
             Filter results to only include papers from these conferences.
         years : list[int], optional
             Filter results to only include papers from these years.
+        query_embedding : list[float], optional
+            Pre-computed embedding for the query.
 
         Returns
         -------
@@ -1093,15 +1245,108 @@ class EmbeddingsManager:
         EmbeddingsError
             If embeddings collection is empty or operation fails.
         """
-        result = self.find_papers_within_distance(
-            database=database,
-            query=query,
-            distance_threshold=distance_threshold,
-            conferences=conferences,
-            years=years,
-            max_papers=0,
-        )
-        return result["count"]
+        try:
+            result = self._query_collection(
+                query=query,
+                include=["distances"],
+                conferences=conferences,
+                years=years,
+                query_embedding=query_embedding,
+            )
+            matches = self._matching_pairs(result["ids"], result["distances"], distance_threshold)
+            return len(matches)
+        except EmbeddingsError:
+            raise
+        except Exception as e:
+            logger.error(f"Error counting papers within distance: {e}", exc_info=True)
+            raise EmbeddingsError(f"Failed to count papers within distance: {str(e)}") from e
+
+    def query_papers_within_distance(
+        self,
+        query: str,
+        distance_threshold: float = 1.1,
+        conferences: Optional[List[str]] = None,
+        years: Optional[List[int]] = None,
+        query_embedding: Optional[List[float]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Query lightweight paper information within a distance threshold.
+
+        Unlike :meth:`find_papers_within_distance`, this method does not fetch
+        full records from the SQL database.  It returns identifiers, distances,
+        and a few display fields taken directly from the embedding collection
+        metadata, making it suitable for aggregations such as topic evolution
+        and relevance analysis.
+
+        Parameters
+        ----------
+        query : str
+            The search query text.
+        distance_threshold : float, optional
+            Euclidean distance radius, by default 1.1.
+        conferences : list[str], optional
+            Filter results to only include papers from these conferences.
+        years : list[int], optional
+            Filter results to only include papers from these years.
+        query_embedding : list[float], optional
+            Pre-computed embedding for the query.
+
+        Returns
+        -------
+        dict
+            Dictionary containing ``query``, ``query_embedding``, ``distance``,
+            ``papers`` (lightweight dictionaries with ``uid``, ``distance``,
+            ``title``, ``session``, ``year``, and ``conference``), ``count``,
+            and ``total_considered``.
+
+        Raises
+        ------
+        EmbeddingsError
+            If embeddings collection is empty or operation fails.
+        """
+        try:
+            result = self._query_collection(
+                query=query,
+                include=["distances", "metadatas"],
+                conferences=conferences,
+                years=years,
+                query_embedding=query_embedding,
+            )
+            matches = self._matching_pairs(result["ids"], result["distances"], distance_threshold)
+            metadata_by_id = dict(zip(result["ids"], result["metadatas"]))
+
+            papers: List[Dict[str, Any]] = []
+            for uid, distance in matches:
+                metadata = metadata_by_id.get(uid) or {}
+                raw_year = metadata.get("year")
+                try:
+                    year = int(raw_year) if raw_year not in (None, "") else None
+                except (TypeError, ValueError):
+                    year = None
+                papers.append(
+                    {
+                        "uid": uid,
+                        "distance": distance,
+                        "title": metadata.get("title", ""),
+                        "session": metadata.get("session", ""),
+                        "year": year,
+                        "conference": metadata.get("conference", ""),
+                    }
+                )
+
+            return {
+                "query": query,
+                "query_embedding": result["query_embedding"],
+                "distance": distance_threshold,
+                "papers": papers,
+                "count": len(papers),
+                "total_considered": result["total_considered"],
+            }
+        except EmbeddingsError:
+            raise
+        except Exception as e:
+            logger.error(f"Error querying papers within distance: {e}", exc_info=True)
+            raise EmbeddingsError(f"Failed to query papers within distance: {str(e)}") from e
 
     def find_papers_within_distance(
         self,
@@ -1111,13 +1356,15 @@ class EmbeddingsManager:
         conferences: Optional[List[str]] = None,
         years: Optional[List[int]] = None,
         query_embedding: Optional[List[float]] = None,
-        max_papers: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        Find papers within a specified distance from a custom search query.
+        Find full paper records within a specified distance from a search query.
 
         This method treats the search query as a clustering center and returns
-        papers within the specified Euclidean distance radius in embedding space.
+        full paper records within the specified Euclidean distance radius in
+        embedding space.  For a lighter-weight result that does not touch the
+        SQL database, use :meth:`query_papers_within_distance`.  For a count
+        only, use :meth:`count_papers_within_distance`.
 
         Parameters
         ----------
@@ -1134,14 +1381,7 @@ class EmbeddingsManager:
         query_embedding : list[float], optional
             Pre-computed embedding for the query.  When provided, the
             embedding generation step is skipped, which avoids redundant
-            LLM API calls when calling this method repeatedly with the
-            same query (e.g. topic-evolution analysis).
-        max_papers : int, optional
-            Maximum number of paper details to return.  When ``None``
-            (default), all matching papers are fetched from the database.
-            ``count`` always reflects the total number of matching papers,
-            even when ``papers`` is capped.  Use ``0`` to skip the database
-            lookup entirely and only obtain the count.
+            LLM API calls.
 
         Returns
         -------
@@ -1151,9 +1391,8 @@ class EmbeddingsManager:
             - query: str - The search query
             - query_embedding: list[float] - The generated embedding for the query
             - distance: float - The distance threshold used
-            - papers: list[dict] - Papers within the distance radius with their distances
-              (capped to ``max_papers`` when provided)
-            - count: int - Number of papers found within the distance threshold
+            - papers: list[dict] - Full paper records with their distances
+            - count: int - Number of paper records returned
             - total_considered: int - Total number of papers matching the
               conference/year filters (before distance filtering)
 
@@ -1177,94 +1416,23 @@ class EmbeddingsManager:
         ...     years=[2023, 2024]
         ... )
         """
-        from abstracts_explorer.paper_utils import PaperFormattingError
-
-        if not query or not query.strip():
-            raise EmbeddingsError("Query cannot be empty")
-
         try:
-            # Use the pre-computed embedding if provided, otherwise generate one
-            if query_embedding is None:
-                query_embedding = self.generate_embedding(query)
-
-            # Get total count of papers in collection
-            total_count = self.collection.count()
-            if total_count == 0:
-                raise EmbeddingsError("No papers in collection")
-
-            # Build where clause for filtering
-            # NOTE: All metadata is stored as strings in ChromaDB (see add_paper method),
-            # so we must convert filter values to strings for matching.
-            where_clause = build_chromadb_where_clause(conferences, years)
-
-            # Query papers and get distances.
-            # Cap n_results to avoid ChromaDB / SQLite "too many SQL variables"
-            # errors that occur when the collection is large (SQLite has a
-            # default limit of 32,766 bound parameters).
-            n_results_query = min(total_count, _MAX_QUERY_RESULTS)
-
-            results = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=n_results_query,
+            result = self._query_collection(
+                query=query,
                 include=["distances"],
-                where=where_clause,
+                conferences=conferences,
+                years=years,
+                query_embedding=query_embedding,
             )
-
-            # Extract results (query returns nested lists)
-            paper_ids = results["ids"][0] if results.get("ids") else []
-            distances = results["distances"][0] if results.get("distances") else []
-
-            if not paper_ids:
-                raise EmbeddingsError("No results from collection query")
-
-            # Collect matching (paper_id, distance) pairs.  Results are sorted
-            # by distance, so we can stop at the first paper outside the radius.
-            matching: List[Tuple[str, float]] = []
-            for paper_id, distance in zip(paper_ids, distances):
-                if distance <= distance_threshold:
-                    matching.append((paper_id, float(distance)))
-                else:
-                    break
-
-            count = len(matching)
-            if max_papers is None:
-                selected = matching
-            else:
-                # Python slicing is safe when max_papers exceeds len(matching).
-                # Clamp negative values so they don't select from the end.
-                selected = matching[: max(0, max_papers)]
-
-            # Fetch paper details in batches to avoid one database round-trip
-            # per matching paper (a major bottleneck for large collections).
-            matching_papers: List[Dict[str, Any]] = []
-            if selected:
-                selected_ids = [paper_id for paper_id, _ in selected]
-                distance_by_id = dict(selected)
-                fetched_papers: List[Dict[str, Any]] = []
-                batch_size = 500
-                for start in range(0, len(selected_ids), batch_size):
-                    batch = selected_ids[start : start + batch_size]
-                    try:
-                        fetched_papers.extend(database.get_papers_by_uids(batch))
-                    except PaperFormattingError:
-                        logger.warning("Some papers were not found in the database, skipping")
-                papers_by_id = {paper["uid"]: paper for paper in fetched_papers if paper}
-
-                for paper_id in selected_ids:
-                    paper_dict = papers_by_id.get(paper_id)
-                    if paper_dict is None:
-                        logger.warning(f"Paper {paper_id} not found in database, skipping")
-                        continue
-                    paper_dict["distance"] = distance_by_id[paper_id]
-                    matching_papers.append(paper_dict)
-
+            matches = self._matching_pairs(result["ids"], result["distances"], distance_threshold)
+            matching_papers = self._fetch_paper_info_for_matches(database, matches)
             return {
                 "query": query,
-                "query_embedding": query_embedding,
+                "query_embedding": result["query_embedding"],
                 "distance": distance_threshold,
                 "papers": matching_papers,
-                "count": count,
-                "total_considered": len(paper_ids),
+                "count": len(matching_papers),
+                "total_considered": result["total_considered"],
             }
 
         except EmbeddingsError:

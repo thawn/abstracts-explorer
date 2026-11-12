@@ -1844,6 +1844,13 @@ class TestFindPapersWithinDistance:
         manager._collection.query.return_value = {
             "ids": [["paper-a", "paper-b", "paper-c"]],
             "distances": [[0.1, 0.2, 2.0]],
+            "metadatas": [
+                [
+                    {"title": "A", "session": "S1", "year": "2023", "conference": "NeurIPS"},
+                    {"title": "B", "session": "S2", "year": "2024", "conference": "NeurIPS"},
+                    {"title": "C", "session": "S3", "year": "2024", "conference": "NeurIPS"},
+                ]
+            ],
         }
         return manager
 
@@ -1867,9 +1874,10 @@ class TestFindPapersWithinDistance:
         assert result["count"] == 2
         assert [paper["uid"] for paper in result["papers"]] == ["paper-a", "paper-b"]
         assert result["papers"][0]["distance"] == 0.1
+        assert result["total_considered"] == 3
 
-    def test_find_papers_with_distance_max_papers_caps_details(self):
-        """max_papers limits detail lookups while count stays complete."""
+    def test_find_papers_within_distance_skips_missing_database_records(self):
+        """Records missing from the database are not returned or counted."""
         manager = self._make_manager()
         database = Mock()
         database.get_papers_by_uids.return_value = [{"uid": "paper-a", "title": "A"}]
@@ -1879,61 +1887,151 @@ class TestFindPapersWithinDistance:
             query="query",
             distance_threshold=1.0,
             query_embedding=[0.1],
-            max_papers=1,
         )
 
-        database.get_papers_by_uids.assert_called_once_with(["paper-a"])
-        assert result["count"] == 2
-        assert len(result["papers"]) == 1
+        assert result["count"] == 1
+        assert [paper["uid"] for paper in result["papers"]] == ["paper-a"]
 
-    def test_find_papers_with_max_papers_larger_than_matches(self):
-        """max_papers larger than the match count returns all matches."""
-        manager = self._make_manager()
-        database = Mock()
-        database.get_papers_by_uids.return_value = [
-            {"uid": "paper-a", "title": "A"},
-            {"uid": "paper-b", "title": "B"},
-        ]
-
-        result = manager.find_papers_within_distance(
-            database=database,
-            query="query",
-            distance_threshold=1.0,
-            query_embedding=[0.1],
-            max_papers=100,
-        )
-
-        database.get_papers_by_uids.assert_called_once_with(["paper-a", "paper-b"])
-        assert result["count"] == 2
-        assert len(result["papers"]) == 2
-
-    def test_find_papers_with_negative_max_papers_returns_no_details(self):
-        """Negative max_papers is clamped to zero instead of slicing from the end."""
-        manager = self._make_manager()
-        database = Mock()
-
-        result = manager.find_papers_within_distance(
-            database=database,
-            query="query",
-            distance_threshold=1.0,
-            query_embedding=[0.1],
-            max_papers=-1,
-        )
-
-        database.get_papers_by_uids.assert_not_called()
-        assert result["count"] == 2
-        assert result["papers"] == []
-
-    def test_count_papers_within_distance_skips_database_lookup(self):
+    def test_count_papers_within_distance_returns_match_count(self):
         """Counting matches does not fetch paper details."""
         manager = self._make_manager()
-        database = Mock()
 
         count = manager.count_papers_within_distance(
-            database=database,
             query="query",
             distance_threshold=1.0,
+            query_embedding=[0.1],
         )
 
-        database.get_papers_by_uids.assert_not_called()
         assert count == 2
+        assert manager._collection.query.call_args.kwargs["include"] == ["distances"]
+
+    def test_count_papers_within_distance_reuses_query_embedding(self):
+        """A pre-computed embedding is passed through without regeneration."""
+        manager = self._make_manager()
+
+        count = manager.count_papers_within_distance(
+            query="query",
+            distance_threshold=1.0,
+            query_embedding=[0.5, 0.6],
+        )
+
+        manager.generate_embedding.assert_not_called()
+        assert manager._collection.query.call_args.kwargs["query_embeddings"] == [[0.5, 0.6]]
+        assert count == 2
+
+    def test_query_papers_within_distance_returns_lightweight_metadata(self):
+        """The lightweight query returns display fields from ChromaDB metadata."""
+        manager = self._make_manager()
+
+        result = manager.query_papers_within_distance(
+            query="query",
+            distance_threshold=1.0,
+            query_embedding=[0.1],
+        )
+
+        assert result["count"] == 2
+        assert result["total_considered"] == 3
+        assert result["papers"] == [
+            {
+                "uid": "paper-a",
+                "distance": 0.1,
+                "title": "A",
+                "session": "S1",
+                "year": 2023,
+                "conference": "NeurIPS",
+            },
+            {
+                "uid": "paper-b",
+                "distance": 0.2,
+                "title": "B",
+                "session": "S2",
+                "year": 2024,
+                "conference": "NeurIPS",
+            },
+        ]
+        assert manager._collection.query.call_args.kwargs["include"] == ["distances", "metadatas"]
+
+    def test_query_papers_within_distance_handles_missing_metadata(self):
+        """Missing or empty metadata fields fall back to safe defaults."""
+        manager = self._make_manager()
+        manager._collection.query.return_value = {
+            "ids": [["paper-a"]],
+            "distances": [[0.1]],
+            "metadatas": [[{"title": "A"}]],
+        }
+
+        result = manager.query_papers_within_distance(
+            query="query",
+            distance_threshold=1.0,
+            query_embedding=[0.1],
+        )
+
+        assert result["papers"] == [
+            {
+                "uid": "paper-a",
+                "distance": 0.1,
+                "title": "A",
+                "session": "",
+                "year": None,
+                "conference": "",
+            }
+        ]
+
+    @pytest.mark.parametrize("method_name", ["find_papers_within_distance", "count_papers_within_distance"])
+    def test_distance_helpers_reject_empty_query(self, method_name):
+        """All distance helpers reject empty queries."""
+        manager = self._make_manager()
+        kwargs = {"query": "  ", "distance_threshold": 1.0}
+        if method_name == "find_papers_within_distance":
+            kwargs["database"] = Mock()
+
+        with pytest.raises(EmbeddingsError, match="Query cannot be empty"):
+            getattr(manager, method_name)(**kwargs)
+
+    def test_matching_pairs_stops_at_threshold(self):
+        """Pairs beyond the threshold are excluded, the boundary is included."""
+        pairs = EmbeddingsManager._matching_pairs(["a", "b", "c"], [0.1, 1.0, 1.1], 1.0)
+
+        assert pairs == [("a", 0.1), ("b", 1.0)]
+
+    def test_matching_pairs_empty_input(self):
+        """An empty query result produces no pairs."""
+        assert EmbeddingsManager._matching_pairs([], [], 1.0) == []
+
+    def test_query_collection_passes_include_to_chromadb(self):
+        """The include list is forwarded to ChromaDB unchanged."""
+        manager = self._make_manager()
+
+        manager._query_collection(
+            query="query",
+            include=["distances", "metadatas"],
+            query_embedding=[0.1],
+        )
+
+        assert manager._collection.query.call_args.kwargs["include"] == ["distances", "metadatas"]
+
+    def test_query_collection_returns_empty_metadatas_when_not_requested(self):
+        """Metadatas are empty when the response does not contain them."""
+        manager = self._make_manager()
+        manager._collection.query.return_value = {"ids": [["paper-a"]], "distances": [[0.1]]}
+
+        result = manager._query_collection(
+            query="query",
+            include=["distances"],
+            query_embedding=[0.1],
+        )
+
+        assert result["metadatas"] == []
+        assert result["ids"] == ["paper-a"]
+
+    def test_query_collection_raises_when_no_results(self):
+        """An empty ChromaDB result set is reported as an error."""
+        manager = self._make_manager()
+        manager._collection.query.return_value = {"ids": [[]], "distances": [[]]}
+
+        with pytest.raises(EmbeddingsError, match="No results from collection query"):
+            manager._query_collection(
+                query="query",
+                include=["distances"],
+                query_embedding=[0.1],
+            )

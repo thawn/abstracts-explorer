@@ -285,12 +285,15 @@ graph TD
         ECOL["create_collection()"]
         EADD["add_paper → generate_embedding → store"]
         ESRCH["search_similar (low level)"]
-        EFIND["find_papers_within_distance"]
+        EQRY["_query_collection"]
+        EFIND["find_papers_within_distance<br/>(full records)"]
+        EQUERY["query_papers_within_distance<br/>(lightweight metadata)"]
+        ECOUNT["count_papers_within_distance<br/>(count only)"]
         EIMP["import/export_embeddings"]
 
         subgraph "⚠ Duplicate: Where-clause building"
             W1["DatabaseManager.search_papers_semantic:<br/>author + SQL filters + Chroma query"]
-            W2["find_papers_within_distance:<br/>build $and/$in filter"]
+            W2["_query_collection:<br/>build $and/$in filter"]
         end
     end
 
@@ -329,7 +332,10 @@ graph TD
 
     ECONN --> ECOL --> EADD
     ECOL --> ESRCH
-    ECOL --> EFIND
+    ECOL --> EQRY
+    EQRY --> EFIND
+    EQRY --> EQUERY
+    EQRY --> ECOUNT
     CLOAD --> CREDUC --> CCLUST --> CKEYS --> CLBL
     CCLUST --> CHRCH
     CLBL --> CRES

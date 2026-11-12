@@ -524,7 +524,7 @@ def get_topic_evolution(
     Analyze how topics have evolved over the years for one or more conferences.
 
     For each conference and year in the given range, this tool uses
-    ``EmbeddingsManager.find_papers_within_distance()`` to count how many
+    ``EmbeddingsManager.query_papers_within_distance()`` to count how many
     papers are semantically close to the topic keywords.  It also
     computes the relative percentage of matching papers with respect to
     the total number of papers for that conference and year.
@@ -604,8 +604,7 @@ def get_topic_evolution(
                     # once per year.  The latter scales with the number of years
                     # and can exceed reverse-proxy timeouts for conferences with
                     # many years (e.g. IGARSS).
-                    result_data = em.find_papers_within_distance(
-                        database=db,
+                    result_data = em.query_papers_within_distance(
                         query=topic_keywords,
                         distance_threshold=distance_threshold,
                         conferences=[conference],
@@ -1087,7 +1086,7 @@ def analyze_topic_relevance(
         config = get_config()
         collection_name = collection_name or config.collection_name
 
-        with _get_mcp_resources(collection_name) as (em, db):
+        with _get_mcp_resources(collection_name) as (em, _db):
             assert em is not None
 
             # Find papers within distance
@@ -1098,8 +1097,7 @@ def analyze_topic_relevance(
             if years:
                 logger.info(f"Filtering by years: {years}")
 
-            result_data = em.find_papers_within_distance(
-                database=db,
+            result_data = em.query_papers_within_distance(
                 query=topic,
                 distance_threshold=distance_threshold,
                 conferences=conferences,

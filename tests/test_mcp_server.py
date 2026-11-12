@@ -530,7 +530,7 @@ class TestToolResourceCleanup:
         mock_db = Mock()
         mock_em_class.return_value = mock_em
         mock_db_class.return_value = mock_db
-        mock_em.find_papers_within_distance.side_effect = RuntimeError("boom")
+        mock_em.query_papers_within_distance.side_effect = RuntimeError("boom")
 
         from abstracts_explorer.mcp_server import analyze_topic_relevance
 
@@ -632,7 +632,7 @@ class TestTopicEvolutionAndRelevance:
         mock_em = Mock()
         mock_em_class.return_value = mock_em
 
-        def _find_papers(database, query, distance_threshold, conferences=None, years=None, query_embedding=None):
+        def _query_papers(query, distance_threshold, conferences=None, years=None, query_embedding=None):
             return {
                 "count": 3,
                 "papers": [
@@ -643,7 +643,7 @@ class TestTopicEvolutionAndRelevance:
                 "total_considered": 90,
             }
 
-        mock_em.find_papers_within_distance.side_effect = _find_papers
+        mock_em.query_papers_within_distance.side_effect = _query_papers
 
         # Setup database mock
         mock_db = Mock()
@@ -680,8 +680,7 @@ class TestTopicEvolutionAndRelevance:
         mock_em.generate_embedding.assert_called_once_with("transformers")
 
         # Verify all years are queried in a single call
-        mock_em.find_papers_within_distance.assert_called_once_with(
-            database=mock_db,
+        mock_em.query_papers_within_distance.assert_called_once_with(
             query="transformers",
             distance_threshold=1.1,
             conferences=["NeurIPS"],
@@ -705,7 +704,7 @@ class TestTopicEvolutionAndRelevance:
         mock_em = Mock()
         mock_em_class.return_value = mock_em
 
-        def _find_papers(database, query, distance_threshold, conferences=None, years=None, query_embedding=None):
+        def _query_papers(query, distance_threshold, conferences=None, years=None, query_embedding=None):
             return {
                 "count": 2,
                 "papers": [
@@ -715,7 +714,7 @@ class TestTopicEvolutionAndRelevance:
                 "total_considered": 60,
             }
 
-        mock_em.find_papers_within_distance.side_effect = _find_papers
+        mock_em.query_papers_within_distance.side_effect = _query_papers
 
         # Setup database mock - DB has years 2022-2025
         mock_db = Mock()
@@ -742,9 +741,8 @@ class TestTopicEvolutionAndRelevance:
         assert result["year_range"]["start"] == 2023
         assert result["year_range"]["end"] == 2024
 
-        # Verify find_papers_within_distance was called once for both years
-        mock_em.find_papers_within_distance.assert_called_once_with(
-            database=mock_db,
+        # Verify query_papers_within_distance was called once for both years
+        mock_em.query_papers_within_distance.assert_called_once_with(
             query="transformers",
             distance_threshold=1.1,
             conferences=["NeurIPS"],
@@ -756,7 +754,7 @@ class TestTopicEvolutionAndRelevance:
     @patch("abstracts_explorer.mcp_server.DatabaseManager")
     @patch("abstracts_explorer.mcp_server.get_config")
     def test_get_topic_evolution_with_distance_threshold(self, mock_config, mock_db_class, mock_em_class):
-        """Test get_topic_evolution passes distance_threshold to find_papers_within_distance."""
+        """Test get_topic_evolution passes distance_threshold to query_papers_within_distance."""
         # Setup config mock
         mock_config_obj = Mock()
         mock_config_obj.embedding_db_path = "chroma_db"
@@ -767,7 +765,7 @@ class TestTopicEvolutionAndRelevance:
         # Setup embeddings manager mock
         mock_em = Mock()
         mock_em_class.return_value = mock_em
-        mock_em.find_papers_within_distance.return_value = {
+        mock_em.query_papers_within_distance.return_value = {
             "count": 2,
             "papers": [
                 {"title": "Paper 1", "session": "ML", "distance": 0.3, "year": 2024},
@@ -795,9 +793,8 @@ class TestTopicEvolutionAndRelevance:
         assert result["topic"] == "transformers"
         assert result["distance_threshold"] == 0.8
 
-        # Verify find_papers_within_distance was called with correct threshold
-        mock_em.find_papers_within_distance.assert_called_once_with(
-            database=mock_db,
+        # Verify query_papers_within_distance was called with correct threshold
+        mock_em.query_papers_within_distance.assert_called_once_with(
             query="transformers",
             distance_threshold=0.8,
             conferences=["NeurIPS"],
@@ -823,7 +820,7 @@ class TestTopicEvolutionAndRelevance:
         mock_em = Mock()
         mock_em_class.return_value = mock_em
 
-        def _find_papers(database, query, distance_threshold, conferences=None, years=None, query_embedding=None):
+        def _query_papers(query, distance_threshold, conferences=None, years=None, query_embedding=None):
             conf = conferences[0] if conferences else None
             if conf == "NeurIPS":
                 papers = [
@@ -841,7 +838,7 @@ class TestTopicEvolutionAndRelevance:
                 return {"count": 11, "papers": papers, "total_considered": 80}
             return {"count": 0, "papers": [], "total_considered": 0}
 
-        mock_em.find_papers_within_distance.side_effect = _find_papers
+        mock_em.query_papers_within_distance.side_effect = _query_papers
 
         # Setup database mock
         mock_db = Mock()
