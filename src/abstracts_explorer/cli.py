@@ -2272,6 +2272,41 @@ def registry_upload_command(args: argparse.Namespace) -> int:
         return 1
 
 
+def _registry_download_has_existing_data(conference: str, year: Optional[int]) -> bool:
+    """
+    Check whether the local database contains data for a registry download scope.
+
+    Parameters
+    ----------
+    conference : str
+        Conference name to check, or ``"all"`` to check for any local data.
+    year : int or None
+        Conference year to check.  When ``None``, any year for the conference
+        counts as existing data.
+
+    Returns
+    -------
+    bool
+        ``True`` if local data matching the scope exists.  On database errors,
+        ``True`` is returned so the caller still asks before replacing data.
+    """
+    try:
+        with DatabaseManager() as db:
+            db.create_tables()
+            conference_years = db.get_conference_years_from_db()
+    except Exception as e:
+        logger.warning("Could not inspect local data before registry download: %s", e)
+        return True
+
+    if conference == "all":
+        return bool(conference_years)
+
+    for local_conference, years in conference_years.items():
+        if local_conference.casefold() == conference.casefold():
+            return bool(years) if year is None else year in years
+    return False
+
+
 def registry_download_command(args: argparse.Namespace) -> int:
     """
     Download data for a conference (and optionally a specific year) from an OCI-compatible container registry.
@@ -2326,7 +2361,7 @@ def registry_download_command(args: argparse.Namespace) -> int:
         print(f"Tag:            {args.tag}")
     print("=" * 70)
 
-    if not args.yes:
+    if not args.yes and _registry_download_has_existing_data(conference, args.year):
         scope = f"{conference}/{year_display}"
         if conference == "all":
             scope = "all conferences"

@@ -2255,6 +2255,175 @@ class TestCLICommands:
         assert call_kwargs["repository"] == "ghcr.io/thawn/abstracts-data"
         assert call_kwargs.get("token") in (None, "")  # token is None or empty string
 
+    def test_registry_download_no_warning_when_no_existing_data(self, tmp_path, capsys):
+        """Download skips the replace warning and prompt when the local DB is empty."""
+        set_test_db(tmp_path / "empty.db")
+
+        from abstracts_explorer.cli import registry_download_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            conference="neurips",
+            year=2024,
+            tag=None,
+            yes=False,
+            embedding_model=None,
+            ignore_embedding_model_mismatch=False,
+        )
+
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.download.return_value = {
+                "tag": "neurips-2024",
+                "conference": "neurips",
+                "years": [2024],
+                "paper_count": 3,
+                "embedding_count": 3,
+                "metadata": {},
+            }
+            with patch("builtins.input") as mock_input:
+                result = registry_download_command(args)
+
+        assert result == 0
+        mock_input.assert_not_called()
+        mock_instance.download.assert_called_once()
+        captured = capsys.readouterr()
+        assert "Warning: This will replace existing data" not in captured.out
+
+    def test_registry_download_warns_when_existing_data(self, tmp_path, capsys):
+        """Download warns and asks for confirmation when matching local data exists."""
+        db = _populate_test_db(tmp_path / "existing.db")
+        db.close()
+
+        from abstracts_explorer.cli import registry_download_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            conference="neurips",
+            year=2024,
+            tag=None,
+            yes=False,
+            embedding_model=None,
+            ignore_embedding_model_mismatch=False,
+        )
+
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            with patch("builtins.input", return_value="n") as mock_input:
+                result = registry_download_command(args)
+
+        assert result == 1
+        mock_input.assert_called_once()
+        mock_instance.download.assert_not_called()
+        captured = capsys.readouterr()
+        assert "Warning: This will replace existing data for neurips/2024!" in captured.out
+
+    def test_registry_download_no_warning_for_different_year(self, tmp_path, capsys):
+        """Download does not warn when local data exists only for another year."""
+        db = _populate_test_db(tmp_path / "existing.db")
+        db.close()
+
+        from abstracts_explorer.cli import registry_download_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            conference="neurips",
+            year=2023,
+            tag=None,
+            yes=False,
+            embedding_model=None,
+            ignore_embedding_model_mismatch=False,
+        )
+
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.download.return_value = {
+                "tag": "neurips-2023",
+                "conference": "neurips",
+                "years": [2023],
+                "paper_count": 1,
+                "embedding_count": 1,
+                "metadata": {},
+            }
+            with patch("builtins.input") as mock_input:
+                result = registry_download_command(args)
+
+        assert result == 0
+        mock_input.assert_not_called()
+        mock_instance.download.assert_called_once()
+        captured = capsys.readouterr()
+        assert "Warning: This will replace existing data" not in captured.out
+
+    def test_registry_download_all_warns_when_any_data_exists(self, tmp_path, capsys):
+        """Download --conference all warns when any local data exists."""
+        db = _populate_test_db(tmp_path / "existing.db")
+        db.close()
+
+        from abstracts_explorer.cli import registry_download_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            conference="all",
+            year=None,
+            tag=None,
+            yes=False,
+            embedding_model=None,
+            ignore_embedding_model_mismatch=False,
+        )
+
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            with patch("builtins.input", return_value="n") as mock_input:
+                result = registry_download_command(args)
+
+        assert result == 1
+        mock_input.assert_called_once()
+        mock_instance.download_all.assert_not_called()
+        captured = capsys.readouterr()
+        assert "Warning: This will replace existing data for all conferences!" in captured.out
+
+    def test_registry_download_all_no_warning_when_empty(self, tmp_path, capsys):
+        """Download --conference all skips the warning and prompt when the local DB is empty."""
+        set_test_db(tmp_path / "empty.db")
+
+        from abstracts_explorer.cli import registry_download_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            conference="all",
+            year=None,
+            tag=None,
+            yes=False,
+            embedding_model=None,
+            ignore_embedding_model_mismatch=False,
+        )
+
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.download_all.return_value = []
+            with patch("builtins.input") as mock_input:
+                result = registry_download_command(args)
+
+        assert result == 0
+        mock_input.assert_not_called()
+        mock_instance.download_all.assert_called_once()
+        captured = capsys.readouterr()
+        assert "Warning: This will replace existing data" not in captured.out
+
+    def test_registry_download_existing_data_check_failure_is_fail_safe(self):
+        """A failed local data check returns True so the caller still confirms."""
+        from abstracts_explorer.cli import _registry_download_has_existing_data
+
+        with patch("abstracts_explorer.cli.DatabaseManager") as MockDatabase:
+            MockDatabase.return_value.__enter__.return_value.create_tables.side_effect = DatabaseError("boom")
+
+            assert _registry_download_has_existing_data("neurips", 2024) is True
+
     def test_registry_list_no_repository(self, capsys, monkeypatch):
         """List fails when no repository is specified."""
         monkeypatch.delenv("REGISTRY_REPOSITORY", raising=False)
