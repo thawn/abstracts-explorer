@@ -7,7 +7,8 @@ Downloads abstracts from the AGU annual meeting's public m-anage meeting API.
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Optional, Set
 
 import requests
@@ -35,9 +36,14 @@ class AGUDownloaderPlugin(LightweightDownloaderPlugin):
     conference_name = "AGU"
     _start_year = 2014
     _BATCH_SIZE = 20
-    _REQUEST_DELAY = 0.1
+    _REQUEST_DELAY = 0.5
     _BASE_URL = "https://studio.m-anage.com/agu"
     _LEGACY_SLUG_LAST_YEAR = 2023
+    _MAX_FETCH_ATTEMPTS = 6
+    _RETRY_BASE_DELAY = 5.0
+    _MAX_RETRY_DELAY = 120.0
+    _MAX_BATCH_ROUNDS = 4
+    _RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
 
     def __init__(self, timeout: int = 30, verify_ssl: bool = True):
         """
@@ -52,7 +58,18 @@ class AGUDownloaderPlugin(LightweightDownloaderPlugin):
         """
         self.timeout = timeout
         self.verify_ssl = verify_ssl
+        self._rate_limit_until = 0.0
         self._session = requests.Session()
+        self._session.headers.update(
+            {
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/126.0.0.0 Safari/537.36"
+                ),
+                "Accept": "application/json, text/plain, */*",
+            }
+        )
 
     def get_url(self, year: int) -> str:
         """
@@ -202,13 +219,72 @@ class AGUDownloaderPlugin(LightweightDownloaderPlugin):
         verify_ssl: bool,
         params: Optional[Dict[str, str]] = None,
     ) -> Any:
-        """Fetch and decode one m-anage API response."""
-        try:
-            response = self._session.get(url, params=params, timeout=timeout, verify=verify_ssl)
-            response.raise_for_status()
-            return response.json()
-        except (requests.RequestException, ValueError) as exc:
-            raise RuntimeError(f"Failed to fetch AGU meeting data from {url}: {exc}") from exc
+        """
+        Fetch and decode one m-anage API response with retry handling.
+
+        Transient failures (HTTP 429/5xx and connection errors) are retried
+        with exponential backoff. A 429 response sets a session-wide cooldown
+        based on the ``Retry-After`` header so subsequent requests also wait.
+        """
+        for attempt in range(self._MAX_FETCH_ATTEMPTS):
+            self._wait_for_rate_limit()
+            try:
+                response = self._session.get(url, params=params, timeout=timeout, verify=verify_ssl)
+                response.raise_for_status()
+                return response.json()
+            except (requests.RequestException, ValueError) as exc:
+                status = self._status_code(exc)
+                retryable = (
+                    status in self._RETRYABLE_STATUSES
+                    if status is not None
+                    else isinstance(exc, (requests.ConnectionError, requests.Timeout))
+                )
+                if not retryable or attempt == self._MAX_FETCH_ATTEMPTS - 1:
+                    detail = f"HTTP {status}: {exc}" if status is not None else str(exc)
+                    raise RuntimeError(f"Failed to fetch AGU meeting data from {url}: {detail}") from exc
+
+                delay = self._retry_delay(exc, attempt)
+                if status == 429:
+                    self._rate_limit_until = max(self._rate_limit_until, time.monotonic() + delay)
+                    logger.warning("AGU m-anage rate limit hit; waiting %.0f seconds before retrying %s", delay, url)
+                else:
+                    logger.warning("Retrying AGU request to %s in %.0f seconds after: %s", url, delay, exc)
+                    time.sleep(delay)
+
+        raise RuntimeError(f"Failed to fetch AGU meeting data from {url}")
+
+    def _wait_for_rate_limit(self) -> None:
+        """Wait until the session-wide rate-limit cooldown has elapsed."""
+        remaining = self._rate_limit_until - time.monotonic()
+        if remaining > 0:
+            time.sleep(remaining)
+            self._rate_limit_until = 0.0
+
+    @staticmethod
+    def _status_code(exc: Exception) -> Optional[int]:
+        """Return the HTTP status code attached to an exception, if any."""
+        response = getattr(exc, "response", None)
+        status = getattr(response, "status_code", None)
+        return status if isinstance(status, int) else None
+
+    def _retry_delay(self, exc: Exception, attempt: int) -> float:
+        """Compute the retry delay, honouring ``Retry-After`` when present."""
+        response = getattr(exc, "response", None)
+        headers = getattr(response, "headers", {}) or {}
+        retry_after = headers.get("Retry-After")
+        delay = self._RETRY_BASE_DELAY * (2**attempt)
+        if retry_after:
+            try:
+                delay = float(retry_after)
+            except (TypeError, ValueError):
+                try:
+                    retry_at = parsedate_to_datetime(str(retry_after))
+                    if retry_at.tzinfo is None:
+                        retry_at = retry_at.replace(tzinfo=timezone.utc)
+                    delay = (retry_at - datetime.now(timezone.utc)).total_seconds()
+                except (TypeError, ValueError, OverflowError):
+                    pass
+        return max(0.0, min(delay, self._MAX_RETRY_DELAY))
 
     def _fetch_batch_records(
         self,
@@ -218,21 +294,44 @@ class AGUDownloaderPlugin(LightweightDownloaderPlugin):
         verify_ssl: bool,
         request_delay: float,
     ) -> Dict[str, Dict[str, Any]]:
-        """Fetch m-anage records in bounded BatchRead requests."""
+        """
+        Fetch m-anage records in bounded BatchRead requests.
+
+        m-anage may answer a BatchRead with only some of the requested records,
+        listing the rest under ``unanswered``. Missing records are retried for a
+        few rounds so slow or rate-limited responses do not silently drop data.
+        """
         records: Dict[str, Dict[str, Any]] = {}
-        for start in range(0, len(refs), self._BATCH_SIZE):
-            batch = refs[start : start + self._BATCH_SIZE]
-            payload = self._fetch_json(
-                f"{api_url}/BatchRead/0",
-                timeout,
-                verify_ssl,
-                {"ids": ",".join(batch)},
-            )
-            models = payload.get("models", {}) if isinstance(payload, dict) else {}
-            if isinstance(models, dict):
-                records.update({ref: record for ref, record in models.items() if isinstance(record, dict)})
-            if request_delay > 0 and start + self._BATCH_SIZE < len(refs):
-                time.sleep(request_delay)
+        pending = list(refs)
+        for round_index in range(self._MAX_BATCH_ROUNDS):
+            if not pending:
+                break
+            missing: List[str] = []
+            for start in range(0, len(pending), self._BATCH_SIZE):
+                batch = pending[start : start + self._BATCH_SIZE]
+                payload = self._fetch_json(
+                    f"{api_url}/BatchRead/0",
+                    timeout,
+                    verify_ssl,
+                    {"ids": ",".join(batch)},
+                )
+                models = payload.get("models", {}) if isinstance(payload, dict) else {}
+                if isinstance(models, dict):
+                    records.update({ref: record for ref, record in models.items() if isinstance(record, dict)})
+                missing.extend(ref for ref in batch if ref not in records)
+                if request_delay > 0:
+                    time.sleep(request_delay)
+            if missing and round_index < self._MAX_BATCH_ROUNDS - 1:
+                logger.warning(
+                    "AGU m-anage returned %d incomplete record(s); retrying (round %d/%d)",
+                    len(missing),
+                    round_index + 2,
+                    self._MAX_BATCH_ROUNDS,
+                )
+            pending = missing
+
+        if pending:
+            logger.warning("AGU m-anage did not return %d record(s) after retries", len(pending))
         return records
 
     @staticmethod

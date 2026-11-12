@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
+import requests
 
 from abstracts_explorer.plugins import AGUDownloaderPlugin, get_plugin, list_plugin_names
 
@@ -116,6 +117,43 @@ class TestAGUDownload:
         assert len(records) == 21
         assert [len(call.kwargs["params"]["ids"].split(",")) for call in mock_request.call_args_list] == [20, 1]
 
+    def test_batch_reads_retry_incomplete_responses(self, agu_plugin):
+        refs = [f"Session/{index}" for index in range(4)]
+        responses = iter(
+            [
+                _response({"models": {"Session/0": {}, "Session/1": {}}, "unanswered": ["Session/2", "Session/3"]}),
+                _response({"models": {"Session/2": {}, "Session/3": {}}, "unanswered": []}),
+            ]
+        )
+
+        with patch.object(agu_plugin._session, "get", side_effect=responses) as mock_request:
+            records = agu_plugin._fetch_batch_records(
+                "https://studio.m-anage.com/agu/fm14/meetingapi.cgi",
+                refs,
+                timeout=30,
+                verify_ssl=True,
+                request_delay=0,
+            )
+
+        assert sorted(records) == refs
+        assert mock_request.call_count == 2
+
+    def test_batch_reads_stop_after_max_rounds(self, agu_plugin):
+        agu_plugin._MAX_BATCH_ROUNDS = 2
+        refs = ["Session/0", "Session/1"]
+
+        with patch.object(agu_plugin._session, "get", return_value=_response({"models": {}})) as mock_request:
+            records = agu_plugin._fetch_batch_records(
+                "https://studio.m-anage.com/agu/fm14/meetingapi.cgi",
+                refs,
+                timeout=30,
+                verify_ssl=True,
+                request_delay=0,
+            )
+
+        assert records == {}
+        assert mock_request.call_count == 2
+
     def test_downloads_and_deduplicates_abstracts(self, agu_plugin):
         def mock_get(url, params=None, **kwargs):
             return _api_response(url, params or {})
@@ -177,3 +215,51 @@ class TestAGUDownload:
         ):
             with pytest.raises(RuntimeError, match="No abstracts"):
                 agu_plugin.download(year=2026)
+
+
+class TestAGURetryHandling:
+    @staticmethod
+    def _http_error(status, headers=None):
+        response = Mock(status_code=status, headers=headers or {})
+        return requests.HTTPError(response=response)
+
+    def test_session_uses_browser_user_agent(self, agu_plugin):
+        assert "Mozilla" in agu_plugin._session.headers["User-Agent"]
+
+    def test_retry_delay_uses_retry_after_header(self, agu_plugin):
+        exc = self._http_error(429, {"Retry-After": "7"})
+        assert agu_plugin._retry_delay(exc, 0) == 7.0
+
+    def test_retry_delay_falls_back_to_exponential_backoff(self, agu_plugin):
+        exc = self._http_error(503)
+        assert agu_plugin._retry_delay(exc, 1) == 10.0
+
+    def test_fetch_retries_429_and_then_succeeds(self, agu_plugin):
+        rate_limited = _response({})
+        rate_limited.raise_for_status.side_effect = self._http_error(429, {"Retry-After": "7"})
+        success = _response({"ok": True})
+
+        with (
+            patch.object(agu_plugin._session, "get", side_effect=[rate_limited, success]) as mock_get,
+            patch("abstracts_explorer.plugins.agu_downloader.time.sleep") as mock_sleep,
+        ):
+            result = agu_plugin._fetch_json("https://example.com/api", 30, True)
+
+        assert result == {"ok": True}
+        assert mock_get.call_count == 2
+        assert mock_sleep.call_count == 1
+        assert 0 < mock_sleep.call_args.args[0] <= 7
+
+    def test_fetch_raises_after_max_attempts(self, agu_plugin):
+        agu_plugin._MAX_FETCH_ATTEMPTS = 3
+        rate_limited = _response({})
+        rate_limited.raise_for_status.side_effect = self._http_error(429)
+
+        with (
+            patch.object(agu_plugin._session, "get", return_value=rate_limited) as mock_get,
+            patch("abstracts_explorer.plugins.agu_downloader.time.sleep"),
+        ):
+            with pytest.raises(RuntimeError, match="429"):
+                agu_plugin._fetch_json("https://example.com/api", 30, True)
+
+        assert mock_get.call_count == 3
