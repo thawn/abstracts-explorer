@@ -633,25 +633,15 @@ class TestTopicEvolutionAndRelevance:
         mock_em_class.return_value = mock_em
 
         def _find_papers(database, query, distance_threshold, conferences=None, years=None, query_embedding=None):
-            year = years[0] if years else None
-            if year == 2023:
-                return {
-                    "count": 2,
-                    "papers": [
-                        {"title": "Paper 1", "session": "ML", "distance": 0.1},
-                        {"title": "Paper 2", "session": "DL", "distance": 0.2},
-                    ],
-                    "total_considered": 50,
-                }
-            elif year == 2024:
-                return {
-                    "count": 1,
-                    "papers": [
-                        {"title": "Paper 3", "session": "ML", "distance": 0.3},
-                    ],
-                    "total_considered": 40,
-                }
-            return {"count": 0, "papers": [], "total_considered": 0}
+            return {
+                "count": 3,
+                "papers": [
+                    {"title": "Paper 1", "session": "ML", "distance": 0.1, "year": 2023},
+                    {"title": "Paper 2", "session": "DL", "distance": 0.2, "year": 2023},
+                    {"title": "Paper 3", "session": "ML", "distance": 0.3, "year": 2024},
+                ],
+                "total_considered": 90,
+            }
 
         mock_em.find_papers_within_distance.side_effect = _find_papers
 
@@ -689,6 +679,16 @@ class TestTopicEvolutionAndRelevance:
         # Verify query was embedded only once, not once per year
         mock_em.generate_embedding.assert_called_once_with("transformers")
 
+        # Verify all years are queried in a single call
+        mock_em.find_papers_within_distance.assert_called_once_with(
+            database=mock_db,
+            query="transformers",
+            distance_threshold=1.1,
+            conferences=["NeurIPS"],
+            years=[2023, 2024],
+            query_embedding=mock_em.generate_embedding.return_value,
+        )
+
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
     @patch("abstracts_explorer.mcp_server.DatabaseManager")
     @patch("abstracts_explorer.mcp_server.get_config")
@@ -706,11 +706,13 @@ class TestTopicEvolutionAndRelevance:
         mock_em_class.return_value = mock_em
 
         def _find_papers(database, query, distance_threshold, conferences=None, years=None, query_embedding=None):
-            year = years[0] if years else None
             return {
-                "count": 1,
-                "papers": [{"title": f"Paper {year}", "session": "ML", "distance": 0.1}],
-                "total_considered": 30,
+                "count": 2,
+                "papers": [
+                    {"title": "Paper 2023", "session": "ML", "distance": 0.1, "year": 2023},
+                    {"title": "Paper 2024", "session": "ML", "distance": 0.2, "year": 2024},
+                ],
+                "total_considered": 60,
             }
 
         mock_em.find_papers_within_distance.side_effect = _find_papers
@@ -740,8 +742,15 @@ class TestTopicEvolutionAndRelevance:
         assert result["year_range"]["start"] == 2023
         assert result["year_range"]["end"] == 2024
 
-        # Verify find_papers_within_distance was called only for 2023 and 2024
-        assert mock_em.find_papers_within_distance.call_count == 2
+        # Verify find_papers_within_distance was called once for both years
+        mock_em.find_papers_within_distance.assert_called_once_with(
+            database=mock_db,
+            query="transformers",
+            distance_threshold=1.1,
+            conferences=["NeurIPS"],
+            years=[2023, 2024],
+            query_embedding=mock_em.generate_embedding.return_value,
+        )
 
     @patch("abstracts_explorer.mcp_server.EmbeddingsManager")
     @patch("abstracts_explorer.mcp_server.DatabaseManager")
@@ -761,8 +770,8 @@ class TestTopicEvolutionAndRelevance:
         mock_em.find_papers_within_distance.return_value = {
             "count": 2,
             "papers": [
-                {"title": "Paper 1", "session": "ML", "distance": 0.3},
-                {"title": "Paper 2", "session": "DL", "distance": 0.4},
+                {"title": "Paper 1", "session": "ML", "distance": 0.3, "year": 2024},
+                {"title": "Paper 2", "session": "DL", "distance": 0.4, "year": 2024},
             ],
             "total_considered": 50,
         }
@@ -816,15 +825,20 @@ class TestTopicEvolutionAndRelevance:
 
         def _find_papers(database, query, distance_threshold, conferences=None, years=None, query_embedding=None):
             conf = conferences[0] if conferences else None
-            year = years[0] if years else None
-            if conf == "NeurIPS" and year == 2023:
-                return {"count": 5, "papers": [], "total_considered": 100}
-            elif conf == "NeurIPS" and year == 2024:
-                return {"count": 10, "papers": [], "total_considered": 100}
-            elif conf == "ICLR" and year == 2023:
-                return {"count": 3, "papers": [], "total_considered": 80}
-            elif conf == "ICLR" and year == 2024:
-                return {"count": 8, "papers": [], "total_considered": 80}
+            if conf == "NeurIPS":
+                papers = [
+                    {"title": "Paper N", "session": "ML", "distance": 0.1, "year": 2023},
+                ] * 5 + [
+                    {"title": "Paper N", "session": "ML", "distance": 0.1, "year": 2024},
+                ] * 10
+                return {"count": 15, "papers": papers, "total_considered": 100}
+            elif conf == "ICLR":
+                papers = [
+                    {"title": "Paper I", "session": "ML", "distance": 0.1, "year": 2023},
+                ] * 3 + [
+                    {"title": "Paper I", "session": "ML", "distance": 0.1, "year": 2024},
+                ] * 8
+                return {"count": 11, "papers": papers, "total_considered": 80}
             return {"count": 0, "papers": [], "total_considered": 0}
 
         mock_em.find_papers_within_distance.side_effect = _find_papers

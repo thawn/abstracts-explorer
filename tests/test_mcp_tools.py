@@ -831,26 +831,15 @@ class TestExecuteMCPToolE2E:
         mock_em = Mock()
 
         def _find_papers(database, query, distance_threshold, conferences=None, years=None, query_embedding=None):
-            year = years[0] if years else None
-            if year == 2022:
-                return {
-                    "count": 1,
-                    "papers": [{"title": "Paper 2022", "session": "ML", "distance": 0.1}],
-                    "total_considered": 30,
-                }
-            elif year == 2023:
-                return {
-                    "count": 1,
-                    "papers": [{"title": "Paper 2023", "session": "ML", "distance": 0.2}],
-                    "total_considered": 30,
-                }
-            elif year == 2024:
-                return {
-                    "count": 1,
-                    "papers": [{"title": "Paper 2024", "session": "ML", "distance": 0.3}],
-                    "total_considered": 30,
-                }
-            return {"count": 0, "papers": [], "total_considered": 0}
+            return {
+                "count": 3,
+                "papers": [
+                    {"title": "Paper 2022", "session": "ML", "distance": 0.1, "year": 2022},
+                    {"title": "Paper 2023", "session": "ML", "distance": 0.2, "year": 2023},
+                    {"title": "Paper 2024", "session": "ML", "distance": 0.3, "year": 2024},
+                ],
+                "total_considered": 90,
+            }
 
         mock_em.find_papers_within_distance.side_effect = _find_papers
         mock_db = Mock()

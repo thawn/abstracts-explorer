@@ -1831,3 +1831,71 @@ class TestRateLimiting:
 
         assert result is mock_response
         mock_inner.handle_request.assert_called_once()
+
+
+class TestFindPapersWithinDistance:
+    """Tests for distance-filtered paper lookup helpers."""
+
+    def _make_manager(self):
+        manager = object.__new__(EmbeddingsManager)
+        manager.generate_embedding = Mock(return_value=[0.1])
+        manager._collection = Mock()
+        manager._collection.count.return_value = 10
+        manager._collection.query.return_value = {
+            "ids": [["paper-a", "paper-b", "paper-c"]],
+            "distances": [[0.1, 0.2, 2.0]],
+        }
+        return manager
+
+    def test_find_papers_within_distance_batches_database_lookup(self):
+        """Matching papers are fetched in one batched database call."""
+        manager = self._make_manager()
+        database = Mock()
+        database.get_papers_by_uids.return_value = [
+            {"uid": "paper-a", "title": "A"},
+            {"uid": "paper-b", "title": "B"},
+        ]
+
+        result = manager.find_papers_within_distance(
+            database=database,
+            query="query",
+            distance_threshold=1.0,
+            query_embedding=[0.1],
+        )
+
+        database.get_papers_by_uids.assert_called_once_with(["paper-a", "paper-b"])
+        assert result["count"] == 2
+        assert [paper["uid"] for paper in result["papers"]] == ["paper-a", "paper-b"]
+        assert result["papers"][0]["distance"] == 0.1
+
+    def test_find_papers_with_distance_max_papers_caps_details(self):
+        """max_papers limits detail lookups while count stays complete."""
+        manager = self._make_manager()
+        database = Mock()
+        database.get_papers_by_uids.return_value = [{"uid": "paper-a", "title": "A"}]
+
+        result = manager.find_papers_within_distance(
+            database=database,
+            query="query",
+            distance_threshold=1.0,
+            query_embedding=[0.1],
+            max_papers=1,
+        )
+
+        database.get_papers_by_uids.assert_called_once_with(["paper-a"])
+        assert result["count"] == 2
+        assert len(result["papers"]) == 1
+
+    def test_count_papers_within_distance_skips_database_lookup(self):
+        """Counting matches does not fetch paper details."""
+        manager = self._make_manager()
+        database = Mock()
+
+        count = manager.count_papers_within_distance(
+            database=database,
+            query="query",
+            distance_threshold=1.0,
+        )
+
+        database.get_papers_by_uids.assert_not_called()
+        assert count == 2

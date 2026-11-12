@@ -6,6 +6,7 @@
 
 import { API_BASE, PLOTLY_COLORS } from './utils/constants.js';
 import { showLoading, showErrorInElement } from './utils/ui-utils.js';
+import { parseJsonResponse } from './utils/api-utils.js';
 import { sortClustersBySizeDesc } from './utils/sort-utils.js';
 import { getClusterLabelWithCount } from './utils/cluster-utils.js';
 import { getSelectedConference, getSelectedYears, escapeHtml } from './utils/dom-utils.js';
@@ -1840,12 +1841,7 @@ async function fetchAndDisplayTopicEvolution(topic, distance, conference) {
             body: JSON.stringify(requestBody)
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
+        const data = await parseJsonResponse(response);
 
         if (data.error) {
             throw new Error(data.error);
