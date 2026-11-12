@@ -38,6 +38,7 @@ dependencies = [
     "pydantic-ai-slim[openai]>=2.32.0",
     "httpx2>=2.7",
     "psycopg[binary]>=3.2",
+    "tqdm>=4.66.0",
 ]
 
 [project.optional-dependencies]

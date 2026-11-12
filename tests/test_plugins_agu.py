@@ -207,6 +207,72 @@ class TestAGUDownload:
         assert papers[0].conference == "AGU"
         assert mock_request.call_count == 6
 
+    def test_fetch_papers_displays_progress(self, agu_plugin):
+        sessions = {
+            "Session/1": {"_url": "Session/1", "ChildList_Paper": ["Paper/10"]},
+            "Session/2": {"_url": "Session/2", "ChildList_Paper": ["Paper/11"]},
+        }
+
+        def mock_get(url, params=None, **kwargs):
+            if url.endswith("/Session/1/ChildList_Paper"):
+                return _response([{"_url": "Paper/10"}])
+            if url.endswith("/Session/2/ChildList_Paper"):
+                return _response([{"_url": "Paper/11"}])
+            raise AssertionError(url)
+
+        with (
+            patch.object(agu_plugin._session, "get", side_effect=mock_get),
+            patch("abstracts_explorer.plugins.agu_downloader.tqdm") as mock_tqdm,
+        ):
+            mock_tqdm.side_effect = lambda iterable, **kwargs: iterable
+            papers = agu_plugin._fetch_papers(
+                "https://studio.m-anage.com/agu/agu26/meetingapi.cgi",
+                sessions,
+                timeout=30,
+                verify_ssl=True,
+                request_delay=0,
+                show_progress=True,
+            )
+
+        assert sorted(papers) == ["Paper/10", "Paper/11"]
+        mock_tqdm.assert_called_once()
+        assert mock_tqdm.call_args.kwargs["total"] == 2
+        assert mock_tqdm.call_args.kwargs["disable"] is False
+
+    def test_fetch_papers_progress_auto_disables_by_default(self, agu_plugin):
+        sessions = {"Session/1": {"_url": "Session/1", "ChildList_Paper": ["Paper/10"]}}
+
+        def mock_get(url, params=None, **kwargs):
+            return _response([{"_url": "Paper/10"}])
+
+        with (
+            patch.object(agu_plugin._session, "get", side_effect=mock_get),
+            patch("abstracts_explorer.plugins.agu_downloader.tqdm") as mock_tqdm,
+        ):
+            mock_tqdm.side_effect = lambda iterable, **kwargs: iterable
+            agu_plugin._fetch_papers(
+                "https://studio.m-anage.com/agu/agu26/meetingapi.cgi",
+                sessions,
+                timeout=30,
+                verify_ssl=True,
+                request_delay=0,
+            )
+
+        assert mock_tqdm.call_args.kwargs["disable"] is None
+
+    def test_download_passes_progress_flag_to_fetch(self, agu_plugin):
+        def mock_get(url, params=None, **kwargs):
+            return _api_response(url, params or {})
+
+        with (
+            patch.object(agu_plugin._session, "get", side_effect=mock_get),
+            patch("abstracts_explorer.plugins.agu_downloader.tqdm") as mock_tqdm,
+        ):
+            mock_tqdm.side_effect = lambda iterable, **kwargs: iterable
+            agu_plugin.download(year=2026, request_delay=0, progress=False)
+
+        assert mock_tqdm.call_args.kwargs["disable"] is True
+
     @pytest.mark.parametrize(("year", "slug"), [(2022, "fm22"), (2024, "agu24")])
     def test_download_uses_year_specific_api_url(self, agu_plugin, year, slug):
         agu_plugin.supported_years = list(range(2014, 2027))

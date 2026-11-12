@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Set
 import requests
 from bs4 import BeautifulSoup
 from pydantic import ValidationError
+from tqdm import tqdm
 
 from abstracts_explorer.plugin import LightweightDownloaderPlugin, LightweightPaper, sanitize_author_names
 
@@ -112,7 +113,8 @@ class AGUDownloaderPlugin(LightweightDownloaderPlugin):
         force_download : bool, optional
             Re-fetch data even when a cached file exists.
         **kwargs : Any
-            Optional ``timeout``, ``verify_ssl``, and ``request_delay`` overrides.
+            Optional ``timeout``, ``verify_ssl``, ``request_delay``, and
+            ``progress`` overrides.
 
         Returns
         -------
@@ -138,6 +140,7 @@ class AGUDownloaderPlugin(LightweightDownloaderPlugin):
         timeout = kwargs.get("timeout", self.timeout)
         verify_ssl = kwargs.get("verify_ssl", self.verify_ssl)
         request_delay = kwargs.get("request_delay", self._REQUEST_DELAY)
+        show_progress = kwargs.get("progress")
         meeting_url = self.get_url(year)
         api_url = meeting_url.replace("meetingapp.cgi", "meetingapi.cgi")
 
@@ -149,7 +152,7 @@ class AGUDownloaderPlugin(LightweightDownloaderPlugin):
         )
         programs = self._records(programs)
         sessions = self._fetch_sessions(api_url, programs, timeout, verify_ssl, request_delay)
-        papers = self._fetch_papers(api_url, sessions, timeout, verify_ssl, request_delay)
+        papers = self._fetch_papers(api_url, sessions, timeout, verify_ssl, request_delay, show_progress)
         if not papers:
             raise RuntimeError(f"No abstracts with authors found for AGU {year}")
 
@@ -197,6 +200,7 @@ class AGUDownloaderPlugin(LightweightDownloaderPlugin):
                 "timeout": "int – HTTP request timeout in seconds",
                 "verify_ssl": "bool – Whether to verify SSL certificates",
                 "request_delay": "float – Delay between API batches in seconds",
+                "progress": "bool – Show a progress bar while fetching papers (default: auto)",
             },
         }
 
@@ -380,6 +384,7 @@ class AGUDownloaderPlugin(LightweightDownloaderPlugin):
         timeout: int,
         verify_ssl: bool,
         request_delay: float,
+        show_progress: Optional[bool] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """
         Fetch full paper records through the session child-list endpoints.
@@ -387,13 +392,26 @@ class AGUDownloaderPlugin(LightweightDownloaderPlugin):
         Session child lists return complete paper records, avoiding the partial
         BatchRead responses m-anage produces under load. Sessions without a
         direct paper list fall back to their paper slots.
+
+        Parameters
+        ----------
+        show_progress : bool, optional
+            Whether to display a progress bar. ``None`` (default) shows the
+            bar only when stderr is an interactive terminal.
         """
         papers: Dict[str, Dict[str, Any]] = {}
         expected_refs: Set[str] = set()
         slot_refs: Set[str] = set()
         params = {"date": datetime.now().isoformat(timespec="seconds")}
+        disable = None if show_progress is None else not show_progress
 
-        for session in sessions.values():
+        for session in tqdm(
+            sessions.values(),
+            total=len(sessions),
+            desc="Fetching AGU papers",
+            unit="session",
+            disable=disable,
+        ):
             session_ref = str(session.get("_url") or f"Session/{session.get('id')}")
             refs = session.get("ChildList_Paper") or []
             if not refs:
