@@ -25,15 +25,19 @@ class AGUDownloaderPlugin(LightweightDownloaderPlugin):
 
     The plugin reads sections and sessions from the public m-anage meeting API,
     then fetches each scheduled contribution and its author records.
+
+    Annual meetings from 2014 onward are supported. Meetings through 2023 use
+    the legacy ``fmYY`` app slug, while 2024 and later use ``aguYY``.
     """
 
     plugin_name = "agu"
     plugin_description = "AGU annual meeting data downloader via m-anage"
     conference_name = "AGU"
-    _start_year = 2025
+    _start_year = 2014
     _BATCH_SIZE = 20
     _REQUEST_DELAY = 0.1
-    _BASE_URL = "https://studio.m-anage.com/agu/agu{short_year}"
+    _BASE_URL = "https://studio.m-anage.com/agu"
+    _LEGACY_SLUG_LAST_YEAR = 2023
 
     def __init__(self, timeout: int = 30, verify_ssl: bool = True):
         """
@@ -54,6 +58,9 @@ class AGUDownloaderPlugin(LightweightDownloaderPlugin):
         """
         Get the AGU meeting-app URL for a conference year.
 
+        Meetings through 2023 use the legacy ``fmYY`` slug, while 2024 and
+        later use ``aguYY``.
+
         Parameters
         ----------
         year : int
@@ -64,8 +71,9 @@ class AGUDownloaderPlugin(LightweightDownloaderPlugin):
         str
             Public meeting-app URL.
         """
+        prefix = "fm" if year <= self._LEGACY_SLUG_LAST_YEAR else "agu"
         short_year = str(year)[-2:]
-        return f"{self._BASE_URL.format(short_year=short_year)}/meetingapp.cgi"
+        return f"{self._BASE_URL}/{prefix}{short_year}/meetingapp.cgi"
 
     def download(
         self,

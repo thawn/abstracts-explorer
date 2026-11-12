@@ -47,8 +47,8 @@ HAICON (Helmholtz AI Conference) data downloader via ConfTool.
 
 AGU annual meeting abstracts from the public m-anage meeting API.
 - **File**: `agu_downloader.py`
-- **Years**: 2025 onward
-- **Source**: <https://studio.m-anage.com/agu/agu26/meetingapp.cgi>
+- **Years**: 2014 onward (2014–2023 use the legacy `fmYY` slug, 2024+ use `aguYY`)
+- **Source**: <https://studio.m-anage.com/agu/>
 - **API**: Lightweight schema
 
 ### example_lightweight

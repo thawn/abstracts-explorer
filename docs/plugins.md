@@ -96,8 +96,8 @@ AGU annual meeting abstracts from the public m-anage program API.
 uv run abstracts-explorer download --plugin agu --year 2026 --db-path data/agu.db
 ```
 
-- **Years**: 2025 onward
-- **Source**: [AGU26 program](https://studio.m-anage.com/agu/agu26/meetingapp.cgi)
+- **Years**: 2014 onward (2014–2023 use the legacy `fmYY` slug, 2024+ use `aguYY`)
+- **Source**: [AGU program](https://studio.m-anage.com/agu/)
 - **Fields**: Lightweight schema (title, authors, abstract, session, and presentation number when available)
 
 ## Using Plugins via CLI

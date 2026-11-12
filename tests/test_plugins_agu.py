@@ -68,6 +68,29 @@ class TestAGUPluginProperties:
         assert agu_plugin.get_url(2026) == "https://studio.m-anage.com/agu/agu26/meetingapp.cgi"
         assert agu_plugin.get_metadata()["name"] == "agu"
 
+    @pytest.mark.parametrize(
+        ("year", "slug"),
+        [
+            (2014, "fm14"),
+            (2020, "fm20"),
+            (2021, "fm21"),
+            (2023, "fm23"),
+            (2024, "agu24"),
+            (2025, "agu25"),
+            (2026, "agu26"),
+        ],
+    )
+    def test_get_url_uses_year_specific_slug(self, agu_plugin, year, slug):
+        assert agu_plugin.get_url(year) == f"https://studio.m-anage.com/agu/{slug}/meetingapp.cgi"
+
+    def test_supported_years_start_at_2014(self):
+        plugin = AGUDownloaderPlugin()
+        with patch.object(plugin, "_check_current_year_available", return_value=False):
+            years = plugin.supported_years
+
+        assert min(years) == 2014
+        assert 2013 not in years
+
     def test_registered(self):
         assert isinstance(get_plugin("agu"), AGUDownloaderPlugin)
         assert "agu" in list_plugin_names()
@@ -110,6 +133,20 @@ class TestAGUDownload:
         assert papers[0].conference == "AGU"
         assert mock_request.call_count == 5
 
+    @pytest.mark.parametrize(("year", "slug"), [(2022, "fm22"), (2024, "agu24")])
+    def test_download_uses_year_specific_api_url(self, agu_plugin, year, slug):
+        agu_plugin.supported_years = list(range(2014, 2027))
+
+        def mock_get(url, params=None, **kwargs):
+            return _api_response(url, params or {})
+
+        with patch.object(agu_plugin._session, "get", side_effect=mock_get) as mock_request:
+            agu_plugin.download(year=year, request_delay=0)
+
+        assert mock_request.call_count == 5
+        for call in mock_request.call_args_list:
+            assert f"/agu/{slug}/meetingapi.cgi" in call.args[0]
+
     def test_download_saves_and_reuses_cache(self, agu_plugin, tmp_path):
         output_path = Path(tmp_path) / "agu.json"
 
@@ -130,7 +167,7 @@ class TestAGUDownload:
 
     def test_unsupported_year(self, agu_plugin):
         with pytest.raises(ValueError, match="not supported"):
-            agu_plugin.download(year=2000)
+            agu_plugin.download(year=2013)
 
     def test_empty_api_results_raise(self, agu_plugin):
         with patch.object(
