@@ -524,7 +524,7 @@ def get_topic_evolution(
     Analyze how topics have evolved over the years for one or more conferences.
 
     For each conference and year in the given range, this tool uses
-    ``EmbeddingsManager.find_papers_within_distance()`` to count how many
+    ``EmbeddingsManager.query_papers_within_distance()`` to count how many
     papers are semantically close to the topic keywords.  It also
     computes the relative percentage of matching papers with respect to
     the total number of papers for that conference and year.
@@ -594,23 +594,51 @@ def get_topic_evolution(
 
                 logger.info(f"Conference: {conference}, years: {available_years}")
 
-                year_counts: Dict[int, int] = {}
+                year_counts: Dict[int, int] = {year: 0 for year in available_years}
                 year_relative: Dict[int, float] = {}
                 year_totals: Dict[int, int] = {}
-                year_distribution: Dict[int, list] = {}
+                year_distribution: Dict[int, list] = {year: [] for year in available_years}
 
-                for year in available_years:
-                    result_data = em.find_papers_within_distance(
-                        database=db,
+                if available_years:
+                    # Query once per conference (all years at once) instead of
+                    # once per year.  The latter scales with the number of years
+                    # and can exceed reverse-proxy timeouts for conferences with
+                    # many years (e.g. IGARSS).
+                    result_data = em.query_papers_within_distance(
                         query=topic_keywords,
                         distance_threshold=distance_threshold,
                         conferences=[conference],
-                        years=[year],
+                        years=available_years,
                         query_embedding=query_embedding,
                     )
 
-                    count = result_data["count"]
-                    year_counts[year] = count
+                    for paper in result_data["papers"]:
+                        paper_year = paper.get("year")
+                        if paper_year is None:
+                            continue
+                        try:
+                            paper_year = int(paper_year)
+                        except (TypeError, ValueError):
+                            continue
+                        if paper_year not in year_counts:
+                            continue
+
+                        year_counts[paper_year] += 1
+
+                        # Collect sample papers (top 3 closest).  Results are
+                        # sorted by distance, so the first three per year are
+                        # the closest matches.
+                        if len(year_distribution[paper_year]) < 3:
+                            year_distribution[paper_year].append(
+                                {
+                                    "title": paper.get("title", ""),
+                                    "session": paper.get("session", ""),
+                                    "distance": paper.get("distance"),
+                                }
+                            )
+
+                for year in available_years:
+                    count = year_counts[year]
                     total_papers += count
 
                     # Get total papers for this conference+year for relative percentage
@@ -621,18 +649,6 @@ def get_topic_evolution(
                         year_relative[year] = round((count / total_for_year) * 100, 2)
                     else:
                         year_relative[year] = 0.0
-
-                    # Collect sample papers (top 3 closest)
-                    sample_papers = []
-                    for paper in result_data["papers"][:3]:
-                        sample_papers.append(
-                            {
-                                "title": paper.get("title", ""),
-                                "session": paper.get("session", ""),
-                                "distance": paper.get("distance"),
-                            }
-                        )
-                    year_distribution[year] = sample_papers
 
                 all_years.update(year_counts.keys())
 
@@ -1070,7 +1086,7 @@ def analyze_topic_relevance(
         config = get_config()
         collection_name = collection_name or config.collection_name
 
-        with _get_mcp_resources(collection_name) as (em, db):
+        with _get_mcp_resources(collection_name) as (em, _db):
             assert em is not None
 
             # Find papers within distance
@@ -1081,8 +1097,7 @@ def analyze_topic_relevance(
             if years:
                 logger.info(f"Filtering by years: {years}")
 
-            result_data = em.find_papers_within_distance(
-                database=db,
+            result_data = em.query_papers_within_distance(
                 query=topic,
                 distance_threshold=distance_threshold,
                 conferences=conferences,
