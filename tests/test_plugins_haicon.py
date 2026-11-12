@@ -20,6 +20,9 @@ from abstracts_explorer.plugins import (
     list_plugin_names,
 )
 
+pytestmark = pytest.mark.usefixtures("mock_current_year_probe")
+
+
 # ============================================================================
 # Sample HTML fixtures
 # ============================================================================

@@ -15,6 +15,8 @@ from abstracts_explorer.plugin import LightweightPaper
 from abstracts_explorer.database import DatabaseManager
 from tests.conftest import set_test_db
 
+pytestmark = pytest.mark.usefixtures("mock_current_year_probe")
+
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------

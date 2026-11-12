@@ -7,6 +7,7 @@ to reduce code duplication and ensure consistency.
 
 import os
 import socket
+import threading
 import pytest
 
 import httpx2
@@ -22,10 +23,64 @@ from tests.conftest import get_env_test_path
 _lm_studio_available_cache = None
 
 
+class FakeTime:
+    """
+    Controllable clock for tests that avoids real sleeps.
+
+    Parameters
+    ----------
+    start : float, optional
+        Initial virtual time in seconds, by default 1000.0.
+
+    Attributes
+    ----------
+    current : float
+        Current virtual time in seconds.
+    sleeps : list of float
+        Recorded sleep durations.
+    """
+
+    def __init__(self, start: float = 1000.0) -> None:
+        self.current = start
+        self.sleeps: list[float] = []
+        self._lock = threading.Lock()
+
+    def monotonic(self) -> float:
+        """Return the current virtual time."""
+        return self.current
+
+    def sleep(self, seconds: float) -> None:
+        """Record a sleep and advance the virtual clock."""
+        with self._lock:
+            self.sleeps.append(seconds)
+            self.current += max(seconds, 1e-6)
+
+
 def reset_lm_studio_availability_cache():
     """Reset the cached result of LM Studio availability check."""
     global _lm_studio_available_cache
     _lm_studio_available_cache = None
+
+
+def mock_plugin_current_year_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Disable live current-year availability probes for all plugin classes.
+
+    Plugin ``supported_years`` properties probe the conference website for the
+    current year. Unit tests should not perform those requests, so this helper
+    patches the probe on the base class and on plugins that override it.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Pytest monkeypatch fixture used to replace the probe methods.
+    """
+    from abstracts_explorer.plugin import DownloaderPlugin
+    from abstracts_explorer.plugins.aaai_downloader import AAAIDownloaderPlugin
+    from abstracts_explorer.plugins.igarss_downloader import IGARSSDownloaderPlugin
+
+    for plugin_class in (DownloaderPlugin, AAAIDownloaderPlugin, IGARSSDownloaderPlugin):
+        monkeypatch.setattr(plugin_class, "_check_current_year_available", lambda self, year: True)
 
 
 def create_test_db_with_paper(db_path, paper_data):
@@ -181,11 +236,11 @@ def find_free_port():
 
 def requires_lm_studio(func):
     """
-    Decorator that marks tests as slow and skips them if OpenAI API backend is not available.
+    Mark a test as slow and requiring a reachable OpenAI-compatible API backend.
 
-    This decorator:
-    1. Marks the test as 'slow' (so it's skipped by default with -m "not slow")
-    2. Skips the test if the configured OpenAI-compatible API is not running or no model is loaded
+    The availability check is performed lazily at test setup time by the
+    ``pytest_runtest_setup`` hook in ``tests/conftest.py``, so deselected slow
+    tests never trigger a network request during collection.
 
     Usage
     -----
@@ -193,12 +248,8 @@ def requires_lm_studio(func):
     def test_something_with_api():
         ...
     """
-    # Apply both slow marker and skipif condition
     func = pytest.mark.slow(func)
-    func = pytest.mark.skipif(
-        not check_lm_studio_available(),
-        reason="OpenAI-compatible API not available. Check configuration and ensure the API backend (LM Studio or blablador) is accessible with the configured models.",
-    )(func)
+    func = pytest.mark.requires_lm_studio(func)
     return func
 
 

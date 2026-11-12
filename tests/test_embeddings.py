@@ -9,6 +9,7 @@ from unittest.mock import Mock
 
 from abstracts_explorer.embeddings import EmbeddingsError, EmbeddingsManager
 from tests.conftest import set_test_db
+from tests.helpers import FakeTime
 
 # Fixtures imported from conftest.py:
 # - mock_lm_studio: Mock LM Studio API responses
@@ -1769,11 +1770,14 @@ class TestRateLimiting:
         # The OpenAI client uses its own default transport
         assert not isinstance(getattr(getattr(client, "_client", None), "_transport", None), RateLimitedTransport)
 
-    def test_rate_limited_transport_sleeps_when_tokens_exhausted(self):
+    def test_rate_limited_transport_sleeps_when_tokens_exhausted(self, monkeypatch):
         """Test that RateLimitedTransport blocks when token bucket is empty."""
         import httpx2
         from abstracts_explorer.embeddings import RateLimitedTransport
         from abstracts_explorer.rate_limiter import set_global_rate_limiter
+
+        clock = FakeTime()
+        monkeypatch.setattr("abstracts_explorer.rate_limiter.time", clock)
 
         set_global_rate_limiter(None)
 
@@ -1782,13 +1786,11 @@ class TestRateLimiting:
 
         transport = RateLimitedTransport(mock_inner, requests_per_minute=60)
         transport._rate_limiter._tokens = 0.0
-        transport._rate_limiter._last_update = time.monotonic()
+        transport._rate_limiter._last_update = clock.monotonic()
 
-        start = time.monotonic()
         transport.handle_request(Mock(spec=httpx2.Request))
-        elapsed = time.monotonic() - start
 
-        assert elapsed >= 0.8
+        assert sum(clock.sleeps) >= 0.8
         mock_inner.handle_request.assert_called_once()
 
     def test_rate_limited_transport_no_wait_when_tokens_available(self):
