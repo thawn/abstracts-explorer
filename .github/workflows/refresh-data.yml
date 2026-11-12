@@ -1,0 +1,147 @@
+name: Refresh Registry Data
+
+on:
+    schedule:
+        - cron: "0 3 1 * *"
+    workflow_dispatch:
+        inputs:
+            year:
+                description: "Conference year to regenerate (defaults to the current UTC year)"
+                required: false
+                type: string
+            conference:
+                description: "Optional conference filter (plugin or canonical name)"
+                required: false
+                type: string
+            force:
+                description: "Force re-download, re-embedding, and clustering for the target year"
+                required: false
+                default: true
+                type: boolean
+            upload:
+                description: "Upload refreshed data to the registry"
+                required: false
+                default: true
+                type: boolean
+
+concurrency:
+    group: registry-data-refresh
+    cancel-in-progress: false
+
+permissions:
+    contents: read
+    packages: write
+
+env:
+    REGISTRY_REPOSITORY: ${{ vars.REGISTRY_REPOSITORY || 'ghcr.io/thawn/abstracts-data' }}
+    EMBEDDING_MODEL: ${{ vars.EMBEDDING_MODEL || 'alias-qwen3-8b-embeddings' }}
+    CHAT_MODEL: ${{ vars.CHAT_MODEL || 'alias-code' }}
+    CLUSTER_LABEL_MODEL: ${{ vars.CLUSTER_LABEL_MODEL || 'alias-fast' }}
+    LLM_BACKEND_URL: ${{ vars.LLM_BACKEND_URL || 'https://api.helmholtz-blablador.fz-juelich.de' }}
+    LLM_BACKEND_AUTH_TOKEN: ${{ secrets.BLABLADOR_TOKEN }}
+    REQUESTS_PER_MINUTE: ${{ vars.REQUESTS_PER_MINUTE || '60' }}
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+    prepare:
+        runs-on: ubuntu-latest
+        outputs:
+            matrix: ${{ steps.matrix.outputs.matrix }}
+            year: ${{ steps.matrix.outputs.year }}
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v6
+              with:
+                  fetch-depth: 0
+
+            - name: Install uv
+              uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57
+              with:
+                  version: "latest"
+                  enable-cache: true
+
+            - name: Set up Python
+              uses: actions/setup-python@v6
+              with:
+                  python-version: "3.12"
+
+            - name: Install dependencies
+              run: uv sync
+
+            - name: Build refresh matrix
+              id: matrix
+              env:
+                  TARGET_YEAR: ${{ inputs.year }}
+                  CONFERENCE_FILTER: ${{ inputs.conference }}
+              run: uv run python .github/scripts/build-data-refresh-matrix.py
+
+    refresh:
+        needs: prepare
+        runs-on: ubuntu-latest
+        timeout-minutes: 350
+        strategy:
+            fail-fast: false
+            max-parallel: 5
+            matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+        env:
+            TARGET_YEAR: ${{ needs.prepare.outputs.year }}
+            FORCE: ${{ github.event_name != 'workflow_dispatch' || inputs.force }}
+            UPLOAD: ${{ github.event_name != 'workflow_dispatch' || inputs.upload }}
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v6
+              with:
+                  fetch-depth: 0
+
+            - name: Install uv
+              uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57
+              with:
+                  version: "latest"
+                  enable-cache: true
+
+            - name: Set up Python
+              uses: actions/setup-python@v6
+              with:
+                  python-version: "3.12"
+
+            - name: Install dependencies
+              run: uv sync
+
+            - name: Free disk space
+              run: |
+                  sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+
+            - name: Restore existing registry data
+              if: env.UPLOAD == 'true' && toJSON(matrix.registry_tags) != '[]'
+              env:
+                  REGISTRY_TAGS: ${{ toJSON(matrix.registry_tags) }}
+              run: |
+                  while IFS= read -r tag; do
+                    [ -z "$tag" ] && continue
+                    uv run abstracts-explorer registry download \
+                      --conference "${{ matrix.conference }}" \
+                      --tag "$tag" \
+                      --yes
+                  done < <(jq -r '.[]' <<< "$REGISTRY_TAGS")
+
+            - name: Regenerate target-year data
+              run: |
+                  args=(
+                    pre-process
+                    --conference "${{ matrix.plugin }}"
+                    --year "$TARGET_YEAR"
+                    --ignore-embedding-model-mismatch
+                    --requests-per-minute "$REQUESTS_PER_MINUTE"
+                  )
+                  if [ "$FORCE" = "true" ]; then
+                    args+=(--force)
+                  fi
+                  uv run abstracts-explorer "${args[@]}"
+
+            - name: Upload refreshed data
+              if: env.UPLOAD == 'true'
+              run: |
+                  uv run abstracts-explorer registry upload \
+                    --conference "${{ matrix.conference }}"

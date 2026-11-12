@@ -255,6 +255,39 @@ The registry feature is designed for safe, conflict-free imports:
 - **Embedding model consistency**: The local database rejects imported data created with a different embedding model, preventing silent data corruption.
 - **Scoped cache invalidation**: Only clustering cache entries for the imported conference+year are replaced; other conferences and years are unaffected.
 
+## Automated Data Refresh
+
+The `Refresh Registry Data` GitHub Actions workflow
+(`.github/workflows/refresh-data.yml`) keeps the published artifacts up to date.
+
+It runs monthly and can also be started manually from the Actions tab. Each run:
+
+1. Restores the latest existing artifact for every supported conference.
+2. Runs `abstracts-explorer pre-process` for the target year.
+3. Uploads the refreshed paper database, embeddings, and clustering cache.
+
+The target year defaults to the current UTC year. Manual runs accept optional
+`year` and `conference` filters, plus `force` and `upload` toggles. With
+`force` enabled (the default), the target year is re-downloaded, re-embedded,
+and re-clustered so the clustering cache never goes stale.
+
+Plugins that require a manually supplied input file, such as CHI, are skipped
+because they cannot run unattended.
+
+The workflow authenticates to the registry with the built-in `GITHUB_TOKEN`,
+which must have `packages: write` permission. Optional repository variables:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `REGISTRY_REPOSITORY` | `ghcr.io/thawn/abstracts-data` | Target OCI repository |
+| `LLM_BACKEND_URL` | `https://api.helmholtz-blablador.fz-juelich.de` | Embedding/clustering backend |
+| `EMBEDDING_MODEL` | `alias-qwen3-8b-embeddings` | Embedding model and registry tag component |
+| `CHAT_MODEL` | `alias-code` | Chat model |
+| `CLUSTER_LABEL_MODEL` | `alias-fast` | Cluster-label model |
+| `REQUESTS_PER_MINUTE` | `60` | Embedding API rate limit |
+
+The Blablador token is read from the `BLABLADOR_TOKEN` repository secret.
+
 ## Docker / Container Usage
 
 When running Abstracts Explorer in Docker, you can pre-populate the databases by running a one-off download command inside the container.
