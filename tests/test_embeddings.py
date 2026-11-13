@@ -7,7 +7,7 @@ import time
 import pytest
 from unittest.mock import Mock
 
-from abstracts_explorer.embeddings import EmbeddingsError, EmbeddingsManager
+from abstracts_explorer.embeddings import EmbeddingsError, EmbeddingsManager, _count_tokens
 from tests.conftest import set_test_db
 from tests.helpers import FakeTime
 
@@ -2037,3 +2037,96 @@ class TestFindPapersWithinDistance:
                 include=["distances"],
                 query_embedding=[0.1],
             )
+
+
+class TestEmbeddingInputTruncation:
+    """Tests for truncating inputs that exceed the embedding context window."""
+
+    @staticmethod
+    def _long_text() -> str:
+        return " ".join(f"token{i}" for i in range(5000))
+
+    def test_short_text_is_not_truncated(self, embeddings_manager):
+        """Text within the budget is sent unchanged."""
+        em = embeddings_manager
+        em.max_input_tokens = 128
+        text = "A short abstract about machine learning."
+
+        em.generate_embedding(text)
+
+        sent = em.openai_client.embeddings.create.call_args.kwargs["input"]
+        assert sent == text
+
+    def test_long_text_is_truncated_before_api_call(self, embeddings_manager):
+        """Text above the budget is shortened before the API call."""
+        em = embeddings_manager
+        em.max_input_tokens = 100
+        text = self._long_text()
+
+        em.generate_embedding(text)
+
+        sent = em.openai_client.embeddings.create.call_args.kwargs["input"]
+        assert sent != text
+        token_count = _count_tokens(sent)
+        if token_count is not None:
+            assert token_count <= em._effective_token_budget()
+
+    def test_truncation_can_be_disabled(self, embeddings_manager):
+        """A zero token budget disables proactive truncation."""
+        em = embeddings_manager
+        em.max_input_tokens = 0
+        text = self._long_text()
+
+        em.generate_embedding(text)
+
+        sent = em.openai_client.embeddings.create.call_args.kwargs["input"]
+        assert sent == text
+
+    def test_add_paper_stores_untruncated_document(self, embeddings_manager):
+        """The full abstract is stored while only the embedding input is truncated."""
+        em = embeddings_manager
+        em.max_input_tokens = 100
+        abstract = self._long_text()
+        paper = {"uid": "long_paper", "title": "Long Paper", "abstract": abstract}
+
+        em.create_collection()
+        em.add_paper(paper)
+
+        stored = em.collection.get(ids=["long_paper"])
+        assert stored["documents"][0] == f"Long Paper\n\n{abstract}".strip()
+
+        sent = em.openai_client.embeddings.create.call_args.kwargs["input"]
+        assert len(sent) < len(abstract)
+        em.close()
+
+    def test_context_length_error_retries_with_shorter_input(self, embeddings_manager):
+        """A backend context-length error triggers a retry with a smaller input."""
+        em = embeddings_manager
+        em.max_input_tokens = 0
+        text = self._long_text()
+        response = em.openai_client.embeddings.create.return_value
+        em.openai_client.embeddings.create.side_effect = [
+            Exception(
+                "Error code: 400 - This model's maximum context length is 100 tokens. "
+                "However, your prompt contains at least 101 input tokens."
+            ),
+            response,
+        ]
+
+        em.generate_embedding(text)
+
+        assert em.openai_client.embeddings.create.call_count == 2
+        first = em.openai_client.embeddings.create.call_args_list[0].kwargs["input"]
+        second = em.openai_client.embeddings.create.call_args_list[1].kwargs["input"]
+        assert len(second) < len(first)
+        assert _count_tokens("probe") is None or em._learned_token_budget is not None
+
+    def test_non_context_error_is_not_retried(self, embeddings_manager):
+        """Unrelated API errors fail on the first attempt."""
+        em = embeddings_manager
+        em.openai_client.embeddings.create.side_effect = Exception("API error")
+
+        with pytest.raises(EmbeddingsError, match="Failed to generate embedding"):
+            em.generate_embedding("Some text")
+
+        assert em.openai_client.embeddings.create.call_count == 1

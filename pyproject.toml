@@ -39,6 +39,7 @@ dependencies = [
     "httpx2>=2.7",
     "psycopg[binary]>=3.2",
     "tqdm>=4.66.0",
+    "tiktoken>=0.7.0",
 ]
 
 [project.optional-dependencies]

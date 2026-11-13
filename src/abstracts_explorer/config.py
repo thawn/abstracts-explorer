@@ -88,6 +88,10 @@ class Config:
         Name of the language model for chat/RAG.
     embedding_model : str
         Name of the embedding model.
+    embedding_max_input_tokens : int
+        Maximum number of tokens sent to the embedding model per request.
+        Longer inputs are truncated before the API call. Set to 0 to disable
+        proactive truncation.
     llm_backend_url : str
         URL for OpenAI-compatible API endpoint.
     llm_backend_auth_token : str
@@ -179,6 +183,7 @@ class Config:
 
         # Embedding Model Settings
         self.embedding_model = self._get_env("EMBEDDING_MODEL", default="text-embedding-qwen3-embedding-4b")
+        self.embedding_max_input_tokens = self._get_env_int("EMBEDDING_MAX_INPUT_TOKENS", default=8192)
 
         # LLM Backend Configuration
         self.llm_backend_url = self._get_env("LLM_BACKEND_URL", default="http://localhost:1234")
@@ -408,6 +413,7 @@ class Config:
             "CHAT_MAX_TOKENS",
             "CLUSTER_LABEL_MODEL",
             "EMBEDDING_MODEL",
+            "EMBEDDING_MAX_INPUT_TOKENS",
             "LLM_BACKEND_URL",
             "LLM_BACKEND_AUTH_TOKEN",
             "PAPER_DB",
@@ -455,6 +461,7 @@ class Config:
             "chat_temperature": self.chat_temperature,
             "chat_max_tokens": self.chat_max_tokens,
             "embedding_model": self.embedding_model,
+            "embedding_max_input_tokens": self.embedding_max_input_tokens,
             "llm_backend_url": self.llm_backend_url,
             "llm_backend_auth_token": "***" if self.llm_backend_auth_token else "",
             "embedding_db": self.embedding_db,

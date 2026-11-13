@@ -125,6 +125,23 @@ class TestConfig:
         assert config.chat_temperature == 0.7
         assert config.chat_max_tokens == 2000
         assert config.cluster_label_model == "alias-fast"
+        assert config.embedding_max_input_tokens == 8192
+
+    def test_embedding_max_input_tokens_from_env(self, tmp_path):
+        """Test parsing EMBEDDING_MAX_INPUT_TOKENS."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("EMBEDDING_MAX_INPUT_TOKENS=2048\n")
+
+        config = Config(env_path=env_file)
+        assert config.embedding_max_input_tokens == 2048
+
+    def test_embedding_max_input_tokens_zero(self, tmp_path):
+        """A zero budget disables proactive truncation."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("EMBEDDING_MAX_INPUT_TOKENS=0\n")
+
+        config = Config(env_path=env_file)
+        assert config.embedding_max_input_tokens == 0
 
     def test_config_from_env_file(self, tmp_path):
         """Test loading configuration from .env file."""

@@ -34,6 +34,7 @@ nano .env
 ### Embedding Model Settings
 
 - **EMBEDDING_MODEL**: The embedding model to use (default: `text-embedding-qwen3-embedding-4b`)
+- **EMBEDDING_MAX_INPUT_TOKENS**: Maximum number of tokens sent to the embedding model in one request (default: `8192`). Longer titles/abstracts are truncated before the API call; the full text is still stored in ChromaDB. Set to `0` to disable proactive truncation.
 
 ### LLM Backend Configuration
 
@@ -107,6 +108,7 @@ CHAT_TEMPERATURE=0.7
 CHAT_MAX_TOKENS=2000
 
 EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b
+EMBEDDING_MAX_INPUT_TOKENS=8192
 
 LLM_BACKEND_URL=http://localhost:1234
 LLM_BACKEND_AUTH_TOKEN=
@@ -133,6 +135,7 @@ CHAT_TEMPERATURE=0.7
 CHAT_MAX_TOKENS=2000
 
 EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b
+EMBEDDING_MAX_INPUT_TOKENS=8192
 
 LLM_BACKEND_URL=http://localhost:1234
 LLM_BACKEND_AUTH_TOKEN=

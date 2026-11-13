@@ -26,6 +26,7 @@ dependencies = [
     { name = "scikit-fuzzy" },
     { name = "scikit-learn" },
     { name = "sqlalchemy" },
+    { name = "tiktoken" },
     { name = "tqdm" },
 ]
 
@@ -87,6 +88,7 @@ requires-dist = [
     { name = "sphinx-rtd-theme", marker = "extra == 'docs'", specifier = ">=1.3.0" },
     { name = "sphinxcontrib-mermaid", marker = "extra == 'docs'", specifier = ">=2.0.1" },
     { name = "sqlalchemy", specifier = ">=2.0.0" },
+    { name = "tiktoken", specifier = ">=0.7.0" },
     { name = "tqdm", specifier = ">=4.66.0" },
     { name = "types-requests", marker = "extra == 'dev'", specifier = ">=2.31.0" },
     { name = "waitress", marker = "extra == 'web'", specifier = ">=3.0.0" },
