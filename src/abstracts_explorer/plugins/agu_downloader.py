@@ -129,7 +129,7 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
             {"date": datetime.now().isoformat(timespec="seconds")},
         )
         programs = self._records(programs)
-        sessions = self._fetch_sessions(api_url, programs, timeout, verify_ssl, request_delay)
+        sessions = self._fetch_sessions(api_url, programs, timeout, verify_ssl, request_delay, show_progress)
         papers = self._fetch_papers(api_url, sessions, timeout, verify_ssl, request_delay, show_progress)
         if not papers:
             raise RuntimeError(f"No abstracts with authors found for AGU {year}")
@@ -137,7 +137,7 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
         person_refs = {
             person_ref for paper in papers.values() for person_ref in (paper.get("ChildList_Person") or [])
         }
-        people = self._fetch_people(api_url, sorted(person_refs), timeout, verify_ssl, request_delay)
+        people = self._fetch_people(api_url, sorted(person_refs), timeout, verify_ssl, request_delay, show_progress)
 
         unique_papers: Dict[Any, LightweightPaper] = {}
         for paper_data in papers.values():
@@ -178,7 +178,7 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
                 "timeout": "int – HTTP request timeout in seconds",
                 "verify_ssl": "bool – Whether to verify SSL certificates",
                 "request_delay": "float – Delay between API batches in seconds",
-                "progress": "bool – Show a progress bar while fetching papers (default: auto)",
+                "progress": "bool – Show progress bars during the download (default: auto)",
             },
         }
 
@@ -189,6 +189,7 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
         timeout: int,
         verify_ssl: bool,
         request_delay: float,
+        show_progress: Optional[bool] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """
         Fetch m-anage records in bounded BatchRead requests.
@@ -197,43 +198,60 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
         listing the rest under ``unanswered`` or ``single``. As the m-anage web
         app does, records missing from the batch response are fetched
         individually so throttling does not silently drop data.
+
+        Parameters
+        ----------
+        show_progress : bool, optional
+            Whether to display a progress bar. ``None`` (default) shows the
+            bar only when stderr is an interactive terminal.
         """
+        if not refs:
+            return {}
+
         records: Dict[str, Dict[str, Any]] = {}
         single_fetches = 0
-        for start in range(0, len(refs), self._BATCH_SIZE):
-            batch = refs[start : start + self._BATCH_SIZE]
-            payload = self._fetch_json(
-                f"{api_url}/BatchRead/0",
-                timeout,
-                verify_ssl,
-                {"ids": ",".join(batch)},
-            )
-            models = payload.get("models", {}) if isinstance(payload, dict) else {}
-            if isinstance(models, dict):
-                records.update({ref: record for ref, record in models.items() if isinstance(record, dict)})
+        disable = None if show_progress is None else not show_progress
+        with tqdm(
+            total=len(refs),
+            desc="Fetching AGU records",
+            unit="record",
+            disable=disable,
+        ) as progress:
+            for start in range(0, len(refs), self._BATCH_SIZE):
+                batch = refs[start : start + self._BATCH_SIZE]
+                payload = self._fetch_json(
+                    f"{api_url}/BatchRead/0",
+                    timeout,
+                    verify_ssl,
+                    {"ids": ",".join(batch)},
+                )
+                models = payload.get("models", {}) if isinstance(payload, dict) else {}
+                if isinstance(models, dict):
+                    records.update({ref: record for ref, record in models.items() if isinstance(record, dict)})
 
-            refused = payload.get("refused", {}) if isinstance(payload, dict) else {}
-            for ref in batch:
-                if ref in records:
-                    continue
-                status = refused.get(ref) if isinstance(refused, dict) else None
-                try:
-                    status_code = int(status) if status is not None else None
-                except (TypeError, ValueError):
-                    status_code = None
-                if status_code is not None and status_code not in self._RETRYABLE_STATUSES:
-                    logger.debug("Skipping unavailable AGU record %s (HTTP %s)", ref, status_code)
-                    continue
+                refused = payload.get("refused", {}) if isinstance(payload, dict) else {}
+                for ref in batch:
+                    if ref in records:
+                        continue
+                    status = refused.get(ref) if isinstance(refused, dict) else None
+                    try:
+                        status_code = int(status) if status is not None else None
+                    except (TypeError, ValueError):
+                        status_code = None
+                    if status_code is not None and status_code not in self._RETRYABLE_STATUSES:
+                        logger.debug("Skipping unavailable AGU record %s (HTTP %s)", ref, status_code)
+                        continue
 
-                record = self._fetch_json(f"{api_url}/{ref}", timeout, verify_ssl)
-                if isinstance(record, dict):
-                    records[ref] = record
-                single_fetches += 1
-                if request_delay > 0:
+                    record = self._fetch_json(f"{api_url}/{ref}", timeout, verify_ssl)
+                    if isinstance(record, dict):
+                        records[ref] = record
+                    single_fetches += 1
+                    if request_delay > 0:
+                        time.sleep(request_delay)
+
+                progress.update(len(batch))
+                if request_delay > 0 and start + self._BATCH_SIZE < len(refs):
                     time.sleep(request_delay)
-
-            if request_delay > 0 and start + self._BATCH_SIZE < len(refs):
-                time.sleep(request_delay)
 
         if single_fetches:
             logger.info(
@@ -249,35 +267,56 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
         timeout: int,
         verify_ssl: bool,
         request_delay: float,
+        show_progress: Optional[bool] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """
         Fetch all sessions through the program child-list endpoints.
 
         Program-level child lists return complete session records and avoid the
         partial BatchRead responses that m-anage produces under load.
+
+        Parameters
+        ----------
+        show_progress : bool, optional
+            Whether to display a progress bar. ``None`` (default) shows the
+            bar only when stderr is an interactive terminal.
         """
         sessions: Dict[str, Dict[str, Any]] = {}
         fallback_refs: Set[str] = set()
         params = {"date": datetime.now().isoformat(timespec="seconds")}
         session_keys = ("ChildList_Session", "ChildList_SessionReadOnly", "ChildList_UnscheduledSession")
+        program_requests = [
+            (program, session_key) for program in programs for session_key in session_keys if program.get(session_key)
+        ]
+        disable = None if show_progress is None else not show_progress
 
-        for program in programs:
+        for program, session_key in tqdm(
+            program_requests,
+            total=len(program_requests),
+            desc="Fetching AGU sessions",
+            unit="request",
+            disable=disable,
+        ):
             parent = str(program.get("_url") or f"Program/{program.get('id')}")
-            for session_key in session_keys:
-                refs = program.get(session_key) or []
-                if not refs:
-                    continue
-                data = self._fetch_json(f"{api_url}/{parent}/{session_key}", timeout, verify_ssl, params)
-                for record in self._records(data):
-                    ref = str(record.get("_url") or f"Session/{record.get('id')}")
-                    sessions[ref] = record
-                fallback_refs.update(ref for ref in refs if ref not in sessions)
-                if request_delay > 0:
-                    time.sleep(request_delay)
+            refs = program[session_key]
+            data = self._fetch_json(f"{api_url}/{parent}/{session_key}", timeout, verify_ssl, params)
+            for record in self._records(data):
+                ref = str(record.get("_url") or f"Session/{record.get('id')}")
+                sessions[ref] = record
+            fallback_refs.update(ref for ref in refs if ref not in sessions)
+            if request_delay > 0:
+                time.sleep(request_delay)
 
         if fallback_refs:
             sessions.update(
-                self._fetch_batch_records(api_url, sorted(fallback_refs), timeout, verify_ssl, request_delay)
+                self._fetch_batch_records(
+                    api_url,
+                    sorted(fallback_refs),
+                    timeout,
+                    verify_ssl,
+                    request_delay,
+                    show_progress,
+                )
             )
         return sessions
 
@@ -330,13 +369,29 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
                 time.sleep(request_delay)
 
         if slot_refs:
-            slots = self._fetch_batch_records(api_url, sorted(slot_refs), timeout, verify_ssl, request_delay)
+            slots = self._fetch_batch_records(
+                api_url,
+                sorted(slot_refs),
+                timeout,
+                verify_ssl,
+                request_delay,
+                show_progress,
+            )
             for slot in slots.values():
                 expected_refs.update(slot.get("ChildList_Entry") or [])
 
         missing = sorted(ref for ref in expected_refs if ref not in papers)
         if missing:
-            papers.update(self._fetch_batch_records(api_url, missing, timeout, verify_ssl, request_delay))
+            papers.update(
+                self._fetch_batch_records(
+                    api_url,
+                    missing,
+                    timeout,
+                    verify_ssl,
+                    request_delay,
+                    show_progress,
+                )
+            )
         return papers
 
     def _fetch_people(
@@ -346,6 +401,7 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
         timeout: int,
         verify_ssl: bool,
         request_delay: float,
+        show_progress: Optional[bool] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """
         Fetch people through the alphabetic people index.
@@ -353,13 +409,26 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
         The people index returns every person for a letter in one request, so
         the complete people directory takes only a few requests. Any referenced
         people missing from the index are fetched through BatchRead.
+
+        Parameters
+        ----------
+        show_progress : bool, optional
+            Whether to display a progress bar. ``None`` (default) shows the
+            bar only when stderr is an interactive terminal.
         """
         if not person_refs:
             return {}
 
         people: Dict[str, Dict[str, Any]] = {}
         params = {"date": datetime.now().isoformat(timespec="seconds")}
-        for letter in self._PEOPLE_INDEX_LETTERS:
+        disable = None if show_progress is None else not show_progress
+        for letter in tqdm(
+            self._PEOPLE_INDEX_LETTERS,
+            total=len(self._PEOPLE_INDEX_LETTERS),
+            desc="Fetching AGU people",
+            unit="letter",
+            disable=disable,
+        ):
             try:
                 data = self._fetch_json(
                     f"{api_url}/PeopleIndex/{letter}/ChildList_Person",
@@ -380,7 +449,16 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
 
         missing = sorted(ref for ref in person_refs if ref not in people)
         if missing:
-            people.update(self._fetch_batch_records(api_url, missing, timeout, verify_ssl, request_delay))
+            people.update(
+                self._fetch_batch_records(
+                    api_url,
+                    missing,
+                    timeout,
+                    verify_ssl,
+                    request_delay,
+                    show_progress,
+                )
+            )
         return people
 
     @staticmethod
