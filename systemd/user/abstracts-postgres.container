@@ -17,11 +17,17 @@ Environment=POSTGRES_USER=abstracts
 # install script (scripts/install-podman.sh).
 Secret=postgres-password,type=env,target=POSTGRES_PASSWORD
 
+Notify=healthy
+
 HealthCmd=pg_isready -U abstracts
-HealthInterval=10s
+HealthInterval=5m
 HealthTimeout=5s
 HealthRetries=5
-HealthStartPeriod=10s
+HealthStartPeriod=15s
+HealthStartupCmd=pg_isready -U abstracts
+HealthStartupInterval=15s
+HealthStartupRetries=0
+HealthStartupSuccess=1
 
 [Service]
 Restart=on-failure

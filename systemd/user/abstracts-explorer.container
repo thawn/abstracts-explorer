@@ -35,10 +35,14 @@ Secret=llm-backend-auth-token,type=env,target=LLM_BACKEND_AUTH_TOKEN
 # Secret=github-token,type=env,target=GITHUB_TOKEN
 
 HealthCmd=curl -sf http://localhost:5000/health
-HealthInterval=30s
+HealthInterval=5m
 HealthTimeout=10s
 HealthRetries=3
-HealthStartPeriod=15s
+HealthStartPeriod=30s
+HealthStartupCmd=curl -sf http://localhost:5000/health
+HealthStartupInterval=30s
+HealthStartupRetries=0
+HealthStartupSuccess=1
 
 [Service]
 Restart=on-failure
