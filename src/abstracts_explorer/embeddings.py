@@ -7,9 +7,11 @@ embeddings and stores them in ChromaDB for efficient similarity search.
 """
 
 import logging
+import re
 import sys
 import threading
 from copy import deepcopy
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
@@ -23,6 +25,67 @@ from abstracts_explorer.config import get_config
 from abstracts_explorer.database import DatabaseManager, normalize_model_name
 
 logger = logging.getLogger(__name__)
+
+_TOKEN_SAFETY_MARGIN_RATIO = 0.1
+_CHAR_FALLBACK_RATIO = 2
+_MAX_CONTEXT_RETRIES = 3
+_CONTEXT_RETRY_SHRINK = 0.75
+
+
+@lru_cache(maxsize=1)
+def _get_token_encoding() -> Optional[Any]:
+    """Return a cached tiktoken encoding, or ``None`` when unavailable."""
+    try:
+        import tiktoken
+
+        return tiktoken.get_encoding("cl100k_base")
+    except Exception as exc:
+        logger.debug("tiktoken unavailable (%s); falling back to character truncation", exc)
+        return None
+
+
+def _count_tokens(text: str) -> Optional[int]:
+    """Count tokens with the cached encoding, returning ``None`` without one."""
+    encoding = _get_token_encoding()
+    if encoding is None:
+        return None
+    return len(encoding.encode(text))
+
+
+def _truncate_to_token_limit(text: str, max_tokens: int) -> str:
+    """Truncate *text* to at most *max_tokens* tokens."""
+    if max_tokens <= 0 or not text:
+        return text
+
+    encoding = _get_token_encoding()
+    if encoding is None:
+        return text[: max_tokens * _CHAR_FALLBACK_RATIO]
+
+    tokens = encoding.encode(text)
+    if len(tokens) <= max_tokens:
+        return text
+    return encoding.decode(tokens[:max_tokens])
+
+
+def _is_context_length_error(error: Exception) -> bool:
+    """Return ``True`` when *error* reports an exceeded input context window."""
+    message = str(error).lower()
+    markers = (
+        "maximum context length",
+        "context window",
+        "context length",
+        "too many tokens",
+        "reduce the length of the input",
+    )
+    return any(marker in message for marker in markers)
+
+
+def _context_length_limit_from_error(error: Exception) -> Optional[int]:
+    """Extract the model's maximum context length from an API error, if present."""
+    match = re.search(r"maximum context length is (\d+)", str(error), re.IGNORECASE)
+    if match is None:
+        return None
+    return int(match.group(1))
 
 
 def _contains_metadata_key(value: Any, key: str) -> bool:
@@ -216,6 +279,10 @@ class EmbeddingsManager:
     requests_per_minute : int, optional
         Maximum number of API requests per minute. Set to 0 to disable rate limiting.
         If None, uses the value from config (default: 60).
+    max_input_tokens : int, optional
+        Maximum number of tokens sent to the embedding model per request. Longer
+        inputs are truncated before the API call. If None, uses the value from
+        config (default: 8192). Set to 0 to disable proactive truncation.
 
     Attributes
     ----------
@@ -223,6 +290,8 @@ class EmbeddingsManager:
         OpenAI-compatible API endpoint URL.
     model_name : str
         Embedding model name.
+    max_input_tokens : int
+        Configured maximum number of input tokens per embedding request.
     embedding_db : str
         ChromaDB configuration - URL for HTTP service or path for local storage.
     collection_name : str
@@ -248,6 +317,7 @@ class EmbeddingsManager:
         model_name: Optional[str] = None,
         collection_name: Optional[str] = None,
         requests_per_minute: Optional[int] = None,
+        max_input_tokens: Optional[int] = None,
     ):
         """
         Initialize the EmbeddingsManager.
@@ -265,11 +335,19 @@ class EmbeddingsManager:
         requests_per_minute : int, optional
             Maximum number of API requests per minute. Set to 0 to disable rate limiting.
             If None, uses the value from config (default: 60).
+        max_input_tokens : int, optional
+            Maximum number of tokens sent to the embedding model per request.
+            If None, uses the value from config (default: 8192).
+            Set to 0 to disable proactive truncation.
         """
         config = get_config()
         self.lm_studio_url = (lm_studio_url or config.llm_backend_url).rstrip("/")
         self.llm_backend_auth_token = auth_token or config.llm_backend_auth_token
         self.model_name = model_name or config.embedding_model
+        self.max_input_tokens = (
+            max_input_tokens if max_input_tokens is not None else config.embedding_max_input_tokens
+        )
+        self._learned_token_budget: Optional[int] = None
 
         # Get ChromaDB configuration from config
         self.embedding_db = config.embedding_db
@@ -507,12 +585,114 @@ class EmbeddingsManager:
         print("✅ Successfully connected to OpenAI API")
         return True
 
+    def _effective_token_budget(self) -> int:
+        """
+        Return the token budget used before sending text to the API.
+
+        The configured model limit is reduced by a safety margin to account for
+        tokenizer differences. A smaller budget learned from a previous API
+        context-length error takes precedence.
+
+        Returns
+        -------
+        int
+            Token budget, or 0 when proactive truncation is disabled.
+        """
+        limit = self.max_input_tokens
+        if limit > 0:
+            margin = max(1, int(limit * _TOKEN_SAFETY_MARGIN_RATIO))
+            budget = max(1, limit - margin)
+        else:
+            budget = 0
+
+        if self._learned_token_budget is not None:
+            budget = self._learned_token_budget if budget <= 0 else min(budget, self._learned_token_budget)
+
+        return budget
+
+    def _prepare_embedding_input(self, text: str) -> str:
+        """
+        Truncate *text* to the effective token budget.
+
+        Parameters
+        ----------
+        text : str
+            Text that will be sent to the embedding API.
+
+        Returns
+        -------
+        str
+            Original text when it fits, otherwise a truncated prefix.
+        """
+        budget = self._effective_token_budget()
+        if budget <= 0:
+            return text
+
+        truncated = _truncate_to_token_limit(text, budget)
+        if truncated == text:
+            return text
+
+        original_tokens = _count_tokens(text)
+        truncated_tokens = _count_tokens(truncated)
+        if original_tokens is not None and truncated_tokens is not None:
+            logger.warning(
+                "Truncated embedding input from %d to %d tokens (budget %d) for model %s",
+                original_tokens,
+                truncated_tokens,
+                budget,
+                self.model_name,
+            )
+        else:
+            logger.warning(
+                "Truncated embedding input from %d to %d characters for model %s",
+                len(text),
+                len(truncated),
+                self.model_name,
+            )
+        return truncated
+
+    def _shrink_embedding_input(self, original_text: str, current_text: str, error: Exception) -> str:
+        """
+        Produce a shorter input after the backend rejects a context-length overflow.
+
+        Parameters
+        ----------
+        original_text : str
+            Full, untruncated text.
+        current_text : str
+            Input that the backend just rejected.
+        error : Exception
+            Error raised by the embedding API.
+
+        Returns
+        -------
+        str
+            Shortened input to retry.
+        """
+        current_tokens = _count_tokens(current_text)
+        if current_tokens is None:
+            return current_text[: max(1, len(current_text) // 2)]
+
+        target = max(1, int(current_tokens * _CONTEXT_RETRY_SHRINK))
+        parsed_limit = _context_length_limit_from_error(error)
+        if parsed_limit is not None:
+            margin = max(1, int(parsed_limit * _TOKEN_SAFETY_MARGIN_RATIO))
+            target = min(target, max(1, parsed_limit - margin))
+        target = min(target, max(1, current_tokens - 1))
+
+        self._learned_token_budget = target
+        return _truncate_to_token_limit(original_text, target)
+
     def generate_embedding(self, text: str) -> List[float]:
         """
         Generate embedding for a given text using OpenAI-compatible API.
 
         Rate limiting (if configured via ``requests_per_minute``) is handled
         transparently by the underlying ``httpx2`` transport.
+
+        Inputs longer than the model's context window are truncated before the
+        request. If the backend still reports an overflow, the input is shrunk
+        and retried a few times.
 
         Parameters
         ----------
@@ -539,18 +719,32 @@ class EmbeddingsManager:
         if not text or not text.strip():
             raise EmbeddingsError("Cannot generate embedding for empty text")
 
-        try:
-            response = self.openai_client.embeddings.create(model=self.model_name, input=text)
+        prepared_text = self._prepare_embedding_input(text)
 
-            if not response.data or len(response.data) == 0:
-                raise EmbeddingsError("No embedding data in API response")
+        for attempt in range(_MAX_CONTEXT_RETRIES + 1):
+            try:
+                response = self.openai_client.embeddings.create(model=self.model_name, input=prepared_text)
 
-            embedding = response.data[0].embedding
-            logger.debug(f"Generated embedding with dimension: {len(embedding)}")
-            return embedding
+                if not response.data or len(response.data) == 0:
+                    raise EmbeddingsError("No embedding data in API response")
 
-        except Exception as e:
-            raise EmbeddingsError(f"Failed to generate embedding via OpenAI API: {str(e)}") from e
+                embedding = response.data[0].embedding
+                logger.debug(f"Generated embedding with dimension: {len(embedding)}")
+                return embedding
+
+            except Exception as e:
+                if not _is_context_length_error(e) or attempt >= _MAX_CONTEXT_RETRIES:
+                    raise EmbeddingsError(f"Failed to generate embedding via OpenAI API: {str(e)}") from e
+
+                prepared_text = self._shrink_embedding_input(text, prepared_text, e)
+                logger.warning(
+                    "Embedding input exceeded the model context window; retrying with a shorter input "
+                    "(attempt %d/%d)",
+                    attempt + 1,
+                    _MAX_CONTEXT_RETRIES,
+                )
+
+        raise EmbeddingsError("Failed to generate embedding via OpenAI API: retries exhausted")
 
     def create_collection(self, reset: bool = False) -> None:
         """

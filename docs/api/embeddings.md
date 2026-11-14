@@ -112,6 +112,22 @@ em = EmbeddingsManager(
 )
 ```
 
+## Long Abstracts
+
+Embedding models have a finite context window (for example, 8192 tokens).
+`EmbeddingsManager` truncates the text sent to the embedding API when it exceeds
+`EMBEDDING_MAX_INPUT_TOKENS` (default: `8192`). The full title and abstract are
+still stored as the ChromaDB document, so search results and exports are not
+truncated.
+
+```python
+# Use a smaller budget for a model with a limited context window
+em = EmbeddingsManager(max_input_tokens=2048)
+
+# Disable proactive truncation; context-length errors are still retried
+em = EmbeddingsManager(max_input_tokens=0)
+```
+
 ## ChromaDB Integration
 
 The module uses ChromaDB for vector storage:
