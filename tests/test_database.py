@@ -225,6 +225,38 @@ class TestDatabaseManager:
 
         db_manager.close()
 
+    def test_create_tables_caches_schema_for_postgresql(self, db_manager, monkeypatch):
+        """PostgreSQL schema verification is cached across manager instances."""
+        from abstracts_explorer import database as database_module
+
+        database_module.reset_schema_cache()
+        monkeypatch.setattr(DatabaseManager, "_schema_cache_applies", lambda self: True)
+        try:
+            with patch.object(database_module.Base.metadata, "create_all") as create_all:
+                db_manager.create_tables()
+                db_manager.create_tables()
+
+            create_all.assert_called_once()
+        finally:
+            database_module.reset_schema_cache()
+            db_manager.close()
+
+    def test_create_tables_force_bypasses_schema_cache(self, db_manager, monkeypatch):
+        """force=True re-runs the schema check even when the URL is cached."""
+        from abstracts_explorer import database as database_module
+
+        database_module.reset_schema_cache()
+        monkeypatch.setattr(DatabaseManager, "_schema_cache_applies", lambda self: True)
+        try:
+            with patch.object(database_module.Base.metadata, "create_all") as create_all:
+                db_manager.create_tables()
+                db_manager.create_tables(force=True)
+
+            assert create_all.call_count == 2
+        finally:
+            database_module.reset_schema_cache()
+            db_manager.close()
+
     def test_query_auto_connects(self, db_manager):
         """Querying an uninitialized database creates the schema lazily."""
         assert db_manager._query("SELECT * FROM papers") == []
@@ -1725,6 +1757,19 @@ class TestGetConferenceYearsFromDb:
         result = connected_db.get_conference_years_from_db()
         assert result["NeurIPS"] == [2025, 2024]
         assert result["ICLR"] == [2024]
+
+    def test_uses_single_query(self, connected_db, sample_paper):
+        """The conference/year mapping is built with one SQL statement."""
+        from abstracts_explorer.profiling import SqlProfiler
+
+        connected_db.add_paper(sample_paper)
+
+        with SqlProfiler() as profiler:
+            with profiler.case("get_conference_years_from_db"):
+                connected_db.get_conference_years_from_db()
+
+        stats = profiler.results()[0]
+        assert stats.statement_count == 1
 
     def test_returns_empty_dict_when_database_empty(self, db_manager):
         """Returns empty dict for an empty auto-initialized database."""

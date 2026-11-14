@@ -6,6 +6,7 @@ Supports both SQLite and PostgreSQL backends via SQLAlchemy.
 import hashlib
 import logging
 import re
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, cast
@@ -38,6 +39,19 @@ from abstracts_explorer.db_models import (
 )
 
 logger = logging.getLogger(__name__)
+
+_SCHEMA_READY_URLS: set[str] = set()
+_SCHEMA_LOCK = threading.Lock()
+
+
+def reset_schema_cache() -> None:
+    """
+    Clear the process-level schema-ready cache.
+
+    This is primarily intended for tests and for explicit schema migrations.
+    """
+    with _SCHEMA_LOCK:
+        _SCHEMA_READY_URLS.clear()
 
 
 class DatabaseError(Exception):
@@ -306,7 +320,7 @@ class DatabaseManager:
         uid_source = f"{title}:{original_id}:{conference}:{year}"
         return hashlib.sha256(uid_source.encode("utf-8")).hexdigest()[:16]
 
-    def create_tables(self) -> None:
+    def create_tables(self, force: bool = False) -> None:
         """
         Create database tables for papers and embeddings metadata.
 
@@ -318,6 +332,16 @@ class DatabaseManager:
         This method is idempotent - it can be called multiple times without error.
         Tables are only created if they don't already exist.
 
+        For PostgreSQL, successful schema verification is cached for the lifetime of
+        the process and keyed by database URL.  Subsequent calls from new
+        ``DatabaseManager`` instances skip the ``create_all`` reflection queries.
+
+        Parameters
+        ----------
+        force : bool, optional
+            Run the schema check even when the database URL is already marked as
+            ready in the process-level cache.  Defaults to ``False``.
+
         Raises
         ------
         DatabaseError
@@ -327,11 +351,17 @@ class DatabaseManager:
             self.connect()
         assert self.engine is not None
 
+        if not force and self._schema_cache_applies():
+            with _SCHEMA_LOCK:
+                if self.database_url in _SCHEMA_READY_URLS:
+                    self._schema_ready = True
+                    return
+
         try:
             # Create tables only if they don't exist (checkfirst=True is the default)
             # This makes the operation idempotent
             Base.metadata.create_all(bind=self.engine, checkfirst=True)
-            self._schema_ready = True
+            self._mark_schema_ready()
             logger.debug("Database tables created successfully")
         except (OperationalError, ProgrammingError, IntegrityError) as e:
             # These exceptions can occur when tables already exist, especially with:
@@ -341,7 +371,7 @@ class DatabaseManager:
             error_msg = str(e).lower()
             if any(x in error_msg for x in ["already exists", "duplicate", "pg_type_typname_nsp_index"]):
                 # Tables already exist - this is fine, just log it
-                self._schema_ready = True
+                self._mark_schema_ready()
                 logger.debug(f"Tables already exist (this is normal): {str(e)}")
                 return
             # For other database errors, re-raise with context
@@ -349,6 +379,24 @@ class DatabaseManager:
         except Exception as e:
             # Catch any other unexpected errors
             raise DatabaseError(f"Failed to create tables: {str(e)}") from e
+
+    def _schema_cache_applies(self) -> bool:
+        """
+        Return whether process-level schema caching applies to this backend.
+
+        Returns
+        -------
+        bool
+            ``True`` for PostgreSQL, ``False`` otherwise.
+        """
+        return self.engine is not None and self.engine.dialect.name == "postgresql"
+
+    def _mark_schema_ready(self) -> None:
+        """Mark the current schema as ready and cache the URL when applicable."""
+        self._schema_ready = True
+        if self._schema_cache_applies():
+            with _SCHEMA_LOCK:
+                _SCHEMA_READY_URLS.add(self.database_url)
 
     def add_paper(self, paper: LightweightPaper) -> Optional[str]:
         """
@@ -1695,12 +1743,23 @@ class DatabaseManager:
         {'NeurIPS': [2025, 2024], 'ICLR': [2024]}
         """
         try:
-            conferences_in_db = self.get_conferences()
+            stmt: Any = (
+                select(Paper.conference, Paper.year)
+                .where(
+                    and_(
+                        Paper.conference.isnot(None),
+                        Paper.conference != "",
+                        Paper.year.isnot(None),
+                    )
+                )
+                .distinct()
+                .order_by(Paper.conference.asc(), Paper.year.desc())
+            )
+            rows: Any = self.session.execute(stmt).all()
+
             result: Dict[str, List[int]] = {}
-            for conf in conferences_in_db:
-                years = self.get_years(conference=conf)
-                if years:
-                    result[conf] = years  # already sorted descending
+            for row in rows:
+                result.setdefault(row[0], []).append(row[1])
             return result
         except Exception as e:
             raise DatabaseError(f"Failed to get conference years from DB: {str(e)}") from e
