@@ -21,8 +21,8 @@ Notify=healthy
 
 HealthCmd=pg_isready -U abstracts
 HealthInterval=5m
-HealthTimeout=5s
-HealthRetries=5
+HealthTimeout=15s
+HealthRetries=3
 HealthStartPeriod=15s
 HealthStartupCmd=pg_isready -U abstracts
 HealthStartupInterval=15s

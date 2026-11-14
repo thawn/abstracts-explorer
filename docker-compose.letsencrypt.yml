@@ -152,7 +152,7 @@ services:
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 5m
-      timeout: 10s
+      timeout: 15s
       retries: 3
       start_period: 30s
       start_interval: 30s
@@ -171,8 +171,8 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/8000' || exit 1"]
       interval: 5m
-      timeout: 5s
-      retries: 5
+      timeout: 15s
+      retries: 3
       start_period: 15s
       start_interval: 15s
 
@@ -192,8 +192,8 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U abstracts"]
       interval: 5m
-      timeout: 5s
-      retries: 5
+      timeout: 15s
+      retries: 3
       start_period: 15s
       start_interval: 15s
 

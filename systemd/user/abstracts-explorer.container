@@ -36,7 +36,7 @@ Secret=llm-backend-auth-token,type=env,target=LLM_BACKEND_AUTH_TOKEN
 
 HealthCmd=curl -sf http://localhost:5000/health
 HealthInterval=5m
-HealthTimeout=10s
+HealthTimeout=15s
 HealthRetries=3
 HealthStartPeriod=30s
 HealthStartupCmd=curl -sf http://localhost:5000/health
