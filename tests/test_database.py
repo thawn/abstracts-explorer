@@ -1777,6 +1777,82 @@ class TestGetConferenceYearsFromDb:
         db_manager.close()
 
 
+class TestMetadataCacheIntegration:
+    """Tests for PostgreSQL metadata caching behavior."""
+
+    def _enable_cache(self, monkeypatch):
+        monkeypatch.setattr(DatabaseManager, "_metadata_cache_enabled", lambda self: True)
+
+    def test_postgresql_metadata_cache_hits(self, connected_db, sample_paper, monkeypatch):
+        """A cached metadata call executes no SQL after the first call."""
+        from abstracts_explorer.profiling import SqlProfiler
+
+        self._enable_cache(monkeypatch)
+        connected_db.add_paper(sample_paper)
+
+        with SqlProfiler() as profiler:
+            with profiler.case("first"):
+                first = connected_db.get_conference_years_from_db()
+            with profiler.case("second"):
+                second = connected_db.get_conference_years_from_db()
+
+        stats = {case.label: case.statement_count for case in profiler.results()}
+        assert stats["first"] == 1
+        assert stats["second"] == 0
+        assert first == second == {"NeurIPS": [2025]}
+
+    def test_sqlite_bypasses_metadata_cache(self, connected_db, sample_paper):
+        """SQLite metadata calls always execute SQL."""
+        from abstracts_explorer.profiling import SqlProfiler
+
+        connected_db.add_paper(sample_paper)
+
+        with SqlProfiler() as profiler:
+            with profiler.case("first"):
+                connected_db.get_conference_years_from_db()
+            with profiler.case("second"):
+                connected_db.get_conference_years_from_db()
+
+        stats = {case.label: case.statement_count for case in profiler.results()}
+        assert stats["first"] == 1
+        assert stats["second"] == 1
+
+    def test_add_paper_invalidates_metadata_cache(
+        self, connected_db, sample_paper, sample_paper_minimal, monkeypatch
+    ):
+        """Adding a paper makes new conference/year data visible immediately."""
+        self._enable_cache(monkeypatch)
+        connected_db.add_paper(sample_paper)
+        assert connected_db.get_conference_years_from_db() == {"NeurIPS": [2025]}
+
+        connected_db.add_paper(sample_paper_minimal)
+
+        assert connected_db.get_conference_years_from_db() == {
+            "ICLR": [2024],
+            "NeurIPS": [2025],
+        }
+
+    def test_delete_papers_invalidates_metadata_cache(self, connected_db, sample_paper, monkeypatch):
+        """Deleting papers makes removed conference/year data disappear immediately."""
+        self._enable_cache(monkeypatch)
+        connected_db.add_paper(sample_paper)
+        assert connected_db.get_conference_years_from_db() == {"NeurIPS": [2025]}
+
+        connected_db.delete_papers_by_conference_year("NeurIPS", 2025)
+
+        assert connected_db.get_conference_years_from_db() == {}
+
+    def test_cached_values_are_copies(self, connected_db, sample_paper, monkeypatch):
+        """Callers cannot mutate cached metadata."""
+        self._enable_cache(monkeypatch)
+        connected_db.add_paper(sample_paper)
+
+        first = connected_db.get_conferences()
+        first.append("Mutated")
+
+        assert "Mutated" not in connected_db.get_conferences()
+
+
 class TestConfirmDefaultConferenceYearExists:
     """Tests for DatabaseManager.confirm_default_conference_year_exists()."""
 

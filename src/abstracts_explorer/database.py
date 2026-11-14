@@ -37,11 +37,13 @@ from abstracts_explorer.db_models import (
     EvalQAPair,
     EvalResult,
 )
+from abstracts_explorer.metadata_cache import MetadataCache
 
 logger = logging.getLogger(__name__)
 
 _SCHEMA_READY_URLS: set[str] = set()
 _SCHEMA_LOCK = threading.Lock()
+_METADATA_CACHE = MetadataCache()
 
 
 def reset_schema_cache() -> None:
@@ -52,6 +54,11 @@ def reset_schema_cache() -> None:
     """
     with _SCHEMA_LOCK:
         _SCHEMA_READY_URLS.clear()
+
+
+def reset_metadata_cache() -> None:
+    """Clear the process-level metadata cache."""
+    _METADATA_CACHE.clear()
 
 
 class DatabaseError(Exception):
@@ -398,6 +405,32 @@ class DatabaseManager:
             with _SCHEMA_LOCK:
                 _SCHEMA_READY_URLS.add(self.database_url)
 
+    def _metadata_cache_enabled(self) -> bool:
+        """Return whether the metadata cache applies to this backend."""
+        return self.database_url.startswith("postgresql")
+
+    def _metadata_cache_ttl(self) -> int:
+        """Return the configured metadata cache TTL in seconds."""
+        from abstracts_explorer.config import get_config
+
+        return max(0, int(get_config().metadata_cache_ttl))
+
+    def _metadata_cache_get(self, kind: str, *parts: Any) -> Optional[Any]:
+        """Return a cached metadata value, or ``None`` when unavailable."""
+        if not self._metadata_cache_enabled():
+            return None
+        return _METADATA_CACHE.get((self.database_url, kind, *parts), self._metadata_cache_ttl())
+
+    def _metadata_cache_set(self, value: Any, kind: str, *parts: Any) -> None:
+        """Cache a metadata value when caching applies."""
+        if not self._metadata_cache_enabled():
+            return
+        _METADATA_CACHE.set((self.database_url, kind, *parts), value, self._metadata_cache_ttl())
+
+    def _invalidate_metadata_cache(self) -> None:
+        """Invalidate all metadata entries for the current database."""
+        _METADATA_CACHE.invalidate_database(self.database_url)
+
     def add_paper(self, paper: LightweightPaper) -> Optional[str]:
         """
         Add a single paper to the database.
@@ -483,6 +516,7 @@ class DatabaseManager:
 
             self.session.add(new_paper)
             self.session.commit()
+            self._invalidate_metadata_cache()
 
             return uid
 
@@ -1742,6 +1776,10 @@ class DatabaseManager:
         >>> print(mapping)
         {'NeurIPS': [2025, 2024], 'ICLR': [2024]}
         """
+        cached = self._metadata_cache_get("conference_years")
+        if cached is not None:
+            return cached
+
         try:
             stmt: Any = (
                 select(Paper.conference, Paper.year)
@@ -1760,6 +1798,7 @@ class DatabaseManager:
             result: Dict[str, List[int]] = {}
             for row in rows:
                 result.setdefault(row[0], []).append(row[1])
+            self._metadata_cache_set(result, "conference_years")
             return result
         except Exception as e:
             raise DatabaseError(f"Failed to get conference years from DB: {str(e)}") from e
@@ -2011,6 +2050,10 @@ class DatabaseManager:
         ['Session 1', 'Session 2', ...]
         >>> sessions = db.get_sessions(conference="NeurIPS", year=2025)
         """
+        cached = self._metadata_cache_get("sessions", conference, year)
+        if cached is not None:
+            return cached
+
         try:
             conditions: list = []
             if conference is not None:
@@ -2023,7 +2066,9 @@ class DatabaseManager:
                 stmt = stmt.where(and_(*conditions))
             stmt = stmt.where(and_(Paper.session.isnot(None), Paper.session != "")).order_by(Paper.session)
 
-            return list(self.session.execute(stmt).scalars().all())
+            result = list(self.session.execute(stmt).scalars().all())
+            self._metadata_cache_set(result, "sessions", conference, year)
+            return result
         except Exception as e:
             raise DatabaseError(f"Failed to get sessions: {str(e)}") from e
 
@@ -2055,6 +2100,10 @@ class DatabaseManager:
         ['ICLR', 'NeurIPS']
         >>> conferences = db.get_conferences(year=2025)
         """
+        cached = self._metadata_cache_get("conferences", year)
+        if cached is not None:
+            return cached
+
         try:
             stmt: Any = (
                 select(Paper.conference).distinct().where(and_(Paper.conference.isnot(None), Paper.conference != ""))
@@ -2063,7 +2112,9 @@ class DatabaseManager:
                 stmt = stmt.where(Paper.year == year)
             stmt = stmt.order_by(Paper.conference)
 
-            return list(self.session.execute(stmt).scalars().all())
+            result = list(self.session.execute(stmt).scalars().all())
+            self._metadata_cache_set(result, "conferences", year)
+            return result
         except Exception as e:
             raise DatabaseError(f"Failed to get conferences: {str(e)}") from e
 
@@ -2095,13 +2146,19 @@ class DatabaseManager:
         [2025, 2024, 2023]
         >>> years = db.get_years(conference="NeurIPS")
         """
+        cached = self._metadata_cache_get("years", conference)
+        if cached is not None:
+            return cached
+
         try:
             stmt: Any = select(Paper.year).distinct().where(Paper.year.isnot(None))
             if conference is not None:
                 stmt = stmt.where(Paper.conference == conference)
             stmt = stmt.order_by(Paper.year.desc())
 
-            return list(self.session.execute(stmt).scalars().all())
+            result = list(self.session.execute(stmt).scalars().all())
+            self._metadata_cache_set(result, "years", conference)
+            return result
         except Exception as e:
             raise DatabaseError(f"Failed to get years: {str(e)}") from e
 
@@ -2417,6 +2474,7 @@ class DatabaseManager:
                 delete(Paper).where(and_(Paper.conference == conference, Paper.year == year))
             )
             self.session.commit()
+            self._invalidate_metadata_cache()
             count = getattr(result, "rowcount", 0) or 0
             logger.info(f"Deleted {count} papers for {conference}/{year}")
             return count
@@ -3345,6 +3403,7 @@ class DatabaseManager:
                 self.session.commit()
 
             source_engine.dispose()
+            self._invalidate_metadata_cache()
             return paper_count
 
         except DatabaseError:

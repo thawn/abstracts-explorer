@@ -122,6 +122,7 @@ class TestConfig:
         assert config.database_url == f"sqlite:///{(Path('data') / 'abstracts.db').absolute()}"
         assert config.collection_name == "papers"
         assert config.max_context_papers == 5
+        assert config.metadata_cache_ttl == 86400
         assert config.chat_temperature == 0.7
         assert config.chat_max_tokens == 2000
         assert config.cluster_label_model == "alias-fast"
@@ -142,6 +143,14 @@ class TestConfig:
 
         config = Config(env_path=env_file)
         assert config.embedding_max_input_tokens == 0
+
+    def test_metadata_cache_ttl_from_env(self, tmp_path):
+        """METADATA_CACHE_TTL overrides the default."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("METADATA_CACHE_TTL=120\n")
+
+        config = Config(env_path=env_file)
+        assert config.metadata_cache_ttl == 120
 
     def test_config_from_env_file(self, tmp_path):
         """Test loading configuration from .env file."""
@@ -236,6 +245,7 @@ CHAT_MAX_TOKENS=500
         assert "database_url" in config_dict
         assert "collection_name" in config_dict
         assert "max_context_papers" in config_dict
+        assert "metadata_cache_ttl" in config_dict
 
     def test_config_to_dict_hides_token(self, tmp_path):
         """Test that to_dict hides auth token."""

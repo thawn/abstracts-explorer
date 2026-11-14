@@ -98,6 +98,16 @@ uv run python scripts/migrate_pg_search_indexes.py --paper-db "$PAPER_DB" --drop
 
 For container deployments, see [Docker: Create PostgreSQL search indexes](docker.md#create-postgresql-search-indexes).
 
+##### Metadata cache
+
+- **METADATA_CACHE_TTL**: Time-to-live in seconds for cached PostgreSQL metadata
+  queries such as conference lists, year lists, session lists, and the
+  conference/year mapping (default: `86400`).
+  - Set to `0` to disable caching.
+  - Applies only to PostgreSQL; SQLite always queries directly.
+  - The cache is process-local. Restart web-ui after external imports so it
+    reloads metadata immediately; otherwise entries expire after the TTL.
+
 #### Embedding Database
 
 - **EMBEDDING_DB**: ChromaDB location. Can be either:

@@ -24,6 +24,18 @@ def _reset_global_rate_limiter():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _reset_process_caches():
+    """Reset process-level schema and metadata caches between tests."""
+    from abstracts_explorer.database import reset_metadata_cache, reset_schema_cache
+
+    reset_schema_cache()
+    reset_metadata_cache()
+    yield
+    reset_schema_cache()
+    reset_metadata_cache()
+
+
 def get_env_test_path() -> Path:
     """
     Get the path to the .env.tests file.
