@@ -62,6 +62,42 @@ PostgreSQL connections use the `psycopg` v3 driver, which is installed with the
 package. Plain `postgresql://` URLs select this driver automatically; no
 `postgresql+psycopg://` prefix is required.
 
+##### PostgreSQL search indexes
+
+Keyword search uses `ILIKE '%term%'` predicates on `title`, `abstract`,
+`keywords`, and `authors`. These predicates cannot use ordinary B-tree indexes,
+so PostgreSQL may scan the `papers` table. For larger databases, create the
+managed trigram and composite indexes:
+
+```bash
+uv run python scripts/migrate_pg_search_indexes.py --paper-db "$PAPER_DB" --dry-run
+uv run python scripts/migrate_pg_search_indexes.py --paper-db "$PAPER_DB"
+```
+
+The migration:
+
+- installs the `pg_trgm` extension if needed,
+- creates GIN trigram indexes for title, abstract, keywords, and authors,
+- creates composite indexes on `(conference, year)` and
+  `(conference, year, session)`,
+- runs `ANALYZE papers`.
+
+It is manual and idempotent. There is no automatic migration at application
+startup. Rerunning the script skips valid indexes and recreates invalid ones.
+
+Indexes preserve existing substring search semantics. They increase disk usage
+and add write/import overhead; this is usually acceptable for a read-heavy
+paper database. Use `--no-concurrently` only for small or development databases,
+because blocking index builds lock writes.
+
+Rollback:
+
+```bash
+uv run python scripts/migrate_pg_search_indexes.py --paper-db "$PAPER_DB" --drop
+```
+
+For container deployments, see [Docker: Create PostgreSQL search indexes](docker.md#create-postgresql-search-indexes).
+
 #### Embedding Database
 
 - **EMBEDDING_DB**: ChromaDB location. Can be either:
