@@ -1320,7 +1320,7 @@ class TestCLI:
             mock_em.verbose_api_connection_test.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
-            mock_em.delete_embeddings_by_filter.return_value = 0
+            mock_em.delete_embeddings_by_ids.return_value = 0
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
@@ -1348,8 +1348,8 @@ class TestCLI:
 
         # init must be called with reset=False (not wipe the collection)
         mock_em.init.assert_called_once_with(reset=False)
-        # delete_embeddings_by_filter must be called with the conference
-        mock_em.delete_embeddings_by_filter.assert_called_once_with(conference="NeurIPS", year=None)
+        # delete_embeddings_by_ids must be called for the resolved paper UIDs
+        mock_em.delete_embeddings_by_ids.assert_called_once()
 
     def test_create_embeddings_force_with_year_does_not_reset_collection(self, tmp_path, capsys, monkeypatch):
         """--force --year should delete only matching embeddings, not reset whole collection."""
@@ -1380,7 +1380,7 @@ class TestCLI:
             mock_em.verbose_api_connection_test.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
-            mock_em.delete_embeddings_by_filter.return_value = 2
+            mock_em.delete_embeddings_by_ids.return_value = 2
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
@@ -1407,7 +1407,7 @@ class TestCLI:
         assert "Removed 2" in captured.out
 
         mock_em.init.assert_called_once_with(reset=False)
-        mock_em.delete_embeddings_by_filter.assert_called_once_with(conference=None, year=2024)
+        mock_em.delete_embeddings_by_ids.assert_called_once()
 
     def test_create_embeddings_force_with_conference_and_year(self, tmp_path, capsys, monkeypatch):
         """--force --conference X --year Y deletes only that conference+year slice."""
@@ -1438,7 +1438,7 @@ class TestCLI:
             mock_em.verbose_api_connection_test.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
-            mock_em.delete_embeddings_by_filter.return_value = 5
+            mock_em.delete_embeddings_by_ids.return_value = 5
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
@@ -1466,7 +1466,7 @@ class TestCLI:
         assert "year=2024" in captured.out
 
         mock_em.init.assert_called_once_with(reset=False)
-        mock_em.delete_embeddings_by_filter.assert_called_once_with(conference="NeurIPS", year=2024)
+        mock_em.delete_embeddings_by_ids.assert_called_once()
 
         """Test create-embeddings with --requests-per-minute flag."""
         from abstracts_explorer import DatabaseManager
@@ -1994,7 +1994,10 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, embeddings_path)
 
         # Mock embeddings manager with results
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM,
+            patch("abstracts_explorer.cli.DatabaseManager") as MockDB,
+        ):
             mock_em = Mock()
             mock_em.verbose_api_connection_test.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 100}
@@ -2022,6 +2025,32 @@ class TestCLI:
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
+            mock_db = Mock()
+            mock_db.search_papers_semantic.return_value = [
+                {
+                    "uid": "123",
+                    "title": "Paper 1",
+                    "authors": ["Author 1"],
+                    "abstract": "Abstract 1",
+                    "session": "S",
+                    "year": 2025,
+                    "conference": "NeurIPS",
+                    "distance": 0.1,
+                    "similarity": 0.9,
+                },
+                {
+                    "uid": "456",
+                    "title": "Paper 2",
+                    "authors": ["Author 2"],
+                    "abstract": "Abstract 2",
+                    "session": "S",
+                    "year": 2025,
+                    "conference": "NeurIPS",
+                    "distance": 0.2,
+                    "similarity": 0.8,
+                },
+            ]
+            MockDB.return_value = mock_db
 
             with patch.object(
                 sys,
@@ -2051,7 +2080,10 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, embeddings_path)
 
         # Mock embeddings manager
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM,
+            patch("abstracts_explorer.cli.DatabaseManager") as MockDB,
+        ):
             mock_em = Mock()
             mock_em.verbose_api_connection_test.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 10}
@@ -2064,6 +2096,21 @@ class TestCLI:
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
+            mock_db = Mock()
+            mock_db.search_papers_semantic.return_value = [
+                {
+                    "uid": "789",
+                    "title": "Test Paper",
+                    "authors": ["Test Author"],
+                    "abstract": "This is a test abstract about machine learning.",
+                    "session": "S",
+                    "year": 2025,
+                    "conference": "NeurIPS",
+                    "distance": 0.15,
+                    "similarity": 0.85,
+                }
+            ]
+            MockDB.return_value = mock_db
 
             with patch.object(
                 sys,
@@ -2091,7 +2138,10 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, embeddings_path)
 
         # Mock embeddings manager
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM,
+            patch("abstracts_explorer.cli.DatabaseManager") as MockDB,
+        ):
             mock_em = Mock()
             mock_em.verbose_api_connection_test.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 50}
@@ -2112,6 +2162,21 @@ class TestCLI:
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
+            mock_db = Mock()
+            mock_db.search_papers_semantic.return_value = [
+                {
+                    "uid": "111",
+                    "title": "Filtered Paper",
+                    "authors": ["Author"],
+                    "abstract": "Abstract",
+                    "session": "S",
+                    "year": 2025,
+                    "conference": "NeurIPS",
+                    "distance": 0.05,
+                    "similarity": 0.95,
+                }
+            ]
+            MockDB.return_value = mock_db
 
             with patch.object(
                 sys,
@@ -2140,7 +2205,10 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, embeddings_path)
 
         # Mock embeddings manager with empty results
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM,
+            patch("abstracts_explorer.cli.DatabaseManager") as MockDB,
+        ):
             mock_em = Mock()
             mock_em.verbose_api_connection_test.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 100}
@@ -2148,6 +2216,9 @@ class TestCLI:
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
+            mock_db = Mock()
+            mock_db.search_papers_semantic.return_value = []
+            MockDB.return_value = mock_db
 
             with patch.object(
                 sys,
@@ -2194,7 +2265,10 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, embeddings_path)
 
         # Mock embeddings manager
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM,
+            patch("abstracts_explorer.cli.DatabaseManager") as MockDB,
+        ):
             mock_em = Mock()
             mock_em.verbose_api_connection_test.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
@@ -2219,6 +2293,23 @@ class TestCLI:
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
+            mock_db = Mock()
+            mock_db.search_papers_semantic.return_value = [
+                {
+                    "uid": "1",
+                    "title": "Test Paper",
+                    "authors": ["John Doe", "Jane Smith"],
+                    "abstract": "Test abstract",
+                    "session": "Session 1",
+                    "year": 2025,
+                    "conference": "NeurIPS",
+                    "url": "https://example.com/paper/1",
+                    "poster_position": "A12",
+                    "distance": 0.1,
+                    "similarity": 0.9,
+                }
+            ]
+            MockDB.return_value = mock_db
 
             with patch.object(
                 sys,
@@ -2249,7 +2340,10 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, embeddings_path)
 
         # Mock embeddings manager
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM,
+            patch("abstracts_explorer.cli.DatabaseManager") as MockDB,
+        ):
             mock_em = Mock()
             mock_em.verbose_api_connection_test.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
@@ -2261,6 +2355,21 @@ class TestCLI:
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
+            mock_db = Mock()
+            mock_db.search_papers_semantic.return_value = [
+                {
+                    "uid": "1",
+                    "title": "Test",
+                    "authors": ["101", "102"],
+                    "abstract": "Abstract",
+                    "session": "S",
+                    "year": 2025,
+                    "conference": "NeurIPS",
+                    "distance": 0.1,
+                    "similarity": 0.9,
+                }
+            ]
+            MockDB.return_value = mock_db
 
             with patch.object(
                 sys,
@@ -2276,7 +2385,7 @@ class TestCLI:
         # Should succeed but fall back to author IDs (no author name resolution)
         assert exit_code == 0
         captured = capsys.readouterr()
-        assert "101,102" in captured.out  # Shows IDs as fallback
+        assert "101; 102" in captured.out  # Shows IDs as fallback
 
     def test_search_with_db_path_lookup_error(self, tmp_path, capsys, monkeypatch):
         """Test search command when database connection fails (no longer relevant)."""
@@ -2291,7 +2400,10 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, embeddings_path)
 
         # Mock embeddings manager
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with (
+            patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM,
+            patch("abstracts_explorer.cli.DatabaseManager") as MockDB,
+        ):
             mock_em = Mock()
             mock_em.verbose_api_connection_test.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
@@ -2303,6 +2415,21 @@ class TestCLI:
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
+            mock_db = Mock()
+            mock_db.search_papers_semantic.return_value = [
+                {
+                    "uid": "1",
+                    "title": "Test",
+                    "authors": ["101"],
+                    "abstract": "Abstract",
+                    "session": "S",
+                    "year": 2025,
+                    "conference": "NeurIPS",
+                    "distance": 0.1,
+                    "similarity": 0.9,
+                }
+            ]
+            MockDB.return_value = mock_db
 
             with patch.object(
                 sys,
@@ -3899,7 +4026,7 @@ class TestDeleteDataCommand:
         ):
             mock_em = Mock()
             mock_em.collection.get.return_value = {"ids": ["emb1", "emb2"]}
-            mock_em.delete_embeddings_by_filter.return_value = 2
+            mock_em.delete_embeddings_by_ids.return_value = 2
             mock_em_class.return_value = mock_em
 
             exit_code = main()
@@ -3909,8 +4036,8 @@ class TestDeleteDataCommand:
         assert "Deleted" in captured.out
         assert "paper" in captured.out.lower()
 
-        # Verify delete_embeddings_by_filter was called with correct parameters
-        mock_em.delete_embeddings_by_filter.assert_called_once_with(conference="NeurIPS", year=2024)
+        # Verify delete_embeddings_by_ids was called
+        mock_em.delete_embeddings_by_ids.assert_called_once()
 
         # Verify papers deleted from DB
         with DatabaseManager() as db:
@@ -3979,7 +4106,7 @@ class TestDeleteDataCommand:
         ):
             mock_em = Mock()
             mock_em.collection.get.return_value = {"ids": []}
-            mock_em.delete_embeddings_by_filter.return_value = 0
+            mock_em.delete_embeddings_by_ids.return_value = 0
             mock_em_class.return_value = mock_em
 
             exit_code = main()
@@ -4058,7 +4185,7 @@ class TestDeleteDataCommand:
         ):
             mock_em = Mock()
             mock_em.collection.get.return_value = {"ids": ["e1"]}
-            mock_em.delete_embeddings_by_filter.side_effect = Exception("ChromaDB failure")
+            mock_em.delete_embeddings_by_ids.side_effect = Exception("ChromaDB failure")
             mock_em_class.return_value = mock_em
 
             exit_code = main()
@@ -4579,3 +4706,32 @@ class TestFeedbackCommand:
             exit_code = main()
 
         assert exit_code == 1
+
+
+class TestCompactEmbeddingsCommand:
+    """Tests for the compact-embeddings command."""
+
+    def test_compact_embeddings(self, capsys):
+        with (
+            patch.object(sys, "argv", ["abstracts-explorer", "compact-embeddings", "--prune"]),
+            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
+        ):
+            mock_em = Mock()
+            mock_em.remove_all_metadata.return_value = 3
+            mock_em.hash_all_documents.return_value = 2
+            mock_em.prune_orphan_embeddings.return_value = 1
+            mock_em_class.return_value = mock_em
+            mock_db = Mock()
+            mock_db_class.return_value.__enter__.return_value = mock_db
+
+            exit_code = main()
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Processed metadata for 3" in captured.out
+        assert "Hashed 2" in captured.out
+        assert "Pruned 1" in captured.out
+        mock_em.remove_all_metadata.assert_called_once()
+        mock_em.hash_all_documents.assert_called_once()
+        mock_em.close.assert_called_once()

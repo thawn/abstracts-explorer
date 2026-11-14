@@ -1233,6 +1233,273 @@ class DatabaseManager:
         except Exception as e:
             raise DatabaseError(f"Failed to count papers: {str(e)}") from e
 
+    @staticmethod
+    def _filter_has_key(filters: Optional[Dict[str, Any]], key: str) -> bool:
+        """Return whether *key* appears anywhere in a nested filter dict."""
+        if not isinstance(filters, dict):
+            return False
+        if key in filters:
+            return True
+        for value in filters.values():
+            if isinstance(value, dict) and DatabaseManager._filter_has_key(value, key):
+                return True
+            if isinstance(value, list):
+                if any(isinstance(item, dict) and DatabaseManager._filter_has_key(item, key) for item in value):
+                    return True
+        return False
+
+    @classmethod
+    def _normalize_year_operand(cls, value: Any) -> Any:
+        """Convert year filter operands to integers where possible."""
+        if isinstance(value, list):
+            return [cls._normalize_year_operand(item) for item in value]
+        if isinstance(value, dict):
+            return {key: cls._normalize_year_operand(item) for key, item in value.items()}
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return value
+
+    @classmethod
+    def _normalize_where_filters(cls, filters: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Normalize year values in a nested filter dictionary."""
+        if not isinstance(filters, dict):
+            return filters
+
+        normalized: Dict[str, Any] = {}
+        for key, value in filters.items():
+            lower = key.lower()
+            if lower in ("$and", "$or") and isinstance(value, list):
+                normalized[key] = [cls._normalize_where_filters(item) for item in value]
+            elif lower == "$not":
+                normalized[key] = cls._normalize_where_filters(value)
+            elif lower == "year":
+                normalized[key] = cls._normalize_year_operand(value)
+            else:
+                normalized[key] = value
+        return normalized
+
+    def resolve_paper_uids(
+        self,
+        conferences: Optional[List[str]] = None,
+        years: Optional[List[int]] = None,
+        sessions: Optional[List[str]] = None,
+        where_filters: Optional[Dict[str, Any]] = None,
+        field_filters: Optional[Dict[str, str]] = None,
+    ) -> List[str]:
+        """
+        Resolve structured filters to paper UIDs.
+
+        Parameters
+        ----------
+        conferences : list of str, optional
+            Conference names to match.
+        years : list of int, optional
+            Publication years to match.
+        sessions : list of str, optional
+            Session names to match.
+        where_filters : dict, optional
+            SQL-style filter dictionary.  See :meth:`_build_where_conditions`.
+        field_filters : dict, optional
+            Mapping of paper field to a case-insensitive substring.
+
+        Returns
+        -------
+        list of str
+            Matching paper UIDs.
+        """
+        terms: List[Dict[str, Any]] = []
+        normalized_where = self._normalize_where_filters(where_filters)
+        if normalized_where:
+            terms.append(normalized_where)
+        if conferences and not self._filter_has_key(normalized_where, "conference"):
+            terms.append({"conference": {"$in": list(conferences)}})
+        if years and not self._filter_has_key(normalized_where, "year"):
+            terms.append({"year": {"$in": [int(year) for year in years]}})
+        if sessions and not self._filter_has_key(normalized_where, "session"):
+            terms.append({"session": {"$in": list(sessions)}})
+        if field_filters:
+            for field_name, value in field_filters.items():
+                terms.append({field_name: {"$contains": value}})
+
+        if not terms:
+            return self.get_paper_uids()
+        where_clause = terms[0] if len(terms) == 1 else {"$and": terms}
+        return self.get_paper_uids(where_clause)
+
+    def get_paper_uids(
+        self,
+        where_filters: Optional[Dict[str, Any]] = None,
+        limit: int = 0,
+    ) -> List[str]:
+        """
+        Return paper UIDs matching ``where_filters``.
+
+        Parameters
+        ----------
+        where_filters : dict, optional
+            Mapping of Paper column names to filter values.
+        limit : int, default=0
+            Maximum number of results.  ``0`` means no limit.
+
+        Returns
+        -------
+        list of str
+            Matching paper UIDs.
+
+        Raises
+        ------
+        DatabaseError
+            If the query fails.
+        """
+        try:
+            stmt: Any = select(Paper.uid)
+            conditions = self._build_where_conditions(where_filters)
+            if conditions:
+                stmt = stmt.where(and_(*conditions))
+            if limit:
+                stmt = stmt.limit(limit)
+            return list(self.session.execute(stmt).scalars().all())
+        except DatabaseError:
+            raise
+        except Exception as e:
+            raise DatabaseError(f"Failed to retrieve paper UIDs: {str(e)}") from e
+
+    def get_paper_summaries_by_uids(self, uids: List[str]) -> List[Dict[str, Any]]:
+        """
+        Return lightweight paper records for the given UIDs.
+
+        Parameters
+        ----------
+        uids : list of str
+            Paper UIDs to retrieve.  Unknown UIDs are omitted.
+
+        Returns
+        -------
+        list of dict
+            Dictionaries with ``uid``, ``title``, ``abstract``, ``year``,
+            ``conference``, and ``session``.  Results follow input order.
+
+        Raises
+        ------
+        DatabaseError
+            If the query fails.
+        """
+        if not uids:
+            return []
+
+        try:
+            summaries: Dict[str, Dict[str, Any]] = {}
+            for start in range(0, len(uids), 500):
+                batch = uids[start : start + 500]
+                stmt: Any = select(
+                    Paper.uid,
+                    Paper.title,
+                    Paper.abstract,
+                    Paper.year,
+                    Paper.conference,
+                    Paper.session,
+                ).where(Paper.uid.in_(batch))
+                for row in self.session.execute(stmt):
+                    summaries[str(row.uid)] = {
+                        "uid": str(row.uid),
+                        "title": row.title or "",
+                        "abstract": row.abstract or "",
+                        "year": row.year,
+                        "conference": row.conference or "",
+                        "session": row.session or "",
+                    }
+            return [summaries[uid] for uid in uids if uid in summaries]
+        except DatabaseError:
+            raise
+        except Exception as e:
+            raise DatabaseError(f"Failed to retrieve paper summaries: {str(e)}") from e
+
+    def find_papers_within_distance(
+        self,
+        embeddings_manager: Any,
+        query: str,
+        distance_threshold: float = 1.1,
+        conferences: Optional[List[str]] = None,
+        years: Optional[List[int]] = None,
+        sessions: Optional[List[str]] = None,
+        where_filters: Optional[Dict[str, Any]] = None,
+        query_embedding: Optional[List[float]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Return full paper records within a distance threshold.
+
+        Parameters
+        ----------
+        embeddings_manager : EmbeddingsManager
+            Connected embeddings manager.
+        query : str
+            Search query text.
+        distance_threshold : float, optional
+            Euclidean distance radius, by default 1.1.
+        conferences : list of str, optional
+            Restrict results to these conferences.
+        years : list of int, optional
+            Restrict results to these years.
+        sessions : list of str, optional
+            Restrict results to these sessions.
+        where_filters : dict, optional
+            Additional SQL-style filters.
+        query_embedding : list of float, optional
+            Pre-computed query embedding.
+
+        Returns
+        -------
+        dict
+            Dictionary with ``query``, ``query_embedding``, ``distance``,
+            ``papers``, ``count``, and ``total_considered``.
+        """
+        has_filters = bool(conferences or years or sessions or where_filters)
+        ids = (
+            self.resolve_paper_uids(
+                conferences=conferences,
+                years=years,
+                sessions=sessions,
+                where_filters=where_filters,
+            )
+            if has_filters
+            else None
+        )
+        if ids is not None and not ids:
+            return {
+                "query": query,
+                "query_embedding": query_embedding,
+                "distance": distance_threshold,
+                "papers": [],
+                "count": 0,
+                "total_considered": 0,
+            }
+
+        result = embeddings_manager.query_ids_within_distance(
+            query=query,
+            distance_threshold=distance_threshold,
+            ids=ids,
+            query_embedding=query_embedding,
+        )
+        papers_by_uid = {paper["uid"]: paper for paper in self.get_papers_by_uids(result["ids"])}
+        papers: List[Dict[str, Any]] = []
+        for uid, distance in zip(result["ids"], result["distances"]):
+            paper = papers_by_uid.get(uid)
+            if paper is None:
+                continue
+            paper["distance"] = distance
+            paper["similarity"] = max(0.0, 1.0 - float(distance))
+            papers.append(paper)
+
+        return {
+            "query": query,
+            "query_embedding": result["query_embedding"],
+            "distance": distance_threshold,
+            "papers": papers,
+            "count": len(papers),
+            "total_considered": result["total_considered"],
+        }
+
     def get_paper_by_uid(self, uid: str) -> Optional[Dict[str, Any]]:
         """
         Retrieve a paper by its UID.
@@ -1525,50 +1792,6 @@ class DatabaseManager:
             limit=limit,
         )
 
-    @staticmethod
-    def _papers_from_chroma_results(results: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Build paper dictionaries from raw ChromaDB results as a fallback."""
-        ids = results.get("ids", [[]])[0] if results.get("ids") else []
-        if not ids:
-            return []
-
-        metadatas = results.get("metadatas", [[]])[0] if results.get("metadatas") else []
-        distances = results.get("distances", [[]])[0] if results.get("distances") else []
-        documents = results.get("documents", [[]])[0] if results.get("documents") else []
-
-        papers: List[Dict[str, Any]] = []
-        for idx, paper_id in enumerate(ids):
-            metadata = dict(metadatas[idx]) if idx < len(metadatas) and metadatas[idx] else {}
-            authors = metadata.get("authors", [])
-            if isinstance(authors, str):
-                authors = [name.strip() for name in authors.split(";") if name.strip()]
-
-            year = metadata.get("year")
-            try:
-                year = int(year) if year is not None else None
-            except (TypeError, ValueError):
-                pass
-
-            distance = distances[idx] if idx < len(distances) else None
-            paper: Dict[str, Any] = {
-                **metadata,
-                "uid": paper_id,
-                "title": metadata.get("title", ""),
-                "authors": authors,
-                "abstract": documents[idx] if idx < len(documents) else metadata.get("abstract", ""),
-                "session": metadata.get("session", ""),
-                "conference": metadata.get("conference", ""),
-                "year": year,
-                "poster_position": metadata.get("poster_position"),
-                "url": metadata.get("url") or metadata.get("paper_url"),
-            }
-            if distance is not None:
-                paper["distance"] = distance
-                paper["similarity"] = max(0.0, 1.0 - float(distance))
-            papers.append(paper)
-
-        return papers
-
     def search_papers_semantic(
         self,
         query: str,
@@ -1578,7 +1801,7 @@ class DatabaseManager:
         conferences: Optional[List[str]] = None,
         distance_threshold: float = 1.1,
         field_filters: Optional[Dict[str, str]] = None,
-        where: Optional[Dict[str, Any]] = None,
+        where_filters: Optional[Dict[str, Any]] = None,
         embeddings_manager: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
         """
@@ -1607,9 +1830,9 @@ class DatabaseManager:
         field_filters : dict, optional
             Field filters to apply in SQL.  When omitted, filters are parsed
             from *query*.
-        where : dict, optional
-            Additional ChromaDB metadata filter.  Merged with the
-            session/year/conference filters.
+        where_filters : dict, optional
+            Additional SQL-style filter.  Merged with the session/year/
+            conference filters.
 
         Returns
         -------
@@ -1621,46 +1844,49 @@ class DatabaseManager:
         DatabaseError
             If the search fails.
         """
-        from abstracts_explorer.embeddings import EmbeddingsManager, build_chromadb_where_clause
+        from abstracts_explorer.embeddings import EmbeddingsManager
         from abstracts_explorer.paper_utils import PaperFormattingError, format_search_results
 
         if field_filters is None:
             field_filters, query = self.parse_field_filters(query)
         # Query consisting only of field filters: no meaningful embedding.
         if field_filters and not query:
-            return self.search_papers(
-                field_filters=field_filters,
-                sessions=sessions,
-                years=years,
+            uids = self.resolve_paper_uids(
                 conferences=conferences,
-                limit=limit,
+                years=years,
+                sessions=sessions,
+                where_filters=where_filters,
+                field_filters=field_filters,
             )
+            return self.get_papers_by_uids(uids[:limit] if limit else uids)
 
         semantic_query = query
-        matching_uids: Optional[List[str]] = None
 
-        if field_filters:
-            matching_papers = self.search_papers(field_filters=field_filters, limit=0)
-            if not matching_papers:
-                return []
-            matching_uids = [paper["uid"] for paper in matching_papers]
-        else:
-            author_matches = self.search_papers(
-                field_filters={"authors": semantic_query},
-                sessions=sessions,
-                years=years,
+        if not field_filters:
+            author_uids = self.resolve_paper_uids(
                 conferences=conferences,
-                limit=limit,
+                years=years,
+                sessions=sessions,
+                where_filters=where_filters,
+                field_filters={"authors": semantic_query},
             )
-            if author_matches:
-                return author_matches
+            if author_uids:
+                return self.get_papers_by_uids(author_uids[:limit])
 
-        where_filter = build_chromadb_where_clause(
-            conferences=conferences,
-            years=years,
-            sessions=sessions,
-            base_where=where,
+        has_filters = bool(conferences or years or sessions or where_filters or field_filters)
+        matching_uids = (
+            self.resolve_paper_uids(
+                conferences=conferences,
+                years=years,
+                sessions=sessions,
+                where_filters=where_filters,
+                field_filters=field_filters,
+            )
+            if has_filters
+            else None
         )
+        if has_filters and not matching_uids:
+            return []
 
         owns_manager = embeddings_manager is None
         em = embeddings_manager or EmbeddingsManager()
@@ -1668,17 +1894,12 @@ class DatabaseManager:
             results = em.search_similar(
                 semantic_query,
                 n_results=limit * 2,
-                where=where_filter,
                 ids=matching_uids,
             )
             try:
-                papers = format_search_results(results, self, include_documents=False)
+                papers = format_search_results(results, self)
             except PaperFormattingError:
-                papers = []
-            if not papers:
-                # Keep semantic search usable when embeddings exist but the
-                # corresponding SQL rows are unavailable.
-                papers = self._papers_from_chroma_results(results)
+                return []
         finally:
             if owns_manager:
                 em.close()

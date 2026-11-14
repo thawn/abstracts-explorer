@@ -678,7 +678,6 @@ class RAGChat:
         self,
         question: str,
         n_results: Optional[int] = None,
-        metadata_filter: Optional[Dict[str, Any]] = None,
         system_prompt: Optional[str] = None,
         conferences: Optional[List[str]] = None,
         years: Optional[List[int]] = None,
@@ -694,8 +693,6 @@ class RAGChat:
             User's question.
         n_results : int, optional
             Number of papers to retrieve for context.
-        metadata_filter : dict, optional
-            Metadata filter for paper search (currently unused with Pydantic AI agent).
         system_prompt : str, optional
             Custom system prompt for the model (overrides default instructions including
             conference context).

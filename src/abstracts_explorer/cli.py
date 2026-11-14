@@ -9,6 +9,7 @@ import argparse
 import json
 import logging
 import queue
+import subprocess
 import sys
 import threading
 from datetime import datetime
@@ -21,7 +22,7 @@ from tqdm import tqdm
 
 from abstracts_explorer.config import Config, get_config
 from abstracts_explorer.database import DatabaseManager, DatabaseError
-from abstracts_explorer.embeddings import EmbeddingsManager, EmbeddingsError, build_chromadb_where_clause
+from abstracts_explorer.embeddings import EmbeddingsManager, EmbeddingsError
 from abstracts_explorer.clustering import perform_clustering, compute_clusters_with_cache, ClusteringError
 from abstracts_explorer.rag import RAGChat, RAGError
 from abstracts_explorer.plugins import (
@@ -344,7 +345,9 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         em.init(reset=args.force and not filtered_force)
 
         if filtered_force:
-            deleted = em.delete_embeddings_by_filter(conference=conference, year=year)
+            with DatabaseManager() as db:
+                existing_ids = db.get_paper_uids(where_filters)
+            deleted = em.delete_embeddings_by_ids(existing_ids)
             if deleted:
                 print(f"   Removed {deleted:,} existing embeddings")
 
@@ -482,7 +485,7 @@ def search_command(args: argparse.Namespace) -> int:
                 years=[year] if year is not None else None,
                 conferences=[conference] if conference else None,
                 distance_threshold=distance_threshold,
-                where=where_filter,
+                where_filters=where_filter,
                 embeddings_manager=em,
             )
         finally:
@@ -1160,30 +1163,22 @@ def delete_data_command(args: argparse.Namespace) -> int:
     # Count what will be deleted
     paper_count = 0
     cache_count = 0
+    paper_uids: List[str] = []
     try:
         with DatabaseManager() as db:
             db.create_tables()
-            papers = db.search_papers(
-                conferences=[conference],
-                years=[year],
-                limit=0,
-            )
-            paper_count = len(papers)
+            paper_uids = db.get_paper_uids({"conference": conference, "year": year})
+            paper_count = len(paper_uids)
             cache_count = db.count_clustering_cache_by_conference_year(conference, year)
     except Exception as e:
         print(f"\n❌ Error accessing database: {e}", file=sys.stderr)
         return 1
 
-    # Count ChromaDB embeddings
+    # Count ChromaDB embeddings for the resolved UIDs
     embedding_count = 0
     try:
         em = EmbeddingsManager()
-        existing = em.collection.get(
-            where=build_chromadb_where_clause(
-                conferences=[conference],
-                years=[year],
-            )
-        )
+        existing = em.collection.get(ids=paper_uids, include=[])
         embedding_count = len(existing.get("ids", []))
         em.close()
     except Exception as e:
@@ -1208,24 +1203,24 @@ def delete_data_command(args: argparse.Namespace) -> int:
 
     errors: List[str] = []
 
-    # 1. Delete papers from paper database
+    # 1. Delete embeddings from ChromaDB using the UIDs resolved above
     try:
-        with DatabaseManager() as db:
-            deleted_papers = db.delete_papers_by_conference_year(conference, year)
-        print(f"\n✅ Deleted {deleted_papers:,} paper(s) from paper database.")
+        em = EmbeddingsManager()
+        deleted_embeddings = em.delete_embeddings_by_ids(paper_uids)
+        em.close()
+        print(f"\n✅ Deleted {deleted_embeddings:,} embedding(s) from ChromaDB.")
     except Exception as e:
-        msg = f"Failed to delete papers: {e}"
+        msg = f"Failed to delete embeddings: {e}"
         print(f"\n❌ {msg}", file=sys.stderr)
         errors.append(msg)
 
-    # 2. Delete embeddings from ChromaDB
+    # 2. Delete papers from paper database
     try:
-        em = EmbeddingsManager()
-        deleted_embeddings = em.delete_embeddings_by_filter(conference=conference, year=year)
-        em.close()
-        print(f"✅ Deleted {deleted_embeddings:,} embedding(s) from ChromaDB.")
+        with DatabaseManager() as db:
+            deleted_papers = db.delete_papers_by_conference_year(conference, year)
+        print(f"✅ Deleted {deleted_papers:,} paper(s) from paper database.")
     except Exception as e:
-        msg = f"Failed to delete embeddings: {e}"
+        msg = f"Failed to delete papers: {e}"
         print(f"\n❌ {msg}", file=sys.stderr)
         errors.append(msg)
 
@@ -1245,6 +1240,56 @@ def delete_data_command(args: argparse.Namespace) -> int:
 
     print(f"\n✅ All data for {conference} {year} has been deleted.")
     return 0
+
+
+def compact_embeddings_command(args: argparse.Namespace) -> int:
+    """
+    Compact an existing ChromaDB collection into the current format.
+
+    Removes per-paper metadata and replaces full-text documents with content
+    hashes.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command-line arguments.
+
+    Returns
+    -------
+    int
+        Exit code.
+    """
+    config = get_config()
+    em = EmbeddingsManager(collection_name=args.collection)
+    try:
+        em.init()
+        print(f"🔧 Compacting collection '{args.collection}'...")
+        metadata_records = em.remove_all_metadata()
+        print(f"   Processed metadata for {metadata_records:,} record(s)")
+        hashed_documents = em.hash_all_documents()
+        print(f"   Hashed {hashed_documents:,} document(s)")
+
+        if args.prune:
+            with DatabaseManager() as db:
+                pruned = em.prune_orphan_embeddings(db)
+            print(f"   Pruned {pruned:,} orphan embedding(s)")
+
+        em.close()
+
+        if args.vacuum:
+            if config.embedding_db.startswith("http://") or config.embedding_db.startswith("https://"):
+                print("⚠️  Cannot vacuum a remote ChromaDB instance from the client.", file=sys.stderr)
+            else:
+                print("🧹 Vacuuming ChromaDB...")
+                subprocess.run(
+                    ["chroma", "vacuum", "--path", str(Path(config.embedding_db)), "--force"],
+                    check=True,
+                )
+        return 0
+    except Exception as e:
+        em.close()
+        print(f"❌ Compaction failed: {e}", file=sys.stderr)
+        return 1
 
 
 def pre_generate_clustering_command(args: argparse.Namespace) -> int:
@@ -3161,6 +3206,35 @@ Examples:
         help=f"Maximum number of API requests per minute, 0 to disable rate limiting (default: {config.requests_per_minute})",
     )
 
+    # Compact embeddings command
+    compact_parser = subparsers.add_parser(
+        "compact-embeddings",
+        help="Remove ChromaDB metadata and hash stored documents",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+Compact an existing ChromaDB collection into the current format.
+
+This removes all per-paper metadata and replaces full-text documents with
+content hashes. Run it once after upgrading an alpha installation.
+""",
+    )
+    compact_parser.add_argument(
+        "--collection",
+        type=str,
+        default=config.collection_name,
+        help=f"Name for the ChromaDB collection (default: {config.collection_name})",
+    )
+    compact_parser.add_argument(
+        "--prune",
+        action="store_true",
+        help="Delete embeddings whose paper rows no longer exist in the database",
+    )
+    compact_parser.add_argument(
+        "--vacuum",
+        action="store_true",
+        help="Run 'chroma vacuum' after compaction to reclaim disk space",
+    )
+
     # Search command
     search_parser = subparsers.add_parser(
         "search",
@@ -4168,6 +4242,8 @@ Examples:
         return download_command(args)
     elif args.command == "create-embeddings":
         return create_embeddings_command(args)
+    elif args.command == "compact-embeddings":
+        return compact_embeddings_command(args)
     elif args.command == "pre-process":
         return pre_process_command(args)
     elif args.command == "search":

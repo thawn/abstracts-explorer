@@ -64,7 +64,7 @@ try:
 except ImportError:
     HAS_FUZZY = False
 
-from abstracts_explorer.embeddings import EmbeddingsManager, build_chromadb_where_clause
+from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
@@ -230,7 +230,7 @@ class ClusteringManager:
     def __init__(
         self,
         embeddings_manager: EmbeddingsManager,
-        database: Optional[DatabaseManager] = None,
+        database: DatabaseManager,
     ):
         """
         Initialize the ClusteringManager.
@@ -239,7 +239,7 @@ class ClusteringManager:
         ----------
         embeddings_manager : EmbeddingsManager
             Embeddings manager instance to load embeddings from
-        database : DatabaseManager, optional
+        database : DatabaseManager
             Database manager for fetching paper metadata
         """
         self.embeddings_manager = embeddings_manager
@@ -289,27 +289,42 @@ class ClusteringManager:
             raise ClusteringError("Collection not initialized in embeddings manager")
 
         try:
-            # Build where clause for conference/year filtering
-            where_filter = build_chromadb_where_clause(conferences, years)
-
-            # Get embeddings from the collection (with optional filtering)
-            get_kwargs: Dict[str, Any] = {"limit": limit, "include": ["embeddings", "metadatas"]}
-            if where_filter is not None:
-                get_kwargs["where"] = where_filter
-            results = self.embeddings_manager.collection.get(**get_kwargs)
-
-            if not results["ids"] or len(results["ids"]) == 0:
+            has_filters = bool(conferences or years)
+            ids = self.database.resolve_paper_uids(conferences=conferences, years=years) if has_filters else None
+            if ids is not None and not ids:
                 raise ClusteringError("No embeddings found in collection")
 
-            self.paper_ids = results["ids"]
-            self.embeddings = np.array(results["embeddings"])
-            # Parse metadata through LightweightPaper model to convert
-            # string values back to their proper types (e.g. year → int).
-            self.metadatas = [EmbeddingsManager.parse_chromadb_metadata(m) for m in results["metadatas"]]
+            get_kwargs: Dict[str, Any] = {"include": ["embeddings"]}
+            if limit:
+                get_kwargs["limit"] = limit
+            if ids is not None:
+                get_kwargs["ids"] = ids
+            results = self.embeddings_manager.collection.get(**get_kwargs)
+
+            chroma_ids = results.get("ids") or []
+            chroma_embeddings = results.get("embeddings")
+            if not chroma_ids or chroma_embeddings is None:
+                raise ClusteringError("No embeddings found in collection")
+
+            summaries = {paper["uid"]: paper for paper in self.database.get_paper_summaries_by_uids(list(chroma_ids))}
+            keep_indices = [index for index, uid in enumerate(chroma_ids) if uid in summaries]
+            if not keep_indices:
+                raise ClusteringError("No matching papers found in the database")
+            if len(keep_indices) != len(chroma_ids):
+                logger.warning(
+                    "%d embedding(s) have no matching paper row and will be ignored",
+                    len(chroma_ids) - len(keep_indices),
+                )
+
+            self.paper_ids = [chroma_ids[index] for index in keep_indices]
+            self.embeddings = np.array([chroma_embeddings[index] for index in keep_indices])
+            self.metadatas = [summaries[uid] for uid in self.paper_ids]
 
             logger.info(f"Loaded {len(self.paper_ids)} embeddings with dimension {self.embeddings.shape[1]}")
             return len(self.paper_ids)
 
+        except ClusteringError:
+            raise
         except Exception as e:
             raise ClusteringError(f"Failed to load embeddings: {str(e)}") from e
 
@@ -1771,6 +1786,7 @@ def perform_clustering(
     ... )
     >>> print(f"Found {results['statistics']['n_clusters']} clusters")
     """
+    db = DatabaseManager()
     try:
         # Initialize embeddings manager - gets config from environment
         em = EmbeddingsManager(
@@ -1778,7 +1794,7 @@ def perform_clustering(
         )
 
         # Initialize clustering manager
-        cm = ClusteringManager(em)
+        cm = ClusteringManager(em, db)
 
         # Load embeddings
         logger.info("Loading embeddings...")
@@ -1820,9 +1836,11 @@ def perform_clustering(
             cm.export_to_json(output_path)
 
         em.close()
+        db.close()
         return results
 
     except Exception as e:
+        db.close()
         raise ClusteringError(f"Clustering pipeline failed: {str(e)}") from e
 
 
@@ -1938,7 +1956,7 @@ def compute_clusters_with_cache(
             logger.info("Reusing cached clustering results – re-applying reduction for visualization...")
             # We have cached clustering with a different reduction method.
             # Re-apply the requested reduction method on the embeddings.
-            cm_cached = ClusteringManager(embeddings_manager)
+            cm_cached = ClusteringManager(embeddings_manager, database)
             cm_cached.load_embeddings(limit=limit, conferences=conferences, years=years)
 
             # Restore cluster assignments from the cached results
@@ -2003,7 +2021,7 @@ def compute_clusters_with_cache(
     logger.info("Computing new clustering results...")
 
     # Create clustering manager
-    cm = ClusteringManager(embeddings_manager)
+    cm = ClusteringManager(embeddings_manager, database)
 
     # Load embeddings
     logger.info(f"Loading embeddings (limit={limit})...")

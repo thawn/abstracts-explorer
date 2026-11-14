@@ -1181,9 +1181,8 @@ def serialize_authors_to_string(authors: List[str]) -> str:
     """
     Serialize a list of author names to a semicolon-separated string.
 
-    Used by both :func:`~abstracts_explorer.database.DatabaseManager.add_paper`
-    and :meth:`~abstracts_explorer.embeddings.EmbeddingsManager._serialize_metadata_for_chromadb`
-    to ensure a consistent storage format in both the SQL database and ChromaDB.
+    Used by :func:`~abstracts_explorer.database.DatabaseManager.add_paper`
+    to store a consistent semicolon-separated format in the SQL database.
 
     Parameters
     ----------
@@ -1231,9 +1230,8 @@ def serialize_keywords_to_string(keywords: List[str]) -> str:
     """
     Serialize a list of keywords to a comma-separated string.
 
-    Used by both :func:`~abstracts_explorer.database.DatabaseManager.add_paper`
-    and :meth:`~abstracts_explorer.embeddings.EmbeddingsManager._serialize_metadata_for_chromadb`
-    to ensure a consistent storage format in both the SQL database and ChromaDB.
+    Used by :func:`~abstracts_explorer.database.DatabaseManager.add_paper`
+    to store a consistent semicolon-separated format in the SQL database.
 
     Parameters
     ----------
@@ -1275,44 +1273,6 @@ def deserialize_keywords_from_string(keywords_str: str) -> List[str]:
     if not keywords_str or not keywords_str.strip():
         return []
     return [k.strip() for k in keywords_str.split(",") if k.strip()]
-
-
-def prepare_chroma_db_paper_data(paper: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Prepare paper data from chroma_db for validation by normalizing and converting fields.
-
-    Parameters
-    ----------
-    paper : dict
-        Paper data to prepare
-
-    Returns
-    -------
-    dict
-        Prepared paper data
-    """
-    # Split authors and keywords into lists, stripping whitespace from each entry
-    paper["authors"] = [a.strip() for a in paper["authors"].split(";") if a.strip()]
-    paper["year"] = int(paper["year"])
-    if "keywords" in paper:
-        kws = [k.strip() for k in paper["keywords"].split(",") if k.strip()]
-        if kws:
-            paper["keywords"] = kws
-        else:
-            # Empty string → remove so LightweightPaper defaults keywords to None
-            del paper["keywords"]
-    if "original_id" in paper:
-        if paper["original_id"]:
-            paper["original_id"] = int(paper["original_id"])
-        else:
-            del paper["original_id"]
-    # Remove empty strings for optional string fields so they default to None in
-    # LightweightPaper, preserving round-trip fidelity with the SQL database (where
-    # None values are serialised to "" by _serialize_metadata_for_chromadb).
-    for field in ("paper_pdf_url", "poster_image_url", "url", "room_name", "starttime", "endtime", "award"):
-        if field in paper and paper[field] == "":
-            del paper[field]
-    return paper
 
 
 def validate_lightweight_paper(paper: Dict[str, Any]) -> LightweightPaper:

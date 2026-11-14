@@ -237,22 +237,14 @@ If your LLM doesn't support function calling, disable MCP tools:
 chat = RAGChat(em, db, enable_mcp_tools=False)
 ```
 
-### Metadata Filtering
+### Conference and Year Context
 
 ```python
-# Query papers from specific year
+# Query papers from a specific conference and years
 response = chat.query(
-    "What are the main themes in 2025?",
-    where={"year": 2025}
-)
-
-# Multiple filters
-response = chat.query(
-    "Explain recent attention mechanisms",
-    where={
-        "year": {"$gte": 2024},
-    },
-    n_results=5
+    "What are the main themes?",
+    conferences=["NeurIPS"],
+    years=[2025],
 )
 ```
 
@@ -426,7 +418,7 @@ chat.query(query, n_results=5, max_tokens=1000)
 ## Best Practices
 
 1. **Start specific** - Focused queries get better results
-2. **Use filters** - Narrow search space with metadata filters
+2. **Use filters** - Provide conference/year context to narrow results
 3. **Manage history** - Reset conversation when changing topics
 4. **Export important conversations** - Save valuable interactions
 5. **Adjust parameters** - Tune n_results and temperature for your needs

@@ -38,53 +38,41 @@ em = EmbeddingsManager(
 
 ```python
 # Create embeddings from all papers in database
-em.create_embeddings_from_db()
+em.embed_from_database()
 
-# Create embeddings for specific papers
-papers = [
-    {
-        'id': 1,
-        'title': 'Example Paper',
-        'abstract': 'This is the abstract...',
-        'year': 2025
-    }
-]
-em.add_papers(papers)
+# Add a single paper
+em.add_paper({
+    "uid": "abc123",
+    "title": "Example Paper",
+    "abstract": "This is the abstract...",
+})
 ```
 
 ### Semantic Search
 
 ```python
 # Search by semantic similarity
-results = em.search(
-    query="transformer architecture",
-    n_results=10
-)
+results = em.search_similar("transformer architecture", n_results=10)
 
-for result in results:
-    print(f"{result['title']}")
-    print(f"Similarity: {result['distance']:.3f}")
-    print()
+for paper_id, distance in zip(results["ids"][0], results["distances"][0]):
+    print(f"{paper_id}: similarity={1 - distance:.3f}")
 ```
 
 ### Filtered Search
 
+ChromaDB stores only IDs, vectors, and content hashes. Resolve metadata filters
+to paper UIDs in the SQL database first:
+
 ```python
-# Search with metadata filters
-results = em.search(
+from abstracts_explorer.database import DatabaseManager
+
+db = DatabaseManager()
+uids = db.resolve_paper_uids(conferences=["NeurIPS"], years=[2025])
+
+results = em.search_similar(
     query="deep learning",
     n_results=5,
-    where={"year": 2025}
-)
-
-# Multiple filters
-results = em.search(
-    query="neural networks",
-    n_results=10,
-    where={
-        "year": {"$gte": 2023},
-        "title": {"$contains": "transformer"}
-    }
+    ids=uids,
 )
 ```
 
@@ -215,6 +203,6 @@ except Exception as e:
 
 1. **Create embeddings once** - They're cached and reused
 2. **Use appropriate batch sizes** - Balance speed and memory
-3. **Filter searches** - Use metadata filters to narrow results
+3. **Filter searches** - Resolve SQL filters to UIDs, then pass `ids=` to ChromaDB
 4. **Choose good models** - Larger models are more accurate but slower
 5. **Monitor LM Studio** - Ensure it's running and model is loaded

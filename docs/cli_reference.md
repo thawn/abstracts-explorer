@@ -81,6 +81,28 @@ uv run abstracts-explorer create-embeddings \
 uv run abstracts-explorer create-embeddings --force
 ```
 
+### compact-embeddings
+
+Migrate an existing ChromaDB collection to the current alpha format. Removes
+per-paper metadata and replaces full-text documents with SHA-256 content hashes.
+
+**Usage:**
+
+```bash
+abstracts-explorer compact-embeddings [OPTIONS]
+```
+
+**Options:**
+
+- `--collection TEXT`: ChromaDB collection name
+- `--prune`: Delete embeddings whose paper rows no longer exist
+- `--vacuum`: Run `chroma vacuum` after compaction to reclaim disk space
+
+```bash
+# Compact and reclaim disk space
+uv run abstracts-explorer compact-embeddings --vacuum
+```
+
 ### pre-process
 
 Run the full data-preparation pipeline: download → create-embeddings →
@@ -147,6 +169,7 @@ abstracts-explorer search QUERY [OPTIONS]
 - `--limit INTEGER`: Maximum number of results (default: 10)
 - `--year INTEGER`: Filter by conference year
 - `--use-embeddings`: Use semantic search (requires embeddings)
+- `--where TEXT`: Additional SQL filter as comma-separated `key=value` pairs
 - `--title-only`: Search only in paper titles
 - `--abstract-only`: Search only in abstracts
 

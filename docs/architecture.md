@@ -286,14 +286,14 @@ graph TD
         EADD["add_paper → generate_embedding → store"]
         ESRCH["search_similar (low level)"]
         EQRY["_query_collection"]
-        EFIND["find_papers_within_distance<br/>(full records)"]
-        EQUERY["query_papers_within_distance<br/>(lightweight metadata)"]
+        EFIND["DatabaseManager.find_papers_within_distance<br/>(full records)"]
+        EQUERY["query_ids_within_distance<br/>(IDs + distances)"]
         ECOUNT["count_papers_within_distance<br/>(count only)"]
         EIMP["import/export_embeddings"]
 
-        subgraph "⚠ Duplicate: Where-clause building"
-            W1["DatabaseManager.search_papers_semantic:<br/>author + SQL filters + Chroma query"]
-            W2["_query_collection:<br/>build $and/$in filter"]
+        subgraph "SQL filter resolution"
+            W1["DatabaseManager.search_papers_semantic:<br/>SQL filters → UIDs → Chroma ids"]
+            W2["_query_collection:<br/>IDs + distances only"]
         end
     end
 
@@ -319,15 +319,15 @@ graph TD
             L4["_call_llm_for_label<br/>(shared call + fallback)"]
         end
 
-        subgraph "⚠ Duplicate: Where-clause building"
-            W3["load_embeddings:<br/>build $and/$in filter"]
+        subgraph "SQL filter resolution"
+            W3["load_embeddings:<br/>resolve UIDs in SQL"]
         end
     end
 
     subgraph "Standalone Functions"
         PF["perform_clustering<br/>(convenience wrapper)"]
         CWC["compute_clusters_with_cache<br/>(multi-level caching)"]
-        W4["⚠ also builds where-clauses"]
+        W4["resolves conference/year filters to UIDs"]
     end
 
     ECONN --> ECOL --> EADD
@@ -406,13 +406,9 @@ graph TD
 
         RES["_get_mcp_resources()<br/>_get_clustering_resources()"]
 
-        subgraph "Shared Where-clause Builder (embeddings.py)"
-            WB["build_chromadb_where_clause"]
-        end
     end
 
-    RBUILD --> TW1 & TW2 & TW3 & TW4 & TW5 & TW6 & TW7 & TW8
-    TW1 & TW2 & TW3 & TW4 & TW5 & TW6 & TW7 & TW8 --> RH
+        TW1 & TW2 & TW3 & TW4 & TW5 & TW6 & TW7 & TW8 --> RH
 
     TW1 --> S1
     TW2 --> S2
@@ -546,7 +542,7 @@ severity:
 
 | # | Pattern | Occurrences | Modules | Severity |
 |---|---------|-------------|---------|----------|
-| 1 | ChromaDB where-clause construction (`$and/$in` filters) | 5+ | embeddings.py, clustering.py, mcp_server.py | High |
+| 1 | SQL filter/UID resolution | 5+ | database.py, clustering.py, mcp_server.py | Resolved (`resolve_paper_uids`) |
 | 2 | CLI command header printing | 15+ | cli.py | Medium |
 | 3 | TF-IDF keyword extraction | 2 | clustering.py | Medium |
 | 4 | LLM label generation (OpenAI call + fallback) | 3 | clustering.py | Medium |

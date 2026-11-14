@@ -26,7 +26,6 @@ class PaperFormattingError(Exception):
 def format_search_results(
     search_results: Dict[str, Any],
     database,
-    include_documents: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     Format ChromaDB search results into complete paper records.
@@ -38,11 +37,9 @@ def format_search_results(
     Parameters
     ----------
     search_results : dict
-        Search results from ChromaDB with 'ids', 'distances', 'metadatas', 'documents'.
+        Search results from ChromaDB with ``ids`` and ``distances``.
     database : DatabaseManager
         Database instance for fetching complete paper details.
-    include_documents : bool, optional
-        Whether to include document text (abstract) from search results, by default True.
 
     Returns
     -------
@@ -80,9 +77,6 @@ def format_search_results(
     if "distances" in search_results and search_results["distances"][0]:
         if len(search_results["distances"][0]) != result_count:
             raise PaperFormattingError("Inconsistent result lengths in search_results.")
-    if "documents" in search_results and search_results["documents"][0]:
-        if len(search_results["documents"][0]) != result_count:
-            raise PaperFormattingError("Inconsistent result lengths in search_results.")
 
     ids = search_results["ids"][0]
     valid_uids: List[str] = []
@@ -113,14 +107,7 @@ def format_search_results(
         if "distances" in search_results and search_results["distances"][0]:
             distance = search_results["distances"][0][i]
             paper["distance"] = distance
-            # Convert distance to similarity (0-1 range where 1 is most similar)
             paper["similarity"] = max(0.0, 1.0 - distance)
-
-        # Add abstract from search results if needed and available
-        if include_documents and "documents" in search_results and search_results["documents"][0]:
-            # Only override if database abstract is missing
-            if not paper.get("abstract"):
-                paper["abstract"] = search_results["documents"][0][i]
 
         papers.append(paper)
 

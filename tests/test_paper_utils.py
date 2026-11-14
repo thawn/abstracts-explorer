@@ -116,8 +116,8 @@ class TestFormatSearchResults:
         with pytest.raises(PaperFormattingError, match="No valid papers could be formatted"):
             format_search_results(search_results, mock_db)
 
-    def test_format_search_results_without_documents(self):
-        """Test formatting without including documents."""
+    def test_format_search_results_uses_database_abstract(self):
+        """Abstracts always come from the database."""
         search_results = {
             "ids": [["abc123"]],
             "distances": [[0.2]],
@@ -133,31 +133,10 @@ class TestFormatSearchResults:
             }
         ]
 
-        papers = format_search_results(search_results, mock_db, include_documents=False)
+        papers = format_search_results(search_results, mock_db)
 
         assert len(papers) == 1
         assert papers[0]["abstract"] == "From DB"
-
-    def test_format_search_results_with_documents_override(self):
-        """Test that documents from search results override missing abstracts."""
-        search_results = {
-            "ids": [["abc123"]],
-            "documents": [["From search"]],
-        }
-
-        mock_db = Mock()
-        mock_db.get_papers_by_uids.return_value = [
-            {
-                "uid": "abc123",
-                "title": "Paper 1",
-                "authors": [],
-                "abstract": None,
-            }
-        ]
-
-        papers = format_search_results(search_results, mock_db, include_documents=True)
-
-        assert papers[0]["abstract"] == "From search"
 
 
 class TestBuildContextFromPapers:

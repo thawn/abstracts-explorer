@@ -134,16 +134,20 @@ em = EmbeddingsManager(
 )
 
 # Create embeddings from database
-em.create_embeddings_from_db()
+em.embed_from_database()
 
 # Search by semantic similarity
-results = em.search("transformer attention mechanism", n_results=5)
+results = em.search_similar("transformer attention mechanism", n_results=5)
 
 # Search with metadata filter
-results = em.search(
+from abstracts_explorer.database import DatabaseManager
+
+db = DatabaseManager()
+uids = db.resolve_paper_uids(years=[2025])
+results = em.search_similar(
     "deep learning",
     n_results=10,
-    where={"year": 2025}
+    ids=uids,
 )
 ```
 

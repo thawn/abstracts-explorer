@@ -18,7 +18,7 @@ from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from abstracts_explorer.database import DatabaseManager
-from abstracts_explorer.embeddings import EmbeddingsManager, build_chromadb_where_clause
+from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.rag import RAGChat
 from abstracts_explorer.config import get_config
 from abstracts_explorer.export_utils import export_papers_to_zip
@@ -530,11 +530,15 @@ def search():
         _, remaining_query = DatabaseManager.parse_field_filters(query)
         if remaining_query:
             try:
+                candidate_ids = database.resolve_paper_uids(
+                    conferences=conferences if conferences else None,
+                    years=[int(year) for year in years] if years else None,
+                    sessions=sessions if sessions else None,
+                )
                 total_similar = em.count_papers_within_distance(
                     query=remaining_query,
                     distance_threshold=distance_threshold,
-                    conferences=conferences if conferences else None,
-                    years=years if years else None,
+                    ids=candidate_ids,
                 )
             except Exception:
                 total_similar = None
@@ -658,7 +662,6 @@ def chat():
     paper_priorities = data.get("paper_priorities", {}) or {}
 
     # Get filters
-    sessions = data.get("sessions", [])
     years = data.get("years", [])
     conferences = data.get("conferences", [])
 
@@ -670,21 +673,12 @@ def chat():
     if reset:
         rag.reset_conversation()
 
-    # Build metadata filter
-    metadata_filter = build_chromadb_where_clause(
-        sessions=sessions,
-        years=years,
-        conferences=conferences,
-        combine_with="$or",
-    )
-
     # Get response with filters
     database = get_database()
     available_conferences = database.get_conferences()
     response = rag.query(
         message,
         n_results=n_papers,
-        metadata_filter=metadata_filter,
         conferences=conferences if conferences else None,
         years=[int(y) for y in years] if years else None,
         available_conferences=available_conferences,
@@ -894,9 +888,9 @@ def search_custom_cluster():
     em = get_embeddings_manager()
     database = get_database()
 
-    # Call EmbeddingsManager method directly
-    results = em.find_papers_within_distance(
-        database=database,
+    # Call DatabaseManager orchestration method
+    results = database.find_papers_within_distance(
+        embeddings_manager=em,
         query=query,
         distance_threshold=distance_threshold,
         conferences=conferences,

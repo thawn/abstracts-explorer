@@ -9,7 +9,7 @@ using the new schema with integer IDs and proper author relationships.
 
 import pytest
 import sqlite3
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from abstracts_explorer.database import DatabaseManager, DatabaseError, normalize_model_name
 from abstracts_explorer.plugin import LightweightPaper
@@ -1994,6 +1994,66 @@ class TestGetPapersByUids:
 
     def test_empty_input_returns_empty_list(self, connected_db):
         assert connected_db.get_papers_by_uids([]) == []
+
+
+class TestPaperUidResolution:
+    """Tests for UID-based resolution and summary hydration."""
+
+    def test_get_paper_uids(self, connected_db, sample_paper, sample_paper_minimal):
+        connected_db.add_paper(sample_paper)
+        connected_db.add_paper(sample_paper_minimal)
+
+        uids = connected_db.get_paper_uids({"year": 2025})
+        assert len(uids) == 1
+        assert isinstance(uids[0], str)
+
+    def test_resolve_paper_uids_combines_filters(self, connected_db, sample_paper, sample_paper_minimal):
+        connected_db.add_paper(sample_paper)
+        connected_db.add_paper(sample_paper_minimal)
+
+        uids = connected_db.resolve_paper_uids(
+            conferences=["NeurIPS"],
+            years=[2025],
+            where_filters={"year": "2025"},
+        )
+        assert len(uids) == 1
+
+    def test_resolve_paper_uids_empty_scope(self, connected_db, sample_paper):
+        connected_db.add_paper(sample_paper)
+        assert connected_db.resolve_paper_uids(conferences=["ICLR"]) == []
+
+    def test_summaries_preserve_order_and_omit_missing(self, connected_db, sample_paper):
+        uid = connected_db.add_paper(sample_paper)
+
+        summaries = connected_db.get_paper_summaries_by_uids(["missing", uid])
+        assert len(summaries) == 1
+        assert summaries[0]["uid"] == uid
+        assert summaries[0]["title"] == "Test Paper"
+        assert summaries[0]["abstract"] == sample_paper.abstract
+        assert set(summaries[0]) == {"uid", "title", "abstract", "year", "conference", "session"}
+
+    def test_find_papers_within_distance_hydrates(self, connected_db, sample_paper):
+        uid = connected_db.add_paper(sample_paper)
+        em = Mock()
+        em.query_ids_within_distance.return_value = {
+            "ids": [uid],
+            "distances": [0.25],
+            "query_embedding": [0.1],
+            "total_considered": 1,
+        }
+
+        result = connected_db.find_papers_within_distance(
+            em,
+            "query",
+            conferences=["NeurIPS"],
+            years=[2025],
+        )
+
+        assert result["count"] == 1
+        assert result["papers"][0]["uid"] == uid
+        assert result["papers"][0]["distance"] == 0.25
+        em.query_ids_within_distance.assert_called_once()
+        assert em.query_ids_within_distance.call_args.kwargs["ids"] == [uid]
 
 
 class TestGetPaperWhereFilters:

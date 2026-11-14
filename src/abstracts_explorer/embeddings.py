@@ -1,19 +1,21 @@
 """
 This module provides functionality to generate text embeddings for paper abstracts
-and store them in a vector database with paper metadata.
+and store them in a vector database.
 
 The module uses an OpenAI-compatible API (such as LM Studio or blablador) to generate
-embeddings and stores them in ChromaDB for efficient similarity search.
+embeddings and stores them in ChromaDB for efficient similarity search.  ChromaDB
+stores only paper UIDs, vectors, and a SHA-256 hash of the embedded text; all paper
+metadata lives in the SQL database.
 """
 
+import hashlib
 import logging
 import re
 import sys
 import threading
-from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import httpx2
@@ -88,97 +90,43 @@ def _context_length_limit_from_error(error: Exception) -> Optional[int]:
     return int(match.group(1))
 
 
-def _contains_metadata_key(value: Any, key: str) -> bool:
-    """Recursively check whether *key* appears in a ChromaDB where clause."""
-    if isinstance(value, dict):
-        if key in value:
-            return True
-        return any(_contains_metadata_key(item, key) for item in value.values())
-    if isinstance(value, (list, tuple)):
-        return any(_contains_metadata_key(item, key) for item in value)
-    return False
+HASH_PREFIX = "sha256:"
+_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
-def build_chromadb_where_clause(
-    conferences: Optional[Sequence[str]] = None,
-    years: Optional[Sequence[int]] = None,
-    sessions: Optional[Sequence[str]] = None,
-    base_where: Optional[Dict[str, Any]] = None,
-    combine_with: str = "$and",
-) -> Optional[Dict[str, Any]]:
+def hash_text(text: str) -> str:
     """
-    Build a ChromaDB ``where`` clause from metadata filters.
-
-    The helper centralizes all ChromaDB metadata-filter composition.  It
-    converts years to strings (ChromaDB stores metadata as strings), combines
-    multiple conditions with ``$and`` (or ``$or``), and merges an optional
-    user-supplied base clause without duplicating existing
-    conference/year/session filters.
+    Return the content hash used to identify embedded text.
 
     Parameters
     ----------
-    conferences : sequence of str, optional
-        Conference names to filter by.
-    years : sequence of int, optional
-        Publication years to filter by.
-    sessions : sequence of str, optional
-        Session names to filter by.
-    base_where : dict, optional
-        Existing ChromaDB where clause to merge with the filters.
-    combine_with : str, optional
-        Logical operator used to combine conditions, either ``"$and"``
-        (default) or ``"$or"``.
+    text : str
+        Text that was embedded.
 
     Returns
     -------
-    dict or None
-        A new where clause, or ``None`` when no filters were supplied.
-
-    Raises
-    ------
-    ValueError
-        If *base_where* is not a dict, *combine_with* is invalid, or the
-        base clause contains an invalid logical-operator value.
-
-    Examples
-    --------
-    >>> build_chromadb_where_clause(["NeurIPS"], [2024])
-    {'$and': [{'conference': {'$in': ['NeurIPS']}}, {'year': {'$in': ['2024']}}]}
-    >>> build_chromadb_where_clause(base_where={"session": "Oral"})
-    {'session': 'Oral'}
+    str
+        ``sha256:`` followed by the hexadecimal SHA-256 digest.
     """
-    if base_where is not None and not isinstance(base_where, dict):
-        raise ValueError(f"WHERE clause must be a dict, got {type(base_where).__name__}")
-    if combine_with not in ("$and", "$or"):
-        raise ValueError(f"combine_with must be '$and' or '$or', got {combine_with!r}")
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return f"{HASH_PREFIX}{digest}"
 
-    where = deepcopy(base_where) if base_where else None
 
-    conditions: List[Dict[str, Any]] = []
-    if conferences and not _contains_metadata_key(where, "conference"):
-        conference_values = [conferences] if isinstance(conferences, str) else list(conferences)
-        conditions.append({"conference": {"$in": conference_values}})
-    if years and not _contains_metadata_key(where, "year"):
-        year_values = [years] if isinstance(years, (str, int)) else list(years)
-        conditions.append({"year": {"$in": [str(year) for year in year_values]}})
-    if sessions and not _contains_metadata_key(where, "session"):
-        session_values = [sessions] if isinstance(sessions, str) else list(sessions)
-        conditions.append({"session": {"$in": session_values}})
+def is_content_hash(value: Optional[str]) -> bool:
+    """
+    Return whether *value* is a content hash produced by :func:`hash_text`.
 
-    if not conditions:
-        return where
+    Parameters
+    ----------
+    value : str or None
+        Candidate ChromaDB document value.
 
-    if where is None:
-        return conditions[0] if len(conditions) == 1 else {combine_with: conditions}
-
-    existing_combined = where.get(combine_with)
-    if existing_combined is not None:
-        if not isinstance(existing_combined, list):
-            raise ValueError(f"WHERE clause '{combine_with}' value must be a list")
-        existing_combined.extend(conditions)
-        return where
-
-    return {combine_with: [where, *conditions]}
+    Returns
+    -------
+    bool
+        ``True`` when *value* matches the ``sha256:<hex>`` format.
+    """
+    return bool(value) and bool(_HASH_RE.match(str(value)))
 
 
 class RateLimitedTransport(httpx2.BaseTransport, httpx2.AsyncBaseTransport):
@@ -813,7 +761,7 @@ class EmbeddingsManager:
         """
         try:
             # Try to get the paper by ID
-            result = self.collection.get(ids=[paper_id])
+            result = self.collection.get(ids=[paper_id], include=[])
             # If the result has any IDs, the paper exists
             return len(result["ids"]) > 0
         except Exception as e:
@@ -822,7 +770,11 @@ class EmbeddingsManager:
 
     def paper_needs_update(self, paper: dict) -> bool:
         """
-        Check if a paper needs to be updated in the collection.
+        Check if a paper's embedding needs to be updated.
+
+        The stored document is a SHA-256 content hash of the text that was
+        embedded.  A paper needs an update when the hash for its current title
+        and abstract differs from the stored hash.
 
         Parameters
         ----------
@@ -845,22 +797,17 @@ class EmbeddingsManager:
         >>> em.init()
         >>> em.paper_needs_update({"id": 1, "abstract": "Updated abstract"})
         True
-        >>> em.paper_needs_update({"id": 1, "abstract": "This paper presents..."})
-        False
         """
         try:
-            existing_paper = self.collection.get(ids=[paper["uid"]])
+            existing_paper = self.collection.get(ids=[paper["uid"]], include=["documents"])
             if not existing_paper or len(existing_paper["ids"]) == 0:
-                return True  # Paper does not exist, needs to be added
+                return True
 
-            # Compare existing embedding text with new paper data
             existing_documents = existing_paper.get("documents", [])
-            if not existing_documents:
-                return True  # No document stored, needs update
+            if not existing_documents or not existing_documents[0]:
+                return True
 
-            existing_embedding_text = existing_documents[0]
-            new_embedding_text = self.embedding_text_from_paper(paper)
-            return existing_embedding_text != new_embedding_text
+            return existing_documents[0] != self.embedding_hash_from_paper(paper)
 
         except Exception as e:
             logger.warning(f"Error checking if paper {paper['uid']} needs update: {str(e)}")
@@ -888,96 +835,22 @@ class EmbeddingsManager:
             raise ValueError(f"Cannot create embedding text for paper {paper['uid']}: no abstract and no title")
         return embedding_text
 
-    @staticmethod
-    def parse_chromadb_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    @classmethod
+    def embedding_hash_from_paper(cls, paper: dict) -> str:
         """
-        Parse a raw ChromaDB metadata dict through the LightweightPaper model.
-
-        ChromaDB stores all values as strings (see :meth:`add_paper`).  This
-        method converts a raw metadata dict into one with properly typed values
-        by running it through :func:`prepare_chroma_db_paper_data` and then
-        validating via :class:`LightweightPaper`.
+        Return the content hash for a paper's embedding text.
 
         Parameters
         ----------
-        metadata : dict
-            Raw metadata dictionary from ChromaDB.
+        paper : dict
+            Dictionary containing at least ``title`` and ``abstract``.
 
         Returns
         -------
-        dict
-            Metadata dictionary with values converted to their canonical types.
-            Authors will be a ``list[str]`` and keywords a ``list[str]``.
-
-        Examples
-        --------
-        >>> raw = {"title": "My Paper", "year": "2024", "original_id": "42",
-        ...        "authors": "Alice;Bob", "abstract": "An abstract",
-        ...        "session": "ML", "poster_position": "1",
-        ...        "conference": "NeurIPS"}
-        >>> parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
-        >>> parsed["year"]
-        2024
-        >>> parsed["authors"]
-        ['Alice', 'Bob']
-
-        See Also
-        --------
-        LightweightPaper : Pydantic model used for validation.
-        prepare_chroma_db_paper_data : Converts ChromaDB string fields to
-            proper types before validation.
+        str
+            ``sha256:<hex>`` hash of :meth:`embedding_text_from_paper`.
         """
-        from abstracts_explorer.plugin import prepare_chroma_db_paper_data, LightweightPaper
-
-        prepared = prepare_chroma_db_paper_data(metadata.copy())
-        return LightweightPaper(**prepared).model_dump(exclude_none=True)
-
-    @staticmethod
-    def _serialize_metadata_for_chromadb(metadata: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Serialize a metadata dict to ChromaDB-compatible string values.
-
-        ChromaDB only accepts ``str``, ``int``, ``float``, ``bool``, or ``None``
-        as metadata values.  :meth:`export_embeddings` (and the registry export
-        path) runs raw ChromaDB metadata through :meth:`parse_chromadb_metadata`
-        which converts the semicolon-separated *authors* string and the
-        comma-separated *keywords* string back to Python lists.  When that data
-        is round-tripped through JSON and then passed back to ChromaDB via
-        :meth:`import_embeddings`, the list values must be re-serialised.
-
-        List fields use the same helpers as
-        :func:`~abstracts_explorer.plugin.serialize_authors_to_string` and
-        :func:`~abstracts_explorer.plugin.serialize_keywords_to_string` to
-        keep the stored format consistent with the SQL database.  All other
-        values are converted to strings so that ChromaDB metadata filters work
-        reliably (e.g. ``{"year": "2025"}``).
-
-        Parameters
-        ----------
-        metadata : dict
-            Metadata dict that may contain list values.
-
-        Returns
-        -------
-        dict
-            Metadata dict with all values converted to ChromaDB-compatible types.
-        """
-        from abstracts_explorer.plugin import serialize_authors_to_string, serialize_keywords_to_string
-
-        result: Dict[str, Any] = {}
-        for k, v in metadata.items():
-            if v is None:
-                result[k] = ""
-            elif isinstance(v, list):
-                if k == "authors":
-                    result[k] = serialize_authors_to_string(v)
-                elif k == "keywords":
-                    result[k] = serialize_keywords_to_string(v)
-                else:
-                    result[k] = str(v)
-            else:
-                result[k] = str(v)
-        return result
+        return hash_text(cls.embedding_text_from_paper(paper))
 
     def add_paper(self, paper: dict) -> None:
         """
@@ -1001,19 +874,11 @@ class EmbeddingsManager:
         """
         try:
             embedding_text = self.embedding_text_from_paper(paper)
-            # Generate embedding if not provided
             embedding = self.generate_embedding(embedding_text)
 
-            # Prepare metadata - serialize all values for ChromaDB compatibility,
-            # using the same format as _serialize_metadata_for_chromadb so that
-            # add_paper and import_embeddings produce identical stored representations.
-            meta = self._serialize_metadata_for_chromadb(paper.copy())
-
-            # Add to collection
             self.collection.add(
                 embeddings=[embedding],
-                documents=[embedding_text],
-                metadatas=[meta],
+                documents=[hash_text(embedding_text)],
                 ids=[paper["uid"]],
             )
             logger.debug(f"Added paper {paper['uid']} to collection")
@@ -1025,7 +890,6 @@ class EmbeddingsManager:
         self,
         query: str,
         n_results: int = 10,
-        where: Optional[Dict[str, Any]] = None,
         ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
@@ -1036,14 +900,14 @@ class EmbeddingsManager:
         query : str
             Query text to search for.
         n_results : int, optional
-            Number of results to return, by default 10
-        where : dict, optional
-            Metadata filter conditions.
+            Number of results to return, by default 10.
+        ids : list of str, optional
+            Restrict the search to these paper UIDs.
 
         Returns
         -------
         dict
-            Search results containing ids, distances, documents, and metadatas.
+            ChromaDB query results containing ``ids`` and ``distances``.
 
         Raises
         ------
@@ -1054,35 +918,29 @@ class EmbeddingsManager:
         --------
         >>> em = EmbeddingsManager()
         >>> em.init()
-        >>> results = em.search_similar("deep learning transformers", n_results=5, where={"year": 2025})
+        >>> results = em.search_similar("deep learning transformers", n_results=5)
         >>> for i, paper_id in enumerate(results['ids'][0]):
-        ...     print(f"{i+1}. Paper {paper_id}: {results['metadatas'][0][i]}")
+        ...     print(f"{i+1}. Paper {paper_id}: {results['distances'][0][i]}")
         """
         if not query or not query.strip():
             raise EmbeddingsError("Query cannot be empty")
+        if ids is not None and not ids:
+            return {"ids": [[]], "distances": [[]]}
 
         try:
-            # Generate embedding for query
             query_embedding = self.generate_embedding(query)
+            if ids is not None:
+                n_results = min(n_results, len(ids))
 
-            # Search in collection
             results = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=n_results,
-                where=where,
                 ids=ids,
+                include=["distances"],
             )
 
             logger.info(f"Found {len(results['ids'][0])} similar papers")
-
-            # Parse metadata through LightweightPaper model to convert
-            # string values back to their proper types (e.g. year → int).
-            parsed = dict(results)  # type: ignore[arg-type]
-            if parsed.get("metadatas"):
-                parsed["metadatas"] = [
-                    [self.parse_chromadb_metadata(m) for m in batch] for batch in parsed["metadatas"]
-                ]
-            return parsed
+            return {"ids": results.get("ids", [[]]), "distances": results.get("distances", [[]])}
 
         except Exception as e:
             raise EmbeddingsError(f"Failed to search: {str(e)}") from e
@@ -1253,29 +1111,18 @@ class EmbeddingsManager:
     def _query_collection(
         self,
         query: str,
-        include: List[str],
-        conferences: Optional[List[str]] = None,
-        years: Optional[List[int]] = None,
+        ids: Optional[List[str]] = None,
         query_embedding: Optional[List[float]] = None,
     ) -> Dict[str, Any]:
         """
         Run a distance query against the embeddings collection.
 
-        This helper only handles ChromaDB mechanics.  Result interpretation
-        (counting, metadata shaping, database hydration) is left to the
-        calling methods.
-
         Parameters
         ----------
         query : str
             The search query text.
-        include : list[str]
-            Fields to include in the ChromaDB query result (for example
-            ``["distances"]`` or ``["distances", "metadatas"]``).
-        conferences : list[str], optional
-            Filter results to only include papers from these conferences.
-        years : list[int], optional
-            Filter results to only include papers from these years.
+        ids : list of str, optional
+            Restrict the query to these paper UIDs.
         query_embedding : list[float], optional
             Pre-computed embedding for the query.  When omitted, an embedding
             is generated with :meth:`generate_embedding`.
@@ -1283,17 +1130,20 @@ class EmbeddingsManager:
         Returns
         -------
         dict
-            Dictionary with ``query_embedding``, ``ids``, ``distances``,
-            ``metadatas`` (empty when not requested), and ``total_considered``.
+            Dictionary with ``query_embedding``, ``ids``, ``distances``, and
+            ``total_considered``.
 
         Raises
         ------
         EmbeddingsError
-            If the query is empty, the collection is empty, or no results are
-            returned.
+            If the query is empty, the collection is empty, no IDs matched, or
+            no results are returned.
         """
         if not query or not query.strip():
             raise EmbeddingsError("Query cannot be empty")
+
+        if ids is not None and not ids:
+            raise EmbeddingsError("No papers matched the filters")
 
         if query_embedding is None:
             query_embedding = self.generate_embedding(query)
@@ -1302,20 +1152,16 @@ class EmbeddingsManager:
         if total_count == 0:
             raise EmbeddingsError("No papers in collection")
 
-        where_clause = build_chromadb_where_clause(conferences, years)
-        n_results_query = min(total_count, _MAX_QUERY_RESULTS)
-
+        n_results_query = min(_MAX_QUERY_RESULTS, len(ids) if ids is not None else total_count)
         results = self.collection.query(
             query_embeddings=[query_embedding],
             n_results=n_results_query,
-            include=include,
-            where=where_clause,
+            include=["distances"],
+            ids=ids,
         )
 
         paper_ids = results["ids"][0] if results.get("ids") else []
         distances = results["distances"][0] if results.get("distances") else []
-        metadatas = results["metadatas"][0] if results.get("metadatas") else []
-
         if not paper_ids:
             raise EmbeddingsError("No results from collection query")
 
@@ -1323,7 +1169,6 @@ class EmbeddingsManager:
             "query_embedding": query_embedding,
             "ids": paper_ids,
             "distances": distances,
-            "metadatas": metadatas,
             "total_considered": len(paper_ids),
         }
 
@@ -1357,64 +1202,15 @@ class EmbeddingsManager:
             pairs.append((paper_id, float(distance)))
         return pairs
 
-    def _fetch_paper_info_for_matches(
-        self,
-        database,
-        matches: List[Tuple[str, float]],
-    ) -> List[Dict[str, Any]]:
-        """
-        Fetch full paper records for embedding matches.
-
-        Parameters
-        ----------
-        database : DatabaseManager
-            Database manager used to retrieve paper details.
-        matches : list of tuple
-            ``(paper_id, distance)`` pairs.
-
-        Returns
-        -------
-        list of dict
-            Paper dictionaries with an added ``distance`` field.
-        """
-        from abstracts_explorer.paper_utils import PaperFormattingError
-
-        if not matches:
-            return []
-
-        selected_ids = [paper_id for paper_id, _ in matches]
-        distance_by_id = dict(matches)
-        fetched_papers: List[Dict[str, Any]] = []
-        batch_size = 500
-        for start in range(0, len(selected_ids), batch_size):
-            batch = selected_ids[start : start + batch_size]
-            try:
-                fetched_papers.extend(database.get_papers_by_uids(batch))
-            except PaperFormattingError:
-                logger.warning("Some papers were not found in the database, skipping")
-
-        papers_by_id = {paper["uid"]: paper for paper in fetched_papers if paper}
-
-        papers: List[Dict[str, Any]] = []
-        for paper_id in selected_ids:
-            paper = papers_by_id.get(paper_id)
-            if paper is None:
-                logger.warning(f"Paper {paper_id} not found in database, skipping")
-                continue
-            paper["distance"] = distance_by_id[paper_id]
-            papers.append(paper)
-        return papers
-
     def count_papers_within_distance(
         self,
         query: str,
         distance_threshold: float = 1.1,
-        conferences: Optional[List[str]] = None,
-        years: Optional[List[int]] = None,
+        ids: Optional[List[str]] = None,
         query_embedding: Optional[List[float]] = None,
     ) -> int:
         """
-        Count papers within a distance threshold without fetching paper records.
+        Count papers within a distance threshold.
 
         Parameters
         ----------
@@ -1422,10 +1218,8 @@ class EmbeddingsManager:
             The search query text.
         distance_threshold : float, optional
             Euclidean distance radius, by default 1.1.
-        conferences : list[str], optional
-            Filter results to only include papers from these conferences.
-        years : list[int], optional
-            Filter results to only include papers from these years.
+        ids : list of str, optional
+            Restrict the count to these paper UIDs.
         query_embedding : list[float], optional
             Pre-computed embedding for the query.
 
@@ -1442,9 +1236,7 @@ class EmbeddingsManager:
         try:
             result = self._query_collection(
                 query=query,
-                include=["distances"],
-                conferences=conferences,
-                years=years,
+                ids=ids,
                 query_embedding=query_embedding,
             )
             matches = self._matching_pairs(result["ids"], result["distances"], distance_threshold)
@@ -1455,22 +1247,15 @@ class EmbeddingsManager:
             logger.error(f"Error counting papers within distance: {e}", exc_info=True)
             raise EmbeddingsError(f"Failed to count papers within distance: {str(e)}") from e
 
-    def query_papers_within_distance(
+    def query_ids_within_distance(
         self,
         query: str,
         distance_threshold: float = 1.1,
-        conferences: Optional[List[str]] = None,
-        years: Optional[List[int]] = None,
+        ids: Optional[List[str]] = None,
         query_embedding: Optional[List[float]] = None,
     ) -> Dict[str, Any]:
         """
-        Query lightweight paper information within a distance threshold.
-
-        Unlike :meth:`find_papers_within_distance`, this method does not fetch
-        full records from the SQL database.  It returns identifiers, distances,
-        and a few display fields taken directly from the embedding collection
-        metadata, making it suitable for aggregations such as topic evolution
-        and relevance analysis.
+        Return identifiers and distances within a distance threshold.
 
         Parameters
         ----------
@@ -1478,10 +1263,8 @@ class EmbeddingsManager:
             The search query text.
         distance_threshold : float, optional
             Euclidean distance radius, by default 1.1.
-        conferences : list[str], optional
-            Filter results to only include papers from these conferences.
-        years : list[int], optional
-            Filter results to only include papers from these years.
+        ids : list of str, optional
+            Restrict the query to these paper UIDs.
         query_embedding : list[float], optional
             Pre-computed embedding for the query.
 
@@ -1489,9 +1272,7 @@ class EmbeddingsManager:
         -------
         dict
             Dictionary containing ``query``, ``query_embedding``, ``distance``,
-            ``papers`` (lightweight dictionaries with ``uid``, ``distance``,
-            ``title``, ``session``, ``year``, and ``conference``), ``count``,
-            and ``total_considered``.
+            ``ids``, ``distances``, ``count``, and ``total_considered``.
 
         Raises
         ------
@@ -1501,39 +1282,17 @@ class EmbeddingsManager:
         try:
             result = self._query_collection(
                 query=query,
-                include=["distances", "metadatas"],
-                conferences=conferences,
-                years=years,
+                ids=ids,
                 query_embedding=query_embedding,
             )
             matches = self._matching_pairs(result["ids"], result["distances"], distance_threshold)
-            metadata_by_id = dict(zip(result["ids"], result["metadatas"]))
-
-            papers: List[Dict[str, Any]] = []
-            for uid, distance in matches:
-                metadata = metadata_by_id.get(uid) or {}
-                raw_year = metadata.get("year")
-                try:
-                    year = int(raw_year) if raw_year not in (None, "") else None
-                except (TypeError, ValueError):
-                    year = None
-                papers.append(
-                    {
-                        "uid": uid,
-                        "distance": distance,
-                        "title": metadata.get("title", ""),
-                        "session": metadata.get("session", ""),
-                        "year": year,
-                        "conference": metadata.get("conference", ""),
-                    }
-                )
-
             return {
                 "query": query,
                 "query_embedding": result["query_embedding"],
                 "distance": distance_threshold,
-                "papers": papers,
-                "count": len(papers),
+                "ids": [paper_id for paper_id, _ in matches],
+                "distances": [distance for _, distance in matches],
+                "count": len(matches),
                 "total_considered": result["total_considered"],
             }
         except EmbeddingsError:
@@ -1542,120 +1301,14 @@ class EmbeddingsManager:
             logger.error(f"Error querying papers within distance: {e}", exc_info=True)
             raise EmbeddingsError(f"Failed to query papers within distance: {str(e)}") from e
 
-    def find_papers_within_distance(
-        self,
-        database,
-        query: str,
-        distance_threshold: float = 1.1,
-        conferences: Optional[List[str]] = None,
-        years: Optional[List[int]] = None,
-        query_embedding: Optional[List[float]] = None,
-    ) -> Dict[str, Any]:
+    def delete_embeddings_by_ids(self, ids: List[str]) -> int:
         """
-        Find full paper records within a specified distance from a search query.
-
-        This method treats the search query as a clustering center and returns
-        full paper records within the specified Euclidean distance radius in
-        embedding space.  For a lighter-weight result that does not touch the
-        SQL database, use :meth:`query_papers_within_distance`.  For a count
-        only, use :meth:`count_papers_within_distance`.
+        Delete embeddings by paper UID.
 
         Parameters
         ----------
-        database : DatabaseManager
-            Database manager instance for retrieving paper details
-        query : str
-            The search query text
-        distance_threshold : float, optional
-            Euclidean distance radius, by default 1.1
-        conferences : list[str], optional
-            Filter results to only include papers from these conferences
-        years : list[int], optional
-            Filter results to only include papers from these years
-        query_embedding : list[float], optional
-            Pre-computed embedding for the query.  When provided, the
-            embedding generation step is skipped, which avoids redundant
-            LLM API calls.
-
-        Returns
-        -------
-        dict
-            Dictionary containing:
-
-            - query: str - The search query
-            - query_embedding: list[float] - The generated embedding for the query
-            - distance: float - The distance threshold used
-            - papers: list[dict] - Full paper records with their distances
-            - count: int - Number of paper records returned
-            - total_considered: int - Total number of papers matching the
-              conference/year filters (before distance filtering)
-
-        Raises
-        ------
-        EmbeddingsError
-            If embeddings collection is empty or operation fails
-
-        Examples
-        --------
-        >>> em = EmbeddingsManager()
-        >>> em.init()
-        >>> db = DatabaseManager()
-        >>> results = em.find_papers_within_distance(db, "machine learning", 1.1)
-        >>> print(f"Found {results['count']} papers")
-        >>>
-        >>> # With filters
-        >>> results = em.find_papers_within_distance(
-        ...     db, "deep learning", 1.1,
-        ...     conferences=["NeurIPS"],
-        ...     years=[2023, 2024]
-        ... )
-        """
-        try:
-            result = self._query_collection(
-                query=query,
-                include=["distances"],
-                conferences=conferences,
-                years=years,
-                query_embedding=query_embedding,
-            )
-            matches = self._matching_pairs(result["ids"], result["distances"], distance_threshold)
-            matching_papers = self._fetch_paper_info_for_matches(database, matches)
-            return {
-                "query": query,
-                "query_embedding": result["query_embedding"],
-                "distance": distance_threshold,
-                "papers": matching_papers,
-                "count": len(matching_papers),
-                "total_considered": result["total_considered"],
-            }
-
-        except EmbeddingsError:
-            # Re-raise EmbeddingsError as-is
-            raise
-        except Exception as e:
-            logger.error(f"Error finding papers within distance: {e}", exc_info=True)
-            raise EmbeddingsError(f"Failed to find papers within distance: {str(e)}") from e
-
-    def delete_embeddings_by_filter(
-        self,
-        conference: Optional[str] = None,
-        year: Optional[int] = None,
-    ) -> int:
-        """
-        Delete embeddings that match the given conference and/or year filter.
-
-        Only embeddings whose metadata matches **all** supplied criteria are
-        removed.  At least one of *conference* or *year* must be provided;
-        calling this method with both set to ``None`` raises ``ValueError`` to
-        prevent accidental deletion of the entire collection.
-
-        Parameters
-        ----------
-        conference : str, optional
-            Conference name to match (exact, case-sensitive, as stored in
-            ChromaDB metadata).
-        year : int, optional
-            Publication year to match.
+        ids : list of str
+            Paper UIDs to remove.
 
         Returns
         -------
@@ -1664,120 +1317,101 @@ class EmbeddingsManager:
 
         Raises
         ------
-        ValueError
-            If both *conference* and *year* are ``None``.
         EmbeddingsError
             If the deletion fails.
-
-        Examples
-        --------
-        >>> em = EmbeddingsManager()
-        >>> em.init()
-        >>> deleted = em.delete_embeddings_by_filter(conference="NeurIPS", year=2024)
-        >>> print(f"Deleted {deleted} embeddings")
         """
-        if conference is None and year is None:
-            raise ValueError("At least one of 'conference' or 'year' must be provided.")
+        if not ids:
+            return 0
 
         try:
-            where_filter = build_chromadb_where_clause(
-                conferences=[conference] if conference is not None else None,
-                years=[year] if year is not None else None,
-            )
-            assert where_filter is not None
-
-            existing = self.collection.get(where=where_filter)
-            ids_to_delete = existing.get("ids", [])
-            if ids_to_delete:
-                self.collection.delete(ids=ids_to_delete)
-                logger.info(f"Deleted {len(ids_to_delete)} embeddings matching filter {where_filter}")
-            return len(ids_to_delete)
-
-        except (ValueError, EmbeddingsError):
-            raise
+            deleted = 0
+            for start in range(0, len(ids), 1000):
+                batch = ids[start : start + 1000]
+                self.collection.delete(ids=batch)
+                deleted += len(batch)
+            return deleted
         except Exception as e:
-            raise EmbeddingsError(f"Failed to delete embeddings by filter: {str(e)}") from e
+            raise EmbeddingsError(f"Failed to delete embeddings: {str(e)}") from e
 
     # ------------------------------------------------------------------
     # Registry export / import helpers
     # ------------------------------------------------------------------
 
-    def export_embeddings(
-        self,
-        conference: str,
-        year: int,
-    ) -> Dict[str, Any]:
+    def export_embeddings(self, ids: List[str]) -> Dict[str, Any]:
         """
-        Export embeddings for a given conference and year to a JSON-serializable dict.
+        Export embeddings and content hashes for the given paper UIDs.
 
         Parameters
         ----------
-        conference : str
-            Conference name to export.
-        year : int
-            Year to export.
+        ids : list of str
+            Paper UIDs to export.
 
         Returns
         -------
         dict
-            Dictionary containing ``ids``, ``documents``, ``metadatas``, and
-            ``embeddings`` lists.  Embedding vectors are converted to plain
-            Python lists so the returned dict is always JSON-serializable.
+            Dictionary with ``format_version``, ``ids``, ``documents``, and
+            ``embeddings`` lists.
 
         Raises
         ------
         EmbeddingsError
-            If the export fails.
+            If the export fails or the collection has not been compacted.
         """
         try:
-            results = self.collection.get(
-                include=["documents", "embeddings", "metadatas"],
-                where=build_chromadb_where_clause(
-                    conferences=[conference],
-                    years=[year],
-                ),
-            )
-            embeddings = results.get("embeddings", [])
-            # ChromaDB may return embeddings as numpy ndarrays; convert to plain lists
-            # so the dict is always JSON-serializable.
-            if embeddings is not None:
-                embeddings = [e.tolist() if hasattr(e, "tolist") else list(e) for e in embeddings]
-            # Parse metadata through LightweightPaper model to convert
-            # string values back to their proper types (e.g. year → int).
-            raw_metadatas = results.get("metadatas", [])
-            parsed_metadatas = [self.parse_chromadb_metadata(m) for m in raw_metadatas]
+            exported_ids: List[str] = []
+            documents: List[str] = []
+            embeddings: List[List[float]] = []
+
+            for start in range(0, len(ids), 1000):
+                batch = ids[start : start + 1000]
+                results = self.collection.get(ids=batch, include=["documents", "embeddings"])
+                result_ids = results.get("ids", [])
+                result_docs = results.get("documents", [])
+                result_embeddings = results.get("embeddings", [])
+
+                by_id = {uid: (result_docs[index], result_embeddings[index]) for index, uid in enumerate(result_ids)}
+                for uid in batch:
+                    if uid not in by_id:
+                        continue
+                    document, embedding = by_id[uid]
+                    if not is_content_hash(document):
+                        raise EmbeddingsError(
+                            "Collection contains uncompacted documents. "
+                            "Run 'abstracts-explorer embeddings compact' before exporting."
+                        )
+                    exported_ids.append(uid)
+                    documents.append(str(document))
+                    vector = embedding.tolist() if hasattr(embedding, "tolist") else list(embedding)
+                    embeddings.append(vector)
+
             return {
-                "ids": results.get("ids", []),
-                "documents": results.get("documents", []),
-                "metadatas": parsed_metadatas,
+                "format_version": 1,
+                "ids": exported_ids,
+                "documents": documents,
                 "embeddings": embeddings,
             }
+        except EmbeddingsError:
+            raise
         except Exception as e:
             raise EmbeddingsError(f"Failed to export embeddings: {str(e)}") from e
 
     def import_embeddings(
         self,
         data: Dict[str, Any],
-        conference: str,
-        year: int,
+        replace_ids: Optional[List[str]] = None,
         batch_size: int = 100,
     ) -> int:
         """
-        Import embeddings for a given conference and year from a dictionary.
-
-        Existing embeddings for the same conference and year are **deleted**
-        before importing (replace semantics).
+        Import embeddings in the current artifact format.
 
         Parameters
         ----------
         data : dict
-            Dictionary with ``ids``, ``documents``, ``metadatas``, and
-            ``embeddings`` lists (as returned by :meth:`export_embeddings`).
-        conference : str
-            Conference name being imported.
-        year : int
-            Year being imported.
-        batch_size : int
+            Dictionary with ``format_version``, ``ids``, ``documents``, and
+            ``embeddings`` lists.
+        replace_ids : list of str, optional
+            Existing embedding IDs to delete before importing.
+        batch_size : int, optional
             Number of embeddings to add per batch.
 
         Returns
@@ -1788,110 +1422,166 @@ class EmbeddingsManager:
         Raises
         ------
         EmbeddingsError
-            If the import fails.
+            If the artifact format is invalid or the import fails.
         """
+        if data.get("format_version") != 1:
+            raise EmbeddingsError("Unsupported embeddings artifact format")
+
+        ids = data.get("ids", [])
+        documents = data.get("documents", [])
+        embeddings = data.get("embeddings", [])
+        if not ids:
+            return 0
+        if not (len(ids) == len(documents) == len(embeddings)):
+            raise EmbeddingsError("Embeddings artifact fields have inconsistent lengths")
+        if not all(is_content_hash(document) for document in documents):
+            raise EmbeddingsError("Embeddings artifact contains invalid content hashes")
+
         try:
-            # Remove existing embeddings for this conference+year
-            try:
-                existing = self.collection.get(
-                    where=build_chromadb_where_clause(
-                        conferences=[conference],
-                        years=[year],
-                    ),
-                )
-                if existing["ids"]:
-                    self.collection.delete(ids=existing["ids"])
-                    logger.info(f"Deleted {len(existing['ids'])} existing embeddings " f"for {conference}/{year}")
-            except Exception:
-                logger.debug("No existing embeddings to delete")
-
-            ids = data.get("ids", [])
-            documents = data.get("documents", [])
-            metadatas = data.get("metadatas", [])
-            embeddings = data.get("embeddings", [])
-
-            if not ids:
-                return 0
+            if replace_ids:
+                self.delete_embeddings_by_ids(replace_ids)
 
             imported = 0
-            for i in range(0, len(ids), batch_size):
-                batch_ids = ids[i : i + batch_size]
-                add_kwargs: Dict[str, Any] = {"ids": batch_ids}
-                if documents:
-                    add_kwargs["documents"] = documents[i : i + batch_size]
-                if metadatas:
-                    add_kwargs["metadatas"] = [
-                        self._serialize_metadata_for_chromadb(m) for m in metadatas[i : i + batch_size]
-                    ]
-                if embeddings:
-                    add_kwargs["embeddings"] = embeddings[i : i + batch_size]
-
-                self.collection.add(**add_kwargs)
+            for start in range(0, len(ids), batch_size):
+                batch_ids = ids[start : start + batch_size]
+                self.collection.add(
+                    ids=batch_ids,
+                    documents=documents[start : start + batch_size],
+                    embeddings=embeddings[start : start + batch_size],
+                )
                 imported += len(batch_ids)
-
             return imported
-
         except EmbeddingsError:
             raise
         except Exception as e:
             raise EmbeddingsError(f"Failed to import embeddings: {str(e)}") from e
 
-    def update_paper_metadata(self, updates: Dict[str, Dict[str, Any]]) -> int:
-        """
-        Update metadata fields for existing papers without changing their embeddings.
+    # ------------------------------------------------------------------
+    # Collection compaction
+    # ------------------------------------------------------------------
 
-        Fetches the current metadata for each UID, merges the supplied field
-        updates, re-serialises the result and calls ``collection.update``.
-        Papers whose UIDs are not found in the collection are silently skipped.
+    def remove_all_metadata(self, batch_size: int = 1000) -> int:
+        """
+        Remove all per-paper metadata from the collection.
 
         Parameters
         ----------
-        updates : dict
-            Mapping of paper UID → dict of metadata field → new value.
-            Only the keys present in each inner dict are modified; all other
-            metadata fields are preserved.
+        batch_size : int, optional
+            Number of records to process per batch.
 
         Returns
         -------
         int
-            Number of papers whose metadata was actually updated.
+            Number of collection records processed.
 
         Raises
         ------
         EmbeddingsError
-            If fetching or updating the collection fails.
-
-        Examples
-        --------
-        >>> em = EmbeddingsManager()
-        >>> em.update_paper_metadata({
-        ...     "abc123": {"paper_pdf_url": "https://example.com/paper.pdf"}
-        ... })
-        1
+            If the update fails.
         """
-        if not updates:
-            return 0
-
         try:
-            ids = list(updates.keys())
-            existing = self.collection.get(ids=ids, include=["metadatas"])
+            all_ids = list(self.collection.get(include=[])["ids"])
+            processed = 0
+            for start in range(0, len(all_ids), batch_size):
+                batch = all_ids[start : start + batch_size]
+                existing = self.collection.get(ids=batch, include=["metadatas"])
+                keys: set[str] = set()
+                for metadata in existing.get("metadatas") or []:
+                    if metadata:
+                        keys.update(metadata)
+                if not keys:
+                    processed += len(batch)
+                    continue
+                null_metadata = {key: None for key in keys}
+                self.collection.update(ids=batch, metadatas=[null_metadata] * len(batch))
+                processed += len(batch)
+            return processed
+        except Exception as e:
+            raise EmbeddingsError(f"Failed to remove metadata: {str(e)}") from e
 
-            updated_ids = []
-            updated_metadatas = []
-            for uid, raw_meta in zip(existing["ids"], existing.get("metadatas") or []):
-                # raw_meta contains already-serialised string values from ChromaDB.
-                # Merge new values and re-serialise so None → "" and lists are handled.
-                merged = dict(raw_meta)
-                merged.update(updates[uid])
-                updated_ids.append(uid)
-                updated_metadatas.append(self._serialize_metadata_for_chromadb(merged))
+    def _update_documents(self, ids: List[str], documents: List[str]) -> None:
+        """Update documents without touching embeddings or metadata."""
+        self.collection._client._update(  # type: ignore[attr-defined]
+            collection_id=self.collection.id,
+            ids=ids,
+            embeddings=None,
+            metadatas=None,
+            documents=documents,
+            tenant=self.collection.tenant,
+            database=self.collection.database,
+        )
 
-            if updated_ids:
-                self.collection.update(ids=updated_ids, metadatas=updated_metadatas)
+    def hash_all_documents(self, batch_size: int = 1000) -> int:
+        """
+        Replace stored full-text documents with content hashes.
 
-            return len(updated_ids)
+        Parameters
+        ----------
+        batch_size : int, optional
+            Number of records to process per batch.
 
+        Returns
+        -------
+        int
+            Number of documents updated.
+
+        Raises
+        ------
+        EmbeddingsError
+            If the update fails.
+        """
+        try:
+            all_ids = list(self.collection.get(include=[])["ids"])
+            updated = 0
+            for start in range(0, len(all_ids), batch_size):
+                batch = all_ids[start : start + batch_size]
+                existing = self.collection.get(ids=batch, include=["documents"])
+                result_ids = existing.get("ids", [])
+                result_documents = existing.get("documents", [])
+                update_ids: List[str] = []
+                update_documents: List[str] = []
+                for uid, document in zip(result_ids, result_documents):
+                    if not document:
+                        continue
+                    new_document = str(document) if is_content_hash(document) else hash_text(str(document))
+                    if new_document == document:
+                        continue
+                    update_ids.append(uid)
+                    update_documents.append(new_document)
+                if update_ids:
+                    self._update_documents(update_ids, update_documents)
+                    updated += len(update_ids)
+            return updated
         except EmbeddingsError:
             raise
         except Exception as e:
-            raise EmbeddingsError(f"Failed to update paper metadata: {str(e)}") from e
+            raise EmbeddingsError(f"Failed to hash documents: {str(e)}") from e
+
+    def prune_orphan_embeddings(self, database: DatabaseManager, batch_size: int = 1000) -> int:
+        """
+        Delete embeddings whose UIDs no longer exist in the paper database.
+
+        Parameters
+        ----------
+        database : DatabaseManager
+            Database used to resolve valid paper UIDs.
+        batch_size : int, optional
+            Number of records to process per batch.
+
+        Returns
+        -------
+        int
+            Number of orphan embeddings deleted.
+
+        Raises
+        ------
+        EmbeddingsError
+            If the operation fails.
+        """
+        try:
+            embedding_ids = set(self.collection.get(include=[])["ids"])
+            paper_ids = set(database.get_paper_uids())
+            orphans = list(embedding_ids - paper_ids)
+            return self.delete_embeddings_by_ids(orphans)
+        except Exception as e:
+            raise EmbeddingsError(f"Failed to prune orphan embeddings: {str(e)}") from e
