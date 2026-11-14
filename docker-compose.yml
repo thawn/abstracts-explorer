@@ -101,10 +101,11 @@ services:
     
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
-      interval: 30s
-      timeout: 10s
+      interval: 5m
+      timeout: 15s
       retries: 3
-      start_period: 10s
+      start_period: 30s
+      start_interval: 30s
 
   # ChromaDB vector database service
   chromadb:
@@ -119,10 +120,11 @@ services:
     
     healthcheck:
       test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/8000' || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+      interval: 5m
+      timeout: 15s
+      retries: 3
+      start_period: 15s
+      start_interval: 15s
 
   # PostgreSQL database service
   postgres:
@@ -139,10 +141,11 @@ services:
     
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U abstracts"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+      interval: 5m
+      timeout: 15s
+      retries: 3
+      start_period: 15s
+      start_interval: 15s
 
 volumes:
   # Named volumes for persistent data

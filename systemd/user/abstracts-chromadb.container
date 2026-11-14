@@ -13,12 +13,18 @@ Volume=abstracts-chromadb-data.volume:/data
 Environment=IS_PERSISTENT=TRUE
 Environment=ANONYMIZED_TELEMETRY=FALSE
 
+Notify=healthy
+
 # the health check is using apt-helper until curl becomes available - see https://github.com/chroma-core/chroma/pull/6856 . Then we can switch to the recommended command in the chromadb docs: curl -sf http://localhost:8000/api/v2/heartbeat
 HealthCmd=/usr/lib/apt/apt-helper download-file http://localhost:8000/api/v2/heartbeat /tmp/health
-HealthInterval=10s
-HealthTimeout=5s
-HealthRetries=5
+HealthInterval=5m
+HealthTimeout=15s
+HealthRetries=3
 HealthStartPeriod=15s
+HealthStartupCmd=/usr/lib/apt/apt-helper download-file http://localhost:8000/api/v2/heartbeat /tmp/health
+HealthStartupInterval=15s
+HealthStartupRetries=0
+HealthStartupSuccess=1
 
 [Service]
 Restart=on-failure
