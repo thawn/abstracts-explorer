@@ -14,7 +14,7 @@ import { renderEmptyState, renderErrorBlock, renderLoadingSpinner, showLoading, 
 import { naturalSortPosterPosition, sortClustersBySizeDesc } from '../static/modules/utils/sort-utils.js';
 import { getClusterLabelWithCount } from '../static/modules/utils/cluster-utils.js';
 import { renderMarkdownWithLatex, configureMarkedWithKatex, renderInlineMarkdownWithLatex } from '../static/modules/utils/markdown-utils.js';
-import { getSelectedFilters, buildFilteredRequestBody, applyYearConferenceFilters, fetchJSON } from '../static/modules/utils/api-utils.js';
+import { getSelectedFilters, buildFilteredRequestBody, applyYearConferenceFilters, fetchJSON, parseJsonResponse } from '../static/modules/utils/api-utils.js';
 import { API_BASE, PLOTLY_COLORS } from '../static/modules/utils/constants.js';
 
 describe('Utility Modules', () => {
@@ -356,6 +356,42 @@ describe('Utility Modules', () => {
                 });
 
                 await expect(fetchJSON('/test')).rejects.toThrow('Failed');
+            });
+        });
+
+        describe('parseJsonResponse', () => {
+            it('should parse a JSON response', async () => {
+                const data = await parseJsonResponse({
+                    ok: true,
+                    status: 200,
+                    json: async () => ({ value: 42 })
+                });
+
+                expect(data).toEqual({ value: 42 });
+            });
+
+            it('should report a helpful error for an HTML gateway timeout', async () => {
+                const response = {
+                    ok: false,
+                    status: 504,
+                    json: async () => {
+                        throw new SyntaxError('Unexpected token <');
+                    }
+                };
+
+                await expect(parseJsonResponse(response)).rejects.toThrow(
+                    'The server took too long to respond'
+                );
+            });
+
+            it('should surface the server error for a non-OK JSON response', async () => {
+                const response = {
+                    ok: false,
+                    status: 500,
+                    json: async () => ({ error: 'boom' })
+                };
+
+                await expect(parseJsonResponse(response)).rejects.toThrow('boom');
             });
         });
     });

@@ -38,6 +38,8 @@ dependencies = [
     "pydantic-ai-slim[openai]>=2.32.0",
     "httpx2>=2.7",
     "psycopg[binary]>=3.2",
+    "tqdm>=4.66.0",
+    "tiktoken>=0.7.0",
 ]
 
 [project.optional-dependencies]
@@ -94,12 +96,10 @@ markers = [
     "integration: marks tests as integration tests (require real data)",
     "e2e: marks tests as end-to-end tests (require browser automation)",
     "staging: marks tests as staging end-to-end tests (run against a live deployment)",
+    "requires_lm_studio: test requires a reachable OpenAI-compatible backend",
 ]
 addopts = [
     "--verbose",
-    "--cov=abstracts_explorer",
-    "--cov-report=term-missing",
-    "--cov-report=html",
     "-m not slow",
 ]
 

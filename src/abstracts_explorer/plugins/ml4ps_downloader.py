@@ -8,17 +8,15 @@ Uses the lightweight plugin API for simplified implementation.
 
 from typing import Any, Dict, List, Optional
 import logging
-import requests
 from requests.adapters import HTTPAdapter
 from bs4 import BeautifulSoup
 import re
-import time
 from urllib.parse import urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
 from abstracts_explorer.plugin import (
-    LightweightDownloaderPlugin,
+    HTTPDownloaderPlugin,
     LightweightPaper,
     sanitize_author_names,
     validate_lightweight_papers,
@@ -27,7 +25,7 @@ from abstracts_explorer.plugin import (
 logger = logging.getLogger(__name__)
 
 
-class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
+class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
     """
     Plugin for downloading papers from ML4PS (Machine Learning for Physical Sciences) workshop.
 
@@ -46,6 +44,8 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
     plugin_description = "ML4PS (Machine Learning for Physical Sciences) workshop downloader"
     _start_year = 2022
     conference_name = "ML4PS"
+    _USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    _SOURCE_LABEL = "ML4PS data"
 
     # NeurIPS virtual page base URL for fetching abstracts (years >= 2022 only)
     _NEURIPS_VIRTUAL_BASES = {
@@ -70,15 +70,19 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
 
     def __init__(self):
         """Initialize the ML4PS downloader plugin."""
-        self.session = requests.Session()
-        self.session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+        super().__init__()
         # Match pool_maxsize to the maximum number of concurrent workers used in
         # _fetch_abstracts_for_papers to avoid urllib3 "Connection pool is full" warnings.
         adapter = HTTPAdapter(pool_maxsize=20)
-        self.session.mount("https://", adapter)
-        self.session.mount("http://", adapter)
+        self._session.mount("https://", adapter)
+        self._session.mount("http://", adapter)
         self.stats_lock = Lock()
         self._current_year: int = max(self.supported_years)
+
+    @property
+    def session(self):
+        """Return the shared HTTP session for backwards compatibility."""
+        return self._session
 
     def _get_base_url(self, year: int) -> str:
         """
@@ -228,19 +232,13 @@ class ML4PSDownloaderPlugin(LightweightDownloaderPlugin):
     # Internal helper methods
 
     def _fetch_page(self, url: str, max_retries: int = 3) -> Optional[BeautifulSoup]:
-        """Fetch and parse a web page."""
-        for attempt in range(max_retries):
-            try:
-                response = self.session.get(url, timeout=30)
-                response.raise_for_status()
-                return BeautifulSoup(response.content, "html.parser")
-            except requests.RequestException as e:
-                logger.warning(f"Failed to fetch {url}: {e}")
-                if attempt < max_retries - 1:
-                    time.sleep(2**attempt)
-                else:
-                    return None
-        return None  # Explicit return if loop completes without returning
+        """Fetch and parse a web page, returning ``None`` after retries fail."""
+        try:
+            response = self._request(url, self.timeout, self.verify_ssl, max_attempts=max_retries)
+            return BeautifulSoup(response.content, "html.parser")
+        except RuntimeError as exc:
+            logger.warning("Failed to fetch %s: %s", url, exc)
+            return None
 
     def _clean_text(self, text: str) -> str:
         """Clean text by removing extra whitespace and unwanted characters."""

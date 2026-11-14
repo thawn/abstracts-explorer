@@ -88,6 +88,21 @@ uv run abstracts-explorer download --plugin haicon --year 2026 --db-path data/ha
 - **Source**: [ConfTool](https://www.conftool.pro/haicon26/) / [haicon.cc](https://haicon.cc/)
 - **Fields**: Lightweight schema (title, authors, abstract, session, keywords, start time)
 
+### agu
+
+AGU annual meeting abstracts from the public m-anage program API.
+
+```bash
+uv run abstracts-explorer download --plugin agu --year 2026 --db-path data/agu.db
+```
+
+- **Years**: 2014 onward (2014–2023 use the legacy `fmYY` slug, 2024+ use `aguYY`)
+- **Source**: [AGU program](https://studio.m-anage.com/agu/)
+- **Fields**: Lightweight schema (title, authors, abstract, session, and presentation number when available)
+- **Progress**: The plugin shows progress bars for session discovery, paper fetching,
+  people indexing, and fallback batch reads in interactive terminals. Pass
+  `progress=True` or `progress=False` to force them on or off.
+
 ## Using Plugins via CLI
 
 ### List Available Plugins

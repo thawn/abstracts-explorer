@@ -7,6 +7,7 @@
 
 import { API_BASE } from './utils/constants.js';
 import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
+import { parseJsonResponse } from './utils/api-utils.js';
 import { renderEmptyState } from './utils/ui-utils.js';
 import { setCurrentSearchTerm, getAllPaperPriorities } from './state.js';
 import { formatPaperCard } from './paper-card.js';
@@ -184,7 +185,7 @@ export async function sendChatMessage() {
             body: JSON.stringify(requestBody)
         });
 
-        const data = await response.json();
+        const data = await parseJsonResponse(response);
 
         // Remove loading message
         document.getElementById(loadingId).remove();
@@ -230,7 +231,10 @@ export async function sendChatMessage() {
     } catch (error) {
         console.error('Chat error:', error);
         document.getElementById(loadingId).remove();
-        addChatMessage('Sorry, an error occurred. Please try again.', 'assistant');
+        const message = error && error.message
+            ? `Sorry, an error occurred: ${error.message}`
+            : 'Sorry, an error occurred. Please try again.';
+        addChatMessage(message, 'assistant');
     }
 }
 

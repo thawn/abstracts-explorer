@@ -531,7 +531,6 @@ def search():
         if remaining_query:
             try:
                 total_similar = em.count_papers_within_distance(
-                    database=database,
                     query=remaining_query,
                     distance_threshold=distance_threshold,
                     conferences=conferences if conferences else None,

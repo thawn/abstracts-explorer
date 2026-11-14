@@ -62,6 +62,48 @@ def pytest_addoption(parser):
     )
 
 
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    """
+    Skip tests marked ``requires_lm_studio`` when the backend is unavailable.
+
+    The check runs only for selected tests, avoiding a network request during
+    collection when slow tests are deselected.
+
+    Parameters
+    ----------
+    item : pytest.Item
+        Test item that is about to run.
+    """
+    if item.get_closest_marker("requires_lm_studio") is None:
+        return
+
+    from tests.helpers import check_lm_studio_available
+
+    if not check_lm_studio_available():
+        pytest.skip(
+            "OpenAI-compatible API not available. Check configuration and ensure the API backend "
+            "(LM Studio or blablador) is accessible with the configured models."
+        )
+
+
+@pytest.fixture
+def mock_current_year_probe(monkeypatch):
+    """
+    Disable live current-year plugin availability probes.
+
+    Tests that exercise plugin metadata or supported years can request this
+    fixture instead of reimplementing the same monkeypatches.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Pytest monkeypatch fixture.
+    """
+    from tests.helpers import mock_plugin_current_year_probe
+
+    mock_plugin_current_year_probe(monkeypatch)
+
+
 @pytest.fixture(scope="session")
 def staging_url(request):
     """

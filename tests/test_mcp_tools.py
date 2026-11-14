@@ -830,29 +830,18 @@ class TestExecuteMCPToolE2E:
         """get_topic_evolution executes end-to-end with mocked EmbeddingsManager."""
         mock_em = Mock()
 
-        def _find_papers(database, query, distance_threshold, conferences=None, years=None, query_embedding=None):
-            year = years[0] if years else None
-            if year == 2022:
-                return {
-                    "count": 1,
-                    "papers": [{"title": "Paper 2022", "session": "ML", "distance": 0.1}],
-                    "total_considered": 30,
-                }
-            elif year == 2023:
-                return {
-                    "count": 1,
-                    "papers": [{"title": "Paper 2023", "session": "ML", "distance": 0.2}],
-                    "total_considered": 30,
-                }
-            elif year == 2024:
-                return {
-                    "count": 1,
-                    "papers": [{"title": "Paper 2024", "session": "ML", "distance": 0.3}],
-                    "total_considered": 30,
-                }
-            return {"count": 0, "papers": [], "total_considered": 0}
+        def _query_papers(query, distance_threshold, conferences=None, years=None, query_embedding=None):
+            return {
+                "count": 3,
+                "papers": [
+                    {"title": "Paper 2022", "session": "ML", "distance": 0.1, "year": 2022},
+                    {"title": "Paper 2023", "session": "ML", "distance": 0.2, "year": 2023},
+                    {"title": "Paper 2024", "session": "ML", "distance": 0.3, "year": 2024},
+                ],
+                "total_considered": 90,
+            }
 
-        mock_em.find_papers_within_distance.side_effect = _find_papers
+        mock_em.query_papers_within_distance.side_effect = _query_papers
         mock_db = Mock()
         mock_db.get_years.return_value = [2022, 2023, 2024]
         mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 100}
@@ -880,7 +869,7 @@ class TestExecuteMCPToolE2E:
     def test_analyze_topic_relevance_real_execution(self):
         """analyze_topic_relevance executes end-to-end with mocked EmbeddingsManager."""
         mock_em = Mock()
-        mock_em.find_papers_within_distance.return_value = {
+        mock_em.query_papers_within_distance.return_value = {
             "papers": [
                 {"title": "Paper 1", "year": 2025, "conference": "NeurIPS", "distance": 0.5},
                 {"title": "Paper 2", "year": 2025, "conference": "NeurIPS", "distance": 1.0},
@@ -908,7 +897,7 @@ class TestExecuteMCPToolE2E:
     def test_analyze_topic_relevance_conference_singular_normalized(self):
         """analyze_topic_relevance maps 'conference' (singular) to 'conferences'."""
         mock_em = Mock()
-        mock_em.find_papers_within_distance.return_value = {
+        mock_em.query_papers_within_distance.return_value = {
             "papers": [{"title": "P", "year": 2025, "conference": "NeurIPS", "distance": 0.5}],
             "total_considered": 50,
         }

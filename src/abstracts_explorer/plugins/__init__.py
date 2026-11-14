@@ -7,6 +7,7 @@ This module provides downloadable plugin implementations for different data sour
 Available plugins:
 - AAAIDownloaderPlugin: Official AAAI proceedings data
 - AISTATSDownloaderPlugin: Official AISTATS conference data
+- AGUDownloaderPlugin: AGU annual meeting data via m-anage
 - CHIDownloaderPlugin: ACM CHI conference data (from SIGCHI program JSON)
 - HAICONDownloaderPlugin: HAICON (Helmholtz AI Conference) data via ConfTool
 - ICLRDownloaderPlugin: Official ICLR conference data
@@ -24,6 +25,7 @@ from abstracts_explorer.plugin import (
     # Plugin base classes
     DownloaderPlugin,
     LightweightDownloaderPlugin,
+    HTTPDownloaderPlugin,
     # Registry
     PluginRegistry,
     register_plugin,
@@ -34,6 +36,7 @@ from abstracts_explorer.plugin import (
     # Conversion utilities
     convert_to_lightweight_schema,
     # HTTP utilities
+    RateLimitCooldown,
     fetch_with_retries,
     get_failed_downloads_path,
     # Pydantic models
@@ -47,6 +50,7 @@ from abstracts_explorer.plugin import (
 # Import actual plugin implementations
 from abstracts_explorer.plugins.aaai_downloader import AAAIDownloaderPlugin
 from abstracts_explorer.plugins.aistats_downloader import AISTATSDownloaderPlugin
+from abstracts_explorer.plugins.agu_downloader import AGUDownloaderPlugin
 from abstracts_explorer.plugins.chi_downloader import CHIDownloaderPlugin
 from abstracts_explorer.plugins.haicon_downloader import HAICONDownloaderPlugin
 from abstracts_explorer.plugins.iclr_downloader import ICLRDownloaderPlugin
@@ -60,6 +64,7 @@ __all__ = [
     # Plugin base classes
     "DownloaderPlugin",
     "LightweightDownloaderPlugin",
+    "HTTPDownloaderPlugin",
     # Registry
     "PluginRegistry",
     "register_plugin",
@@ -70,6 +75,7 @@ __all__ = [
     # Conversion utilities
     "convert_to_lightweight_schema",
     # HTTP utilities
+    "RateLimitCooldown",
     "fetch_with_retries",
     "get_failed_downloads_path",
     # Pydantic models
@@ -81,6 +87,7 @@ __all__ = [
     # Plugin implementations
     "AAAIDownloaderPlugin",
     "AISTATSDownloaderPlugin",
+    "AGUDownloaderPlugin",
     "CHIDownloaderPlugin",
     "HAICONDownloaderPlugin",
     "ICLRDownloaderPlugin",

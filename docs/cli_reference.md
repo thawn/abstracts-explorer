@@ -287,7 +287,7 @@ abstracts-explorer registry download [OPTIONS]
 - `-c, --conference TEXT`: Conference to download (case-insensitive). Use `all` for all conferences.
 - `-y, --year INTEGER`: Year to download. Omit to download all available years.
 - `--embedding-model TEXT`: Embedding model name (used to derive the tag when no local data exists).
-- `--yes`: Skip confirmation prompts (also auto-confirms clear-and-retry on model mismatch).
+- `--yes`: Skip the replace confirmation prompt (shown only when matching local data already exists).
 
 **Examples:**
 

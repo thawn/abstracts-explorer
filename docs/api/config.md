@@ -50,6 +50,7 @@ config.llm_backend_auth_token       # str
 
 # Embedding settings
 config.embedding_model              # str
+config.embedding_max_input_tokens   # int
 config.embedding_db_path            # str (for local ChromaDB)
 config.embedding_db_url             # str (for remote ChromaDB)
 config.collection_name              # str
@@ -162,6 +163,7 @@ CHAT_TEMPERATURE = 0.7
 CHAT_MAX_TOKENS = 2000
 
 EMBEDDING_MODEL = "text-embedding-qwen3-embedding-4b"
+EMBEDDING_MAX_INPUT_TOKENS = 8192
 EMBEDDING_DB_PATH = "chroma_db"
 EMBEDDING_DB_URL = ""
 

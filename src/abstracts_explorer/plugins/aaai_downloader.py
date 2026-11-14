@@ -8,14 +8,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
-import requests
 from bs4 import BeautifulSoup, Tag
 from pydantic import ValidationError
 
 from abstracts_explorer.plugin import (
-    LightweightDownloaderPlugin,
+    HTTPDownloaderPlugin,
     LightweightPaper,
-    fetch_with_retries,
     get_failed_downloads_path,
     register_plugin,
     sanitize_author_names,
@@ -28,7 +26,7 @@ _FAILED_ARTICLE = "article"
 _FAILED_ISSUE = "issue"
 
 
-class AAAIDownloaderPlugin(LightweightDownloaderPlugin):
+class AAAIDownloaderPlugin(HTTPDownloaderPlugin):
     """Download AAAI papers, excluding co-located IAAI and EAAI sections.
 
     Parameters
@@ -59,12 +57,8 @@ class AAAIDownloaderPlugin(LightweightDownloaderPlugin):
         r"education(?:al)? advances in artificial intelligence",
         re.IGNORECASE,
     )
-
-    def __init__(self, timeout: int = 30, verify_ssl: bool = True) -> None:
-        self.timeout = timeout
-        self.verify_ssl = verify_ssl
-        self._session = requests.Session()
-        self._session.headers.update({"User-Agent": "abstracts-explorer AAAI proceedings downloader"})
+    _USER_AGENT = "abstracts-explorer AAAI proceedings downloader"
+    _SOURCE_LABEL = "AAAI proceedings"
 
     def get_url(self, year: int) -> str:
         """Return the archive URL shared by all conference years.
@@ -96,7 +90,7 @@ class AAAIDownloaderPlugin(LightweightDownloaderPlugin):
     def _check_current_year_available(self, current_year: int) -> bool:
         """Check for this year's issues, not just a reachable archive URL."""
         try:
-            soup = self._fetch_page(self._ARCHIVE_URL, 3, self.verify_ssl, 0)
+            soup = self._fetch_soup(self._ARCHIVE_URL, 3, self.verify_ssl, 0)
         except RuntimeError:
             return False
         for summary in soup.select(".obj_issue_summary"):
@@ -109,22 +103,6 @@ class AAAIDownloaderPlugin(LightweightDownloaderPlugin):
                 return True
         return False
 
-    def _fetch_page(self, url: str, timeout: int, verify_ssl: bool, request_delay: float) -> BeautifulSoup:
-        """Fetch HTML, retrying transient failures with exponential backoff."""
-        try:
-            response = fetch_with_retries(
-                self._session,
-                url,
-                timeout=timeout,
-                verify=verify_ssl,
-                request_delay=request_delay,
-            )
-        except requests.RequestException as exc:
-            status = getattr(getattr(exc, "response", None), "status_code", None)
-            detail = f" (HTTP {status})" if isinstance(status, int) else ""
-            raise RuntimeError(f"Failed to fetch AAAI proceedings from {url}{detail}: {exc}") from exc
-        return BeautifulSoup(response.text, "html.parser")
-
     def _discover_issues(self, year: int, timeout: int, verify_ssl: bool, request_delay: float) -> list[str]:
         """Follow archive pagination and collect all AAAI issues for a year."""
         issues: dict[str, None] = {}
@@ -136,7 +114,7 @@ class AAAIDownloaderPlugin(LightweightDownloaderPlugin):
             if url in visited:
                 raise RuntimeError(f"Repeated AAAI archive page: {url}")
             visited.add(url)
-            soup = self._fetch_page(url, timeout, verify_ssl, request_delay)
+            soup = self._fetch_soup(url, timeout, verify_ssl, request_delay)
             summaries = soup.select(".obj_issue_summary")
             if not summaries:
                 raise RuntimeError(f"No issue summaries on AAAI archive page: {url}")
@@ -283,7 +261,7 @@ class AAAIDownloaderPlugin(LightweightDownloaderPlugin):
     ) -> None:
         """Collect one issue's papers, recording page-level fetch failures."""
         try:
-            soup = self._fetch_page(issue_url, timeout, verify_ssl, request_delay)
+            soup = self._fetch_soup(issue_url, timeout, verify_ssl, request_delay)
         except RuntimeError as exc:
             logger.warning("Skipping AAAI issue %s: %s", issue_url, exc)
             failures.append({"url": issue_url, "type": _FAILED_ISSUE})
@@ -315,7 +293,7 @@ class AAAIDownloaderPlugin(LightweightDownloaderPlugin):
                     continue
                 seen.add(article_id)
                 try:
-                    article = self._fetch_page(url, timeout, verify_ssl, request_delay)
+                    article = self._fetch_soup(url, timeout, verify_ssl, request_delay)
                 except RuntimeError as exc:
                     logger.warning("Skipping AAAI article %s: %s", url, exc)
                     failures.append(
@@ -375,7 +353,7 @@ class AAAIDownloaderPlugin(LightweightDownloaderPlugin):
             if match and int(match.group(1)) in seen:
                 continue
             try:
-                article = self._fetch_page(url, timeout, verify_ssl, request_delay)
+                article = self._fetch_soup(url, timeout, verify_ssl, request_delay)
             except RuntimeError as exc:
                 logger.warning("Retry failed for AAAI article %s: %s", url, exc)
                 remaining.append(entry)

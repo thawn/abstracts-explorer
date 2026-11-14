@@ -16,6 +16,9 @@ from abstracts_explorer.plugins.ieeevis_downloader import IEEEVISDownloaderPlugi
 from abstracts_explorer.database import DatabaseManager
 from tests.conftest import set_test_db
 
+pytestmark = pytest.mark.usefixtures("mock_current_year_probe")
+
+
 # ---------------------------------------------------------------------------
 # Sample data helpers
 # ---------------------------------------------------------------------------
@@ -58,6 +61,76 @@ SAMPLE_PAPER_2 = {
 }
 
 
+SAMPLE_HTML_2026 = """
+<html><body>
+<article class="program-card"
+    data-program-card="true"
+    data-paper-id="paper-1"
+    data-type="full"
+    data-title="lowercase title"
+    data-authors="alice smith,bob jones"
+    data-keywords-label="Visualization, LLM agents"
+    data-keywords="visualization, llm agents"
+    data-session="me, myself, and ai"
+    data-event="vis full papers"
+    data-abstract="A full paper abstract."
+    data-award="best paper"
+    data-start="2026-11-09T14:00:00.000Z">
+  <a class="program-card__title-link" href="/year/2026/program/content/paper-1">Proper Title One</a>
+  <a class="program-card__person-link" href="/year/2026/program/content/?filter=author&amp;search=Alice">Alice Smith</a>
+  <a class="program-card__person-link" href="/year/2026/program/content/?filter=author&amp;search=Bob">Bob Jones</a>
+  <a class="program-card__person-link" href="/year/2026/program/content/?filter=author&amp;search=Başak">Başak Oral</a>
+  <a class="program-card__action-link" href="/year/2026/program/session/v-full-1">
+    Mon, Nov 9, 09:00 - Me, Myself, and AI
+  </a>
+</article>
+<article class="program-card"
+    data-program-card="true"
+    data-paper-id="paper-2"
+    data-type="workshop"
+    data-title="workshop title"
+    data-authors="carol lee"
+    data-keywords-label="No keywords listed"
+    data-session="workshop session"
+    data-event="some workshop"
+    data-abstract="Workshop abstract."
+    data-start="2026-11-10T10:00:00.000Z">
+  <a class="program-card__title-link" href="/year/2026/program/content/paper-2">Workshop Paper</a>
+  <a class="program-card__person-link" href="/year/2026/program/content/?filter=author&amp;search=Carol">Carol Lee</a>
+  <a class="program-card__action-link" href="/year/2026/program/session/v-ws-1">
+    Tue, Nov 10, 10:00 - Workshop Session
+  </a>
+</article>
+<article class="program-card"
+    data-program-card="true"
+    data-paper-id="paper-3"
+    data-type="poster"
+    data-title="poster without abstract"
+    data-authors="dave kim"
+    data-abstract=""
+    data-session="poster session"
+    data-event="vis posters">
+  <a class="program-card__title-link" href="/year/2026/program/content/paper-3">Poster Without Abstract</a>
+  <a class="program-card__person-link" href="/year/2026/program/content/?filter=author&amp;search=Dave">Dave Kim</a>
+</article>
+<article class="program-card"
+    data-program-card="true"
+    data-paper-id="paper-4"
+    data-type="full"
+    data-authors="erin ng"
+    data-abstract="An abstract with no title."
+    data-session="session"
+    data-event="vis full papers">
+  <span class="program-card__title-link"></span>
+  <a class="program-card__person-link" href="/year/2026/program/content/?filter=author&amp;search=Erin">Erin Ng</a>
+</article>
+<article class="program-card" data-session-role="Chair" data-session-id="session-1">
+  <span class="program-card__person-link">Session Chair</span>
+</article>
+</body></html>
+"""
+
+
 def _make_mock_response(papers):
     """Return a Mock that behaves like a successful requests.Response with a list payload."""
     mock_response = Mock()
@@ -88,6 +161,10 @@ class TestIEEEVISPluginMetadata:
     def test_supported_years_contains_2025(self):
         plugin = IEEEVISDownloaderPlugin()
         assert 2025 in plugin.supported_years
+
+    def test_supported_years_contains_2026(self):
+        plugin = IEEEVISDownloaderPlugin()
+        assert 2026 in plugin.supported_years
 
     def test_get_metadata(self):
         plugin = IEEEVISDownloaderPlugin()
@@ -121,6 +198,11 @@ class TestIEEEVISPluginURL:
         plugin = IEEEVISDownloaderPlugin()
         url = plugin.get_url(2024)
         assert url == "https://ieeevis.org/year/2024/program/papers.json"
+
+    def test_get_url_2026_uses_html_program(self):
+        plugin = IEEEVISDownloaderPlugin()
+        url = plugin.get_url(2026)
+        assert url == "https://ieeevis.org/year/2026/program/content"
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +276,14 @@ class TestIEEEVISConvertPaper:
         assert paper is not None
         assert paper.url == "https://doi.org/10.1109/TVCG.2025.0000001"
 
+    def test_explicit_url_takes_precedence_over_doi(self):
+        plugin = IEEEVISDownloaderPlugin()
+        item = dict(SAMPLE_PAPER_1)
+        item["url"] = "https://ieeevis.org/year/2026/program/content/paper-1"
+        paper = plugin._convert_paper(item, 2026)
+        assert paper is not None
+        assert paper.url == "https://ieeevis.org/year/2026/program/content/paper-1"
+
     def test_pdf_url_mapped(self):
         plugin = IEEEVISDownloaderPlugin()
         paper = plugin._convert_paper(SAMPLE_PAPER_2, 2025)
@@ -244,6 +334,109 @@ class TestIEEEVISConvertPaper:
 
 
 # ---------------------------------------------------------------------------
+# HTML program tests (2026+)
+# ---------------------------------------------------------------------------
+
+
+class TestIEEEVISHTMLProgram:
+    """Test the 2026+ HTML program parser and download path."""
+
+    def test_parse_program_html_includes_title_and_abstract(self):
+        plugin = IEEEVISDownloaderPlugin()
+        papers = plugin._parse_program_html(SAMPLE_HTML_2026, 2026)
+        assert len(papers) == 2
+
+        by_title = {paper.title: paper for paper in papers}
+        assert "Proper Title One" in by_title
+        assert "Workshop Paper" in by_title
+        assert "Poster Without Abstract" not in by_title
+
+        first = by_title["Proper Title One"]
+        assert first.authors == ["Alice Smith", "Bob Jones", "Başak Oral"]
+        assert first.abstract == "A full paper abstract."
+        assert first.keywords == ["Visualization", "LLM agents"]
+        assert first.session == "Me, Myself, and AI"
+        assert first.award == "Best Paper"
+        assert first.starttime == "2026-11-09T14:00:00.000Z"
+        assert first.url == "https://ieeevis.org/year/2026/program/content/paper-1"
+        assert first.year == 2026
+        assert first.conference == "IEEE VIS"
+
+        workshop = by_title["Workshop Paper"]
+        assert workshop.keywords is None
+        assert workshop.award is None
+        assert workshop.session == "Workshop Session"
+
+    def test_parse_program_html_skips_missing_title_or_abstract(self):
+        plugin = IEEEVISDownloaderPlugin()
+        papers = plugin._parse_program_html(SAMPLE_HTML_2026, 2026)
+        assert all(paper.title for paper in papers)
+        assert all(paper.abstract for paper in papers)
+        assert len(papers) == 2
+
+    @patch("requests.Session.get")
+    def test_download_2026_uses_html_program(self, mock_get):
+        mock_response = Mock()
+        mock_response.text = SAMPLE_HTML_2026
+        mock_get.return_value = mock_response
+
+        plugin = IEEEVISDownloaderPlugin()
+        with patch.object(plugin, "_check_current_year_available", return_value=True):
+            papers = plugin.download(year=2026)
+
+        assert mock_get.call_args[0][0] == "https://ieeevis.org/year/2026/program/content"
+        assert len(papers) == 2
+        assert all(paper.year == 2026 for paper in papers)
+
+    @patch("requests.Session.get")
+    def test_download_2026_decodes_utf8(self, mock_get):
+        response = requests.Response()
+        response.status_code = 200
+        response._content = SAMPLE_HTML_2026.encode("utf-8")
+        response.headers["Content-Type"] = "text/html"
+        response.encoding = "ISO-8859-1"
+        mock_get.return_value = response
+
+        plugin = IEEEVISDownloaderPlugin()
+        with patch.object(plugin, "_check_current_year_available", return_value=True):
+            papers = plugin.download(year=2026)
+
+        by_title = {paper.title: paper for paper in papers}
+        assert "Başak Oral" in by_title["Proper Title One"].authors
+
+    @patch("requests.Session.get")
+    def test_download_2026_saves_to_file(self, mock_get):
+        mock_response = Mock()
+        mock_response.text = SAMPLE_HTML_2026
+        mock_get.return_value = mock_response
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "ieeevis_2026.json"
+            plugin = IEEEVISDownloaderPlugin()
+            with patch.object(plugin, "_check_current_year_available", return_value=True):
+                plugin.download(year=2026, output_path=str(output_path))
+
+            assert output_path.exists()
+            saved = json.loads(output_path.read_text())
+            assert len(saved) == 2
+            assert all(paper["year"] == 2026 for paper in saved)
+            assert all(paper["conference"] == "IEEE VIS" for paper in saved)
+
+    @patch("requests.Session.get")
+    def test_download_2026_request_exception(self, mock_get):
+        mock_get.side_effect = requests.exceptions.RequestException("Connection error")
+
+        plugin = IEEEVISDownloaderPlugin()
+        with patch.object(plugin, "_check_current_year_available", return_value=True):
+            with pytest.raises(RuntimeError, match="Failed to download"):
+                plugin.download(year=2026)
+
+    def test_parse_program_html_empty_page(self):
+        plugin = IEEEVISDownloaderPlugin()
+        assert plugin._parse_program_html("<html><body></body></html>", 2026) == []
+
+
+# ---------------------------------------------------------------------------
 # Download method tests
 # ---------------------------------------------------------------------------
 
@@ -251,7 +444,7 @@ class TestIEEEVISConvertPaper:
 class TestIEEEVISDownload:
     """Test the download() method."""
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_success(self, mock_get):
         mock_get.return_value = _make_mock_response([SAMPLE_PAPER_1, SAMPLE_PAPER_2])
 
@@ -267,7 +460,7 @@ class TestIEEEVISDownload:
             assert p.year == 2025
             assert p.conference == "IEEE VIS"
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_default_year(self, mock_get):
         mock_get.return_value = _make_mock_response([SAMPLE_PAPER_1])
 
@@ -277,7 +470,7 @@ class TestIEEEVISDownload:
         assert "2025" in mock_get.call_args[0][0]
         assert papers[0].year == 2025
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_saves_to_file(self, mock_get):
         mock_get.return_value = _make_mock_response([SAMPLE_PAPER_1])
 
@@ -315,14 +508,14 @@ class TestIEEEVISDownload:
                 json.dump(cached, f)
 
             plugin = IEEEVISDownloaderPlugin()
-            with patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get") as mock_get:
+            with patch("requests.Session.get") as mock_get:
                 papers = plugin.download(year=2025, output_path=str(output_path))
                 mock_get.assert_not_called()
 
             assert len(papers) == 1
             assert papers[0].title == "Cached Paper"
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_force_redownload(self, mock_get):
         mock_get.return_value = _make_mock_response([SAMPLE_PAPER_2])
 
@@ -339,7 +532,7 @@ class TestIEEEVISDownload:
             assert len(papers) == 1
             assert papers[0].title == "Test VIS Paper Two"
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_request_exception(self, mock_get):
         mock_get.side_effect = requests.exceptions.RequestException("Connection error")
 
@@ -347,7 +540,7 @@ class TestIEEEVISDownload:
         with pytest.raises(RuntimeError, match="Failed to download"):
             plugin.download(year=2025)
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_invalid_json(self, mock_get):
         mock_response = Mock()
         mock_response.json.side_effect = json.JSONDecodeError("Invalid JSON", "", 0)
@@ -357,7 +550,7 @@ class TestIEEEVISDownload:
         with pytest.raises(RuntimeError, match="Invalid JSON response"):
             plugin.download(year=2025)
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_unexpected_json_structure(self, mock_get):
         """When the API returns a dict instead of a list, return an empty list gracefully."""
         mock_response = Mock()
@@ -368,7 +561,7 @@ class TestIEEEVISDownload:
         papers = plugin.download(year=2025)
         assert papers == []
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_skips_papers_without_title(self, mock_get):
         no_title = dict(SAMPLE_PAPER_1)
         no_title["title"] = ""
@@ -380,7 +573,7 @@ class TestIEEEVISDownload:
         assert len(papers) == 1
         assert papers[0].title == "Test VIS Paper Two"
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_custom_timeout(self, mock_get):
         mock_get.return_value = _make_mock_response([])
 
@@ -389,7 +582,7 @@ class TestIEEEVISDownload:
 
         assert mock_get.call_args[1]["timeout"] == 60
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_download_kwargs_override(self, mock_get):
         mock_get.return_value = _make_mock_response([])
 
@@ -408,7 +601,7 @@ class TestIEEEVISDownload:
 class TestIEEEVISPluginDatabaseIntegration:
     """Test that IEEE VIS plugin data can be stored in the database."""
 
-    @patch("abstracts_explorer.plugins.ieeevis_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_ieeevis_data_in_database(self, mock_get):
         mock_get.return_value = _make_mock_response([SAMPLE_PAPER_1, SAMPLE_PAPER_2])
 

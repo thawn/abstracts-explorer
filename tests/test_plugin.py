@@ -18,6 +18,8 @@ from unittest.mock import patch, Mock
 from abstracts_explorer.database import DatabaseManager
 from tests.conftest import set_test_db
 from abstracts_explorer.plugin import (
+    HTTPDownloaderPlugin,
+    RateLimitCooldown,
     sanitize_author_names,
     convert_to_lightweight_schema,
     fetch_with_retries,
@@ -31,6 +33,9 @@ from abstracts_explorer.plugins import (
 from abstracts_explorer.plugins.neurips_downloader import NeurIPSDownloaderPlugin
 from abstracts_explorer.plugins.icml_downloader import ICMLDownloaderPlugin
 from abstracts_explorer.plugins.ml4ps_downloader import ML4PSDownloaderPlugin
+
+pytestmark = pytest.mark.usefixtures("mock_current_year_probe")
+
 
 # ============================================================
 # Tests from test_plugin_helpers.py
@@ -668,6 +673,215 @@ class TestFetchWithRetries:
 
         sleep.assert_any_call(7)
 
+    def test_params_are_forwarded(self, monkeypatch):
+        """Query parameters are forwarded only when provided."""
+        sleep = Mock()
+        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        session = Mock()
+        session.get.return_value = self._response()
+
+        fetch_with_retries(
+            session,
+            "https://example.com",
+            timeout=7,
+            params={"ids": "Person/1"},
+        )
+
+        session.get.assert_called_once_with(
+            "https://example.com",
+            timeout=7,
+            verify=True,
+            params={"ids": "Person/1"},
+        )
+
+    def test_custom_backoff_and_cap(self, monkeypatch):
+        """Custom retry base delays and caps are applied."""
+        sleep = Mock()
+        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        session = Mock()
+        session.get.side_effect = [requests.ConnectionError("reset"), self._response()]
+
+        fetch_with_retries(
+            session,
+            "https://example.com",
+            timeout=7,
+            retry_base_delay=5,
+            max_retry_delay=3,
+        )
+
+        sleep.assert_any_call(3)
+
+    def test_http_date_retry_after_is_honored(self, monkeypatch):
+        """HTTP-date Retry-After values are converted to a delay."""
+        sleep = Mock()
+        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        session = Mock()
+        session.get.return_value = self._response(
+            429,
+            {"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"},
+        )
+
+        with pytest.raises(requests.HTTPError, match="429"):
+            fetch_with_retries(session, "https://example.com", timeout=7)
+
+        assert sleep.call_count >= 1
+
+    def test_cooldown_is_used_for_rate_limits(self, monkeypatch):
+        """A shared cooldown defers and waits across retry attempts."""
+        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", Mock())
+        cooldown = Mock()
+        session = Mock()
+        success = self._response()
+        session.get.side_effect = [self._response(429, {"Retry-After": "7"}), success]
+
+        result = fetch_with_retries(
+            session,
+            "https://example.com",
+            timeout=7,
+            cooldown=cooldown,
+        )
+
+        assert result is success
+        cooldown.defer.assert_called_once_with(7)
+        assert cooldown.wait.call_count == 2
+
+
+class TestRateLimitCooldown:
+    """Tests for the shared rate-limit cooldown."""
+
+    def test_wait_sleeps_until_deferred_time(self, monkeypatch):
+        clock = {"now": 100.0}
+        sleeps = []
+        monkeypatch.setattr("abstracts_explorer.plugin.time.monotonic", lambda: clock["now"])
+        monkeypatch.setattr(
+            "abstracts_explorer.plugin.time.sleep",
+            lambda delay: (sleeps.append(delay), clock.__setitem__("now", clock["now"] + delay)),
+        )
+        cooldown = RateLimitCooldown()
+        cooldown.defer(5)
+        cooldown.wait()
+
+        assert sleeps == [5]
+        cooldown.wait()
+        assert sleeps == [5]
+
+    def test_defer_keeps_longest_window(self, monkeypatch):
+        clock = {"now": 100.0}
+        monkeypatch.setattr("abstracts_explorer.plugin.time.monotonic", lambda: clock["now"])
+        cooldown = RateLimitCooldown()
+        cooldown.defer(10)
+        cooldown.defer(3)
+
+        sleeps = []
+        monkeypatch.setattr(
+            "abstracts_explorer.plugin.time.sleep",
+            lambda delay: sleeps.append(delay),
+        )
+        cooldown.wait()
+        assert sleeps == [10]
+
+
+class _TestHTTPDownloaderPlugin(HTTPDownloaderPlugin):
+    """Minimal concrete HTTP plugin for testing the shared base class."""
+
+    plugin_name = "test_http"
+    plugin_description = "Test HTTP plugin"
+    conference_name = "TEST"
+    _USER_AGENT = "test-agent"
+    _ACCEPT = "application/json"
+    _EXTRA_HEADERS = {"X-Test": "yes"}
+    _SOURCE_LABEL = "test data"
+
+    def download(self, year=None, output_path=None, force_download=False, **kwargs):
+        return []
+
+    def get_metadata(self):
+        return {"name": self.plugin_name}
+
+
+class TestHTTPDownloaderPlugin:
+    """Tests for the shared HTTP downloader base class."""
+
+    @staticmethod
+    def _response(data=None, text="<html></html>"):
+        response = Mock(text=text)
+        response.json.return_value = data
+        response.raise_for_status = Mock()
+        return response
+
+    def test_session_configuration(self):
+        plugin = _TestHTTPDownloaderPlugin(timeout=12, verify_ssl=False)
+
+        assert plugin.timeout == 12
+        assert plugin.verify_ssl is False
+        assert plugin._session.headers["User-Agent"] == "test-agent"
+        assert plugin._session.headers["Accept"] == "application/json"
+        assert plugin._session.headers["X-Test"] == "yes"
+
+    def test_fetch_json(self):
+        plugin = _TestHTTPDownloaderPlugin()
+        response = self._response({"ok": True})
+        with patch.object(plugin._session, "get", return_value=response):
+            assert plugin._fetch_json("https://example.com", 30, True) == {"ok": True}
+
+    def test_fetch_soup(self):
+        plugin = _TestHTTPDownloaderPlugin()
+        response = self._response(text="<html><body>Hello</body></html>")
+        with patch.object(plugin._session, "get", return_value=response):
+            soup = plugin._fetch_soup("https://example.com", 30, True)
+
+        assert soup.get_text(strip=True) == "Hello"
+
+    def test_fetch_json_wraps_http_errors(self):
+        plugin = _TestHTTPDownloaderPlugin()
+        response = Mock(status_code=503, headers={})
+        response.raise_for_status.side_effect = requests.HTTPError("503", response=response)
+        with (
+            patch.object(plugin._session, "get", return_value=response),
+            patch("abstracts_explorer.plugin.time.sleep"),
+        ):
+            with pytest.raises(RuntimeError, match="Failed to fetch test data"):
+                plugin._fetch_json("https://example.com", 30, True)
+
+    def test_fetch_json_wraps_decode_errors(self):
+        plugin = _TestHTTPDownloaderPlugin()
+        response = self._response()
+        response.json.side_effect = ValueError("invalid json")
+        with patch.object(plugin._session, "get", return_value=response):
+            with pytest.raises(RuntimeError, match="Failed to decode test data JSON"):
+                plugin._fetch_json("https://example.com", 30, True)
+
+    def test_post_request_uses_json_body(self):
+        plugin = _TestHTTPDownloaderPlugin()
+        response = self._response({"ok": True})
+        with patch.object(plugin._session, "post", return_value=response) as mock_post:
+            result = plugin._fetch_json(
+                "https://example.com",
+                30,
+                True,
+                method="POST",
+                json_body={"q": "test"},
+            )
+
+        assert result == {"ok": True}
+        mock_post.assert_called_once_with(
+            "https://example.com",
+            json={"q": "test"},
+            timeout=30,
+            verify=True,
+        )
+
+    def test_per_call_max_attempts(self):
+        plugin = _TestHTTPDownloaderPlugin()
+        with (
+            patch.object(plugin._session, "get", side_effect=requests.ConnectionError("down")) as mock_get,
+            patch("abstracts_explorer.plugin.time.sleep"),
+        ):
+            with pytest.raises(RuntimeError, match="Failed to fetch test data"):
+                plugin._request("https://example.com", 30, True, max_attempts=2)
+
+        assert mock_get.call_count == 2
+
 
 # ============================================================
 # Tests from test_plugin_year_conference.py
@@ -677,7 +891,7 @@ class TestFetchWithRetries:
 class TestConferencePluginYearFields:
     """Test that NeurIPS plugin sets year and conference fields."""
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_neurips_plugin_adds_year_and_conference(self, mock_get):
         """Test that NeurIPS plugin adds year and conference to each paper."""
         # Mock the requests.get to return test data
@@ -719,7 +933,7 @@ class TestConferencePluginYearFields:
             assert paper.year == 2024
             assert paper.conference == "NeurIPS"
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_neurips_plugin_preserves_existing_fields(self, mock_get):
         """Test that NeurIPS plugin preserves existing paper fields."""
         # Mock the requests.get to return test data with existing fields
@@ -764,7 +978,7 @@ class TestConferencePluginYearFields:
 class TestICMLPluginYearConference:
     """Test that ICML plugin sets year and conference fields."""
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_icml_plugin_adds_year_and_conference(self, mock_get):
         """Test that ICML plugin adds year and conference to each paper."""
         # Mock the requests.get to return test data
@@ -806,7 +1020,7 @@ class TestICMLPluginYearConference:
             assert paper.year == 2025
             assert paper.conference == "ICML"
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_icml_plugin_preserves_existing_fields(self, mock_get):
         """Test that ICML plugin preserves existing paper fields."""
         # Mock the requests.get to return test data with existing fields
@@ -911,7 +1125,7 @@ class TestML4PSPluginYearConference:
 class TestDatabaseYearConferenceIntegration:
     """Test that year and conference fields are properly stored in the database."""
 
-    @patch("abstracts_explorer.plugins.json_conference_downloader.requests.get")
+    @patch("requests.Session.get")
     def test_neurips_year_conference_in_database(self, mock_get):
         """Test that year and conference are stored in database from NeurIPS plugin."""
         # Mock the requests.get to return test data
