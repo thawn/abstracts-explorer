@@ -81,28 +81,6 @@ uv run abstracts-explorer create-embeddings \
 uv run abstracts-explorer create-embeddings --force
 ```
 
-### compact-embeddings
-
-Migrate an existing ChromaDB collection to the current alpha format. Removes
-per-paper metadata and replaces full-text documents with SHA-256 content hashes.
-
-**Usage:**
-
-```bash
-abstracts-explorer compact-embeddings [OPTIONS]
-```
-
-**Options:**
-
-- `--collection TEXT`: ChromaDB collection name
-- `--prune`: Delete embeddings whose paper rows no longer exist
-- `--vacuum`: Run `chroma vacuum` after compaction to reclaim disk space
-
-```bash
-# Compact and reclaim disk space
-uv run abstracts-explorer compact-embeddings --vacuum
-```
-
 ### pre-process
 
 Run the full data-preparation pipeline: download → create-embeddings →

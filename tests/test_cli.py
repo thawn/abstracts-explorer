@@ -4706,32 +4706,3 @@ class TestFeedbackCommand:
             exit_code = main()
 
         assert exit_code == 1
-
-
-class TestCompactEmbeddingsCommand:
-    """Tests for the compact-embeddings command."""
-
-    def test_compact_embeddings(self, capsys):
-        with (
-            patch.object(sys, "argv", ["abstracts-explorer", "compact-embeddings", "--prune"]),
-            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
-            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
-        ):
-            mock_em = Mock()
-            mock_em.remove_all_metadata.return_value = 3
-            mock_em.hash_all_documents.return_value = 2
-            mock_em.prune_orphan_embeddings.return_value = 1
-            mock_em_class.return_value = mock_em
-            mock_db = Mock()
-            mock_db_class.return_value.__enter__.return_value = mock_db
-
-            exit_code = main()
-
-        assert exit_code == 0
-        captured = capsys.readouterr()
-        assert "Processed metadata for 3" in captured.out
-        assert "Hashed 2" in captured.out
-        assert "Pruned 1" in captured.out
-        mock_em.remove_all_metadata.assert_called_once()
-        mock_em.hash_all_documents.assert_called_once()
-        mock_em.close.assert_called_once()

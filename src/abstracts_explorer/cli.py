@@ -9,7 +9,6 @@ import argparse
 import json
 import logging
 import queue
-import subprocess
 import sys
 import threading
 from datetime import datetime
@@ -1240,56 +1239,6 @@ def delete_data_command(args: argparse.Namespace) -> int:
 
     print(f"\n✅ All data for {conference} {year} has been deleted.")
     return 0
-
-
-def compact_embeddings_command(args: argparse.Namespace) -> int:
-    """
-    Compact an existing ChromaDB collection into the current format.
-
-    Removes per-paper metadata and replaces full-text documents with content
-    hashes.
-
-    Parameters
-    ----------
-    args : argparse.Namespace
-        Parsed command-line arguments.
-
-    Returns
-    -------
-    int
-        Exit code.
-    """
-    config = get_config()
-    em = EmbeddingsManager(collection_name=args.collection)
-    try:
-        em.create_collection()
-        print(f"🔧 Compacting collection '{args.collection}'...")
-        metadata_records = em.remove_all_metadata()
-        print(f"   Processed metadata for {metadata_records:,} record(s)")
-        hashed_documents = em.hash_all_documents()
-        print(f"   Hashed {hashed_documents:,} document(s)")
-
-        if args.prune:
-            with DatabaseManager() as db:
-                pruned = em.prune_orphan_embeddings(db)
-            print(f"   Pruned {pruned:,} orphan embedding(s)")
-
-        em.close()
-
-        if args.vacuum:
-            if config.embedding_db.startswith("http://") or config.embedding_db.startswith("https://"):
-                print("⚠️  Cannot vacuum a remote ChromaDB instance from the client.", file=sys.stderr)
-            else:
-                print("🧹 Vacuuming ChromaDB...")
-                subprocess.run(
-                    ["chroma", "vacuum", "--path", str(Path(config.embedding_db)), "--force"],
-                    check=True,
-                )
-        return 0
-    except Exception as e:
-        em.close()
-        print(f"❌ Compaction failed: {e}", file=sys.stderr)
-        return 1
 
 
 def pre_generate_clustering_command(args: argparse.Namespace) -> int:
@@ -3206,35 +3155,6 @@ Examples:
         help=f"Maximum number of API requests per minute, 0 to disable rate limiting (default: {config.requests_per_minute})",
     )
 
-    # Compact embeddings command
-    compact_parser = subparsers.add_parser(
-        "compact-embeddings",
-        help="Remove ChromaDB metadata and hash stored documents",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="""
-Compact an existing ChromaDB collection into the current format.
-
-This removes all per-paper metadata and replaces full-text documents with
-content hashes. Run it once after upgrading an alpha installation.
-""",
-    )
-    compact_parser.add_argument(
-        "--collection",
-        type=str,
-        default=config.collection_name,
-        help=f"Name for the ChromaDB collection (default: {config.collection_name})",
-    )
-    compact_parser.add_argument(
-        "--prune",
-        action="store_true",
-        help="Delete embeddings whose paper rows no longer exist in the database",
-    )
-    compact_parser.add_argument(
-        "--vacuum",
-        action="store_true",
-        help="Run 'chroma vacuum' after compaction to reclaim disk space",
-    )
-
     # Search command
     search_parser = subparsers.add_parser(
         "search",
@@ -4242,8 +4162,6 @@ Examples:
         return download_command(args)
     elif args.command == "create-embeddings":
         return create_embeddings_command(args)
-    elif args.command == "compact-embeddings":
-        return compact_embeddings_command(args)
     elif args.command == "pre-process":
         return pre_process_command(args)
     elif args.command == "search":

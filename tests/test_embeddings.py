@@ -1355,45 +1355,6 @@ class TestContentHashing:
         embeddings_manager.close()
 
 
-class TestCollectionCompaction:
-    """Tests for the one-time metadata/document compaction helpers."""
-
-    def test_remove_metadata_and_hash_documents(self, embeddings_manager):
-        embeddings_manager.create_collection()
-        embeddings_manager.collection.add(
-            ids=["p1"],
-            embeddings=[[0.1] * 4096],
-            documents=["Title\n\nAbstract"],
-            metadatas=[{"title": "Title", "year": "2025"}],
-        )
-
-        assert embeddings_manager.remove_all_metadata() == 1
-        stored = embeddings_manager.collection.get(ids=["p1"], include=["metadatas"])
-        assert stored["metadatas"] == [None]
-
-        assert embeddings_manager.hash_all_documents() == 1
-        stored = embeddings_manager.collection.get(ids=["p1"], include=["documents"])
-        assert stored["documents"] == [hash_text("Title\n\nAbstract")]
-
-        # Idempotent
-        assert embeddings_manager.hash_all_documents() == 0
-        embeddings_manager.close()
-
-    def test_prune_orphan_embeddings(self, embeddings_manager):
-        embeddings_manager.create_collection()
-        embeddings_manager.collection.add(
-            ids=["known", "orphan"],
-            embeddings=[[0.1] * 4096, [0.2] * 4096],
-            documents=[hash_text("known"), hash_text("orphan")],
-        )
-        database = Mock()
-        database.get_paper_uids.return_value = ["known"]
-
-        assert embeddings_manager.prune_orphan_embeddings(database) == 1
-        assert embeddings_manager.collection.get()["ids"] == ["known"]
-        embeddings_manager.close()
-
-
 class TestImportExport:
     """Tests for the v1 embeddings artifact format."""
 
