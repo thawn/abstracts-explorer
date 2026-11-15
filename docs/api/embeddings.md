@@ -137,7 +137,7 @@ collection = em.collection
 print(f"Total papers: {collection.count()}")
 
 # Reset the collection
-em.init(reset=True)
+em.create_collection(reset=True)
 
 # Check whether a paper's embedding is current
 needs_update = em.paper_needs_update(paper_dict)
@@ -153,20 +153,27 @@ for paper_id, distance in zip(results["ids"][0], results["distances"][0]):
     print(f"{paper_id}: distance={distance:.3f}")  # Lower is more similar
 ```
 
-For distance-threshold workflows, `query_ids_within_distance` returns flat lists
-with a ``count`` and ``total_considered``.
+For distance-threshold workflows, `query_ids_within_distance` returns flat
+``ids``/``distances`` lists plus ``total_considered``.
 
 ## Performance Considerations
 
 ### Incremental Embedding
 
-`embed_from_database` skips papers whose content hash is unchanged:
+`embed_from_database` skips papers whose content hash is unchanged and embeds
+the remainder in batches of 32 papers per API request:
 
 ```python
 count = em.embed_from_database()
 
 # Recreate all embeddings, ignoring existing ones
 count = em.embed_from_database(force_recreate=True)
+```
+
+Use `generate_embeddings` to embed an explicit list of texts in one request:
+
+```python
+vectors = em.generate_embeddings(["First abstract", "Second abstract"])
 ```
 
 ### Caching

@@ -37,7 +37,7 @@ em = EmbeddingsManager()
 # Initialize RAG chat
 chat = RAGChat(
     embeddings_manager=em,
-    lm_studio_url="http://localhost:1234",
+    backend_url="http://localhost:1234",
     model="gemma-3-4b-it-qat"
 )
 ```
@@ -313,7 +313,7 @@ The module is designed for LM Studio but works with any OpenAI-compatible API:
 # With authentication token
 chat = RAGChat(
     em,
-    lm_studio_url="https://api.example.com",
+    backend_url="https://api.example.com",
     model="gpt-4",
     auth_token="sk-..."
 )
@@ -325,7 +325,7 @@ chat = RAGChat(
 # Different backend URL
 chat = RAGChat(
     em,
-    lm_studio_url="http://localhost:8080",
+    backend_url="http://localhost:8080",
     model="custom-model"
 )
 ```

@@ -122,7 +122,7 @@ abstracts-explorer pre-process [OPTIONS]
 - `--no-overlap-post-process`: Run embeddings and clustering in one worker
   instead of overlapping them
 - `--collection TEXT`: ChromaDB collection name (default: from config)
-- `--lm-studio-url TEXT`: OpenAI-compatible API URL (default: from config)
+- `--backend-url TEXT`: OpenAI-compatible API URL (default: from config)
 - `--model TEXT`: Embedding model (default: from config)
 - `--requests-per-minute INTEGER`: API rate limit, 0 disables it
 - `--ignore-embedding-model-mismatch`: Recreate embeddings after an embedding

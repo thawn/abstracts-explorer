@@ -753,8 +753,8 @@ class TestSearchEndpoint:
         assert response.status_code == 200
         data = json.loads(response.data)
         assert data["count"] == 1
-        # Field-filter-only query should not trigger count_papers_within_distance
-        mock_em.count_papers_within_distance.assert_not_called()
+        # Field-filter-only query should not trigger query_ids_within_distance
+        mock_em.query_ids_within_distance.assert_not_called()
         # total_similar should not be in response for field-filter-only queries
         assert "total_similar" not in data
 
@@ -1005,7 +1005,7 @@ class TestWebUISemanticSearchDetails:
                         },
                     ]
                     mock_db.search_papers_keyword.return_value = mock_papers
-                    mock_em.count_papers_within_distance.return_value = 25
+                    mock_em.query_ids_within_distance.return_value = {"ids": ["uid"] * 25}
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
 
@@ -1044,7 +1044,7 @@ class TestWebUISemanticSearchDetails:
                     mock_em = Mock()
                     mock_db = Mock()
                     mock_db.search_papers_keyword.return_value = []
-                    mock_em.count_papers_within_distance.return_value = 0
+                    mock_em.query_ids_within_distance.return_value = {"ids": []}
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
 
@@ -1069,7 +1069,7 @@ class TestWebUISemanticSearchDetails:
                         mock_em = Mock()
                         mock_db = Mock()
                         mock_db.search_papers_keyword.return_value = []
-                        mock_em.count_papers_within_distance.return_value = 0
+                        mock_em.query_ids_within_distance.return_value = {"ids": []}
                         mock_get_em.return_value = mock_em
                         mock_get_db.return_value = mock_db
 
@@ -1092,7 +1092,7 @@ class TestWebUISemanticSearchDetails:
                     mock_em = Mock()
                     mock_db = Mock()
                     mock_db.search_papers_keyword.return_value = []
-                    mock_em.count_papers_within_distance.return_value = 0
+                    mock_em.query_ids_within_distance.return_value = {"ids": []}
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
 

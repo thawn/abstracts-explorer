@@ -55,21 +55,13 @@ class TestEmbeddingsManager:
             assert em._client is not None
         assert embeddings_manager._client is None
 
-    def test_init_connects_and_creates_collection(self, embeddings_manager):
-        """Test that init creates the collection (which connects the client)."""
-        embeddings_manager.create_collection = Mock()
+    def test_create_collection_connects_to_chromadb(self, embeddings_manager):
+        """Test that create_collection connects the client on first use."""
+        embeddings_manager.create_collection()
 
-        embeddings_manager.init()
-
-        embeddings_manager.create_collection.assert_called_once_with(reset=False)
-
-    def test_init_reset(self, embeddings_manager):
-        """Test that init forwards the reset flag to create_collection."""
-        embeddings_manager.create_collection = Mock()
-
-        embeddings_manager.init(reset=True)
-
-        embeddings_manager.create_collection.assert_called_once_with(reset=True)
+        assert embeddings_manager._client is not None
+        assert embeddings_manager._collection is not None
+        embeddings_manager.close()
 
     def test_test_api_connection_success(self, embeddings_manager):
         """Test successful API connection."""
@@ -101,7 +93,7 @@ class TestEmbeddingsManager:
         assert result is False
         captured = capsys.readouterr()
         assert "Failed to connect to OpenAI API" in captured.err
-        assert embeddings_manager.lm_studio_url in captured.err
+        assert embeddings_manager.backend_url in captured.err
         assert embeddings_manager.model_name in captured.err
 
     def test_test_api_connection_model_hint(self, embeddings_manager, capsys):
@@ -143,6 +135,60 @@ class TestEmbeddingsManager:
 
         with pytest.raises(EmbeddingsError, match="Failed to generate embedding"):
             embeddings_manager.generate_embedding("Test text")
+
+    def test_generate_embeddings_batches_inputs(self, embeddings_manager):
+        """A batch request returns one vector per input."""
+        vectors = embeddings_manager.generate_embeddings(["one", "two", "three"])
+        assert len(vectors) == 3
+        assert all(len(vector) == 4096 for vector in vectors)
+        assert embeddings_manager.openai_client.embeddings.create.call_args.kwargs["input"] == [
+            "one",
+            "two",
+            "three",
+        ]
+
+    def test_generate_embeddings_empty_list(self, embeddings_manager):
+        """An empty batch makes no API call."""
+        assert embeddings_manager.generate_embeddings([]) == []
+        embeddings_manager.openai_client.embeddings.create.assert_not_called()
+
+    def test_generate_embeddings_rejects_empty_text(self, embeddings_manager):
+        """Every text in a batch must be non-empty."""
+        with pytest.raises(EmbeddingsError, match="Cannot generate embedding for empty text"):
+            embeddings_manager.generate_embeddings(["ok", "  "])
+
+    def test_generate_embeddings_falls_back_on_context_error(self, embeddings_manager):
+        """A context-length batch error retries each text individually."""
+        context_error = Exception("maximum context length is 10 tokens")
+        embeddings_manager.openai_client.embeddings.create.side_effect = [context_error] + [
+            self._single_response() for _ in range(2)
+        ]
+
+        vectors = embeddings_manager.generate_embeddings(["one", "two"])
+
+        assert len(vectors) == 2
+        assert embeddings_manager.openai_client.embeddings.create.call_count == 3
+
+    def test_generate_embeddings_falls_back_on_count_mismatch(self, embeddings_manager):
+        """A response with the wrong number of vectors retries individually."""
+        embeddings_manager.openai_client.embeddings.create.side_effect = [
+            self._single_response(),
+            self._single_response(),
+            self._single_response(),
+        ]
+
+        vectors = embeddings_manager.generate_embeddings(["one", "two"])
+
+        assert len(vectors) == 2
+        assert embeddings_manager.openai_client.embeddings.create.call_count == 3
+
+    @staticmethod
+    def _single_response():
+        item = Mock()
+        item.embedding = [0.1] * 4096
+        response = Mock()
+        response.data = [item]
+        return response
 
     def test_create_collection(self, embeddings_manager):
         """Test creating a collection."""
@@ -566,6 +612,42 @@ class TestEmbeddingsManager:
         stats = embeddings_manager.get_collection_stats()
         assert stats["count"] == 3
 
+        embeddings_manager.close()
+
+    def test_embed_from_database_batches_requests(self, embeddings_manager, test_database):
+        """Papers are embedded with a single batched API request."""
+        embeddings_manager.create_collection()
+
+        count = embeddings_manager.embed_from_database()
+
+        assert count == 3
+        create = embeddings_manager.openai_client.embeddings.create
+        assert create.call_count == 1
+        assert isinstance(create.call_args.kwargs["input"], list)
+        embeddings_manager.close()
+
+    def test_embed_from_database_retries_batch_failures_individually(self, embeddings_manager, test_database):
+        """A failed batch falls back to individual paper embeddings."""
+        embeddings_manager.create_collection()
+
+        calls = {"count": 0}
+
+        def create(*args, **kwargs):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise RuntimeError("batch failed")
+            item = Mock()
+            item.embedding = [0.1] * 4096
+            response = Mock()
+            response.data = [item]
+            return response
+
+        embeddings_manager.openai_client.embeddings.create.side_effect = create
+
+        count = embeddings_manager.embed_from_database()
+
+        assert count == 3
+        assert calls["count"] == 4
         embeddings_manager.close()
 
     def test_paper_needs_update_returns_true_on_error(self, embeddings_manager, mock_lm_studio):
@@ -1158,7 +1240,7 @@ def test_search_papers_semantic_distance_threshold(embeddings_manager, tmp_path,
     """Test that search_papers_semantic filters results by distance_threshold.
 
     Papers with distance greater than the threshold must be excluded from the
-    results, matching the behaviour of count_papers_within_distance.
+    results, matching the behaviour of query_ids_within_distance.
     """
     from unittest.mock import patch as mock_patch
     from abstracts_explorer.database import DatabaseManager
@@ -1247,10 +1329,10 @@ class TestContentHashing:
         assert not is_content_hash("hello")
         assert not is_content_hash(None)
 
-    def test_embedding_hash_from_paper(self):
+    def test_paper_text_hash(self):
         paper = {"uid": "p1", "title": "Title", "abstract": "Abstract"}
-        expected = hash_text("Title\n\nAbstract")
-        assert EmbeddingsManager.embedding_hash_from_paper(paper) == expected
+        text = EmbeddingsManager.embedding_text_from_paper(paper)
+        assert hash_text(text) == hash_text("Title\n\nAbstract")
 
     def test_paper_needs_update_hash_comparison(self, embeddings_manager, mock_lm_studio):
         embeddings_manager.create_collection()
@@ -1404,7 +1486,7 @@ class TestRateLimiting:
         """Test that a RateLimitedTransport http_client is used when requests_per_minute > 0."""
         from tests.conftest import get_env_test_path
         from abstracts_explorer.config import get_config
-        from abstracts_explorer.embeddings import RateLimitedTransport
+        from abstracts_explorer.rate_limiter import RateLimitedTransport
         from abstracts_explorer.rate_limiter import (
             TokenBucketRateLimiter,
             set_global_rate_limiter,
@@ -1428,7 +1510,7 @@ class TestRateLimiting:
         """Test that no RateLimitedTransport is used when requests_per_minute=0."""
         from tests.conftest import get_env_test_path
         from abstracts_explorer.config import get_config
-        from abstracts_explorer.embeddings import RateLimitedTransport
+        from abstracts_explorer.rate_limiter import RateLimitedTransport
 
         monkeypatch.setenv("EMBEDDING_DB", str(tmp_path / "chroma"))
         get_config(reload=True, env_path=get_env_test_path())
@@ -1442,7 +1524,7 @@ class TestRateLimiting:
     def test_rate_limited_transport_sleeps_when_tokens_exhausted(self, monkeypatch):
         """Test that RateLimitedTransport blocks when token bucket is empty."""
         import httpx2
-        from abstracts_explorer.embeddings import RateLimitedTransport
+        from abstracts_explorer.rate_limiter import RateLimitedTransport
         from abstracts_explorer.rate_limiter import set_global_rate_limiter
 
         clock = FakeTime()
@@ -1465,7 +1547,7 @@ class TestRateLimiting:
     def test_rate_limited_transport_no_wait_when_tokens_available(self):
         """Test that RateLimitedTransport does not wait when tokens are available."""
         import httpx2
-        from abstracts_explorer.embeddings import RateLimitedTransport
+        from abstracts_explorer.rate_limiter import RateLimitedTransport
         from abstracts_explorer.rate_limiter import set_global_rate_limiter
 
         set_global_rate_limiter(None)
@@ -1486,7 +1568,7 @@ class TestRateLimiting:
     def test_rate_limited_transport_forwards_response(self):
         """Test that RateLimitedTransport forwards the response from inner transport."""
         import httpx2
-        from abstracts_explorer.embeddings import RateLimitedTransport
+        from abstracts_explorer.rate_limiter import RateLimitedTransport
         from abstracts_explorer.rate_limiter import set_global_rate_limiter
 
         set_global_rate_limiter(None)
@@ -1518,27 +1600,6 @@ class TestDistanceHelpers:
         }
         return manager
 
-    def test_count_papers_within_distance_returns_match_count(self):
-        manager = self._make_manager()
-        count = manager.count_papers_within_distance(
-            query="query",
-            distance_threshold=1.0,
-            query_embedding=[0.1],
-        )
-        assert count == 2
-        assert manager._collection.query.call_args.kwargs["include"] == ["distances"]
-
-    def test_count_papers_within_distance_reuses_query_embedding(self):
-        manager = self._make_manager()
-        count = manager.count_papers_within_distance(
-            query="query",
-            distance_threshold=1.0,
-            query_embedding=[0.5, 0.6],
-        )
-        manager.generate_embedding.assert_not_called()
-        assert manager._collection.query.call_args.kwargs["query_embeddings"] == [[0.5, 0.6]]
-        assert count == 2
-
     def test_query_ids_within_distance(self):
         manager = self._make_manager()
         result = manager.query_ids_within_distance(
@@ -1546,10 +1607,20 @@ class TestDistanceHelpers:
             distance_threshold=1.0,
             query_embedding=[0.1],
         )
-        assert result["count"] == 2
         assert result["total_considered"] == 3
         assert result["ids"] == ["paper-a", "paper-b"]
         assert result["distances"] == [0.1, 0.2]
+        assert manager._collection.query.call_args.kwargs["include"] == ["distances"]
+
+    def test_query_ids_within_distance_reuses_query_embedding(self):
+        manager = self._make_manager()
+        manager.query_ids_within_distance(
+            query="query",
+            distance_threshold=1.0,
+            query_embedding=[0.5, 0.6],
+        )
+        manager.generate_embedding.assert_not_called()
+        assert manager._collection.query.call_args.kwargs["query_embeddings"] == [[0.5, 0.6]]
 
     def test_query_ids_within_distance_with_ids(self):
         manager = self._make_manager()
@@ -1566,29 +1637,16 @@ class TestDistanceHelpers:
         with pytest.raises(EmbeddingsError, match="No papers matched"):
             manager.query_ids_within_distance(query="query", ids=[], query_embedding=[0.1])
 
-    @pytest.mark.parametrize("method_name", ["count_papers_within_distance", "query_ids_within_distance"])
-    def test_distance_helpers_reject_empty_query(self, method_name):
+    def test_query_ids_reject_empty_query(self):
         manager = self._make_manager()
         with pytest.raises(EmbeddingsError, match="Query cannot be empty"):
-            getattr(manager, method_name)(query="  ", distance_threshold=1.0)
+            manager.query_ids_within_distance(query="  ", distance_threshold=1.0)
 
-    def test_matching_pairs_stops_at_threshold(self):
-        pairs = EmbeddingsManager._matching_pairs(["a", "b", "c"], [0.1, 1.0, 1.1], 1.0)
-        assert pairs == [("a", 0.1), ("b", 1.0)]
-
-    def test_matching_pairs_empty_input(self):
-        assert EmbeddingsManager._matching_pairs([], [], 1.0) == []
-
-    def test_query_collection_uses_distances_only(self):
-        manager = self._make_manager()
-        manager._query_collection(query="query", query_embedding=[0.1])
-        assert manager._collection.query.call_args.kwargs["include"] == ["distances"]
-
-    def test_query_collection_raises_when_no_results(self):
+    def test_query_ids_raises_when_no_results(self):
         manager = self._make_manager()
         manager._collection.query.return_value = {"ids": [[]], "distances": [[]]}
         with pytest.raises(EmbeddingsError, match="No results from collection query"):
-            manager._query_collection(query="query", query_embedding=[0.1])
+            manager.query_ids_within_distance(query="query", query_embedding=[0.1])
 
 
 class TestEmbeddingInputTruncation:
@@ -1657,7 +1715,10 @@ class TestEmbeddingInputTruncation:
         em = embeddings_manager
         em.max_input_tokens = 0
         text = self._long_text()
-        response = em.openai_client.embeddings.create.return_value
+        response = Mock()
+        item = Mock()
+        item.embedding = [0.1] * 4096
+        response.data = [item]
         em.openai_client.embeddings.create.side_effect = [
             Exception(
                 "Error code: 400 - This model's maximum context length is 100 tokens. "

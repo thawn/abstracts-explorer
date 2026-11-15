@@ -232,7 +232,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     args : argparse.Namespace
         Command-line arguments containing:
         - collection: Name for the ChromaDB collection
-        - lm_studio_url: URL for OpenAI-compatible API
+        - backend_url: URL for OpenAI-compatible API
         - model: Name of the embedding model
         - force: Whether to reset existing collection
         - conference: Conference name to filter by (optional)
@@ -258,7 +258,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     print(f"Embedding DB:   {config.embedding_db}")
     print(f"Collection: {args.collection}")
     print(f"Model:    {args.model}")
-    print(f"API URL: {args.lm_studio_url}")
+    print(f"API URL: {args.backend_url}")
     rate_limit_str = f"{args.requests_per_minute} req/min" if args.requests_per_minute > 0 else "disabled"
     print(f"Rate limit: {rate_limit_str}")
     year = getattr(args, "year", None)
@@ -281,7 +281,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     try:
         print("\n🔧 Initializing embeddings manager...")
         em = EmbeddingsManager(
-            lm_studio_url=args.lm_studio_url,
+            backend_url=args.backend_url,
             model_name=args.model,
             collection_name=args.collection,
             requests_per_minute=args.requests_per_minute,
@@ -342,7 +342,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         else:
             print(f"📁 Creating collection '{args.collection}'...")
 
-        em.init(reset=args.force and not filtered_force)
+        em.create_collection(reset=args.force and not filtered_force)
 
         if filtered_force:
             with DatabaseManager() as db:
@@ -414,7 +414,7 @@ def search_command(args: argparse.Namespace) -> int:
         - n_results: Number of results to return
         - where: Metadata filter conditions
         - show_abstract: Whether to show paper abstracts
-        - lm_studio_url: URL for OpenAI-compatible API
+        - backend_url: URL for OpenAI-compatible API
         - model: Name of the embedding model
 
     Returns
@@ -449,7 +449,7 @@ def search_command(args: argparse.Namespace) -> int:
     try:
         # Initialize embeddings manager
         em = EmbeddingsManager(
-            lm_studio_url=args.lm_studio_url,
+            backend_url=args.backend_url,
             model_name=args.model,
             collection_name=args.collection,
         )
@@ -556,7 +556,7 @@ def chat_command(args: argparse.Namespace) -> int:
     args : argparse.Namespace
         Command-line arguments containing:
         - collection: Name of the collection
-        - lm_studio_url: LM Studio API URL
+        - backend_url: OpenAI-compatible API URL
         - model: Language model name for chat
         - embedding_model: Embedding model name
         - max_context: Maximum papers to use as context
@@ -584,7 +584,7 @@ def chat_command(args: argparse.Namespace) -> int:
         print(f"Collection: {args.collection}")
         print(f"Chat Model: {args.model}")
         print(f"Embedding Model: {args.embedding_model}")
-        print(f"API URL: {args.lm_studio_url}")
+        print(f"API URL: {args.backend_url}")
         if conference:
             print(f"Conference: {conference}")
         if year is not None:
@@ -598,7 +598,7 @@ def chat_command(args: argparse.Namespace) -> int:
         # Initialize embeddings manager
         em = EmbeddingsManager(
             collection_name=args.collection,
-            lm_studio_url=args.lm_studio_url,
+            backend_url=args.backend_url,
             model_name=args.embedding_model,
         )
 
@@ -629,7 +629,7 @@ def chat_command(args: argparse.Namespace) -> int:
         chat = RAGChat(
             embeddings_manager=em,
             database=db,
-            lm_studio_url=args.lm_studio_url,
+            backend_url=args.backend_url,
             model=args.model,
             max_context_papers=args.max_context,
             temperature=args.temperature,
@@ -1262,7 +1262,7 @@ def compact_embeddings_command(args: argparse.Namespace) -> int:
     config = get_config()
     em = EmbeddingsManager(collection_name=args.collection)
     try:
-        em.init()
+        em.create_collection()
         print(f"🔧 Compacting collection '{args.collection}'...")
         metadata_records = em.remove_all_metadata()
         print(f"   Processed metadata for {metadata_records:,} record(s)")
@@ -1495,7 +1495,7 @@ def eval_generate_command(args: argparse.Namespace) -> int:
         - no_followups: Disable follow-up generation
         - n_followups: Number of follow-ups per pair
         - model: Chat model name
-        - lm_studio_url: LLM backend URL
+        - backend_url: LLM backend URL
 
     Returns
     -------
@@ -1519,7 +1519,7 @@ def eval_generate_command(args: argparse.Namespace) -> int:
     try:
         # Initialize embeddings manager for its openai_client
         em = EmbeddingsManager(
-            lm_studio_url=args.lm_studio_url,
+            backend_url=args.backend_url,
         )
 
         with DatabaseManager() as db:
@@ -1719,7 +1719,7 @@ def eval_run_command(args: argparse.Namespace) -> int:
         Command-line arguments containing:
         - collection: ChromaDB collection name
         - model: Chat model name
-        - lm_studio_url: LLM backend URL
+        - backend_url: LLM backend URL
         - embedding_model: Embedding model name
         - limit: Maximum pairs to evaluate
         - include_unverified: Include unverified pairs
@@ -1742,7 +1742,7 @@ def eval_run_command(args: argparse.Namespace) -> int:
     try:
         # Initialize embeddings
         em = EmbeddingsManager(
-            lm_studio_url=args.lm_studio_url,
+            backend_url=args.backend_url,
             model_name=args.embedding_model,
             collection_name=args.collection,
         )
@@ -2670,7 +2670,7 @@ def _build_pre_process_embeddings_args(
         conference=conference,
         year=year,
         collection=getattr(args, "collection", config.collection_name),
-        lm_studio_url=getattr(args, "lm_studio_url", config.llm_backend_url),
+        backend_url=getattr(args, "backend_url", config.llm_backend_url),
         model=getattr(args, "model", config.embedding_model),
         force=force,
         where=getattr(args, "where", None),
@@ -2972,7 +2972,7 @@ def pre_process_command(args: argparse.Namespace) -> int:
         - ignore_embedding_model_mismatch: Recreate embeddings on model mismatch
           without prompting
         - no_overlap_post_process: Run embeddings and clustering in one worker
-        - collection, lm_studio_url, model, where, requests_per_minute: Forwarded
+        - collection, backend_url, model, where, requests_per_minute: Forwarded
           to the embeddings and clustering steps
 
     Returns
@@ -3178,10 +3178,10 @@ Examples:
         help=f"Name for the ChromaDB collection (default: {config.collection_name})",
     )
     embeddings_parser.add_argument(
-        "--lm-studio-url",
+        "--backend-url",
         type=str,
         default=config.llm_backend_url,
-        help=f"URL for LM Studio API (default: {config.llm_backend_url})",
+        help=f"URL for OpenAI-compatible API (default: {config.llm_backend_url})",
     )
     embeddings_parser.add_argument(
         "--model",
@@ -3270,10 +3270,10 @@ content hashes. Run it once after upgrading an alpha installation.
         help="Show paper abstracts in results",
     )
     search_parser.add_argument(
-        "--lm-studio-url",
+        "--backend-url",
         type=str,
         default=config.llm_backend_url,
-        help=f"URL for LM Studio API (default: {config.llm_backend_url})",
+        help=f"URL for OpenAI-compatible API (default: {config.llm_backend_url})",
     )
     search_parser.add_argument(
         "--model",
@@ -3304,10 +3304,10 @@ content hashes. Run it once after upgrading an alpha installation.
         help=f"Name of the ChromaDB collection (default: {config.collection_name})",
     )
     chat_parser.add_argument(
-        "--lm-studio-url",
+        "--backend-url",
         type=str,
         default=config.llm_backend_url,
-        help=f"URL for LM Studio API (default: {config.llm_backend_url})",
+        help=f"URL for OpenAI-compatible API (default: {config.llm_backend_url})",
     )
     chat_parser.add_argument(
         "--model",
@@ -3649,7 +3649,7 @@ Examples:
         help=f"Chat model for generation (default: {config.chat_model})",
     )
     eval_gen_parser.add_argument(
-        "--lm-studio-url",
+        "--backend-url",
         type=str,
         default=config.llm_backend_url,
         help=f"LLM backend URL (default: {config.llm_backend_url})",
@@ -3700,7 +3700,7 @@ Examples:
         help=f"Embedding model (default: {config.embedding_model})",
     )
     eval_run_parser.add_argument(
-        "--lm-studio-url",
+        "--backend-url",
         type=str,
         default=config.llm_backend_url,
         help=f"LLM backend URL (default: {config.llm_backend_url})",
@@ -4205,10 +4205,10 @@ Examples:
         help=f"Name for the ChromaDB collection (default: {config.collection_name})",
     )
     pre_process_parser.add_argument(
-        "--lm-studio-url",
+        "--backend-url",
         type=str,
         default=config.llm_backend_url,
-        help=f"URL for LM Studio API (default: {config.llm_backend_url})",
+        help=f"URL for OpenAI-compatible API (default: {config.llm_backend_url})",
     )
     pre_process_parser.add_argument(
         "--model",

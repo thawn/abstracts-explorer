@@ -283,17 +283,16 @@ graph TD
     subgraph "EmbeddingsManager"
         ECONN["connect() → ChromaDB"]
         ECOL["create_collection()"]
-        EADD["add_paper → generate_embedding → store"]
+        EADD["add_paper / embed_from_database<br/>→ generate_embedding(s) → store"]
         ESRCH["search_similar (low level)"]
-        EQRY["_query_collection"]
+        EQRY["_query_embeddings"]
         EFIND["DatabaseManager.find_papers_within_distance<br/>(full records)"]
         EQUERY["query_ids_within_distance<br/>(IDs + distances)"]
-        ECOUNT["count_papers_within_distance<br/>(count only)"]
         EIMP["import/export_embeddings"]
 
         subgraph "SQL filter resolution"
             W1["DatabaseManager.search_papers_semantic:<br/>SQL filters → UIDs → Chroma ids"]
-            W2["_query_collection:<br/>IDs + distances only"]
+            W2["_query_embeddings:<br/>IDs + distances only"]
         end
     end
 
@@ -335,7 +334,6 @@ graph TD
     ECOL --> EQRY
     EQRY --> EFIND
     EQRY --> EQUERY
-    EQRY --> ECOUNT
     CLOAD --> CREDUC --> CCLUST --> CKEYS --> CLBL
     CCLUST --> CHRCH
     CLBL --> CRES

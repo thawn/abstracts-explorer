@@ -162,7 +162,7 @@ em = EmbeddingsManager()
 
 chat = RAGChat(
     em,
-    lm_studio_url="http://localhost:1234",
+    backend_url="http://localhost:1234",
     model="gemma-3-4b-it-qat"
 )
 

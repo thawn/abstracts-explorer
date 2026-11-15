@@ -500,12 +500,20 @@ def mock_lm_studio():
         mock_models = Mock()
         mock_client.models.list.return_value = mock_models
 
-        # Mock embeddings.create() for embedding generation
-        mock_embedding_response = Mock()
-        mock_embedding_data = Mock()
-        mock_embedding_data.embedding = [0.1] * 4096
-        mock_embedding_response.data = [mock_embedding_data]
-        mock_client.embeddings.create.return_value = mock_embedding_response
+        # Mock embeddings.create() for single and batched embedding generation
+        def _create_embeddings(*args, **kwargs):
+            inputs = kwargs.get("input")
+            texts = [inputs] if isinstance(inputs, str) else list(inputs or [])
+            response = Mock()
+            response.data = []
+            for index in range(len(texts)):
+                item = Mock()
+                item.embedding = [0.1] * 4096
+                item.index = index
+                response.data.append(item)
+            return response
+
+        mock_client.embeddings.create.side_effect = _create_embeddings
 
         yield mock_client
 
@@ -585,19 +593,27 @@ def embeddings_manager(tmp_path, monkeypatch):
 
     # Create the manager
     em = EmbeddingsManager(
-        lm_studio_url="http://localhost:1234",
+        backend_url="http://localhost:1234",
         collection_name="test_collection",
     )
 
     # Replace the OpenAI client with a mock
     mock_client = Mock()
 
-    # Mock embeddings.create()
-    mock_embedding_response = Mock()
-    mock_embedding_data = Mock()
-    mock_embedding_data.embedding = [0.1] * 4096
-    mock_embedding_response.data = [mock_embedding_data]
-    mock_client.embeddings.create.return_value = mock_embedding_response
+    # Mock embeddings.create() for single and batched embedding generation
+    def _create_embeddings(*args, **kwargs):
+        inputs = kwargs.get("input")
+        texts = [inputs] if isinstance(inputs, str) else list(inputs or [])
+        response = Mock()
+        response.data = []
+        for index in range(len(texts)):
+            item = Mock()
+            item.embedding = [0.1] * 4096
+            item.index = index
+            response.data.append(item)
+        return response
+
+    mock_client.embeddings.create.side_effect = _create_embeddings
 
     # Mock models.list()
     mock_client.models.list.return_value = Mock()

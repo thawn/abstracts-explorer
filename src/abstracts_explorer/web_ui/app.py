@@ -103,7 +103,7 @@ def get_embeddings_manager():
     if embeddings_manager is None:
         config = get_config()  # Get config lazily
         embeddings_manager = EmbeddingsManager(
-            lm_studio_url=config.llm_backend_url,
+            backend_url=config.llm_backend_url,
             model_name=config.embedding_model,
             collection_name=config.collection_name,
         )
@@ -151,7 +151,7 @@ def get_rag_chat():
         _rag_chat_cache[session_id] = RAGChat(
             embeddings_manager=em,
             database=database,  # Database is now required
-            lm_studio_url=config.llm_backend_url,
+            backend_url=config.llm_backend_url,
             model=config.chat_model,
         )
 
@@ -535,10 +535,12 @@ def search():
                     years=[int(year) for year in years] if years else None,
                     sessions=sessions if sessions else None,
                 )
-                total_similar = em.count_papers_within_distance(
-                    query=remaining_query,
-                    distance_threshold=distance_threshold,
-                    ids=candidate_ids,
+                total_similar = len(
+                    em.query_ids_within_distance(
+                        query=remaining_query,
+                        distance_threshold=distance_threshold,
+                        ids=candidate_ids,
+                    )["ids"]
                 )
             except Exception:
                 total_similar = None

@@ -804,7 +804,7 @@ class TestCLI:
                 force=False,
                 verbose=0,
                 collection="custom-collection",
-                lm_studio_url="http://example.test:1234/v1",
+                backend_url="http://example.test:1234/v1",
                 model="custom-embedding-model",
                 where="year = 2024",
                 requests_per_minute=42,
@@ -815,7 +815,7 @@ class TestCLI:
         assert rc == 0
         embed_args = mock_embed.call_args[0][0]
         assert embed_args.collection == "custom-collection"
-        assert embed_args.lm_studio_url == "http://example.test:1234/v1"
+        assert embed_args.backend_url == "http://example.test:1234/v1"
         assert embed_args.model == "custom-embedding-model"
         assert embed_args.where == "year = 2024"
         assert embed_args.requests_per_minute == 42
@@ -1192,14 +1192,14 @@ class TestCLI:
         assert "Resetting existing collection" in captured.out
 
         # Verify init was called with reset=True
-        mock_em.init.assert_called_once_with(reset=True)
+        mock_em.create_collection.assert_called_once_with(reset=True)
 
     def _create_mismatch_test_args(self):
         return argparse.Namespace(
             conference=None,
             year=None,
             collection="test",
-            lm_studio_url="http://localhost:1234/v1",
+            backend_url="http://localhost:1234/v1",
             model="new-model",
             force=False,
             where=None,
@@ -1249,7 +1249,7 @@ class TestCLI:
         assert rc == 0
         captured = capsys.readouterr()
         assert "ignore-embedding-model-mismatch detected" in captured.out
-        mock_em.init.assert_called_once_with(reset=True)
+        mock_em.create_collection.assert_called_once_with(reset=True)
 
     def test_create_embeddings_non_interactive_mismatch_fails(self, tmp_path, capsys, monkeypatch):
         """In non-interactive mode a model mismatch fails instead of prompting."""
@@ -1347,7 +1347,7 @@ class TestCLI:
         assert "conference=NeurIPS" in captured.out
 
         # init must be called with reset=False (not wipe the collection)
-        mock_em.init.assert_called_once_with(reset=False)
+        mock_em.create_collection.assert_called_once_with(reset=False)
         # delete_embeddings_by_ids must be called for the resolved paper UIDs
         mock_em.delete_embeddings_by_ids.assert_called_once()
 
@@ -1406,7 +1406,7 @@ class TestCLI:
         # Reports the number removed
         assert "Removed 2" in captured.out
 
-        mock_em.init.assert_called_once_with(reset=False)
+        mock_em.create_collection.assert_called_once_with(reset=False)
         mock_em.delete_embeddings_by_ids.assert_called_once()
 
     def test_create_embeddings_force_with_conference_and_year(self, tmp_path, capsys, monkeypatch):
@@ -1465,7 +1465,7 @@ class TestCLI:
         assert "conference=NeurIPS" in captured.out
         assert "year=2024" in captured.out
 
-        mock_em.init.assert_called_once_with(reset=False)
+        mock_em.create_collection.assert_called_once_with(reset=False)
         mock_em.delete_embeddings_by_ids.assert_called_once()
 
         """Test create-embeddings with --requests-per-minute flag."""
@@ -1617,7 +1617,7 @@ class TestCLI:
                 [
                     "neurips-abstracts",
                     "create-embeddings",
-                    "--lm-studio-url",
+                    "--backend-url",
                     custom_url,
                     "--model",
                     custom_model,
@@ -1630,7 +1630,7 @@ class TestCLI:
         # Verify EmbeddingsManager was initialized with custom settings
         MockEM.assert_called_once()
         call_kwargs = MockEM.call_args.kwargs
-        assert call_kwargs["lm_studio_url"] == custom_url
+        assert call_kwargs["backend_url"] == custom_url
         assert call_kwargs["model_name"] == custom_model
 
     def test_create_embeddings_embeddings_error(self, tmp_path, capsys):
@@ -1661,7 +1661,7 @@ class TestCLI:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
             mock_em.test_api_connection.return_value = True
-            mock_em.init.side_effect = EmbeddingsError("Connection failed")
+            mock_em.create_collection.side_effect = EmbeddingsError("Connection failed")
             MockEM.return_value = mock_em
 
             with patch.object(
@@ -3167,7 +3167,7 @@ class TestCLI:
             collection="test",
             model="test-model",
             embedding_model="test-embedding-model",
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             max_context=5,
             temperature=0.7,
             show_sources=False,
@@ -3196,7 +3196,7 @@ class TestCLI:
             collection="test",
             model="test-model",
             embedding_model="test-embedding-model",
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             max_context=5,
             temperature=0.7,
             show_sources=False,
@@ -3234,7 +3234,7 @@ class TestCLI:
             collection="test",
             model="test-model",
             embedding_model="test-embedding-model",
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             max_context=5,
             temperature=0.7,
             show_sources=False,
@@ -3422,7 +3422,7 @@ class TestCLISearchErrorHandling:
         args = argparse.Namespace(
             query="test",
             embeddings_path=str(embeddings_path),
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             model="test-model",
             collection="test_collection",
             n_results=5,
@@ -3462,7 +3462,7 @@ class TestCLISearchErrorHandling:
         args = argparse.Namespace(
             query="test",
             embeddings_path=str(embeddings_path),
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             model="test-model",
             collection="test_collection",
             n_results=5,
@@ -3570,7 +3570,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -3608,7 +3608,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -3646,7 +3646,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -3684,7 +3684,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -3725,7 +3725,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -3765,7 +3765,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -3818,7 +3818,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -3859,7 +3859,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -3897,7 +3897,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",

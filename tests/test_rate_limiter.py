@@ -7,7 +7,7 @@ import time
 import httpx2
 import pytest
 
-from abstracts_explorer.embeddings import RateLimitedTransport
+from abstracts_explorer.rate_limiter import RateLimitedTransport
 from abstracts_explorer.rate_limiter import (
     TokenBucketRateLimiter,
     get_global_rate_limiter,

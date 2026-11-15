@@ -195,7 +195,7 @@ class TestRAGChatInit:
 
         assert chat.embeddings_manager == mock_embeddings_manager
         assert chat.database == mock_database
-        assert chat.lm_studio_url == "https://api.helmholtz-blablador.fz-juelich.de"
+        assert chat.backend_url == "https://api.helmholtz-blablador.fz-juelich.de"
         assert chat.model == "deepseek-v4.1-flash-at-hzdr"
         assert chat.max_context_papers > 0
         assert 0 <= chat.temperature <= 1
@@ -208,13 +208,13 @@ class TestRAGChatInit:
         chat = RAGChat(
             mock_embeddings_manager,
             mock_database,
-            lm_studio_url="http://custom:8080",
+            backend_url="http://custom:8080",
             model="custom-model",
             max_context_papers=10,
             temperature=0.9,
         )
 
-        assert chat.lm_studio_url == "http://custom:8080"
+        assert chat.backend_url == "http://custom:8080"
         assert chat.model == "custom-model"
         assert chat.max_context_papers == 10
         assert chat.temperature == 0.9
@@ -224,10 +224,10 @@ class TestRAGChatInit:
         chat = RAGChat(
             mock_embeddings_manager,
             mock_database,
-            lm_studio_url="http://localhost:1234/",
+            backend_url="http://localhost:1234/",
         )
 
-        assert chat.lm_studio_url == "http://localhost:1234"
+        assert chat.backend_url == "http://localhost:1234"
 
     def test_init_without_embeddings_manager(self, mock_database):
         """Test that missing embeddings manager raises error."""
@@ -542,7 +542,7 @@ class TestRAGChatHTTPClient:
 
         import httpx2
 
-        from abstracts_explorer.embeddings import RateLimitedTransport
+        from abstracts_explorer.rate_limiter import RateLimitedTransport
 
         config = get_config()
         monkeypatch.setattr(config, "requests_per_minute", 60)
@@ -1238,7 +1238,7 @@ class TestRAGChatIntegration:
         chat = RAGChat(
             em,
             db,
-            lm_studio_url=config.llm_backend_url,
+            backend_url=config.llm_backend_url,
             model=config.chat_model,
         )
 
@@ -1300,7 +1300,7 @@ class TestRAGChatIntegration:
         chat = RAGChat(
             em,
             db,
-            lm_studio_url=config.llm_backend_url,
+            backend_url=config.llm_backend_url,
             model=config.chat_model,
         )
 
@@ -1364,7 +1364,7 @@ class TestRAGChatIntegration:
         chat = RAGChat(
             em,
             db,
-            lm_studio_url=config.llm_backend_url,
+            backend_url=config.llm_backend_url,
             model=config.chat_model,
         )
         chat.query("What is machine learning?")
@@ -1865,7 +1865,7 @@ class TestParallelRAGRateLimiting:
         chat = RAGChat(
             em,
             db,
-            lm_studio_url=config.llm_backend_url,
+            backend_url=config.llm_backend_url,
             model=config.chat_model,
         )
 
