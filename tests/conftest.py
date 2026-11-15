@@ -491,7 +491,7 @@ def mock_lm_studio():
     """
     from unittest.mock import patch, Mock
 
-    with patch("abstracts_explorer.embeddings.OpenAI") as mock_openai_class:
+    with patch("abstracts_explorer.embeddings.models.OpenAI") as mock_openai_class:
         # Create mock OpenAI client instance
         mock_client = Mock()
         mock_openai_class.return_value = mock_client

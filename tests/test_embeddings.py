@@ -10,10 +10,10 @@ from unittest.mock import Mock
 from abstracts_explorer.embeddings import (
     EmbeddingsError,
     EmbeddingsManager,
-    _count_tokens,
     hash_text,
     is_content_hash,
 )
+from abstracts_explorer.embeddings.tokens import count_tokens as _count_tokens
 from tests.conftest import set_test_db
 from tests.helpers import FakeTime
 
@@ -1329,15 +1329,16 @@ class TestImportExport:
         assert embeddings_manager.collection.count() == 2
         embeddings_manager.close()
 
-    def test_export_requires_hashed_documents(self, embeddings_manager):
+    def test_export_includes_documents(self, embeddings_manager):
         embeddings_manager.create_collection()
         embeddings_manager.collection.add(
             ids=["p1"],
             embeddings=[[0.1] * 4096],
             documents=["full text"],
         )
-        with pytest.raises(EmbeddingsError, match="uncompacted"):
-            embeddings_manager.export_embeddings(["p1"])
+        exported = embeddings_manager.export_embeddings(["p1"])
+        assert exported["ids"] == ["p1"]
+        assert exported["documents"] == ["full text"]
         embeddings_manager.close()
 
     def test_import_rejects_legacy_format(self, embeddings_manager):

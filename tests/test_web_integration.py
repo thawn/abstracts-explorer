@@ -122,7 +122,7 @@ def web_server(test_database, tmp_path_factory):
 
     # Mock the OpenAI API for embedding generation
     # Integration tests should not require a real API connection
-    mock_openai_patcher = patch("abstracts_explorer.embeddings.OpenAI")
+    mock_openai_patcher = patch("abstracts_explorer.embeddings.models.OpenAI")
     mock_openai_class = mock_openai_patcher.start()
 
     try:
