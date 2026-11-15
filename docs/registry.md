@@ -14,7 +14,9 @@ ghcr.io/thawn/abstracts-data:neurips-2024_text-embedding-qwen3-embedding-4b
 
 Each uploaded artifact contains:
 - **Paper database** (`papers-YYYY.db`) — all papers, clustering cache, hierarchical labels, and embedding metadata for the given conference and year
-- **Embeddings** (`embeddings-YYYY.json`) — ChromaDB vector embeddings for all papers
+- **Embeddings** (`embeddings-YYYY.json`) — v1 artifact with paper IDs, content hashes, and vectors
+
+Old embedding artifacts without a `format_version` field are no longer supported; re-export them after running `uv run python scripts/migrate_embeddings_compaction.py`.
 
 Data for all years of a conference is bundled into a single tag (e.g. `neurips_model-name`) where each year is stored as its own pair of layers. The OCI registry deduplicates blobs by content hash, so no data is stored twice even when individual year tags and the all-years tag both exist.
 

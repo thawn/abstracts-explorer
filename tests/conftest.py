@@ -24,6 +24,18 @@ def _reset_global_rate_limiter():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _reset_process_caches():
+    """Reset process-level schema and metadata caches between tests."""
+    from abstracts_explorer.database import reset_metadata_cache, reset_schema_cache
+
+    reset_schema_cache()
+    reset_metadata_cache()
+    yield
+    reset_schema_cache()
+    reset_metadata_cache()
+
+
 def get_env_test_path() -> Path:
     """
     Get the path to the .env.tests file.
@@ -488,12 +500,20 @@ def mock_lm_studio():
         mock_models = Mock()
         mock_client.models.list.return_value = mock_models
 
-        # Mock embeddings.create() for embedding generation
-        mock_embedding_response = Mock()
-        mock_embedding_data = Mock()
-        mock_embedding_data.embedding = [0.1] * 4096
-        mock_embedding_response.data = [mock_embedding_data]
-        mock_client.embeddings.create.return_value = mock_embedding_response
+        # Mock embeddings.create() for single and batched embedding generation
+        def _create_embeddings(*args, **kwargs):
+            inputs = kwargs.get("input")
+            texts = [inputs] if isinstance(inputs, str) else list(inputs or [])
+            response = Mock()
+            response.data = []
+            for index in range(len(texts)):
+                item = Mock()
+                item.embedding = [0.1] * 4096
+                item.index = index
+                response.data.append(item)
+            return response
+
+        mock_client.embeddings.create.side_effect = _create_embeddings
 
         yield mock_client
 
@@ -573,19 +593,27 @@ def embeddings_manager(tmp_path, monkeypatch):
 
     # Create the manager
     em = EmbeddingsManager(
-        lm_studio_url="http://localhost:1234",
+        backend_url="http://localhost:1234",
         collection_name="test_collection",
     )
 
     # Replace the OpenAI client with a mock
     mock_client = Mock()
 
-    # Mock embeddings.create()
-    mock_embedding_response = Mock()
-    mock_embedding_data = Mock()
-    mock_embedding_data.embedding = [0.1] * 4096
-    mock_embedding_response.data = [mock_embedding_data]
-    mock_client.embeddings.create.return_value = mock_embedding_response
+    # Mock embeddings.create() for single and batched embedding generation
+    def _create_embeddings(*args, **kwargs):
+        inputs = kwargs.get("input")
+        texts = [inputs] if isinstance(inputs, str) else list(inputs or [])
+        response = Mock()
+        response.data = []
+        for index in range(len(texts)):
+            item = Mock()
+            item.embedding = [0.1] * 4096
+            item.index = index
+            response.data.append(item)
+        return response
+
+    mock_client.embeddings.create.side_effect = _create_embeddings
 
     # Mock models.list()
     mock_client.models.list.return_value = Mock()
@@ -614,43 +642,9 @@ def mock_embeddings_manager():
     mock_em = Mock(spec=EmbeddingsManager)
 
     # Mock successful search results with STRING UIDs (lightweight schema)
-    # Metadata is already parsed (search_similar returns LightweightPaper-parsed metadata):
-    # authors as list, keywords as list, year as int
     mock_em.search_similar.return_value = {
-        "ids": [["1", "2", "3"]],  # Use string UIDs (lightweight schema)
+        "ids": [["1", "2", "3"]],
         "distances": [[0.1, 0.2, 0.3]],
-        "metadatas": [
-            [
-                {
-                    "title": "Attention Is All You Need",
-                    "authors": ["Vaswani et al."],
-                    "topic": "Deep Learning",
-                    "decision": "Accept (oral)",
-                    "keywords": ["transformers", "attention"],
-                },
-                {
-                    "title": "BERT: Pre-training of Deep Bidirectional Transformers",
-                    "authors": ["Devlin et al."],
-                    "topic": "Natural Language Processing",
-                    "decision": "Accept (poster)",
-                    "keywords": ["language models", "pretraining"],
-                },
-                {
-                    "title": "GPT-3: Language Models are Few-Shot Learners",
-                    "authors": ["Brown et al."],
-                    "topic": "Language Models",
-                    "decision": "Accept (oral)",
-                    "keywords": ["large language models", "in-context learning"],
-                },
-            ]
-        ],
-        "documents": [
-            [
-                "We propose the Transformer, a model architecture...",
-                "We introduce BERT, a new language representation model...",
-                "We train GPT-3, an autoregressive language model with 175B parameters...",
-            ]
-        ],
     }
 
     return mock_em

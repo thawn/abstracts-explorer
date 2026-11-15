@@ -39,6 +39,7 @@ def _mock_db(papers):
     by_uid = {paper["uid"]: paper for paper in papers}
     db.get_papers_by_uids.side_effect = lambda uids: [by_uid[uid] for uid in uids if uid in by_uid]
     db.search_papers.return_value = [paper for paper in papers if paper["uid"] not in {"p1", "p2"}]
+    db.resolve_paper_uids.return_value = [paper["uid"] for paper in papers]
     return db
 
 
@@ -129,37 +130,20 @@ class TestRecommendRelatedPapers:
         }
         em.collection.count.return_value = 4
         em.collection.query.return_value = query_result
-        em.parse_chromadb_metadata.side_effect = lambda metadata: {
-            **metadata,
-            "year": int(metadata.get("year", 0)),
-            "authors": metadata.get("authors", []),
-            "keywords": metadata.get("keywords", []),
-        }
         return em
 
     def test_recommends_nearest_unrated_papers(self):
-        papers = [_paper("p1"), _paper("p2")]
+        papers = [
+            _paper("p1"),
+            _paper("p2"),
+            _paper("p3", title="Recommended", keywords=["alignment"], authors=["Alice"]),
+            _paper("p4", title="Other"),
+        ]
         db = _mock_db(papers)
         em = self._mock_embeddings(
             {
                 "ids": [["p1", "p3", "p4"]],
                 "distances": [[0.0, 0.2, 0.4]],
-                "metadatas": [
-                    [
-                        {"uid": "p1", "year": "2026", "conference": "ICLR"},
-                        {
-                            "uid": "p3",
-                            "title": "Recommended",
-                            "year": "2026",
-                            "conference": "ICLR",
-                            "keywords": ["alignment"],
-                            "authors": ["Alice"],
-                            "session": "Oral",
-                        },
-                        {"uid": "p4", "title": "Other", "year": "2026", "conference": "ICLR"},
-                    ]
-                ],
-                "documents": [["", "abstract three", "abstract four"]],
             }
         )
 
@@ -182,13 +166,11 @@ class TestRecommendRelatedPapers:
     def test_infers_scope_from_seed_papers(self):
         papers = [_paper("p1"), _paper("p2")]
         db = _mock_db(papers)
-        em = self._mock_embeddings({"ids": [[]], "distances": [[]], "metadatas": [[]], "documents": [[]]})
+        em = self._mock_embeddings({"ids": [[]], "distances": [[]]})
 
         recommend_related_papers(db, em, priorities={"p1": {"priority": 5}, "p2": {"priority": 1}}, n_results=5)
 
-        where = em.collection.query.call_args.kwargs["where"]
-        assert {"conference": {"$in": ["ICLR"]}} in where["$and"]
-        assert {"year": {"$in": ["2026"]}} in where["$and"]
+        assert em.collection.query.call_args.kwargs["ids"] == ["p1", "p2"]
 
     def test_falls_back_to_metadata_when_embeddings_missing(self):
         papers = [_paper("p1")]

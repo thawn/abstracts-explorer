@@ -430,7 +430,10 @@ MCP_TOOLS_SCHEMA = [
                         "type": "string",
                         "description": "Conference name to search (e.g., 'NeurIPS', 'ICLR'). Required.",
                     },
-                    "where": {"type": "object", "description": "Custom ChromaDB WHERE clause for filtering"},
+                    "where_filters": {
+                        "type": "object",
+                        "description": "SQL-style paper filters (e.g. {'year': 2025, 'session': {'$in': ['Oral']}})",
+                    },
                     "collection_name": {"type": "string", "description": "Name of ChromaDB collection (optional)"},
                 },
                 "required": ["topic_keywords", "conference"],

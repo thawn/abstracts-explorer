@@ -7,7 +7,13 @@ import time
 import pytest
 from unittest.mock import Mock
 
-from abstracts_explorer.embeddings import EmbeddingsError, EmbeddingsManager, _count_tokens
+from abstracts_explorer.embeddings import (
+    EmbeddingsError,
+    EmbeddingsManager,
+    _count_tokens,
+    hash_text,
+    is_content_hash,
+)
 from tests.conftest import set_test_db
 from tests.helpers import FakeTime
 
@@ -27,8 +33,7 @@ class TestEmbeddingsManager:
         assert embeddings_manager._collection is None
 
     def test_connect(self, embeddings_manager):
-        """Test connecting to ChromaDB."""
-        embeddings_manager.connect()
+        """Test connecting to ChromaDB via the lazy client property."""
         assert embeddings_manager.client is not None
         # Check that embedding_db path exists (only for local paths)
         if not embeddings_manager.embedding_db.startswith("http"):
@@ -39,7 +44,7 @@ class TestEmbeddingsManager:
 
     def test_close(self, embeddings_manager):
         """Test closing ChromaDB connection."""
-        embeddings_manager.connect()
+        embeddings_manager.client
         embeddings_manager.close()
         assert embeddings_manager._client is None
         assert embeddings_manager._collection is None
@@ -50,70 +55,64 @@ class TestEmbeddingsManager:
             assert em._client is not None
         assert embeddings_manager._client is None
 
-    def test_init_connects_and_creates_collection(self, embeddings_manager):
-        """Test that init connects and creates the collection."""
-        embeddings_manager.connect = Mock()
-        embeddings_manager.create_collection = Mock()
+    def test_create_collection_connects_to_chromadb(self, embeddings_manager):
+        """Test that create_collection connects the client on first use."""
+        embeddings_manager.create_collection()
 
-        embeddings_manager.init()
+        assert embeddings_manager._client is not None
+        assert embeddings_manager._collection is not None
+        embeddings_manager.close()
 
-        embeddings_manager.connect.assert_called_once_with()
-        embeddings_manager.create_collection.assert_called_once_with(reset=False)
-
-    def test_init_reset(self, embeddings_manager):
-        """Test that init forwards the reset flag to create_collection."""
-        embeddings_manager.connect = Mock()
-        embeddings_manager.create_collection = Mock()
-
-        embeddings_manager.init(reset=True)
-
-        embeddings_manager.connect.assert_called_once_with()
-        embeddings_manager.create_collection.assert_called_once_with(reset=True)
-
-    def test_test_lm_studio_connection_success(self, embeddings_manager):
-        """Test successful LM Studio connection."""
-        result = embeddings_manager.test_lm_studio_connection()
+    def test_test_api_connection_success(self, embeddings_manager):
+        """Test successful API connection."""
+        result = embeddings_manager.test_api_connection()
         assert result is True
         embeddings_manager.openai_client.models.list.assert_called_once()
 
-    def test_test_lm_studio_connection_failure(self, embeddings_manager):
-        """Test failed LM Studio connection."""
-        # Mock the OpenAI client's models.list() to raise an exception
+    def test_test_api_connection_failure(self, embeddings_manager):
+        """Test failed API connection."""
         embeddings_manager.openai_client.models.list.side_effect = Exception("Connection error")
-        result = embeddings_manager.test_lm_studio_connection()
+        result = embeddings_manager.test_api_connection()
         assert result is False
 
-    def test_verbose_api_connection_test_success(self, embeddings_manager, capsys):
+    def test_test_api_connection_verbose_success(self, embeddings_manager, capsys):
         """Test verbose connection test prints success messages."""
-        result = embeddings_manager.verbose_api_connection_test()
+        result = embeddings_manager.test_api_connection(verbose=True)
 
         assert result is True
         captured = capsys.readouterr()
-        assert "Testing OpenAI API connection" in captured.out
         assert "Successfully connected to OpenAI API" in captured.out
         assert captured.err == ""
 
-    def test_verbose_api_connection_test_failure(self, embeddings_manager, capsys):
+    def test_test_api_connection_verbose_failure(self, embeddings_manager, capsys):
         """Test verbose connection test prints failure details."""
         embeddings_manager.openai_client.models.list.side_effect = Exception("Connection error")
 
-        result = embeddings_manager.verbose_api_connection_test()
+        result = embeddings_manager.test_api_connection(verbose=True)
 
         assert result is False
         captured = capsys.readouterr()
         assert "Failed to connect to OpenAI API" in captured.err
-        assert embeddings_manager.lm_studio_url in captured.err
+        assert embeddings_manager.backend_url in captured.err
         assert embeddings_manager.model_name in captured.err
 
-    def test_verbose_api_connection_test_model_hint(self, embeddings_manager, capsys):
+    def test_test_api_connection_model_hint(self, embeddings_manager, capsys):
         """Test verbose connection test uses a custom model hint."""
         embeddings_manager.openai_client.models.list.side_effect = Exception("Connection error")
 
-        result = embeddings_manager.verbose_api_connection_test(model_hint="A language model is loaded")
+        result = embeddings_manager.test_api_connection(verbose=True, model_hint="A language model is loaded")
 
         assert result is False
         captured = capsys.readouterr()
         assert "A language model is loaded" in captured.err
+
+    def test_close_closes_openai_client(self, embeddings_manager):
+        """Test that close() closes and resets the OpenAI client."""
+        embeddings_manager.client
+        openai_client = embeddings_manager.openai_client
+        embeddings_manager.close()
+        assert embeddings_manager._openai_client is None
+        openai_client.close.assert_called_once()
 
     def test_generate_embedding_success(self, embeddings_manager):
         """Test successful embedding generation."""
@@ -137,6 +136,60 @@ class TestEmbeddingsManager:
         with pytest.raises(EmbeddingsError, match="Failed to generate embedding"):
             embeddings_manager.generate_embedding("Test text")
 
+    def test_generate_embeddings_batches_inputs(self, embeddings_manager):
+        """A batch request returns one vector per input."""
+        vectors = embeddings_manager.generate_embeddings(["one", "two", "three"])
+        assert len(vectors) == 3
+        assert all(len(vector) == 4096 for vector in vectors)
+        assert embeddings_manager.openai_client.embeddings.create.call_args.kwargs["input"] == [
+            "one",
+            "two",
+            "three",
+        ]
+
+    def test_generate_embeddings_empty_list(self, embeddings_manager):
+        """An empty batch makes no API call."""
+        assert embeddings_manager.generate_embeddings([]) == []
+        embeddings_manager.openai_client.embeddings.create.assert_not_called()
+
+    def test_generate_embeddings_rejects_empty_text(self, embeddings_manager):
+        """Every text in a batch must be non-empty."""
+        with pytest.raises(EmbeddingsError, match="Cannot generate embedding for empty text"):
+            embeddings_manager.generate_embeddings(["ok", "  "])
+
+    def test_generate_embeddings_falls_back_on_context_error(self, embeddings_manager):
+        """A context-length batch error retries each text individually."""
+        context_error = Exception("maximum context length is 10 tokens")
+        embeddings_manager.openai_client.embeddings.create.side_effect = [context_error] + [
+            self._single_response() for _ in range(2)
+        ]
+
+        vectors = embeddings_manager.generate_embeddings(["one", "two"])
+
+        assert len(vectors) == 2
+        assert embeddings_manager.openai_client.embeddings.create.call_count == 3
+
+    def test_generate_embeddings_falls_back_on_count_mismatch(self, embeddings_manager):
+        """A response with the wrong number of vectors retries individually."""
+        embeddings_manager.openai_client.embeddings.create.side_effect = [
+            self._single_response(),
+            self._single_response(),
+            self._single_response(),
+        ]
+
+        vectors = embeddings_manager.generate_embeddings(["one", "two"])
+
+        assert len(vectors) == 2
+        assert embeddings_manager.openai_client.embeddings.create.call_count == 3
+
+    @staticmethod
+    def _single_response():
+        item = Mock()
+        item.embedding = [0.1] * 4096
+        response = Mock()
+        response.data = [item]
+        return response
+
     def test_create_collection(self, embeddings_manager):
         """Test creating a collection."""
         embeddings_manager.create_collection()
@@ -158,86 +211,38 @@ class TestEmbeddingsManager:
         assert embeddings_manager.collection is not None
         embeddings_manager.close()
 
-    def test_delete_embeddings_by_filter_no_filter_raises(self, embeddings_manager):
-        """delete_embeddings_by_filter with no args raises ValueError."""
+    def test_delete_embeddings_by_ids_empty(self, embeddings_manager):
+        """delete_embeddings_by_ids returns 0 for an empty list."""
         embeddings_manager.create_collection()
-        with pytest.raises(ValueError):
-            embeddings_manager.delete_embeddings_by_filter()
+        assert embeddings_manager.delete_embeddings_by_ids([]) == 0
         embeddings_manager.close()
 
-    def test_delete_embeddings_by_filter_conference(self, embeddings_manager, mock_lm_studio):
-        """delete_embeddings_by_filter(conference=...) removes only matching papers."""
+    def test_delete_embeddings_by_ids(self, embeddings_manager, mock_lm_studio):
+        """delete_embeddings_by_ids removes only the supplied UIDs."""
         embeddings_manager.create_collection()
 
         papers = [
-            {"uid": "p1", "title": "NeurIPS Paper 1", "abstract": "A", "conference": "NeurIPS", "year": 2024},
-            {"uid": "p2", "title": "NeurIPS Paper 2", "abstract": "B", "conference": "NeurIPS", "year": 2024},
-            {"uid": "p3", "title": "ICLR Paper", "abstract": "C", "conference": "ICLR", "year": 2024},
+            {"uid": "p1", "title": "Paper 1", "abstract": "A"},
+            {"uid": "p2", "title": "Paper 2", "abstract": "B"},
+            {"uid": "p3", "title": "Paper 3", "abstract": "C"},
         ]
         for paper in papers:
             embeddings_manager.add_paper(paper)
 
         assert embeddings_manager.collection.count() == 3
-
-        deleted = embeddings_manager.delete_embeddings_by_filter(conference="NeurIPS")
+        deleted = embeddings_manager.delete_embeddings_by_ids(["p1", "p3"])
         assert deleted == 2
         assert embeddings_manager.collection.count() == 1
-
-        # Remaining paper should be the ICLR one
-        remaining = embeddings_manager.collection.get()
-        assert remaining["ids"] == ["p3"]
+        assert embeddings_manager.collection.get()["ids"] == ["p2"]
         embeddings_manager.close()
 
-    def test_delete_embeddings_by_filter_year(self, embeddings_manager, mock_lm_studio):
-        """delete_embeddings_by_filter(year=...) removes only papers from that year."""
+    def test_delete_embeddings_by_ids_unknown_ids(self, embeddings_manager, mock_lm_studio):
+        """delete_embeddings_by_ids ignores unknown UIDs."""
         embeddings_manager.create_collection()
 
-        papers = [
-            {"uid": "p1", "title": "Paper 2024", "abstract": "A", "conference": "NeurIPS", "year": 2024},
-            {"uid": "p2", "title": "Paper 2025", "abstract": "B", "conference": "NeurIPS", "year": 2025},
-        ]
-        for paper in papers:
-            embeddings_manager.add_paper(paper)
-
-        deleted = embeddings_manager.delete_embeddings_by_filter(year=2024)
+        embeddings_manager.add_paper({"uid": "p1", "title": "Paper 1", "abstract": "A"})
+        deleted = embeddings_manager.delete_embeddings_by_ids(["missing"])
         assert deleted == 1
-        assert embeddings_manager.collection.count() == 1
-        remaining = embeddings_manager.collection.get()
-        assert remaining["ids"] == ["p2"]
-        embeddings_manager.close()
-
-    def test_delete_embeddings_by_filter_conference_and_year(self, embeddings_manager, mock_lm_studio):
-        """delete_embeddings_by_filter(conference=..., year=...) scopes to exact slice."""
-        embeddings_manager.create_collection()
-
-        papers = [
-            {"uid": "p1", "title": "NeurIPS 2024", "abstract": "A", "conference": "NeurIPS", "year": 2024},
-            {"uid": "p2", "title": "NeurIPS 2025", "abstract": "B", "conference": "NeurIPS", "year": 2025},
-            {"uid": "p3", "title": "ICLR 2024", "abstract": "C", "conference": "ICLR", "year": 2024},
-        ]
-        for paper in papers:
-            embeddings_manager.add_paper(paper)
-
-        deleted = embeddings_manager.delete_embeddings_by_filter(conference="NeurIPS", year=2024)
-        assert deleted == 1
-        assert embeddings_manager.collection.count() == 2
-        remaining_ids = set(embeddings_manager.collection.get()["ids"])
-        assert "p1" not in remaining_ids
-        assert {"p2", "p3"} == remaining_ids
-        embeddings_manager.close()
-
-    def test_delete_embeddings_by_filter_nothing_to_delete(self, embeddings_manager, mock_lm_studio):
-        """delete_embeddings_by_filter returns 0 when no matching embeddings exist."""
-        embeddings_manager.create_collection()
-
-        papers = [
-            {"uid": "p1", "title": "NeurIPS Paper", "abstract": "A", "conference": "NeurIPS", "year": 2024},
-        ]
-        for paper in papers:
-            embeddings_manager.add_paper(paper)
-
-        deleted = embeddings_manager.delete_embeddings_by_filter(conference="ICLR")
-        assert deleted == 0
         assert embeddings_manager.collection.count() == 1
         embeddings_manager.close()
 
@@ -255,6 +260,26 @@ class TestEmbeddingsManager:
 
         stats = embeddings_manager.get_collection_stats()
         assert stats["count"] == 1
+        embeddings_manager.close()
+
+    def test_add_paper_updates_existing(self, embeddings_manager, mock_lm_studio):
+        """Test that add_paper replaces the embedding when a paper's content changes."""
+        embeddings_manager.create_collection()
+
+        uid = "update_paper"
+        embeddings_manager.add_paper({"uid": uid, "title": "Title", "abstract": "Old abstract"})
+        old_hash = embeddings_manager.collection.get(ids=[uid])["documents"][0]
+
+        embeddings_manager.add_paper({"uid": uid, "title": "Title", "abstract": "New abstract"})
+
+        stored = embeddings_manager.collection.get(ids=[uid])
+        assert embeddings_manager.collection.count() == 1
+        assert stored["documents"][0] != old_hash
+        assert stored["documents"][0] == hash_text("Title\n\nNew abstract")
+        assert (
+            embeddings_manager.paper_needs_update({"uid": uid, "title": "Title", "abstract": "New abstract"}) is False
+        )
+
         embeddings_manager.close()
 
     def test_add_paper_empty_abstract(self, embeddings_manager, mock_lm_studio):
@@ -354,8 +379,8 @@ class TestEmbeddingsManager:
 
         assert "ids" in results
         assert "distances" in results
-        assert "documents" in results
-        assert "metadatas" in results
+        assert "metadatas" not in results
+        assert "documents" not in results
         assert len(results["ids"][0]) <= 2
         embeddings_manager.close()
 
@@ -555,64 +580,17 @@ class TestEmbeddingsManager:
 
         embeddings_manager.close()
 
-    def test_embed_from_database_with_metadata_fields(self, embeddings_manager, test_database, mock_lm_studio):
-        """Test that metadata fields from lightweight schema are included."""
+    def test_embed_from_database_without_metadata(self, embeddings_manager, test_database, mock_lm_studio):
+        """Embedding a database stores hashes and no metadata."""
         embeddings_manager.create_collection()
 
         count = embeddings_manager.embed_from_database()
         assert count == 3
 
-        # Search to verify metadata includes lightweight schema fields
-        results = embeddings_manager.search_similar("test", n_results=3)
-        assert len(results["metadatas"][0]) > 0
+        stored = embeddings_manager.collection.get(include=["metadatas", "documents"])
+        assert all(metadata is None for metadata in stored["metadatas"])
+        assert all(is_content_hash(document) for document in stored["documents"])
 
-        # Check papers have the lightweight schema metadata fields
-        for metadata in results["metadatas"][0]:
-            assert "title" in metadata
-            assert "authors" in metadata
-            assert "keywords" in metadata
-            assert "session" in metadata
-
-        # Verify one paper has expected metadata values (use first result)
-        first_paper_metadata = results["metadatas"][0][0]
-        assert first_paper_metadata is not None
-        # Verify fields exist and contain expected data format
-        assert "title" in first_paper_metadata
-        assert "authors" in first_paper_metadata
-        assert "session" in first_paper_metadata
-
-        embeddings_manager.close()
-
-    def test_paper_exists(self, embeddings_manager, mock_lm_studio):
-        """Test paper_exists method."""
-        embeddings_manager.create_collection()
-
-        # Initially paper should not exist
-        assert not embeddings_manager.paper_exists("test_paper_1")
-
-        # Add a paper
-        paper = {
-            "uid": "test_paper_1",
-            "title": "Test Paper",
-            "abstract": "This is a test abstract",
-        }
-        embeddings_manager.add_paper(paper)
-
-        # Now paper should exist
-        assert embeddings_manager.paper_exists("test_paper_1")
-
-        # Other papers should not exist
-        assert not embeddings_manager.paper_exists("test_paper_2")
-
-        embeddings_manager.close()
-
-    def test_paper_exists_auto_initializes(self, embeddings_manager):
-        """Test that paper_exists auto-initializes client and collection if needed."""
-        # Should not raise - auto-initializes (paper doesn't exist yet)
-        result = embeddings_manager.paper_exists("test_paper_1")
-        assert result is False
-        assert embeddings_manager._client is not None
-        assert embeddings_manager._collection is not None
         embeddings_manager.close()
 
     def test_embed_from_database_skip_existing(self, embeddings_manager, test_database, mock_lm_studio):
@@ -634,6 +612,42 @@ class TestEmbeddingsManager:
         stats = embeddings_manager.get_collection_stats()
         assert stats["count"] == 3
 
+        embeddings_manager.close()
+
+    def test_embed_from_database_batches_requests(self, embeddings_manager, test_database):
+        """Papers are embedded with a single batched API request."""
+        embeddings_manager.create_collection()
+
+        count = embeddings_manager.embed_from_database()
+
+        assert count == 3
+        create = embeddings_manager.openai_client.embeddings.create
+        assert create.call_count == 1
+        assert isinstance(create.call_args.kwargs["input"], list)
+        embeddings_manager.close()
+
+    def test_embed_from_database_retries_batch_failures_individually(self, embeddings_manager, test_database):
+        """A failed batch falls back to individual paper embeddings."""
+        embeddings_manager.create_collection()
+
+        calls = {"count": 0}
+
+        def create(*args, **kwargs):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise RuntimeError("batch failed")
+            item = Mock()
+            item.embedding = [0.1] * 4096
+            response = Mock()
+            response.data = [item]
+            return response
+
+        embeddings_manager.openai_client.embeddings.create.side_effect = create
+
+        count = embeddings_manager.embed_from_database()
+
+        assert count == 3
+        assert calls["count"] == 4
         embeddings_manager.close()
 
     def test_paper_needs_update_returns_true_on_error(self, embeddings_manager, mock_lm_studio):
@@ -1226,7 +1240,7 @@ def test_search_papers_semantic_distance_threshold(embeddings_manager, tmp_path,
     """Test that search_papers_semantic filters results by distance_threshold.
 
     Papers with distance greater than the threshold must be excluded from the
-    results, matching the behaviour of count_papers_within_distance.
+    results, matching the behaviour of query_ids_within_distance.
     """
     from unittest.mock import patch as mock_patch
     from abstracts_explorer.database import DatabaseManager
@@ -1304,399 +1318,97 @@ def test_search_papers_semantic_distance_threshold(embeddings_manager, tmp_path,
     embeddings_manager.close()
 
 
-class TestParseChromaDBMetadata:
-    """Tests for EmbeddingsManager.parse_chromadb_metadata."""
+class TestContentHashing:
+    """Tests for ChromaDB content hashing."""
 
-    def _make_raw_metadata(self, **overrides):
-        """Create a complete raw ChromaDB metadata dict with all required fields."""
-        base = {
-            "title": "Test Paper",
-            "authors": "Alice;Bob",
-            "abstract": "An abstract",
-            "session": "ML Track",
-            "poster_position": "1",
-            "year": "2024",
-            "conference": "NeurIPS",
-        }
-        base.update(overrides)
-        return base
+    def test_hash_text_format(self):
+        digest = hash_text("hello")
+        assert digest.startswith("sha256:")
+        assert len(digest) == 71
+        assert is_content_hash(digest)
+        assert not is_content_hash("hello")
+        assert not is_content_hash(None)
 
-    def test_converts_year_string_to_int(self):
-        """Test that year is converted from string to int."""
-        raw = self._make_raw_metadata(year="2024")
-        parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
-        assert parsed["year"] == 2024
-        assert isinstance(parsed["year"], int)
+    def test_paper_text_hash(self):
+        paper = {"uid": "p1", "title": "Title", "abstract": "Abstract"}
+        text = EmbeddingsManager.embedding_text_from_paper(paper)
+        assert hash_text(text) == hash_text("Title\n\nAbstract")
 
-    def test_converts_original_id_string_to_int(self):
-        """Test that original_id is converted from string to int."""
-        raw = self._make_raw_metadata(original_id="42")
-        parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
-        assert parsed["original_id"] == 42
-        assert isinstance(parsed["original_id"], int)
-
-    def test_authors_parsed_to_list(self):
-        """Test that semicolon-separated authors are parsed to a list."""
-        raw = self._make_raw_metadata(authors="Alice;Bob;Charlie")
-        parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
-        assert parsed["authors"] == ["Alice", "Bob", "Charlie"]
-
-    def test_keywords_parsed_to_list(self):
-        """Test that comma-separated keywords are parsed to a list."""
-        raw = self._make_raw_metadata(keywords="ml,ai,deep learning")
-        parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
-        assert parsed["keywords"] == ["ml", "ai", "deep learning"]
-
-    def test_string_fields_preserved(self):
-        """Test that string fields are preserved correctly."""
-        raw = self._make_raw_metadata()
-        parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
-        assert parsed["title"] == "Test Paper"
-        assert parsed["session"] == "ML Track"
-        assert parsed["conference"] == "NeurIPS"
-
-    def test_integer_year_stays_int(self):
-        """Test that integer year value passes through unchanged."""
-        raw = self._make_raw_metadata(year=2024)
-        parsed = EmbeddingsManager.parse_chromadb_metadata(raw)
-        assert parsed["year"] == 2024
-        assert isinstance(parsed["year"], int)
-
-
-class TestSerializeMetadataForChromaDB:
-    """Tests for EmbeddingsManager._serialize_metadata_for_chromadb."""
-
-    def test_authors_list_joined_with_semicolon_and_space(self):
-        """Test that authors list is joined with '; ' matching the DB format."""
-        metadata = {"authors": ["Alice", "Bob", "Charlie"], "year": 2024, "title": "Test"}
-        result = EmbeddingsManager._serialize_metadata_for_chromadb(metadata)
-        assert result["authors"] == "Alice; Bob; Charlie"
-
-    def test_keywords_list_joined_with_comma_and_space(self):
-        """Test that keywords list is joined with ', ' matching the DB format."""
-        metadata = {"keywords": ["ml", "ai", "deep learning"], "authors": ["Alice"], "year": 2024}
-        result = EmbeddingsManager._serialize_metadata_for_chromadb(metadata)
-        assert result["keywords"] == "ml, ai, deep learning"
-
-    def test_none_values_converted_to_empty_string(self):
-        """Test that None values are converted to empty strings."""
-        metadata = {"title": None, "authors": ["Alice"], "year": 2024}
-        result = EmbeddingsManager._serialize_metadata_for_chromadb(metadata)
-        assert result["title"] == ""
-
-    def test_numeric_values_converted_to_string(self):
-        """Test that numeric values are converted to strings for consistent ChromaDB filters."""
-        metadata = {"year": 2024, "authors": ["Alice"]}
-        result = EmbeddingsManager._serialize_metadata_for_chromadb(metadata)
-        assert result["year"] == "2024"
-        assert isinstance(result["year"], str)
-
-    def test_string_values_preserved(self):
-        """Test that existing string values are not changed."""
-        metadata = {"title": "My Paper", "conference": "NeurIPS", "authors": "Alice; Bob", "year": "2024"}
-        result = EmbeddingsManager._serialize_metadata_for_chromadb(metadata)
-        assert result["title"] == "My Paper"
-        assert result["conference"] == "NeurIPS"
-        assert result["authors"] == "Alice; Bob"
-        assert result["year"] == "2024"
-        assert isinstance(result["year"], str)
-
-    def test_authors_list_whitespace_stripped(self):
-        """Test that whitespace is stripped from each author name before joining."""
-        metadata = {"authors": [" Alice ", "Bob", "  Charlie  "], "year": 2024}
-        result = EmbeddingsManager._serialize_metadata_for_chromadb(metadata)
-        assert result["authors"] == "Alice; Bob; Charlie"
-
-    def test_keywords_list_whitespace_stripped(self):
-        """Test that whitespace is stripped from each keyword before joining."""
-        metadata = {"keywords": [" ml ", "ai", "  deep learning  "], "authors": ["Alice"]}
-        result = EmbeddingsManager._serialize_metadata_for_chromadb(metadata)
-        assert result["keywords"] == "ml, ai, deep learning"
-
-
-class TestImportEmbeddings:
-    """Tests for EmbeddingsManager.import_embeddings."""
-
-    def test_import_embeddings_with_list_metadata(self, embeddings_manager):
-        """Test that import_embeddings handles list metadata values (authors, keywords).
-
-        Regression test for the registry import bug where exported metadata
-        contains Python lists (after being parsed through LightweightPaper) but
-        ChromaDB only accepts scalar values.
-        """
+    def test_paper_needs_update_hash_comparison(self, embeddings_manager, mock_lm_studio):
         embeddings_manager.create_collection()
-
-        # Simulate data as it would appear after export_embeddings() + JSON round-trip:
-        # authors and keywords are lists, year is an int.
-        data = {
-            "ids": ["paper1"],
-            "documents": ["Title: Test Paper\nAbstract: Test abstract"],
-            "metadatas": [
-                {
-                    "title": "Test Paper",
-                    "abstract": "Test abstract",
-                    "authors": ["Alice", "Bob", "Charlie"],  # list, not string
-                    "keywords": ["ml", "ai"],  # list, not string
-                    "year": 2018,  # int, not string
-                    "conference": "CHI",
-                    "session": "Session A",
-                    "poster_position": "1",
-                }
-            ],
-            "embeddings": [[0.1, 0.2, 0.3]],
-        }
-
-        # Should not raise an error
-        count = embeddings_manager.import_embeddings(data, "CHI", 2018)
-        assert count == 1
-
-        # Verify the paper was actually stored
-        stats = embeddings_manager.get_collection_stats()
-        assert stats["count"] == 1
-
-        embeddings_manager.close()
-
-    def test_import_embeddings_authors_stored_with_consistent_separator(self, embeddings_manager):
-        """Test that after importing with list authors, they are stored consistently with the DB format."""
-        embeddings_manager.create_collection()
-
-        data = {
-            "ids": ["paper1"],
-            "documents": ["Title: Test Paper\nAbstract: Test abstract"],
-            "metadatas": [
-                {
-                    "title": "Test Paper",
-                    "abstract": "Test abstract",
-                    "authors": ["Alice", "Bob", "Charlie"],
-                    "year": 2024,
-                    "conference": "NeurIPS",
-                    "session": "Session A",
-                    "poster_position": "1",
-                }
-            ],
-            "embeddings": [[0.1, 0.2, 0.3]],
-        }
-
-        embeddings_manager.import_embeddings(data, "NeurIPS", 2024)
-
-        # Retrieve raw metadata from ChromaDB and verify authors are stored as a
-        # semicolon-and-space-separated string (same format as the SQL database).
-        raw = embeddings_manager.collection.get(ids=["paper1"], include=["metadatas"])
-        stored_authors = raw["metadatas"][0]["authors"]
-        assert isinstance(stored_authors, str)
-        assert stored_authors == "Alice; Bob; Charlie"
-
-        embeddings_manager.close()
-
-
-class TestExportImportRoundTrip:
-    """Integration tests for the export→import round-trip (no registry involved)."""
-
-    def test_export_import_round_trip_preserves_data(self, embeddings_manager):
-        """Test that papers survive an export→import round-trip with their metadata intact.
-
-        This tests the full cycle: add a paper with list authors → export to dict →
-        import back from that dict → verify authors are stored correctly.
-        """
-        embeddings_manager.create_collection()
-
-        # Add a paper via add_paper (as would happen from embed_from_database)
-        paper = {
-            "uid": "roundtrip1",
-            "title": "Round Trip Test Paper",
-            "abstract": "Testing the full export-import cycle.",
-            "authors": "Cynthia Putnam; Mary Bungum; Dan Spinner",  # already string (from DB)
-            "keywords": "testing, round trip, embeddings",
-            "year": "2018",
-            "conference": "CHI",
-            "session": "Session A",
-            "poster_position": "1",
-        }
+        paper = {"uid": "p1", "title": "Title", "abstract": "Abstract"}
         embeddings_manager.add_paper(paper)
 
-        # Export embeddings to a local dict (no registry)
-        exported = embeddings_manager.export_embeddings("CHI", 2018)
-
-        assert exported["ids"] == ["roundtrip1"]
-        assert len(exported["metadatas"]) == 1
-
-        # After export, authors should be a list (parse_chromadb_metadata converts to list)
-        exported_authors = exported["metadatas"][0]["authors"]
-        assert isinstance(exported_authors, list)
-        assert exported_authors == ["Cynthia Putnam", "Mary Bungum", "Dan Spinner"]
-
-        # Clear the collection so we can re-import
-        embeddings_manager.collection.delete(ids=["roundtrip1"])
-        assert embeddings_manager.get_collection_stats()["count"] == 0
-
-        # Import from the exported dict (simulating registry import)
-        count = embeddings_manager.import_embeddings(exported, "CHI", 2018)
-        assert count == 1
-
-        # Retrieve raw metadata and verify authors stored as string with '; ' separator
-        raw = embeddings_manager.collection.get(ids=["roundtrip1"], include=["metadatas"])
-        stored_meta = raw["metadatas"][0]
-        assert isinstance(stored_meta["authors"], str)
-        assert stored_meta["authors"] == "Cynthia Putnam; Mary Bungum; Dan Spinner"
-
-        # Parse back through LightweightPaper to verify round-trip fidelity
-        reparsed = embeddings_manager.parse_chromadb_metadata(stored_meta)
-
-        # The full dictionary must be identical to what was exported before the delete+re-import.
-        # This covers all fields: authors (list), keywords (list), year (int), title, conference,
-        # session, poster_position, abstract, and any other metadata that was stored.
-        assert reparsed == exported["metadatas"][0]
-
+        assert embeddings_manager.paper_needs_update(paper) is False
+        assert embeddings_manager.paper_needs_update({**paper, "abstract": "Changed"}) is True
         embeddings_manager.close()
 
-    def test_export_import_round_trip_with_keywords(self, embeddings_manager):
-        """Test that keywords survive an export→import round-trip."""
+    def test_paper_needs_update_missing_document(self, embeddings_manager):
         embeddings_manager.create_collection()
+        embeddings_manager.collection.add(
+            ids=["p1"],
+            embeddings=[[0.1] * 4096],
+            documents=[""],
+        )
+        paper = {"uid": "p1", "title": "Title", "abstract": "Abstract"}
+        assert embeddings_manager.paper_needs_update(paper) is True
+        embeddings_manager.close()
 
-        paper = {
-            "uid": "kw_roundtrip",
-            "title": "Keyword Round Trip Paper",
-            "abstract": "Tests keyword export-import.",
-            "authors": "Alice Author",
-            "keywords": "machine learning, deep learning, neural networks",
-            "year": "2024",
-            "conference": "NeurIPS",
-            "session": "ML Track",
-            "poster_position": "P1",
+
+class TestImportExport:
+    """Tests for the v1 embeddings artifact format."""
+
+    def test_export_import_round_trip(self, embeddings_manager, mock_lm_studio):
+        embeddings_manager.create_collection()
+        papers = [
+            {"uid": "p1", "title": "Paper 1", "abstract": "Abstract 1"},
+            {"uid": "p2", "title": "Paper 2", "abstract": "Abstract 2"},
+        ]
+        for paper in papers:
+            embeddings_manager.add_paper(paper)
+
+        exported = embeddings_manager.export_embeddings(["p1", "p2"])
+        assert exported["format_version"] == 1
+        assert exported["ids"] == ["p1", "p2"]
+        assert all(is_content_hash(doc) for doc in exported["documents"])
+        assert "metadatas" not in exported
+
+        embeddings_manager.delete_embeddings_by_ids(["p1", "p2"])
+        imported = embeddings_manager.import_embeddings(exported)
+        assert imported == 2
+        assert embeddings_manager.collection.count() == 2
+        embeddings_manager.close()
+
+    def test_export_requires_hashed_documents(self, embeddings_manager):
+        embeddings_manager.create_collection()
+        embeddings_manager.collection.add(
+            ids=["p1"],
+            embeddings=[[0.1] * 4096],
+            documents=["full text"],
+        )
+        with pytest.raises(EmbeddingsError, match="uncompacted"):
+            embeddings_manager.export_embeddings(["p1"])
+        embeddings_manager.close()
+
+    def test_import_rejects_legacy_format(self, embeddings_manager):
+        embeddings_manager.create_collection()
+        with pytest.raises(EmbeddingsError, match="Unsupported"):
+            embeddings_manager.import_embeddings({"ids": ["p1"], "documents": ["x"], "embeddings": [[0.1]]})
+        embeddings_manager.close()
+
+    def test_import_replaces_ids(self, embeddings_manager, mock_lm_studio):
+        embeddings_manager.create_collection()
+        embeddings_manager.add_paper({"uid": "old", "title": "Old", "abstract": "Old abstract"})
+        data = {
+            "format_version": 1,
+            "ids": ["new"],
+            "documents": [hash_text("New\n\nNew abstract")],
+            "embeddings": [[0.1] * 4096],
         }
-        embeddings_manager.add_paper(paper)
-
-        exported = embeddings_manager.export_embeddings("NeurIPS", 2024)
-
-        # After export, keywords should be a list
-        exported_keywords = exported["metadatas"][0]["keywords"]
-        assert isinstance(exported_keywords, list)
-        assert exported_keywords == ["machine learning", "deep learning", "neural networks"]
-
-        # Import and verify full dictionary equality
-        embeddings_manager.collection.delete(ids=["kw_roundtrip"])
-        embeddings_manager.import_embeddings(exported, "NeurIPS", 2024)
-
-        raw = embeddings_manager.collection.get(ids=["kw_roundtrip"], include=["metadatas"])
-        reparsed = embeddings_manager.parse_chromadb_metadata(raw["metadatas"][0])
-
-        # The full dictionary must equal what was exported: keywords as a list,
-        # authors as a list, year as int, and all other metadata fields intact.
-        assert reparsed == exported["metadatas"][0]
-
-        embeddings_manager.close()
-
-
-class TestEmbeddingsMetadataRoundTrip:
-    """Integration tests for the SQL DB → ChromaDB metadata round-trip."""
-
-    def test_sql_to_chromadb_round_trip(self, embeddings_manager, tmp_path):
-        """Test that paper metadata is preserved when going SQL DB → embed → ChromaDB → retrieve.
-
-        Verifies that:
-        1. A LightweightPaper stored in the SQL DB is embedded into ChromaDB.
-        2. The raw ChromaDB metadata can be parsed back via parse_chromadb_metadata.
-        3. The parsed metadata matches the original LightweightPaper.
-        """
-        from abstracts_explorer.database import DatabaseManager
-        from abstracts_explorer.plugin import LightweightPaper
-        from tests.conftest import set_test_db
-
-        # Build an isolated DB
-        db_path = tmp_path / "roundtrip_test.db"
-        set_test_db(db_path)
-
-        original_paper = LightweightPaper(
-            title="SQL to ChromaDB Round Trip Paper",
-            abstract="This paper tests the full round-trip from SQL DB to ChromaDB.",
-            authors=["Cynthia Putnam", "Mary Bungum", "Dan Spinner"],
-            keywords=["testing", "round trip", "embeddings"],
-            session="Integration Session",
-            poster_position="RT1",
-            year=2018,
-            conference="CHI",
-        )
-
-        with DatabaseManager() as db:
-            db.create_tables()
-            uid = db.add_paper(original_paper)
-
-        assert uid is not None
-
-        # Embed the paper from the database (embedding API call is mocked in the fixture)
-        embeddings_manager.create_collection()
-        embedded_count = embeddings_manager.embed_from_database()
-        assert embedded_count == 1
-
-        # Retrieve the raw metadata directly from ChromaDB
-        raw_results = embeddings_manager.collection.get(ids=[uid], include=["metadatas"])
-        assert len(raw_results["metadatas"]) == 1
-        raw_meta = raw_results["metadatas"][0]
-
-        # Raw metadata must not contain list values (ChromaDB rejects lists)
-        for value in raw_meta.values():
-            assert not isinstance(value, list), f"ChromaDB metadata contains a list: {value!r}"
-
-        # Authors and keywords should be stored as strings with the canonical separators
-        assert raw_meta["authors"] == "Cynthia Putnam; Mary Bungum; Dan Spinner"
-        assert raw_meta["keywords"] == "testing, round trip, embeddings"
-
-        # Parse the raw metadata back through LightweightPaper
-        parsed = embeddings_manager.parse_chromadb_metadata(raw_meta)
-
-        # All fields must match the original LightweightPaper.  Optional fields
-        # that were None in the original are excluded from both dicts via
-        # model_dump(exclude_none=True), so equality holds end-to-end.
-        assert parsed == original_paper.model_dump(exclude_none=True)
-
-        embeddings_manager.close()
-
-    def test_sql_to_chromadb_round_trip_no_keywords(self, embeddings_manager, tmp_path):
-        """Test that papers without keywords are handled correctly in the SQL → ChromaDB round-trip."""
-        from abstracts_explorer.database import DatabaseManager
-        from abstracts_explorer.plugin import LightweightPaper
-        from tests.conftest import set_test_db
-
-        db_path = tmp_path / "roundtrip_nokw.db"
-        set_test_db(db_path)
-
-        original_paper = LightweightPaper(
-            title="Paper Without Keywords",
-            abstract="This paper has no keywords.",
-            authors=["Solo Author"],
-            keywords=None,  # no keywords
-            session="Solo Session",
-            poster_position="S1",
-            year=2020,
-            conference="CHI",
-        )
-
-        with DatabaseManager() as db:
-            db.create_tables()
-            uid = db.add_paper(original_paper)
-
-        assert uid is not None
-
-        embeddings_manager.create_collection()
-        embedded_count = embeddings_manager.embed_from_database()
-        assert embedded_count == 1
-
-        raw_results = embeddings_manager.collection.get(ids=[uid], include=["metadatas"])
-        raw_meta = raw_results["metadatas"][0]
-
-        # keywords should be stored as an empty string (not None, not a list)
-        assert isinstance(raw_meta.get("keywords", ""), str)
-
-        # No list values should appear in metadata
-        for value in raw_meta.values():
-            assert not isinstance(value, list), f"ChromaDB metadata contains a list: {value!r}"
-
-        # Parsing back must reproduce all fields of the original paper exactly.
-        # Optional fields that were None on the original are absent from both
-        # model_dump(exclude_none=True) dicts (including keywords=None).
-        parsed = embeddings_manager.parse_chromadb_metadata(raw_meta)
-        assert parsed == original_paper.model_dump(exclude_none=True)
-
+        imported = embeddings_manager.import_embeddings(data, replace_ids=["old"])
+        assert imported == 1
+        assert embeddings_manager.collection.count() == 1
+        assert embeddings_manager.collection.get()["ids"] == ["new"]
         embeddings_manager.close()
 
 
@@ -1735,7 +1447,7 @@ class TestRateLimiting:
         """Test that a RateLimitedTransport http_client is used when requests_per_minute > 0."""
         from tests.conftest import get_env_test_path
         from abstracts_explorer.config import get_config
-        from abstracts_explorer.embeddings import RateLimitedTransport
+        from abstracts_explorer.rate_limiter import RateLimitedTransport
         from abstracts_explorer.rate_limiter import (
             TokenBucketRateLimiter,
             set_global_rate_limiter,
@@ -1759,7 +1471,7 @@ class TestRateLimiting:
         """Test that no RateLimitedTransport is used when requests_per_minute=0."""
         from tests.conftest import get_env_test_path
         from abstracts_explorer.config import get_config
-        from abstracts_explorer.embeddings import RateLimitedTransport
+        from abstracts_explorer.rate_limiter import RateLimitedTransport
 
         monkeypatch.setenv("EMBEDDING_DB", str(tmp_path / "chroma"))
         get_config(reload=True, env_path=get_env_test_path())
@@ -1773,7 +1485,7 @@ class TestRateLimiting:
     def test_rate_limited_transport_sleeps_when_tokens_exhausted(self, monkeypatch):
         """Test that RateLimitedTransport blocks when token bucket is empty."""
         import httpx2
-        from abstracts_explorer.embeddings import RateLimitedTransport
+        from abstracts_explorer.rate_limiter import RateLimitedTransport
         from abstracts_explorer.rate_limiter import set_global_rate_limiter
 
         clock = FakeTime()
@@ -1796,7 +1508,7 @@ class TestRateLimiting:
     def test_rate_limited_transport_no_wait_when_tokens_available(self):
         """Test that RateLimitedTransport does not wait when tokens are available."""
         import httpx2
-        from abstracts_explorer.embeddings import RateLimitedTransport
+        from abstracts_explorer.rate_limiter import RateLimitedTransport
         from abstracts_explorer.rate_limiter import set_global_rate_limiter
 
         set_global_rate_limiter(None)
@@ -1817,7 +1529,7 @@ class TestRateLimiting:
     def test_rate_limited_transport_forwards_response(self):
         """Test that RateLimitedTransport forwards the response from inner transport."""
         import httpx2
-        from abstracts_explorer.embeddings import RateLimitedTransport
+        from abstracts_explorer.rate_limiter import RateLimitedTransport
         from abstracts_explorer.rate_limiter import set_global_rate_limiter
 
         set_global_rate_limiter(None)
@@ -1835,8 +1547,8 @@ class TestRateLimiting:
         mock_inner.handle_request.assert_called_once()
 
 
-class TestFindPapersWithinDistance:
-    """Tests for distance-filtered paper lookup helpers."""
+class TestDistanceHelpers:
+    """Tests for ID-based distance helpers."""
 
     def _make_manager(self):
         manager = object.__new__(EmbeddingsManager)
@@ -1846,197 +1558,56 @@ class TestFindPapersWithinDistance:
         manager._collection.query.return_value = {
             "ids": [["paper-a", "paper-b", "paper-c"]],
             "distances": [[0.1, 0.2, 2.0]],
-            "metadatas": [
-                [
-                    {"title": "A", "session": "S1", "year": "2023", "conference": "NeurIPS"},
-                    {"title": "B", "session": "S2", "year": "2024", "conference": "NeurIPS"},
-                    {"title": "C", "session": "S3", "year": "2024", "conference": "NeurIPS"},
-                ]
-            ],
         }
         return manager
 
-    def test_find_papers_within_distance_batches_database_lookup(self):
-        """Matching papers are fetched in one batched database call."""
+    def test_query_ids_within_distance(self):
         manager = self._make_manager()
-        database = Mock()
-        database.get_papers_by_uids.return_value = [
-            {"uid": "paper-a", "title": "A"},
-            {"uid": "paper-b", "title": "B"},
-        ]
-
-        result = manager.find_papers_within_distance(
-            database=database,
+        result = manager.query_ids_within_distance(
             query="query",
             distance_threshold=1.0,
             query_embedding=[0.1],
         )
-
-        database.get_papers_by_uids.assert_called_once_with(["paper-a", "paper-b"])
-        assert result["count"] == 2
-        assert [paper["uid"] for paper in result["papers"]] == ["paper-a", "paper-b"]
-        assert result["papers"][0]["distance"] == 0.1
         assert result["total_considered"] == 3
-
-    def test_find_papers_within_distance_skips_missing_database_records(self):
-        """Records missing from the database are not returned or counted."""
-        manager = self._make_manager()
-        database = Mock()
-        database.get_papers_by_uids.return_value = [{"uid": "paper-a", "title": "A"}]
-
-        result = manager.find_papers_within_distance(
-            database=database,
-            query="query",
-            distance_threshold=1.0,
-            query_embedding=[0.1],
-        )
-
-        assert result["count"] == 1
-        assert [paper["uid"] for paper in result["papers"]] == ["paper-a"]
-
-    def test_count_papers_within_distance_returns_match_count(self):
-        """Counting matches does not fetch paper details."""
-        manager = self._make_manager()
-
-        count = manager.count_papers_within_distance(
-            query="query",
-            distance_threshold=1.0,
-            query_embedding=[0.1],
-        )
-
-        assert count == 2
+        assert result["ids"] == ["paper-a", "paper-b"]
+        assert result["distances"] == [0.1, 0.2]
         assert manager._collection.query.call_args.kwargs["include"] == ["distances"]
 
-    def test_count_papers_within_distance_reuses_query_embedding(self):
-        """A pre-computed embedding is passed through without regeneration."""
+    def test_query_ids_within_distance_reuses_query_embedding(self):
         manager = self._make_manager()
-
-        count = manager.count_papers_within_distance(
+        manager.query_ids_within_distance(
             query="query",
             distance_threshold=1.0,
             query_embedding=[0.5, 0.6],
         )
-
         manager.generate_embedding.assert_not_called()
         assert manager._collection.query.call_args.kwargs["query_embeddings"] == [[0.5, 0.6]]
-        assert count == 2
 
-    def test_query_papers_within_distance_returns_lightweight_metadata(self):
-        """The lightweight query returns display fields from ChromaDB metadata."""
+    def test_query_ids_within_distance_with_ids(self):
         manager = self._make_manager()
-
-        result = manager.query_papers_within_distance(
+        manager.query_ids_within_distance(
             query="query",
             distance_threshold=1.0,
+            ids=["paper-a", "paper-b"],
             query_embedding=[0.1],
         )
+        assert manager._collection.query.call_args.kwargs["ids"] == ["paper-a", "paper-b"]
 
-        assert result["count"] == 2
-        assert result["total_considered"] == 3
-        assert result["papers"] == [
-            {
-                "uid": "paper-a",
-                "distance": 0.1,
-                "title": "A",
-                "session": "S1",
-                "year": 2023,
-                "conference": "NeurIPS",
-            },
-            {
-                "uid": "paper-b",
-                "distance": 0.2,
-                "title": "B",
-                "session": "S2",
-                "year": 2024,
-                "conference": "NeurIPS",
-            },
-        ]
-        assert manager._collection.query.call_args.kwargs["include"] == ["distances", "metadatas"]
-
-    def test_query_papers_within_distance_handles_missing_metadata(self):
-        """Missing or empty metadata fields fall back to safe defaults."""
+    def test_empty_ids_raise(self):
         manager = self._make_manager()
-        manager._collection.query.return_value = {
-            "ids": [["paper-a"]],
-            "distances": [[0.1]],
-            "metadatas": [[{"title": "A"}]],
-        }
+        with pytest.raises(EmbeddingsError, match="No papers matched"):
+            manager.query_ids_within_distance(query="query", ids=[], query_embedding=[0.1])
 
-        result = manager.query_papers_within_distance(
-            query="query",
-            distance_threshold=1.0,
-            query_embedding=[0.1],
-        )
-
-        assert result["papers"] == [
-            {
-                "uid": "paper-a",
-                "distance": 0.1,
-                "title": "A",
-                "session": "",
-                "year": None,
-                "conference": "",
-            }
-        ]
-
-    @pytest.mark.parametrize("method_name", ["find_papers_within_distance", "count_papers_within_distance"])
-    def test_distance_helpers_reject_empty_query(self, method_name):
-        """All distance helpers reject empty queries."""
+    def test_query_ids_reject_empty_query(self):
         manager = self._make_manager()
-        kwargs = {"query": "  ", "distance_threshold": 1.0}
-        if method_name == "find_papers_within_distance":
-            kwargs["database"] = Mock()
-
         with pytest.raises(EmbeddingsError, match="Query cannot be empty"):
-            getattr(manager, method_name)(**kwargs)
+            manager.query_ids_within_distance(query="  ", distance_threshold=1.0)
 
-    def test_matching_pairs_stops_at_threshold(self):
-        """Pairs beyond the threshold are excluded, the boundary is included."""
-        pairs = EmbeddingsManager._matching_pairs(["a", "b", "c"], [0.1, 1.0, 1.1], 1.0)
-
-        assert pairs == [("a", 0.1), ("b", 1.0)]
-
-    def test_matching_pairs_empty_input(self):
-        """An empty query result produces no pairs."""
-        assert EmbeddingsManager._matching_pairs([], [], 1.0) == []
-
-    def test_query_collection_passes_include_to_chromadb(self):
-        """The include list is forwarded to ChromaDB unchanged."""
-        manager = self._make_manager()
-
-        manager._query_collection(
-            query="query",
-            include=["distances", "metadatas"],
-            query_embedding=[0.1],
-        )
-
-        assert manager._collection.query.call_args.kwargs["include"] == ["distances", "metadatas"]
-
-    def test_query_collection_returns_empty_metadatas_when_not_requested(self):
-        """Metadatas are empty when the response does not contain them."""
-        manager = self._make_manager()
-        manager._collection.query.return_value = {"ids": [["paper-a"]], "distances": [[0.1]]}
-
-        result = manager._query_collection(
-            query="query",
-            include=["distances"],
-            query_embedding=[0.1],
-        )
-
-        assert result["metadatas"] == []
-        assert result["ids"] == ["paper-a"]
-
-    def test_query_collection_raises_when_no_results(self):
-        """An empty ChromaDB result set is reported as an error."""
+    def test_query_ids_raises_when_no_results(self):
         manager = self._make_manager()
         manager._collection.query.return_value = {"ids": [[]], "distances": [[]]}
-
         with pytest.raises(EmbeddingsError, match="No results from collection query"):
-            manager._query_collection(
-                query="query",
-                include=["distances"],
-                query_embedding=[0.1],
-            )
+            manager.query_ids_within_distance(query="query", query_embedding=[0.1])
 
 
 class TestEmbeddingInputTruncation:
@@ -2093,7 +1664,8 @@ class TestEmbeddingInputTruncation:
         em.add_paper(paper)
 
         stored = em.collection.get(ids=["long_paper"])
-        assert stored["documents"][0] == f"Long Paper\n\n{abstract}".strip()
+        assert stored["documents"][0] == hash_text(f"Long Paper\n\n{abstract}".strip())
+        assert stored["metadatas"][0] is None
 
         sent = em.openai_client.embeddings.create.call_args.kwargs["input"]
         assert len(sent) < len(abstract)
@@ -2104,7 +1676,10 @@ class TestEmbeddingInputTruncation:
         em = embeddings_manager
         em.max_input_tokens = 0
         text = self._long_text()
-        response = em.openai_client.embeddings.create.return_value
+        response = Mock()
+        item = Mock()
+        item.embedding = [0.1] * 4096
+        response.data = [item]
         em.openai_client.embeddings.create.side_effect = [
             Exception(
                 "Error code: 400 - This model's maximum context length is 100 tokens. "

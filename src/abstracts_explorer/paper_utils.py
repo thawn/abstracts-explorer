@@ -26,7 +26,6 @@ class PaperFormattingError(Exception):
 def format_search_results(
     search_results: Dict[str, Any],
     database,
-    include_documents: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     Format ChromaDB search results into complete paper records.
@@ -38,11 +37,9 @@ def format_search_results(
     Parameters
     ----------
     search_results : dict
-        Search results from ChromaDB with 'ids', 'distances', 'metadatas', 'documents'.
+        Search results from ChromaDB with ``ids`` and ``distances``.
     database : DatabaseManager
         Database instance for fetching complete paper details.
-    include_documents : bool, optional
-        Whether to include document text (abstract) from search results, by default True.
 
     Returns
     -------
@@ -80,44 +77,39 @@ def format_search_results(
     if "distances" in search_results and search_results["distances"][0]:
         if len(search_results["distances"][0]) != result_count:
             raise PaperFormattingError("Inconsistent result lengths in search_results.")
-    if "documents" in search_results and search_results["documents"][0]:
-        if len(search_results["documents"][0]) != result_count:
-            raise PaperFormattingError("Inconsistent result lengths in search_results.")
+
+    ids = search_results["ids"][0]
+    valid_uids: List[str] = []
+    for paper_uid in ids:
+        if isinstance(paper_uid, str):
+            valid_uids.append(paper_uid)
+        else:
+            logger.warning(f"Invalid paper_uid format: {paper_uid} ({type(paper_uid)})")
+
+    papers_by_uid: Dict[str, Dict[str, Any]] = {}
+    if valid_uids:
+        unique_uids = list(dict.fromkeys(valid_uids))
+        papers_by_uid = {paper["uid"]: paper for paper in database.get_papers_by_uids(unique_uids)}
 
     papers = []
-    for i in range(result_count):
-        paper_uid = search_results["ids"][0][i]
-
-        try:
-            # ChromaDB stores UIDs as strings - use them directly
-            if not isinstance(paper_uid, str):
-                logger.warning(f"Invalid paper_uid format: {paper_uid} ({type(paper_uid)})")
-                continue
-
-            # Get complete paper from database (this validates paper exists)
-            paper = database.get_paper_by_uid(paper_uid)
-            if paper is None:
-                raise PaperFormattingError(f"Paper with uid={paper_uid} not found in database.")
-
-            # Add similarity/distance scores if available
-            if "distances" in search_results and search_results["distances"][0]:
-                distance = search_results["distances"][0][i]
-                paper["distance"] = distance
-                # Convert distance to similarity (0-1 range where 1 is most similar)
-                paper["similarity"] = max(0.0, 1.0 - distance)
-
-            # Add abstract from search results if needed and available
-            if include_documents and "documents" in search_results and search_results["documents"][0]:
-                # Only override if database abstract is missing
-                if not paper.get("abstract"):
-                    paper["abstract"] = search_results["documents"][0][i]
-
-            papers.append(paper)
-
-        except PaperFormattingError as e:
-            # Log the error but continue with other papers
-            logger.warning(f"Skipping paper {paper_uid}: {str(e)}")
+    for i, paper_uid in enumerate(ids):
+        if not isinstance(paper_uid, str):
             continue
+
+        fetched_paper = papers_by_uid.get(paper_uid)
+        if fetched_paper is None:
+            logger.warning(f"Skipping paper {paper_uid}: Paper with uid={paper_uid} not found in database.")
+            continue
+
+        paper = dict(fetched_paper)
+
+        # Add similarity/distance scores if available
+        if "distances" in search_results and search_results["distances"][0]:
+            distance = search_results["distances"][0][i]
+            paper["distance"] = distance
+            paper["similarity"] = max(0.0, 1.0 - distance)
+
+        papers.append(paper)
 
     if not papers:
         raise PaperFormattingError(

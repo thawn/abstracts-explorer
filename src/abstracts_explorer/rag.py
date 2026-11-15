@@ -485,7 +485,7 @@ class RAGChat:
         Manager for embeddings and vector search.
     database : DatabaseManager
         Database instance for querying paper details. REQUIRED.
-    lm_studio_url : str, optional
+    backend_url : str, optional
         URL for OpenAI-compatible API, by default from config.
     model : str, optional
         Name of the language model, by default from config.
@@ -501,7 +501,7 @@ class RAGChat:
     >>> from abstracts_explorer.embeddings import EmbeddingsManager
     >>> from abstracts_explorer.database import DatabaseManager
     >>> em = EmbeddingsManager()
-    >>> em.init()
+    >>> em.create_collection()
     >>> db = DatabaseManager()
     >>> chat = RAGChat(em, db)
     >>>
@@ -518,7 +518,7 @@ class RAGChat:
         self,
         embeddings_manager,
         database,
-        lm_studio_url: Optional[str] = None,
+        backend_url: Optional[str] = None,
         model: Optional[str] = None,
         max_context_papers: Optional[int] = None,
         temperature: Optional[float] = None,
@@ -532,7 +532,7 @@ class RAGChat:
         config = get_config()
         self.embeddings_manager = embeddings_manager
         self.database = database
-        self.lm_studio_url = (lm_studio_url or config.llm_backend_url).rstrip("/")
+        self.backend_url = (backend_url or config.llm_backend_url).rstrip("/")
         self.model = model or config.chat_model
         self.max_context_papers = max_context_papers or config.max_context_papers
         self.temperature = temperature or config.chat_temperature
@@ -630,14 +630,14 @@ class RAGChat:
         # Build rate-limited async HTTP client when RPM > 0.
         http_client: Optional[httpx2.AsyncClient] = None
         if requests_per_minute > 0:
-            from abstracts_explorer.embeddings import RateLimitedTransport
+            from abstracts_explorer.rate_limiter import RateLimitedTransport
 
             transport = RateLimitedTransport(httpx2.AsyncHTTPTransport(), requests_per_minute=requests_per_minute)
             http_client = httpx2.AsyncClient(transport=transport)
 
         # Create OpenAI-compatible model
         provider = OpenAIProvider(
-            base_url=f"{self.lm_studio_url}/v1",
+            base_url=f"{self.backend_url}/v1",
             api_key=config.llm_backend_auth_token or "lm-studio-local",
             http_client=http_client,
         )
@@ -678,7 +678,6 @@ class RAGChat:
         self,
         question: str,
         n_results: Optional[int] = None,
-        metadata_filter: Optional[Dict[str, Any]] = None,
         system_prompt: Optional[str] = None,
         conferences: Optional[List[str]] = None,
         years: Optional[List[int]] = None,
@@ -694,8 +693,6 @@ class RAGChat:
             User's question.
         n_results : int, optional
             Number of papers to retrieve for context.
-        metadata_filter : dict, optional
-            Metadata filter for paper search (currently unused with Pydantic AI agent).
         system_prompt : str, optional
             Custom system prompt for the model (overrides default instructions including
             conference context).

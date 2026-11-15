@@ -571,36 +571,25 @@ class TestIntegration:
             assert all(isinstance(d, (int, float)) for d in distances)
             assert len(distances) == len(result_uids)
 
-            # Verify metadata is preserved
-            metadatas = graph_results["metadatas"][0]
-            assert all("title" in meta for meta in metadatas)
-            assert all("session" in meta for meta in metadatas)
-
             # Step 4: Test search with different query
             reasoning_results = em.search_similar("reasoning and language models", n_results=2)
 
             assert len(reasoning_results["ids"][0]) <= 2
             assert len(reasoning_results["ids"][0]) > 0
 
-            # Step 5: Test metadata filtering - filter by session
-            # Get the first session name from our test data to use for filtering
+            # Step 5: Test metadata filtering through SQL-resolved IDs
             with DatabaseManager() as db:
                 results = db._query("SELECT DISTINCT session FROM papers LIMIT 1")
                 first_session = results[0]["session"]
+                session_ids = db.resolve_paper_uids(sessions=[first_session])
 
-            session_results = em.search_similar("machine learning", n_results=5, where={"session": first_session})
-
-            # Should return results (at least one paper from that session)
+            session_results = em.search_similar("machine learning", n_results=5, ids=session_ids)
             assert len(session_results["ids"][0]) > 0
 
-            # Verify all returned papers are from the specified session
-            for meta in session_results["metadatas"][0]:
-                assert meta["session"] == first_session
-
-            # Step 6: Verify documents (abstracts) are returned
-            docs = graph_results["documents"][0]
-            assert all(isinstance(doc, str) for doc in docs)
-            assert all(len(doc) > 0 for doc in docs)
+            # Step 6: Verify documents are content hashes and metadata is absent
+            stored = em.collection.get(ids=graph_results["ids"][0], include=["documents", "metadatas"])
+            assert all(isinstance(doc, str) and doc.startswith("sha256:") for doc in stored["documents"])
+            assert all(metadata is None for metadata in stored["metadatas"])
 
             # Step 7: Test that embeddings persist across sessions
             # Close and reopen the manager

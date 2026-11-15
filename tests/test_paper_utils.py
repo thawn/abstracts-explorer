@@ -27,7 +27,7 @@ class TestFormatSearchResults:
         }
 
         mock_db = Mock()
-        mock_db.get_paper_by_uid.side_effect = [
+        mock_db.get_papers_by_uids.return_value = [
             {"uid": "abc123", "title": "Paper 1", "abstract": "Abstract 1", "authors": ["Author 1"]},
             {"uid": "def456", "title": "Paper 2", "abstract": "Abstract 2", "authors": ["Author 2"]},
         ]
@@ -42,6 +42,7 @@ class TestFormatSearchResults:
         assert papers[0]["similarity"] == 0.8
         assert papers[1]["uid"] == "def456"
         assert papers[1]["similarity"] == 0.5
+        mock_db.get_papers_by_uids.assert_called_once_with(["abc123", "def456"])
 
     def test_format_search_results_empty_results(self):
         """Test empty search results."""
@@ -51,7 +52,7 @@ class TestFormatSearchResults:
         papers = format_search_results(search_results, mock_db)
 
         assert papers == []
-        mock_db.get_paper_by_uid.assert_not_called()
+        mock_db.get_papers_by_uids.assert_not_called()
 
     def test_format_search_results_invalid_input(self):
         """Test invalid search results structure."""
@@ -93,9 +94,8 @@ class TestFormatSearchResults:
         }
 
         mock_db = Mock()
-        mock_db.get_paper_by_uid.side_effect = [
+        mock_db.get_papers_by_uids.return_value = [
             {"uid": "abc123", "title": "Paper 1", "authors": ["Author 1"]},
-            None,  # Paper nonexist not found
             {"uid": "def456", "title": "Paper 2", "authors": ["Author 2"]},
         ]
 
@@ -111,49 +111,32 @@ class TestFormatSearchResults:
         search_results = {"ids": [["nonexist1", "nonexist2"]]}
 
         mock_db = Mock()
-        mock_db.get_paper_by_uid.return_value = None  # No papers found
+        mock_db.get_papers_by_uids.return_value = []
 
         with pytest.raises(PaperFormattingError, match="No valid papers could be formatted"):
             format_search_results(search_results, mock_db)
 
-    def test_format_search_results_without_documents(self):
-        """Test formatting without including documents."""
+    def test_format_search_results_uses_database_abstract(self):
+        """Abstracts always come from the database."""
         search_results = {
             "ids": [["abc123"]],
             "distances": [[0.2]],
         }
 
         mock_db = Mock()
-        mock_db.get_paper_by_uid.return_value = {
-            "uid": "abc123",
-            "title": "Paper 1",
-            "abstract": "From DB",
-            "authors": ["Author 1"],
-        }
+        mock_db.get_papers_by_uids.return_value = [
+            {
+                "uid": "abc123",
+                "title": "Paper 1",
+                "abstract": "From DB",
+                "authors": ["Author 1"],
+            }
+        ]
 
-        papers = format_search_results(search_results, mock_db, include_documents=False)
+        papers = format_search_results(search_results, mock_db)
 
         assert len(papers) == 1
         assert papers[0]["abstract"] == "From DB"
-
-    def test_format_search_results_with_documents_override(self):
-        """Test that documents from search results override missing abstracts."""
-        search_results = {
-            "ids": [["abc123"]],
-            "documents": [["From search"]],
-        }
-
-        mock_db = Mock()
-        mock_db.get_paper_by_uid.return_value = {
-            "uid": "abc123",
-            "title": "Paper 1",
-            "authors": [],
-            "abstract": None,
-        }  # No abstract
-
-        papers = format_search_results(search_results, mock_db, include_documents=True)
-
-        assert papers[0]["abstract"] == "From search"
 
 
 class TestBuildContextFromPapers:

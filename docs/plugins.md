@@ -99,6 +99,13 @@ uv run abstracts-explorer download --plugin agu --year 2026 --db-path data/agu.d
 - **Years**: 2014 onward (2014–2023 use the legacy `fmYY` slug, 2024+ use `aguYY`)
 - **Source**: [AGU program](https://studio.m-anage.com/agu/)
 - **Fields**: Lightweight schema (title, authors, abstract, session, and presentation number when available)
+- **Concurrency**: Session, paper, and people-index requests run concurrently.
+  Use `--max-workers` to tune concurrency (default: 20 from the CLI, 16 when
+  calling the plugin directly). Use `--request-delay` to add a per-request
+  delay if m-anage starts rate-limiting.
+- **Resume**: Long downloads checkpoint completed phases next to the output
+  file. If a run is interrupted, rerun without `--force` to resume. Use
+  `--no-resume` to discard a checkpoint and start fresh.
 - **Progress**: The plugin shows progress bars for session discovery, paper fetching,
   people indexing, and fallback batch reads in interactive terminals. Pass
   `progress=True` or `progress=False` to force them on or off.

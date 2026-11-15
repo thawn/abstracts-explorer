@@ -160,7 +160,9 @@ them from `static/modules/`.
 - **Database**: SQLAlchemy 2.0+, SQLite default / PostgreSQL supported. Models:
   `Paper` (indexed title/year/openreview id), `EmbeddingsMetadata`,
   `ClusteringCache`. Schema via `metadata.create_all()`.
-- **Embeddings**: ChromaDB; metadata records embedding model and parameters.
+- **Embeddings**: ChromaDB stores paper UIDs, vectors, and SHA-256 content
+  hashes only. The SQL database is the single source of truth for paper
+  metadata; filters resolve to UIDs in SQL and are passed to ChromaDB as IDs.
 - **Clustering**: CLI/web/MCP pipeline is fixed to Agglomerative (ward, distance
   threshold 150) + t-SNE. `clustering.py` still exposes K-Means, DBSCAN,
   Agglomerative, Spectral, Fuzzy C-Means and PCA/t-SNE; UMAP was removed.

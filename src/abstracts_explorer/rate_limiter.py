@@ -3,12 +3,20 @@ Thread-safe and async-compatible token bucket rate limiter.
 
 Provides accurate global rate limiting that works correctly with
 Waitress's multi-threaded WSGI server and async agents (Pydantic AI).
+
+``RateLimitedTransport`` adapts the shared limiter to ``httpx2`` clients so
+sync and async OpenAI clients are throttled transparently.
 """
 
 import asyncio
+import logging
 import threading
 import time
 from typing import Optional
+
+import httpx2
+
+logger = logging.getLogger(__name__)
 
 _global_rate_limiter: Optional["TokenBucketRateLimiter"] = None
 
@@ -110,6 +118,70 @@ class TokenBucketRateLimiter:
         with self._lock:
             self._tokens = self._max_tokens
             self._last_update = time.monotonic()
+
+
+class RateLimitedTransport(httpx2.BaseTransport, httpx2.AsyncBaseTransport):
+    """
+    An httpx2 transport that enforces a maximum requests-per-minute rate.
+
+    Supports both synchronous and asynchronous clients.  Wraps an existing
+    transport and acquires tokens from a shared token bucket rate limiter before
+    forwarding requests.  This provides thread-safe, global rate limiting that
+    works correctly under Waitress's multi-threaded WSGI server as well as with
+    Pydantic AI's async OpenAI provider.
+
+    Parameters
+    ----------
+    transport : httpx2.BaseTransport or httpx2.AsyncBaseTransport
+        The underlying transport to delegate requests to.
+    requests_per_minute : int
+        Maximum number of requests per minute. Must be > 0.
+    """
+
+    def __init__(
+        self,
+        transport: httpx2.BaseTransport | httpx2.AsyncBaseTransport,
+        requests_per_minute: int,
+    ) -> None:
+        self._transport = transport
+
+        global_rate_limiter = get_global_rate_limiter()
+        if global_rate_limiter is None:
+            global_rate_limiter = TokenBucketRateLimiter(requests_per_minute=requests_per_minute)
+            set_global_rate_limiter(global_rate_limiter)
+        elif global_rate_limiter.requests_per_minute != requests_per_minute:
+            logger.warning(
+                "Reusing existing global rate limiter with %d requests/minute; "
+                "requested rate of %d requests/minute is ignored",
+                global_rate_limiter.requests_per_minute,
+                requests_per_minute,
+            )
+
+        self._rate_limiter = global_rate_limiter
+
+    def handle_request(self, request: httpx2.Request) -> httpx2.Response:
+        """Send *request* after acquiring a rate-limit token."""
+        if not isinstance(self._transport, httpx2.BaseTransport):
+            raise TypeError("Cannot use a synchronous client with an async transport.")
+        self._rate_limiter.acquire(tokens=1.0)
+        return self._transport.handle_request(request)
+
+    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
+        """Send *request* after acquiring a rate-limit token asynchronously."""
+        if not isinstance(self._transport, httpx2.AsyncBaseTransport):
+            raise TypeError("Cannot use an async client with a synchronous transport.")
+        await self._rate_limiter.async_acquire(tokens=1.0)
+        return await self._transport.handle_async_request(request)
+
+    def close(self) -> None:
+        """Close the underlying sync transport."""
+        if isinstance(self._transport, httpx2.BaseTransport):
+            self._transport.close()
+
+    async def aclose(self) -> None:
+        """Close the underlying async transport."""
+        if isinstance(self._transport, httpx2.AsyncBaseTransport):
+            await self._transport.aclose()
 
 
 def get_global_rate_limiter() -> Optional["TokenBucketRateLimiter"]:

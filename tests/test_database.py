@@ -9,7 +9,7 @@ using the new schema with integer IDs and proper author relationships.
 
 import pytest
 import sqlite3
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from abstracts_explorer.database import DatabaseManager, DatabaseError, normalize_model_name
 from abstracts_explorer.plugin import LightweightPaper
@@ -224,6 +224,38 @@ class TestDatabaseManager:
         assert "papers" in tables
 
         db_manager.close()
+
+    def test_create_tables_caches_schema_for_postgresql(self, db_manager, monkeypatch):
+        """PostgreSQL schema verification is cached across manager instances."""
+        from abstracts_explorer import database as database_module
+
+        database_module.reset_schema_cache()
+        monkeypatch.setattr(DatabaseManager, "_schema_cache_applies", lambda self: True)
+        try:
+            with patch.object(database_module.Base.metadata, "create_all") as create_all:
+                db_manager.create_tables()
+                db_manager.create_tables()
+
+            create_all.assert_called_once()
+        finally:
+            database_module.reset_schema_cache()
+            db_manager.close()
+
+    def test_create_tables_force_bypasses_schema_cache(self, db_manager, monkeypatch):
+        """force=True re-runs the schema check even when the URL is cached."""
+        from abstracts_explorer import database as database_module
+
+        database_module.reset_schema_cache()
+        monkeypatch.setattr(DatabaseManager, "_schema_cache_applies", lambda self: True)
+        try:
+            with patch.object(database_module.Base.metadata, "create_all") as create_all:
+                db_manager.create_tables()
+                db_manager.create_tables(force=True)
+
+            assert create_all.call_count == 2
+        finally:
+            database_module.reset_schema_cache()
+            db_manager.close()
 
     def test_query_auto_connects(self, db_manager):
         """Querying an uninitialized database creates the schema lazily."""
@@ -1726,10 +1758,99 @@ class TestGetConferenceYearsFromDb:
         assert result["NeurIPS"] == [2025, 2024]
         assert result["ICLR"] == [2024]
 
+    def test_uses_single_query(self, connected_db, sample_paper):
+        """The conference/year mapping is built with one SQL statement."""
+        from abstracts_explorer.profiling import SqlProfiler
+
+        connected_db.add_paper(sample_paper)
+
+        with SqlProfiler() as profiler:
+            with profiler.case("get_conference_years_from_db"):
+                connected_db.get_conference_years_from_db()
+
+        stats = profiler.results()[0]
+        assert stats.statement_count == 1
+
     def test_returns_empty_dict_when_database_empty(self, db_manager):
         """Returns empty dict for an empty auto-initialized database."""
         assert db_manager.get_conference_years_from_db() == {}
         db_manager.close()
+
+
+class TestMetadataCacheIntegration:
+    """Tests for PostgreSQL metadata caching behavior."""
+
+    def _enable_cache(self, monkeypatch):
+        monkeypatch.setattr(DatabaseManager, "_metadata_cache_enabled", lambda self: True)
+
+    def test_postgresql_metadata_cache_hits(self, connected_db, sample_paper, monkeypatch):
+        """A cached metadata call executes no SQL after the first call."""
+        from abstracts_explorer.profiling import SqlProfiler
+
+        self._enable_cache(monkeypatch)
+        connected_db.add_paper(sample_paper)
+
+        with SqlProfiler() as profiler:
+            with profiler.case("first"):
+                first = connected_db.get_conference_years_from_db()
+            with profiler.case("second"):
+                second = connected_db.get_conference_years_from_db()
+
+        stats = {case.label: case.statement_count for case in profiler.results()}
+        assert stats["first"] == 1
+        assert stats["second"] == 0
+        assert first == second == {"NeurIPS": [2025]}
+
+    def test_sqlite_bypasses_metadata_cache(self, connected_db, sample_paper):
+        """SQLite metadata calls always execute SQL."""
+        from abstracts_explorer.profiling import SqlProfiler
+
+        connected_db.add_paper(sample_paper)
+
+        with SqlProfiler() as profiler:
+            with profiler.case("first"):
+                connected_db.get_conference_years_from_db()
+            with profiler.case("second"):
+                connected_db.get_conference_years_from_db()
+
+        stats = {case.label: case.statement_count for case in profiler.results()}
+        assert stats["first"] == 1
+        assert stats["second"] == 1
+
+    def test_add_paper_invalidates_metadata_cache(
+        self, connected_db, sample_paper, sample_paper_minimal, monkeypatch
+    ):
+        """Adding a paper makes new conference/year data visible immediately."""
+        self._enable_cache(monkeypatch)
+        connected_db.add_paper(sample_paper)
+        assert connected_db.get_conference_years_from_db() == {"NeurIPS": [2025]}
+
+        connected_db.add_paper(sample_paper_minimal)
+
+        assert connected_db.get_conference_years_from_db() == {
+            "ICLR": [2024],
+            "NeurIPS": [2025],
+        }
+
+    def test_delete_papers_invalidates_metadata_cache(self, connected_db, sample_paper, monkeypatch):
+        """Deleting papers makes removed conference/year data disappear immediately."""
+        self._enable_cache(monkeypatch)
+        connected_db.add_paper(sample_paper)
+        assert connected_db.get_conference_years_from_db() == {"NeurIPS": [2025]}
+
+        connected_db.delete_papers_by_conference_year("NeurIPS", 2025)
+
+        assert connected_db.get_conference_years_from_db() == {}
+
+    def test_cached_values_are_copies(self, connected_db, sample_paper, monkeypatch):
+        """Callers cannot mutate cached metadata."""
+        self._enable_cache(monkeypatch)
+        connected_db.add_paper(sample_paper)
+
+        first = connected_db.get_conferences()
+        first.append("Mutated")
+
+        assert "Mutated" not in connected_db.get_conferences()
 
 
 class TestConfirmDefaultConferenceYearExists:
@@ -1873,6 +1994,66 @@ class TestGetPapersByUids:
 
     def test_empty_input_returns_empty_list(self, connected_db):
         assert connected_db.get_papers_by_uids([]) == []
+
+
+class TestPaperUidResolution:
+    """Tests for UID-based resolution and summary hydration."""
+
+    def test_get_paper_uids(self, connected_db, sample_paper, sample_paper_minimal):
+        connected_db.add_paper(sample_paper)
+        connected_db.add_paper(sample_paper_minimal)
+
+        uids = connected_db.get_paper_uids({"year": 2025})
+        assert len(uids) == 1
+        assert isinstance(uids[0], str)
+
+    def test_resolve_paper_uids_combines_filters(self, connected_db, sample_paper, sample_paper_minimal):
+        connected_db.add_paper(sample_paper)
+        connected_db.add_paper(sample_paper_minimal)
+
+        uids = connected_db.resolve_paper_uids(
+            conferences=["NeurIPS"],
+            years=[2025],
+            where_filters={"year": "2025"},
+        )
+        assert len(uids) == 1
+
+    def test_resolve_paper_uids_empty_scope(self, connected_db, sample_paper):
+        connected_db.add_paper(sample_paper)
+        assert connected_db.resolve_paper_uids(conferences=["ICLR"]) == []
+
+    def test_summaries_preserve_order_and_omit_missing(self, connected_db, sample_paper):
+        uid = connected_db.add_paper(sample_paper)
+
+        summaries = connected_db.get_paper_summaries_by_uids(["missing", uid])
+        assert len(summaries) == 1
+        assert summaries[0]["uid"] == uid
+        assert summaries[0]["title"] == "Test Paper"
+        assert summaries[0]["abstract"] == sample_paper.abstract
+        assert set(summaries[0]) == {"uid", "title", "abstract", "year", "conference", "session"}
+
+    def test_find_papers_within_distance_hydrates(self, connected_db, sample_paper):
+        uid = connected_db.add_paper(sample_paper)
+        em = Mock()
+        em.query_ids_within_distance.return_value = {
+            "ids": [uid],
+            "distances": [0.25],
+            "query_embedding": [0.1],
+            "total_considered": 1,
+        }
+
+        result = connected_db.find_papers_within_distance(
+            em,
+            "query",
+            conferences=["NeurIPS"],
+            years=[2025],
+        )
+
+        assert result["count"] == 1
+        assert result["papers"][0]["uid"] == uid
+        assert result["papers"][0]["distance"] == 0.25
+        em.query_ids_within_distance.assert_called_once()
+        assert em.query_ids_within_distance.call_args.kwargs["ids"] == [uid]
 
 
 class TestGetPaperWhereFilters:

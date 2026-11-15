@@ -105,6 +105,9 @@ class Config:
         Name of the ChromaDB collection.
     max_context_papers : int
         Default number of papers for RAG context.
+    metadata_cache_ttl : int
+        Time-to-live in seconds for the PostgreSQL metadata cache. ``0``
+        disables the cache.
     chat_temperature : float
         Default temperature for chat generation.
     chat_max_tokens : int
@@ -246,6 +249,7 @@ class Config:
 
         # RAG Settings
         self.max_context_papers = self._get_env_int("MAX_CONTEXT_PAPERS", default=5)
+        self.metadata_cache_ttl = self._get_env_int("METADATA_CACHE_TTL", default=86400)
 
         # Query Rewriting Settings
         self.enable_query_rewriting = self._get_env_bool("ENABLE_QUERY_REWRITING", default=True)
@@ -425,6 +429,7 @@ class Config:
             "EMBEDDING_DB",
             "COLLECTION_NAME",
             "MAX_CONTEXT_PAPERS",
+            "METADATA_CACHE_TTL",
             "ENABLE_QUERY_REWRITING",
             "QUERY_SIMILARITY_THRESHOLD",
             "DEFAULT_CONFERENCE",
@@ -468,6 +473,7 @@ class Config:
             "database_url": self._mask_database_url(self.database_url),
             "collection_name": self.collection_name,
             "max_context_papers": self.max_context_papers,
+            "metadata_cache_ttl": self.metadata_cache_ttl,
         }
 
     def _mask_database_url(self, url: str) -> str:

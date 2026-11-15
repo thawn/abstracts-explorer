@@ -830,20 +830,41 @@ class TestExecuteMCPToolE2E:
         """get_topic_evolution executes end-to-end with mocked EmbeddingsManager."""
         mock_em = Mock()
 
-        def _query_papers(query, distance_threshold, conferences=None, years=None, query_embedding=None):
-            return {
-                "count": 3,
-                "papers": [
-                    {"title": "Paper 2022", "session": "ML", "distance": 0.1, "year": 2022},
-                    {"title": "Paper 2023", "session": "ML", "distance": 0.2, "year": 2023},
-                    {"title": "Paper 2024", "session": "ML", "distance": 0.3, "year": 2024},
-                ],
-                "total_considered": 90,
-            }
-
-        mock_em.query_papers_within_distance.side_effect = _query_papers
+        mock_em.query_ids_within_distance.return_value = {
+            "ids": ["a1", "a2", "a3"],
+            "distances": [0.1, 0.2, 0.3],
+            "count": 3,
+            "total_considered": 90,
+        }
         mock_db = Mock()
         mock_db.get_years.return_value = [2022, 2023, 2024]
+        mock_db.resolve_paper_uids.return_value = ["a1", "a2", "a3"]
+        mock_db.get_paper_summaries_by_uids.return_value = [
+            {
+                "uid": "a1",
+                "title": "Paper 2022",
+                "session": "ML",
+                "year": 2022,
+                "conference": "NeurIPS",
+                "abstract": "",
+            },
+            {
+                "uid": "a2",
+                "title": "Paper 2023",
+                "session": "ML",
+                "year": 2023,
+                "conference": "NeurIPS",
+                "abstract": "",
+            },
+            {
+                "uid": "a3",
+                "title": "Paper 2024",
+                "session": "ML",
+                "year": 2024,
+                "conference": "NeurIPS",
+                "abstract": "",
+            },
+        ]
         mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 100}
 
         with (
@@ -869,17 +890,22 @@ class TestExecuteMCPToolE2E:
     def test_analyze_topic_relevance_real_execution(self):
         """analyze_topic_relevance executes end-to-end with mocked EmbeddingsManager."""
         mock_em = Mock()
-        mock_em.query_papers_within_distance.return_value = {
-            "papers": [
-                {"title": "Paper 1", "year": 2025, "conference": "NeurIPS", "distance": 0.5},
-                {"title": "Paper 2", "year": 2025, "conference": "NeurIPS", "distance": 1.0},
-            ],
+        mock_em.query_ids_within_distance.return_value = {
+            "ids": ["p1", "p2"],
+            "distances": [0.5, 1.0],
+            "count": 2,
             "total_considered": 100,
         }
+        mock_db = Mock()
+        mock_db.resolve_paper_uids.return_value = ["p1", "p2"]
+        mock_db.get_papers_by_uids.return_value = [
+            {"uid": "p1", "title": "Paper 1", "year": 2025, "conference": "NeurIPS"},
+            {"uid": "p2", "title": "Paper 2", "year": 2025, "conference": "NeurIPS"},
+        ]
 
         with (
             patch("abstracts_explorer.mcp_server.EmbeddingsManager", return_value=mock_em),
-            patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=Mock()),
+            patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),
             patch("abstracts_explorer.mcp_server.get_config") as mock_cfg,
         ):
             mock_cfg.return_value = Mock(collection_name="papers")
@@ -897,14 +923,19 @@ class TestExecuteMCPToolE2E:
     def test_analyze_topic_relevance_conference_singular_normalized(self):
         """analyze_topic_relevance maps 'conference' (singular) to 'conferences'."""
         mock_em = Mock()
-        mock_em.query_papers_within_distance.return_value = {
-            "papers": [{"title": "P", "year": 2025, "conference": "NeurIPS", "distance": 0.5}],
+        mock_em.query_ids_within_distance.return_value = {
+            "ids": ["p1"],
+            "distances": [0.5],
+            "count": 1,
             "total_considered": 50,
         }
+        mock_db = Mock()
+        mock_db.resolve_paper_uids.return_value = ["p1"]
+        mock_db.get_papers_by_uids.return_value = [{"uid": "p1", "title": "P", "year": 2025, "conference": "NeurIPS"}]
 
         with (
             patch("abstracts_explorer.mcp_server.EmbeddingsManager", return_value=mock_em),
-            patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=Mock()),
+            patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),
             patch("abstracts_explorer.mcp_server.get_config") as mock_cfg,
         ):
             mock_cfg.return_value = Mock(collection_name="papers")

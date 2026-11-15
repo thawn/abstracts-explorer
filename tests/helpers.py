@@ -189,14 +189,14 @@ def check_lm_studio_available():
     try:
         config = get_config(reload=True, env_path=get_env_test_path())
         em = EmbeddingsManager(
-            lm_studio_url=config.llm_backend_url,
+            backend_url=config.llm_backend_url,
             auth_token=config.llm_backend_auth_token,
             model_name=config.embedding_model,
         )
 
         try:
             # Connect and perform a lightweight liveness check via the embeddings API
-            if not em.test_lm_studio_connection():
+            if not em.test_api_connection():
                 _lm_studio_available_cache = False
                 return False
 

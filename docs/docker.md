@@ -240,6 +240,49 @@ directories into the new Podman named volumes and sets the correct ownership and
 permissions.  It creates a timestamped backup of the existing data before
 migrating.
 
+#### Create PostgreSQL search indexes
+
+Search performance on PostgreSQL can be improved with trigram indexes for
+`ILIKE` searches and composite indexes for conference/year/session lookups. The
+index migration is manual and idempotent. It is not run automatically at startup.
+
+Run a dry run inside the running container:
+
+```bash
+podman exec -i abstracts-explorer sh -c '
+  curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/<tag-or-branch>/scripts/migrate_pg_search_indexes.py \
+  | python - --dry-run
+'
+```
+
+Apply the indexes:
+
+```bash
+podman exec -i abstracts-explorer sh -c '
+  curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/<tag-or-branch>/scripts/migrate_pg_search_indexes.py \
+  | python -
+'
+```
+
+Roll back:
+
+```bash
+podman exec -i abstracts-explorer sh -c '
+  curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/<tag-or-branch>/scripts/migrate_pg_search_indexes.py \
+  | python - --drop
+'
+```
+
+Pin `<tag-or-branch>` to the same release or branch as the running image. The
+script must exist at that ref. The migration requires the `pg_trgm` extension;
+the container's PostgreSQL user normally has permission to create it. If it does
+not, ask a database administrator to run `CREATE EXTENSION pg_trgm;` and rerun the
+script with `--skip-extension`.
+
+`CREATE INDEX CONCURRENTLY` avoids blocking writes but can take several minutes
+on large databases and temporarily increases disk usage. The script runs
+`ANALYZE papers` after creating the indexes.
+
 ## Available Images
 
 Pre-built container images are available from:

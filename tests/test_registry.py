@@ -1100,132 +1100,83 @@ class TestEmbeddingsExportImport:
     """Tests for EmbeddingsManager.export_embeddings and import_embeddings."""
 
     def test_export_embeddings(self):
-        """Embeddings for a conference+year are exported correctly."""
+        """Embeddings are exported by ID in the v1 format."""
+        from abstracts_explorer.embeddings import EmbeddingsManager, hash_text
+
         mock_collection = MagicMock()
         mock_collection.get.return_value = {
             "ids": ["id1", "id2"],
-            "documents": ["doc1", "doc2"],
-            "metadatas": [
-                {
-                    "title": "Paper 1",
-                    "authors": "Author A;Author B",
-                    "abstract": "Abstract 1",
-                    "session": "Session 1",
-                    "poster_position": "1",
-                    "conference": "neurips",
-                    "year": "2024",
-                },
-                {
-                    "title": "Paper 2",
-                    "authors": "Author C",
-                    "abstract": "Abstract 2",
-                    "session": "Session 2",
-                    "poster_position": "2",
-                    "conference": "neurips",
-                    "year": "2024",
-                },
-            ],
+            "documents": [hash_text("doc1"), hash_text("doc2")],
             "embeddings": [[0.1, 0.2], [0.3, 0.4]],
         }
-
-        mock_em = MagicMock()
-        mock_em.collection = mock_collection
-        mock_em.export_embeddings = MagicMock()
-
-        # Test the actual method by calling it on a real-ish object
-        from abstracts_explorer.embeddings import EmbeddingsManager
 
         em = EmbeddingsManager.__new__(EmbeddingsManager)
         em._collection = mock_collection
 
-        result = em.export_embeddings("neurips", 2024)
+        result = em.export_embeddings(["id1", "id2"])
+
+        assert result["format_version"] == 1
         assert result["ids"] == ["id1", "id2"]
         assert result["embeddings"] == [[0.1, 0.2], [0.3, 0.4]]
-
-        # Verify the filter was used
-        call_kwargs = mock_collection.get.call_args[1]
-        assert call_kwargs["where"] == {
-            "$and": [
-                {"conference": {"$in": ["neurips"]}},
-                {"year": {"$in": ["2024"]}},
-            ]
-        }
+        assert "metadatas" not in result
+        assert mock_collection.get.call_args.kwargs["ids"] == ["id1", "id2"]
 
     def test_export_embeddings_converts_ndarray(self):
-        """Numpy ndarrays in embeddings are converted to plain lists (JSON-serializable)."""
+        """Numpy ndarrays in embeddings are converted to plain lists."""
         import json
 
         import numpy as np
 
+        from abstracts_explorer.embeddings import EmbeddingsManager, hash_text
+
         mock_collection = MagicMock()
         mock_collection.get.return_value = {
             "ids": ["id1"],
-            "documents": ["doc1"],
-            "metadatas": [
-                {
-                    "title": "Paper 1",
-                    "authors": "Author A",
-                    "abstract": "Abstract 1",
-                    "session": "Session 1",
-                    "poster_position": "1",
-                    "conference": "neurips",
-                    "year": "2024",
-                }
-            ],
+            "documents": [hash_text("doc1")],
             "embeddings": [np.array([0.1, 0.2, 0.3])],
         }
-
-        from abstracts_explorer.embeddings import EmbeddingsManager
 
         em = EmbeddingsManager.__new__(EmbeddingsManager)
         em._collection = mock_collection
 
-        result = em.export_embeddings("neurips", 2024)
+        result = em.export_embeddings(["id1"])
 
-        # Must be JSON-serializable (no ndarray objects)
-        serialized = json.dumps(result)
-        assert serialized is not None
-        # Values should match
+        assert json.dumps(result)
         assert result["embeddings"] == [[0.1, 0.2, 0.3]]
 
     def test_import_embeddings(self):
-        """Embeddings are imported with replace semantics."""
-        mock_collection = MagicMock()
-        # Existing embeddings to delete
-        mock_collection.get.return_value = {"ids": ["old1"]}
+        """Embeddings are imported and replace IDs are deleted first."""
+        from abstracts_explorer.embeddings import EmbeddingsManager, hash_text
 
-        from abstracts_explorer.embeddings import EmbeddingsManager
+        mock_collection = MagicMock()
 
         em = EmbeddingsManager.__new__(EmbeddingsManager)
         em._collection = mock_collection
 
         data = {
+            "format_version": 1,
             "ids": ["id1", "id2"],
-            "documents": ["doc1", "doc2"],
-            "metadatas": [{"conference": "neurips", "year": "2024"}, {"conference": "neurips", "year": "2024"}],
+            "documents": [hash_text("doc1"), hash_text("doc2")],
             "embeddings": [[0.1, 0.2], [0.3, 0.4]],
         }
 
-        count = em.import_embeddings(data, "neurips", 2024)
+        count = em.import_embeddings(data, replace_ids=["old1"])
         assert count == 2
 
-        # Verify old embeddings were deleted
         mock_collection.delete.assert_called_once_with(ids=["old1"])
-        # Verify new embeddings were added
-        mock_collection.add.assert_called_once()
+        mock_collection.upsert.assert_called_once()
 
     def test_import_embeddings_empty(self):
         """Empty import returns 0."""
-        mock_collection = MagicMock()
-        mock_collection.get.return_value = {"ids": []}
-
         from abstracts_explorer.embeddings import EmbeddingsManager
+
+        mock_collection = MagicMock()
 
         em = EmbeddingsManager.__new__(EmbeddingsManager)
         em._collection = mock_collection
 
-        data = {"ids": [], "documents": [], "metadatas": [], "embeddings": []}
-        count = em.import_embeddings(data, "neurips", 2024)
+        data = {"format_version": 1, "ids": [], "documents": [], "embeddings": []}
+        count = em.import_embeddings(data)
         assert count == 0
 
 

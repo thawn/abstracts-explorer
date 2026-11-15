@@ -23,7 +23,7 @@ from collections import Counter
 
 from mcp.server.mcpserver import MCPServer
 
-from abstracts_explorer.embeddings import EmbeddingsManager, build_chromadb_where_clause
+from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.clustering import ClusteringManager
 from abstracts_explorer.config import get_config
@@ -524,7 +524,7 @@ def get_topic_evolution(
     Analyze how topics have evolved over the years for one or more conferences.
 
     For each conference and year in the given range, this tool uses
-    ``EmbeddingsManager.query_papers_within_distance()`` to count how many
+    ``EmbeddingsManager.query_ids_within_distance()`` to count how many
     papers are semantically close to the topic keywords.  It also
     computes the relative percentage of matching papers with respect to
     the total number of papers for that conference and year.
@@ -604,38 +604,48 @@ def get_topic_evolution(
                     # once per year.  The latter scales with the number of years
                     # and can exceed reverse-proxy timeouts for conferences with
                     # many years (e.g. IGARSS).
-                    result_data = em.query_papers_within_distance(
-                        query=topic_keywords,
-                        distance_threshold=distance_threshold,
+                    candidate_ids = db.resolve_paper_uids(
                         conferences=[conference],
                         years=available_years,
-                        query_embedding=query_embedding,
                     )
+                    if candidate_ids:
+                        result_data = em.query_ids_within_distance(
+                            query=topic_keywords,
+                            distance_threshold=distance_threshold,
+                            ids=candidate_ids,
+                            query_embedding=query_embedding,
+                        )
+                        summaries = {
+                            paper["uid"]: paper for paper in db.get_paper_summaries_by_uids(result_data["ids"])
+                        }
 
-                    for paper in result_data["papers"]:
-                        paper_year = paper.get("year")
-                        if paper_year is None:
-                            continue
-                        try:
-                            paper_year = int(paper_year)
-                        except (TypeError, ValueError):
-                            continue
-                        if paper_year not in year_counts:
-                            continue
+                        for uid, distance in zip(result_data["ids"], result_data["distances"]):
+                            paper = summaries.get(uid)
+                            if paper is None:
+                                continue
+                            paper_year = paper.get("year")
+                            if paper_year is None:
+                                continue
+                            try:
+                                paper_year = int(paper_year)
+                            except (TypeError, ValueError):
+                                continue
+                            if paper_year not in year_counts:
+                                continue
 
-                        year_counts[paper_year] += 1
+                            year_counts[paper_year] += 1
 
-                        # Collect sample papers (top 3 closest).  Results are
-                        # sorted by distance, so the first three per year are
-                        # the closest matches.
-                        if len(year_distribution[paper_year]) < 3:
-                            year_distribution[paper_year].append(
-                                {
-                                    "title": paper.get("title", ""),
-                                    "session": paper.get("session", ""),
-                                    "distance": paper.get("distance"),
-                                }
-                            )
+                            # Collect sample papers (top 3 closest).  Results are
+                            # sorted by distance, so the first three per year are
+                            # the closest matches.
+                            if len(year_distribution[paper_year]) < 3:
+                                year_distribution[paper_year].append(
+                                    {
+                                        "title": paper.get("title", ""),
+                                        "session": paper.get("session", ""),
+                                        "distance": distance,
+                                    }
+                                )
 
                 for year in available_years:
                     count = year_counts[year]
@@ -698,7 +708,7 @@ def search_papers(
     years: Optional[List[int]] = None,
     n_results: int = 10,
     conference: Optional[str] = None,
-    where: Optional[Dict[str, Any]] = None,
+    where_filters: Optional[Dict[str, Any]] = None,
     collection_name: Optional[str] = None,
 ) -> str:
     """
@@ -718,13 +728,15 @@ def search_papers(
     conference : str, optional
         Conference name to filter by (e.g., "NeurIPS", "ICLR").
         Required – returns an error when not provided.
-    where : dict, optional
-        Custom ChromaDB WHERE clause for filtering results by metadata.
-        Supports ChromaDB query operators like $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin.
-        Logical operators $and, $or are also supported.
-        Examples: ``{"year": 2025}``, ``{"session": {"$in": ["Oral Session 1", "Oral Session 2"]}}``,
+    where_filters : dict, optional
+        SQL-style filter dictionary applied to the paper database.
+        Supports operators like ``$eq``, ``$ne``, ``$gt``, ``$gte``,
+        ``$lt``, ``$lte``, ``$in``, ``$nin``, ``$contains``, plus logical
+        operators ``$and``, ``$or``, and ``$not``.
+        Examples: ``{"year": 2025}``,
+        ``{"session": {"$in": ["Oral Session 1", "Oral Session 2"]}}``,
         ``{"$and": [{"year": {"$gte": 2024}}, {"conference": "NeurIPS"}]}``.
-        Note: If 'conference' parameter is provided, it will be merged with this WHERE clause.
+        The ``conference`` parameter is merged with this filter.
     collection_name : str, optional
         Name of ChromaDB collection
 
@@ -749,22 +761,10 @@ def search_papers(
         with _get_mcp_resources(collection_name) as (em, db):
             assert em is not None
 
-            # Validate custom WHERE clause and merge conference/year filters
-            try:
-                where = build_chromadb_where_clause(
-                    conferences=[conference],
-                    years=years,
-                    base_where=where,
-                )
-            except ValueError as e:
-                logger.error(f"Invalid WHERE clause: {str(e)}")
-                return json.dumps({"error": f"Invalid WHERE clause: {str(e)}"}, indent=2)
-
-            # Search for papers
             search_desc = f"papers from {years}" if years else "papers"
             logger.info(f"Searching for {search_desc} about: {topic_keywords}")
-            if where:
-                logger.info(f"Applying WHERE filter: {where}")
+            if where_filters:
+                logger.info(f"Applying filters: {where_filters}")
             if years:
                 logger.info(f"Year filter: {years}")
 
@@ -773,7 +773,7 @@ def search_papers(
                 limit=n_results,
                 years=years,
                 conferences=[conference],
-                where=where,
+                where_filters=where_filters,
                 embeddings_manager=em,
             )
 
@@ -1086,7 +1086,7 @@ def analyze_topic_relevance(
         config = get_config()
         collection_name = collection_name or config.collection_name
 
-        with _get_mcp_resources(collection_name) as (em, _db):
+        with _get_mcp_resources(collection_name) as (em, db):
             assert em is not None
 
             # Find papers within distance
@@ -1097,17 +1097,27 @@ def analyze_topic_relevance(
             if years:
                 logger.info(f"Filtering by years: {years}")
 
-            result_data = em.query_papers_within_distance(
-                query=topic,
-                distance_threshold=distance_threshold,
-                conferences=conferences,
-                years=years,
-            )
+            candidate_ids = db.resolve_paper_uids(conferences=conferences, years=years)
+            if candidate_ids:
+                result_data = em.query_ids_within_distance(
+                    query=topic,
+                    distance_threshold=distance_threshold,
+                    ids=candidate_ids,
+                )
+                papers_by_uid = {paper["uid"]: paper for paper in db.get_papers_by_uids(result_data["ids"])}
+                papers: List[Dict[str, Any]] = []
+                for uid, distance in zip(result_data["ids"], result_data["distances"]):
+                    paper = papers_by_uid.get(uid)
+                    if paper is None:
+                        continue
+                    paper["distance"] = distance
+                    papers.append(paper)
+                total_considered = result_data.get("total_considered", len(papers))
+            else:
+                papers = []
+                total_considered = 0
 
-            # Analyze results
-            papers = result_data["papers"]
             total_papers = len(papers)
-            total_considered = result_data.get("total_considered", total_papers)
 
             # Count by conference
             conference_counts: Counter[str] = Counter()

@@ -260,10 +260,12 @@ class TestEmbeddingsExportImportRoundTrip:
 
     def _make_embeddings_data(self, conference="neurips", year=2024, count=3):
         """Create fake embeddings data dict as returned by export_embeddings."""
+        from abstracts_explorer.embeddings import hash_text
+
         return {
+            "format_version": 1,
             "ids": [f"id-{i}" for i in range(count)],
-            "documents": [f"doc-{i}" for i in range(count)],
-            "metadatas": [{"conference": conference, "year": year} for _ in range(count)],
+            "documents": [hash_text(f"doc-{i}") for i in range(count)],
             "embeddings": [[float(j) for j in range(4)] for _ in range(count)],
         }
 
@@ -276,7 +278,7 @@ class TestEmbeddingsExportImportRoundTrip:
             # Simulate what ChromaDB returns (numpy-like lists as plain lists)
             mock_em.export_embeddings.return_value = self._make_embeddings_data()
 
-            result = mock_em.export_embeddings("neurips", 2024)
+            result = mock_em.export_embeddings(["id-0", "id-1", "id-2"])
 
         # Must be JSON-serializable
         serialized = json.dumps(result)
@@ -293,7 +295,7 @@ class TestEmbeddingsExportImportRoundTrip:
             mock_em = MockEM.return_value
             mock_em.import_embeddings.return_value = 5
 
-            count = mock_em.import_embeddings(self._make_embeddings_data(), "neurips", 2024)
+            count = mock_em.import_embeddings(self._make_embeddings_data(), replace_ids=["old"])
 
         assert count == 5
         mock_em.import_embeddings.assert_called_once()
@@ -306,10 +308,10 @@ class TestEmbeddingsExportImportRoundTrip:
 
         loaded = json.loads(json_file.read_text())
 
+        assert loaded["format_version"] == 1
         assert len(loaded["ids"]) == 10
         assert len(loaded["embeddings"]) == 10
-        assert loaded["metadatas"][0]["conference"] == "neurips"
-        assert loaded["metadatas"][0]["year"] == 2024
+        assert "metadatas" not in loaded
 
 
 # ---------------------------------------------------------------------------

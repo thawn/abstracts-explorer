@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from abstracts_explorer.database import DatabaseManager
-from abstracts_explorer.embeddings import EmbeddingsManager, build_chromadb_where_clause
+from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.paper_utils import extract_top_keywords
 
 logger = logging.getLogger(__name__)
@@ -452,14 +452,6 @@ def _recommendation_reasons(
     return reasons[:3]
 
 
-def _build_where_filter(
-    conferences: Optional[Sequence[str]],
-    years: Optional[Sequence[int]],
-) -> Optional[Dict[str, Any]]:
-    """Build a ChromaDB metadata filter from conference/year constraints."""
-    return build_chromadb_where_clause(conferences=conferences, years=years)
-
-
 def _infer_scope(papers: List[Dict[str, Any]]) -> Tuple[Optional[List[str]], Optional[List[int]]]:
     """Infer a sensible candidate scope from the interesting papers."""
     conference_counts = Counter(
@@ -655,7 +647,6 @@ def recommend_related_papers(
         years = inferred_years
 
     resolved_conferences, resolved_years = _resolve_conferences_scope(conferences, years)
-    where = _build_where_filter(resolved_conferences, resolved_years)
 
     excluded_uids = {str(paper.get("uid")) for paper in seed_papers if paper.get("uid")}
     for uid in exclude_ids or []:
@@ -666,6 +657,28 @@ def recommend_related_papers(
         "conferences": resolved_conferences,
         "years": resolved_years,
     }
+
+    has_scope = bool(resolved_conferences or resolved_years)
+    candidate_uids = (
+        database.resolve_paper_uids(
+            conferences=resolved_conferences,
+            years=resolved_years,
+        )
+        if has_scope
+        else None
+    )
+    if candidate_uids is not None and not candidate_uids:
+        return {
+            "papers": [],
+            "recommendations_count": 0,
+            "seed_count": len(seed_papers),
+            "candidate_count": 0,
+            "filters": filters,
+            "warning": (
+                "No recommendations matched the requested conference/year scope. "
+                "Try widening the filters or marking more papers as interesting."
+            ),
+        }
 
     try:
         seed_vectors, seed_weights = _seed_embeddings(embeddings_manager, seed_papers)
@@ -710,13 +723,17 @@ def recommend_related_papers(
         fallback["filters"] = filters
         return fallback
 
-    n_query = min(collection_size, max(n_results + len(excluded_uids) + 20, n_results * 4))
+    n_query = min(
+        len(candidate_uids) if candidate_uids is not None else collection_size,
+        max(n_results + len(excluded_uids) + 20, n_results * 4),
+    )
 
     try:
         results = embeddings_manager.collection.query(
             query_embeddings=[centroid],
             n_results=n_query,
-            where=where,
+            ids=candidate_uids,
+            include=["distances"],
         )
     except Exception as exc:
         logger.warning("Embedding-based recommendation query failed: %s", exc)
@@ -739,26 +756,17 @@ def recommend_related_papers(
 
     ids = results.get("ids", [[]])
     distances = results.get("distances", [[]])
-    metadatas = results.get("metadatas", [[]])
-    documents = results.get("documents", [[]])
+    result_uids = [str(uid) for uid in ids[0]] if ids and ids[0] else []
+    papers_by_uid = {paper["uid"]: paper for paper in database.get_papers_by_uids(result_uids)}
 
-    if ids and ids[0]:
-        for index, raw_uid in enumerate(ids[0]):
-            uid = str(raw_uid)
+    if result_uids:
+        for index, uid in enumerate(result_uids):
             if not uid or uid in excluded_uids or uid in seen:
                 continue
 
-            metadata: Dict[str, Any] = {}
-            if metadatas and metadatas[0] and index < len(metadatas[0]):
-                try:
-                    metadata = embeddings_manager.parse_chromadb_metadata(metadatas[0][index] or {})
-                except Exception:
-                    metadata = dict(metadatas[0][index] or {})
-
-            paper = dict(metadata)
-            paper["uid"] = uid
-            if not paper.get("abstract") and documents and documents[0] and index < len(documents[0]):
-                paper["abstract"] = documents[0][index] or ""
+            paper = papers_by_uid.get(uid)
+            if paper is None:
+                continue
 
             distance = 0.0
             if distances and distances[0] and index < len(distances[0]):

@@ -509,7 +509,7 @@ class RegistryClient:
 
         # 2. Reset the ChromaDB collection
         em = EmbeddingsManager()
-        em.init(reset=True)
+        em.create_collection(reset=True)
 
     def _export_year(
         self,
@@ -534,6 +534,7 @@ class RegistryClient:
         with DatabaseManager() as db:
             db.create_tables()
             paper_count = db.export_papers_to_sqlite(paper_db_path, conference, year)
+            paper_uids = db.get_paper_uids({"conference": conference, "year": year})
 
         if paper_count == 0:
             raise RegistryError(f"No papers found for {conference}/{year}. Download the conference data first.")
@@ -543,7 +544,10 @@ class RegistryClient:
         # --- embeddings ---
         progress(f"Exporting embeddings for {conference}/{year}...")
         em = EmbeddingsManager()
-        embeddings_data = em.export_embeddings(conference, year)
+        try:
+            embeddings_data = em.export_embeddings(paper_uids)
+        finally:
+            em.close()
         embedding_count = len(embeddings_data.get("ids", []))
 
         if embedding_count == 0:
@@ -762,6 +766,7 @@ class RegistryClient:
         try:
             with DatabaseManager() as db:
                 db.create_tables()
+                old_uids = db.get_paper_uids({"conference": conference, "year": year})
                 paper_count = db.import_papers_from_sqlite(paper_db_file, conference, year)
         except Exception as db_err:
             from abstracts_explorer.database import EmbeddingModelConflictError
@@ -776,7 +781,10 @@ class RegistryClient:
             progress(f"Importing embeddings for {conference}/{year}...")
             embeddings_data = json.loads(embeddings_file.read_text())
             em = EmbeddingsManager()
-            embedding_count = em.import_embeddings(embeddings_data, conference, year)
+            try:
+                embedding_count = em.import_embeddings(embeddings_data, replace_ids=old_uids)
+            finally:
+                em.close()
             progress(f"  Imported {embedding_count} embeddings")
         except Exception as embed_err:
             # Roll back paper DB import so both stay consistent
