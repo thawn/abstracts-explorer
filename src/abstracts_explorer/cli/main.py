@@ -42,6 +42,7 @@ from abstracts_explorer.cli.feedback import (
     feedback_stats_command,
 )
 from abstracts_explorer.cli.pipeline import pre_process_command
+from abstracts_explorer.plugins import list_plugins
 from abstracts_explorer.cli.registry import (
     registry_delete_command,
     registry_download_command,
@@ -78,22 +79,21 @@ def main() -> int:
         epilog="""
 Examples:
   # Download NeurIPS 2025 data and create database
-  neurips-abstracts download --year 2025
-  
+  abstracts-explorer download neurips --year 2025
+
   # Generate embeddings for all papers
-  neurips-abstracts create-embeddings
+  abstracts-explorer create-embeddings
 
   # Search for similar papers
-  neurips-abstracts search "graph neural networks for molecular generation"
-  
+  abstracts-explorer search "graph neural networks for molecular generation"
+
   # Search with custom settings
-  neurips-abstracts search "deep learning transformers" \\
-    --embeddings-path embeddings/ \\
+  abstracts-explorer search "deep learning transformers" \\
     --n-results 10 \\
     --show-abstract
-  
+
   # Search with metadata filter
-  neurips-abstracts search "reinforcement learning" \\
+  abstracts-explorer search "reinforcement learning" \\
     --where "decision=Accept (poster)"
         """,
     )
@@ -117,25 +117,19 @@ Examples:
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # Download command
-    download_parser = subparsers.add_parser(
-        "download",
-        help="Download conference data and create database",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="""
+    download_description = """
 Download papers from various sources using plugins.
 
 Without arguments, downloads ALL conferences for ALL available years
 (plugins that require manual input are skipped).
 
 Available plugins:
-  aaai     - Official AAAI proceedings (2010 onward)
-  neurips  - Official NeurIPS conference data (2020-2025)
-  iclr     - Official ICLR conference data (2020-2025)
-  icml     - Official ICML conference data (2020-2025)
-  ieeevis  - Official IEEE VIS conference data (2025)
-  ml4ps    - ML4PS (Machine Learning for Physical Sciences) workshop (2025)
-  chi      - ACM CHI conference data (2023-2025, requires manual JSON download)
-
+"""
+    for plugin_meta in list_plugins():
+        years = plugin_meta.get("supported_years") or []
+        year_note = f" ({min(years)}-{max(years)})" if years else ""
+        download_description += f"  {plugin_meta['name']:<8} - {plugin_meta['description']}{year_note}\n"
+    download_description += """
 Examples:
   # Download ALL conference data for ALL available years
   abstracts-explorer download
@@ -151,7 +145,12 @@ Examples:
 
   # List available plugins
   abstracts-explorer download --list-plugins
-        """,
+        """
+    download_parser = subparsers.add_parser(
+        "download",
+        help="Download conference data and create database",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=download_description,
     )
     download_parser.add_argument(
         "--output",

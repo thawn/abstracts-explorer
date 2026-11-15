@@ -68,10 +68,10 @@ web = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/thawn/neurips-abstracts"
-Documentation = "https://neurips-abstracts.readthedocs.io"
-Repository = "https://github.com/thawn/neurips-abstracts.git"
-Issues = "https://github.com/thawn/neurips-abstracts/issues"
+Homepage = "https://github.com/thawn/abstracts-explorer"
+Documentation = "https://thawn.github.io/abstracts-explorer"
+Repository = "https://github.com/thawn/abstracts-explorer.git"
+Issues = "https://github.com/thawn/abstracts-explorer/issues"
 
 [project.scripts]
 abstracts-explorer = "abstracts_explorer.cli:main"

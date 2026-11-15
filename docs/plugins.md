@@ -57,7 +57,7 @@ automatic retries.
 Official NeurIPS conference data downloader.
 
 ```bash
-uv run abstracts-explorer download --plugin neurips --year 2025 --db-path data/neurips.db
+uv run abstracts-explorer download --conference neurips --year 2025
 ```
 
 - **Years**: 2020-2025
@@ -69,7 +69,7 @@ uv run abstracts-explorer download --plugin neurips --year 2025 --db-path data/n
 ML4PS (Machine Learning for Physical Sciences) workshop downloader.
 
 ```bash
-uv run abstracts-explorer download --plugin ml4ps --year 2025 --db-path data/ml4ps.db
+uv run abstracts-explorer download --conference ml4ps --year 2025
 ```
 
 - **Years**: 2025
@@ -81,7 +81,7 @@ uv run abstracts-explorer download --plugin ml4ps --year 2025 --db-path data/ml4
 HAICON (Helmholtz AI Conference) data downloader.
 
 ```bash
-uv run abstracts-explorer download --plugin haicon --year 2026 --db-path data/haicon.db
+uv run abstracts-explorer download --conference haicon --year 2026
 ```
 
 - **Years**: 2026+
@@ -93,7 +93,7 @@ uv run abstracts-explorer download --plugin haicon --year 2026 --db-path data/ha
 AGU annual meeting abstracts from the public m-anage program API.
 
 ```bash
-uv run abstracts-explorer download --plugin agu --year 2026 --db-path data/agu.db
+uv run abstracts-explorer download --conference agu --year 2026
 ```
 
 - **Years**: 2014 onward (2014–2023 use the legacy `fmYY` slug, 2024+ use `aguYY`)
@@ -122,13 +122,13 @@ uv run abstracts-explorer download --list-plugins
 
 ```bash
 # Basic usage
-uv run abstracts-explorer download --plugin ml4ps --year 2025 --db-path data/output.db
+uv run abstracts-explorer download --conference ml4ps --year 2025
 
 # With options
 uv run abstracts-explorer download \
-    --plugin ml4ps \
+    --conference ml4ps \
     --year 2025 \
-    --db-path data/ml4ps_2025.db \
+    \
     --fetch-abstracts \
     --max-workers 10
 ```
@@ -180,7 +180,7 @@ Create `my_workshop_plugin.py`:
 ```python
 from abstracts_explorer.plugins import (
     LightweightDownloaderPlugin,
-    convert_lightweight_to_neurips_schema,
+    convert_to_lightweight_schema,
     register_plugin
 )
 import requests
@@ -226,7 +226,7 @@ class MyWorkshopPlugin(LightweightDownloaderPlugin):
             papers.append(paper)
         
         # Convert to full NeurIPS schema
-        return convert_lightweight_to_neurips_schema(
+        return convert_to_lightweight_schema(
             papers,
             session_default=f'My Workshop {year}',
             event_type='Workshop Poster',
@@ -256,7 +256,7 @@ _register()
 from my_workshop_plugin import MyWorkshopPlugin
 
 # Or use via CLI
-# uv run abstracts-explorer download --plugin myworkshop --year 2025 --db-path data/workshop.db
+# uv run abstracts-explorer download --conference myworkshop --year 2025
 ```
 
 #### Flexible Author Format
@@ -376,10 +376,10 @@ _register()
 
 ## Schema Conversion
 
-The `convert_lightweight_to_neurips_schema()` function automatically converts lightweight format to the full NeurIPS schema:
+The `convert_to_lightweight_schema()` function automatically converts lightweight format to the full NeurIPS schema:
 
 ```python
-from abstracts_explorer.plugins import convert_lightweight_to_neurips_schema
+from abstracts_explorer.plugins import convert_to_lightweight_schema
 
 papers = [
     {
@@ -392,7 +392,7 @@ papers = [
     }
 ]
 
-full_schema_data = convert_lightweight_to_neurips_schema(
+full_schema_data = convert_to_lightweight_schema(
     papers,
     session_default='Workshop 2025',
     event_type='Workshop Poster',
@@ -434,7 +434,7 @@ Or set `PYTHONPATH`:
 
 ```bash
 export PYTHONPATH=/path/to/plugins:$PYTHONPATH
-uv run abstracts-explorer download --plugin myplugin --year 2025
+uv run abstracts-explorer download --conference myplugin --year 2025
 ```
 
 ## Testing Your Plugin
@@ -552,7 +552,7 @@ class MyPlugin(LightweightDownloaderPlugin):
         papers = self._scrape_papers(year)
         logger.info(f"Found {len(papers)} papers")
         
-        return convert_lightweight_to_neurips_schema(papers, ...)
+        return convert_to_lightweight_schema(papers, ...)
 ```
 
 ### 4. Progress Indication

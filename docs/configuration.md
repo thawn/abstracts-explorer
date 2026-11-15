@@ -27,14 +27,16 @@ nano .env
 
 ### Chat/Language Model Settings
 
-- **CHAT_MODEL**: The LLM model to use for RAG chat (default: `gemma-3-4b-it-qat`)
+- **CHAT_MODEL**: The LLM model to use for RAG chat (default: `diffbot-small-xl-2508`)
 - **CHAT_TEMPERATURE**: Temperature for LLM responses, 0.0-2.0 (default: `0.7`)
 - **CHAT_MAX_TOKENS**: Maximum tokens in LLM responses (default: `2000`)
+- **CLUSTER_LABEL_MODEL**: Chat model used to auto-generate cluster labels during clustering (default: `alias-fast`)
 
 ### Embedding Model Settings
 
 - **EMBEDDING_MODEL**: The embedding model to use (default: `text-embedding-qwen3-embedding-4b`)
 - **EMBEDDING_MAX_INPUT_TOKENS**: Maximum number of tokens sent to the embedding model in one request (default: `8192`). Longer titles/abstracts are truncated before the API call; the full text is still stored in ChromaDB. Set to `0` to disable proactive truncation.
+- **REQUESTS_PER_MINUTE**: Maximum embedding API requests per minute, `0` disables rate limiting (default: `60`). Can be overridden per command with `--requests-per-minute`.
 
 ### LLM Backend Configuration
 
@@ -123,6 +125,30 @@ The configuration automatically detects the type based on the format:
 
 - **COLLECTION_NAME**: ChromaDB collection name (default: `papers`)
 - **MAX_CONTEXT_PAPERS**: Number of papers to include in RAG context (default: `5`)
+- **ENABLE_QUERY_REWRITING**: Rewrite follow-up questions into self-contained search queries before retrieval (default: `true`)
+- **QUERY_SIMILARITY_THRESHOLD**: Maximum embedding distance for a rewritten-query answer to be accepted as a hit (default: `0.7`)
+
+### Web UI Defaults
+
+- **DEFAULT_CONFERENCE**: Pre-selected conference in the web UI (default: `ML4PS`)
+- **DEFAULT_YEAR**: Pre-selected year in the web UI; `0` disables the default (default: `0`)
+- **IMPRINT_LINK**: Optional URL of a legal notice/imprint shown in the web UI footer (default: empty = not shown)
+
+### Reverse Proxy Header Handling
+
+These settings configure Werkzeug's `ProxyFix` middleware, i.e. the number of
+trusted reverse-proxy layers for each `X-Forwarded-*` header (defaults match the
+single nginx layer in `docker-compose.yml`). Set a value to `0` to disable
+trust for that header:
+
+- **PROXY_X_FOR**: Trusted `X-Forwarded-For` proxy hops (default: `1`)
+- **PROXY_X_PROTO**: Trusted `X-Forwarded-Proto` proxy hops (default: `1`)
+- **PROXY_X_HOST**: Trusted `X-Forwarded-Host` proxy hops (default: `1`)
+- **PROXY_X_PREFIX**: Trusted `X-Forwarded-Prefix` proxy hops (default: `1`)
+
+### Logging
+
+- **LOG_LEVEL**: Optional root log level override (`DEBUG`, `INFO`, `WARNING`, ...). Empty uses the default level.
 
 ### Registry Settings
 

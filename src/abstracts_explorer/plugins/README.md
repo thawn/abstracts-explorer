@@ -1,6 +1,6 @@
 # Download Plugins
 
-This directory contains downloader plugins for the neurips-abstracts package.
+This directory contains downloader plugins for the abstracts-explorer package.
 
 ## Available Plugins
 
@@ -19,6 +19,15 @@ caching, and source limitations. Failed issue/article pages are skipped and
 recorded in a sibling `.failed.json` file; the next download retries them
 automatically. Delete that sidecar file to skip retries.
 
+### aistats
+
+Official AISTATS conference data downloader.
+- **File**: `aistats_downloader.py`
+- **Years**: 2021 onward
+- **Source**: <https://proceedings.mlr.press/>
+- **API**: Full schema
+
+
 ### neurips
 
 Official NeurIPS conference data downloader.
@@ -35,12 +44,36 @@ ML4PS (Machine Learning for Physical Sciences) workshop downloader.
 - **Source**: <https://ml4physicalsciences.github.io/>
 - **API**: Full schema
 
+### iclr
+
+Official ICLR conference data downloader.
+- **File**: `iclr_downloader.py`
+- **Years**: 2020 onward
+- **Source**: <https://openreview.net/>
+- **API**: Full schema
+
+### icml
+
+Official ICML conference data downloader.
+- **File**: `icml_downloader.py`
+- **Years**: 2020 onward
+- **Source**: <https://proceedings.mlr.press/>
+- **API**: Full schema
+
 ### haicon
 
 HAICON (Helmholtz AI Conference) data downloader via ConfTool.
 - **File**: `haicon_downloader.py`
 - **Years**: 2026+
 - **Source**: <https://www.conftool.pro/haicon26/> (conference website: <https://haicon.cc/>)
+- **API**: Lightweight schema
+
+### chi
+
+CHI (ACM CHI) conference data loaded from the SIGCHI program JSON.
+- **File**: `chi_downloader.py`
+- **Years**: 2018 onward (requires manual JSON download via `--input-file`)
+- **Source**: <https://programs.sigchi.org/>
 - **API**: Lightweight schema
 
 ### agu
@@ -51,12 +84,22 @@ AGU annual meeting abstracts from the public m-anage meeting API.
 - **Source**: <https://studio.m-anage.com/agu/>
 - **API**: Lightweight schema
 
-### example_lightweight
+### ieeevis
 
-Example demonstrating the lightweight plugin API.
-- **File**: `example_lightweight.py`
-- **Years**: 2024-2025
+Official IEEE VIS conference data downloader.
+- **File**: `ieeevis_downloader.py`
+- **Years**: 2025 onward
+- **Source**: <https://ieeexplore.ieee.org/>
+- **API**: Full schema
+
+### igarss
+
+IGARSS (IEEE International Geoscience and Remote Sensing Symposium) conference data downloader via IEEE Xplore.
+- **File**: `igarss_downloader.py`
+- **Years**: 1994 onward
+- **Source**: <https://ieeexplore.ieee.org/>
 - **API**: Lightweight schema
+
 
 ## Plugin APIs
 
@@ -127,7 +170,7 @@ For simple data sources with minimal fields.
 ```python
 from abstracts_explorer.plugins import (
     LightweightDownloaderPlugin,
-    convert_lightweight_to_neurips_schema,
+    convert_to_lightweight_schema,
     register_plugin
 )
 
@@ -152,7 +195,7 @@ class MyLightweightPlugin(LightweightDownloaderPlugin):
         ]
         
         # Automatic conversion to full schema
-        return convert_lightweight_to_neurips_schema(
+        return convert_to_lightweight_schema(
             papers,
             session_default='My Workshop 2025',
             event_type='Workshop Poster',
@@ -225,7 +268,7 @@ Create `my_workshop_plugin.py`:
 ```python
 from abstracts_explorer.plugins import (
     LightweightDownloaderPlugin,
-    convert_lightweight_to_neurips_schema,
+    convert_to_lightweight_schema,
     register_plugin
 )
 import requests
@@ -254,7 +297,7 @@ class MyWorkshopPlugin(LightweightDownloaderPlugin):
                 'paper_pdf_url': paper_elem.find('a', class_='pdf')['href'],
             })
         
-        return convert_lightweight_to_neurips_schema(
+        return convert_to_lightweight_schema(
             papers,
             session_default=f'My Workshop {year}',
             event_type='Workshop Poster',
@@ -282,7 +325,7 @@ Then use it:
 python -c "from abstracts_explorer.plugins import my_workshop_plugin"
 
 # Or via CLI
-neurips-abstracts download --plugin myworkshop --year 2025
+abstracts-explorer download --conference myworkshop --year 2025
 ```
 
 ## Plugin Interface Requirements

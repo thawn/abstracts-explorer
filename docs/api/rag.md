@@ -38,7 +38,7 @@ em = EmbeddingsManager()
 chat = RAGChat(
     embeddings_manager=em,
     backend_url="http://localhost:1234",
-    model="gemma-3-4b-it-qat"
+    model="diffbot-small-xl-2508"
 )
 ```
 
@@ -277,7 +277,7 @@ Exported conversations include:
 ```python
 {
     "timestamp": "2025-11-26T10:00:00",
-    "model": "gemma-3-4b-it-qat",
+    "model": "diffbot-small-xl-2508",
     "messages": [
         {
             "role": "user",

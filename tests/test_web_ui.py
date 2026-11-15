@@ -1709,7 +1709,7 @@ class TestWebUIRunServer:
         # Verify helpful error message was printed
         captured = capsys.readouterr()
         assert "Database not found" in captured.err
-        assert "neurips-abstracts download" in captured.err
+        assert "abstracts-explorer download" in captured.err
         assert "create-embeddings" in captured.err
 
     def test_run_server_registers_sigterm_handler(self):

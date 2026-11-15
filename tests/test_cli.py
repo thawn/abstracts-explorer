@@ -1,7 +1,7 @@
 """
 Unit tests for the CLI module.
 
-This module tests the command-line interface for neurips-abstracts,
+This module tests the command-line interface for abstracts-explorer,
 including the download and create-embeddings commands.
 """
 
@@ -218,7 +218,7 @@ class TestCLI:
 
     def test_main_no_command(self, capsys):
         """Test main() with no command shows help."""
-        with patch.object(sys, "argv", ["neurips-abstracts"]):
+        with patch.object(sys, "argv", ["abstracts-explorer"]):
             exit_code = main()
             assert exit_code == 1
 
@@ -228,7 +228,7 @@ class TestCLI:
 
     def test_main_help(self, capsys):
         """Test main() with --help shows help."""
-        with patch.object(sys, "argv", ["neurips-abstracts", "--help"]):
+        with patch.object(sys, "argv", ["abstracts-explorer", "--help"]):
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 0
@@ -239,7 +239,7 @@ class TestCLI:
 
     def test_argcomplete_autocomplete_called(self):
         """Test that argcomplete.autocomplete is called during CLI startup."""
-        with patch.object(sys, "argv", ["neurips-abstracts"]):
+        with patch.object(sys, "argv", ["abstracts-explorer"]):
             with patch("abstracts_explorer.cli.main.argcomplete.autocomplete") as mock_autocomplete:
                 main()
                 assert mock_autocomplete.called, "argcomplete.autocomplete should be called in main()"
@@ -289,7 +289,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "download",
                     "--conference",
                     "neurips",
@@ -444,7 +444,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["neurips-abstracts", "download", "--conference", "neurips", "--output", str(output_db)],
+                ["abstracts-explorer", "download", "--conference", "neurips", "--output", str(output_db)],
             ):
                 exit_code = main()
 
@@ -485,7 +485,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "download",
                     "--conference",
                     "neurips",
@@ -1080,7 +1080,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["neurips-abstracts", "create-embeddings"],
+                ["abstracts-explorer", "create-embeddings"],
             ):
                 exit_code = main()
 
@@ -1123,7 +1123,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                 ],
             ):
@@ -1181,7 +1181,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                 ],
             ):
@@ -1235,7 +1235,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                     "--force",
                 ],
@@ -1384,7 +1384,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                     "--force",
                     "--conference",
@@ -1444,7 +1444,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                     "--force",
                     "--year",
@@ -1502,7 +1502,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                     "--force",
                     "--conference",
@@ -1560,7 +1560,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                     "--requests-per-minute",
                     "30",
@@ -1614,7 +1614,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                     "--requests-per-minute",
                     "0",
@@ -1670,7 +1670,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                     "--backend-url",
                     custom_url,
@@ -1722,7 +1722,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["neurips-abstracts", "create-embeddings"],
+                ["abstracts-explorer", "create-embeddings"],
             ):
                 exit_code = main()
 
@@ -1776,7 +1776,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                     "--conference",
                     "NeurIPS",
@@ -1839,7 +1839,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                     "--year",
                     "2024",
@@ -1910,7 +1910,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                     "--conference",
                     "NeurIPS",
@@ -1977,7 +1977,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                 ],
             ):
@@ -2000,7 +2000,7 @@ class TestCLI:
             sys,
             "argv",
             [
-                "neurips-abstracts",
+                "abstracts-explorer",
                 "search",
                 "test query",
             ],
@@ -2030,7 +2030,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "search",
                     "test query",
                 ],
@@ -2111,7 +2111,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "search",
                     "test query",
                     "--n-results",
@@ -2171,7 +2171,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "search",
                     "machine learning",
                     "--show-abstract",
@@ -2237,7 +2237,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "search",
                     "neural networks",
                     "--where",
@@ -2279,7 +2279,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "search",
                     "nonexistent topic",
                 ],
@@ -2370,7 +2370,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "search",
                     "test",
                 ],
@@ -2430,7 +2430,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "search",
                     "test",
                 ],
@@ -2490,7 +2490,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "search",
                     "test",
                 ],
@@ -2523,7 +2523,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "search",
                     "test",
                 ],
@@ -3437,7 +3437,7 @@ class TestMainDispatch:
         # Set EMBEDDING_DB and patch config reload
         patch_get_config_for_test(monkeypatch, embeddings_path)
 
-        with patch.object(sys, "argv", ["neurips-abstracts", "chat"]):
+        with patch.object(sys, "argv", ["abstracts-explorer", "chat"]):
             with patch("abstracts_explorer.cli.main.chat_command") as mock_chat:
                 mock_chat.return_value = 0
                 exit_code = main()
@@ -3447,7 +3447,7 @@ class TestMainDispatch:
 
     def test_main_web_ui_command(self):
         """Test main() dispatches web-ui command."""
-        with patch.object(sys, "argv", ["neurips-abstracts", "web-ui"]):
+        with patch.object(sys, "argv", ["abstracts-explorer", "web-ui"]):
             with patch("abstracts_explorer.cli.main.web_ui_command") as mock_web:
                 mock_web.return_value = 0
                 exit_code = main()
@@ -3603,7 +3603,7 @@ class TestCLIEmbeddingsProgressAndStats:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                 ],
             ):

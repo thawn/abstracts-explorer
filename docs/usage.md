@@ -13,7 +13,7 @@ Download papers for a specific conference and year:
 uv run abstracts-explorer download --year 2025
 
 # Download from a specific conference using a plugin
-uv run abstracts-explorer download --plugin iclr --year 2025
+uv run abstracts-explorer download --conference iclr --year 2025
 ```
 
 Alternatively, download pre-built data from a registry (no API access or LLM backend required):
@@ -25,9 +25,10 @@ uv run abstracts-explorer registry download \
 ```
 
 Options:
-- `--year`: Conference year (e.g., 2025)
-- `--db-path`: Path to SQLite database (will be created if doesn't exist)
+- `--conference`: Conference to download (default: all conferences)
+- `--year`: Conference year (e.g., 2025; default: all available years)
 - `--force`: Force re-download even if papers already exist
+- `--list-plugins`: List available downloader plugins and exit
 
 ### 2. Create Embeddings
 
@@ -38,10 +39,12 @@ uv run abstracts-explorer create-embeddings
 ```
 
 Options:
-- `--db-path`: Path to SQLite database with papers
-- `--embedding-db-path`: Path to ChromaDB database (default: from config)
-- `--collection-name`: Collection name in ChromaDB (default: from config)
-- `--force`: Recreate embeddings even if they exist
+- `--conference`: Only embed papers from this conference
+- `--year`: Only embed papers from this year
+- `--collection`: Collection name in ChromaDB (default: `papers`)
+- `--force`: Reset collection if it already exists
+- `--ignore-embedding-model-mismatch`: Recreate embeddings after an
+  embedding model mismatch without prompting
 
 ### 3. Search Papers
 
@@ -52,7 +55,7 @@ Search papers by keyword or semantic similarity:
 uv run abstracts-explorer search "transformer architecture"
 
 # Limit results
-uv run abstracts-explorer search "reinforcement learning" --limit 10
+uv run abstracts-explorer search "reinforcement learning" --n-results 10
 
 # Filter by year
 uv run abstracts-explorer search "neural networks" --year 2025
@@ -163,7 +166,7 @@ em = EmbeddingsManager()
 chat = RAGChat(
     em,
     backend_url="http://localhost:1234",
-    model="gemma-3-4b-it-qat"
+    model="diffbot-small-xl-2508"
 )
 
 # Ask a question
@@ -202,7 +205,7 @@ Use a custom configuration file:
 ```python
 import os
 os.environ['PAPER_DB'] = 'custom_papers.db'
-os.environ['EMBEDDING_DB_PATH'] = 'custom_embeddings'
+os.environ['EMBEDDING_DB'] = 'custom_embeddings'
 
 from abstracts_explorer.config import get_config
 config = get_config()

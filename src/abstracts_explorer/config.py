@@ -1,5 +1,5 @@
 """
-Configuration management for neurips-abstracts package.
+Configuration management for abstracts-explorer package.
 
 This module loads configuration from environment variables and .env files.
 Uses only standard library (no python-dotenv dependency required).
@@ -75,7 +75,7 @@ def load_env_file(env_path: Optional[Path] = None) -> Dict[str, str]:
 
 class Config:
     """
-    Configuration manager for neurips-abstracts package.
+    Configuration manager for abstracts-explorer package.
 
     Loads configuration from environment variables with fallback to defaults.
     Automatically loads from .env file if present.

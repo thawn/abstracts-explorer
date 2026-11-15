@@ -19,14 +19,14 @@ Guidance for AI coding agents working on **abstracts-explorer** (Python package 
 
 ## Layout
 
-- `src/abstracts_explorer/`: `database.py` (SQLAlchemy), `db_models.py`, `embeddings.py` (ChromaDB), `clustering.py`, `rag.py`, `mcp_server.py`, `mcp_tools.py`, `interesting_papers.py`, `evaluation.py`, `registry.py`, `rate_limiter.py`, `export_utils.py`, `config.py`, `cli.py`, `plugin.py`, `plugins/`, `web_ui/` (Flask + modular ES6).
+- `src/abstracts_explorer/`: `db/` package (`DatabaseManager` composed from mixins; `database.py` is a re-export facade), `db_models.py`, `embeddings.py` (ChromaDB), `clustering.py`, `rag.py`, `mcp_server.py`, `mcp_tools.py`, `interesting_papers.py`, `evaluation.py`, `registry.py`, `rate_limiter.py`, `llm_utils.py`, `export_utils.py`, `config.py`, `cli/` package (argparse; one module per command group, `main.py` wires/dispatches), `plugin.py`, `plugins/`, `web_ui/` (Flask + modular ES6).
 - `tests/`: pytest suite.
 - `docs/`: Sphinx (Markdown).
 - `src/abstracts_explorer/web_ui/tests/`: Jest tests.
 
 ## Testing
 
-- One test file per source module, same base name (e.g. `database.py` -> `tests/test_database.py`).
+- One test file per source module, same base name (e.g. `database.py` -> `tests/test_database.py`). The CLI is argparse (not click); test patch targets must point at the owning submodule (e.g. `abstracts_explorer.cli.search_chat.EmbeddingsManager`).
 - Separate files allowed by test type: `test_integration.py`, `test_web_integration.py`, `test_web_e2e.py`.
 - Reuse shared fixtures/helpers in `tests/conftest.py` and `tests/helpers.py` rather than duplicating setup.
 - Python: pytest + pytest-mock. Coverage target >90%.
@@ -48,7 +48,7 @@ Guidance for AI coding agents working on **abstracts-explorer** (Python package 
 ## Architecture Notes
 
 - DB: SQLAlchemy 2.0+, SQLite default / PostgreSQL supported. Models: `Paper`, `EmbeddingsMetadata`, `ClusteringCache`.
-- Clustering: CLI/web/MCP pipeline is fixed to Agglomerative (ward, distance threshold 150) + t-SNE. `clustering.py` still exposes 5 algorithms (K-Means, DBSCAN, Agglomerative, Spectral, Fuzzy C-Means) and PCA/t-SNE; UMAP was removed. LLM auto-labeling + DB-backed cache.
+- Clustering: the pipeline is fixed to Agglomerative (ward linkage, distance threshold 150) + t-SNE; the other algorithms (K-Means, DBSCAN, Spectral, Fuzzy C-Means) and PCA were removed. Shared pipeline constants live in `clustering.py` (`DEFAULT_CLUSTERING_*`). LLM auto-labeling + DB-backed cache.
 - MCP: `MCPServer` from the `mcp` package; RAG chat auto-invokes MCP tools.
 - Web UI: Flask 3.0+, 20+ API routes in `web_ui/app.py` (frontend calls from `web_ui/static/modules/`), 15 ES6 modules, Waitress in production.
 

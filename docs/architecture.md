@@ -5,47 +5,52 @@ codebase, including module relationships, data flow, and function-level flow-cha
 
 ## Module Overview
 
-The codebase comprises **~21,800 lines** of Python across 20 source files:
+The codebase comprises **~28,200 lines** of Python:
 
 | Module | Lines | Responsibility |
 |--------|------:|----------------|
-| `cli.py` | 3,446 | Command-line interface (25 commands) |
-| `database.py` | 2,943 | SQL database operations (SQLAlchemy ORM) |
-| `clustering.py` | 2,094 | Clustering algorithms & visualization |
-| `registry.py` | 1,664 | OCI registry upload/download |
-| `embeddings.py` | 1,372 | ChromaDB vector embeddings |
-| `mcp_server.py` | 1,328 | MCP server & tool implementations |
-| `web_ui/app.py` | 1,120 | Flask web API (22 routes) |
-| `plugin.py` | 976 | Plugin system & data models |
-| `rag.py` | 874 | RAG chat with Pydantic AI |
-| `evaluation.py` | 833 | RAG evaluation framework |
-| `mcp_tools.py` | 824 | MCP tool schema & formatting |
-| `export_utils.py` | 675 | Paper export (ZIP/Markdown) |
-| `config.py` | 532 | Configuration management |
-| `db_models.py` | 435 | SQLAlchemy ORM models |
-| `paper_utils.py` | 247 | Paper formatting utilities |
-| `plugins/*.py` | ~2,177 | Conference downloader plugins (7 plugins) |
+| `cli/` package | 4,653 | Command-line interface (`main.py` wiring + one module per command group) |
+| `db/` package | 3,975 | SQL database operations as `DatabaseManager` mixins (+ 27-line `database.py` facade) |
+| `clustering.py` | 1,787 | Agglomerative clustering & visualization (fixed pipeline: ward/150 + t-SNE) |
+| `registry.py` | 1,684 | OCI registry upload/download |
+| `mcp_server.py` | 1,306 | MCP server & tool implementations (8 tools) |
+| `plugin.py` | 1,314 | Plugin system & data models |
+| `embeddings.py` | 1,223 | ChromaDB vector embeddings |
+| `web_ui/app.py` | 1,199 | Flask web API (19 routes) |
+| `rag.py` | 989 | RAG chat with Pydantic AI |
+| `evaluation.py` | 851 | RAG evaluation framework |
+| `interesting_papers.py` | 823 | Interesting-paper summaries & recommendations |
+| `profiling.py` | 742 | DB access profiling (development tool) |
+| `mcp_tools.py` | 679 | MCP tool argument normalization & LLM formatting |
+| `export_utils.py` | 667 | Paper export (ZIP/Markdown) |
+| `config.py` | 501 | Configuration management |
+| `db_models.py` | 429 | SQLAlchemy ORM models |
+| `plugins/*.py` | ~4,083 | Conference downloader plugins (11 plugins) |
+| `rate_limiter.py` | 222 | Token-bucket rate limiter & cooldown |
+| `paper_utils.py` | 167 | Paper formatting utilities |
+| `metadata_cache.py` | 112 | TTL cache for PostgreSQL metadata |
+| `llm_utils.py` | 76 | Shared one-shot chat-completion helper |
 
 ## High-Level Module Dependency Graph
 
 ```{mermaid}
 graph TD
-    CLI[cli.py<br/>3446 lines<br/>25 commands]
-    CFG[config.py<br/>532 lines]
-    DB[database.py<br/>2943 lines]
-    DBM[db_models.py<br/>435 lines]
-    EMB[embeddings.py<br/>1372 lines]
-    CLU[clustering.py<br/>2094 lines]
-    RAG[rag.py<br/>874 lines]
-    MCP[mcp_server.py<br/>1328 lines]
-    MCT[mcp_tools.py<br/>824 lines]
-    WEB[web_ui/app.py<br/>1120 lines]
-    PLG[plugin.py<br/>976 lines]
-    PLI[plugins/*<br/>7 downloaders]
-    EXP[export_utils.py<br/>675 lines]
-    PAP[paper_utils.py<br/>247 lines]
-    REG[registry.py<br/>1664 lines]
-    EVL[evaluation.py<br/>833 lines]
+    CLI[cli/ package<br/>15 commands<br/>+ subcommand groups]
+    CFG[config.py<br/>501 lines]
+    DB[db/ package<br/>DatabaseManager mixins]
+    DBM[db_models.py<br/>429 lines]
+    EMB[embeddings.py<br/>1223 lines]
+    CLU[clustering.py<br/>1787 lines]
+    RAG[rag.py<br/>989 lines]
+    MCP[mcp_server.py<br/>1306 lines]
+    MCT[mcp_tools.py<br/>679 lines]
+    WEB[web_ui/app.py<br/>1199 lines]
+    PLG[plugin.py<br/>1314 lines]
+    PLI[plugins/*<br/>11 downloaders]
+    EXP[export_utils.py<br/>667 lines]
+    PAP[paper_utils.py<br/>167 lines]
+    REG[registry.py<br/>1684 lines]
+    EVL[evaluation.py<br/>851 lines]
 
     CLI --> CFG
     CLI --> DB
@@ -298,8 +303,8 @@ graph TD
 
     subgraph "ClusteringManager"
         CLOAD["load_embeddings"]
-        CREDUC["reduce_dimensions<br/>(PCA / t-SNE)"]
-        CCLUST["cluster<br/>(K-Means / DBSCAN / Agglom / Spectral / Fuzzy)"]
+        CREDUC["reduce_dimensions<br/>(t-SNE)"]
+        CCLUST["cluster<br/>(Agglomerative, ward linkage)"]
         CKEYS["extract_cluster_keywords"]
         CLBL["generate_cluster_labels"]
         CHRCH["generate_hierarchical_labels"]
@@ -431,7 +436,7 @@ graph TD
 
 ```{mermaid}
 graph TD
-    subgraph "Flask Web UI (app.py - 22 routes)"
+    subgraph "Flask Web UI (app.py - 19 routes)"
         REQ[HTTP Request] --> MW["Middleware<br/>ProxyFix, CORS, teardown_db"]
 
         MW --> IDX["GET / → index()"]

@@ -22,16 +22,16 @@ Start the web interface using the new CLI command:
 
 ```bash
 # Start with defaults (127.0.0.1:5000)
-uv run neurips-abstracts web-ui
+uv run abstracts-explorer web-ui
 
 # Specify host and port
-uv run neurips-abstracts web-ui --host 0.0.0.0 --port 8080
+uv run abstracts-explorer web-ui --host 0.0.0.0 --port 8080
 
 # Enable debug mode
-uv run neurips-abstracts web-ui --debug
+uv run abstracts-explorer web-ui --debug
 
 # Get help
-uv run neurips-abstracts web-ui --help
+uv run abstracts-explorer web-ui --help
 ```
 
 ### Programmatic Usage
@@ -67,12 +67,16 @@ The web interface provides:
 ```
 src/abstracts_explorer/web_ui/
 ├── __init__.py          # Module exports
-├── app.py               # Flask application
-├── static/              # Static assets
-│   ├── app.js          # Frontend JavaScript
-│   └── style.css       # Custom styles
-└── templates/           # HTML templates
-    └── index.html      # Main page
+├── app.py               # Flask application (routes + server startup)
+├── api_utils.py         # Shared API helpers
+├── static/
+│   ├── app.js           # Frontend entry point
+│   ├── modules/         # ES6 modules (chat, search, clustering, state, ...)
+│   │   └── utils/       # Shared ES6 utilities
+│   ├── templates/       # HTML templates
+│   ├── style.css        # Custom styles
+│   └── vendor/          # Vendored JS libraries (plotly, marked, katex)
+└── tests/               # Jest test suite
 ```
 
 ## Configuration
@@ -84,8 +88,8 @@ The web UI uses the same configuration system as the rest of the package. Set en
 DATA_DIR=data
 
 # Database paths (relative to DATA_DIR unless absolute)
-PAPER_DB_PATH=abstracts.db
-EMBEDDING_DB_PATH=chroma_db
+PAPER_DB=abstracts.db
+EMBEDDING_DB=chroma_db
 
 # OpenAI-compatible API (such as LM Studio or blablador) settings
 LLM_BACKEND_URL=http://localhost:1234
@@ -101,19 +105,32 @@ COLLECTION_NAME=papers
 The web UI exposes the following REST API endpoints:
 
 - `GET /` - Main web interface
+- `GET /<conference_name>` - Deep link to a conference view
 - `GET /api/stats` - Database statistics
+- `GET /api/filters` - Filters for the current selection
+- `GET /api/available-filters` - All available filters
 - `POST /api/search` - Search papers
-- `GET /api/paper/<id>` - Get paper details
-- `POST /api/chat` - Chat with RAG
+- `GET /api/paper/<paper_uid>` - Get paper details
+- `POST /api/papers/batch` - Batch-fetch paper details
+- `POST /api/chat` - Chat with RAG (forwards interesting-paper ratings)
 - `POST /api/chat/reset` - Reset conversation
-- `GET /api/years` - Get available years
+- `POST /api/clusters/compute` - Serve (cached) cluster visualization
+- `POST /api/clusters/search` - Search within a distance of a custom query
+- `POST /api/topic-evolution` - Topic evolution data for plotting
+- `GET /api/papers-per-year` - Papers-per-year counts
+- `GET /api/embedding-model-check` - Report stored vs configured embedding model
+- `POST /api/export/interesting-papers` - Export interesting papers as ZIP
+- `POST /api/donate-data` - Donate interesting-paper ratings
+- `POST /api/donate-chat` - Donate chat transcripts
+- `GET /health` - Health check (used by container healthchecks)
 
 ## Testing
 
 Run the web UI tests:
 
 ```bash
-pytest tests/test_web.py -v
+uv run pytest tests/test_web_ui.py -v          # Python (Flask) tests
+npm test --prefix src/abstracts_explorer/web_ui  # Jest tests for the ES6 modules
 ```
 
 ## Development
@@ -121,7 +138,7 @@ pytest tests/test_web.py -v
 The web UI is fully integrated into the package:
 
 1. **Module Location**: `src/abstracts_explorer/web_ui/`
-2. **CLI Command**: `uv run neurips-abstracts web-ui`
+2. **CLI Command**: `uv run abstracts-explorer web-ui`
 3. **Optional Dependency**: Install with `uv sync --extra web`
 4. **Test Coverage**: 18 comprehensive tests
 
@@ -130,7 +147,7 @@ The web UI is fully integrated into the package:
 If you were using the standalone `web/` directory before:
 
 - **Old**: `cd web && python app.py`
-- **New**: `uv run neurips-abstracts web-ui`
+- **New**: `uv run abstracts-explorer web-ui`
 
 The functionality is identical, but now it's properly integrated into the package structure.
 
@@ -150,6 +167,6 @@ Or install Flask manually if not using uv:
 
 ## Notes
 
-- The web UI requires a database to be created first (`neurips-abstracts download`)
-- For semantic search, embeddings must be generated (`neurips-abstracts create-embeddings`)
+- The web UI requires a database to be created first (`abstracts-explorer download`)
+- For semantic search, embeddings must be generated (`abstracts-explorer create-embeddings`)
 - For AI chat, OpenAI-compatible API (such as LM Studio or blablador) must be running with a compatible model loaded

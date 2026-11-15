@@ -204,9 +204,9 @@ curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/main/scrip
 
 The final step is to populate the database. There are three options:
 
-#### Get pre-computed data from the registry
+#### Get pre-generated data from the registry
 
-After the services are running, use the CLI to [download pre-computed data from the registry](registry.md):
+After the services are running, use the CLI to [download pre-generated data from the registry](registry.md):
 
 ```bash
 podman exec abstracts-explorer \
@@ -223,7 +223,7 @@ podman exec abstracts-explorer \
 podman exec abstracts-explorer \
   abstracts-explorer create-embeddings
 podman exec abstracts-explorer \
-  abstracts-explorer clustering pre-compute
+  abstracts-explorer clustering pre-generate
 ```
 
 #### Migrate existing data

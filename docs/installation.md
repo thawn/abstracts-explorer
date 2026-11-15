@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Python 3.11 or higher
+- Python 3.12 or higher
 - [uv](https://docs.astral.sh/uv/) - Fast Python package installer and resolver
 - Node.js 14 or higher (for web UI)
 - npm package manager
@@ -187,7 +187,7 @@ If you don't have Node.js installed:
 
 ### Python Version Issues
 
-Ensure you're using Python 3.11 or higher:
+Ensure you're using Python 3.12 or higher:
 
 ```bash
 python --version

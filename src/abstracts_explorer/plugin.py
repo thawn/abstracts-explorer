@@ -2,7 +2,7 @@
 Plugin Framework
 ================
 
-This module provides the plugin framework for extending neurips-abstracts
+This module provides the plugin framework for extending abstracts-explorer
 with custom data downloaders.
 
 The framework consists of:

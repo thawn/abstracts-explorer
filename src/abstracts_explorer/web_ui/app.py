@@ -399,7 +399,7 @@ def check_embedding_model():
             f"Embedding model mismatch detected! The embeddings were created with '{stored_model}' "
             f"but the current configuration uses '{current_model}'. Embeddings from different models "
             f"are incompatible. Please recreate the embeddings using: "
-            f"neurips-abstracts create-embeddings --force"
+            f"abstracts-explorer create-embeddings --force"
         )
 
     return jsonify(
@@ -1126,13 +1126,13 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=6):
             print(f"\nThe database file does not exist: {db_path}", file=sys.stderr)
             print("\nTo create and populate the database, run one of these commands:", file=sys.stderr)
             print("  # Download NeurIPS papers:", file=sys.stderr)
-            print("  neurips-abstracts download --conference neurips --year 2025", file=sys.stderr)
+            print("  abstracts-explorer download --conference neurips --year 2025", file=sys.stderr)
             print("\n  # Or use a different conference/year:", file=sys.stderr)
-            print("  neurips-abstracts download --conference iclr --year 2025", file=sys.stderr)
+            print("  abstracts-explorer download --conference iclr --year 2025", file=sys.stderr)
             print("\n  # List available plugins:", file=sys.stderr)
-            print("  neurips-abstracts list-plugins", file=sys.stderr)
+            print("  abstracts-explorer download --list-plugins", file=sys.stderr)
             print("\nAfter downloading papers, you may also want to create embeddings:", file=sys.stderr)
-            print("  neurips-abstracts create-embeddings", file=sys.stderr)
+            print("  abstracts-explorer create-embeddings", file=sys.stderr)
             raise FileNotFoundError(f"Database not found: {db_path}")
     # For PostgreSQL, we can't check file existence - connection will be validated at runtime
 
