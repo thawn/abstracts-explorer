@@ -13,7 +13,7 @@ import logging
 import re
 import sys
 import threading
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterator, Sequence
 from contextlib import contextmanager
 from functools import lru_cache
 from itertools import takewhile
@@ -168,7 +168,7 @@ def _iter_batches(items: Sequence[Any], size: int) -> Iterator[Sequence[Any]]:
 
 
 @contextmanager
-def _translate_errors(message: str) -> Iterator[None]:
+def _translate_errors(message: str) -> Generator[None, None, None]:
     """Wrap unexpected exceptions in :class:`EmbeddingsError`, passing existing ones through."""
     try:
         yield
