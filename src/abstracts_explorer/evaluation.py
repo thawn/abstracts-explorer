@@ -24,7 +24,12 @@ from abstracts_explorer.config import get_config
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.llm_utils import chat_completion_text
-from abstracts_explorer.mcp_tools import execute_mcp_tool, format_tool_result_for_llm
+from abstracts_explorer.mcp_tools import (
+    TOOL_ARGUMENT_EXAMPLES,
+    TOOL_DESCRIPTIONS,
+    execute_mcp_tool,
+    format_tool_result_for_llm,
+)
 from abstracts_explorer.utils.time_utils import format_timestamp
 
 logger = logging.getLogger(__name__)
@@ -39,31 +44,6 @@ class EvaluationError(Exception):
 # ---------------------------------------------------------------------------
 #  Prompt templates
 # ---------------------------------------------------------------------------
-
-_TOOL_DESCRIPTIONS: Dict[str, str] = {
-    "search_papers": "Search for papers on a specific topic. Returns relevant papers from the database.",
-    "get_conference_topics": "Get the main research topics of a conference.",
-    "analyze_topic_relevance": (
-        "Analyze the relevance and popularity of a research topic by counting "
-        "papers within a specified distance in embedding space."
-    ),
-    "get_topic_evolution": "Analyze how a specific topic has evolved over the years.",
-    "get_cluster_visualization": "Retrieve pre-computed visualization data for clustered embeddings.",
-    "get_paper_details": "Get detailed metadata for one or more papers by title or paper ID.",
-    "summarize_interesting_papers": "Summarize the papers the user marked as interesting.",
-    "recommend_related_papers": "Recommend further papers based on the user's interesting papers.",
-}
-
-_TOOL_ARGUMENT_EXAMPLES: Dict[str, str] = {
-    "search_papers": '{"topic_keywords": "deep learning", "conference": "NeurIPS", "n_results": 5}',
-    "get_conference_topics": '{"conferences": ["NeurIPS"], "years": [2025]}',
-    "analyze_topic_relevance": '{"topic": "transformers", "conferences": ["NeurIPS"], "distance_threshold": 1.1}',
-    "get_topic_evolution": '{"topic_keywords": "reinforcement learning", "conferences": ["NeurIPS"], "start_year": 2020}',
-    "get_cluster_visualization": '{"conferences": ["NeurIPS"], "years": [2025]}',
-    "get_paper_details": '{"title": "attention is all you need"}',
-    "summarize_interesting_papers": '{"conference": "ICLR", "years": [2026]}',
-    "recommend_related_papers": '{"conferences": ["ICLR"], "years": [2026], "n_results": 10}',
-}
 
 _QA_GENERATION_SYSTEM_PROMPT = """\
 You are an expert evaluation dataset creator for a conference paper search and \
@@ -458,7 +438,7 @@ class Evaluator:
         EvaluationError
             If generation fails.
         """
-        available_tools = list(_TOOL_DESCRIPTIONS.keys())
+        available_tools = list(TOOL_DESCRIPTIONS.keys())
         target_tools = tools if tools else available_tools
         invalid = set(target_tools) - set(available_tools)
         if invalid:
@@ -469,8 +449,8 @@ class Evaluator:
 
         for tool_name in target_tools:
             logger.info(f"Generating {n_pairs_per_tool} Q/A pair(s) for tool: {tool_name}")
-            tool_desc = _TOOL_DESCRIPTIONS[tool_name]
-            tool_args_example = _TOOL_ARGUMENT_EXAMPLES[tool_name]
+            tool_desc = TOOL_DESCRIPTIONS[tool_name]
+            tool_args_example = TOOL_ARGUMENT_EXAMPLES[tool_name]
 
             user_prompt = _QA_GENERATION_USER_PROMPT.format(
                 n_pairs=n_pairs_per_tool,

@@ -30,8 +30,33 @@ from abstracts_explorer.utils.paper_presentation import truncate_abstract
 
 logger = logging.getLogger(__name__)
 
+TOOL_DESCRIPTIONS: Dict[str, str] = {
+    "search_papers": "Search for papers on a specific topic. Returns relevant papers from the database.",
+    "get_conference_topics": "Get the main research topics of a conference.",
+    "analyze_topic_relevance": (
+        "Analyze the relevance and popularity of a research topic by counting "
+        "papers within a specified distance in embedding space."
+    ),
+    "get_topic_evolution": "Analyze how a specific topic has evolved over the years.",
+    "get_cluster_visualization": "Retrieve pre-computed visualization data for clustered embeddings.",
+    "get_paper_details": "Get detailed metadata for one or more papers by title or paper ID.",
+    "summarize_interesting_papers": "Summarize the papers the user marked as interesting.",
+    "recommend_related_papers": "Recommend further papers based on the user's interesting papers.",
+}
 
-def _abbreviate_result(text: str, max_length: int = 200) -> str:
+TOOL_ARGUMENT_EXAMPLES: Dict[str, str] = {
+    "search_papers": '{"topic_keywords": "deep learning", "conference": "NeurIPS", "n_results": 5}',
+    "get_conference_topics": '{"conferences": ["NeurIPS"], "years": [2025]}',
+    "analyze_topic_relevance": '{"topic": "transformers", "conferences": ["NeurIPS"], "distance_threshold": 1.1}',
+    "get_topic_evolution": '{"topic_keywords": "reinforcement learning", "conferences": ["NeurIPS"], "start_year": 2020}',
+    "get_cluster_visualization": '{"conferences": ["NeurIPS"], "years": [2025]}',
+    "get_paper_details": '{"title": "attention is all you need"}',
+    "summarize_interesting_papers": '{"conference": "ICLR", "years": [2026]}',
+    "recommend_related_papers": '{"conferences": ["ICLR"], "years": [2026], "n_results": 10}',
+}
+
+
+def abbreviate_result(text: str, max_length: int = 200) -> str:
     """
     Abbreviate a result string for logging.
 
@@ -345,7 +370,7 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
             error_result = {"error": f"Unknown MCP tool: {tool_name}"}
             result = json.dumps(error_result, indent=2)
 
-        logger.info("MCP tool %s returned: %s", tool_name, _abbreviate_result(result))
+        logger.info("MCP tool %s returned: %s", tool_name, abbreviate_result(result))
         return result
 
     except Exception as e:

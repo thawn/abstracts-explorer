@@ -12,7 +12,7 @@ from unittest.mock import patch, Mock
 from abstracts_explorer.mcp_tools import (
     execute_mcp_tool,
     format_tool_result_for_llm,
-    _abbreviate_result,
+    abbreviate_result,
     _format_conference_topics_result,
     _format_topic_evolution_result,
     _format_search_papers_result,
@@ -610,9 +610,9 @@ class TestExecuteMCPToolE2E:
         ]
 
         with (
-            patch("abstracts_explorer.mcp_server.EmbeddingsManager", return_value=mock_em),
-            patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),
-            patch("abstracts_explorer.mcp_server.get_config") as mock_cfg,
+            patch("abstracts_explorer.mcp.deps.EmbeddingsManager", return_value=mock_em),
+            patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db),
+            patch("abstracts_explorer.mcp.deps.get_config") as mock_cfg,
         ):
             mock_cfg.return_value = Mock(collection_name="papers")
             result = execute_mcp_tool(
@@ -675,8 +675,8 @@ class TestExecuteMCPToolE2E:
         }
 
         with (
-            patch("abstracts_explorer.mcp_server.load_clustering_data", return_value=(mock_cm, mock_db)),
-            patch("abstracts_explorer.mcp_server.get_config") as mock_cfg,
+            patch("abstracts_explorer.mcp.resources.load_clustering_data", return_value=(mock_cm, mock_db)),
+            patch("abstracts_explorer.mcp.deps.get_config") as mock_cfg,
         ):
             mock_cfg.return_value = Mock(collection_name="papers", embedding_model="test-model")
             result = execute_mcp_tool("get_conference_topics", {"conferences": ["NeurIPS"]})
@@ -741,9 +741,9 @@ class TestExecuteMCPToolE2E:
         mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 100}
 
         with (
-            patch("abstracts_explorer.mcp_server.EmbeddingsManager", return_value=mock_em),
-            patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),
-            patch("abstracts_explorer.mcp_server.get_config") as mock_cfg,
+            patch("abstracts_explorer.mcp.deps.EmbeddingsManager", return_value=mock_em),
+            patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db),
+            patch("abstracts_explorer.mcp.deps.get_config") as mock_cfg,
         ):
             mock_cfg.return_value = Mock(collection_name="papers")
             result = execute_mcp_tool(
@@ -777,9 +777,9 @@ class TestExecuteMCPToolE2E:
         ]
 
         with (
-            patch("abstracts_explorer.mcp_server.EmbeddingsManager", return_value=mock_em),
-            patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),
-            patch("abstracts_explorer.mcp_server.get_config") as mock_cfg,
+            patch("abstracts_explorer.mcp.deps.EmbeddingsManager", return_value=mock_em),
+            patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db),
+            patch("abstracts_explorer.mcp.deps.get_config") as mock_cfg,
         ):
             mock_cfg.return_value = Mock(collection_name="papers")
             result = execute_mcp_tool(
@@ -807,9 +807,9 @@ class TestExecuteMCPToolE2E:
         mock_db.get_papers_by_uids.return_value = [{"uid": "p1", "title": "P", "year": 2025, "conference": "NeurIPS"}]
 
         with (
-            patch("abstracts_explorer.mcp_server.EmbeddingsManager", return_value=mock_em),
-            patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),
-            patch("abstracts_explorer.mcp_server.get_config") as mock_cfg,
+            patch("abstracts_explorer.mcp.deps.EmbeddingsManager", return_value=mock_em),
+            patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db),
+            patch("abstracts_explorer.mcp.deps.get_config") as mock_cfg,
         ):
             mock_cfg.return_value = Mock(collection_name="papers")
             # 'conference' (singular) should not crash
@@ -920,7 +920,7 @@ class TestExecuteMCPToolE2E:
             }
         ]
 
-        with (patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),):
+        with (patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db),):
             result = execute_mcp_tool("get_paper_details", {"title": "Test Paper", "conference": "NeurIPS"})
 
         data = json.loads(result)
@@ -956,7 +956,7 @@ class TestExecuteMCPToolE2E:
             "created_at": "2024-01-01",
         }
 
-        with (patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),):
+        with (patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db),):
             result = execute_mcp_tool("get_paper_details", {"paper_id": "abc123"})
 
         data = json.loads(result)
@@ -1256,38 +1256,38 @@ def test_format_tool_result_for_llm_paper_details():
 
 
 # ---------------------------------------------------------------------------
-# _abbreviate_result tests
+# abbreviate_result tests
 # ---------------------------------------------------------------------------
 
 
 class TestAbbreviateResult:
-    """Tests for the _abbreviate_result helper function."""
+    """Tests for the abbreviate_result helper function."""
 
     def test_short_text_unchanged(self):
         """Short text is returned unchanged."""
-        assert _abbreviate_result("short") == "short"
+        assert abbreviate_result("short") == "short"
 
     def test_exact_max_length_unchanged(self):
         """Text exactly at max_length is returned unchanged."""
         text = "a" * 200
-        assert _abbreviate_result(text) == text
+        assert abbreviate_result(text) == text
 
     def test_long_text_truncated(self):
         """Text exceeding max_length is truncated with ellipsis."""
         text = "a" * 300
-        result = _abbreviate_result(text)
+        result = abbreviate_result(text)
         assert len(result) == 201  # 200 chars + '…'
         assert result.endswith("…")
 
     def test_custom_max_length(self):
         """Custom max_length is respected."""
         text = "a" * 50
-        result = _abbreviate_result(text, max_length=10)
+        result = abbreviate_result(text, max_length=10)
         assert len(result) == 11  # 10 chars + '…'
 
     def test_empty_string(self):
         """Empty string is returned unchanged."""
-        assert _abbreviate_result("") == ""
+        assert abbreviate_result("") == ""
 
 
 # ---------------------------------------------------------------------------

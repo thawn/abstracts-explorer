@@ -519,41 +519,6 @@ def mock_lm_studio():
 
 
 @pytest.fixture
-def mock_rag_openai():
-    """
-    Mock OpenAI client for RAG testing.
-
-    Yields
-    ------
-    Mock
-        Mock OpenAI client with configured chat completion responses
-
-    Notes
-    -----
-    Mocks chat.completions.create() for RAG query testing.
-    """
-    from unittest.mock import patch, Mock
-
-    with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
-        # Create mock OpenAI client instance
-        mock_client = Mock()
-        mock_openai_class.return_value = mock_client
-
-        # Mock chat.completions.create() for chat generation
-        mock_chat_response = Mock()
-        mock_choice = Mock()
-        mock_message = Mock()
-        mock_message.content = (
-            "Based on Paper 1 and Paper 2, attention mechanisms allow models to focus on relevant parts of the input."
-        )
-        mock_choice.message = mock_message
-        mock_chat_response.choices = [mock_choice]
-        mock_client.chat.completions.create.return_value = mock_chat_response
-
-        yield mock_client
-
-
-@pytest.fixture
 def embeddings_manager(tmp_path, monkeypatch):
     """
     Create an EmbeddingsManager instance for testing.

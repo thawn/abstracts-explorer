@@ -56,7 +56,7 @@ def mock_embeddings_manager_empty():
 @pytest.fixture
 def mock_search_papers():
     """Mock mcp_server.search_papers to return test papers."""
-    with patch("abstracts_explorer.rag.mcp_search_papers") as mock_sp:
+    with patch("abstracts_explorer.rag.tools.mcp_search_papers") as mock_sp:
         mock_sp.return_value = json.dumps(
             {
                 "topic": "test query",
@@ -99,7 +99,7 @@ def mock_search_papers():
 @pytest.fixture
 def mock_cluster_topics():
     """Mock mcp_server.get_conference_topics to return test data."""
-    with patch("abstracts_explorer.rag.mcp_get_conference_topics") as mock_ct:
+    with patch("abstracts_explorer.rag.tools.mcp_get_conference_topics") as mock_ct:
         mock_ct.return_value = json.dumps(
             {
                 "n_topics": 8,
@@ -119,7 +119,7 @@ def mock_cluster_topics():
 @pytest.fixture
 def mock_topic_evolution():
     """Mock mcp_server.get_topic_evolution to return test data."""
-    with patch("abstracts_explorer.rag.mcp_get_topic_evolution") as mock_te:
+    with patch("abstracts_explorer.rag.tools.mcp_get_topic_evolution") as mock_te:
         mock_te.return_value = json.dumps(
             {
                 "topic": "transformers",
@@ -140,7 +140,7 @@ def mock_topic_evolution():
 @pytest.fixture
 def mock_analyze_topic():
     """Mock mcp_server.analyze_topic_relevance to return test data."""
-    with patch("abstracts_explorer.rag.mcp_analyze_topic_relevance") as mock_at:
+    with patch("abstracts_explorer.rag.tools.mcp_analyze_topic_relevance") as mock_at:
         mock_at.return_value = json.dumps(
             {
                 "topic": "uncertainty quantification",
@@ -167,7 +167,7 @@ def mock_analyze_topic():
 @pytest.fixture
 def mock_all_tools(mock_search_papers, mock_cluster_topics, mock_topic_evolution, mock_analyze_topic):
     """Mock all MCP server tools."""
-    with patch("abstracts_explorer.rag.mcp_get_cluster_visualization") as mock_viz:
+    with patch("abstracts_explorer.rag.tools.mcp_get_cluster_visualization") as mock_viz:
         mock_viz.return_value = json.dumps(
             {
                 "n_dimensions": 2,
@@ -410,7 +410,7 @@ class TestRAGChatQuery:
 
     def test_query_no_results(self, mock_embeddings_manager_empty, mock_database):
         """Test query when no papers are found."""
-        with patch("abstracts_explorer.rag.mcp_search_papers") as mock_sp:
+        with patch("abstracts_explorer.rag.tools.mcp_search_papers") as mock_sp:
             mock_sp.return_value = json.dumps(
                 {"topic": "Unknown topic", "papers_found": 0, "papers": []},
                 indent=2,
@@ -440,7 +440,7 @@ class TestRAGChatQuery:
     def test_query_general_exception(self, mock_embeddings_manager, mock_database):
         """Test query with general exception."""
         # Mock the search_papers tool to raise exception
-        with patch("abstracts_explorer.rag.mcp_search_papers") as mock_sp:
+        with patch("abstracts_explorer.rag.tools.mcp_search_papers") as mock_sp:
             mock_sp.side_effect = Exception("Unexpected error")
 
             chat = RAGChat(mock_embeddings_manager, mock_database)
@@ -1393,7 +1393,7 @@ class TestRAGToolLogging:
         """_tool_get_cluster_visualization logs the call arguments and abbreviated result."""
         from abstracts_explorer.rag import _tool_get_cluster_visualization, RAGDeps
 
-        with patch("abstracts_explorer.rag.mcp_get_cluster_visualization") as mock_viz:
+        with patch("abstracts_explorer.rag.tools.mcp_get_cluster_visualization") as mock_viz:
             mock_viz.return_value = json.dumps({"points": [], "n_points": 0})
 
             ctx = Mock()
@@ -1609,7 +1609,7 @@ class TestRAGToolGetPaperDetails:
     @pytest.fixture
     def mock_paper_details(self):
         """Mock mcp_server.get_paper_details to return test data."""
-        with patch("abstracts_explorer.rag.mcp_get_paper_details") as mock_gpd:
+        with patch("abstracts_explorer.rag.tools.mcp_get_paper_details") as mock_gpd:
             mock_gpd.return_value = json.dumps(
                 {
                     "papers_found": 1,
@@ -1852,7 +1852,7 @@ class TestParallelRAGRateLimiting:
 class TestRAGChatInterestingPaperTools:
     """Tests for the interesting-paper summary and recommendation tools."""
 
-    @patch("abstracts_explorer.rag.mcp_summarize_interesting_papers")
+    @patch("abstracts_explorer.rag.tools.mcp_summarize_interesting_papers")
     def test_query_calls_summarize_interesting_papers(
         self,
         mock_summarize,
@@ -1885,7 +1885,7 @@ class TestRAGChatInterestingPaperTools:
         )
         assert "summarize_interesting_papers" in result["metadata"]["tools_executed"]
 
-    @patch("abstracts_explorer.rag.mcp_recommend_related_papers")
+    @patch("abstracts_explorer.rag.tools.mcp_recommend_related_papers")
     def test_query_calls_recommend_related_papers(
         self,
         mock_recommend,

@@ -1,0 +1,135 @@
+"""
+Cluster visualization tools.
+"""
+
+import json
+import logging
+from typing import Any, Dict, List, Optional
+
+from abstracts_explorer.mcp import cache, deps, resources
+from abstracts_explorer.mcp.server import mcp
+
+logger = logging.getLogger(__name__)
+
+
+@mcp.tool()
+def get_cluster_visualization(
+    conferences: Optional[List[str]] = None,
+    years: Optional[List[int]] = None,
+    output_path: Optional[str] = None,
+    collection_name: Optional[str] = None,
+    **kwargs,
+) -> str:
+    """
+    Retrieve pre-computed visualization data for clustered embeddings.
+
+    This tool looks up cached clustering results (pre-generated via CLI)
+    and returns data suitable for visualization.  A conference must be
+    specified.
+
+    When multiple conferences are provided, each conference is looked up
+    individually and results are combined.
+
+    The chat frontend can use the returned data to generate a plot with
+    plotly.js showing the clusters.
+
+    Parameters
+    ----------
+    conferences : list of str, optional
+        Conference names to retrieve clusters for (e.g. ["NeurIPS"]).
+        Required – returns an error when not provided.
+    years : list of int, optional
+        Filter by publication years.
+    output_path : str, optional
+        Path to save visualization JSON file (optional).
+    collection_name : str, optional
+        Name of ChromaDB collection.
+    **kwargs
+        Ignored (for backwards compatibility with old tool schemas).
+
+    Returns
+    -------
+    str
+        JSON string containing visualization data with points, clusters, and statistics.
+    """
+    try:
+        if not conferences:
+            return json.dumps(
+                {
+                    "error": (
+                        "A conference must be specified for cluster visualization. "
+                        "Please provide conferences parameter."
+                    )
+                },
+                indent=2,
+            )
+
+        config = deps.get_config()
+        collection_name = collection_name or config.collection_name
+
+        all_points: List[Dict[str, Any]] = []
+        combined_stats: Dict[str, Any] = {}
+
+        for conf in conferences:
+            # Parse year from conference name if present (e.g. "NeurIPS 2025")
+            parsed_conf, extracted_year = deps.parse_conference_year(conf)
+            vis_years = list(years) if years else None
+            if extracted_year is not None:
+                if vis_years is None:
+                    vis_years = [extracted_year]
+                elif extracted_year not in vis_years:
+                    vis_years = sorted(vis_years + [extracted_year])
+
+            with resources._get_clustering_resources(collection_name) as (_, db):
+                cached = cache._lookup_clustering_cache(db, config, parsed_conf, vis_years)
+
+            if not cached:
+                return json.dumps(
+                    {
+                        "error": (
+                            f"No pre-computed clustering data available for conference "
+                            f"'{parsed_conf}'"
+                            + (f" years={vis_years}" if vis_years else "")
+                            + ". Run 'abstracts-explorer clustering pre-generate' first."
+                        ),
+                    },
+                    indent=2,
+                )
+
+            all_points.extend(cached.get("points", []))
+            if not combined_stats:
+                combined_stats = cached.get("statistics", {})
+            else:
+                # Merge stats across conferences
+                combined_stats["n_clusters"] = combined_stats.get("n_clusters", 0) + cached.get("statistics", {}).get(
+                    "n_clusters", 0
+                )
+                combined_stats["total_papers"] = combined_stats.get("total_papers", 0) + cached.get(
+                    "statistics", {}
+                ).get("total_papers", 0)
+
+        # Export if requested
+        if output_path:
+            import pathlib
+
+            try:
+                export_data = {"points": all_points, "statistics": combined_stats}
+                pathlib.Path(output_path).write_text(json.dumps(export_data, indent=2))
+            except OSError as exc:
+                logger.warning(f"Failed to write visualization to {output_path}: {exc}")
+                output_path = None
+
+        result = {
+            "n_dimensions": 2,
+            "n_points": len(all_points),
+            "statistics": combined_stats,
+            "points": all_points[:1000],  # Limit for MCP response size
+            "visualization_saved": output_path is not None,
+            "output_path": output_path if output_path else None,
+        }
+
+        return json.dumps(result, indent=2)
+
+    except Exception as e:
+        logger.error(f"Failed to generate cluster visualization: {str(e)}")
+        return json.dumps({"error": str(e)}, indent=2)
