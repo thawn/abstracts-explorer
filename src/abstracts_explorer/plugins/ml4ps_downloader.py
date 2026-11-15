@@ -8,14 +8,13 @@ Uses the lightweight plugin API for simplified implementation.
 
 from typing import Any, Dict, List, Optional
 import logging
-from requests.adapters import HTTPAdapter
 from bs4 import BeautifulSoup
 import re
 from urllib.parse import urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from threading import Lock
 
 from abstracts_explorer.plugin import (
+    DownloadOptions,
     HTTPDownloaderPlugin,
     LightweightPaper,
     sanitize_author_names,
@@ -46,6 +45,7 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
     conference_name = "ML4PS"
     _USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     _SOURCE_LABEL = "ML4PS data"
+    _DEFAULT_MAX_WORKERS = 10
 
     # NeurIPS virtual page base URL for fetching abstracts (years >= 2022 only)
     _NEURIPS_VIRTUAL_BASES = {
@@ -71,34 +71,13 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
     def __init__(self):
         """Initialize the ML4PS downloader plugin."""
         super().__init__()
-        # Match pool_maxsize to the maximum number of concurrent workers used in
-        # _fetch_abstracts_for_papers to avoid urllib3 "Connection pool is full" warnings.
-        adapter = HTTPAdapter(pool_maxsize=20)
-        self._session.mount("https://", adapter)
-        self._session.mount("http://", adapter)
-        self.stats_lock = Lock()
-        self._current_year: int = max(self.supported_years)
+        self.configure_pool(20)
+        self._current_year: int = self._start_year
 
     @property
     def session(self):
         """Return the shared HTTP session for backwards compatibility."""
         return self._session
-
-    def _get_base_url(self, year: int) -> str:
-        """
-        Get the ML4PS workshop page URL for a given year.
-
-        Parameters
-        ----------
-        year : int
-            Workshop year
-
-        Returns
-        -------
-        str
-            URL of the workshop page
-        """
-        return f"https://ml4physicalsciences.github.io/{year}/"
 
     def _get_neurips_virtual_base(self, year: int) -> Optional[str]:
         """
@@ -120,73 +99,45 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
             return None
         return self._NEURIPS_VIRTUAL_BASES.get(year, f"https://neurips.cc/virtual/{year}/poster/")
 
-    def download(
+    def _download_uncached(
         self,
-        year: Optional[int] = None,
-        output_path: Optional[str] = None,
-        force_download: bool = False,
-        **kwargs: Any,
+        year: int,
+        output_path: Optional[str],
+        options: DownloadOptions,
     ) -> List[LightweightPaper]:
         """
-        Download papers from ML4PS workshop.
+        Scrape the ML4PS workshop page and fetch abstracts for *year*.
 
         Parameters
         ----------
-        year : int, optional
-            Workshop year (default: 2025)
+        year : int
+            Workshop year.
         output_path : str, optional
-            Path to save the downloaded JSON file
-        force_download : bool
-            Force re-download even if file exists
-        max_workers : int, optional
-            Maximum parallel workers for fetching abstracts (default: 10)
-        **kwargs : Any
-            Additional parameters
+            Cache path (unused here; the template persists the result).
+        options : DownloadOptions
+            Resolved download options. ``max_workers`` controls parallel
+            abstract fetching.
 
         Returns
         -------
         list of LightweightPaper
-            List of validated paper objects ready for database insertion
+            List of validated paper objects ready for database insertion.
         """
-        if year is None:
-            year = max(self.supported_years)
-
-        # Validate year
-        self.validate_year(year)
-
-        # Store year for use by internal methods
         self._current_year = year
-
-        # Check if file already exists and should be loaded
-        if output_path and not force_download:
-            cached_papers = self._load_papers_json(output_path, "web")
-            if cached_papers is not None:
-                return cached_papers
-
-        # Get options from kwargs
-        max_workers = kwargs.get("max_workers", 10)
 
         logger.info(f"Scraping ML4PS {year} workshop papers...")
 
-        # Scrape papers
         papers_raw = self._scrape_papers()
 
         if not papers_raw:
             logger.error("No papers were scraped")
             return []
 
-        # Fetch abstracts (required field)
         logger.info(f"Fetching abstracts for {len(papers_raw)} papers...")
-        self._fetch_abstracts_for_papers(papers_raw, max_workers=max_workers)
+        self._fetch_abstracts_for_papers(papers_raw, max_workers=options.max_workers)
 
-        # Convert to lightweight format
         lightweight_papers_data = self._convert_to_lightweight_format(papers_raw)
-
-        # Convert to LightweightPaper objects (skip papers that fail validation)
         papers = validate_lightweight_papers(lightweight_papers_data)
-
-        # Save to file only if path provided and papers were found
-        self._save_papers_json(papers, output_path, "ML4PS")
 
         logger.info(f"Successfully downloaded {len(papers)} papers from ML4PS {year}")
 
@@ -211,7 +162,7 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
                     "type": "int",
                     "required": True,
                     "description": "Workshop year to download",
-                    "default": max(self.supported_years),
+                    "default": self._resolve_year(None),
                 },
                 "output_path": {"type": "str", "required": False, "description": "Path to save the downloaded data"},
                 "force_download": {
@@ -224,7 +175,7 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
                     "type": "int",
                     "required": False,
                     "description": "Maximum parallel workers for fetching abstracts",
-                    "default": 20,
+                    "default": self._DEFAULT_MAX_WORKERS,
                 },
             },
         }
@@ -311,7 +262,7 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
         if len(cells) < 2:
             return None
 
-        base_url = self._get_base_url(self._current_year)
+        base_url = self.get_url(self._current_year)
 
         try:
             # Extract paper ID
@@ -426,7 +377,7 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
 
     def _scrape_papers(self) -> List[Dict]:
         """Scrape all papers from the workshop page."""
-        base_url = self._get_base_url(self._current_year)
+        base_url = self.get_url(self._current_year)
         logger.info(f"Scraping ML4PS {self._current_year} workshop papers...")
 
         soup = self._fetch_page(base_url)
@@ -498,18 +449,17 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
             for future in as_completed(future_to_paper):
                 paper, success = future.result()
 
-                with self.stats_lock:
-                    processed_count += 1
-                    if success:
-                        success_count += 1
-                    else:
-                        fail_count += 1
+                processed_count += 1
+                if success:
+                    success_count += 1
+                else:
+                    fail_count += 1
 
-                    if processed_count % 10 == 0:
-                        logger.info(
-                            f"Progress: {processed_count}/{len(papers)} papers processed "
-                            f"({success_count} abstracts fetched, {fail_count} failed)"
-                        )
+                if processed_count % 10 == 0:
+                    logger.info(
+                        f"Progress: {processed_count}/{len(papers)} papers processed "
+                        f"({success_count} abstracts fetched, {fail_count} failed)"
+                    )
 
         logger.info(f"Abstract fetching complete: {success_count} successful, {fail_count} failed")
 
@@ -558,7 +508,7 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
                 "session": session,
                 "poster_position": str(paper["id"]),  # Use paper ID as position
                 # Optional fields
-                "id": paper["id"],
+                "original_id": paper["id"],
                 "paper_pdf_url": paper.get("paper_url"),
                 "poster_image_url": paper.get("poster_url"),
                 "url": paper.get("openreview_url") or paper.get("paper_url"),

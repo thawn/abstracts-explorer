@@ -132,6 +132,7 @@ class TestAISTATSPlugin:
         mock_get.return_value = mock_response
 
         plugin = AISTATSDownloaderPlugin()
+        plugin.supported_years = [2025]
         data = plugin.download()
 
         call_args = mock_get.call_args

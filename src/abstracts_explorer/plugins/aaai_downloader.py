@@ -1,10 +1,8 @@
 """Download AAAI abstracts and metadata from the official OJS proceedings."""
 
-import json
 import logging
 import re
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
@@ -14,10 +12,10 @@ from pydantic import ValidationError
 from abstracts_explorer.plugin import (
     HTTPDownloaderPlugin,
     LightweightPaper,
-    get_failed_downloads_path,
     register_plugin,
     sanitize_author_names,
 )
+from abstracts_explorer.plugin.persistence import FailureSidecar
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +57,7 @@ class AAAIDownloaderPlugin(HTTPDownloaderPlugin):
     )
     _USER_AGENT = "abstracts-explorer AAAI proceedings downloader"
     _SOURCE_LABEL = "AAAI proceedings"
+    _DEFAULT_REQUEST_DELAY = 0.5
 
     def get_url(self, year: int) -> str:
         """Return the archive URL shared by all conference years.
@@ -103,7 +102,7 @@ class AAAIDownloaderPlugin(HTTPDownloaderPlugin):
                 return True
         return False
 
-    def _discover_issues(self, year: int, timeout: int, verify_ssl: bool, request_delay: float) -> list[str]:
+    def _discover_issues(self, year: int, timeout: float, verify_ssl: bool, request_delay: float) -> list[str]:
         """Follow archive pagination and collect all AAAI issues for a year."""
         issues: dict[str, None] = {}
         visited: set[str] = set()
@@ -196,63 +195,11 @@ class AAAIDownloaderPlugin(HTTPDownloaderPlugin):
             logger.warning("Skipping AAAI article %s: %s", url, exc)
             return None
 
-    def _load_failed_downloads(self, output_path: str | None, year: int) -> list[dict[str, Any]]:
-        """Load recorded failed URLs for a year, ignoring malformed sidecars."""
-        if not output_path:
-            return []
-        path = Path(get_failed_downloads_path(output_path))
-        if not path.exists():
-            return []
-        try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("Could not read AAAI failed-download list %s: %s", path, exc)
-            return []
-        if not isinstance(data, dict):
-            logger.warning("Ignoring malformed AAAI failed-download list: %s", path)
-            return []
-        if data.get("conference") != self.conference_name or data.get("year") != year:
-            logger.warning("Ignoring mismatched AAAI failed-download list: %s", path)
-            return []
-        failures = data.get("failed", [])
-        if not isinstance(failures, list):
-            logger.warning("Ignoring malformed AAAI failed-download list: %s", path)
-            return []
-        return [
-            entry
-            for entry in failures
-            if isinstance(entry, dict) and isinstance(entry.get("url"), str) and entry["url"]
-        ]
-
-    def _save_failed_downloads(self, output_path: str | None, year: int, failures: list[dict[str, Any]]) -> None:
-        """Save failed URLs, or remove the sidecar when every page succeeded."""
-        if not output_path:
-            return
-        path = Path(get_failed_downloads_path(output_path))
-        if not failures:
-            path.unlink(missing_ok=True)
-            return
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(
-                {"conference": self.conference_name, "year": year, "failed": failures},
-                f,
-                indent=2,
-            )
-        logger.warning(
-            "Recorded %d failed AAAI %d page(s) in %s; they will be retried "
-            "automatically on the next run. Delete this file to skip retrying them.",
-            len(failures),
-            year,
-            path,
-        )
-
     def _process_issue(
         self,
         issue_url: str,
         year: int,
-        timeout: int,
+        timeout: float,
         verify_ssl: bool,
         request_delay: float,
         papers: list[LightweightPaper],
@@ -315,7 +262,7 @@ class AAAIDownloaderPlugin(HTTPDownloaderPlugin):
         failures: list[dict[str, Any]],
         year: int,
         output_path: str,
-        timeout: int,
+        timeout: float,
         verify_ssl: bool,
         request_delay: float,
     ) -> list[LightweightPaper]:
@@ -366,7 +313,7 @@ class AAAIDownloaderPlugin(HTTPDownloaderPlugin):
                 if paper.original_id is not None:
                     seen.add(paper.original_id)
         self._save_papers_json(papers, output_path, "AAAI")
-        self._save_failed_downloads(output_path, year, remaining)
+        FailureSidecar(output_path, self.conference_name, year).save(remaining)
         if remaining:
             logger.warning(
                 "Retried %d failed AAAI %d page(s); %d still failed.",
@@ -385,19 +332,20 @@ class AAAIDownloaderPlugin(HTTPDownloaderPlugin):
         force_download: bool = False,
         **kwargs: Any,
     ) -> list[LightweightPaper]:
-        """Download all AAAI proceedings issues for one conference year.
+        """
+        Download AAAI papers for a given year.
 
         Parameters
         ----------
         year : int, optional
-            Conference year; defaults to the latest supported year.
+            Conference year (default: newest supported year).
         output_path : str, optional
-            Lightweight JSON cache path. Existing files are loaded offline.
-        force_download : bool, optional
-            Ignore an existing cache and fetch fresh proceedings.
+            Path to write the lightweight JSON cache. When set and the cache
+            matches *year*, it is reused unless *force_download* is true.
+        force_download : bool
+            Force a fresh crawl even when a matching cache exists.
         **kwargs : Any
-            Overrides for ``timeout``, ``verify_ssl``, and ``request_delay``
-            (default: 0.5 seconds before each HTTP request).
+            ``timeout``, ``verify_ssl`` and ``request_delay`` overrides.
 
         Returns
         -------
@@ -412,17 +360,17 @@ class AAAIDownloaderPlugin(HTTPDownloaderPlugin):
             If archive discovery or layout parsing fails, or no valid papers
             remain.
         """
-        if year is None:
-            year = max(self.supported_years)
+        year = self._resolve_year(year)
         if year < self._start_year or year > datetime.now().year:
             raise ValueError(f"Year {year} not supported by {self.plugin_name}")
-        timeout = kwargs.get("timeout", self.timeout)
-        verify_ssl = kwargs.get("verify_ssl", self.verify_ssl)
-        request_delay = kwargs.get("request_delay", 0.5)
+
+        options = self.resolve_options(kwargs)
+        sidecar = FailureSidecar(output_path, self.conference_name, year)
+
         if output_path and not force_download:
             cached = self._load_papers_json(output_path, "AAAI")
             if cached and all(paper.year == year and paper.conference == self.conference_name for paper in cached):
-                cached_failures = self._load_failed_downloads(output_path, year)
+                cached_failures = sidecar.load()
                 if cached_failures:
                     logger.info("Retrying %d previously failed AAAI %d page(s).", len(cached_failures), year)
                     return self._retry_failed(
@@ -430,14 +378,13 @@ class AAAIDownloaderPlugin(HTTPDownloaderPlugin):
                         cached_failures,
                         year,
                         output_path,
-                        timeout,
-                        verify_ssl,
-                        request_delay,
+                        options.timeout,
+                        options.verify_ssl,
+                        options.request_delay,
                     )
                 return cached
-        # Explicit requests use actual issue discovery, not a cached metadata
-        # probe, which can fail transiently or use different HTTP options.
-        issue_urls = self._discover_issues(year, timeout, verify_ssl, request_delay)
+
+        issue_urls = self._discover_issues(year, options.timeout, options.verify_ssl, options.request_delay)
         papers: list[LightweightPaper] = []
         seen: set[int] = set()
         failures: list[dict[str, Any]] = []
@@ -445,9 +392,9 @@ class AAAIDownloaderPlugin(HTTPDownloaderPlugin):
             self._process_issue(
                 issue_url,
                 year,
-                timeout,
-                verify_ssl,
-                request_delay,
+                options.timeout,
+                options.verify_ssl,
+                options.request_delay,
                 papers,
                 seen,
                 failures,
@@ -456,7 +403,7 @@ class AAAIDownloaderPlugin(HTTPDownloaderPlugin):
             raise RuntimeError(f"No valid AAAI papers with abstracts found for {year}")
         logger.info("Downloaded %d unique AAAI %d papers", len(papers), year)
         self._save_papers_json(papers, output_path, "AAAI")
-        self._save_failed_downloads(output_path, year, failures)
+        sidecar.save(failures)
         if failures:
             logger.warning(
                 "Downloaded %d AAAI %d paper(s), but %d page(s) failed; "

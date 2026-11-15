@@ -7,8 +7,6 @@ Downloads abstracts from the AGU annual meeting's public m-anage meeting API.
 
 import json
 import logging
-import os
-import shutil
 import string
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -18,10 +16,10 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Set
 
 from bs4 import BeautifulSoup
 from pydantic import ValidationError
-from requests.adapters import HTTPAdapter
 from tqdm import tqdm
 
 from abstracts_explorer.plugin import HTTPDownloaderPlugin, LightweightPaper, sanitize_author_names
+from abstracts_explorer.plugin.persistence import append_jsonl, clear_directory, load_json, load_jsonl, save_json
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +42,8 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
     _BATCH_SIZE = 20
     _MAX_WORKERS: int = 16
     _REQUEST_DELAY: float = 0.1
+    _DEFAULT_REQUEST_DELAY = _REQUEST_DELAY
+    _DEFAULT_MAX_WORKERS = _MAX_WORKERS
     _BASE_URL = "https://studio.m-anage.com/agu"
     _LEGACY_SLUG_LAST_YEAR = 2023
     _MAX_FETCH_ATTEMPTS = 6
@@ -80,13 +80,6 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
         prefix = "fm" if year <= self._LEGACY_SLUG_LAST_YEAR else "agu"
         short_year = str(year)[-2:]
         return f"{self._BASE_URL}/{prefix}{short_year}/meetingapp.cgi"
-
-    def _configure_session_pool(self, max_workers: int) -> None:
-        """Size the shared connection pool for concurrent requests."""
-        pool_size = max(32, max_workers + 5)
-        adapter = HTTPAdapter(pool_connections=pool_size, pool_maxsize=pool_size)
-        self._session.mount("https://", adapter)
-        self._session.mount("http://", adapter)
 
     def _run_parallel(
         self,
@@ -160,60 +153,27 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
     @staticmethod
     def _clear_checkpoint(directory: Path) -> None:
         """Remove a checkpoint directory if it exists."""
-        shutil.rmtree(directory, ignore_errors=True)
+        clear_directory(directory)
 
     @staticmethod
     def _load_json(path: Optional[Path]) -> Any:
         """Load a JSON checkpoint, returning ``None`` when it is unusable."""
-        if path is None or not path.exists():
-            return None
-        try:
-            with path.open("r", encoding="utf-8") as handle:
-                return json.load(handle)
-        except (OSError, json.JSONDecodeError):
-            return None
+        return load_json(path)
 
     @staticmethod
     def _save_json(path: Path, data: Any) -> None:
         """Write JSON atomically so an interrupted write cannot corrupt it."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_name(f"{path.name}.tmp")
-        with temporary.open("w", encoding="utf-8") as handle:
-            json.dump(data, handle, ensure_ascii=False, separators=(",", ":"))
-        os.replace(temporary, path)
+        save_json(path, data)
 
     @staticmethod
     def _load_jsonl(path: Optional[Path]) -> List[Dict[str, Any]]:
         """Load append-only JSONL records, ignoring a corrupt trailing line."""
-        records: List[Dict[str, Any]] = []
-        if path is None or not path.exists():
-            return records
-        try:
-            with path.open("r", encoding="utf-8") as handle:
-                for line in handle:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        record = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if isinstance(record, dict):
-                        records.append(record)
-        except OSError:
-            return records
-        return records
+        return load_jsonl(path)
 
     @staticmethod
     def _append_jsonl(path: Path, records: List[Dict[str, Any]]) -> None:
         """Append records to a JSONL checkpoint."""
-        if not records:
-            return
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            for record in records:
-                handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
-                handle.write("\n")
+        append_jsonl(path, records)
 
     def download(
         self,
@@ -249,9 +209,10 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
         RuntimeError
             If the API request fails or no abstracts are found.
         """
-        if year is None:
-            year = max(self.supported_years, default=self._start_year)
+        year = self._resolve_year(year)
         self.validate_year(year)
+
+        options = self.resolve_options(kwargs)
 
         if output_path and not force_download:
             cached_papers = self._load_papers_json(output_path, "AGU")
@@ -259,16 +220,16 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
                 self._clear_checkpoint(self._checkpoint_dir(output_path))
                 return cached_papers
 
-        timeout = kwargs.get("timeout", self.timeout)
-        verify_ssl = kwargs.get("verify_ssl", self.verify_ssl)
-        request_delay = kwargs.get("request_delay", self._REQUEST_DELAY)
-        max_workers = max(1, int(kwargs.get("max_workers", self._MAX_WORKERS)))
-        resume = bool(kwargs.get("resume", True)) and not force_download
-        show_progress = kwargs.get("progress")
+        timeout = options.timeout
+        verify_ssl = options.verify_ssl
+        request_delay = options.request_delay
+        max_workers = max(1, int(options.max_workers))
+        resume = options.resume and not force_download
+        show_progress = options.progress
         meeting_url = self.get_url(year)
         api_url = meeting_url.replace("meetingapp.cgi", "meetingapi.cgi")
 
-        self._configure_session_pool(max_workers)
+        self.configure_pool(max_workers)
         checkpoint_dir = self._prepare_checkpoint(output_path, year, api_url, resume)
 
         sessions: Optional[Dict[str, Dict[str, Any]]] = None
@@ -405,7 +366,7 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
         self,
         api_url: str,
         refs: List[str],
-        timeout: int,
+        timeout: float,
         verify_ssl: bool,
         request_delay: float,
         show_progress: Optional[bool] = None,
@@ -483,7 +444,7 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
         self,
         api_url: str,
         programs: List[Dict[str, Any]],
-        timeout: int,
+        timeout: float,
         verify_ssl: bool,
         request_delay: float,
         show_progress: Optional[bool] = None,
@@ -552,7 +513,7 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
         self,
         api_url: str,
         sessions: Dict[str, Dict[str, Any]],
-        timeout: int,
+        timeout: float,
         verify_ssl: bool,
         request_delay: float,
         show_progress: Optional[bool] = None,
@@ -669,7 +630,7 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
         self,
         api_url: str,
         person_refs: List[str],
-        timeout: int,
+        timeout: float,
         verify_ssl: bool,
         request_delay: float,
         show_progress: Optional[bool] = None,

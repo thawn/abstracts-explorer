@@ -613,7 +613,7 @@ class TestFetchWithRetries:
     def test_successful_request(self, monkeypatch):
         """A successful request is returned without retrying."""
         sleep = Mock()
-        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        monkeypatch.setattr("abstracts_explorer.plugin.http.time.sleep", sleep)
         session = Mock()
         response = self._response()
         session.get.return_value = response
@@ -627,7 +627,7 @@ class TestFetchWithRetries:
     def test_transient_failure_retries(self, monkeypatch):
         """A dropped connection is retried and then succeeds."""
         sleep = Mock()
-        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        monkeypatch.setattr("abstracts_explorer.plugin.http.time.sleep", sleep)
         session = Mock()
         response = self._response()
         session.get.side_effect = [requests.ConnectionError("reset"), response]
@@ -641,7 +641,7 @@ class TestFetchWithRetries:
     def test_persistent_server_error_is_retried_then_raised(self, monkeypatch):
         """Persistent HTTP 503 responses are retried before raising."""
         sleep = Mock()
-        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        monkeypatch.setattr("abstracts_explorer.plugin.http.time.sleep", sleep)
         session = Mock()
         session.get.return_value = self._response(503)
 
@@ -653,7 +653,7 @@ class TestFetchWithRetries:
     def test_permanent_http_error_not_retried(self, monkeypatch):
         """Missing pages are not retried."""
         sleep = Mock()
-        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        monkeypatch.setattr("abstracts_explorer.plugin.http.time.sleep", sleep)
         session = Mock()
         session.get.return_value = self._response(404)
 
@@ -665,7 +665,7 @@ class TestFetchWithRetries:
     def test_retry_after_is_honored(self, monkeypatch):
         """Rate-limit responses respect the server's Retry-After header."""
         sleep = Mock()
-        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        monkeypatch.setattr("abstracts_explorer.plugin.http.time.sleep", sleep)
         session = Mock()
         session.get.return_value = self._response(429, {"Retry-After": "7"})
 
@@ -677,7 +677,7 @@ class TestFetchWithRetries:
     def test_params_are_forwarded(self, monkeypatch):
         """Query parameters are forwarded only when provided."""
         sleep = Mock()
-        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        monkeypatch.setattr("abstracts_explorer.plugin.http.time.sleep", sleep)
         session = Mock()
         session.get.return_value = self._response()
 
@@ -698,7 +698,7 @@ class TestFetchWithRetries:
     def test_custom_backoff_and_cap(self, monkeypatch):
         """Custom retry base delays and caps are applied."""
         sleep = Mock()
-        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        monkeypatch.setattr("abstracts_explorer.plugin.http.time.sleep", sleep)
         session = Mock()
         session.get.side_effect = [requests.ConnectionError("reset"), self._response()]
 
@@ -715,7 +715,7 @@ class TestFetchWithRetries:
     def test_http_date_retry_after_is_honored(self, monkeypatch):
         """HTTP-date Retry-After values are converted to a delay."""
         sleep = Mock()
-        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        monkeypatch.setattr("abstracts_explorer.plugin.http.time.sleep", sleep)
         session = Mock()
         session.get.return_value = self._response(
             429,
@@ -729,7 +729,7 @@ class TestFetchWithRetries:
 
     def test_cooldown_is_used_for_rate_limits(self, monkeypatch):
         """A shared cooldown defers and waits across retry attempts."""
-        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", Mock())
+        monkeypatch.setattr("abstracts_explorer.plugin.http.time.sleep", Mock())
         cooldown = Mock()
         session = Mock()
         success = self._response()
@@ -753,9 +753,9 @@ class TestRateLimitCooldown:
     def test_wait_sleeps_until_deferred_time(self, monkeypatch):
         clock = {"now": 100.0}
         sleeps = []
-        monkeypatch.setattr("abstracts_explorer.plugin.time.monotonic", lambda: clock["now"])
+        monkeypatch.setattr("abstracts_explorer.plugin.http.time.monotonic", lambda: clock["now"])
         monkeypatch.setattr(
-            "abstracts_explorer.plugin.time.sleep",
+            "abstracts_explorer.plugin.http.time.sleep",
             lambda delay: (sleeps.append(delay), clock.__setitem__("now", clock["now"] + delay)),
         )
         cooldown = RateLimitCooldown()
@@ -768,14 +768,14 @@ class TestRateLimitCooldown:
 
     def test_defer_keeps_longest_window(self, monkeypatch):
         clock = {"now": 100.0}
-        monkeypatch.setattr("abstracts_explorer.plugin.time.monotonic", lambda: clock["now"])
+        monkeypatch.setattr("abstracts_explorer.plugin.http.time.monotonic", lambda: clock["now"])
         cooldown = RateLimitCooldown()
         cooldown.defer(10)
         cooldown.defer(3)
 
         sleeps = []
         monkeypatch.setattr(
-            "abstracts_explorer.plugin.time.sleep",
+            "abstracts_explorer.plugin.http.time.sleep",
             lambda delay: sleeps.append(delay),
         )
         cooldown.wait()
@@ -839,7 +839,7 @@ class TestHTTPDownloaderPlugin:
         response.raise_for_status.side_effect = requests.HTTPError("503", response=response)
         with (
             patch.object(plugin._session, "get", return_value=response),
-            patch("abstracts_explorer.plugin.time.sleep"),
+            patch("abstracts_explorer.plugin.http.time.sleep"),
         ):
             with pytest.raises(RuntimeError, match="Failed to fetch test data"):
                 plugin._fetch_json("https://example.com", 30, True)
@@ -876,7 +876,7 @@ class TestHTTPDownloaderPlugin:
         plugin = _TestHTTPDownloaderPlugin()
         with (
             patch.object(plugin._session, "get", side_effect=requests.ConnectionError("down")) as mock_get,
-            patch("abstracts_explorer.plugin.time.sleep"),
+            patch("abstracts_explorer.plugin.http.time.sleep"),
         ):
             with pytest.raises(RuntimeError, match="Failed to fetch test data"):
                 plugin._request("https://example.com", 30, True, max_attempts=2)
@@ -1117,7 +1117,7 @@ class TestML4PSPluginYearConference:
         assert paper["authors"] == ["Alice", "Bob", "Charlie"]
         assert paper["abstract"] == "This is an amazing abstract"
         assert paper["session"] == f"ML4PhysicalSciences {expected_year} Workshop - Spotlight"
-        assert paper["id"] == 42
+        assert paper["original_id"] == 42
         assert paper["year"] == expected_year
         assert paper["conference"] == "ML4PS"
         assert paper["award"] == "Best Paper, Outstanding Poster"

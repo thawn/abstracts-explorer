@@ -122,9 +122,10 @@ class TestICLRPlugin:
         mock_get.return_value = mock_response
 
         plugin = ICLRDownloaderPlugin()
+        plugin.supported_years = [2025]
         data = plugin.download()  # No year specified
 
-        # Should default to 2025
+        # Should default to the newest supported year
         call_args = mock_get.call_args
         assert "iclr-2025-orals-posters.json" in call_args[0][0]
 

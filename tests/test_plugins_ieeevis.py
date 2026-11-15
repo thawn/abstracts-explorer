@@ -466,6 +466,7 @@ class TestIEEEVISDownload:
         mock_get.return_value = _make_mock_response([SAMPLE_PAPER_1])
 
         plugin = IEEEVISDownloaderPlugin()
+        plugin.supported_years = [2025]
         papers = plugin.download()  # No year specified
 
         assert "2025" in mock_get.call_args[0][0]

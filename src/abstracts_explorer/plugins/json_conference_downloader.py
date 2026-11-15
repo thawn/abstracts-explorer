@@ -11,6 +11,7 @@ import logging
 import json
 
 from abstracts_explorer.plugin import (
+    DownloadOptions,
     HTTPDownloaderPlugin,
     convert_to_lightweight_schema,
     LightweightPaper,
@@ -71,7 +72,7 @@ class JSONConferenceDownloaderPlugin(HTTPDownloaderPlugin):
         self,
         records: List[Dict[str, Any]],
         year: int,
-        timeout: int,
+        timeout: float,
         verify_ssl: bool,
     ) -> None:
         """Add missing abstracts from an EventHosts companion JSON object."""
@@ -123,61 +124,41 @@ class JSONConferenceDownloaderPlugin(HTTPDownloaderPlugin):
                 url,
             )
 
-    def download(
+    def _download_uncached(
         self,
-        year: Optional[int] = None,
-        output_path: Optional[str] = None,
-        force_download: bool = False,
-        **kwargs: Any,
+        year: int,
+        output_path: Optional[str],
+        options: DownloadOptions,
     ) -> List[LightweightPaper]:
         """
-        Download papers from conference.
+        Fetch and parse the conference JSON for *year*.
 
         Parameters
         ----------
-        year : int, optional
-            Conference year to download (default: 2025)
+        year : int
+            Conference year to download.
         output_path : str, optional
-            Path to save the downloaded JSON file
-        force_download : bool
-            Force re-download even if file exists
-        **kwargs : Any
-            Additional parameters (timeout, verify_ssl can override defaults)
+            Cache path (unused by this base class; kept for the template).
+        options : DownloadOptions
+            Resolved download options.
 
         Returns
         -------
         list of LightweightPaper
-            List of validated paper objects ready for database insertion
+            List of validated paper objects ready for database insertion.
 
         Raises
         ------
-        ValueError
-            If the year is not supported
         RuntimeError
-            If the download or JSON parsing fails
+            If the download or JSON parsing fails.
         """
-        if year is None:
-            year = 2025
-
-        # Validate year
-        self.validate_year(year)
-
-        # Get timeout and verify_ssl from kwargs or use defaults
-        timeout = kwargs.get("timeout", self.timeout)
-        verify_ssl = kwargs.get("verify_ssl", self.verify_ssl)
-
-        # Check if file already exists and should be loaded
-        if output_path and not force_download:
-            cached_papers = self._load_papers_json(output_path, "URL")
-            if cached_papers is not None:
-                return cached_papers
+        timeout = options.timeout
+        verify_ssl = options.verify_ssl
 
         logger.info(f"Downloading {self.conference_name} {year} data...")
 
-        # Construct URL for the specific year
         url = self.get_url(year)
 
-        # Download the data
         try:
             response = self._request(url, timeout, verify_ssl)
         except RuntimeError as e:
@@ -188,22 +169,18 @@ class JSONConferenceDownloaderPlugin(HTTPDownloaderPlugin):
         except (json.JSONDecodeError, ValueError) as e:
             raise RuntimeError(f"Invalid JSON response from {url}: {str(e)}") from e
 
-        # Convert papers to lightweight schema
         papers_data = []
         source_record_count = 0
         if "results" in data and isinstance(data["results"], list):
             source_record_count = len(data["results"])
             self._merge_companion_abstracts(data["results"], year, timeout, verify_ssl)
 
-            # Add year and conference fields before conversion
             for paper in data["results"]:
                 paper["year"] = year
                 paper["conference"] = self.conference_name
 
-            # Convert to lightweight schema (returns list of dicts)
             papers_data = convert_to_lightweight_schema(data["results"])
 
-        # Convert to LightweightPaper objects (skip papers that fail validation)
         papers = validate_lightweight_papers(papers_data)
         if source_record_count and not papers:
             logger.warning(
@@ -212,9 +189,6 @@ class JSONConferenceDownloaderPlugin(HTTPDownloaderPlugin):
                 self.conference_name,
                 year,
             )
-
-        # Save to file only if path provided and papers were found
-        self._save_papers_json(papers, output_path, self.conference_name)
 
         logger.info(f"Successfully downloaded {len(papers)} papers from {self.conference_name} {year}")
 
@@ -239,7 +213,7 @@ class JSONConferenceDownloaderPlugin(HTTPDownloaderPlugin):
                     "type": "int",
                     "required": True,
                     "description": "Conference year to download",
-                    "default": 2025,
+                    "default": self._resolve_year(None),
                 },
                 "output_path": {"type": "str", "required": False, "description": "Path to save the downloaded data"},
                 "force_download": {

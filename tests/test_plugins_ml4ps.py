@@ -39,7 +39,7 @@ def _check_ml4ps_website_available() -> bool:
 @pytest.fixture(autouse=True)
 def _mock_network_delays(monkeypatch):
     """Avoid retry backoff sleeps in unit tests."""
-    monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", lambda seconds: None)
+    monkeypatch.setattr("abstracts_explorer.plugin.http.time.sleep", lambda seconds: None)
 
 
 @pytest.fixture
@@ -211,8 +211,8 @@ class TestML4PSPluginProperties:
 
     def test_plugin_base_url(self, ml4ps_plugin):
         """Test base URL construction for different years."""
-        assert ml4ps_plugin._get_base_url(2025) == "https://ml4physicalsciences.github.io/2025/"
-        assert ml4ps_plugin._get_base_url(2019) == "https://ml4physicalsciences.github.io/2019/"
+        assert ml4ps_plugin.get_url(2025) == "https://ml4physicalsciences.github.io/2025/"
+        assert ml4ps_plugin.get_url(2019) == "https://ml4physicalsciences.github.io/2019/"
 
     def test_plugin_neurips_virtual_base(self, ml4ps_plugin):
         """Test NeurIPS virtual base URL construction."""
@@ -328,7 +328,7 @@ class TestML4PSLightweightConversion:
         assert paper1["abstract"] == "This is a test abstract."
         assert paper1["session"] == f"ML4PhysicalSciences {expected_year} Workshop"
         assert paper1["poster_position"] == "1"
-        assert paper1["id"] == 1
+        assert paper1["original_id"] == 1
 
     def test_convert_spotlight_session(self, ml4ps_plugin, sample_scraped_papers):
         """Test that spotlight papers get special session name."""

@@ -593,7 +593,7 @@ class TestAGURetryHandling:
 
         with (
             patch.object(agu_plugin._session, "get", side_effect=[rate_limited, success]) as mock_get,
-            patch("abstracts_explorer.plugin.time.sleep") as mock_sleep,
+            patch("abstracts_explorer.plugin.http.time.sleep") as mock_sleep,
         ):
             result = agu_plugin._fetch_json("https://example.com/api", 30, True)
 
@@ -609,7 +609,7 @@ class TestAGURetryHandling:
 
         with (
             patch.object(agu_plugin._session, "get", return_value=rate_limited) as mock_get,
-            patch("abstracts_explorer.plugin.time.sleep"),
+            patch("abstracts_explorer.plugin.http.time.sleep"),
         ):
             with pytest.raises(RuntimeError, match="429"):
                 agu_plugin._fetch_json("https://example.com/api", 30, True)
