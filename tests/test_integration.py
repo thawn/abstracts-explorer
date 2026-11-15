@@ -10,7 +10,7 @@ import pytest
 from abstracts_explorer import DatabaseManager
 from abstracts_explorer.plugin import LightweightPaper, convert_to_lightweight_schema
 from tests.conftest import set_test_db, set_test_embedding_db
-from tests.helpers import requires_lm_studio
+from tests.helpers import raw_query, requires_lm_studio
 
 # Fixtures imported from conftest.py:
 # - sample_neurips_data: List of 2 papers with authors
@@ -480,14 +480,14 @@ class TestIntegration:
             assert "Xi ruida" in paper2["authors"]
 
             # Test 7: Verify empty keywords are handled correctly
-            papers_with_no_keywords = db._query(
-                "SELECT * FROM papers WHERE keywords = '' OR keywords IS NULL OR keywords = '[]'"
+            papers_with_no_keywords = raw_query(
+                db, "SELECT * FROM papers WHERE keywords = '' OR keywords IS NULL OR keywords = '[]'"
             )
             assert len(papers_with_no_keywords) == 5  # Papers 1-5 have no keywords
 
             # Test 8: Verify papers with keywords
-            papers_with_keywords = db._query(
-                "SELECT * FROM papers WHERE keywords != '' AND keywords IS NOT NULL AND keywords != '[]'"
+            papers_with_keywords = raw_query(
+                db, "SELECT * FROM papers WHERE keywords != '' AND keywords IS NOT NULL AND keywords != '[]'"
             )
             assert len(papers_with_keywords) == 2  # Papers 6 and 7 have keywords
 
@@ -579,7 +579,7 @@ class TestIntegration:
 
             # Step 5: Test metadata filtering through SQL-resolved IDs
             with DatabaseManager() as db:
-                results = db._query("SELECT DISTINCT session FROM papers LIMIT 1")
+                results = raw_query(db, "SELECT DISTINCT session FROM papers LIMIT 1")
                 first_session = results[0]["session"]
                 session_ids = db.resolve_paper_uids(sessions=[first_session])
 

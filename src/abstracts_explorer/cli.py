@@ -1022,9 +1022,7 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
         print("\n🚀 Starting clustering pipeline...")
         results = perform_clustering(
             collection_name=args.collection,
-            reduction_method="tsne",
             n_components=2,
-            clustering_method="agglomerative",
             n_clusters=None,
             output_path=args.output,
             limit=args.limit,
@@ -1354,9 +1352,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
                         embeddings_manager=em,
                         database=db,
                         embedding_model=config.embedding_model,
-                        reduction_method="tsne",
                         n_components=2,
-                        clustering_method="agglomerative",
                         n_clusters=None,
                         limit=None,
                         force=args.force,

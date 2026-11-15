@@ -16,7 +16,6 @@ import {
 
 import {
     displayInterestingPapers,
-    generateInterestingPapersMarkdown,
     loadInterestingPapersFromJSON,
     handleJSONFileLoad,
     switchInterestingSession,
@@ -265,118 +264,6 @@ describe('Interesting Papers Module', () => {
         });
     });
 
-    describe('generateInterestingPapersMarkdown', () => {
-        test('should generate markdown for papers', () => {
-            // Setup priorities in localStorage for the function to read
-            localStorage.setItem('paperPriorities', JSON.stringify({
-                'paper1': { priority: 3, searchTerm: 'transformers' }
-            }));
-            loadPriorities(); // Load from localStorage into state
-
-            const papers = [
-                {
-                    uid: 'paper1',
-                    title: 'Test Paper',
-                    authors: ['Author 1', 'Author 2'],
-                    abstract: 'Test abstract',
-                    year: 2025,
-                    conference: 'NeurIPS',
-                    session: 'Session A',
-                    poster_position: 'A1',
-                    pdf_url: 'http://example.com/paper1.pdf'
-                }
-            ];
-
-            const markdown = generateInterestingPapersMarkdown(papers);
-
-            expect(markdown).toContain('# Interesting Papers');
-            expect(markdown).toContain('Test Paper');
-            expect(markdown).toContain('Author 1');
-            expect(markdown).toContain('Session A');
-            expect(markdown).toContain('⭐⭐⭐'); // 3 stars
-        });
-
-        test('should handle papers without optional fields', () => {
-            localStorage.setItem('paperPriorities', JSON.stringify({
-                'paper1': { priority: 1 }
-            }));
-            loadPriorities(); // Load from localStorage into state
-
-            const papers = [
-                {
-                    uid: 'paper1',
-                    title: 'Test Paper',
-                    authors: [],
-                    abstract: 'Test abstract'
-                }
-            ];
-
-            const markdown = generateInterestingPapersMarkdown(papers);
-
-            expect(markdown).toContain('Test Paper');
-            expect(markdown).toContain('⭐'); // 1 star
-        });
-
-        test('should group papers by session', () => {
-            localStorage.setItem('paperPriorities', JSON.stringify({
-                'paper1': { priority: 3 },
-                'paper2': { priority: 2 }
-            }));
-            loadPriorities(); // Load from localStorage into state
-
-            const papers = [
-                {
-                    uid: 'paper1',
-                    title: 'Paper 1',
-                    authors: [],
-                    abstract: 'Abstract 1',
-                    session: 'Session A'
-                },
-                {
-                    uid: 'paper2',
-                    title: 'Paper 2',
-                    authors: [],
-                    abstract: 'Abstract 2',
-                    session: 'Session A'
-                }
-            ];
-
-            const markdown = generateInterestingPapersMarkdown(papers);
-
-            expect(markdown).toContain('## Session A');
-            expect(markdown).toContain('Paper 1');
-            expect(markdown).toContain('Paper 2');
-        });
-
-        test('should include metadata for papers', () => {
-            localStorage.setItem('paperPriorities', JSON.stringify({
-                'paper1': { priority: 2 }
-            }));
-            loadPriorities(); // Load from localStorage into state
-
-            const papers = [
-                {
-                    uid: 'paper1',
-                    title: 'Test Paper',
-                    authors: ['Author 1'],
-                    abstract: 'Test abstract',
-                    year: 2025,
-                    conference: 'NeurIPS',
-                    session: 'Poster Session',
-                    poster_position: 'A1',
-                    pdf_url: 'http://example.com/paper.pdf'
-                }
-            ];
-
-            const markdown = generateInterestingPapersMarkdown(papers);
-
-            // Check what the function actually includes
-            expect(markdown).toContain('Test Paper');
-            expect(markdown).toContain('Author 1');
-            expect(markdown).toContain('**Poster:** A1');
-            expect(markdown).toContain('Test abstract');
-        });
-    });
 
     describe('loadInterestingPapersFromJSON', () => {
         test('should trigger file input click', () => {

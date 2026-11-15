@@ -3,13 +3,13 @@ MCP Tools Integration for RAG Chat
 ==================================
 
 This module provides integration between MCP clustering tools and the RAG chat system.
-It converts MCP tool definitions to OpenAI function calling format and handles tool execution.
+It normalizes tool arguments to absorb common LLM output quirks and formats tool
+execution results for LLM consumption.
 
 The integration allows the LLM to automatically decide when to use clustering tools
 to answer questions about conference topics, trends, and developments.
 """
 
-import copy
 import inspect
 import json
 import logging
@@ -28,12 +28,6 @@ from abstracts_explorer.mcp_server import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-class MCPToolsError(Exception):
-    """Exception raised for MCP tools-related errors."""
-
-    pass
 
 
 def _abbreviate_result(text: str, max_length: int = 200) -> str:
@@ -294,323 +288,6 @@ def _filter_unknown_kwargs(func: Callable, kwargs: Dict[str, Any]) -> Dict[str, 
     return filtered
 
 
-MCP_TOOLS_SCHEMA = [
-    {
-        "type": "function",
-        "function": {
-            "name": "analyze_topic_relevance",
-            "description": (
-                "Analyze the relevance of a research topic by counting papers within a specified "
-                "distance in embedding space. Use this tool when the user asks about: topic relevance, "
-                "popularity of a research area, how many papers cover a topic, or identifying significant "
-                "research themes at a conference. A conference must be specified."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "topic": {
-                        "type": "string",
-                        "description": "The topic or research question to analyze (e.g., 'Uncertainty quantification')",
-                    },
-                    "distance_threshold": {
-                        "type": "number",
-                        "description": "Maximum Euclidean distance to consider papers relevant (default: 1.1)",
-                    },
-                    "conferences": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Conference names to analyze (e.g., ['NeurIPS']). Required.",
-                    },
-                    "years": {
-                        "type": "array",
-                        "items": {"type": "integer"},
-                        "description": "Filter by specific years (e.g., [2024, 2025])",
-                    },
-                    "collection_name": {"type": "string", "description": "Name of ChromaDB collection (optional)"},
-                },
-                "required": ["topic", "conferences"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_conference_topics",
-            "description": (
-                "Get the main research topics of a conference. "
-                "Use this tool when the user asks about: overall themes, main topics, research areas, "
-                "or wants to understand what topics are covered in the conference. "
-                "Returns topic names, representative keywords, paper counts, and example titles. "
-                "A conference must be specified."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "conferences": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Conference names (e.g., ['NeurIPS']). Required.",
-                    },
-                    "years": {
-                        "type": "array",
-                        "items": {"type": "integer"},
-                        "description": "Filter by specific years (e.g., [2024, 2025])",
-                    },
-                    "collection_name": {
-                        "type": "string",
-                        "description": "Name of ChromaDB collection (optional, uses config default)",
-                    },
-                },
-                "required": ["conferences"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_topic_evolution",
-            "description": (
-                "Analyze how specific topics have evolved over the years. "
-                "Use this tool when the user asks about: trends over time, historical development, how a topic has developed,"
-                "how a topic has changed, or evolution of research areas. At least one conference must be specified. "
-                "If requested, multiple conferences can be compared in the same analysis."
-                "The chat frontend can use the returned data to generate a plot with plotly.js showing the topic evolution over time."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "topic_keywords": {
-                        "type": "string",
-                        "description": "Keywords describing the topic (e.g., 'transformers attention', 'reinforcement learning')",
-                    },
-                    "conferences": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Conference names to analyze (e.g., ['NeurIPS', 'ICLR']). Required.",
-                    },
-                    "start_year": {"type": "integer", "description": "Start year for analysis (inclusive)"},
-                    "end_year": {"type": "integer", "description": "End year for analysis (inclusive)"},
-                    "distance_threshold": {
-                        "type": "number",
-                        "description": (
-                            "Maximum Euclidean distance in embedding space to consider papers "
-                            "relevant (default: 1.1). Lower values mean stricter matching."
-                        ),
-                    },
-                    "collection_name": {"type": "string", "description": "Name of ChromaDB collection (optional)"},
-                },
-                "required": ["topic_keywords", "conferences"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_papers",
-            "description": (
-                "Search for papers on a specific topic. "
-                "Use this tool when the user asks about: papers on a topic, research about something, "
-                "specific work, or wants to find papers related to a particular area. "
-                "Can filter by specific years or search all years. A conference must be specified."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "topic_keywords": {
-                        "type": "string",
-                        "description": "Keywords describing the topic to search for",
-                    },
-                    "years": {
-                        "type": "array",
-                        "items": {"type": "integer"},
-                        "description": "List of specific years to filter by (e.g., [2024, 2025]). If not provided, searches all years.",
-                    },
-                    "n_results": {"type": "integer", "description": "Number of papers to return (default: 10)"},
-                    "conference": {
-                        "type": "string",
-                        "description": "Conference name to search (e.g., 'NeurIPS', 'ICLR'). Required.",
-                    },
-                    "where_filters": {
-                        "type": "object",
-                        "description": "SQL-style paper filters (e.g. {'year': 2025, 'session': {'$in': ['Oral']}})",
-                    },
-                    "collection_name": {"type": "string", "description": "Name of ChromaDB collection (optional)"},
-                },
-                "required": ["topic_keywords", "conference"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_cluster_visualization",
-            "description": (
-                "Retrieve pre-computed visualization data for clustered embeddings. "
-                "Use this tool when the user asks for: a visual representation, graphical view, "
-                "or wants to see clusters displayed. A conference must be specified."
-                "The chat frontend can use the returned data to generate a plot with plotly.js showing the clusters."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "conferences": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Conference names to retrieve visualization for (e.g., ['NeurIPS']). Required.",
-                    },
-                    "years": {
-                        "type": "array",
-                        "items": {"type": "integer"},
-                        "description": "Filter by specific years (e.g., [2024, 2025])",
-                    },
-                    "output_path": {"type": "string", "description": "Path to save visualization JSON (optional)"},
-                    "collection_name": {"type": "string", "description": "Name of ChromaDB collection (optional)"},
-                },
-                "required": ["conferences"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_paper_details",
-            "description": (
-                "Get detailed information about papers from the database, including authors, "
-                "URLs, PDF links, session information, keywords, and awards. "
-                "Use this tool when the user asks about: who wrote a paper, paper authors, "
-                "where to find a paper, PDF or poster links, session or room details, "
-                "paper awards, or any other metadata about a specific paper."
-                "must specify either paper_id or title to identify the paper."
-                "Conference + year are optional but can help disambiguate papers with similar titles or multiple versions. "
-                "Do not use for searching for papers on a topic; use the 'search_papers' tool for that instead. "
-                "This tool is useful for specific follow-up questions after searching for papers using semantic search."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "title": {
-                        "type": "string",
-                        "description": "Title or partial title to search for (case-insensitive)",
-                    },
-                    "paper_id": {
-                        "type": "string",
-                        "description": "Unique paper identifier (uid or original conference/OpenReview ID)",
-                    },
-                    "conference": {
-                        "type": "string",
-                        "description": "Filter by conference name (e.g., 'NeurIPS', 'ICLR')",
-                    },
-                    "year": {
-                        "type": "integer",
-                        "description": "Filter by publication year",
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Maximum number of papers to return when searching by title (default: 5)",
-                    },
-                },
-                "required": [],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "summarize_interesting_papers",
-            "description": (
-                "Summarize the papers the user marked, starred, liked, or rated as interesting. "
-                "Use this tool when the user asks for an overview or summary of their interesting papers, "
-                "for example 'Give me a summary about the papers I marked as interesting for ICLR 2026'. "
-                "The web UI supplies the user's ratings automatically; do not ask the user for paper IDs. "
-                "Returns rating statistics, conferences, years, sessions, search terms, top keywords, "
-                "highest-rated papers, and compact paper records."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "paper_ids": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Optional paper UIDs. Usually supplied automatically from the web UI.",
-                    },
-                    "priorities": {
-                        "type": "object",
-                        "description": (
-                            "Optional mapping of paper UID to a dict with 'priority' and optional "
-                            "'searchTerm'. Usually supplied automatically from the web UI."
-                        ),
-                    },
-                    "conference": {
-                        "type": "string",
-                        "description": "Filter by conference (e.g., 'ICLR' or 'ICLR 2026').",
-                    },
-                    "years": {
-                        "type": "array",
-                        "items": {"type": "integer"},
-                        "description": "Filter by years (e.g., [2026]).",
-                    },
-                },
-                "required": [],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "recommend_related_papers",
-            "description": (
-                "Recommend further papers based on the papers the user marked as interesting. "
-                "Use this tool when the user asks for suggestions, recommendations, or related papers "
-                "based on their starred/interesting papers. "
-                "The web UI supplies the user's ratings automatically; do not ask the user for paper IDs. "
-                "Already-rated papers are excluded. Each recommendation includes a relevance score and reasons."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "paper_ids": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Optional paper UIDs. Usually supplied automatically from the web UI.",
-                    },
-                    "priorities": {
-                        "type": "object",
-                        "description": (
-                            "Optional mapping of paper UID to a dict with 'priority' and optional "
-                            "'searchTerm'. Usually supplied automatically from the web UI."
-                        ),
-                    },
-                    "conferences": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Restrict recommendations to these conferences.",
-                    },
-                    "years": {
-                        "type": "array",
-                        "items": {"type": "integer"},
-                        "description": "Restrict recommendations to these years (e.g., [2026]).",
-                    },
-                    "n_results": {
-                        "type": "integer",
-                        "description": "Number of recommendations to return (default: 10).",
-                    },
-                    "exclude_ids": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Additional paper UIDs to exclude.",
-                    },
-                    "collection_name": {
-                        "type": "string",
-                        "description": "Name of ChromaDB collection (optional).",
-                    },
-                },
-                "required": [],
-            },
-        },
-    },
-]
-
-
 def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
     """
     Execute an MCP tool with the given arguments.
@@ -631,12 +308,9 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
     Returns
     -------
     str
-        Tool execution result (JSON string)
-
-    Raises
-    ------
-    MCPToolsError
-        If tool execution fails or tool is unknown
+        Tool execution result (JSON string). Errors (including unknown tool
+        names) are returned as ``{"error": ...}`` JSON strings rather than
+        raised, so callers always receive a string.
     """
     logger.info("Executing MCP tool: %s with arguments: %s", tool_name, arguments)
 
@@ -677,68 +351,6 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
         logger.error(f"MCP tool execution failed: {str(e)}")
         error_result = {"error": f"Tool execution failed: {str(e)}"}
         return json.dumps(error_result, indent=2)
-
-
-def get_mcp_tools_schema(
-    conferences: Optional[List[str]] = None,
-    years: Optional[List[int]] = None,
-) -> List[Dict[str, Any]]:
-    """
-    Get the MCP tools schema for OpenAI function calling.
-
-    When *conferences* or *years* are provided (typically queried from the
-    database), they are injected as ``enum`` constraints into every tool
-    property that accepts conference or year values.  This lets the LLM
-    pick from the exact values stored in the database instead of guessing.
-
-    Parameters
-    ----------
-    conferences : list of str, optional
-        Available conference names (e.g. ``["NeurIPS", "ICLR"]``).
-        Injected as ``enum`` into conference-related properties.
-    years : list of int, optional
-        Available years (e.g. ``[2024, 2025]``).
-        Injected as ``enum`` into year-related properties.
-
-    Returns
-    -------
-    list
-        List of tool definitions in OpenAI format
-    """
-    schema: List[Dict[str, Any]] = copy.deepcopy(MCP_TOOLS_SCHEMA)
-
-    if not conferences and not years:
-        return schema
-
-    for tool in schema:
-        func_def: Dict[str, Any] = tool.get("function", {})
-        params: Dict[str, Any] = func_def.get("parameters", {})
-        props: Dict[str, Any] = params.get("properties", {})
-
-        if conferences:
-            # Single-value conference fields (type: string)
-            if "conference" in props and props["conference"].get("type") == "string":
-                props["conference"]["enum"] = conferences
-
-            # Array conference fields (type: array, items: {type: string})
-            if "conferences" in props and props["conferences"].get("type") == "array":
-                items = props["conferences"].get("items", {})
-                if items.get("type") == "string":
-                    items["enum"] = conferences
-
-        if years:
-            # Array year fields (type: array, items: {type: integer})
-            if "years" in props and props["years"].get("type") == "array":
-                items = props["years"].get("items", {})
-                if items.get("type") == "integer":
-                    items["enum"] = years
-
-            # Single integer year fields
-            for key in ("year", "start_year", "end_year"):
-                if key in props and props[key].get("type") == "integer":
-                    props[key]["enum"] = years
-
-    return schema
 
 
 def format_tool_result_for_llm(tool_name: str, result: str) -> str:

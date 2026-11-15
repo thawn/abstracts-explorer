@@ -33,6 +33,7 @@ from abstracts_explorer.plugins import (
 from abstracts_explorer.plugins.neurips_downloader import NeurIPSDownloaderPlugin
 from abstracts_explorer.plugins.icml_downloader import ICMLDownloaderPlugin
 from abstracts_explorer.plugins.ml4ps_downloader import ML4PSDownloaderPlugin
+from tests.helpers import raw_query
 
 pytestmark = pytest.mark.usefixtures("mock_current_year_probe")
 
@@ -1169,7 +1170,7 @@ class TestDatabaseYearConferenceIntegration:
                 db.add_papers(data)
 
                 # Query papers and verify year and conference
-                papers = db._query("SELECT uid, title, year, conference FROM papers ORDER BY title")
+                papers = raw_query(db, "SELECT uid, title, year, conference FROM papers ORDER BY title")
                 assert len(papers) == 2
 
                 # Check first paper (Test Paper 1)
@@ -1183,11 +1184,11 @@ class TestDatabaseYearConferenceIntegration:
                 assert papers[1]["conference"] == "NeurIPS"
 
                 # Test filtering by year
-                papers_2024 = db._query("SELECT * FROM papers WHERE year = 2024")
+                papers_2024 = raw_query(db, "SELECT * FROM papers WHERE year = 2024")
                 assert len(papers_2024) == 2
 
                 # Test filtering by conference
-                papers = db._query("SELECT * FROM papers WHERE conference = 'NeurIPS'")
+                papers = raw_query(db, "SELECT * FROM papers WHERE conference = 'NeurIPS'")
                 assert len(papers) == 2
 
     def test_ml4ps_year_conference_in_database(self):
@@ -1232,7 +1233,7 @@ class TestDatabaseYearConferenceIntegration:
                 db.add_papers(papers_to_insert)
 
                 # Query papers and verify year and conference
-                papers = db._query("SELECT uid, title, year, conference FROM papers ORDER BY title")
+                papers = raw_query(db, "SELECT uid, title, year, conference FROM papers ORDER BY title")
                 assert len(papers) == 2
 
                 # Check first paper
@@ -1246,11 +1247,11 @@ class TestDatabaseYearConferenceIntegration:
                 assert papers[1]["conference"] == "ML4PS"
 
                 # Test filtering by year
-                papers_for_year = db._query(f"SELECT * FROM papers WHERE year = {expected_year}")
+                papers_for_year = raw_query(db, f"SELECT * FROM papers WHERE year = {expected_year}")
                 assert len(papers_for_year) == 2
 
                 # Test filtering by conference
-                ml4ps_papers = db._query("SELECT * FROM papers WHERE conference = 'ML4PS'")
+                ml4ps_papers = raw_query(db, "SELECT * FROM papers WHERE conference = 'ML4PS'")
                 assert len(ml4ps_papers) == 2
 
 

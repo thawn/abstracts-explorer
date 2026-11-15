@@ -276,10 +276,6 @@ class TestEmbeddingsManager:
         assert embeddings_manager.collection.count() == 1
         assert stored["documents"][0] != old_hash
         assert stored["documents"][0] == hash_text("Title\n\nNew abstract")
-        assert (
-            embeddings_manager.paper_needs_update({"uid": uid, "title": "Title", "abstract": "New abstract"}) is False
-        )
-
         embeddings_manager.close()
 
     def test_add_paper_empty_abstract(self, embeddings_manager, mock_lm_studio):
@@ -648,32 +644,6 @@ class TestEmbeddingsManager:
 
         assert count == 3
         assert calls["count"] == 4
-        embeddings_manager.close()
-
-    def test_paper_needs_update_returns_true_on_error(self, embeddings_manager, mock_lm_studio):
-        """Test that paper_needs_update returns True when an error occurs.
-
-        When paper_needs_update encounters an exception it should return True
-        (assume update needed) rather than False, so the paper is re-embedded
-        instead of silently skipped.
-        """
-        from unittest.mock import patch
-
-        embeddings_manager.create_collection()
-
-        paper = {
-            "uid": "test_paper_err",
-            "title": "Test Paper",
-            "abstract": "Test abstract",
-        }
-
-        # Simulate an exception during the collection.get() call
-        with patch.object(embeddings_manager.collection, "get", side_effect=RuntimeError("db error")):
-            result = embeddings_manager.paper_needs_update(paper)
-
-        # Should return True so the paper is embedded rather than skipped
-        assert result is True
-
         embeddings_manager.close()
 
 
@@ -1333,26 +1303,6 @@ class TestContentHashing:
         paper = {"uid": "p1", "title": "Title", "abstract": "Abstract"}
         text = EmbeddingsManager.embedding_text_from_paper(paper)
         assert hash_text(text) == hash_text("Title\n\nAbstract")
-
-    def test_paper_needs_update_hash_comparison(self, embeddings_manager, mock_lm_studio):
-        embeddings_manager.create_collection()
-        paper = {"uid": "p1", "title": "Title", "abstract": "Abstract"}
-        embeddings_manager.add_paper(paper)
-
-        assert embeddings_manager.paper_needs_update(paper) is False
-        assert embeddings_manager.paper_needs_update({**paper, "abstract": "Changed"}) is True
-        embeddings_manager.close()
-
-    def test_paper_needs_update_missing_document(self, embeddings_manager):
-        embeddings_manager.create_collection()
-        embeddings_manager.collection.add(
-            ids=["p1"],
-            embeddings=[[0.1] * 4096],
-            documents=[""],
-        )
-        paper = {"uid": "p1", "title": "Title", "abstract": "Abstract"}
-        assert embeddings_manager.paper_needs_update(paper) is True
-        embeddings_manager.close()
 
 
 class TestImportExport:

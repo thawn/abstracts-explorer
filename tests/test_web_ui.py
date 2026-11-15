@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from abstracts_explorer.web_ui import app as flask_app
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.config import get_config
+from tests.helpers import raw_query
 
 # ============================================================
 # Tests from test_web.py
@@ -155,12 +156,6 @@ class TestWebInterface:
     def test_filters_endpoint_no_db(self, client):
         """Test filters endpoint when database doesn't exist."""
         response = client.get("/api/filters")
-        # Should return error if DB doesn't exist
-        assert response.status_code in [200, 500]
-
-    def test_years_endpoint_no_db(self, client):
-        """Test years endpoint when database doesn't exist."""
-        response = client.get("/api/years")
         # Should return error if DB doesn't exist
         assert response.status_code in [200, 500]
 
@@ -2514,58 +2509,6 @@ class TestClusteringEndpoint:
                     assert "conferences" not in call_kwargs["clustering_params"]
                     assert "years" not in call_kwargs["clustering_params"]
 
-    def test_get_default_cluster_count(self):
-        """Test getting default cluster count based on embeddings."""
-        from abstracts_explorer.web_ui.app import app
-
-        with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
-                mock_em = Mock()
-                mock_em.get_collection_stats.return_value = {"count": 250}
-                mock_get_em.return_value = mock_em
-
-                response = client.get("/api/clusters/default-count")
-
-                assert response.status_code == 200
-                data = response.get_json()
-
-                assert "n_clusters" in data
-                assert "n_papers" in data
-                assert data["n_papers"] == 250
-                # For 250 papers: max(2, min(50, 250 // 100)) = max(2, min(500, 2)) = max(2, 2) = 2
-                assert data["n_clusters"] == 2
-
-    def test_get_default_cluster_count_large_dataset(self):
-        """Test default cluster count with large dataset."""
-        from abstracts_explorer.web_ui.app import app
-
-        with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.app.get_embeddings_manager") as mock_get_em:
-                mock_em = Mock()
-                mock_em.get_collection_stats.return_value = {"count": 100000}
-                mock_get_em.return_value = mock_em
-
-                response = client.get("/api/clusters/default-count")
-
-                assert response.status_code == 200
-                data = response.get_json()
-
-                assert data["n_papers"] == 100000
-                # For 100000 papers: max(2, min(50, 100000 // 100)) = max(2, min(1000, 500)) = 500
-                assert data["n_clusters"] == 500
-
-    def test_get_default_cluster_count_error(self):
-        """Test error handling when getting default cluster count."""
-        from abstracts_explorer.web_ui.app import app
-
-        with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.app.get_embeddings_manager", side_effect=Exception("Test error")):
-                response = client.get("/api/clusters/default-count")
-
-                assert response.status_code == 500
-                data = response.get_json()
-                assert "error" in data
-
     def test_search_custom_cluster_success(self):
         """Test successful custom cluster search."""
         from abstracts_explorer.web_ui.app import app
@@ -2736,7 +2679,7 @@ class TestDataDonationEndpoint:
 
         # Get the actual UID that was generated
         with db:
-            all_papers = db._query("SELECT uid FROM papers LIMIT 1")
+            all_papers = raw_query(db, "SELECT uid FROM papers LIMIT 1")
             paper_uid = all_papers[0]["uid"]
 
         paper_priorities = {paper_uid: {"priority": 5, "searchTerm": "machine learning"}}
@@ -2756,7 +2699,7 @@ class TestDataDonationEndpoint:
             db_verify = DatabaseManager()
             with db_verify:
                 # Query using the database manager's query method
-                results = db_verify._query("SELECT * FROM validation_data")
+                results = raw_query(db_verify, "SELECT * FROM validation_data")
                 assert len(results) == 1
                 assert results[0]["paper_uid"] == paper_uid
                 assert results[0]["priority"] == 5

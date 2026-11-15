@@ -384,7 +384,6 @@ graph TD
 
     subgraph "MCP Tools (mcp_tools.py)"
         EXEC["execute_mcp_tool<br/>(dispatcher)"]
-        SCHEMA["get_mcp_tools_schema"]
         NORM["_normalize_args(arguments, rules)"]
         RULES["NormRule rule tables"]
         FORMAT["format_tool_result_for_llm"]
@@ -448,10 +447,7 @@ graph TD
         MW --> CHAT["POST /api/chat"]
         MW --> RSET["POST /api/chat/reset"]
         MW --> CCMP["POST /api/clusters/compute"]
-        MW --> CCCH["GET /api/clusters/cached"]
-        MW --> CDEF["GET /api/clusters/default-count"]
         MW --> CSRCH["POST /api/clusters/search"]
-        MW --> GYRS["GET /api/years"]
         MW --> EXPRT["POST /api/export/interesting-papers"]
         MW --> DOND["POST /api/donate-data"]
         MW --> DONC["POST /api/donate-chat"]
@@ -494,7 +490,6 @@ graph TD
     subgraph "paper_utils.py"
         GPA["get_paper_with_authors"] --> DB[(DatabaseManager)]
         FSR["format_search_results"] --> GPA
-        BCP["build_context_from_papers"]
     end
 
     style GAP_F fill:#ffcccc,stroke:#cc0000

@@ -2,21 +2,22 @@
 This module provides functionality to cluster and visualize paper embeddings
 using dimensionality reduction and clustering algorithms from scikit-learn.
 
+The pipeline is fixed to Agglomerative clustering (ward linkage) on the full
+embeddings, with t-SNE used for 2-D visualization.
+
 Features:
-- Dimensionality reduction using PCA and t-SNE
-- Clustering using K-Means, DBSCAN, Agglomerative, Fuzzy C-Means, and Spectral clustering
-- **NEW: Automatic cluster labeling using TF-IDF and LLM-based methods**
-- **NEW: Keyword extraction for each cluster**
-- **NEW: Representative paper selection based on cluster centroids**
-- **NEW: Hierarchical cluster structure for agglomerative clustering**
+- Clustering using Agglomerative clustering with a distance threshold
+- Dimensionality reduction using t-SNE
+- Automatic cluster labeling using TF-IDF and LLM-based methods
+- Keyword extraction for each cluster
+- Hierarchical cluster structure for agglomerative clustering
 - Export clustering results to JSON for visualization
 
 Cluster Labeling
 ----------------
-The module now includes state-of-the-art cluster labeling functionality that:
+The module includes cluster labeling functionality that:
 1. Extracts distinctive keywords for each cluster using TF-IDF analysis
 2. Generates human-readable labels using LLM (Large Language Model) integration
-3. Identifies representative papers closest to each cluster's centroid
 
 Hierarchical Clustering
 -----------------------
@@ -35,8 +36,8 @@ Example
 >>>
 >>> # Load and cluster embeddings
 >>> cm.load_embeddings()
->>> cm.cluster(method='kmeans', n_clusters=5)
->>> cm.reduce_dimensions(method='pca', n_components=2)
+>>> cm.cluster(distance_threshold=150.0, linkage="ward")
+>>> cm.reduce_dimensions(n_components=2)
 >>>
 >>> # Generate cluster labels
 >>> cm.extract_cluster_keywords(n_keywords=10)
@@ -56,13 +57,6 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
-
-try:
-    import skfuzzy as fuzz
-
-    HAS_FUZZY = True
-except ImportError:
-    HAS_FUZZY = False
 
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.database import DatabaseManager
@@ -172,12 +166,11 @@ class ClusteringManager:
 
     This class handles:
     - Loading embeddings from ChromaDB
-    - Dimensionality reduction (PCA, t-SNE)
-    - Clustering (K-Means, DBSCAN, Agglomerative, Fuzzy C-Means, Spectral)
-    - **Automatic cluster labeling using TF-IDF and LLM**
-    - **Keyword extraction for clusters**
-    - **Representative paper selection**
-    - **Hierarchical cluster structure tracking**
+    - Clustering using Agglomerative clustering (ward linkage)
+    - Dimensionality reduction using t-SNE
+    - Automatic cluster labeling using TF-IDF and LLM
+    - Keyword extraction for clusters
+    - Hierarchical cluster structure tracking
     - Export of results for visualization
 
     Parameters
@@ -211,8 +204,6 @@ class ClusteringManager:
         Summaries generated for each cluster
     cluster_hierarchy : dict or None
         Hierarchical structure of clusters (for agglomerative)
-    fuzzy_memberships : np.ndarray or None
-        Fuzzy membership values (for fuzzy c-means)
 
     Examples
     --------
@@ -220,8 +211,8 @@ class ClusteringManager:
     >>> em.create_collection()
     >>> cm = ClusteringManager(em)
     >>> cm.load_embeddings()
-    >>> reduced = cm.reduce_dimensions(method='pca', n_components=2)
-    >>> labels = cm.cluster(method='kmeans', n_clusters=5)
+    >>> labels = cm.cluster(distance_threshold=150.0)
+    >>> cm.reduce_dimensions(n_components=2)
     >>> cm.extract_cluster_keywords()
     >>> cm.generate_cluster_labels(use_llm=True)
     >>> results = cm.get_clustering_results()
@@ -254,7 +245,6 @@ class ClusteringManager:
         self.cluster_keywords: Optional[Dict[int, List[str]]] = None
         self.cluster_summaries: Optional[Dict[int, str]] = None
         self.cluster_hierarchy: Optional[Dict[str, Any]] = None
-        self.fuzzy_memberships: Optional[np.ndarray] = None
         self.clusterer: Optional[Any] = None  # Store the clusterer for hierarchy access
 
     def load_embeddings(
@@ -328,22 +318,18 @@ class ClusteringManager:
         except Exception as e:
             raise ClusteringError(f"Failed to load embeddings: {str(e)}") from e
 
-    def reduce_dimensions(
-        self, method: str = "pca", n_components: int = 2, random_state: int = 42, **kwargs
-    ) -> np.ndarray:
+    def reduce_dimensions(self, n_components: int = 2, random_state: int = 42, **kwargs) -> np.ndarray:
         """
-        Reduce dimensionality of embeddings.
+        Reduce dimensionality of embeddings using t-SNE.
 
         Parameters
         ----------
-        method : str, optional
-            Dimensionality reduction method: 'pca' or 'tsne', by default 'pca'
         n_components : int, optional
             Number of components to reduce to, by default 2
         random_state : int, optional
             Random state for reproducibility, by default 42
         **kwargs
-            Additional arguments passed to the reduction algorithm
+            Additional arguments passed to t-SNE (e.g. perplexity, max_iter)
 
         Returns
         -------
@@ -359,6 +345,8 @@ class ClusteringManager:
             raise ClusteringError("No embeddings loaded. Call load_embeddings() first.")
 
         try:
+            from sklearn.manifold import TSNE  # lazy import to reduce initial load time
+
             # Standardize embeddings before reduction
             if self.scaler is None:
                 self.scaler = StandardScaler()
@@ -366,27 +354,17 @@ class ClusteringManager:
             else:
                 scaled_embeddings = self.scaler.transform(self.embeddings)
 
-            if method.lower() == "pca":
-                from sklearn.decomposition import PCA  # lazy import to reduce initial load time
-
-                reducer = PCA(n_components=n_components, random_state=random_state, **kwargs)
-                logger.info(f"Applying PCA to reduce to {n_components} dimensions")
-            elif method.lower() == "tsne":
-                from sklearn.manifold import TSNE  # lazy import to reduce initial load time
-
-                # t-SNE parameters
-                perplexity = kwargs.pop("perplexity", min(30, len(self.embeddings) - 1))
-                max_iter = kwargs.pop("max_iter", 1000)
-                reducer = TSNE(
-                    n_components=n_components,
-                    random_state=random_state,
-                    perplexity=perplexity,
-                    max_iter=max_iter,
-                    **kwargs,
-                )
-                logger.info(f"Applying t-SNE to reduce to {n_components} dimensions (perplexity={perplexity})")
-            else:
-                raise ClusteringError(f"Unknown reduction method: {method}. Use 'pca' or 'tsne'.")
+            # t-SNE parameters
+            perplexity = kwargs.pop("perplexity", min(30, len(self.embeddings) - 1))
+            max_iter = kwargs.pop("max_iter", 1000)
+            reducer = TSNE(
+                n_components=n_components,
+                random_state=random_state,
+                perplexity=perplexity,
+                max_iter=max_iter,
+                **kwargs,
+            )
+            logger.info(f"Applying t-SNE to reduce to {n_components} dimensions (perplexity={perplexity})")
 
             self.reduced_embeddings = reducer.fit_transform(scaled_embeddings)
             logger.info(f"Reduced embeddings shape: {self.reduced_embeddings.shape}")
@@ -398,35 +376,27 @@ class ClusteringManager:
 
     def cluster(
         self,
-        method: str = "kmeans",
         n_clusters: Optional[int] = None,
         random_state: int = 42,
         use_reduced: bool = False,
         **kwargs,
     ) -> np.ndarray:
         """
-        Cluster embeddings using specified algorithm.
+        Cluster embeddings using Agglomerative clustering.
 
         Parameters
         ----------
-        method : str, optional
-            Clustering method: 'kmeans', 'dbscan', 'agglomerative', 'fuzzy_cmeans', or 'spectral'.
-            By default 'kmeans'.
         n_clusters : int, optional
-            Number of clusters (for kmeans, agglomerative, fuzzy_cmeans, and spectral).
-            For agglomerative, can be None if distance_threshold is provided.
-            If None, automatically calculated as n_papers / 100, clamped to [2, 500].
-            By default None.
+            Number of clusters. Can be None if distance_threshold is provided.
+            If both are None, automatically calculated as n_papers / 100,
+            clamped to [2, 500]. By default None.
         random_state : int, optional
             Random state for reproducibility, by default 42
         use_reduced : bool, optional
             Whether to cluster reduced embeddings or original embeddings, by default False
         **kwargs
-            Additional arguments passed to the clustering algorithm.
-            For agglomerative: distance_threshold (float), linkage (str), affinity (str)
-            For dbscan: eps (float), min_samples (int)
-            For fuzzy_cmeans: m (float, fuzziness parameter), error (float), maxiter (int)
-            For spectral: affinity (str), n_neighbors (int)
+            Additional arguments passed to AgglomerativeClustering, e.g.
+            distance_threshold (float) and linkage (str).
 
         Returns
         -------
@@ -441,18 +411,12 @@ class ClusteringManager:
         Examples
         --------
         >>> # Agglomerative with distance threshold
-        >>> cm.cluster(method='agglomerative', distance_threshold=0.5, n_clusters=None)
-
-        >>> # Fuzzy C-Means
-        >>> cm.cluster(method='fuzzy_cmeans', n_clusters=5, m=2.0)
-
-        >>> # Spectral clustering
-        >>> cm.cluster(method='spectral', n_clusters=5)
+        >>> cm.cluster(distance_threshold=150.0, linkage="ward")
         """
         if self.embeddings is None:
             raise ClusteringError("No embeddings loaded. Call load_embeddings() first.")
 
-        # Extract distance_threshold for agglomerative if provided
+        # Extract distance_threshold if provided
         distance_threshold = kwargs.pop("distance_threshold", None)
 
         # Calculate default n_clusters if not provided and not using distance_threshold
@@ -474,112 +438,28 @@ class ClusteringManager:
             logger.info(f"Clustering using original embeddings of shape {data_to_cluster.shape}")
 
         try:
-            if method.lower() == "kmeans":
-                from sklearn.cluster import KMeans  # lazy import to reduce initial load time
+            from sklearn.cluster import AgglomerativeClustering  # lazy import to reduce initial load time
 
-                self.clusterer = KMeans(n_clusters=n_clusters, random_state=random_state, **kwargs)
-                logger.info(f"Applying K-Means clustering with {n_clusters} clusters")
-                self.cluster_labels = self.clusterer.fit_predict(data_to_cluster)
-
-            elif method.lower() == "dbscan":
-                from sklearn.cluster import DBSCAN  # lazy import to reduce initial load time
-
-                eps = kwargs.pop("eps", 0.5)
-                min_samples = kwargs.pop("min_samples", 5)
-                self.clusterer = DBSCAN(eps=eps, min_samples=min_samples, **kwargs)
-                logger.info(f"Applying DBSCAN clustering with eps={eps}, min_samples={min_samples}")
-                self.cluster_labels = self.clusterer.fit_predict(data_to_cluster)
-
-            elif method.lower() == "agglomerative":
-                from sklearn.cluster import AgglomerativeClustering  # lazy import to reduce initial load time
-
-                # Handle agglomerative with distance_threshold or n_clusters
-                # Filter out parameters that don't belong to AgglomerativeClustering
-                # (e.g., 'affinity' and 'n_neighbors' are for spectral clustering)
-                agg_kwargs = {
-                    k: v for k, v in kwargs.items() if k not in ["affinity", "n_neighbors", "eps", "min_samples", "m"]
-                }
-
-                if distance_threshold is not None:
-                    self.clusterer = AgglomerativeClustering(
-                        n_clusters=None,
-                        distance_threshold=distance_threshold,
-                        compute_full_tree=True,  # Required for hierarchy
-                        **agg_kwargs,
-                    )
-                    logger.info(f"Applying Agglomerative clustering with distance_threshold={distance_threshold}")
-                else:
-                    self.clusterer = AgglomerativeClustering(
-                        n_clusters=n_clusters,
-                        compute_full_tree=True,  # Store for potential hierarchy extraction
-                        **agg_kwargs,
-                    )
-                    logger.info(f"Applying Agglomerative clustering with {n_clusters} clusters")
-
-                self.cluster_labels = self.clusterer.fit_predict(data_to_cluster)
-
-                # Extract hierarchical structure
-                self._extract_cluster_hierarchy()
-
-            elif method.lower() == "fuzzy_cmeans" or method.lower() == "fuzzy-cmeans":
-                if not HAS_FUZZY:
-                    raise ClusteringError(
-                        "Fuzzy C-Means requires scikit-fuzzy. Install with: pip install scikit-fuzzy"
-                    )
-                if n_clusters is None:
-                    raise ClusteringError("n_clusters must be specified for fuzzy c-means")
-
-                # Fuzzy C-Means parameters
-                m = kwargs.pop("m", 2.0)  # Fuzziness parameter
-                error = kwargs.pop("error", 0.005)
-                maxiter = kwargs.pop("maxiter", 1000)
-
-                logger.info(f"Applying Fuzzy C-Means clustering with {n_clusters} clusters (m={m})")
-
-                # Fuzzy C-Means expects features as rows, samples as columns (transpose)
-                cntr, u, u0, d, jm, p, fpc = fuzz.cluster.cmeans(
-                    data_to_cluster.T, c=n_clusters, m=m, error=error, maxiter=maxiter, init=None
+            if distance_threshold is not None:
+                self.clusterer = AgglomerativeClustering(
+                    n_clusters=None,
+                    distance_threshold=distance_threshold,
+                    compute_full_tree=True,  # Required for hierarchy
+                    **kwargs,
                 )
-
-                # Store fuzzy memberships (shape: n_clusters x n_samples)
-                self.fuzzy_memberships = u
-
-                # Get hard cluster assignments (highest membership)
-                self.cluster_labels = np.argmax(u, axis=0)
-
-                logger.info(f"Fuzzy C-Means completed with FPC={fpc:.4f}")
-
-            elif method.lower() == "spectral":
-                from sklearn.cluster import SpectralClustering  # lazy import to reduce initial load time
-
-                # Spectral clustering parameters
-                affinity = kwargs.pop("affinity", "rbf")
-                n_neighbors = kwargs.pop("n_neighbors", 10)
-
-                if affinity == "nearest_neighbors":
-                    self.clusterer = SpectralClustering(
-                        n_clusters=n_clusters,
-                        random_state=random_state,
-                        affinity=affinity,
-                        n_neighbors=n_neighbors,
-                        **kwargs,
-                    )
-                    logger.info(
-                        f"Applying Spectral clustering with {n_clusters} clusters (affinity={affinity}, n_neighbors={n_neighbors})"
-                    )
-                else:
-                    self.clusterer = SpectralClustering(
-                        n_clusters=n_clusters, random_state=random_state, affinity=affinity, **kwargs
-                    )
-                    logger.info(f"Applying Spectral clustering with {n_clusters} clusters (affinity={affinity})")
-
-                self.cluster_labels = self.clusterer.fit_predict(data_to_cluster)
-
+                logger.info(f"Applying Agglomerative clustering with distance_threshold={distance_threshold}")
             else:
-                raise ClusteringError(
-                    f"Unknown clustering method: {method}. "
-                    f"Use 'kmeans', 'dbscan', 'agglomerative', 'fuzzy_cmeans', or 'spectral'."
+                self.clusterer = AgglomerativeClustering(
+                    n_clusters=n_clusters,
+                    compute_full_tree=True,  # Store for potential hierarchy extraction
+                    **kwargs,
                 )
+                logger.info(f"Applying Agglomerative clustering with {n_clusters} clusters")
+
+            self.cluster_labels = self.clusterer.fit_predict(data_to_cluster)
+
+            # Extract hierarchical structure
+            self._extract_cluster_hierarchy()
 
             # Count unique clusters
             unique_labels = np.unique(self.cluster_labels)
@@ -811,54 +691,6 @@ class ClusteringManager:
             "leaves": leaf_order,
             "color_list": ["#808080"] * n_merges,  # Default gray for all links
         }
-
-    def get_hierarchy_level_clusters(self, level: int = 0) -> Dict[str, Any]:
-        """
-        Get clusters at a specific hierarchy level for agglomerative clustering.
-
-        Parameters
-        ----------
-        level : int, optional
-            Hierarchy level (0 = leaf level, higher = more merged), by default 0
-
-        Returns
-        -------
-        dict
-            Dictionary containing:
-            - clusters: List of cluster information at the level
-            - level: The requested level
-            - max_level: Maximum available level
-
-        Raises
-        ------
-        ClusteringError
-            If hierarchy not available
-        """
-        if self.cluster_hierarchy is None or "tree" not in self.cluster_hierarchy:
-            raise ClusteringError("Cluster hierarchy not available. Use agglomerative clustering.")
-
-        tree = self.cluster_hierarchy["tree"]
-        max_level = tree["max_level"]
-
-        # Clamp level to valid range
-        level = max(0, min(level, max_level))
-
-        # Find all nodes at the requested level
-        clusters_at_level = []
-        for node_id, node_info in tree["nodes"].items():
-            if node_info["level"] == level:
-                clusters_at_level.append(
-                    {
-                        "cluster_id": node_id,
-                        "node_id": node_id,
-                        "samples": node_info["samples"],
-                        "is_leaf": node_info["is_leaf"],
-                        "children": node_info["children"],
-                        "size": len(node_info["samples"]),
-                    }
-                )
-
-        return {"clusters": clusters_at_level, "level": level, "max_level": max_level}
 
     def generate_hierarchical_labels(
         self, use_llm: bool = True, max_keywords: int = 5, llm_level: int = 8
@@ -1206,7 +1038,7 @@ Only respond with the label, nothing else. Do not add formatting."""
         dict
             Dictionary containing cluster statistics:
             - n_clusters: Number of clusters
-            - n_noise: Number of noise points (for DBSCAN)
+            - n_noise: Number of noise points (label -1)
             - cluster_sizes: Dictionary mapping cluster labels to sizes
             - cluster_centers: Cluster centers (if available)
 
@@ -1444,89 +1276,6 @@ Only respond with the label, nothing else. Do not add formatting."""
             ),
         )
 
-    def get_cluster_representative_papers(
-        self,
-        n_papers: int = 5,
-    ) -> Dict[int, List[Dict[str, Any]]]:
-        """
-        Find representative papers for each cluster.
-
-        Representative papers are those closest to the cluster centroid
-        in the embedding space.
-
-        Parameters
-        ----------
-        n_papers : int, optional
-            Number of representative papers per cluster, by default 5
-
-        Returns
-        -------
-        Dict[int, List[Dict[str, Any]]]
-            Dictionary mapping cluster labels to lists of representative paper metadata
-
-        Raises
-        ------
-        ClusteringError
-            If clustering has not been performed
-
-        Examples
-        --------
-        >>> cm = ClusteringManager(em)
-        >>> cm.load_embeddings()
-        >>> cm.cluster(method='kmeans', n_clusters=5)
-        >>> representatives = cm.get_cluster_representative_papers(n_papers=3)
-        >>> print(f"Cluster 0 representatives: {representatives[0]}")
-        """
-        if self.cluster_labels is None:
-            raise ClusteringError("No clustering performed. Call cluster() first.")
-        if self.embeddings is None:
-            raise ClusteringError("No embeddings loaded.")
-
-        try:
-            representatives: Dict[int, List[Dict[str, Any]]] = {}
-            unique_labels = np.unique(self.cluster_labels)
-            cluster_ids = [int(label) for label in unique_labels if label >= 0]
-
-            for cluster_id in cluster_ids:
-                # Get indices of papers in this cluster
-                cluster_indices = np.where(self.cluster_labels == cluster_id)[0]
-
-                if len(cluster_indices) == 0:
-                    representatives[cluster_id] = []
-                    continue
-
-                # Get embeddings for this cluster
-                cluster_embeddings = self.embeddings[cluster_indices]
-
-                # Calculate cluster centroid
-                centroid = cluster_embeddings.mean(axis=0)
-
-                # Calculate distances to centroid
-                distances = np.linalg.norm(cluster_embeddings - centroid, axis=1)
-
-                # Get indices of papers closest to centroid
-                n_repr = min(n_papers, len(cluster_indices))
-                closest_indices = distances.argsort()[:n_repr]
-
-                # Collect representative paper metadata
-                repr_papers = []
-                if self.metadatas and self.paper_ids:
-                    for idx in closest_indices:
-                        paper_idx = cluster_indices[idx]
-                        paper_meta = self.metadatas[paper_idx].copy()
-                        paper_meta["paper_id"] = self.paper_ids[paper_idx]
-                        paper_meta["distance_to_centroid"] = float(distances[idx])
-                        repr_papers.append(paper_meta)
-
-                representatives[cluster_id] = repr_papers
-                logger.debug(f"Found {len(repr_papers)} representative papers for cluster {cluster_id}")
-
-            logger.info(f"Found representative papers for {len(representatives)} clusters")
-            return representatives
-
-        except Exception as e:
-            raise ClusteringError(f"Failed to find representative papers: {str(e)}") from e
-
     def get_clustering_results(
         self,
         include_metadata: bool = True,
@@ -1617,11 +1366,6 @@ Only respond with the label, nothing else. Do not add formatting."""
             # Add cluster hierarchy if available (for agglomerative)
             if self.cluster_hierarchy:
                 results["cluster_hierarchy"] = self.cluster_hierarchy
-
-            # Add fuzzy memberships if available (for fuzzy c-means)
-            if self.fuzzy_memberships is not None:
-                # Convert to list format for JSON serialization
-                results["fuzzy_memberships"] = self.fuzzy_memberships.tolist()
 
             logger.info(f"Generated clustering results with {len(points)} points")
             return results
@@ -1725,9 +1469,7 @@ Only respond with the label, nothing else. Do not add formatting."""
 
 def perform_clustering(
     collection_name: str = "papers",
-    reduction_method: str = "pca",
     n_components: int = 2,
-    clustering_method: str = "kmeans",
     n_clusters: Optional[int] = None,
     output_path: Optional[Union[str, Path]] = None,
     random_state: int = 42,
@@ -1739,24 +1481,20 @@ def perform_clustering(
 
     This is a convenience function that handles the full clustering workflow:
     1. Load embeddings from ChromaDB
-    2. Cluster on full embeddings
-    3. Apply dimensionality reduction for visualization
+    2. Cluster on full embeddings (Agglomerative)
+    3. Apply t-SNE dimensionality reduction for visualization
     4. Export results if requested
 
     Parameters
     ----------
     collection_name : str, optional
         Name of the ChromaDB collection, by default "papers"
-    reduction_method : str, optional
-        Dimensionality reduction method ('pca' or 'tsne') for visualization, by default 'pca'
     n_components : int, optional
         Number of components for dimensionality reduction, by default 2
-    clustering_method : str, optional
-        Clustering method ('kmeans', 'dbscan', 'agglomerative', 'fuzzy_cmeans', or 'spectral'), by default 'kmeans'
     n_clusters : int, optional
-        Number of clusters (for kmeans and agglomerative).
-        If None, automatically calculated as n_papers / 100, clamped to [2, 500].
-        By default None.
+        Number of clusters. Can be None if distance_threshold is provided
+        in *kwargs*. If both are None, automatically calculated as
+        n_papers / 100, clamped to [2, 500]. By default None.
     output_path : str or Path, optional
         Path to export JSON results. If None, don't export.
     random_state : int, optional
@@ -1764,7 +1502,8 @@ def perform_clustering(
     limit : int, optional
         Maximum number of embeddings to process. If None, process all.
     **kwargs
-        Additional arguments passed to clustering algorithm
+        Additional arguments passed to the clustering algorithm
+        (e.g. distance_threshold, linkage)
 
     Returns
     -------
@@ -1779,8 +1518,6 @@ def perform_clustering(
     Examples
     --------
     >>> results = perform_clustering(
-    ...     reduction_method="tsne",
-    ...     clustering_method="kmeans",
     ...     n_clusters=5,
     ...     output_path="clusters.json"
     ... )
@@ -1801,9 +1538,8 @@ def perform_clustering(
         cm.load_embeddings(limit=limit)
 
         # Perform clustering on full embeddings
-        logger.info(f"Clustering using {clustering_method} on full embeddings...")
+        logger.info("Clustering using Agglomerative on full embeddings...")
         cm.cluster(
-            method=clustering_method,
             n_clusters=n_clusters,
             random_state=random_state,
             use_reduced=False,  # Cluster on full embeddings
@@ -1811,9 +1547,8 @@ def perform_clustering(
         )
 
         # Reduce dimensions for visualization
-        logger.info(f"Reducing dimensions using {reduction_method} for visualization...")
+        logger.info("Reducing dimensions using t-SNE for visualization...")
         cm.reduce_dimensions(
-            method=reduction_method,
             n_components=n_components,
             random_state=random_state,
         )
@@ -1848,9 +1583,7 @@ def compute_clusters_with_cache(
     embeddings_manager: EmbeddingsManager,
     database: DatabaseManager,
     embedding_model: str,
-    reduction_method: str = "pca",
     n_components: int = 2,
-    clustering_method: str = "kmeans",
     n_clusters: Optional[int] = None,
     limit: Optional[int] = None,
     force: bool = False,
@@ -1862,7 +1595,8 @@ def compute_clusters_with_cache(
     Compute clusters with caching support.
 
     This function checks the cache first and returns cached results if available.
-    If cache miss or forced recompute, it performs clustering and saves to cache.
+    If cache miss or forced recompute, it performs clustering (Agglomerative +
+    t-SNE) and saves to cache.
 
     Parameters
     ----------
@@ -1872,14 +1606,12 @@ def compute_clusters_with_cache(
         Database manager for cache operations
     embedding_model : str
         Current embedding model name
-    reduction_method : str, optional
-        Dimensionality reduction method, by default "pca"
     n_components : int, optional
-        Number of components for reduction, by default 2
-    clustering_method : str, optional
-        Clustering method to use, by default "kmeans"
+        Number of components for the t-SNE reduction, by default 2
     n_clusters : int, optional
-        Number of clusters. If None, auto-calculated based on data size
+        Number of clusters. Can be None if distance_threshold is provided
+        in *clustering_kwargs*. If both are None, auto-calculated based on
+        data size
     limit : int, optional
         Maximum number of embeddings to process
     force : bool, optional
@@ -1889,7 +1621,7 @@ def compute_clusters_with_cache(
     years : list of int, optional
         Filter to only cluster papers from these years.
     **clustering_kwargs
-        Additional clustering parameters (e.g., eps, min_samples for DBSCAN)
+        Additional clustering parameters (e.g., distance_threshold, linkage)
 
     Returns
     -------
@@ -1905,8 +1637,8 @@ def compute_clusters_with_cache(
     --------
     >>> results = compute_clusters_with_cache(
     ...     em, db, "text-embedding-model",
-    ...     clustering_method="kmeans",
-    ...     n_clusters=5
+    ...     distance_threshold=150.0,
+    ...     linkage="ward"
     ... )
     """
 
@@ -1921,17 +1653,15 @@ def compute_clusters_with_cache(
         cache_year = years[0] if years and len(years) == 1 else None
 
         # Special handling for agglomerative with distance_threshold
-        if clustering_method.lower() == "agglomerative" and "distance_threshold" in cache_params:
+        if "distance_threshold" in cache_params:
             cache_n_clusters = None  # Don't use n_clusters as cache key when using distance_threshold
-        elif clustering_method.lower() == "dbscan":
-            cache_n_clusters = None  # DBSCAN doesn't use n_clusters
 
-        # Level 1: Try exact match (same clustering params AND same reduction method)
+        # Try exact match (same clustering params AND same reduction method)
         exact_cached = database.get_clustering_cache(
             embedding_model=embedding_model,
-            reduction_method=reduction_method,
+            reduction_method="tsne",
             n_components=n_components,
-            clustering_method=clustering_method,
+            clustering_method="agglomerative",
             n_clusters=cache_n_clusters,
             clustering_params=cache_params if cache_params else None,
             conference=cache_conference,
@@ -1941,81 +1671,6 @@ def compute_clusters_with_cache(
         if exact_cached:
             logger.info("Using exact cached clustering results (including reduction)")
             return exact_cached
-
-        # Level 2: Try clustering-only match (same clustering params, any reduction)
-        clustering_cached = database.get_clustering_cache(
-            embedding_model=embedding_model,
-            clustering_method=clustering_method,
-            n_clusters=cache_n_clusters,
-            clustering_params=cache_params if cache_params else None,
-            conference=cache_conference,
-            year=cache_year,
-        )
-
-        if clustering_cached:
-            logger.info("Reusing cached clustering results – re-applying reduction for visualization...")
-            # We have cached clustering with a different reduction method.
-            # Re-apply the requested reduction method on the embeddings.
-            cm_cached = ClusteringManager(embeddings_manager, database)
-            cm_cached.load_embeddings(limit=limit, conferences=conferences, years=years)
-
-            # Restore cluster assignments from the cached results
-            if "points" in clustering_cached:
-                # Reconstruct cluster assignments from points
-                point_id_to_cluster: Dict[str, int] = {}
-                for point in clustering_cached["points"]:
-                    pid = point.get("id") or point.get("paper_id", "")
-                    point_id_to_cluster[pid] = point.get("cluster", -1)
-
-                current_ids = cm_cached.paper_ids or []
-                missing = [pid for pid in current_ids if pid not in point_id_to_cluster]
-                if missing:
-                    logger.warning(
-                        f"{len(missing)} paper(s) are not in the clustering cache "
-                        f"(e.g. '{missing[0]}'). They will be assigned to cluster -1. "
-                        "Run with force=True (or clear the cache) to recompute."
-                    )
-                cm_cached.cluster_labels = np.array([point_id_to_cluster.get(pid, -1) for pid in current_ids])
-
-                # Restore labels and hierarchy from cached results
-                if clustering_cached.get("cluster_labels"):
-                    cm_cached.cluster_label_names = {
-                        int(k): v for k, v in clustering_cached["cluster_labels"].items()
-                    }
-                if clustering_cached.get("cluster_keywords"):
-                    cm_cached.cluster_keywords = {int(k): v for k, v in clustering_cached["cluster_keywords"].items()}
-                if clustering_cached.get("cluster_hierarchy"):
-                    cm_cached.cluster_hierarchy = clustering_cached["cluster_hierarchy"]
-            else:
-                logger.warning("Cached clustering results have unexpected format (no 'points' key). Re-computing.")
-                # Fall through to full recompute below
-                clustering_cached = None
-
-        if clustering_cached:
-
-            # Apply the requested reduction method for visualization
-            cm_cached.reduce_dimensions(method=reduction_method, n_components=n_components)
-            results = cm_cached.get_clustering_results()
-
-            # Save the new result (with new reduction method) to cache
-            try:
-                save_params = clustering_kwargs.copy() if clustering_kwargs else {}
-
-                database.save_clustering_cache(
-                    embedding_model=embedding_model,
-                    reduction_method=reduction_method,
-                    n_components=n_components,
-                    clustering_method=clustering_method,
-                    results=results,
-                    n_clusters=n_clusters,
-                    clustering_params=save_params if save_params else None,
-                    conference=cache_conference,
-                    year=cache_year,
-                )
-            except Exception as e:
-                logger.warning(f"Failed to save clustering cache: {e}")
-
-            return results
 
     # Cache miss or forced recompute - compute clusters
     logger.info("Computing new clustering results...")
@@ -2028,18 +1683,16 @@ def compute_clusters_with_cache(
     cm.load_embeddings(limit=limit, conferences=conferences, years=years)
 
     # Perform clustering on full embeddings first
-    logger.info(f"Clustering using {clustering_method} on full embeddings...")
+    logger.info("Clustering using Agglomerative on full embeddings...")
     cm.cluster(
-        method=clustering_method,
         n_clusters=n_clusters,
         use_reduced=False,  # Cluster on full embeddings
         **clustering_kwargs,
     )
 
     # Reduce dimensions for visualization
-    logger.info(f"Reducing dimensions using {reduction_method} for visualization...")
+    logger.info("Reducing dimensions using t-SNE for visualization...")
     cm.reduce_dimensions(
-        method=reduction_method,
         n_components=n_components,
     )
 
@@ -2053,7 +1706,7 @@ def compute_clusters_with_cache(
         # Continue without labels
 
     # Generate hierarchical labels for agglomerative clustering
-    if clustering_method.lower() == "agglomerative" and cm.cluster_hierarchy is not None:
+    if cm.cluster_hierarchy is not None:
         # Determine linkage for the hierarchical label cache key
         linkage_method = clustering_kwargs.get("linkage", "ward")
         use_llm = clustering_kwargs.get("use_llm_labels", True)
@@ -2111,9 +1764,9 @@ def compute_clusters_with_cache(
 
             database.save_clustering_cache(
                 embedding_model=embedding_model,
-                reduction_method=reduction_method,
+                reduction_method="tsne",
                 n_components=n_components,
-                clustering_method=clustering_method,
+                clustering_method="agglomerative",
                 results=results,
                 n_clusters=n_clusters,
                 clustering_params=save_params if save_params else None,

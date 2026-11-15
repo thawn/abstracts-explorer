@@ -14,6 +14,7 @@ from abstracts_explorer.plugins.chi_downloader import CHIDownloaderPlugin
 from abstracts_explorer.plugin import LightweightPaper
 from abstracts_explorer.database import DatabaseManager
 from tests.conftest import set_test_db
+from tests.helpers import raw_query
 
 pytestmark = pytest.mark.usefixtures("mock_current_year_probe")
 
@@ -655,7 +656,7 @@ class TestCHIPluginDatabaseIntegration:
             count = db.add_papers(papers)
             assert count == len(papers)
 
-            rows = db._query("SELECT title, year, conference, authors FROM papers")
+            rows = raw_query(db, "SELECT title, year, conference, authors FROM papers")
             titles = [r["title"] for r in rows]
             assert "Test Paper One" in titles
             assert "Test Best Paper" in titles
@@ -676,7 +677,7 @@ class TestCHIPluginDatabaseIntegration:
             db.create_tables()
             db.add_papers(papers)
 
-            rows = db._query("SELECT authors FROM papers WHERE title = 'Test Paper One'")
+            rows = raw_query(db, "SELECT authors FROM papers WHERE title = 'Test Paper One'")
             assert rows
             authors_str = rows[0]["authors"]
             assert "Alice Smith" in authors_str
@@ -693,6 +694,6 @@ class TestCHIPluginDatabaseIntegration:
             db.create_tables()
             db.add_papers(papers)
 
-            rows = db._query("SELECT award FROM papers WHERE title = 'Test Best Paper'")
+            rows = raw_query(db, "SELECT award FROM papers WHERE title = 'Test Best Paper'")
             assert rows
             assert rows[0]["award"] == "Best Paper Award"

@@ -744,8 +744,6 @@ Registry for managing and accessing downloader plugins.
 
 # DownloaderPlugin is defined earlier in this file
 
-logger = logging.getLogger(__name__)
-
 
 class PluginRegistry:
     """Registry for managing downloader plugins."""
@@ -767,21 +765,6 @@ class PluginRegistry:
 
         self._plugins[plugin.plugin_name] = plugin
         logger.info(f"Registered plugin: {plugin.plugin_name}")
-
-    def unregister(self, plugin_name: str) -> None:
-        """
-        Unregister a plugin.
-
-        Parameters
-        ----------
-        plugin_name : str
-            Name of plugin to unregister
-        """
-        if plugin_name in self._plugins:
-            del self._plugins[plugin_name]
-            logger.info(f"Unregistered plugin: {plugin_name}")
-        else:
-            logger.warning(f"Plugin not found: {plugin_name}")
 
     def get(self, plugin_name: str) -> Optional[DownloaderPlugin]:
         """

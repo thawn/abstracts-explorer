@@ -23,7 +23,6 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-ai-slim", extra = ["openai"] },
     { name = "requests" },
-    { name = "scikit-fuzzy" },
     { name = "scikit-learn" },
     { name = "sqlalchemy" },
     { name = "tiktoken" },
@@ -80,7 +79,6 @@ requires-dist = [
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.11.0" },
     { name = "requests", specifier = ">=2.31.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.16" },
-    { name = "scikit-fuzzy", specifier = ">=0.4.2" },
     { name = "scikit-learn", specifier = ">=1.3.0" },
     { name = "selenium", marker = "extra == 'dev'", specifier = ">=4.0.0" },
     { name = "sphinx", marker = "extra == 'docs'", specifier = ">=7.0.0" },
@@ -3725,15 +3723,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/b9/ab/d8e407669ffe5014429baf780c2df47e001968a6e4c17f615e2e7b13a9ba/ruff-0.17.4-py3-none-win32.whl", hash = "sha256:3971a78cba76298b284c8321e6d40d93045ed348bec5c369d85099efc97fb7cf", size = 9931993, upload-time = "2026-11-05T18:52:11.169Z" },
     { url = "https://files.pythonhosted.org/packages/bd/15/42af8a72d8946e3c9efd2bbf6641e462b6832783b0d043d63ef5b280ba7f/ruff-0.17.4-py3-none-win_amd64.whl", hash = "sha256:67c5a894fc054cf41f75f7afa24815de5a74329d97634126c2a1015740ff4e8c", size = 10292922, upload-time = "2026-11-05T18:52:13.436Z" },
     { url = "https://files.pythonhosted.org/packages/68/9e/f1dbffcfb8ff25dadbc21f87a8b73c3848abe4abada9d4b08ccef8bec40c/ruff-0.17.4-py3-none-win_arm64.whl", hash = "sha256:181ae38a9a8fb94925bf7d0794327b48d7fd7f4b50cfd84c0e999cc09ef8d131", size = 9889396, upload-time = "2026-11-05T18:52:15.549Z" },
-]
-
-[[package]]
-name = "scikit-fuzzy"
-version = "0.5.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/98/1c/eeffa327ecf44e11fdd312b2b8cf5a7ac7f6cd2956646980893dc4aa56d8/scikit_fuzzy-0.5.0.tar.gz", hash = "sha256:2ee5340523aa7635ca568b9d8029c7738d05f9ea550fc89d4054b4cb50f34e7f", size = 958406, upload-time = "2024-08-22T22:20:45.697Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9d/06/da70811f95c4a3bada55e7b20c957548a4d9bc21150916f0c024286d67c7/scikit_fuzzy-0.5.0-py2.py3-none-any.whl", hash = "sha256:e456c365146bc5c58d9f593f4127ac783112e2daf89f87b12c6ef3c38e4087dd", size = 920817, upload-time = "2024-08-22T22:20:43.447Z" },
 ]
 
 [[package]]

@@ -8,10 +8,13 @@ to reduce code duplication and ensure consistency.
 import os
 import socket
 import threading
+from typing import Any
+
 import pytest
 
 import httpx2
 import openai
+from sqlalchemy import text
 
 from abstracts_explorer.config import get_config
 from abstracts_explorer.embeddings import EmbeddingsManager
@@ -21,6 +24,36 @@ from tests.conftest import get_env_test_path
 
 # Cache for LM Studio availability check to avoid multiple API calls during test collection
 _lm_studio_available_cache = None
+
+
+def raw_query(db_manager: DatabaseManager, sql: str, parameters: tuple = ()) -> list[dict[str, Any]]:
+    """
+    Execute a raw SQL query against the database (test escape hatch).
+
+    Test assertions sometimes need to inspect raw table contents instead of
+    going through the ``DatabaseManager`` API.  This helper keeps that
+    capability in the test suite only.
+
+    Parameters
+    ----------
+    db_manager : DatabaseManager
+        Manager providing the session to execute against.
+    sql : str
+        SQL query to execute (use ``?`` placeholders or named parameters).
+    parameters : tuple, optional
+        Query parameters for ``?`` placeholders.
+
+    Returns
+    -------
+    list of dict
+        Query results as list of dictionaries.
+    """
+    converted_sql = sql
+    for i in range(sql.count("?")):
+        converted_sql = converted_sql.replace("?", f":param{i}", 1)
+    param_dict = {f"param{i}": parameters[i] for i in range(len(parameters))}
+    result = db_manager.session.execute(text(converted_sql), param_dict)
+    return [dict(row._mapping) for row in result]
 
 
 class FakeTime:

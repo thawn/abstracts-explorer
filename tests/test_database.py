@@ -8,12 +8,13 @@ using the new schema with integer IDs and proper author relationships.
 """
 
 import pytest
-import sqlite3
+from sqlalchemy import exc as sqlalchemy_exc
 from unittest.mock import Mock, patch
 
 from abstracts_explorer.database import DatabaseManager, DatabaseError, normalize_model_name
 from abstracts_explorer.plugin import LightweightPaper
 from tests.conftest import set_test_db
+from tests.helpers import raw_query
 
 # Fixtures are now imported from conftest.py:
 # - db_manager: DatabaseManager instance with temporary database
@@ -92,14 +93,14 @@ class TestDatabaseManager:
         db = DatabaseManager()
 
         assert db.database_url == f"sqlite:///{db_path}"
-        assert db.connection is None
+        assert db.engine is None
 
     def test_connect(self, db_manager):
         """Test database connection."""
         db_manager.connect()
 
-        assert db_manager.connection is not None
-        assert isinstance(db_manager.connection, sqlite3.Connection)
+        assert db_manager.engine is not None
+        assert db_manager._session is not None
 
         db_manager.close()
 
@@ -107,12 +108,8 @@ class TestDatabaseManager:
         """SQLite connections use WAL and a 30s busy timeout for concurrent access."""
         db_manager.connect()
 
-        cursor = db_manager.connection.cursor()
-        try:
-            journal_mode = cursor.execute("PRAGMA journal_mode").fetchone()[0]
-            busy_timeout = cursor.execute("PRAGMA busy_timeout").fetchone()[0]
-        finally:
-            cursor.close()
+        journal_mode = raw_query(db_manager, "PRAGMA journal_mode")[0]["journal_mode"]
+        busy_timeout = raw_query(db_manager, "SELECT * FROM pragma_busy_timeout")[0]["timeout"]
         db_manager.close()
 
         assert str(journal_mode).lower() == "wal"
@@ -127,7 +124,7 @@ class TestDatabaseManager:
         db.connect()
 
         assert db_path.parent.exists()
-        assert db.connection is not None
+        assert db.engine is not None
 
         db.close()
 
@@ -136,12 +133,14 @@ class TestDatabaseManager:
         db_manager.connect()
         db_manager.close()
 
-        assert db_manager.connection is None
+        assert db_manager.engine is None
+        assert db_manager._session is None
 
     def test_close_without_connection(self, db_manager):
         """Test closing without connection doesn't raise error."""
         db_manager.close()  # Should not raise
-        assert db_manager.connection is None
+        assert db_manager.engine is None
+        assert db_manager._session is None
 
     def test_context_manager(self, tmp_path):
         """Test DatabaseManager as context manager."""
@@ -151,10 +150,11 @@ class TestDatabaseManager:
         with DatabaseManager() as db:
             assert db._session is None
             db.create_tables()
-            assert db.connection is not None
+            assert db.engine is not None
 
         # Connection should be closed after exiting context
-        assert db.connection is None
+        assert db.engine is None
+        assert db._session is None
 
     def test_session_property_lazily_connects(self, db_manager):
         """The session property connects and initializes the schema on first access."""
@@ -194,9 +194,7 @@ class TestDatabaseManager:
         db_manager.create_tables()
 
         # Check if tables exist
-        cursor = db_manager.connection.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tables = [row[0] for row in cursor.fetchall()]
+        tables = [row["name"] for row in raw_query(db_manager, "SELECT name FROM sqlite_master WHERE type='table'")]
 
         assert "papers" in tables
 
@@ -218,9 +216,7 @@ class TestDatabaseManager:
         db_manager.create_tables()
 
         # Check tables still exist and work
-        cursor = db_manager.connection.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tables = [row[0] for row in cursor.fetchall()]
+        tables = [row["name"] for row in raw_query(db_manager, "SELECT name FROM sqlite_master WHERE type='table'")]
         assert "papers" in tables
 
         db_manager.close()
@@ -259,14 +255,14 @@ class TestDatabaseManager:
 
     def test_query_auto_connects(self, db_manager):
         """Querying an uninitialized database creates the schema lazily."""
-        assert db_manager._query("SELECT * FROM papers") == []
+        assert raw_query(db_manager, "SELECT * FROM papers") == []
         assert db_manager._session is not None
         db_manager.close()
 
     def test_query_with_invalid_sql(self, connected_db):
         """Test query with invalid SQL."""
-        with pytest.raises(DatabaseError, match="Query failed"):
-            connected_db._query("SELECT * FROM nonexistent_table")
+        with pytest.raises(sqlalchemy_exc.OperationalError, match="no such table"):
+            raw_query(connected_db, "SELECT * FROM nonexistent_table")
 
     def test_get_paper_count_empty(self, connected_db):
         """Test getting paper count on empty database."""
@@ -432,7 +428,7 @@ class TestAddPaper:
         assert isinstance(paper_uid, str)
 
         # Verify paper was added
-        result = connected_db._query("SELECT * FROM papers WHERE uid = ?", (paper_uid,))
+        result = raw_query(connected_db, "SELECT * FROM papers WHERE uid = ?", (paper_uid,))
         assert len(result) == 1
 
         row = result[0]
@@ -455,7 +451,7 @@ class TestAddPaper:
         assert paper_uid is not None
 
         # Verify paper was added
-        result = connected_db._query("SELECT * FROM papers WHERE uid = ?", (paper_uid,))
+        result = raw_query(connected_db, "SELECT * FROM papers WHERE uid = ?", (paper_uid,))
         assert len(result) == 1
 
         row = result[0]
@@ -511,7 +507,7 @@ class TestAddPaper:
         assert paper_uid is not None
 
         # Verify the original_id was stored
-        result = connected_db._query("SELECT * FROM papers WHERE uid = ?", (paper_uid,))
+        result = raw_query(connected_db, "SELECT * FROM papers WHERE uid = ?", (paper_uid,))
         assert len(result) == 1
         assert result[0]["original_id"] == "12345"
 
@@ -519,7 +515,7 @@ class TestAddPaper:
         """Test that add_paper generates a UID correctly."""
         paper_uid = connected_db.add_paper(sample_paper)
 
-        result = connected_db._query("SELECT uid FROM papers WHERE uid = ?", (paper_uid,))
+        result = raw_query(connected_db, "SELECT uid FROM papers WHERE uid = ?", (paper_uid,))
         assert len(result) == 1
 
         uid = result[0]["uid"]

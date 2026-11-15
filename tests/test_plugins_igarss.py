@@ -19,7 +19,7 @@ from abstracts_explorer.plugins.igarss_downloader import (
 )
 from abstracts_explorer.database import DatabaseManager
 from tests.conftest import set_test_db
-from tests.helpers import mock_plugin_current_year_probe
+from tests.helpers import raw_query, mock_plugin_current_year_probe
 
 
 @pytest.fixture(autouse=True)
@@ -757,7 +757,7 @@ class TestIGARSSPluginDatabaseIntegration:
                 db.create_tables()
                 db.add_papers(papers)
 
-                rows = db._query("SELECT uid, title, abstract, year, conference, authors FROM papers")
+                rows = raw_query(db, "SELECT uid, title, abstract, year, conference, authors FROM papers")
                 assert len(rows) == 2
 
                 titles = {r["title"] for r in rows}

@@ -91,18 +91,6 @@ class MetadataCache:
         with self._lock:
             self._entries[key] = (self._clock() + ttl_seconds, copy.deepcopy(value))
 
-    def invalidate(self, key: Hashable) -> None:
-        """
-        Remove one entry from the cache.
-
-        Parameters
-        ----------
-        key : hashable
-            Cache key.
-        """
-        with self._lock:
-            self._entries.pop(key, None)
-
     def invalidate_database(self, database_url: str) -> None:
         """
         Remove all entries whose key starts with *database_url*.

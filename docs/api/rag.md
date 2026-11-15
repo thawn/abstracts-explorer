@@ -61,10 +61,10 @@ response1 = chat.query("Tell me about vision transformers")
 print(response1)
 
 # Continue the conversation (maintains context)
-response2 = chat.chat("What are their main advantages?")
+response2 = chat.query("What are their main advantages?")
 print(response2)
 
-response3 = chat.chat("Can you explain the first paper in more detail?")
+response3 = chat.query("Can you explain the first paper in more detail?")
 print(response3)
 ```
 

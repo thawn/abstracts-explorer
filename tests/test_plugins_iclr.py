@@ -15,6 +15,7 @@ import requests
 from abstracts_explorer.plugins.iclr_downloader import ICLRDownloaderPlugin
 from abstracts_explorer.database import DatabaseManager
 from tests.conftest import set_test_db
+from tests.helpers import raw_query
 
 pytestmark = pytest.mark.usefixtures("mock_current_year_probe")
 
@@ -331,7 +332,7 @@ class TestICLRPluginDatabaseIntegration:
                 db.add_papers(data)
 
                 # Verify paper was stored (lightweight schema uses 'title' not 'name', and 'uid' not 'id')
-                papers = db._query("SELECT uid, title, abstract, year, conference, authors FROM papers")
+                papers = raw_query(db, "SELECT uid, title, abstract, year, conference, authors FROM papers")
                 assert len(papers) == 1
 
                 paper = papers[0]

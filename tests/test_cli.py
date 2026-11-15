@@ -2782,10 +2782,8 @@ class TestCLI:
         # Verify fixed agglomerative/t-SNE parameters on all calls
         for call in mock_compute.call_args_list:
             kw = call[1]
-            assert kw["clustering_method"] == "agglomerative"
             assert kw["linkage"] == "ward"
             assert kw["distance_threshold"] == 150.0
-            assert kw["reduction_method"] == "tsne"
             assert kw["n_clusters"] is None
 
     def test_pre_generate_clustering_no_conferences_in_db(self, tmp_path, capsys, monkeypatch):

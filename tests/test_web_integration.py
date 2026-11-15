@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from abstracts_explorer.database import DatabaseManager
 from tests.conftest import set_test_db
-from tests.helpers import requires_lm_studio, find_free_port
+from tests.helpers import raw_query, requires_lm_studio, find_free_port
 
 # Helper functions imported from test_helpers:
 # - check_lm_studio_available(): Check if LM Studio is running
@@ -160,7 +160,7 @@ def web_server(test_database, tmp_path_factory):
 
         set_test_db(str(test_database))
         db = DatabaseManager()
-        papers = db._query("SELECT * FROM papers")
+        papers = raw_query(db, "SELECT * FROM papers")
 
         for paper in papers:
             em.add_paper(paper)
@@ -983,18 +983,6 @@ class TestWebUIErrorHandlingPaths:
 
         data = response.json()
         assert isinstance(data, dict)
-        assert "error" in data
-
-    def test_clusters_cached_endpoint_not_found(self, web_server):
-        """Test that cached clusters endpoint returns 404 when no cache exists."""
-        host, port, base_url = web_server
-
-        response = requests.get(f"{base_url}/api/clusters/cached", timeout=10)
-
-        # Should return 404 when no cached file exists
-        assert response.status_code == 404
-
-        data = response.json()
         assert "error" in data
 
     def test_clusters_compute_with_conference_year_filter(self, web_server):

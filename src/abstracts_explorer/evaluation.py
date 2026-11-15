@@ -47,15 +47,21 @@ _TOOL_DESCRIPTIONS: Dict[str, str] = {
         "papers within a specified distance in embedding space."
     ),
     "get_topic_evolution": "Analyze how a specific topic has evolved over the years.",
-    "get_cluster_visualization": "Generate visualization data for clustered paper embeddings.",
+    "get_cluster_visualization": "Retrieve pre-computed visualization data for clustered embeddings.",
+    "get_paper_details": "Get detailed metadata for one or more papers by title or paper ID.",
+    "summarize_interesting_papers": "Summarize the papers the user marked as interesting.",
+    "recommend_related_papers": "Recommend further papers based on the user's interesting papers.",
 }
 
 _TOOL_ARGUMENT_EXAMPLES: Dict[str, str] = {
-    "search_papers": '{"topic_keywords": "deep learning", "n_results": 5}',
-    "get_conference_topics": '{"conferences": ["NeurIPS"]}',
-    "analyze_topic_relevance": '{"topic": "transformers", "distance_threshold": 1.1}',
-    "get_topic_evolution": '{"topic_keywords": "reinforcement learning"}',
-    "get_cluster_visualization": '{"n_clusters": 8, "reduction_method": "pca"}',
+    "search_papers": '{"topic_keywords": "deep learning", "conference": "NeurIPS", "n_results": 5}',
+    "get_conference_topics": '{"conferences": ["NeurIPS"], "years": [2025]}',
+    "analyze_topic_relevance": '{"topic": "transformers", "conferences": ["NeurIPS"], "distance_threshold": 1.1}',
+    "get_topic_evolution": '{"topic_keywords": "reinforcement learning", "conferences": ["NeurIPS"], "start_year": 2020}',
+    "get_cluster_visualization": '{"conferences": ["NeurIPS"], "years": [2025]}',
+    "get_paper_details": '{"title": "attention is all you need"}',
+    "summarize_interesting_papers": '{"conference": "ICLR", "years": [2026]}',
+    "recommend_related_papers": '{"conferences": ["ICLR"], "years": [2026], "n_results": 10}',
 }
 
 _QA_GENERATION_SYSTEM_PROMPT = """\

@@ -138,9 +138,6 @@ print(f"Total papers: {collection.count()}")
 
 # Reset the collection
 em.create_collection(reset=True)
-
-# Check whether a paper's embedding is current
-needs_update = em.paper_needs_update(paper_dict)
 ```
 
 ## Search Results Format

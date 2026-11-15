@@ -155,8 +155,6 @@ class DatabaseManager:
         self.SessionLocal: Optional[sessionmaker] = None
         self._session: Optional[Session] = None
         self._schema_ready = False
-        self._raw_connection: Optional[Any] = None
-        self.connection: Optional[Any] = None  # Legacy attribute for backward compatibility
 
     @property
     def session(self) -> Session:
@@ -242,11 +240,6 @@ class DatabaseManager:
             self._session = self.SessionLocal()
             self._schema_ready = False
 
-            # Set legacy connection attribute to provide raw database connection for backward compatibility
-            # This allows tests to use .connection.cursor()
-            self._raw_connection = self.engine.raw_connection()
-            self.connection = self._raw_connection.driver_connection
-
             logger.debug(f"Connected to database: {self._mask_url(self.database_url)}")
         except Exception as e:
             raise DatabaseError(f"Failed to connect to database: {str(e)}") from e
@@ -277,14 +270,10 @@ class DatabaseManager:
             self._session.close()
             self._session = None
         self._schema_ready = False
-        if hasattr(self, "_raw_connection") and self._raw_connection:
-            self._raw_connection.close()
-            self._raw_connection = None
         if self.engine:
             self.engine.dispose()
             self.engine = None
         self.SessionLocal = None
-        self.connection = None
         logger.debug("Database connection closed")
 
     def __enter__(self):
@@ -1025,57 +1014,6 @@ class DatabaseManager:
             self._rollback()
             logger.error(f"Error deleting validation data: {e}", exc_info=True)
             raise DatabaseError(f"Failed to delete validation data: {e}")
-
-    def _query(self, sql: str, parameters: tuple = ()) -> List[Dict[str, Any]]:
-        """
-        Execute a raw SQL query and return results.
-
-        This is a private helper.  Code outside this module must use the
-        SQLAlchemy-based public methods instead.
-
-        Parameters
-        ----------
-        sql : str
-            SQL query to execute (use named parameters like :param1, :param2).
-        parameters : tuple, optional
-            Query parameters for parameterized queries.
-
-        Returns
-        -------
-        list of dict
-            Query results as list of dictionaries.
-
-        Raises
-        ------
-        DatabaseError
-            If query execution fails.
-        """
-        try:
-            # Convert ? placeholders to :0, :1, :2 for SQLAlchemy
-            # Count the number of ? placeholders
-            param_count = sql.count("?")
-
-            # Replace ? with numbered parameters
-            converted_sql = sql
-            for i in range(param_count):
-                converted_sql = converted_sql.replace("?", f":param{i}", 1)
-
-            # Create parameter dict
-            param_dict = {f"param{i}": parameters[i] for i in range(len(parameters))}
-
-            # Execute raw SQL using text()
-            result = self.session.execute(text(converted_sql), param_dict)
-
-            # Convert result to list of dicts
-            rows = []
-            for row in result:
-                # Convert row to dict
-                row_dict = dict(row._mapping)
-                rows.append(row_dict)
-
-            return rows
-        except Exception as e:
-            raise DatabaseError(f"Query failed: {str(e)}") from e
 
     def _build_where_conditions(self, where_filters: Optional[Dict[str, Any]]) -> List[Any]:
         """
@@ -3165,36 +3103,6 @@ class DatabaseManager:
         except Exception as e:
             self._rollback()
             raise DatabaseError(f"Failed to update eval QA pair: {str(e)}") from e
-
-    def delete_eval_qa_pair(self, pair_id: int) -> bool:
-        """
-        Delete an evaluation Q/A pair by ID.
-
-        Parameters
-        ----------
-        pair_id : int
-            Primary key of the pair to delete.
-
-        Returns
-        -------
-        bool
-            ``True`` if a row was deleted, ``False`` if pair was not found.
-
-        Raises
-        ------
-        DatabaseError
-            If deletion fails.
-        """
-        try:
-            pair = self.session.get(EvalQAPair, pair_id)
-            if pair is None:
-                return False
-            self.session.delete(pair)
-            self.session.commit()
-            return True
-        except Exception as e:
-            self._rollback()
-            raise DatabaseError(f"Failed to delete eval QA pair: {str(e)}") from e
 
     def delete_verified_eval_qa_pairs(self) -> int:
         """

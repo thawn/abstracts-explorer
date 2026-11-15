@@ -171,7 +171,7 @@ response = chat.query("What are the latest developments in transformers?")
 print(response)
 
 # Continue conversation
-response = chat.chat("Tell me more about the first paper")
+response = chat.query("Tell me more about the first paper")
 print(response)
 
 # Export conversation

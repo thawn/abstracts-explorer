@@ -60,14 +60,6 @@ class TestMetadataCache:
 
         assert cache.get("key", ttl_seconds=0) is None
 
-    def test_invalidate(self):
-        cache = MetadataCache()
-        cache.set("key", [2025], ttl_seconds=60)
-
-        cache.invalidate("key")
-
-        assert cache.get("key", ttl_seconds=60) is None
-
     def test_invalidate_database_only_matching_entries(self):
         cache = MetadataCache()
         cache.set(("postgresql://a", "years"), [2025], ttl_seconds=60)

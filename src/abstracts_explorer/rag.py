@@ -808,65 +808,6 @@ class RAGChat:
         except Exception as e:
             raise RAGError(f"Query failed: {str(e)}") from e
 
-    def chat(
-        self,
-        message: str,
-        use_context: bool = True,
-        n_results: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        """
-        Continue conversation with context awareness.
-
-        Parameters
-        ----------
-        message : str
-            User's message.
-        use_context : bool, optional
-            Whether to retrieve papers as context, by default True.
-        n_results : int, optional
-            Number of papers to retrieve.
-
-        Returns
-        -------
-        dict
-            Dictionary containing response and metadata.
-
-        Examples
-        --------
-        >>> response = chat.chat("Tell me more about transformers")
-        >>> print(response["response"])
-        """
-        if use_context:
-            return self.query(message, n_results=n_results)
-        else:
-            # Use only conversation history without tool calls
-            try:
-                settings = OpenAIChatModelSettings(
-                    temperature=self.temperature,
-                    max_tokens=self.max_tokens,
-                    openai_reasoning_effort="low",
-                )
-                base_instructions = self._build_base_instructions()
-                run_kwargs: Dict[str, Any] = {
-                    "deps": RAGDeps(),
-                    "model_settings": settings,
-                    "instructions": base_instructions,
-                }
-                if self._message_history:
-                    self._update_message_history_instructions(base_instructions)
-                    run_kwargs["message_history"] = self._message_history
-
-                result = self.agent.run_sync(message, **run_kwargs)
-                self._message_history = result.all_messages()
-
-                return {
-                    "response": result.output,
-                    "papers": [],
-                    "metadata": {"n_papers": 0, "model": self.model},
-                }
-            except Exception as e:
-                raise RAGError(f"Chat failed: {str(e)}") from e
-
     def _update_message_history_instructions(self, instructions: str) -> None:
         """
         Update the instructions on the first ModelRequest in message history.

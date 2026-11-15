@@ -10,11 +10,11 @@ global.markedKatex = jest.fn(() => ({}));
 
 // Import all utility modules
 import { escapeHtml } from '../static/modules/utils/dom-utils.js';
-import { renderEmptyState, renderErrorBlock, renderLoadingSpinner, showLoading, showErrorInElement, showError } from '../static/modules/utils/ui-utils.js';
+import { renderEmptyState, renderErrorBlock, showLoading, showErrorInElement, showError } from '../static/modules/utils/ui-utils.js';
 import { naturalSortPosterPosition, sortClustersBySizeDesc } from '../static/modules/utils/sort-utils.js';
 import { getClusterLabelWithCount } from '../static/modules/utils/cluster-utils.js';
 import { renderMarkdownWithLatex, configureMarkedWithKatex, renderInlineMarkdownWithLatex } from '../static/modules/utils/markdown-utils.js';
-import { getSelectedFilters, buildFilteredRequestBody, applyYearConferenceFilters, fetchJSON, parseJsonResponse } from '../static/modules/utils/api-utils.js';
+import { parseJsonResponse } from '../static/modules/utils/api-utils.js';
 import { API_BASE, PLOTLY_COLORS } from '../static/modules/utils/constants.js';
 
 describe('Utility Modules', () => {
@@ -87,18 +87,6 @@ describe('Utility Modules', () => {
             });
         });
 
-        describe('renderLoadingSpinner', () => {
-            it('should render loading spinner', () => {
-                const html = renderLoadingSpinner('Loading...');
-                expect(html).toContain('spinner');
-                expect(html).toContain('Loading...');
-            });
-
-            it('should work without message', () => {
-                const html = renderLoadingSpinner('');
-                expect(html).toContain('spinner');
-            });
-        });
 
         describe('showLoading', () => {
             it('should show loading in element', () => {
@@ -267,97 +255,9 @@ describe('Utility Modules', () => {
             document.body.innerHTML = '';
         });
 
-        describe('getSelectedFilters', () => {
-            it('should get filters from DOM', () => {
-                document.body.innerHTML = `
-                    <select id="year-selector"><option value="2025" selected>2025</option></select>
-                    <select id="conference-selector"><option value="NeurIPS" selected>NeurIPS</option></select>
-                `;
-                
-                const filters = getSelectedFilters();
-                expect(filters.selectedYear).toBe('2025');
-                expect(filters.selectedConference).toBe('NeurIPS');
-            });
 
-            it('should handle missing selectors', () => {
-                const filters = getSelectedFilters();
-                expect(filters.selectedYear).toBe('');
-            });
-        });
 
-        describe('buildFilteredRequestBody', () => {
-            it('should add partial session filter', () => {
-                const body = buildFilteredRequestBody({ q: 'test' }, ['S1'], 3, '', '');
-                expect(body.sessions).toEqual(['S1']);
-            });
 
-            it('should not add full session filter', () => {
-                const body = buildFilteredRequestBody({ q: 'test' }, ['S1', 'S2'], 2, '', '');
-                expect(body.sessions).toBeUndefined();
-            });
-
-            it('should add year filter', () => {
-                const body = buildFilteredRequestBody({}, [], 0, '2025', '');
-                expect(body.years).toEqual([2025]);
-            });
-
-            it('should add conference filter', () => {
-                const body = buildFilteredRequestBody({}, [], 0, '', 'NeurIPS');
-                expect(body.conferences).toEqual(['NeurIPS']);
-            });
-        });
-
-        describe('applyYearConferenceFilters', () => {
-            const papers = [
-                { id: 1, year: 2025, conference: 'NeurIPS' },
-                { id: 2, year: 2024, conference: 'ICLR' },
-                { id: 3, year: 2025, conference: 'ICLR' }
-            ];
-
-            it('should filter by year', () => {
-                const filtered = applyYearConferenceFilters(papers, '2025', '');
-                expect(filtered.length).toBe(2);
-            });
-
-            it('should filter by conference', () => {
-                const filtered = applyYearConferenceFilters(papers, '', 'NeurIPS');
-                expect(filtered.length).toBe(1);
-            });
-
-            it('should filter by both', () => {
-                const filtered = applyYearConferenceFilters(papers, '2025', 'NeurIPS');
-                expect(filtered.length).toBe(1);
-                expect(filtered[0].id).toBe(1);
-            });
-
-            it('should return all when no filters', () => {
-                const filtered = applyYearConferenceFilters(papers, '', '');
-                expect(filtered.length).toBe(3);
-            });
-        });
-
-        describe('fetchJSON', () => {
-            beforeEach(() => {
-                global.fetch = jest.fn();
-            });
-
-            it('should fetch and parse JSON', async () => {
-                global.fetch.mockResolvedValueOnce({
-                    json: async () => ({ data: 'test' })
-                });
-
-                const result = await fetchJSON('/test');
-                expect(result).toEqual({ data: 'test' });
-            });
-
-            it('should throw on error response', async () => {
-                global.fetch.mockResolvedValueOnce({
-                    json: async () => ({ error: 'Failed' })
-                });
-
-                await expect(fetchJSON('/test')).rejects.toThrow('Failed');
-            });
-        });
 
         describe('parseJsonResponse', () => {
             it('should parse a JSON response', async () => {

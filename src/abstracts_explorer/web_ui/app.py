@@ -780,73 +780,6 @@ def compute_clusters():
     )
 
 
-@app.route("/api/clusters/cached")
-@api_error_handler
-def get_cached_clusters():
-    """
-    Get previously computed clusters from cache file.
-
-    Query Parameters
-    ----------------
-    file : str (optional)
-        Path to cached clustering results JSON file
-        Default: "clusters.json" in current directory
-
-    Returns
-    -------
-    dict
-        Clustering results from cache file
-    """
-    cache_file = request.args.get("file", "clusters.json")
-    cache_path = Path(cache_file)
-
-    if not cache_path.exists():
-        return (
-            jsonify(
-                {
-                    "error": f"Cached clusters file not found: {cache_file}",
-                    "hint": "Run 'abstracts-explorer cluster-embeddings --output clusters.json' first",
-                }
-            ),
-            404,
-        )
-
-    try:
-        with open(cache_path, "r", encoding="utf-8") as f:
-            results = json.load(f)
-    except json.JSONDecodeError as e:
-        raise ApiError(f"Invalid JSON in cache file: {e}", 500) from e
-
-    return jsonify(results)
-
-
-@app.route("/api/clusters/default-count")
-@api_error_handler
-def get_default_cluster_count():
-    """
-    Get the recommended default number of clusters based on embeddings count.
-
-    Returns
-    -------
-    dict
-        Dictionary with:
-        - n_clusters: Recommended number of clusters
-        - n_papers: Number of papers in embeddings collection
-    """
-    from abstracts_explorer.clustering import calculate_default_clusters
-
-    em = get_embeddings_manager()
-
-    # Get embeddings count
-    collection_stats = em.get_collection_stats()
-    n_papers = collection_stats["count"]
-
-    # Calculate default
-    n_clusters = calculate_default_clusters(n_papers)
-
-    return jsonify({"n_clusters": n_clusters, "n_papers": n_papers})
-
-
 @app.route("/api/clusters/search", methods=["POST"])
 @api_error_handler
 def search_custom_cluster():
@@ -975,22 +908,6 @@ def papers_per_year():
         year_counts[year] = stats["total_papers"]
 
     return jsonify({"year_counts": year_counts, "conference": conference})
-
-
-@app.route("/api/years")
-@api_error_handler
-def get_years():
-    """
-    Get available years in the database.
-
-    Returns
-    -------
-    dict
-        List of available years
-    """
-    database = get_database()
-    years = database.get_years()
-    return jsonify({"years": years})
 
 
 @app.route("/api/export/interesting-papers", methods=["POST"])

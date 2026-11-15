@@ -271,25 +271,6 @@ class TestEvalQAPairModel:
         result = eval_db.update_eval_qa_pair(pair_id, invalid_field="value")
         assert result is False
 
-    def test_delete_eval_qa_pair(self, eval_db):
-        """Test deleting a Q/A pair."""
-        pair_id = eval_db.add_eval_qa_pair(
-            conversation_id="c1",
-            turn_number=0,
-            query="To delete",
-            expected_answer="Will be deleted",
-        )
-
-        assert eval_db.get_eval_qa_pair_count() == 1
-        result = eval_db.delete_eval_qa_pair(pair_id)
-        assert result is True
-        assert eval_db.get_eval_qa_pair_count() == 0
-
-    def test_delete_eval_qa_pair_not_found(self, eval_db):
-        """Test deleting a non-existent pair returns False."""
-        result = eval_db.delete_eval_qa_pair(99999)
-        assert result is False
-
     def test_delete_verified_eval_qa_pairs_empty(self, eval_db):
         """Deleting verified pairs when there are none returns 0."""
         count = eval_db.delete_verified_eval_qa_pairs()

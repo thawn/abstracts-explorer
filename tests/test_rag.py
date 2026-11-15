@@ -24,7 +24,7 @@ from abstracts_explorer.rag import RAGChat, RAGError
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.config import get_config
 from tests.conftest import set_test_embedding_db
-from tests.helpers import requires_lm_studio, create_test_db_with_paper
+from tests.helpers import raw_query, requires_lm_studio, create_test_db_with_paper
 
 # Fixtures imported from conftest.py:
 # - mock_embeddings_manager: Mock embeddings manager with predefined search results
@@ -515,23 +515,6 @@ class TestRAGChatSingleSystemMessage:
         assert "ICLR" in payloads[1]["messages"][0]["content"]
         assert "NeurIPS" not in payloads[1]["messages"][0]["content"]
 
-    def test_chat_without_context_sends_single_system_message(self, mock_embeddings_manager, mock_database):
-        """The no-context chat path must also send exactly one system message."""
-        payloads = []
-        model, close_client = self._make_mock_model(payloads)
-        chat = RAGChat(mock_embeddings_manager, mock_database)
-
-        try:
-            with chat.agent.override(model=model):
-                chat.chat("hello", use_context=False)
-        finally:
-            close_client()
-
-        assert len(payloads) == 1
-        roles = [message["role"] for message in payloads[0]["messages"]]
-        assert roles.count("system") == 1
-        assert roles[0] == "system"
-
 
 class TestRAGChatHTTPClient:
     """Verify the rate-limited provider uses httpx2 without legacy warnings."""
@@ -558,42 +541,6 @@ class TestRAGChatHTTPClient:
         assert isinstance(async_client, httpx2.AsyncClient)
         assert isinstance(async_client._transport, RateLimitedTransport)
         asyncio.run(async_client.aclose())
-
-
-class TestRAGChatChat:
-    """Test RAGChat chat method."""
-
-    def test_chat_with_context(self, mock_embeddings_manager, mock_database, mock_search_papers):
-        """Test chat with context retrieval."""
-        chat = RAGChat(mock_embeddings_manager, mock_database)
-
-        with chat.agent.override(model=TestModel()):
-            result = chat.chat("Tell me about transformers")
-
-        assert "response" in result
-        assert len(result["papers"]) > 0
-        mock_search_papers.assert_called()
-
-    def test_chat_without_context(self, mock_embeddings_manager, mock_database):
-        """Test chat without context retrieval."""
-        chat = RAGChat(mock_embeddings_manager, mock_database)
-
-        with chat.agent.override(model=TestModel()):
-            result = chat.chat("Hello, how are you?", use_context=False)
-
-        assert "response" in result
-        assert result["papers"] == []
-        assert result["metadata"]["n_papers"] == 0
-
-    def test_chat_custom_n_results(self, mock_embeddings_manager, mock_database, mock_search_papers):
-        """Test chat with custom n_results."""
-        chat = RAGChat(mock_embeddings_manager, mock_database)
-
-        with chat.agent.override(model=TestModel()):
-            chat.chat("What is AI?", n_results=7)
-
-        # Verify search was called
-        mock_search_papers.assert_called()
 
 
 class TestRAGChatConversation:
@@ -1214,7 +1161,7 @@ class TestRAGChatIntegration:
         )
 
         # Get the generated UID from the database
-        papers = db._query("SELECT uid FROM papers LIMIT 1")
+        papers = raw_query(db, "SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
 
         chroma_path = tmp_path / "chroma_integration"
@@ -1278,7 +1225,7 @@ class TestRAGChatIntegration:
             },
         )
 
-        papers = db._query("SELECT uid FROM papers LIMIT 1")
+        papers = raw_query(db, "SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
 
         chroma_path = tmp_path / "chroma_conversation"
@@ -1309,7 +1256,7 @@ class TestRAGChatIntegration:
         assert len(result1["response"]) > 0
 
         # Follow-up query
-        result2 = chat.chat("Tell me more about their architecture")
+        result2 = chat.query("Tell me more about their architecture")
         assert len(result2["response"]) > 0
 
         # Check history
@@ -1342,7 +1289,7 @@ class TestRAGChatIntegration:
             },
         )
 
-        papers = db._query("SELECT uid FROM papers LIMIT 1")
+        papers = raw_query(db, "SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
 
         chroma_path = tmp_path / "chroma_export"
@@ -1837,7 +1784,7 @@ class TestParallelRAGRateLimiting:
             },
         )
 
-        papers = db._query("SELECT uid FROM papers LIMIT 1")
+        papers = raw_query(db, "SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
 
         chroma_path = tmp_path / "chroma_parallel"

@@ -7,6 +7,8 @@ testing user interactions and workflows as they would happen in a real browser.
 
 import pytest
 import time
+
+import numpy as np
 import threading
 import sys
 import os
@@ -18,6 +20,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 from abstracts_explorer.database import DatabaseManager
 from tests.helpers import (
+    raw_query,
     find_free_port,
     create_webdriver,
 )
@@ -200,7 +203,7 @@ def test_embeddings(test_database, tmp_path_factory):
     set_test_db(str(test_database))
     db = DatabaseManager()
 
-    papers = db._query("SELECT * FROM papers")
+    papers = raw_query(db, "SELECT * FROM papers")
 
     # Add each paper to the embeddings database
     for paper in papers:
@@ -248,19 +251,19 @@ def _prepopulate_clustering_cache(test_database, em, collection_name):
 
     # Cluster on full embeddings (this is fast with only 3 test papers)
     cm.cluster(
-        method="agglomerative",
         n_clusters=None,
         use_reduced=False,
         distance_threshold=150.0,
         linkage="ward",
     )
 
-    # Use PCA for the reduction step (deterministic, thread-safe, and fast).
-    # The results are stored under the "tsne" cache key so that
-    # compute_clusters_with_cache() finds an exact cache hit when MCP tools
-    # request t-SNE reduction.  The x/y coordinates differ from a real t-SNE
-    # but are sufficient for testing the cache-lookup and topic-analysis paths.
-    cm.reduce_dimensions(method="pca", n_components=2)
+    # Assign deterministic 2-D coordinates directly instead of running a real
+    # reduction (deterministic, thread-safe, and fast).  The results are stored
+    # under the "tsne" cache key so that compute_clusters_with_cache() finds an
+    # exact cache hit when MCP tools request t-SNE reduction.  The x/y
+    # coordinates differ from a real t-SNE but are sufficient for testing the
+    # cache-lookup and topic-analysis paths.
+    cm.reduced_embeddings = np.array([[float(i), float(i % 3)] for i in range(len(cm.paper_ids or []))])
 
     try:
         cm.extract_cluster_keywords(n_keywords=5)

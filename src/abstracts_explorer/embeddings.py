@@ -700,45 +700,6 @@ class EmbeddingsManager:
             )
             logger.debug("Created/retrieved collection: %s", self.collection_name)
 
-    def paper_needs_update(self, paper: dict) -> bool:
-        """
-        Check if a paper's embedding needs to be created or updated.
-
-        The stored document is a SHA-256 content hash of the text that was
-        embedded.  A paper needs an update when the hash for its current title
-        and abstract differs from the stored hash.
-
-        Parameters
-        ----------
-        paper : dict
-            Dictionary containing paper information.
-
-        Returns
-        -------
-        bool
-            True if the paper needs to be updated, False otherwise.
-
-        Examples
-        --------
-        >>> em = EmbeddingsManager()
-        >>> em.create_collection()
-        >>> em.paper_needs_update({"id": 1, "abstract": "Updated abstract"})
-        True
-        """
-        try:
-            existing_paper = self.collection.get(ids=[paper["uid"]], include=["documents"])
-            if not existing_paper or len(existing_paper["ids"]) == 0:
-                return True
-
-            existing_documents = existing_paper.get("documents", [])
-            if not existing_documents or not existing_documents[0]:
-                return True
-
-            return existing_documents[0] != hash_text(self.embedding_text_from_paper(paper))
-        except Exception as e:
-            logger.warning("Error checking if paper %s needs update: %s", paper["uid"], str(e))
-            return True
-
     @staticmethod
     def embedding_text_from_paper(paper: dict) -> str:
         """

@@ -2,7 +2,7 @@
 Tests for MCP Tools Integration Module.
 
 Tests the integration between MCP clustering tools and RAG chat,
-including tool schema generation, execution, and result formatting.
+including tool execution, argument normalization, and result formatting.
 """
 
 import json
@@ -10,7 +10,6 @@ from typing import Any
 from unittest.mock import patch, Mock
 
 from abstracts_explorer.mcp_tools import (
-    get_mcp_tools_schema,
     execute_mcp_tool,
     format_tool_result_for_llm,
     _abbreviate_result,
@@ -54,34 +53,6 @@ def _normalize_interesting_paper_tool_args(arguments, array_conference=True):
     """Test convenience wrapper for the interesting-paper rule sets."""
     rules = INTERESTING_PAPER_ARRAY_RULES if array_conference else INTERESTING_PAPER_SINGLE_RULES
     return _normalize_args(arguments, rules)
-
-
-def test_get_mcp_tools_schema():
-    """Test that MCP tools schema is in correct OpenAI format."""
-    schema = get_mcp_tools_schema()
-
-    # Should return a list of tool definitions
-    assert isinstance(schema, list)
-    assert len(schema) == 8  # 8 MCP tools (including interesting-paper tools)
-
-    # Check structure of first tool
-    tool = schema[0]
-    assert tool["type"] == "function"
-    assert "function" in tool
-    assert "name" in tool["function"]
-    assert "description" in tool["function"]
-    assert "parameters" in tool["function"]
-
-    # Verify all expected tools are present
-    tool_names = [t["function"]["name"] for t in schema]
-    assert "analyze_topic_relevance" in tool_names
-    assert "get_conference_topics" in tool_names
-    assert "get_topic_evolution" in tool_names
-    assert "search_papers" in tool_names
-    assert "get_cluster_visualization" in tool_names
-    assert "get_paper_details" in tool_names
-    assert "summarize_interesting_papers" in tool_names
-    assert "recommend_related_papers" in tool_names
 
 
 def test_execute_mcp_tool_cluster_topics():
@@ -291,104 +262,6 @@ def test_format_tool_result_unknown_tool():
     assert result == result_json
 
 
-def test_mcp_tools_schema_parameters():
-    """Test that tool schemas have correct parameter definitions."""
-    schema = get_mcp_tools_schema()
-
-    # Check get_conference_topics parameters
-    conference_topics = next(t for t in schema if t["function"]["name"] == "get_conference_topics")
-    params = conference_topics["function"]["parameters"]["properties"]
-    assert "collection_name" in params
-
-    # Check get_topic_evolution parameters
-    topic_evolution = next(t for t in schema if t["function"]["name"] == "get_topic_evolution")
-    params = topic_evolution["function"]["parameters"]
-    assert "topic_keywords" in params["properties"]
-    assert "conferences" in params["properties"]
-    assert "topic_keywords" in params["required"]
-    assert "conferences" in params["required"]
-
-    # Check search_papers parameters
-    recent_dev = next(t for t in schema if t["function"]["name"] == "search_papers")
-    params = recent_dev["function"]["parameters"]
-    assert "topic_keywords" in params["properties"]
-    assert "years" in params["properties"]
-    assert "topic_keywords" in params["required"]
-
-    # Check get_cluster_visualization parameters (simplified)
-    viz = next(t for t in schema if t["function"]["name"] == "get_cluster_visualization")
-    params = viz["function"]["parameters"]["properties"]
-    assert "output_path" in params
-    assert "collection_name" in params
-
-
-def test_get_mcp_tools_schema_with_conferences_enum():
-    """Test that passing conferences injects enum into the schema."""
-    conferences = ["NeurIPS", "ICLR", "ICML"]
-    schema = get_mcp_tools_schema(conferences=conferences)
-
-    # analyze_topic_relevance has an array 'conferences' field
-    atr = next(t for t in schema if t["function"]["name"] == "analyze_topic_relevance")
-    items = atr["function"]["parameters"]["properties"]["conferences"]["items"]
-    assert items["enum"] == conferences
-
-    # search_papers has a single-string 'conference' field
-    sp = next(t for t in schema if t["function"]["name"] == "search_papers")
-    assert sp["function"]["parameters"]["properties"]["conference"]["enum"] == conferences
-
-    # get_topic_evolution now has an array 'conferences' field
-    te = next(t for t in schema if t["function"]["name"] == "get_topic_evolution")
-    items = te["function"]["parameters"]["properties"]["conferences"]["items"]
-    assert items["enum"] == conferences
-
-
-def test_get_mcp_tools_schema_with_years_enum():
-    """Test that passing years injects enum into the schema."""
-    years = [2023, 2024, 2025]
-    schema = get_mcp_tools_schema(years=years)
-
-    # analyze_topic_relevance has array 'years' field
-    atr = next(t for t in schema if t["function"]["name"] == "analyze_topic_relevance")
-    items = atr["function"]["parameters"]["properties"]["years"]["items"]
-    assert items["enum"] == years
-
-    # search_papers has array 'years' field
-    sp = next(t for t in schema if t["function"]["name"] == "search_papers")
-    items = sp["function"]["parameters"]["properties"]["years"]["items"]
-    assert items["enum"] == years
-
-    # get_topic_evolution has start_year/end_year integer fields
-    te = next(t for t in schema if t["function"]["name"] == "get_topic_evolution")
-    props = te["function"]["parameters"]["properties"]
-    assert props["start_year"]["enum"] == years
-    assert props["end_year"]["enum"] == years
-
-
-def test_get_mcp_tools_schema_without_args_has_no_enum():
-    """Test that calling without arguments produces no enum constraints."""
-    schema = get_mcp_tools_schema()
-
-    atr = next(t for t in schema if t["function"]["name"] == "analyze_topic_relevance")
-    items = atr["function"]["parameters"]["properties"]["conferences"]["items"]
-    assert "enum" not in items
-
-    sp = next(t for t in schema if t["function"]["name"] == "search_papers")
-    assert "enum" not in sp["function"]["parameters"]["properties"]["conference"]
-
-
-def test_get_mcp_tools_schema_does_not_mutate_base():
-    """Test that dynamic schema generation does not mutate the base schema."""
-    # Call once with enums to verify it doesn't leak into a subsequent call
-    get_mcp_tools_schema(conferences=["NeurIPS"])
-    schema2 = get_mcp_tools_schema()
-
-    # schema2 should not have the enum from schema1
-    atr = next(t for t in schema2 if t["function"]["name"] == "analyze_topic_relevance")
-    items = atr["function"]["parameters"]["properties"]["conferences"]["items"]
-    assert "enum" not in items
-
-
-# ---------------------------------------------------------------------------
 # Argument normalization unit tests
 # ---------------------------------------------------------------------------
 
@@ -1380,44 +1253,6 @@ def test_format_tool_result_for_llm_paper_details():
     assert "Paper Details" in result
     assert "My Paper" in result
     assert "Alice" in result
-
-
-# ---------------------------------------------------------------------------
-# get_mcp_tools_schema – get_paper_details entries
-# ---------------------------------------------------------------------------
-
-
-def test_get_mcp_tools_schema_paper_details_parameters():
-    """get_paper_details schema has expected parameter definitions."""
-    schema = get_mcp_tools_schema()
-    pd_tool = next(t for t in schema if t["function"]["name"] == "get_paper_details")
-    props = pd_tool["function"]["parameters"]["properties"]
-
-    assert "title" in props
-    assert props["title"]["type"] == "string"
-    assert "paper_id" in props
-    assert props["paper_id"]["type"] == "string"
-    assert "conference" in props
-    assert props["conference"]["type"] == "string"
-    assert "year" in props
-    assert props["year"]["type"] == "integer"
-    assert "limit" in props
-
-
-def test_get_mcp_tools_schema_paper_details_conference_enum():
-    """Conference enum is injected into get_paper_details conference field."""
-    conferences = ["NeurIPS", "ICLR"]
-    schema = get_mcp_tools_schema(conferences=conferences)
-    pd_tool = next(t for t in schema if t["function"]["name"] == "get_paper_details")
-    assert pd_tool["function"]["parameters"]["properties"]["conference"]["enum"] == conferences
-
-
-def test_get_mcp_tools_schema_paper_details_year_enum():
-    """Year enum is injected into get_paper_details year field."""
-    years = [2023, 2024, 2025]
-    schema = get_mcp_tools_schema(years=years)
-    pd_tool = next(t for t in schema if t["function"]["name"] == "get_paper_details")
-    assert pd_tool["function"]["parameters"]["properties"]["year"]["enum"] == years
 
 
 # ---------------------------------------------------------------------------

@@ -1,8 +1,8 @@
 # MCP Tools Module
 
 The MCP tools module provides integration between MCP clustering tools and the
-RAG chat system. It converts MCP tool definitions to OpenAI function calling
-format and handles tool execution.
+RAG chat system. It normalizes tool arguments to absorb common LLM output
+quirks and formats tool execution results for LLM consumption.
 
 ## Overview
 
@@ -16,18 +16,14 @@ paper ratings forwarded from the web UI.
 
 ```python
 from abstracts_explorer.mcp_tools import (
-    get_mcp_tools_schema,
     execute_mcp_tool,
     format_tool_result_for_llm,
 )
 
-# Get tool schemas for OpenAI function calling
-schemas = get_mcp_tools_schema()
-
 # Execute a tool
 result = execute_mcp_tool(
     "get_conference_topics",
-    {"n_clusters": 8}
+    {"conferences": ["NeurIPS"], "years": [2025]},
 )
 
 # Format the result for LLM consumption
