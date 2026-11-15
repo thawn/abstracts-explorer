@@ -544,7 +544,7 @@ class TestGenerateQAPairs:
         evaluator_with_papers.openai_client.chat.completions.create.return_value = mock_response
 
         with patch(
-            "abstracts_explorer.evaluation.execute_mcp_tool",
+            "abstracts_explorer.evaluation.generator.execute_mcp_tool",
             return_value='{"papers": [{"title": "Deep Learning Paper", "abstract": "..."}]}',
         ):
             pairs = evaluator_with_papers.generate_qa_pairs(
@@ -595,7 +595,7 @@ class TestGenerateQAPairs:
         ]
 
         with patch(
-            "abstracts_explorer.evaluation.execute_mcp_tool",
+            "abstracts_explorer.evaluation.generator.execute_mcp_tool",
             return_value=json.dumps(
                 {
                     "conference": "NeurIPS",
@@ -645,7 +645,7 @@ class TestGenerateQAPairs:
         evaluator_with_papers.openai_client.chat.completions.create.return_value = mock_response
 
         with patch(
-            "abstracts_explorer.evaluation.execute_mcp_tool",
+            "abstracts_explorer.evaluation.generator.execute_mcp_tool",
             return_value='{"error": "no embeddings loaded"}',
         ):
             pairs = evaluator_with_papers.generate_qa_pairs(
@@ -1000,7 +1000,7 @@ class TestCLIEvalCommands:
         with (
             patch("abstracts_explorer.cli.evaluation.EmbeddingsManager", return_value=mock_em_instance),
             patch(
-                "abstracts_explorer.evaluation.execute_mcp_tool",
+                "abstracts_explorer.evaluation.generator.execute_mcp_tool",
                 return_value='{"papers": [{"title": "Test Paper", "abstract": "test"}]}',
             ),
             patch.object(

@@ -2117,10 +2117,10 @@ class TestSessionScopedRAGChat:
         mock_config.chat_model = "test"
 
         with (
-            patch("abstracts_explorer.web_ui.app.RAGChat") as MockRAGChat,
-            patch("abstracts_explorer.web_ui.app.get_database"),
-            patch("abstracts_explorer.web_ui.app.get_embeddings_manager"),
-            patch("abstracts_explorer.web_ui.app.get_config", return_value=mock_config),
+            patch("abstracts_explorer.web_ui.dependencies.RAGChat") as MockRAGChat,
+            patch("abstracts_explorer.web_ui.dependencies.get_database"),
+            patch("abstracts_explorer.web_ui.dependencies.get_embeddings_manager"),
+            patch("abstracts_explorer.web_ui.dependencies.get_config", return_value=mock_config),
         ):
             MockRAGChat.side_effect = [Mock(), Mock()]
 
@@ -2161,10 +2161,10 @@ class TestSessionScopedRAGChat:
         mock_config.chat_model = "test"
 
         with (
-            patch("abstracts_explorer.web_ui.app.RAGChat") as MockRAGChat,
-            patch("abstracts_explorer.web_ui.app.get_database"),
-            patch("abstracts_explorer.web_ui.app.get_embeddings_manager"),
-            patch("abstracts_explorer.web_ui.app.get_config", return_value=mock_config),
+            patch("abstracts_explorer.web_ui.dependencies.RAGChat") as MockRAGChat,
+            patch("abstracts_explorer.web_ui.dependencies.get_database"),
+            patch("abstracts_explorer.web_ui.dependencies.get_embeddings_manager"),
+            patch("abstracts_explorer.web_ui.dependencies.get_config", return_value=mock_config),
         ):
             created_instances = []
             MockRAGChat.side_effect = lambda *a, **kw: created_instances.append(Mock()) or created_instances[-1]
@@ -2198,10 +2198,10 @@ class TestSessionScopedRAGChat:
         mock_config.chat_model = "test"
 
         with (
-            patch("abstracts_explorer.web_ui.app.RAGChat") as MockRAGChat,
-            patch("abstracts_explorer.web_ui.app.get_database"),
-            patch("abstracts_explorer.web_ui.app.get_embeddings_manager"),
-            patch("abstracts_explorer.web_ui.app.get_config", return_value=mock_config),
+            patch("abstracts_explorer.web_ui.dependencies.RAGChat") as MockRAGChat,
+            patch("abstracts_explorer.web_ui.dependencies.get_database"),
+            patch("abstracts_explorer.web_ui.dependencies.get_embeddings_manager"),
+            patch("abstracts_explorer.web_ui.dependencies.get_config", return_value=mock_config),
         ):
             MockRAGChat.return_value = Mock()
 
@@ -2251,10 +2251,10 @@ class TestSessionScopedRAGChat:
         mock_config.chat_model = "test"
 
         with (
-            patch("abstracts_explorer.web_ui.app.RAGChat", return_value=Mock()),
-            patch("abstracts_explorer.web_ui.app.get_database"),
-            patch("abstracts_explorer.web_ui.app.get_embeddings_manager"),
-            patch("abstracts_explorer.web_ui.app.get_config", return_value=mock_config),
+            patch("abstracts_explorer.web_ui.dependencies.RAGChat", return_value=Mock()),
+            patch("abstracts_explorer.web_ui.dependencies.get_database"),
+            patch("abstracts_explorer.web_ui.dependencies.get_embeddings_manager"),
+            patch("abstracts_explorer.web_ui.dependencies.get_config", return_value=mock_config),
         ):
             # Fill the cache to the max
             for i in range(_RAG_CHAT_CACHE_MAX):
@@ -2297,10 +2297,10 @@ class TestSessionScopedRAGChat:
         mock_config.chat_model = "test"
 
         with (
-            patch("abstracts_explorer.web_ui.app.RAGChat") as MockRAGChat,
-            patch("abstracts_explorer.web_ui.app.get_database"),
-            patch("abstracts_explorer.web_ui.app.get_embeddings_manager"),
-            patch("abstracts_explorer.web_ui.app.get_config", return_value=mock_config),
+            patch("abstracts_explorer.web_ui.dependencies.RAGChat") as MockRAGChat,
+            patch("abstracts_explorer.web_ui.dependencies.get_database"),
+            patch("abstracts_explorer.web_ui.dependencies.get_embeddings_manager"),
+            patch("abstracts_explorer.web_ui.dependencies.get_config", return_value=mock_config),
         ):
             mock_rag = Mock()
             MockRAGChat.return_value = mock_rag
@@ -2392,10 +2392,10 @@ class TestSessionScopedRAGChat:
         rag_b._message_history = []
 
         with (
-            patch("abstracts_explorer.web_ui.app.RAGChat"),
-            patch("abstracts_explorer.web_ui.app.get_database"),
-            patch("abstracts_explorer.web_ui.app.get_embeddings_manager"),
-            patch("abstracts_explorer.web_ui.app.get_config", return_value=mock_config),
+            patch("abstracts_explorer.web_ui.dependencies.RAGChat"),
+            patch("abstracts_explorer.web_ui.dependencies.get_database"),
+            patch("abstracts_explorer.web_ui.dependencies.get_embeddings_manager"),
+            patch("abstracts_explorer.web_ui.dependencies.get_config", return_value=mock_config),
         ):
             # Manually seed cache as if session A already had a conversation
             _rag_chat_cache["session-a"] = rag_a
@@ -2407,7 +2407,7 @@ class TestSessionScopedRAGChat:
                 flask_session["_session_id"] = "session-b"
                 flask_session.modified = True
 
-                with patch("abstracts_explorer.web_ui.app.RAGChat", return_value=rag_b):
+                with patch("abstracts_explorer.web_ui.dependencies.RAGChat", return_value=rag_b):
                     got_rag = get_rag_chat()
 
             assert got_rag is rag_b, "Session B must get its own RAGChat, not session A's"
