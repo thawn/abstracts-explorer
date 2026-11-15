@@ -4,10 +4,10 @@ Abstracts Explorer includes an extensible plugin system that allows you to downl
 
 ## Overview
 
-The plugin system provides two APIs:
-
-1. **Full Schema API** (`DownloaderPlugin`) - For complex data sources with rich metadata
-2. **Lightweight API** (`LightweightDownloaderPlugin`) - For simple workshops and conferences
+All plugins subclass `DownloaderPlugin` and return lightweight
+`LightweightPaper` objects. HTTP-based sources typically subclass
+`HTTPDownloaderPlugin` (shared retry/rate-limit handling), and EventHosts-backed
+conferences subclass `JSONConferenceDownloaderPlugin`.
 
 ### EventHosts JSON sources
 
@@ -179,7 +179,7 @@ Create `my_workshop_plugin.py`:
 
 ```python
 from abstracts_explorer.plugins import (
-    LightweightDownloaderPlugin,
+    DownloaderPlugin,
     convert_to_lightweight_schema,
     register_plugin
 )
@@ -187,7 +187,7 @@ import requests
 from bs4 import BeautifulSoup
 
 
-class MyWorkshopPlugin(LightweightDownloaderPlugin):
+class MyWorkshopPlugin(DownloaderPlugin):
     """Downloader for My Workshop."""
     
     plugin_name = "myworkshop"
@@ -545,7 +545,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-class MyPlugin(LightweightDownloaderPlugin):
+class MyPlugin(DownloaderPlugin):
     def download(self, year=None, **kwargs):
         logger.info(f"Starting download for {year}")
         

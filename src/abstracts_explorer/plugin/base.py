@@ -1,9 +1,8 @@
 """
 Plugin base classes.
 
-Defines :class:`DownloaderPlugin` and :class:`LightweightDownloaderPlugin`,
-including year handling and the per-year JSON cache helpers shared by all
-downloaders.
+Defines :class:`DownloaderPlugin`, including year handling and the per-year
+JSON cache helpers shared by all downloaders.
 """
 
 import json
@@ -74,6 +73,12 @@ class DownloaderPlugin(ABC):
     Subclasses should set ``_start_year`` and override ``get_url(year)``
     to get automatic ``supported_years`` computation with a current-year
     availability check.
+
+    Plugins return :class:`~abstracts_explorer.plugin.LightweightPaper`
+    objects; see that model for the required and optional per-paper fields.
+    The default :meth:`download` template handles year resolution, validation,
+    caching, and saving, delegating the source-specific work to
+    :meth:`_download_uncached`.
     """
 
     # Plugin metadata (should be overridden in subclasses)
@@ -407,36 +412,3 @@ class DownloaderPlugin(ABC):
             except (json.JSONDecodeError, Exception) as e:
                 logger.warning("Failed to load local file: %s. Downloading from %s...", e, source_label)
         return None
-
-
-class LightweightDownloaderPlugin(DownloaderPlugin):
-    """
-    Lightweight base class for downloader plugins using the simplified schema.
-
-    This plugin type returns :class:`~abstracts_explorer.plugin.LightweightPaper`
-    objects, which the database layer stores directly.
-
-    Required fields per paper:
-        - title (str): Paper title
-        - authors (list of str): Author names
-        - abstract (str): Paper abstract
-        - session (str): Session/workshop/track name
-        - poster_position (str): Poster position identifier
-        - year (int): Conference year (e.g., 2025)
-        - conference (str): Conference name (e.g., "NeurIPS", "ICLR")
-
-    Optional fields per paper:
-        - original_id (int): Paper ID from the original source
-        - paper_pdf_url (str): URL to paper PDF
-        - poster_image_url (str): URL to poster image
-        - url (str): General URL (e.g., OpenReview, ArXiv)
-        - room_name (str): Room name for presentation
-        - keywords (list): List of keywords/tags
-        - starttime (str): Start time (ISO format or readable string)
-        - endtime (str): End time (ISO format or readable string)
-        - award (str): Award name (e.g., "Best Paper Award")
-    """
-
-    # Plugin metadata (should be overridden in subclasses)
-    plugin_name: str = "lightweight_base"
-    plugin_description: str = "Lightweight base downloader plugin"

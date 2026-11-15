@@ -140,7 +140,7 @@ class MyFullPlugin(DownloaderPlugin):
         }
 ```
 
-### Lightweight API (`LightweightDownloaderPlugin`)
+### DownloaderPlugin
 
 For simple data sources with minimal fields.
 
@@ -169,12 +169,12 @@ For simple data sources with minimal fields.
 **Example:**
 ```python
 from abstracts_explorer.plugins import (
-    LightweightDownloaderPlugin,
+    DownloaderPlugin,
     convert_to_lightweight_schema,
     register_plugin
 )
 
-class MyLightweightPlugin(LightweightDownloaderPlugin):
+class MyLightweightPlugin(DownloaderPlugin):
     plugin_name = "myworkshop"
     plugin_description = "My Workshop 2025"
     supported_years = [2025]
@@ -267,14 +267,14 @@ Create `my_workshop_plugin.py`:
 
 ```python
 from abstracts_explorer.plugins import (
-    LightweightDownloaderPlugin,
+    DownloaderPlugin,
     convert_to_lightweight_schema,
     register_plugin
 )
 import requests
 from bs4 import BeautifulSoup
 
-class MyWorkshopPlugin(LightweightDownloaderPlugin):
+class MyWorkshopPlugin(DownloaderPlugin):
     plugin_name = "myworkshop"
     plugin_description = "My Workshop downloader"
     supported_years = [2025]

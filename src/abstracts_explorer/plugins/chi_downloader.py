@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from abstracts_explorer.config import get_config
 from abstracts_explorer.plugin import (
-    LightweightDownloaderPlugin,
+    DownloaderPlugin,
     LightweightPaper,
     validate_lightweight_papers,
 )
@@ -30,7 +30,7 @@ from pydantic import ValidationError
 logger = logging.getLogger(__name__)
 
 
-class CHIDownloaderPlugin(LightweightDownloaderPlugin):
+class CHIDownloaderPlugin(DownloaderPlugin):
     """
     Plugin for loading CHI conference papers from the SIGCHI program JSON.
 

@@ -230,10 +230,10 @@ class TestCHIPluginProperties:
         assert "year" in meta["parameters"]
 
     def test_inherits_lightweight_downloader(self, chi_plugin):
-        """CHIDownloaderPlugin must be a LightweightDownloaderPlugin."""
-        from abstracts_explorer.plugin import LightweightDownloaderPlugin
+        """CHIDownloaderPlugin must be a DownloaderPlugin."""
+        from abstracts_explorer.plugin import DownloaderPlugin
 
-        assert isinstance(chi_plugin, LightweightDownloaderPlugin)
+        assert isinstance(chi_plugin, DownloaderPlugin)
 
     def test_award_names_mapping(self, chi_plugin):
         """AWARD_NAMES must contain the expected keys."""

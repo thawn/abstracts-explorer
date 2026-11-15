@@ -6,18 +6,18 @@ orphan: true
 
 Quick reference for the Abstracts Explorer plugin APIs.
 
-## Lightweight API
+## DownloaderPlugin
 
 ### Minimal Example
 
 ```python
 from abstracts_explorer.plugins import (
-    LightweightDownloaderPlugin,
+    DownloaderPlugin,
     convert_to_lightweight_schema,
     register_plugin
 )
 
-class MyPlugin(LightweightDownloaderPlugin):
+class MyPlugin(DownloaderPlugin):
     plugin_name = "myplugin"
     plugin_description = "My Plugin"
     supported_years = [2025]

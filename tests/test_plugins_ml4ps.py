@@ -13,7 +13,6 @@ from bs4 import BeautifulSoup
 
 from abstracts_explorer.plugins.ml4ps_downloader import ML4PSDownloaderPlugin
 from abstracts_explorer.plugins import (
-    LightweightDownloaderPlugin,
     DownloaderPlugin,
     get_plugin,
     list_plugins,
@@ -186,8 +185,8 @@ class TestML4PSPluginProperties:
         assert isinstance(ml4ps_plugin, ML4PSDownloaderPlugin)
 
     def test_plugin_inheritance(self, ml4ps_plugin):
-        """Test that plugin inherits from LightweightDownloaderPlugin."""
-        assert isinstance(ml4ps_plugin, LightweightDownloaderPlugin)
+        """Test that plugin inherits from DownloaderPlugin."""
+        assert isinstance(ml4ps_plugin, DownloaderPlugin)
         assert isinstance(ml4ps_plugin, DownloaderPlugin)
 
     def test_plugin_metadata(self, ml4ps_plugin):

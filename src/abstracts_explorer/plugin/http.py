@@ -15,7 +15,7 @@ import requests
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 
-from abstracts_explorer.plugin.base import LightweightDownloaderPlugin
+from abstracts_explorer.plugin.base import DownloaderPlugin
 from abstracts_explorer.rate_limiter import RateLimitCooldown
 from abstracts_explorer.utils.time_utils import utcnow
 
@@ -163,8 +163,8 @@ def fetch_with_retries(
     raise last_error
 
 
-class HTTPDownloaderPlugin(LightweightDownloaderPlugin):
-    """Lightweight plugin base class with shared HTTP transport handling."""
+class HTTPDownloaderPlugin(DownloaderPlugin):
+    """Downloader base class with shared HTTP transport handling."""
 
     _USER_AGENT = "abstracts-explorer"
     _ACCEPT: Optional[str] = None

@@ -18,7 +18,7 @@ class LightweightPaper(BaseModel):
     """
     Lightweight paper model for plugin data validation.
 
-    This model validates the simplified schema used by LightweightDownloaderPlugin.
+    This model validates the schema returned by downloader plugins.
     It requires only essential fields and optionally supports additional metadata.
 
     Required Fields

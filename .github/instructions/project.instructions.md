@@ -181,9 +181,10 @@ them from `static/modules/`.
 - **Feature**: branch → implement (types + NumPy docstrings) → unit and
   integration tests → update docs → run tests → PR.
 - **Bugfix**: branch → failing regression test → fix → verify → PR.
-- **New plugin**: implement in `plugins/`, inherit `DownloaderPlugin` or
-  `LightweightDownloaderPlugin`, register in `plugins/__init__.py`, add
-  `tests/test_plugins_<name>.py`, update `docs/plugins.md`.
+- **New plugin**: implement in `plugins/`, inherit `DownloaderPlugin` (or
+  `HTTPDownloaderPlugin`/`JSONConferenceDownloaderPlugin`), register in
+  `plugins/__init__.py`, add `tests/test_plugins_<name>.py`, update
+  `docs/plugins.md`.
 - **Docs**: edit `docs/*.md` and docstrings, then `cd docs && uv run make html`.
 
 CLI groups: `download`, `create-embeddings`, `pre-process`, `search`, `chat`,

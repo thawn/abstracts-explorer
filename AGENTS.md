@@ -85,7 +85,7 @@ Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
 
 - Feature: branch -> implement (types + NumPy docstrings) -> unit + integration tests -> update docs -> run tests -> PR.
 - Bugfix: branch -> failing regression test -> fix -> verify -> PR.
-- New plugin: implement in `plugins/`, inherit `DownloaderPlugin`/`LightweightDownloaderPlugin`, register in `plugins/__init__.py`, add `tests/test_plugins_<name>.py`, update `docs/plugins.md`.
+- New plugin: implement in `plugins/`, inherit `DownloaderPlugin`/`HTTPDownloaderPlugin`, register in `plugins/__init__.py`, add `tests/test_plugins_<name>.py`, update `docs/plugins.md`.
 - Build docs: `cd docs && uv run make html`.
 
 ## Git

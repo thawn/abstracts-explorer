@@ -9,7 +9,7 @@ import pytest
 import requests
 from bs4 import BeautifulSoup
 
-from abstracts_explorer.plugin import LightweightDownloaderPlugin, get_failed_downloads_path
+from abstracts_explorer.plugin import DownloaderPlugin, get_failed_downloads_path
 from abstracts_explorer.plugins import AAAIDownloaderPlugin, get_plugin
 
 BASE = "https://ojs.aaai.org/index.php/AAAI"
@@ -167,7 +167,7 @@ def test_registration():
     """Importing the package registers the standalone lightweight plugin."""
     plugin = get_plugin("aaai")
     assert isinstance(plugin, AAAIDownloaderPlugin)
-    assert isinstance(plugin, LightweightDownloaderPlugin)
+    assert isinstance(plugin, DownloaderPlugin)
     assert plugin.conference_name == "AAAI"
 
 
