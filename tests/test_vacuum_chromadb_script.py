@@ -9,9 +9,24 @@ from pathlib import Path
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "vacuum-chromadb.sh"
 
 
+def _bash_path(path: Path) -> str:
+    """Return a path that bash can use on the current platform."""
+    if os.name == "nt":
+        try:
+            return subprocess.check_output(["cygpath", "-u", str(path)], text=True).strip()
+        except (OSError, subprocess.CalledProcessError):
+            pass
+    return path.as_posix()
+
+
+def _script_arg() -> str:
+    """Return a bash-friendly path, including on Windows runners."""
+    return _bash_path(SCRIPT_PATH)
+
+
 def _run(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["bash", str(SCRIPT_PATH), *args],
+        ["bash", _script_arg(), *args],
         capture_output=True,
         text=True,
         check=True,
@@ -19,40 +34,33 @@ def _run(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _fake_runtime(tmp_path: Path, vacuum_output: str) -> tuple[subprocess.CompletedProcess[str], str, str]:
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
     podman_log = tmp_path / "podman.log"
     systemctl_log = tmp_path / "systemctl.log"
+    fake_env = tmp_path / "bash_env.sh"
+    fake_env.write_text(
+        f"""podman() {{
+    printf '%s\\n' "$*" >> "{_bash_path(podman_log)}"
+    case "$*" in
+        "volume inspect"*) return 0 ;;
+        *"--entrypoint sh"*) return 0 ;;
+        *" vacuum "*) printf '%s\\n' "{vacuum_output}"; return 0 ;;
+        *) return 0 ;;
+    esac
+}}
 
-    podman = bin_dir / "podman"
-    podman.write_text(
-        f"""#!/usr/bin/env bash
-printf '%s\\n' "$*" >> "{podman_log}"
-case "$*" in
-    "volume inspect"*) exit 0 ;;
-    *"--entrypoint sh"*) exit 0 ;;
-    *" vacuum "*) printf '%s\\n' "{vacuum_output}"; exit 0 ;;
-    *) exit 0 ;;
-esac
+systemctl() {{
+    printf '%s\\n' "$*" >> "{_bash_path(systemctl_log)}"
+    return 0
+}}
 """,
         encoding="utf-8",
+        newline="\n",
     )
-    podman.chmod(0o755)
-
-    systemctl = bin_dir / "systemctl"
-    systemctl.write_text(
-        f"""#!/usr/bin/env bash
-printf '%s\\n' "$*" >> "{systemctl_log}"
-exit 0
-""",
-        encoding="utf-8",
-    )
-    systemctl.chmod(0o755)
 
     env = os.environ.copy()
-    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    env["BASH_ENV"] = _bash_path(fake_env)
     result = subprocess.run(
-        ["bash", str(SCRIPT_PATH), "--yes", "--volume", "test-volume", "--path", "/data"],
+        ["bash", _script_arg(), "--yes", "--volume", "test-volume", "--path", "/data"],
         capture_output=True,
         text=True,
         check=False,
@@ -62,7 +70,7 @@ exit 0
 
 
 def test_shell_syntax() -> None:
-    subprocess.run(["bash", "-n", str(SCRIPT_PATH)], check=True)
+    subprocess.run(["bash", "-n", _script_arg()], check=True)
 
 
 def test_help_does_not_require_podman() -> None:

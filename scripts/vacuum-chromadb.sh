@@ -24,7 +24,7 @@ Options:
   -h, --help      Show this help
 
 Environment variable equivalents:
-  CHROMA_VOLUME, CHROMA_PATH, CHROMA_IMAGE
+  CHROMA_VOLUME, CHROMA_PATH, CHROMA_IMAGE, PODMAN, SYSTEMCTL
 
 Examples:
   ./scripts/vacuum-chromadb.sh
@@ -40,6 +40,8 @@ warn() { printf '\033[1;33m⚠ %s\033[0m\n' "$*" >&2; }
 VOLUME="${CHROMA_VOLUME:-systemd-abstracts-chromadb-data}"
 CHROMA_PATH="${CHROMA_PATH:-/data}"
 IMAGE="${CHROMA_IMAGE:-docker.io/chromadb/chroma:latest}"
+PODMAN="${PODMAN:-podman}"
+SYSTEMCTL="${SYSTEMCTL:-systemctl}"
 ASSUME_YES=0
 DRY_RUN=0
 
@@ -91,32 +93,32 @@ run() {
 
 restart_services() {
     if [ "$DRY_RUN" -eq 1 ]; then
-        printf '  systemctl --user start %s\n' "${SERVICES[*]}"
-    elif ! systemctl --user start "${SERVICES[@]}"; then
-        warn "Failed to restart services. Run: systemctl --user start ${SERVICES[*]}"
+        printf '  %s --user start %s\n' "$SYSTEMCTL" "${SERVICES[*]}"
+    elif ! "$SYSTEMCTL" --user start "${SERVICES[@]}"; then
+        warn "Failed to restart services. Run: $SYSTEMCTL --user start ${SERVICES[*]}"
     fi
 }
 
 if [ "$DRY_RUN" -ne 1 ]; then
-    command -v podman >/dev/null 2>&1 || {
-        warn "podman is required for this helper."
+    command -v "$PODMAN" >/dev/null 2>&1 || {
+        warn "$PODMAN is required for this helper."
         exit 1
     }
-    command -v systemctl >/dev/null 2>&1 || {
-        warn "systemctl is required for this helper."
+    command -v "$SYSTEMCTL" >/dev/null 2>&1 || {
+        warn "$SYSTEMCTL is required for this helper."
         exit 1
     }
-    if ! podman volume inspect "$VOLUME" >/dev/null 2>&1; then
+    if ! "$PODMAN" volume inspect "$VOLUME" >/dev/null 2>&1; then
         warn "ChromaDB volume '$VOLUME' was not found."
-        warn "List volumes with: podman volume ls"
+        warn "List volumes with: $PODMAN volume ls"
         warn "Override the name with: --volume NAME"
         exit 1
     fi
-    if ! podman run --rm -v "$VOLUME:/data:ro" --entrypoint sh "$IMAGE" \
+    if ! "$PODMAN" run --rm -v "$VOLUME:/data:ro" --entrypoint sh "$IMAGE" \
         -c 'test -f "$1/chroma.sqlite3"' sh "$CHROMA_PATH" >/dev/null 2>&1; then
         warn "No chroma.sqlite3 found at $CHROMA_PATH in volume '$VOLUME'."
         warn "Inspect the volume with:"
-        warn "  podman run --rm -v $VOLUME:/data:ro --entrypoint sh $IMAGE -c 'find /data -maxdepth 2 -name chroma.sqlite3 -print'"
+        warn "  $PODMAN run --rm -v $VOLUME:/data:ro --entrypoint sh $IMAGE -c 'find /data -maxdepth 2 -name chroma.sqlite3 -print'"
         warn "Override the path with: --path PATH"
         exit 1
     fi
@@ -139,16 +141,16 @@ fi
 trap restart_services EXIT
 
 info "Stopping ${SERVICES[*]}"
-run systemctl --user stop "${SERVICES[@]}"
+run "$SYSTEMCTL" --user stop "${SERVICES[@]}"
 
 info "Vacuuming $CHROMA_PATH in volume $VOLUME"
 if [ "$DRY_RUN" -eq 1 ]; then
-    run podman run --rm --entrypoint chroma \
+    run "$PODMAN" run --rm --entrypoint chroma \
         -v "$VOLUME:/data" \
         "$IMAGE" \
         vacuum --path "$CHROMA_PATH" --force
 else
-    if output=$(podman run --rm --entrypoint chroma \
+    if output=$("$PODMAN" run --rm --entrypoint chroma \
         -v "$VOLUME:/data" \
         "$IMAGE" \
         vacuum --path "$CHROMA_PATH" --force 2>&1); then
