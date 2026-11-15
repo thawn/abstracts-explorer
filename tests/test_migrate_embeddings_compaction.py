@@ -147,7 +147,7 @@ class TestMain:
 
         assert exit_code == 0
         mock_subprocess.run.assert_called_once_with(
-            ["chroma", "vacuum", "--path", "/tmp/chroma", "--force"],
+            ["chroma", "vacuum", "--path", str(Path("/tmp/chroma")), "--force"],
             check=True,
         )
 
