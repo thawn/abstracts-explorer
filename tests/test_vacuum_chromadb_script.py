@@ -6,27 +6,16 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "vacuum-chromadb.sh"
 
-
-def _bash_path(path: Path) -> str:
-    """Return a path that bash can use on the current platform."""
-    if os.name == "nt":
-        try:
-            return subprocess.check_output(["cygpath", "-u", str(path)], text=True).strip()
-        except (OSError, subprocess.CalledProcessError):
-            pass
-    return path.as_posix()
-
-
-def _script_arg() -> str:
-    """Return a bash-friendly path, including on Windows runners."""
-    return _bash_path(SCRIPT_PATH)
+pytestmark = pytest.mark.skipif(os.name == "nt", reason="vacuum helper targets Podman on Linux")
 
 
 def _run(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["bash", _script_arg(), *args],
+        ["bash", SCRIPT_PATH.as_posix(), *args],
         capture_output=True,
         text=True,
         check=True,
@@ -39,7 +28,7 @@ def _fake_runtime(tmp_path: Path, vacuum_output: str) -> tuple[subprocess.Comple
     fake_env = tmp_path / "bash_env.sh"
     fake_env.write_text(
         f"""podman() {{
-    printf '%s\\n' "$*" >> "{_bash_path(podman_log)}"
+    printf '%s\\n' "$*" >> "{podman_log.as_posix()}"
     case "$*" in
         "volume inspect"*) return 0 ;;
         *"--entrypoint sh"*) return 0 ;;
@@ -49,7 +38,7 @@ def _fake_runtime(tmp_path: Path, vacuum_output: str) -> tuple[subprocess.Comple
 }}
 
 systemctl() {{
-    printf '%s\\n' "$*" >> "{_bash_path(systemctl_log)}"
+    printf '%s\\n' "$*" >> "{systemctl_log.as_posix()}"
     return 0
 }}
 """,
@@ -58,9 +47,9 @@ systemctl() {{
     )
 
     env = os.environ.copy()
-    env["BASH_ENV"] = _bash_path(fake_env)
+    env["BASH_ENV"] = fake_env.as_posix()
     result = subprocess.run(
-        ["bash", _script_arg(), "--yes", "--volume", "test-volume", "--path", "/data"],
+        ["bash", SCRIPT_PATH.as_posix(), "--yes", "--volume", "test-volume", "--path", "/data"],
         capture_output=True,
         text=True,
         check=False,
@@ -70,7 +59,7 @@ systemctl() {{
 
 
 def test_shell_syntax() -> None:
-    subprocess.run(["bash", "-n", _script_arg()], check=True)
+    subprocess.run(["bash", "-n", SCRIPT_PATH.as_posix()], check=True)
 
 
 def test_help_does_not_require_podman() -> None:
