@@ -16,6 +16,9 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime
 import requests
 
+from abstracts_explorer.utils.time_utils import format_timestamp
+from abstracts_explorer.utils.url_utils import paper_pdf_url
+
 logger = logging.getLogger(__name__)
 
 
@@ -214,9 +217,7 @@ def _format_paper_block(paper: Dict[str, Any]) -> str:
     if paper.get("poster_position"):
         markdown += f"**Poster:** {paper['poster_position']}\n\n"
 
-    pdf_url = paper.get("paper_pdf_url")
-    if not pdf_url and paper.get("paper_url"):
-        pdf_url = paper["paper_url"].replace("/forum?id=", "/pdf?id=")
+    pdf_url = paper_pdf_url(paper)
     if pdf_url:
         markdown += f"**PDF:** [View on OpenReview]({pdf_url})\n\n"
 
@@ -377,7 +378,7 @@ def generate_main_readme(
 
     # Export metadata
     markdown += "## Export Information\n\n"
-    markdown += f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    markdown += f"**Generated:** {format_timestamp(datetime.now(), '%Y-%m-%d %H:%M:%S')}\n\n"
     markdown += f"**Total Papers:** {len(papers)}\n\n"
 
     # Document sort order

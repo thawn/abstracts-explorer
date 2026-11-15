@@ -6,7 +6,6 @@
 import argparse
 import logging
 import sys
-from datetime import datetime
 
 
 from abstracts_explorer.config import get_config
@@ -18,6 +17,7 @@ from abstracts_explorer.evaluation import (
     format_eval_summary,
     format_eval_result_detail,
 )
+from abstracts_explorer.utils.time_utils import format_timestamp
 
 
 from abstracts_explorer.cli._common import (
@@ -406,9 +406,7 @@ def eval_results_command(args: argparse.Namespace) -> int:
                     s = db.get_eval_run_summary(rid)
                     score_str = f"{s['avg_score']:.2f}" if s.get("avg_score") else "N/A"
                     run_date = s.get("run_date")
-                    date_str = (
-                        run_date.strftime("%Y-%m-%d %H:%M") if isinstance(run_date, datetime) else "unknown date"
-                    )
+                    date_str = format_timestamp(run_date, fallback="unknown date")
                     marker = " ◀ current" if rid == target_run else ""
                     print(f"   {date_str}  {rid}: {s['total']} pairs, avg score: {score_str}{marker}")
 

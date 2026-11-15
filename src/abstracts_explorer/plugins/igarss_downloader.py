@@ -26,6 +26,7 @@ from abstracts_explorer.plugin import (
     LightweightPaper,
     sanitize_author_names,
 )
+from abstracts_explorer.utils.url_utils import normalize_doi_url
 
 logger = logging.getLogger(__name__)
 
@@ -318,7 +319,7 @@ class IGARSSDownloaderPlugin(HTTPDownloaderPlugin):
         # DOI → URL
         doi = record.get("doi")
         if doi:
-            paper_dict["url"] = f"https://doi.org/{doi}"
+            paper_dict["url"] = normalize_doi_url(doi)
 
         # PDF URL
         pdf_link = record.get("pdfUrl") or record.get("pdfLink")

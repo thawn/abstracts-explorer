@@ -24,6 +24,7 @@ from abstracts_explorer.plugin import (
     LightweightPaper,
     validate_lightweight_papers,
 )
+from abstracts_explorer.utils.url_utils import normalize_doi_url
 from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
@@ -336,18 +337,7 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
         doi_addon = (item.get("addons") or {}).get("doi", {})
         doi_value = (doi_addon.get("url") or "").strip()
         if doi_value:
-            if doi_value.startswith("https://"):
-                url = doi_value
-            elif doi_value.startswith("http://"):
-                url = doi_value.replace("http://", "https://", 1)
-            else:
-                # Strip any leading doi.org/ prefix before normalising
-                doi_path = doi_value
-                for prefix in ("doi.org/",):
-                    if doi_path.startswith(prefix):
-                        doi_path = doi_path[len(prefix) :]
-                        break
-                url = f"https://doi.org/{doi_path}"
+            url = normalize_doi_url(doi_value)
 
         # Human-readable award string
         award: Optional[str] = None

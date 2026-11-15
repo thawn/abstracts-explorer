@@ -61,6 +61,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.llm_utils import chat_completion_text
+from abstracts_explorer.utils.json_utils import NumpyEncoder
 
 logger = logging.getLogger(__name__)
 
@@ -1454,17 +1455,6 @@ Only respond with the label, nothing else. Do not add formatting."""
             results = self.get_clustering_results(include_metadata=include_metadata)
             output_path = Path(output_path)
             output_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Custom JSON encoder to handle numpy types
-            class NumpyEncoder(json.JSONEncoder):
-                def default(self, obj):
-                    if isinstance(obj, np.integer):
-                        return int(obj)
-                    elif isinstance(obj, np.floating):
-                        return float(obj)
-                    elif isinstance(obj, np.ndarray):
-                        return obj.tolist()
-                    return super().default(obj)
 
             with open(output_path, "w", encoding="utf-8") as f:
                 json.dump(results, f, indent=2, ensure_ascii=False, cls=NumpyEncoder)

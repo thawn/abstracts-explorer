@@ -26,6 +26,7 @@ from bs4 import BeautifulSoup
 from pydantic import BaseModel, ValidationError, field_validator
 
 from abstracts_explorer.rate_limiter import RateLimitCooldown
+from abstracts_explorer.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -277,7 +278,7 @@ def _compute_retry_delay(
                 retry_at = parsedate_to_datetime(str(retry_after))
                 if retry_at.tzinfo is None:
                     retry_at = retry_at.replace(tzinfo=timezone.utc)
-                delay = (retry_at - datetime.now(timezone.utc)).total_seconds()
+                delay = (retry_at - utcnow()).total_seconds()
             except (TypeError, ValueError, OverflowError):
                 pass
     if max_retry_delay is not None:

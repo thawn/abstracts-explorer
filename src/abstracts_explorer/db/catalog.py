@@ -3,7 +3,6 @@ Conference catalog metadata and embedding-model tracking.
 """
 
 import logging
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select, func, and_
@@ -18,6 +17,7 @@ from abstracts_explorer.db_models import (
 
 from abstracts_explorer.db.errors import DatabaseError
 from abstracts_explorer.db.papers import PapersMixin
+from abstracts_explorer.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -543,7 +543,7 @@ class CatalogMixin(PapersMixin):
                 latest_stmt = select(EmbeddingsMetadata).order_by(EmbeddingsMetadata.updated_at.desc()).limit(1)
                 latest = self.session.execute(latest_stmt).scalar_one()
                 latest.embedding_model = model_name
-                latest.updated_at = datetime.now(timezone.utc)
+                latest.updated_at = utcnow()
             else:
                 # Insert new record
                 new_metadata = EmbeddingsMetadata(embedding_model=model_name)

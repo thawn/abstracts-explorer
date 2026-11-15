@@ -16,7 +16,6 @@ ratings as plain dictionaries instead of persisting them server-side.
 from __future__ import annotations
 
 import logging
-import re
 from collections import Counter
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -25,52 +24,14 @@ import numpy as np
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.paper_utils import extract_top_keywords
+from abstracts_explorer.utils.conference_utils import parse_conference_year
+from abstracts_explorer.utils.paper_presentation import truncate_abstract
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_RECOMMENDATION_LIMIT = 10
 MAX_SUMMARY_PAPERS = 50
 ABSTRACT_SNIPPET_LENGTH = 400
-
-
-def _parse_conference_year(conference: str) -> Tuple[str, Optional[int]]:
-    """
-    Split a trailing year from a conference name.
-
-    Handles the combined ``"conference year"`` forms LLMs and users
-    typically produce (e.g. ``"NeurIPS 2025"`` or ``"ICLR'26"``) so the
-    conference name matches database and cache entries, which store name
-    and year separately.
-
-    Parameters
-    ----------
-    conference : str
-        Conference name, possibly with a trailing 4- or 2-digit year.
-
-    Returns
-    -------
-    tuple of (str, int or None)
-        ``(conference_name, year)`` — *year* is ``None`` when no trailing
-        year was found; 2-digit years are expanded to the 2000s.
-
-    Examples
-    --------
-    >>> _parse_conference_year("NeurIPS 2025")
-    ('NeurIPS', 2025)
-    >>> _parse_conference_year("ICLR'26")
-    ('ICLR', 2026)
-    >>> _parse_conference_year("ICLR")
-    ('ICLR', None)
-    """
-    match = re.match(r"^(.+?)[\s']+(\d{4}|\d{2})$", conference.strip())
-    if not match:
-        return conference.strip(), None
-
-    name = match.group(1).strip()
-    year = int(match.group(2))
-    if year < 100:
-        year += 2000
-    return name, year
 
 
 def _as_int(value: Any, default: int = 0) -> int:
@@ -184,7 +145,7 @@ def _resolve_scope(
     if not conference:
         return None, list(years) if years else None
 
-    parsed_conference, extracted_year = _parse_conference_year(conference)
+    parsed_conference, extracted_year = parse_conference_year(conference)
     resolved_years = list(years) if years else None
     if extracted_year is not None:
         if resolved_years is None:
@@ -206,7 +167,7 @@ def _resolve_conferences_scope(
     resolved_conferences: List[str] = []
     resolved_years = {int(year) for year in years} if years else set()
     for conference in conferences:
-        parsed_conference, extracted_year = _parse_conference_year(str(conference))
+        parsed_conference, extracted_year = parse_conference_year(str(conference))
         if parsed_conference:
             resolved_conferences.append(parsed_conference)
         if extracted_year is not None:
@@ -293,10 +254,7 @@ def _paper_record(paper: Dict[str, Any], include_abstract: bool = False) -> Dict
     if include_abstract:
         abstract = str(paper.get("abstract") or "")
         if abstract:
-            snippet = abstract[:ABSTRACT_SNIPPET_LENGTH]
-            if len(abstract) > ABSTRACT_SNIPPET_LENGTH:
-                snippet += "..."
-            record["abstract_snippet"] = snippet
+            record["abstract_snippet"] = truncate_abstract(abstract, ABSTRACT_SNIPPET_LENGTH)
 
     return record
 

@@ -32,6 +32,7 @@ from abstracts_explorer.mcp_server import (
     recommend_related_papers as mcp_recommend_related_papers,
 )
 from abstracts_explorer.mcp_tools import format_tool_result_for_llm, _abbreviate_result
+from abstracts_explorer.utils.time_utils import format_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -561,7 +562,7 @@ class RAGChat:
             "When the user asks about papers they marked, starred, liked, or rated as interesting, "
             "use the summarize_interesting_papers or recommend_related_papers tools; their ratings "
             "are provided automatically by the web UI, so do not ask for paper IDs. "
-            f"Today's date is {datetime.now().strftime('%Y-%m-%d')}. "
+            f"Today's date is {format_timestamp(datetime.now(), '%Y-%m-%d')}. "
             "When referencing specific papers, cite them using local markdown links: "
             "[Paper-1](#paper-1), [Paper-2](#paper-2), etc."
         )

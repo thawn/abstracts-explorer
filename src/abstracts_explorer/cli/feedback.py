@@ -9,6 +9,7 @@ import sys
 
 
 from abstracts_explorer.database import DatabaseManager
+from abstracts_explorer.utils.time_utils import format_timestamp
 
 
 from abstracts_explorer.cli._common import (
@@ -100,7 +101,7 @@ def feedback_list_command(args: argparse.Namespace) -> int:
                     print(f"\n💬 Chat Donations ({len(donations)} shown):")
                     print("-" * 60)
                     for entry in donations:
-                        ts = entry["donated_at"].strftime("%Y-%m-%d %H:%M") if entry["donated_at"] else "unknown"
+                        ts = format_timestamp(entry["donated_at"])
                         n_turns = len(entry["transcript"])
                         icon = "👍" if entry["rating"] == "up" else "👎"
                         print(f"  ID {entry['id']:5d}  {icon} {entry['rating']:<4}  {n_turns} turns  {ts}")
@@ -113,7 +114,7 @@ def feedback_list_command(args: argparse.Namespace) -> int:
                     print(f"\n📌 Data Donations ({len(val_data)} shown):")
                     print("-" * 60)
                     for entry in val_data:
-                        ts = entry["donated_at"].strftime("%Y-%m-%d %H:%M") if entry["donated_at"] else "unknown"
+                        ts = format_timestamp(entry["donated_at"])
                         term = entry["search_term"] or ""
                         print(
                             f"  ID {entry['id']:5d}  UID {entry['paper_uid']}  "
@@ -168,7 +169,7 @@ def feedback_browse_command(args: argparse.Namespace) -> int:
                 print("Press [Enter] to continue, [q] to quit.\n")
 
                 for i, entry in enumerate(entries, 1):
-                    ts = entry["donated_at"].strftime("%Y-%m-%d %H:%M") if entry["donated_at"] else "unknown"
+                    ts = format_timestamp(entry["donated_at"])
                     icon = "👍" if entry["rating"] == "up" else "👎"
                     print(f"--- Entry {i}/{len(entries)} (ID: {entry['id']}) {icon} {entry['rating']} — {ts} ---")
                     for msg in entry["transcript"]:
@@ -200,7 +201,7 @@ def feedback_browse_command(args: argparse.Namespace) -> int:
                 print("Press [Enter] to continue, [q] to quit.\n")
 
                 for i, entry in enumerate(entries, 1):
-                    ts = entry["donated_at"].strftime("%Y-%m-%d %H:%M") if entry["donated_at"] else "unknown"
+                    ts = format_timestamp(entry["donated_at"])
                     term = entry["search_term"] or "(no search term)"
                     print(
                         f"--- Entry {i}/{len(entries)} (ID: {entry['id']}) ---\n"

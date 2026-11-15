@@ -18,7 +18,6 @@ import random
 import re
 import time
 import uuid
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from abstracts_explorer.config import get_config
@@ -26,6 +25,7 @@ from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.llm_utils import chat_completion_text
 from abstracts_explorer.mcp_tools import execute_mcp_tool, format_tool_result_for_llm
+from abstracts_explorer.utils.time_utils import format_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -242,7 +242,7 @@ def format_eval_summary(summary: Dict[str, Any], run_id: str) -> str:
 
     run_date = summary.get("run_date")
     if run_date is not None:
-        date_str = run_date.strftime("%Y-%m-%d %H:%M:%S") if isinstance(run_date, datetime) else str(run_date)
+        date_str = format_timestamp(run_date, "%Y-%m-%d %H:%M:%S", fallback=str(run_date))
         lines.append(f"Run date:              {date_str}")
 
     lines.append(f"Total pairs evaluated: {summary['total']}")

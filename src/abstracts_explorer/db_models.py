@@ -6,8 +6,6 @@ This module defines SQLAlchemy ORM models for the database tables.
 These models support both SQLite and PostgreSQL backends.
 """
 
-from datetime import datetime, timezone
-
 from sqlalchemy import (
     Column,
     Float,
@@ -18,6 +16,8 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.orm import DeclarativeBase
+
+from abstracts_explorer.utils.time_utils import utcnow
 
 
 class Base(DeclarativeBase):
@@ -47,11 +47,11 @@ def timestamp_column(*, onupdate: bool = False) -> Column:
     """
     kwargs: dict = {}
     if onupdate:
-        kwargs["onupdate"] = lambda: datetime.now(timezone.utc)
+        kwargs["onupdate"] = utcnow
     return Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=utcnow,
         server_default=func.now(),
         **kwargs,
     )

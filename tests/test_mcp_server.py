@@ -12,8 +12,8 @@ from abstracts_explorer.mcp_server import (
     load_clustering_data,
     analyze_cluster_topics,
     ClusterAnalysisError,
-    _parse_conference_year,
 )
+from abstracts_explorer.utils.conference_utils import parse_conference_year
 from abstracts_explorer.clustering import ClusteringManager
 from abstracts_explorer.database import DatabaseManager
 
@@ -542,23 +542,23 @@ class TestToolResourceCleanup:
 
 
 class TestParseConferenceYear:
-    """Tests for _parse_conference_year helper."""
+    """Tests for parse_conference_year helper."""
 
     def test_conference_with_year(self):
-        assert _parse_conference_year("NeurIPS 2025") == ("NeurIPS", 2025)
+        assert parse_conference_year("NeurIPS 2025") == ("NeurIPS", 2025)
 
     def test_conference_without_year(self):
-        assert _parse_conference_year("ICLR") == ("ICLR", None)
+        assert parse_conference_year("ICLR") == ("ICLR", None)
 
     def test_conference_with_extra_spaces(self):
-        assert _parse_conference_year("  NeurIPS 2025  ") == ("NeurIPS", 2025)
+        assert parse_conference_year("  NeurIPS 2025  ") == ("NeurIPS", 2025)
 
     def test_conference_name_with_spaces_and_year(self):
-        assert _parse_conference_year("IEEE VIS 2024") == ("IEEE VIS", 2024)
+        assert parse_conference_year("IEEE VIS 2024") == ("IEEE VIS", 2024)
 
     def test_conference_with_non_year_number(self):
         # 3-digit numbers shouldn't be parsed as years
-        assert _parse_conference_year("NeurIPS 123") == ("NeurIPS 123", None)
+        assert parse_conference_year("NeurIPS 123") == ("NeurIPS 123", None)
 
     @patch("abstracts_explorer.mcp_server.load_clustering_data")
     @patch("abstracts_explorer.mcp_server.analyze_cluster_topics")

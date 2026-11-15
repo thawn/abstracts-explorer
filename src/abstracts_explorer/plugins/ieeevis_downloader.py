@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup, Tag
 from typing import Any, Dict, List, Optional
 
 from abstracts_explorer.plugin import sanitize_author_names, LightweightPaper
+from abstracts_explorer.utils.url_utils import normalize_doi_url
 from pydantic import ValidationError
 from abstracts_explorer.plugins.json_conference_downloader import JSONConferenceDownloaderPlugin
 
@@ -150,7 +151,7 @@ class IEEEVISDownloaderPlugin(JSONConferenceDownloaderPlugin):
         if url:
             paper_dict["url"] = url
         elif doi:
-            paper_dict["url"] = f"https://doi.org/{doi}"
+            paper_dict["url"] = normalize_doi_url(doi)
 
         award = (item.get("award") or "").strip()
         if award:

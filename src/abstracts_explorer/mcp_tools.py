@@ -26,6 +26,7 @@ from abstracts_explorer.mcp_server import (
     summarize_interesting_papers,
     recommend_related_papers,
 )
+from abstracts_explorer.utils.paper_presentation import truncate_abstract
 
 logger = logging.getLogger(__name__)
 
@@ -511,7 +512,7 @@ def _format_search_papers_result(data: Dict[str, Any]) -> str:
         # Add abstract snippet if available
         abstract = paper.get("abstract", "")
         if abstract:
-            snippet = abstract[:150] + "..." if len(abstract) > 150 else abstract
+            snippet = truncate_abstract(abstract, 150)
             lines.append(f"   {snippet}")
 
     return "\n".join(lines)
@@ -577,7 +578,7 @@ def _format_paper_details_result(data: Dict[str, Any]) -> str:
 
         abstract = paper.get("abstract") or ""
         if abstract:
-            snippet = abstract[:200] + "..." if len(abstract) > 200 else abstract
+            snippet = truncate_abstract(abstract, 200)
             lines.append(f"   Abstract: {snippet}")
 
     return "\n".join(lines)

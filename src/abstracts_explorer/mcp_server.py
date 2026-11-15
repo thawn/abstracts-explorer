@@ -33,10 +33,10 @@ from abstracts_explorer.clustering import (
 )
 from abstracts_explorer.config import get_config
 from abstracts_explorer.interesting_papers import (
-    _parse_conference_year,
     recommend_related_papers as _recommend_related_papers,
     summarize_interesting_papers as _summarize_interesting_papers,
 )
+from abstracts_explorer.utils.conference_utils import parse_conference_year
 
 logger = logging.getLogger(__name__)
 
@@ -367,7 +367,7 @@ def _get_conference_topics_for_single_conference(
     collection_name = collection_name or config.collection_name
 
     # Parse year from conference name if present (e.g. "NeurIPS 2025" → "NeurIPS", 2025)
-    conference, extracted_year = _parse_conference_year(conference)
+    conference, extracted_year = parse_conference_year(conference)
     if extracted_year is not None:
         if years is None:
             years = [extracted_year]
@@ -1201,7 +1201,7 @@ def get_cluster_visualization(
 
         for conf in conferences:
             # Parse year from conference name if present (e.g. "NeurIPS 2025")
-            parsed_conf, extracted_year = _parse_conference_year(conf)
+            parsed_conf, extracted_year = parse_conference_year(conf)
             vis_years = list(years) if years else None
             if extracted_year is not None:
                 if vis_years is None:
