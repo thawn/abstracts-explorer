@@ -11,6 +11,7 @@ import logging
 import queue
 import sys
 import threading
+import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -22,7 +23,13 @@ from tqdm import tqdm
 from abstracts_explorer.config import Config, get_config
 from abstracts_explorer.database import DatabaseManager, DatabaseError
 from abstracts_explorer.embeddings import EmbeddingsManager, EmbeddingsError
-from abstracts_explorer.clustering import perform_clustering, compute_clusters_with_cache, ClusteringError
+from abstracts_explorer.clustering import (
+    perform_clustering,
+    compute_clusters_with_cache,
+    DEFAULT_CLUSTERING_PARAMS,
+    DEFAULT_N_COMPONENTS,
+    ClusteringError,
+)
 from abstracts_explorer.rag import RAGChat, RAGError
 from abstracts_explorer.plugins import (
     DownloaderPlugin,
@@ -97,6 +104,104 @@ def setup_logging(verbosity: int) -> None:
     # Reset the package logger so it inherits the newly configured root level.
     # This overrides the level set at import time by _configure_package_logging().
     logging.getLogger("abstracts_explorer").setLevel(logging.NOTSET)
+
+
+def _print_header(title: str, *lines: Optional[str]) -> None:
+    """
+    Print a command banner: title line, separator, optional field lines,
+    separator.
+
+    Parameters
+    ----------
+    title : str
+        Command title printed after the "Abstracts Explorer - " prefix.
+    *lines : str or None, optional
+        Field lines to print between the separators.  ``None`` entries are
+        skipped, which callers use for optional conference/year lines.
+    """
+    print(f"Abstracts Explorer - {title}")
+    print("=" * 70)
+    for line in lines:
+        if line is not None:
+            print(line)
+    print("=" * 70)
+
+
+def _unexpected_error(e: Exception, label: str = "Unexpected error", log_message: Optional[str] = None) -> int:
+    """
+    Report an unexpected error and return the CLI exit code.
+
+    Parameters
+    ----------
+    e : Exception
+        The exception to report.
+    label : str, optional
+        Prefix for the error line, by default "Unexpected error".
+    log_message : str, optional
+        If given, log the full exception via ``logger.exception`` with this
+        message instead of printing a traceback.
+
+    Returns
+    -------
+    int
+        Exit code 1.
+    """
+    print(f"\n❌ {label}: {e}", file=sys.stderr)
+    if log_message:
+        logger.exception(log_message)
+    else:
+        traceback.print_exc()
+    return 1
+
+
+def _confirm(prompt: str, *, require_yes: bool = False) -> bool:
+    """
+    Ask the user to confirm a destructive action.
+
+    Parameters
+    ----------
+    prompt : str
+        The question to display.  Unless *require_yes* is set, a
+        ``[y/N]: `` hint is appended automatically.
+    require_yes : bool, optional
+        Require the full word ``yes`` instead of accepting ``y``, by
+        default False.  Set for prompts that already end in ``: ``.
+
+    Returns
+    -------
+    bool
+        True if the user confirmed.  EOF/interrupt counts as "no".
+    """
+    try:
+        answer = input(f"{prompt}{' [y/N]: ' if not require_yes else ''}").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return False
+    if require_yes:
+        return answer == "yes"
+    return answer in ("y", "yes")
+
+
+def _resolve_registry_auth(args: argparse.Namespace) -> Tuple[str, Optional[str]]:
+    """
+    Resolve the OCI repository and auth token for a registry command.
+
+    Command-line arguments take precedence over the ``REGISTRY_REPOSITORY``
+    and ``GITHUB_TOKEN`` settings.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command arguments containing ``repository`` and ``token``.
+
+    Returns
+    -------
+    tuple
+        ``(repository, token)``.
+    """
+    config = get_config()
+    repository = args.repository or config.registry_repository
+    token = args.token or config.github_token
+    return repository, token
 
 
 def add_conference_year_args(parser: argparse.ArgumentParser) -> None:
@@ -251,21 +356,19 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     # Build structured paper filters from --conference and --year
     where_filters = _build_embeddings_where_filters(args)
 
-    print("Abstracts Explorer - Embeddings Generator")
-    print("=" * 70)
-    print(f"Database: {config.database_url}")
-    print(f"Embedding DB:   {config.embedding_db}")
-    print(f"Collection: {args.collection}")
-    print(f"Model:    {args.model}")
-    print(f"API URL: {args.backend_url}")
     rate_limit_str = f"{args.requests_per_minute} req/min" if args.requests_per_minute > 0 else "disabled"
-    print(f"Rate limit: {rate_limit_str}")
     year = getattr(args, "year", None)
-    if conference:
-        print(f"Conference: {conference}")
-    if year is not None:
-        print(f"Year:       {year}")
-    print("=" * 70)
+    _print_header(
+        "Embeddings Generator",
+        f"Database: {config.database_url}",
+        f"Embedding DB: {config.embedding_db}",
+        f"Collection: {args.collection}",
+        f"Model: {args.model}",
+        f"API URL: {args.backend_url}",
+        f"Rate limit: {rate_limit_str}",
+        f"Conference: {conference}" if conference else None,
+        f"Year: {year}" if year is not None else None,
+    )
 
     # Check paper count
     with DatabaseManager() as db:
@@ -393,11 +496,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         print(f"\n❌ Embeddings error: {e}", file=sys.stderr)
         return 1
     except Exception as e:
-        print(f"\n❌ Unexpected error: {e}", file=sys.stderr)
-        import traceback
-
-        traceback.print_exc()
-        return 1
+        return _unexpected_error(e)
 
 
 def search_command(args: argparse.Namespace) -> int:
@@ -432,18 +531,16 @@ def search_command(args: argparse.Namespace) -> int:
     year = getattr(args, "year", None)
     distance_threshold = getattr(args, "distance_threshold", 1.2)
 
-    print("NeurIPS Semantic Search")
-    print("=" * 70)
-    print(f"Query: {args.query}")
-    print(f"Embeddings: {config.embedding_db}")
-    print(f"Collection: {args.collection}")
-    print(f"Results: {args.n_results}")
-    print(f"Distance threshold: {distance_threshold}")
-    if conference:
-        print(f"Conference: {conference}")
-    if year is not None:
-        print(f"Year:       {year}")
-    print("=" * 70)
+    _print_header(
+        "Semantic Search",
+        f"Query: {args.query}",
+        f"Embeddings: {config.embedding_db}",
+        f"Collection: {args.collection}",
+        f"Results: {args.n_results}",
+        f"Distance threshold: {distance_threshold}",
+        f"Conference: {conference}" if conference else None,
+        f"Year: {year}" if year is not None else None,
+    )
 
     try:
         # Initialize embeddings manager
@@ -539,11 +636,7 @@ def search_command(args: argparse.Namespace) -> int:
         print(f"\n❌ Search error: {e}", file=sys.stderr)
         return 1
     except Exception as e:
-        print(f"\n❌ Unexpected error: {e}", file=sys.stderr)
-        import traceback
-
-        traceback.print_exc()
-        return 1
+        return _unexpected_error(e)
 
 
 def chat_command(args: argparse.Namespace) -> int:
@@ -576,19 +669,16 @@ def chat_command(args: argparse.Namespace) -> int:
         conference = _resolve_conference_arg(getattr(args, "conference", None))
         year = getattr(args, "year", None)
 
-        print("=" * 70)
-        print("NeurIPS RAG Chat")
-        print("=" * 70)
-        print(f"Embeddings: {config.embedding_db}")
-        print(f"Collection: {args.collection}")
-        print(f"Chat Model: {args.model}")
-        print(f"Embedding Model: {args.embedding_model}")
-        print(f"API URL: {args.backend_url}")
-        if conference:
-            print(f"Conference: {conference}")
-        if year is not None:
-            print(f"Year:       {year}")
-        print("=" * 70)
+        _print_header(
+            "RAG Chat",
+            f"Embeddings: {config.embedding_db}",
+            f"Collection: {args.collection}",
+            f"Chat Model: {args.model}",
+            f"Embedding Model: {args.embedding_model}",
+            f"API URL: {args.backend_url}",
+            f"Conference: {conference}" if conference else None,
+            f"Year: {year}" if year is not None else None,
+        )
 
         # Check embeddings exist (for local paths only)
         if not _validate_embeddings_db(config):
@@ -707,11 +797,7 @@ def chat_command(args: argparse.Namespace) -> int:
         print(f"\n❌ Embeddings error: {e}", file=sys.stderr)
         return 1
     except Exception as e:
-        print(f"\n❌ Unexpected error: {e}", file=sys.stderr)
-        import traceback
-
-        traceback.print_exc()
-        return 1
+        return _unexpected_error(e)
 
 
 def _download_single(
@@ -899,8 +985,6 @@ def download_command(
                 msg = f"{plugin.plugin_name} {yr}: {e}"
                 errors.append(msg)
                 print(f"❌ Error downloading {plugin.plugin_name} {yr}: {e}", file=sys.stderr)
-                import traceback
-
                 if args.verbose > 0:
                     traceback.print_exc()
 
@@ -973,11 +1057,7 @@ def web_ui_command(args: argparse.Namespace) -> int:
         # Database not found - error message already printed by run_server
         return 1
     except Exception as e:
-        print(f"\n❌ Error starting web server: {e}", file=sys.stderr)
-        import traceback
-
-        traceback.print_exc()
-        return 1
+        return _unexpected_error(e, label="Error starting web server")
 
 
 def cluster_embeddings_command(args: argparse.Namespace) -> int:
@@ -1006,28 +1086,25 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
     if not _validate_embeddings_db(config):
         return 1
 
-    print("Abstracts Explorer - Clustering")
-    print("=" * 70)
-    print(f"Embeddings:  {config.embedding_db}")
-    print(f"Collection:  {args.collection}")
-    print("Reduction:   tsne (n_components=2)")
-    print("Clustering:  agglomerative (linkage=ward, distance_threshold=150)")
-
-    if args.limit:
-        print(f"Limit:       {args.limit} papers")
-    print("=" * 70)
+    _print_header(
+        "Clustering",
+        f"Embeddings: {config.embedding_db}",
+        f"Collection: {args.collection}",
+        "Reduction: tsne (n_components=2)",
+        "Clustering: agglomerative (linkage=ward, distance_threshold=150)",
+        f"Limit: {args.limit} papers" if args.limit else None,
+    )
 
     try:
         # Perform clustering with fixed parameters
         print("\n🚀 Starting clustering pipeline...")
         results = perform_clustering(
             collection_name=args.collection,
-            n_components=2,
+            n_components=DEFAULT_N_COMPONENTS,
             n_clusters=None,
             output_path=args.output,
             limit=args.limit,
-            distance_threshold=150.0,
-            linkage="ward",
+            **DEFAULT_CLUSTERING_PARAMS,
         )
 
         # Display statistics
@@ -1053,11 +1130,7 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
         print(f"\n❌ Clustering error: {e}", file=sys.stderr)
         return 1
     except Exception as e:
-        print(f"\n❌ Unexpected error: {e}", file=sys.stderr)
-        import traceback
-
-        traceback.print_exc()
-        return 1
+        return _unexpected_error(e)
 
 
 def clear_clustering_cache_command(args: argparse.Namespace) -> int:
@@ -1077,14 +1150,11 @@ def clear_clustering_cache_command(args: argparse.Namespace) -> int:
     """
     config = get_config()
 
-    print("Abstracts Explorer - Clear Clustering Cache")
-    print("=" * 70)
-    print(f"Database: {config.database_url}")
-    if args.embedding_model:
-        print(f"Filtering by model: {args.embedding_model}")
-    else:
-        print("Clearing all cache entries")
-    print("=" * 70)
+    _print_header(
+        "Clear Clustering Cache",
+        f"Database: {config.database_url}",
+        f"Filtering by model: {args.embedding_model}" if args.embedding_model else "Clearing all cache entries",
+    )
 
     try:
         # Connect to database
@@ -1104,11 +1174,7 @@ def clear_clustering_cache_command(args: argparse.Namespace) -> int:
         return 0
 
     except Exception as e:
-        print(f"\n❌ Error clearing clustering cache: {e}", file=sys.stderr)
-        import traceback
-
-        traceback.print_exc()
-        return 1
+        return _unexpected_error(e, label="Error clearing clustering cache")
 
 
 def delete_data_command(args: argparse.Namespace) -> int:
@@ -1156,13 +1222,13 @@ def delete_data_command(args: argparse.Namespace) -> int:
 
     assert conference is not None
 
-    print("Abstracts Explorer - Delete Conference/Year Data")
-    print("=" * 70)
-    print(f"Database:     {config.database_url}")
-    print(f"Embedding DB: {config.embedding_db}")
-    print(f"Conference:   {conference}")
-    print(f"Year:         {year}")
-    print("=" * 70)
+    _print_header(
+        "Delete Conference/Year Data",
+        f"Database: {config.database_url}",
+        f"Embedding DB: {config.embedding_db}",
+        f"Conference: {conference}",
+        f"Year: {year}",
+    )
 
     # Count what will be deleted
     paper_count = 0
@@ -1200,8 +1266,7 @@ def delete_data_command(args: argparse.Namespace) -> int:
 
     if not getattr(args, "yes", False):
         print(f"\n⚠️  This will permanently delete all data for {conference} {year} from all databases.")
-        confirm = input("Type 'yes' to confirm: ")
-        if confirm.strip().lower() != "yes":
+        if not _confirm("Type 'yes' to confirm: ", require_yes=True):
             print("Aborted.")
             return 1
 
@@ -1305,23 +1370,25 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
         print("❌ No conferences found in the database.", file=sys.stderr)
         return 1
 
-    print("Abstracts Explorer - Pre-generate Clustering")
-    print("=" * 70)
-    print(f"Embeddings:       {config.embedding_db}")
-    print(f"Collection:       {args.collection}")
-    print("Clustering:       agglomerative (linkage=ward, distance_threshold=150)")
-    print("Reduction:        tsne")
     rate_limit_str = f"{args.requests_per_minute} req/min" if args.requests_per_minute > 0 else "disabled"
-    print(f"Rate limit:       {rate_limit_str}")
     if len(combos) > 1:
-        print(f"Combinations:     {len(combos)} total")
+        extra_lines = [f"Combinations: {len(combos)} total"]
     else:
         conf_name, yr = combos[0]
+        extra_lines = []
         if conf_name:
-            print(f"Conference:       {conf_name}")
+            extra_lines.append(f"Conference: {conf_name}")
         if yr is not None:
-            print(f"Year:             {yr}")
-    print("=" * 70)
+            extra_lines.append(f"Year: {yr}")
+    _print_header(
+        "Pre-generate Clustering",
+        f"Embeddings: {config.embedding_db}",
+        f"Collection: {args.collection}",
+        "Clustering: agglomerative (linkage=ward, distance_threshold=150)",
+        "Reduction: tsne",
+        f"Rate limit: {rate_limit_str}",
+        *extra_lines,
+    )
 
     try:
         em = EmbeddingsManager(
@@ -1352,14 +1419,13 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
                         embeddings_manager=em,
                         database=db,
                         embedding_model=config.embedding_model,
-                        n_components=2,
+                        n_components=DEFAULT_N_COMPONENTS,
                         n_clusters=None,
                         limit=None,
                         force=args.force,
                         conferences=c_conferences,
                         years=c_years,
-                        linkage="ward",
-                        distance_threshold=150.0,
+                        **DEFAULT_CLUSTERING_PARAMS,
                     )
 
                 stats = results.get("statistics", {})
@@ -1380,11 +1446,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
         print(f"\n❌ Clustering error: {e}", file=sys.stderr)
         return 1
     except Exception as e:
-        print(f"\n❌ Unexpected error: {e}", file=sys.stderr)
-        import traceback
-
-        traceback.print_exc()
-        return 1
+        return _unexpected_error(e)
 
 
 def mcp_server_command(args: argparse.Namespace) -> int:
@@ -1405,12 +1467,12 @@ def mcp_server_command(args: argparse.Namespace) -> int:
         Exit code (0 for success, non-zero for failure)
     """
     try:
-        print("Abstracts Explorer - MCP Server")
-        print("=" * 70)
-        print(f"Host:      {args.host}")
-        print(f"Port:      {args.port}")
-        print(f"Transport: {args.transport}")
-        print("=" * 70)
+        _print_header(
+            "MCP Server",
+            f"Host: {args.host}",
+            f"Port: {args.port}",
+            f"Transport: {args.transport}",
+        )
         print("\nStarting MCP server...")
         print("\nAvailable tools:")
         print("  - get_conference_topics: Get the main research topics of a conference")
@@ -1427,11 +1489,7 @@ def mcp_server_command(args: argparse.Namespace) -> int:
         print("\n\n👋 Server stopped")
         return 0
     except Exception as e:
-        print(f"\n❌ Error starting MCP server: {e}", file=sys.stderr)
-        import traceback
-
-        traceback.print_exc()
-        return 1
+        return _unexpected_error(e, label="Error starting MCP server")
 
 
 def eval_generate_command(args: argparse.Namespace) -> int:
@@ -1456,17 +1514,14 @@ def eval_generate_command(args: argparse.Namespace) -> int:
     """
     config = get_config()
 
-    print("Abstracts Explorer - Generate Evaluation Q/A Pairs")
-    print("=" * 70)
-    print(f"Database:   {config.database_url}")
-    print(f"Model:      {args.model}")
-    print(f"Pairs/tool: {args.n_pairs}")
-    print(f"Follow-ups: {'disabled' if args.no_followups else args.n_followups}")
-    if args.tools:
-        print(f"Tools:      {', '.join(args.tools)}")
-    else:
-        print("Tools:      all")
-    print("=" * 70)
+    _print_header(
+        "Generate Evaluation Q/A Pairs",
+        f"Database: {config.database_url}",
+        f"Model: {args.model}",
+        f"Pairs/tool: {args.n_pairs}",
+        f"Follow-ups: {'disabled' if args.no_followups else args.n_followups}",
+        f"Tools: {', '.join(args.tools)}" if args.tools else "Tools: all",
+    )
 
     try:
         # Initialize embeddings manager for its openai_client
@@ -1511,11 +1566,7 @@ def eval_generate_command(args: argparse.Namespace) -> int:
         print(f"\n❌ Evaluation error: {e}", file=sys.stderr)
         return 1
     except Exception as e:
-        print(f"\n❌ Unexpected error: {e}", file=sys.stderr)
-        import traceback
-
-        traceback.print_exc()
-        return 1
+        return _unexpected_error(e)
 
 
 def eval_verify_command(args: argparse.Namespace) -> int:
@@ -1654,11 +1705,7 @@ def eval_verify_command(args: argparse.Namespace) -> int:
         return 0
 
     except Exception as e:
-        print(f"\n❌ Error: {e}", file=sys.stderr)
-        import traceback
-
-        traceback.print_exc()
-        return 1
+        return _unexpected_error(e, label="Error")
 
 
 def eval_run_command(args: argparse.Namespace) -> int:
@@ -1683,13 +1730,13 @@ def eval_run_command(args: argparse.Namespace) -> int:
     """
     config = get_config()
 
-    print("Abstracts Explorer - Run Evaluation")
-    print("=" * 70)
-    print(f"Database:    {config.database_url}")
-    print(f"Model:       {args.model}")
-    print(f"Embeddings:  {config.embedding_db}")
-    print(f"Collection:  {args.collection}")
-    print("=" * 70)
+    _print_header(
+        "Run Evaluation",
+        f"Database: {config.database_url}",
+        f"Model: {args.model}",
+        f"Embeddings: {config.embedding_db}",
+        f"Collection: {args.collection}",
+    )
 
     try:
         # Initialize embeddings
@@ -1733,11 +1780,7 @@ def eval_run_command(args: argparse.Namespace) -> int:
         print(f"\n❌ Embeddings error: {e}", file=sys.stderr)
         return 1
     except Exception as e:
-        print(f"\n❌ Unexpected error: {e}", file=sys.stderr)
-        import traceback
-
-        traceback.print_exc()
-        return 1
+        return _unexpected_error(e)
 
 
 def eval_results_command(args: argparse.Namespace) -> int:
@@ -1784,10 +1827,9 @@ def eval_results_command(args: argparse.Namespace) -> int:
             if getattr(args, "clear", False):
                 n = len(db.get_eval_results(run_id=target_run))
                 if not getattr(args, "yes", False):
-                    confirm = input(
-                        f"⚠️  This will permanently delete {n} result(s) for run '{target_run}'. Are you sure? [y/N]: "
-                    )
-                    if confirm.strip().lower() != "y":
+                    if not _confirm(
+                        f"⚠️  This will permanently delete {n} result(s) for run '{target_run}'. Are you sure?"
+                    ):
                         print("Aborted.")
                         return 0
                 deleted = db.delete_eval_results(run_id=target_run)
@@ -1836,11 +1878,7 @@ def eval_results_command(args: argparse.Namespace) -> int:
         return 0
 
     except Exception as e:
-        print(f"\n❌ Error: {e}", file=sys.stderr)
-        import traceback
-
-        traceback.print_exc()
-        return 1
+        return _unexpected_error(e, label="Error")
 
 
 def eval_clear_command(args: argparse.Namespace) -> int:
@@ -1868,11 +1906,9 @@ def eval_clear_command(args: argparse.Namespace) -> int:
                 return 0
 
             print(f"⚠️  This will permanently delete {count} accepted Q/A pair(s).")
-            if not args.yes:
-                answer = input("Are you sure? [y/N]: ").strip().lower()
-                if answer not in ("y", "yes"):
-                    print("Aborted.")
-                    return 0
+            if not args.yes and not _confirm("Are you sure?"):
+                print("Aborted.")
+                return 0
 
             deleted = db.delete_verified_eval_qa_pairs()
             print(f"✅ Deleted {deleted} accepted Q/A pair(s).")
@@ -1880,11 +1916,7 @@ def eval_clear_command(args: argparse.Namespace) -> int:
         return 0
 
     except Exception as e:
-        print(f"\n❌ Error: {e}", file=sys.stderr)
-        import traceback
-
-        traceback.print_exc()
-        return 1
+        return _unexpected_error(e, label="Error")
 
 
 def feedback_stats_command(args: argparse.Namespace) -> int:
@@ -1932,11 +1964,7 @@ def feedback_stats_command(args: argparse.Namespace) -> int:
         return 0
 
     except Exception as e:
-        print(f"\n❌ Error: {e}", file=sys.stderr)
-        import traceback
-
-        traceback.print_exc()
-        return 1
+        return _unexpected_error(e, label="Error")
 
 
 def feedback_list_command(args: argparse.Namespace) -> int:
@@ -1997,11 +2025,7 @@ def feedback_list_command(args: argparse.Namespace) -> int:
         return 0
 
     except Exception as e:
-        print(f"\n❌ Error: {e}", file=sys.stderr)
-        import traceback
-
-        traceback.print_exc()
-        return 1
+        return _unexpected_error(e, label="Error")
 
 
 def feedback_browse_command(args: argparse.Namespace) -> int:
@@ -2100,11 +2124,7 @@ def feedback_browse_command(args: argparse.Namespace) -> int:
         return 0
 
     except Exception as e:
-        print(f"\n❌ Error: {e}", file=sys.stderr)
-        import traceback
-
-        traceback.print_exc()
-        return 1
+        return _unexpected_error(e, label="Error")
 
 
 def feedback_clear_command(args: argparse.Namespace) -> int:
@@ -2144,15 +2164,9 @@ def feedback_clear_command(args: argparse.Namespace) -> int:
                 parts.append(f"{val_stats['total']} data donation(s)")
 
             print(f"⚠️  This will permanently delete {' and '.join(parts)}.")
-            if not getattr(args, "yes", False):
-                try:
-                    answer = input("Are you sure? [y/N]: ").strip().lower()
-                except (EOFError, KeyboardInterrupt):
-                    print("\nAborted.")
-                    return 0
-                if answer not in ("y", "yes"):
-                    print("Aborted.")
-                    return 0
+            if not getattr(args, "yes", False) and not _confirm("Are you sure?"):
+                print("Aborted.")
+                return 0
 
             deleted_chat = 0
             deleted_val = 0
@@ -2169,11 +2183,7 @@ def feedback_clear_command(args: argparse.Namespace) -> int:
         return 0
 
     except Exception as e:
-        print(f"\n❌ Error: {e}", file=sys.stderr)
-        import traceback
-
-        traceback.print_exc()
-        return 1
+        return _unexpected_error(e, label="Error")
 
 
 def registry_upload_command(args: argparse.Namespace) -> int:
@@ -2197,9 +2207,7 @@ def registry_upload_command(args: argparse.Namespace) -> int:
     """
     from abstracts_explorer.registry import RegistryClient, RegistryError
 
-    config = get_config()
-    repository = args.repository or config.registry_repository
-    token = args.token or config.github_token
+    repository, token = _resolve_registry_auth(args)
     # Resolve conference name to canonical form; treat None/"all" as "all"
     raw_conf = getattr(args, "conference", None)
     if raw_conf and raw_conf.lower() != "all":
@@ -2221,14 +2229,13 @@ def registry_upload_command(args: argparse.Namespace) -> int:
         )
         return 1
 
-    print("Abstracts Explorer - Registry Upload")
-    print("=" * 70)
-    print(f"Repository:     {repository}")
-    print(f"Conference:     {conference}")
-    print(f"Year:           {args.year if args.year else 'all'}")
-    if args.tag:
-        print(f"Tag:            {args.tag}")
-    print("=" * 70)
+    _print_header(
+        "Registry Upload",
+        f"Repository: {repository}",
+        f"Conference: {conference}",
+        f"Year: {args.year if args.year else 'all'}",
+        f"Tag: {args.tag}" if args.tag else None,
+    )
 
     try:
         client = RegistryClient(repository=repository, token=token)
@@ -2264,9 +2271,7 @@ def registry_upload_command(args: argparse.Namespace) -> int:
         print(f"\n❌ Registry error: {e}", file=sys.stderr)
         return 1
     except Exception as e:
-        print(f"\n❌ Unexpected error: {e}", file=sys.stderr)
-        logger.exception("Upload failed")
-        return 1
+        return _unexpected_error(e, log_message="Upload failed")
 
 
 def _registry_download_has_existing_data(conference: str, year: Optional[int]) -> bool:
@@ -2331,9 +2336,7 @@ def registry_download_command(args: argparse.Namespace) -> int:
         RegistryError,
     )
 
-    config = get_config()
-    repository = args.repository or config.registry_repository
-    token = args.token or config.github_token
+    repository, token = _resolve_registry_auth(args)
     # Resolve conference name to canonical form; treat None/"all" as "all"
     raw_conf = getattr(args, "conference", None)
     if raw_conf and raw_conf.lower() != "all":
@@ -2349,33 +2352,27 @@ def registry_download_command(args: argparse.Namespace) -> int:
         return 1
 
     year_display = str(args.year) if args.year else "all"
-    print("Abstracts Explorer - Registry Download")
-    print("=" * 70)
-    print(f"Repository:     {repository}")
-    print(f"Conference:     {conference}")
-    print(f"Year:           {year_display}")
-    if args.tag:
-        print(f"Tag:            {args.tag}")
-    print("=" * 70)
+    _print_header(
+        "Registry Download",
+        f"Repository: {repository}",
+        f"Conference: {conference}",
+        f"Year: {year_display}",
+        f"Tag: {args.tag}" if args.tag else None,
+    )
 
     if not args.yes and _registry_download_has_existing_data(conference, args.year):
         scope = f"{conference}/{year_display}"
         if conference == "all":
             scope = "all conferences"
         print(f"\n⚠️  Warning: This will replace existing data for {scope}!")
-        try:
-            confirm = input("Continue? [y/N]: ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            print("\nAborted.")
-            return 1
-        if confirm != "y":
+        if not _confirm("Continue?"):
             print("Aborted.")
             return 1
 
     try:
         client = RegistryClient(repository=repository, token=token)
 
-        embedding_model = getattr(args, "embedding_model", None) or config.embedding_model
+        embedding_model = getattr(args, "embedding_model", None) or get_config().embedding_model
         ignore_embedding_model_mismatch = getattr(args, "ignore_embedding_model_mismatch", False)
 
         try:
@@ -2430,9 +2427,7 @@ def registry_download_command(args: argparse.Namespace) -> int:
         print(f"\n❌ Registry error: {e}", file=sys.stderr)
         return 1
     except Exception as e:
-        print(f"\n❌ Unexpected error: {e}", file=sys.stderr)
-        logger.exception("Download failed")
-        return 1
+        return _unexpected_error(e, log_message="Download failed")
 
 
 def registry_list_command(args: argparse.Namespace) -> int:
@@ -2454,9 +2449,7 @@ def registry_list_command(args: argparse.Namespace) -> int:
     """
     from abstracts_explorer.registry import RegistryClient, RegistryError
 
-    config = get_config()
-    repository = args.repository or config.registry_repository
-    token = args.token or config.github_token
+    repository, token = _resolve_registry_auth(args)
 
     if not repository:
         print(
@@ -2512,9 +2505,7 @@ def registry_list_command(args: argparse.Namespace) -> int:
         print(f"\n❌ Registry error: {e}", file=sys.stderr)
         return 1
     except Exception as e:
-        print(f"\n❌ Unexpected error: {e}", file=sys.stderr)
-        logger.exception("List failed")
-        return 1
+        return _unexpected_error(e, log_message="List failed")
 
 
 def registry_delete_command(args: argparse.Namespace) -> int:
@@ -2542,9 +2533,7 @@ def registry_delete_command(args: argparse.Namespace) -> int:
     """
     from abstracts_explorer.registry import RegistryClient, RegistryError
 
-    config = get_config()
-    repository = args.repository or config.registry_repository
-    token = args.token or config.github_token
+    repository, token = _resolve_registry_auth(args)
 
     if not repository:
         print(
@@ -2564,20 +2553,17 @@ def registry_delete_command(args: argparse.Namespace) -> int:
     conference = getattr(args, "conference", None)
     dry_run: bool = getattr(args, "dry_run", False)
 
-    print("Abstracts Explorer - Registry Delete Old Versions")
-    print("=" * 70)
-    print(f"Repository:     {repository}")
-    print(f"Delete below:   {below_version}")
-    print(f"Conference:     {conference or 'all'}")
-    print(f"Dry-run:        {dry_run}")
-    print("=" * 70)
+    _print_header(
+        "Registry Delete Old Versions",
+        f"Repository: {repository}",
+        f"Delete below: {below_version}",
+        f"Conference: {conference or 'all'}",
+        f"Dry-run: {dry_run}",
+    )
 
     if not dry_run and not getattr(args, "yes", False):
-        confirm = input(
-            f"\n⚠️  This will permanently delete all versions below {below_version} from {repository}.\n"
-            "Type 'yes' to confirm: "
-        )
-        if confirm.strip().lower() != "yes":
+        print(f"\n⚠️  This will permanently delete all versions below {below_version} from {repository}.")
+        if not _confirm("Type 'yes' to confirm: ", require_yes=True):
             print("Aborted.")
             return 1
 
@@ -2604,9 +2590,7 @@ def registry_delete_command(args: argparse.Namespace) -> int:
         print(f"\n❌ Registry error: {e}", file=sys.stderr)
         return 1
     except Exception as e:
-        print(f"\n❌ Unexpected error: {e}", file=sys.stderr)
-        logger.exception("Delete failed")
-        return 1
+        return _unexpected_error(e, log_message="Delete failed")
 
 
 def _build_pre_process_embeddings_args(
@@ -2939,17 +2923,15 @@ def pre_process_command(args: argparse.Namespace) -> int:
     force = getattr(args, "force", False)
     verbose = getattr(args, "verbose", 0)
 
-    print("Abstracts Explorer - Pre-process Pipeline")
-    print("=" * 70)
-    if conference:
-        print(f"Conference: {conference}")
-    if year is not None:
-        print(f"Year:       {year}")
-    print(f"Force:      {force}")
-    print(f"Collection: {getattr(args, 'collection', config.collection_name)}")
-    print(f"Model:      {getattr(args, 'model', config.embedding_model)}")
-    print("Steps: download → create-embeddings → clustering pre-generate")
-    print("=" * 70)
+    _print_header(
+        "Pre-process Pipeline",
+        f"Conference: {conference}" if conference else None,
+        f"Year: {year}" if year is not None else None,
+        f"Force: {force}",
+        f"Collection: {getattr(args, 'collection', config.collection_name)}",
+        f"Model: {getattr(args, 'model', config.embedding_model)}",
+        "Steps: download → create-embeddings → clustering pre-generate",
+    )
 
     download_args = argparse.Namespace(
         conference=conference,

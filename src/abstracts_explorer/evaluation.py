@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 from abstracts_explorer.config import get_config
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
+from abstracts_explorer.llm_utils import chat_completion_text
 from abstracts_explorer.mcp_tools import execute_mcp_tool, format_tool_result_for_llm
 
 logger = logging.getLogger(__name__)
@@ -160,6 +161,33 @@ Score the actual answer (1-5) and explain briefly.
 # ---------------------------------------------------------------------------
 
 
+def _strip_reasoning_and_fences(text: str) -> str:
+    """
+    Remove hidden-reasoning blocks and markdown code fences from an LLM
+    response.
+
+    Reasoning models may emit hidden-reasoning blocks before the answer, and
+    answers are often wrapped in markdown code fences.  Both are removed so
+    the remaining text can be parsed as JSON.
+
+    Parameters
+    ----------
+    text : str
+        Raw LLM response.
+
+    Returns
+    -------
+    str
+        Cleaned text, stripped of surrounding whitespace.
+    """
+    # Strip hidden-reasoning blocks
+    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    # Strip markdown code fences
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"\s*```$", "", cleaned, flags=re.MULTILINE)
+    return cleaned.strip()
+
+
 def _parse_json_array(text: str) -> List[Dict[str, Any]]:
     """
     Parse a JSON array from LLM output, tolerating markdown fences.
@@ -179,12 +207,7 @@ def _parse_json_array(text: str) -> List[Dict[str, Any]]:
     EvaluationError
         If parsing fails.
     """
-    # Strip <think> blocks
-    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
-    # Strip markdown code fences
-    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-    cleaned = re.sub(r"\s*```$", "", cleaned)
-    cleaned = cleaned.strip()
+    cleaned = _strip_reasoning_and_fences(text)
 
     try:
         parsed = json.loads(cleaned)
@@ -458,17 +481,15 @@ class Evaluator:
             )
 
             try:
-                resp = self.openai_client.chat.completions.create(
+                raw = chat_completion_text(
+                    client=self.openai_client,
                     model=self.model,
-                    messages=[
-                        {"role": "system", "content": _QA_GENERATION_SYSTEM_PROMPT},
-                        {"role": "user", "content": user_prompt},
-                    ],
+                    system_prompt=_QA_GENERATION_SYSTEM_PROMPT,
+                    user_prompt=user_prompt,
                     temperature=0.7,
                     max_tokens=2000,
                     timeout=120,
                 )
-                raw = resp.choices[0].message.content or ""
                 pairs = _parse_json_array(raw)
             except EvaluationError:
                 raise
@@ -516,17 +537,15 @@ class Evaluator:
                         papers_context=papers_context,
                     )
                     try:
-                        fu_resp = self.openai_client.chat.completions.create(
+                        fu_raw = chat_completion_text(
+                            client=self.openai_client,
                             model=self.model,
-                            messages=[
-                                {"role": "system", "content": _QA_GENERATION_SYSTEM_PROMPT},
-                                {"role": "user", "content": followup_prompt},
-                            ],
+                            system_prompt=_QA_GENERATION_SYSTEM_PROMPT,
+                            user_prompt=followup_prompt,
                             temperature=0.7,
                             max_tokens=2000,
                             timeout=120,
                         )
-                        fu_raw = fu_resp.choices[0].message.content or ""
                         followups = _parse_json_array(fu_raw)
                     except Exception as exc:
                         logger.warning(f"Failed to generate follow-ups for conv {conv_id}: {exc}")
@@ -679,24 +698,17 @@ class Evaluator:
             actual_answer=actual_answer,
         )
         try:
-            resp = self.openai_client.chat.completions.create(
+            raw = chat_completion_text(
+                client=self.openai_client,
                 model=self.model,
-                messages=[
-                    {"role": "system", "content": _JUDGE_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
+                system_prompt=_JUDGE_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
                 temperature=0.1,
                 max_tokens=300,
                 timeout=60,
             )
-            raw = resp.choices[0].message.content or ""
             logger.debug(f"Judge raw response: {raw[:200]}")
-            # Strip <think> blocks
-            cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
-            # Strip markdown fences
-            cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.MULTILINE)
-            cleaned = re.sub(r"\s*```$", "", cleaned, flags=re.MULTILINE)
-            cleaned = cleaned.strip()
+            cleaned = _strip_reasoning_and_fences(raw)
             # Use raw_decode to extract the first JSON object even if the model
             # adds preamble text (e.g. "Here is my evaluation: {…}")
             decoder = json.JSONDecoder()

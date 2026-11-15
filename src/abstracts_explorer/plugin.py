@@ -14,7 +14,6 @@ The framework consists of:
 
 import json
 import logging
-import threading
 import time
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
@@ -25,6 +24,8 @@ from typing import Any, Dict, List, Optional
 import requests
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, ValidationError, field_validator
+
+from abstracts_explorer.rate_limiter import RateLimitCooldown
 
 logger = logging.getLogger(__name__)
 
@@ -256,30 +257,6 @@ def _http_status_code(exc: Exception) -> Optional[int]:
     response = getattr(exc, "response", None)
     status = getattr(response, "status_code", None)
     return status if isinstance(status, int) else None
-
-
-class RateLimitCooldown:
-    """Thread-safe shared cooldown window after a rate-limit response."""
-
-    def __init__(self) -> None:
-        self._until = 0.0
-        self._lock = threading.Lock()
-
-    def wait(self) -> None:
-        """Sleep until the current cooldown expires."""
-        with self._lock:
-            remaining = self._until - time.monotonic()
-            if remaining <= 0:
-                self._until = 0.0
-                return
-        time.sleep(remaining)
-        with self._lock:
-            self._until = 0.0
-
-    def defer(self, delay: float) -> None:
-        """Extend the cooldown by at least *delay* seconds."""
-        with self._lock:
-            self._until = max(self._until, time.monotonic() + max(0.0, delay))
 
 
 def _compute_retry_delay(

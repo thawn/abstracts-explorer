@@ -1831,7 +1831,7 @@ class TestCLI:
 
         assert exit_code == 0
         captured = capsys.readouterr()
-        assert "Year:       2024" in captured.out
+        assert "Year: 2024" in captured.out
         assert "Filter will process 1 abstracts" in captured.out
 
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
@@ -1905,7 +1905,7 @@ class TestCLI:
         assert exit_code == 0
         captured = capsys.readouterr()
         assert "Conference: NeurIPS" in captured.out
-        assert "Year:       2024" in captured.out
+        assert "Year: 2024" in captured.out
         assert "Filter will process 1 abstracts" in captured.out
 
         call_kwargs = mock_em.embed_from_database.call_args.kwargs

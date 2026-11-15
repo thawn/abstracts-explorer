@@ -60,8 +60,18 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.database import DatabaseManager
+from abstracts_explorer.llm_utils import chat_completion_text
 
 logger = logging.getLogger(__name__)
+
+# Fixed clustering pipeline: agglomerative clustering with ward linkage and a
+# distance threshold on the full embeddings, reduced with t-SNE for 2-D
+# visualization.  These constants are shared by the CLI, web UI, and MCP
+# server so cache keys stay consistent.  Do not mutate DEFAULT_CLUSTERING_PARAMS.
+DEFAULT_CLUSTERING_METHOD = "agglomerative"
+DEFAULT_REDUCTION_METHOD = "tsne"
+DEFAULT_N_COMPONENTS = 2
+DEFAULT_CLUSTERING_PARAMS: Dict[str, Any] = {"linkage": "ward", "distance_threshold": 150.0}
 
 
 class ClusteringError(Exception):
@@ -849,12 +859,11 @@ class ClusteringManager:
 
         config = get_config()
 
-        response = self.embeddings_manager.openai_client.chat.completions.create(
+        content = chat_completion_text(
+            client=self.embeddings_manager.openai_client,
             model=config.cluster_label_model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
             temperature=0.3,
             max_tokens=max_tokens,
             # Suppress the hidden reasoning block on GPT-OSS-120B so the
@@ -864,7 +873,6 @@ class ClusteringManager:
             reasoning_effort="low",
         )
 
-        content = response.choices[0].message.content
         if not content:
             raise ValueError("LLM returned empty content")
         return content.strip().strip("\"'")
@@ -1659,9 +1667,9 @@ def compute_clusters_with_cache(
         # Try exact match (same clustering params AND same reduction method)
         exact_cached = database.get_clustering_cache(
             embedding_model=embedding_model,
-            reduction_method="tsne",
+            reduction_method=DEFAULT_REDUCTION_METHOD,
             n_components=n_components,
-            clustering_method="agglomerative",
+            clustering_method=DEFAULT_CLUSTERING_METHOD,
             n_clusters=cache_n_clusters,
             clustering_params=cache_params if cache_params else None,
             conference=cache_conference,
@@ -1764,9 +1772,9 @@ def compute_clusters_with_cache(
 
             database.save_clustering_cache(
                 embedding_model=embedding_model,
-                reduction_method="tsne",
+                reduction_method=DEFAULT_REDUCTION_METHOD,
                 n_components=n_components,
-                clustering_method="agglomerative",
+                clustering_method=DEFAULT_CLUSTERING_METHOD,
                 results=results,
                 n_clusters=n_clusters,
                 clustering_params=save_params if save_params else None,

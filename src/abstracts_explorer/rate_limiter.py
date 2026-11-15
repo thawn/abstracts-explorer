@@ -196,3 +196,27 @@ def set_global_rate_limiter(
     """Set or reset the global shared rate limiter instance."""
     global _global_rate_limiter
     _global_rate_limiter = limiter
+
+
+class RateLimitCooldown:
+    """Thread-safe shared cooldown window after a rate-limit response."""
+
+    def __init__(self) -> None:
+        self._until = 0.0
+        self._lock = threading.Lock()
+
+    def wait(self) -> None:
+        """Sleep until the current cooldown expires."""
+        with self._lock:
+            remaining = self._until - time.monotonic()
+            if remaining <= 0:
+                self._until = 0.0
+                return
+        time.sleep(remaining)
+        with self._lock:
+            self._until = 0.0
+
+    def defer(self, delay: float) -> None:
+        """Extend the cooldown by at least *delay* seconds."""
+        with self._lock:
+            self._until = max(self._until, time.monotonic() + max(0.0, delay))

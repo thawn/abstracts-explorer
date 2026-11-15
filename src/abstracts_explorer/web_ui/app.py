@@ -20,6 +20,12 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.rag import RAGChat
+from abstracts_explorer.clustering import (
+    DEFAULT_CLUSTERING_METHOD,
+    DEFAULT_CLUSTERING_PARAMS,
+    DEFAULT_N_COMPONENTS,
+    DEFAULT_REDUCTION_METHOD,
+)
 from abstracts_explorer.config import get_config
 from abstracts_explorer.export_utils import export_papers_to_zip
 from abstracts_explorer.paper_utils import extract_top_keywords
@@ -748,7 +754,7 @@ def compute_clusters():
     current_model = config.embedding_model
 
     # Fixed clustering parameters (only true clustering params, not conference/year)
-    clustering_params = {"linkage": "ward", "distance_threshold": 150.0}
+    clustering_params = dict(DEFAULT_CLUSTERING_PARAMS)
 
     # Determine single conference/year for cache lookup
     cache_conference = conferences[0] if conferences and len(conferences) == 1 else None
@@ -757,9 +763,9 @@ def compute_clusters():
     # Look up pre-computed results from the cache
     cached = database.get_clustering_cache(
         embedding_model=current_model,
-        reduction_method="tsne",
-        n_components=2,
-        clustering_method="agglomerative",
+        reduction_method=DEFAULT_REDUCTION_METHOD,
+        n_components=DEFAULT_N_COMPONENTS,
+        clustering_method=DEFAULT_CLUSTERING_METHOD,
         n_clusters=None,
         clustering_params=clustering_params if clustering_params else None,
         conference=cache_conference,

@@ -16,7 +16,6 @@ Features:
 
 import logging
 import json
-import re
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple, Iterator
 from collections import Counter
@@ -25,9 +24,16 @@ from mcp.server.mcpserver import MCPServer
 
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.database import DatabaseManager
-from abstracts_explorer.clustering import ClusteringManager
+from abstracts_explorer.clustering import (
+    ClusteringManager,
+    DEFAULT_CLUSTERING_METHOD,
+    DEFAULT_CLUSTERING_PARAMS,
+    DEFAULT_N_COMPONENTS,
+    DEFAULT_REDUCTION_METHOD,
+)
 from abstracts_explorer.config import get_config
 from abstracts_explorer.interesting_papers import (
+    _parse_conference_year,
     recommend_related_papers as _recommend_related_papers,
     summarize_interesting_papers as _summarize_interesting_papers,
 )
@@ -264,39 +270,6 @@ def analyze_cluster_topics(
     }
 
 
-def _parse_conference_year(conference: str) -> Tuple[str, Optional[int]]:
-    """
-    Parse a trailing year from a conference name.
-
-    LLMs often combine the conference name and year into a single string
-    (e.g. ``"NeurIPS 2025"``).  This helper splits them so the conference
-    name matches the database/cache entries which store the name and year
-    separately.
-
-    Parameters
-    ----------
-    conference : str
-        Conference name, possibly with a trailing 4-digit year.
-
-    Returns
-    -------
-    tuple of (str, int or None)
-        ``(conference_name, year)`` — *year* is ``None`` when no trailing
-        year was found.
-
-    Examples
-    --------
-    >>> _parse_conference_year("NeurIPS 2025")
-    ('NeurIPS', 2025)
-    >>> _parse_conference_year("ICLR")
-    ('ICLR', None)
-    """
-    match = re.match(r"^(.+)\s+(\d{4})$", conference.strip())
-    if match:
-        return match.group(1), int(match.group(2))
-    return conference, None
-
-
 def _lookup_clustering_cache(
     db: "DatabaseManager",
     config: Any,
@@ -326,19 +299,16 @@ def _lookup_clustering_cache(
     dict or None
         Cached clustering results, or ``None`` when nothing matches.
     """
-    clustering_params: Dict[str, Any] = {
-        "linkage": "ward",
-        "distance_threshold": 150.0,
-    }
+    clustering_params: Dict[str, Any] = dict(DEFAULT_CLUSTERING_PARAMS)
 
     # Determine single year for column-based lookup
     cache_year = years[0] if years and len(years) == 1 else None
 
     cached = db.get_clustering_cache(
         embedding_model=config.embedding_model,
-        reduction_method="tsne",
-        n_components=2,
-        clustering_method="agglomerative",
+        reduction_method=DEFAULT_REDUCTION_METHOD,
+        n_components=DEFAULT_N_COMPONENTS,
+        clustering_method=DEFAULT_CLUSTERING_METHOD,
         n_clusters=None,
         clustering_params=clustering_params,
         conference=conference,
@@ -349,9 +319,9 @@ def _lookup_clustering_cache(
     if not cached and years:
         cached = db.get_clustering_cache(
             embedding_model=config.embedding_model,
-            reduction_method="tsne",
-            n_components=2,
-            clustering_method="agglomerative",
+            reduction_method=DEFAULT_REDUCTION_METHOD,
+            n_components=DEFAULT_N_COMPONENTS,
+            clustering_method=DEFAULT_CLUSTERING_METHOD,
             n_clusters=None,
             clustering_params=clustering_params,
             conference=conference,

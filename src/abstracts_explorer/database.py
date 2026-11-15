@@ -4,6 +4,7 @@ Supports both SQLite and PostgreSQL backends via SQLAlchemy.
 """
 
 import hashlib
+import json
 import logging
 import re
 import threading
@@ -11,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, cast
 
-from sqlalchemy import create_engine, event, select, delete, func, or_, and_, text
+from sqlalchemy import create_engine, event, select, delete, update, func, or_, and_, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError, ProgrammingError, IntegrityError
@@ -65,6 +66,26 @@ class DatabaseError(Exception):
     """Exception raised for database operations."""
 
     pass
+
+
+def _row_to_dict(model: Any, obj: Any) -> Dict[str, Any]:
+    """
+    Serialize an ORM instance into a dict of its column values.
+
+    Parameters
+    ----------
+    model : Any
+        SQLAlchemy declarative model class; its ``__table__`` columns define
+        the mapping.
+    obj : Any
+        ORM instance (or row) to serialize.
+
+    Returns
+    -------
+    dict
+        Mapping of column name to value.
+    """
+    return {c.name: getattr(obj, c.name) for c in model.__table__.columns}
 
 
 class EmbeddingModelConflictError(DatabaseError):
@@ -259,6 +280,29 @@ class DatabaseManager:
         """Roll back the active session if one exists."""
         if self._session is not None:
             self._session.rollback()
+
+    def _db_error(self, label: str, e: Exception) -> DatabaseError:
+        """
+        Roll back the active session and build a DatabaseError for a failed
+        write operation.
+
+        Parameters
+        ----------
+        label : str
+            Human-readable description of the failed operation, used as the
+            error message prefix.
+        e : Exception
+            The original exception.
+
+        Returns
+        -------
+        DatabaseError
+            Exception chaining *e* with the message ``"{label}: {e}"``.
+        """
+        self._rollback()
+        error = DatabaseError(f"{label}: {str(e)}")
+        error.__cause__ = e
+        return error
 
     def close(self) -> None:
         """
@@ -510,8 +554,7 @@ class DatabaseManager:
             return uid
 
         except Exception as e:
-            self._rollback()
-            raise DatabaseError(f"Failed to add paper: {str(e)}") from e
+            raise self._db_error("Failed to add paper", e)
 
     def add_papers(self, papers: List[LightweightPaper]) -> int:
         """
@@ -695,8 +738,6 @@ class DatabaseManager:
                 raise ValueError("Each message must be a dict with 'role' and 'text' keys.")
 
         try:
-            import json
-
             donation = ChatDonation(
                 rating=rating,
                 transcript=json.dumps(transcript),
@@ -753,19 +794,17 @@ class DatabaseManager:
         ...     donations = db.get_chat_donations(limit=10, rating='up')
         """
         try:
-            import json
-
-            query = self.session.query(ChatDonation)
+            stmt = select(ChatDonation)
             if rating is not None:
-                query = query.filter(ChatDonation.rating == rating)
-            query = query.order_by(ChatDonation.donated_at.desc())
+                stmt = stmt.where(ChatDonation.rating == rating)
+            stmt = stmt.order_by(ChatDonation.donated_at.desc())
             if offset:
-                query = query.offset(offset)
+                stmt = stmt.offset(offset)
             if limit is not None:
-                query = query.limit(limit)
+                stmt = stmt.limit(limit)
 
             results = []
-            for entry in query.all():
+            for entry in self.session.execute(stmt).scalars().all():
                 try:
                     transcript = json.loads(entry.transcript)
                 except Exception:
@@ -810,9 +849,7 @@ class DatabaseManager:
         ...     print(f"Total donations: {stats['total']}")
         """
         try:
-            import json
-
-            all_entries = self.session.query(ChatDonation).all()
+            all_entries = self.session.execute(select(ChatDonation)).scalars().all()
             total = len(all_entries)
             up = sum(1 for e in all_entries if e.rating == "up")
             down = sum(1 for e in all_entries if e.rating == "down")
@@ -867,11 +904,11 @@ class DatabaseManager:
         ...     data = db.get_validation_data(limit=20)
         """
         try:
-            query = self.session.query(ValidationData).order_by(ValidationData.donated_at.desc())
+            stmt = select(ValidationData).order_by(ValidationData.donated_at.desc())
             if offset:
-                query = query.offset(offset)
+                stmt = stmt.offset(offset)
             if limit is not None:
-                query = query.limit(limit)
+                stmt = stmt.limit(limit)
 
             return [
                 {
@@ -881,7 +918,7 @@ class DatabaseManager:
                     "search_term": entry.search_term,
                     "donated_at": entry.donated_at,
                 }
-                for entry in query.all()
+                for entry in self.session.execute(stmt).scalars().all()
             ]
 
         except Exception as e:
@@ -914,7 +951,7 @@ class DatabaseManager:
         ...     print(f"Total data donations: {stats['total']}")
         """
         try:
-            all_entries = self.session.query(ValidationData).all()
+            all_entries = self.session.execute(select(ValidationData)).scalars().all()
             total = len(all_entries)
             unique_papers = len({e.paper_uid for e in all_entries})
             priorities = [int(e.priority) for e in all_entries]
@@ -960,11 +997,11 @@ class DatabaseManager:
         ...     print(f"Deleted {deleted} donations")
         """
         try:
-            query = self.session.query(ChatDonation)
+            stmt = delete(ChatDonation)
             if ids is not None:
-                query = query.filter(ChatDonation.id.in_(ids))
-            count = query.count()
-            query.delete(synchronize_session=False)
+                stmt = stmt.where(ChatDonation.id.in_(ids))
+            result = self.session.execute(stmt)
+            count = getattr(result, "rowcount", 0) or 0
             self.session.commit()
             logger.info(f"Deleted {count} chat donation(s)")
             return count
@@ -1001,11 +1038,11 @@ class DatabaseManager:
         ...     print(f"Deleted {deleted} entries")
         """
         try:
-            query = self.session.query(ValidationData)
+            stmt = delete(ValidationData)
             if ids is not None:
-                query = query.filter(ValidationData.id.in_(ids))
-            count = query.count()
-            query.delete(synchronize_session=False)
+                stmt = stmt.where(ValidationData.id.in_(ids))
+            result = self.session.execute(stmt)
+            count = getattr(result, "rowcount", 0) or 0
             self.session.commit()
             logger.info(f"Deleted {count} validation data entry(ies)")
             return count
@@ -1483,7 +1520,11 @@ class DatabaseManager:
         if not uids:
             return []
 
-        papers = self.get_paper({"uid": {"$in": uids}}, limit=0)
+        # Query in fixed-size batches to stay well below DB parameter limits
+        papers: List[Dict[str, Any]] = []
+        for start in range(0, len(uids), 500):
+            batch = uids[start : start + 500]
+            papers.extend(self.get_paper({"uid": {"$in": batch}}, limit=0))
         by_uid = {paper["uid"]: paper for paper in papers}
         return [by_uid[uid] for uid in uids if uid in by_uid]
 
@@ -2396,8 +2437,7 @@ class DatabaseManager:
             self.session.commit()
             logger.info(f"Set embedding model to: {model_name}")
         except Exception as e:
-            self._rollback()
-            raise DatabaseError(f"Failed to set embedding model: {str(e)}") from e
+            raise self._db_error("Failed to set embedding model", e)
 
     def get_clustering_cache(
         self,
@@ -2454,8 +2494,6 @@ class DatabaseManager:
             If query fails.
         """
         try:
-            import json
-
             # Build query conditions
             stmt = select(ClusteringCache).where(
                 and_(
@@ -2568,8 +2606,6 @@ class DatabaseManager:
             If save fails.
         """
         try:
-            import json
-
             # Always try to fill n_clusters from the results statistics
             if n_clusters is None:
                 stats = results.get("statistics", {})
@@ -2604,8 +2640,7 @@ class DatabaseManager:
             )
 
         except Exception as e:
-            self._rollback()
-            raise DatabaseError(f"Failed to save clustering cache: {str(e)}") from e
+            raise self._db_error("Failed to save clustering cache", e)
 
     def delete_papers_by_conference_year(self, conference: str, year: int) -> int:
         """
@@ -2639,8 +2674,7 @@ class DatabaseManager:
             return count
 
         except Exception as e:
-            self._rollback()
-            raise DatabaseError(f"Failed to delete papers for {conference}/{year}: {str(e)}") from e
+            raise self._db_error(f"Failed to delete papers for {conference}/{year}", e)
 
     def delete_clustering_cache_by_conference_year(self, conference: str, year: int) -> int:
         """
@@ -2664,22 +2698,18 @@ class DatabaseManager:
             If deletion fails.
         """
         try:
-            stmt = select(ClusteringCache).where(
+            stmt = delete(ClusteringCache).where(
                 and_(ClusteringCache.conference == conference, ClusteringCache.year == year)
             )
-            entries = self.session.execute(stmt).scalars().all()
-            count = len(entries)
-
-            for entry in entries:
-                self.session.delete(entry)
+            result = self.session.execute(stmt)
+            count = getattr(result, "rowcount", 0) or 0
 
             self.session.commit()
             logger.info(f"Deleted {count} clustering cache entries for {conference}/{year}")
             return count
 
         except Exception as e:
-            self._rollback()
-            raise DatabaseError(f"Failed to delete clustering cache for {conference}/{year}: {str(e)}") from e
+            raise self._db_error(f"Failed to delete clustering cache for {conference}/{year}", e)
 
     def count_clustering_cache_by_conference_year(self, conference: str, year: int) -> int:
         """
@@ -2738,16 +2768,13 @@ class DatabaseManager:
         try:
             if embedding_model:
                 # Delete only for specific model
-                stmt = select(ClusteringCache).where(ClusteringCache.embedding_model == embedding_model)
+                stmt = delete(ClusteringCache).where(ClusteringCache.embedding_model == embedding_model)
             else:
                 # Delete all
-                stmt = select(ClusteringCache)
+                stmt = delete(ClusteringCache)
 
-            entries = self.session.execute(stmt).scalars().all()
-            count = len(entries)
-
-            for entry in entries:
-                self.session.delete(entry)
+            result = self.session.execute(stmt)
+            count = getattr(result, "rowcount", 0) or 0
 
             self.session.commit()
 
@@ -2759,8 +2786,7 @@ class DatabaseManager:
             return count
 
         except Exception as e:
-            self._rollback()
-            raise DatabaseError(f"Failed to clear clustering cache: {str(e)}") from e
+            raise self._db_error("Failed to clear clustering cache", e)
 
     def update_clustering_cache_embedding_model(self, old_model: str, new_model: str) -> int:
         """
@@ -2798,20 +2824,20 @@ class DatabaseManager:
         ...     )
         """
         try:
-            stmt = select(ClusteringCache).where(ClusteringCache.embedding_model == old_model)
-            entries = self.session.execute(stmt).scalars().all()
-            count = len(entries)
-
-            for entry in entries:
-                setattr(entry, "embedding_model", new_model)
+            stmt = (
+                update(ClusteringCache)
+                .where(ClusteringCache.embedding_model == old_model)
+                .values(embedding_model=new_model)
+            )
+            result = self.session.execute(stmt)
+            count = getattr(result, "rowcount", 0) or 0
 
             self.session.commit()
             logger.info(f"Updated {count} clustering cache entries from model {old_model!r} to {new_model!r}")
             return count
 
         except Exception as e:
-            self._rollback()
-            raise DatabaseError(f"Failed to update clustering cache embedding model: {str(e)}") from e
+            raise self._db_error("Failed to update clustering cache embedding model", e)
 
     # ------------------------------------------------------------------
     # Hierarchical label cache
@@ -2848,8 +2874,6 @@ class DatabaseManager:
             If query fails.
         """
         try:
-            import json
-
             stmt = (
                 select(HierarchicalLabelCache)
                 .where(
@@ -2895,8 +2919,6 @@ class DatabaseManager:
             If save fails.
         """
         try:
-            import json
-
             labels_json = json.dumps({str(k): v for k, v in labels.items()})
             entry = HierarchicalLabelCache(
                 embedding_model=embedding_model,
@@ -2911,8 +2933,7 @@ class DatabaseManager:
             )
 
         except Exception as e:
-            self._rollback()
-            raise DatabaseError(f"Failed to save hierarchical label cache: {str(e)}") from e
+            raise self._db_error("Failed to save hierarchical label cache", e)
 
     # ------------------------------------------------------------------ #
     #  Evaluation Q/A pair and result methods                              #
@@ -2968,8 +2989,7 @@ class DatabaseManager:
             self.session.commit()
             return cast(int, pair.id)
         except Exception as e:
-            self._rollback()
-            raise DatabaseError(f"Failed to add eval QA pair: {str(e)}") from e
+            raise self._db_error("Failed to add eval QA pair", e)
 
     def get_eval_qa_pairs(
         self,
@@ -3101,8 +3121,7 @@ class DatabaseManager:
             self.session.commit()
             return True
         except Exception as e:
-            self._rollback()
-            raise DatabaseError(f"Failed to update eval QA pair: {str(e)}") from e
+            raise self._db_error("Failed to update eval QA pair", e)
 
     def delete_verified_eval_qa_pairs(self) -> int:
         """
@@ -3124,8 +3143,7 @@ class DatabaseManager:
             self.session.commit()
             return count
         except Exception as e:
-            self._rollback()
-            raise DatabaseError(f"Failed to delete verified eval QA pairs: {str(e)}") from e
+            raise self._db_error("Failed to delete verified eval QA pairs", e)
 
     def delete_eval_results(self, run_id: Optional[str] = None) -> int:
         """
@@ -3156,8 +3174,7 @@ class DatabaseManager:
             self.session.commit()
             return count
         except Exception as e:
-            self._rollback()
-            raise DatabaseError(f"Failed to delete eval results: {str(e)}") from e
+            raise self._db_error("Failed to delete eval results", e)
 
     def add_eval_result(
         self,
@@ -3221,8 +3238,7 @@ class DatabaseManager:
             self.session.commit()
             return cast(int, result.id)
         except Exception as e:
-            self._rollback()
-            raise DatabaseError(f"Failed to add eval result: {str(e)}") from e
+            raise self._db_error("Failed to add eval result", e)
 
     def get_eval_results(
         self,
@@ -3413,18 +3429,18 @@ class DatabaseManager:
                 # Export papers filtered by conference and year
                 query = select(Paper).where(and_(Paper.conference == conference, Paper.year == year))
                 for paper in self.session.execute(query).scalars():
-                    paper_dict = {c.name: getattr(paper, c.name) for c in Paper.__table__.columns}
+                    paper_dict = _row_to_dict(Paper, paper)
                     export_session.add(Paper(**paper_dict))
                     paper_count += 1
 
                 # Export hierarchical label cache
                 for entry in self.session.execute(select(HierarchicalLabelCache)).scalars():
-                    entry_dict = {c.name: getattr(entry, c.name) for c in HierarchicalLabelCache.__table__.columns}
+                    entry_dict = _row_to_dict(HierarchicalLabelCache, entry)
                     export_session.add(HierarchicalLabelCache(**entry_dict))
 
                 # Export embeddings metadata
                 for meta_entry in self.session.execute(select(EmbeddingsMetadata)).scalars():
-                    entry_dict = {c.name: getattr(meta_entry, c.name) for c in EmbeddingsMetadata.__table__.columns}
+                    entry_dict = _row_to_dict(EmbeddingsMetadata, meta_entry)
                     export_session.add(EmbeddingsMetadata(**entry_dict))
 
                 export_session.commit()
@@ -3511,13 +3527,13 @@ class DatabaseManager:
                 # (e.g. the same paper existing under a different conference
                 # casing that the DELETE above didn't catch).
                 for paper in source_session.execute(select(Paper)).scalars():
-                    paper_dict = {c.name: getattr(paper, c.name) for c in Paper.__table__.columns}
+                    paper_dict = _row_to_dict(Paper, paper)
                     self.session.merge(Paper(**paper_dict))
                     paper_count += 1
 
                 # Import hierarchical labels
                 for entry in source_session.execute(select(HierarchicalLabelCache)).scalars():
-                    entry_dict = {c.name: getattr(entry, c.name) for c in HierarchicalLabelCache.__table__.columns}
+                    entry_dict = _row_to_dict(HierarchicalLabelCache, entry)
                     self.session.add(HierarchicalLabelCache(**entry_dict))
 
                 # Import embeddings metadata (only if not already present)
@@ -3538,8 +3554,7 @@ class DatabaseManager:
         except DatabaseError:
             raise
         except Exception as e:
-            self._rollback()
-            raise DatabaseError(f"Failed to import papers: {str(e)}") from e
+            raise self._db_error("Failed to import papers", e)
 
     # ------------------------------------------------------------------
     # Clustering cache JSON export / import
@@ -3572,8 +3587,6 @@ class DatabaseManager:
         DatabaseError
             If the export fails.
         """
-        import json as _json
-
         try:
             entries: List[Dict[str, Any]] = []
             stmt = select(ClusteringCache).where(
@@ -3589,7 +3602,7 @@ class DatabaseManager:
                         continue  # skip PK; it will be auto-generated on import
                     val = getattr(entry, col.name)
                     if col.name in ("clustering_params", "results_json") and isinstance(val, str):
-                        val = _json.loads(val)
+                        val = json.loads(val)
                     elif col.name == "created_at" and val is not None:
                         val = val.isoformat()
                     row[col.name] = val
@@ -3642,8 +3655,6 @@ class DatabaseManager:
         DatabaseError
             If the import fails.
         """
-        import json as _json
-
         try:
             # Delete existing matching entries using column-based filtering.
             self.session.execute(
@@ -3683,11 +3694,11 @@ class DatabaseManager:
                 # Re-serialise parsed JSON fields back to strings for DB storage
                 if "clustering_params" in row and row["clustering_params"] is not None:
                     if not isinstance(row["clustering_params"], str):
-                        row["clustering_params"] = _json.dumps(row["clustering_params"])
+                        row["clustering_params"] = json.dumps(row["clustering_params"])
 
                 if "results_json" in row and row["results_json"] is not None:
                     if not isinstance(row["results_json"], str):
-                        row["results_json"] = _json.dumps(row["results_json"])
+                        row["results_json"] = json.dumps(row["results_json"])
 
                 # Convert ISO-format created_at back to datetime
                 if "created_at" in row and isinstance(row["created_at"], str):
@@ -3709,7 +3720,7 @@ class DatabaseManager:
                     results = row.get("results_json")
                     if isinstance(results, str):
                         try:
-                            results = _json.loads(results)
+                            results = json.loads(results)
                         except (ValueError, TypeError):
                             results = {}
                     if isinstance(results, dict):
@@ -3726,5 +3737,4 @@ class DatabaseManager:
         except DatabaseError:
             raise
         except Exception as e:
-            self._rollback()
-            raise DatabaseError(f"Failed to import clustering cache: {str(e)}") from e
+            raise self._db_error("Failed to import clustering cache", e)
