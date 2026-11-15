@@ -998,7 +998,7 @@ class TestCLIEvalCommands:
         mock_em_instance.openai_client = mock_openai_client
 
         with (
-            patch("abstracts_explorer.cli.EmbeddingsManager", return_value=mock_em_instance),
+            patch("abstracts_explorer.cli.evaluation.EmbeddingsManager", return_value=mock_em_instance),
             patch(
                 "abstracts_explorer.evaluation.execute_mcp_tool",
                 return_value='{"papers": [{"title": "Test Paper", "abstract": "test"}]}',

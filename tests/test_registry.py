@@ -2370,7 +2370,7 @@ class TestCLICommands:
         """A failed local data check returns True so the caller still confirms."""
         from abstracts_explorer.cli import _registry_download_has_existing_data
 
-        with patch("abstracts_explorer.cli.DatabaseManager") as MockDatabase:
+        with patch("abstracts_explorer.cli.registry.DatabaseManager") as MockDatabase:
             MockDatabase.return_value.__enter__.return_value.create_tables.side_effect = DatabaseError("boom")
 
             assert _registry_download_has_existing_data("neurips", 2024) is True
@@ -2513,7 +2513,7 @@ class TestCLICommands:
                 "24",
             ],
         ):
-            with patch("abstracts_explorer.cli.registry_upload_command", return_value=0) as mock_cmd:
+            with patch("abstracts_explorer.cli.main.registry_upload_command", return_value=0) as mock_cmd:
                 result = main()
 
         assert result == 0
@@ -2539,7 +2539,7 @@ class TestCLICommands:
                 "24",
             ],
         ):
-            with patch("abstracts_explorer.cli.registry_download_command", return_value=0) as mock_cmd:
+            with patch("abstracts_explorer.cli.main.registry_download_command", return_value=0) as mock_cmd:
                 result = main()
 
         assert result == 0
@@ -2550,7 +2550,7 @@ class TestCLICommands:
         from abstracts_explorer.cli import main
 
         with patch("sys.argv", ["abstracts-explorer", "registry", "list", "-r", "ghcr.io/o/r"]):
-            with patch("abstracts_explorer.cli.registry_list_command", return_value=0) as mock_cmd:
+            with patch("abstracts_explorer.cli.main.registry_list_command", return_value=0) as mock_cmd:
                 result = main()
 
         assert result == 0
@@ -3516,7 +3516,7 @@ class TestRegistryDeleteCommand:
             dry_run=False,
             yes=True,
         )
-        with patch("abstracts_explorer.cli.get_config", return_value=mock_cfg):
+        with patch("abstracts_explorer.cli._common.get_config", return_value=mock_cfg):
             # Override repository to None (mock_cfg.registry_repository is None)
             args.repository = None
             mock_cfg.registry_repository = None
@@ -3540,7 +3540,7 @@ class TestRegistryDeleteCommand:
             dry_run=False,
             yes=True,
         )
-        with patch("abstracts_explorer.cli.get_config", return_value=mock_cfg):
+        with patch("abstracts_explorer.cli._common.get_config", return_value=mock_cfg):
             result = registry_delete_command(args)
         assert result == 1
         assert "Authentication token" in capsys.readouterr().err
@@ -3604,7 +3604,7 @@ class TestRegistryDeleteCommand:
                 "--yes",
             ],
         ):
-            with patch("abstracts_explorer.cli.registry_delete_command", return_value=0) as mock_cmd:
+            with patch("abstracts_explorer.cli.main.registry_delete_command", return_value=0) as mock_cmd:
                 result = main()
 
         assert result == 0
