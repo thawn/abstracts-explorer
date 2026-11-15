@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -17,6 +18,49 @@ def _run(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _fake_runtime(tmp_path: Path, vacuum_output: str) -> tuple[subprocess.CompletedProcess[str], str, str]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    podman_log = tmp_path / "podman.log"
+    systemctl_log = tmp_path / "systemctl.log"
+
+    podman = bin_dir / "podman"
+    podman.write_text(
+        f"""#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "{podman_log}"
+case "$*" in
+    "volume inspect"*) exit 0 ;;
+    *"--entrypoint sh"*) exit 0 ;;
+    *" vacuum "*) printf '%s\\n' "{vacuum_output}"; exit 0 ;;
+    *) exit 0 ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    podman.chmod(0o755)
+
+    systemctl = bin_dir / "systemctl"
+    systemctl.write_text(
+        f"""#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "{systemctl_log}"
+exit 0
+""",
+        encoding="utf-8",
+    )
+    systemctl.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    result = subprocess.run(
+        ["bash", str(SCRIPT_PATH), "--yes", "--volume", "test-volume", "--path", "/data"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+    return result, podman_log.read_text(encoding="utf-8"), systemctl_log.read_text(encoding="utf-8")
+
+
 def test_shell_syntax() -> None:
     subprocess.run(["bash", "-n", str(SCRIPT_PATH)], check=True)
 
@@ -26,6 +70,7 @@ def test_help_does_not_require_podman() -> None:
 
     assert "Usage: vacuum-chromadb.sh" in result.stdout
     assert "--dry-run" in result.stdout
+    assert "(default: /data)" in result.stdout
 
 
 def test_dry_run_prints_stop_vacuum_and_restart_commands() -> None:
@@ -35,11 +80,30 @@ def test_dry_run_prints_stop_vacuum_and_restart_commands() -> None:
         "--volume",
         "test-volume",
         "--path",
-        "/data/chroma",
+        "/data",
     )
 
     assert "systemctl --user stop abstracts-explorer abstracts-chromadb" in result.stdout
     assert "podman run --rm --entrypoint chroma" in result.stdout
     assert "test-volume:/data" in result.stdout
-    assert "vacuum --path /data/chroma --force" in result.stdout
+    assert "vacuum --path /data --force" in result.stdout
     assert "systemctl --user start abstracts-explorer abstracts-chromadb" in result.stdout
+
+
+def test_success_requires_vacuum_complete_marker(tmp_path: Path) -> None:
+    result, podman_log, systemctl_log = _fake_runtime(tmp_path, "Vacuum complete!")
+
+    assert result.returncode == 0
+    assert "ChromaDB vacuum complete" in result.stdout
+    assert "vacuum --path /data --force" in podman_log
+    assert "start abstracts-explorer abstracts-chromadb" in systemctl_log
+
+
+def test_cli_failure_is_not_reported_as_success(tmp_path: Path) -> None:
+    result, podman_log, systemctl_log = _fake_runtime(tmp_path, "Failed to vacuum Chroma")
+
+    assert result.returncode == 1
+    assert "ChromaDB vacuum failed" in result.stderr
+    assert "ChromaDB vacuum complete" not in result.stdout
+    assert "vacuum --path /data --force" in podman_log
+    assert "start abstracts-explorer abstracts-chromadb" in systemctl_log

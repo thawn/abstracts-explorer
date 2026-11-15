@@ -16,7 +16,7 @@ Stop the Abstracts Explorer services and vacuum the ChromaDB data volume.
 
 Options:
   --volume NAME   ChromaDB volume name (default: systemd-abstracts-chromadb-data)
-  --path PATH     Chroma persistent directory inside the volume (default: /data/chroma)
+  --path PATH     Chroma persistent directory inside the volume (default: /data)
   --image IMAGE   Container image containing the chroma CLI
                   (default: docker.io/chromadb/chroma:latest)
   --yes           Skip the confirmation prompt
@@ -38,7 +38,7 @@ ok()   { printf '\033[1;32m✔ %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m⚠ %s\033[0m\n' "$*" >&2; }
 
 VOLUME="${CHROMA_VOLUME:-systemd-abstracts-chromadb-data}"
-CHROMA_PATH="${CHROMA_PATH:-/data/chroma}"
+CHROMA_PATH="${CHROMA_PATH:-/data}"
 IMAGE="${CHROMA_IMAGE:-docker.io/chromadb/chroma:latest}"
 ASSUME_YES=0
 DRY_RUN=0
@@ -112,6 +112,14 @@ if [ "$DRY_RUN" -ne 1 ]; then
         warn "Override the name with: --volume NAME"
         exit 1
     fi
+    if ! podman run --rm -v "$VOLUME:/data:ro" --entrypoint sh "$IMAGE" \
+        -c 'test -f "$1/chroma.sqlite3"' sh "$CHROMA_PATH" >/dev/null 2>&1; then
+        warn "No chroma.sqlite3 found at $CHROMA_PATH in volume '$VOLUME'."
+        warn "Inspect the volume with:"
+        warn "  podman run --rm -v $VOLUME:/data:ro --entrypoint sh $IMAGE -c 'find /data -maxdepth 2 -name chroma.sqlite3 -print'"
+        warn "Override the path with: --path PATH"
+        exit 1
+    fi
 fi
 
 if [ "$ASSUME_YES" -ne 1 ]; then
@@ -134,9 +142,26 @@ info "Stopping ${SERVICES[*]}"
 run systemctl --user stop "${SERVICES[@]}"
 
 info "Vacuuming $CHROMA_PATH in volume $VOLUME"
-run podman run --rm --entrypoint chroma \
-    -v "$VOLUME:/data" \
-    "$IMAGE" \
-    vacuum --path "$CHROMA_PATH" --force
+if [ "$DRY_RUN" -eq 1 ]; then
+    run podman run --rm --entrypoint chroma \
+        -v "$VOLUME:/data" \
+        "$IMAGE" \
+        vacuum --path "$CHROMA_PATH" --force
+else
+    if output=$(podman run --rm --entrypoint chroma \
+        -v "$VOLUME:/data" \
+        "$IMAGE" \
+        vacuum --path "$CHROMA_PATH" --force 2>&1); then
+        printf '%s\n' "$output"
+        if ! grep -q "Vacuum complete" <<<"$output"; then
+            warn "ChromaDB vacuum failed."
+            exit 1
+        fi
+    else
+        printf '%s\n' "$output"
+        warn "ChromaDB vacuum failed."
+        exit 1
+    fi
+fi
 
 ok "ChromaDB vacuum complete"
