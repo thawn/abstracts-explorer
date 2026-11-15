@@ -96,7 +96,7 @@ config = get_config()
 
 # Or directly
 em = EmbeddingsManager(
-    model="text-embedding-nomic-embed-text-v1.5"
+    model_name="text-embedding-nomic-embed-text-v1.5"
 )
 ```
 
@@ -104,9 +104,10 @@ em = EmbeddingsManager(
 
 Embedding models have a finite context window (for example, 8192 tokens).
 `EmbeddingsManager` truncates the text sent to the embedding API when it exceeds
-`EMBEDDING_MAX_INPUT_TOKENS` (default: `8192`). The full title and abstract are
-still stored as the ChromaDB document, so search results and exports are not
-truncated.
+`EMBEDDING_MAX_INPUT_TOKENS` (default: `8192`). Only the text sent to the
+embedding API is truncated; the full title and abstract remain in the SQL
+database, and ChromaDB stores a content hash of the untruncated text, so
+updates are detected correctly.
 
 ```python
 # Use a smaller budget for a model with a limited context window
@@ -122,10 +123,11 @@ The module uses ChromaDB for vector storage:
 
 ### Collection Structure
 
-- **Documents**: Paper abstracts
-- **Metadata**: Paper ID, title, year, etc.
+- **Documents**: SHA-256 content hashes of the embedded title + abstract
 - **Embeddings**: Vector representations
-- **IDs**: Unique identifiers (paper_id)
+- **IDs**: Unique identifiers (paper UID)
+
+All paper metadata (title, abstract, year, ...) lives in the SQL database; ChromaDB stores only UIDs, vectors, and content hashes.
 
 ### Collection Management
 
@@ -134,42 +136,37 @@ The module uses ChromaDB for vector storage:
 collection = em.collection
 print(f"Total papers: {collection.count()}")
 
-# Clear collection
-em.clear_collection()
+# Reset the collection
+em.init(reset=True)
 
-# Check if paper exists
-exists = em.paper_exists(paper_id=123)
+# Check whether a paper's embedding is current
+needs_update = em.paper_needs_update(paper_dict)
 ```
 
 ## Search Results Format
 
-Search results are returned as a list of dictionaries:
+`search_similar` returns nested ID/distance lists:
 
 ```python
-[
-    {
-        'id': 'paper_123',
-        'title': 'Paper Title',
-        'abstract': 'Abstract text...',
-        'year': 2025,
-        'distance': 0.234,  # Lower is more similar
-    },
-    # ... more results
-]
+results = em.search_similar("deep learning", n_results=5)
+for paper_id, distance in zip(results["ids"][0], results["distances"][0]):
+    print(f"{paper_id}: distance={distance:.3f}")  # Lower is more similar
 ```
+
+For distance-threshold workflows, `query_ids_within_distance` returns flat lists
+with a ``count`` and ``total_considered``.
 
 ## Performance Considerations
 
-### Batch Processing
+### Incremental Embedding
 
-Process papers in batches for better performance:
+`embed_from_database` skips papers whose content hash is unchanged:
 
 ```python
-# Default batch size: 100
-em.create_embeddings_from_db(batch_size=100)
+count = em.embed_from_database()
 
-# Larger batches for more memory
-em.create_embeddings_from_db(batch_size=500)
+# Recreate all embeddings, ignoring existing ones
+count = em.embed_from_database(force_recreate=True)
 ```
 
 ### Caching
@@ -191,11 +188,11 @@ Embedding models can be memory-intensive:
 ## Error Handling
 
 ```python
+from abstracts_explorer.embeddings import EmbeddingsError
+
 try:
-    em.create_embeddings_from_db()
-except requests.RequestException:
-    print("LM Studio connection failed")
-except Exception as e:
+    em.embed_from_database()
+except EmbeddingsError as e:
     print(f"Embedding error: {e}")
 ```
 

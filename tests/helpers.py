@@ -196,7 +196,7 @@ def check_lm_studio_available():
 
         try:
             # Connect and perform a lightweight liveness check via the embeddings API
-            if not em.test_lm_studio_connection():
+            if not em.test_api_connection():
                 _lm_studio_available_cache = False
                 return False
 

@@ -33,8 +33,7 @@ class TestEmbeddingsManager:
         assert embeddings_manager._collection is None
 
     def test_connect(self, embeddings_manager):
-        """Test connecting to ChromaDB."""
-        embeddings_manager.connect()
+        """Test connecting to ChromaDB via the lazy client property."""
         assert embeddings_manager.client is not None
         # Check that embedding_db path exists (only for local paths)
         if not embeddings_manager.embedding_db.startswith("http"):
@@ -45,7 +44,7 @@ class TestEmbeddingsManager:
 
     def test_close(self, embeddings_manager):
         """Test closing ChromaDB connection."""
-        embeddings_manager.connect()
+        embeddings_manager.client
         embeddings_manager.close()
         assert embeddings_manager._client is None
         assert embeddings_manager._collection is None
@@ -57,53 +56,47 @@ class TestEmbeddingsManager:
         assert embeddings_manager._client is None
 
     def test_init_connects_and_creates_collection(self, embeddings_manager):
-        """Test that init connects and creates the collection."""
-        embeddings_manager.connect = Mock()
+        """Test that init creates the collection (which connects the client)."""
         embeddings_manager.create_collection = Mock()
 
         embeddings_manager.init()
 
-        embeddings_manager.connect.assert_called_once_with()
         embeddings_manager.create_collection.assert_called_once_with(reset=False)
 
     def test_init_reset(self, embeddings_manager):
         """Test that init forwards the reset flag to create_collection."""
-        embeddings_manager.connect = Mock()
         embeddings_manager.create_collection = Mock()
 
         embeddings_manager.init(reset=True)
 
-        embeddings_manager.connect.assert_called_once_with()
         embeddings_manager.create_collection.assert_called_once_with(reset=True)
 
-    def test_test_lm_studio_connection_success(self, embeddings_manager):
-        """Test successful LM Studio connection."""
-        result = embeddings_manager.test_lm_studio_connection()
+    def test_test_api_connection_success(self, embeddings_manager):
+        """Test successful API connection."""
+        result = embeddings_manager.test_api_connection()
         assert result is True
         embeddings_manager.openai_client.models.list.assert_called_once()
 
-    def test_test_lm_studio_connection_failure(self, embeddings_manager):
-        """Test failed LM Studio connection."""
-        # Mock the OpenAI client's models.list() to raise an exception
+    def test_test_api_connection_failure(self, embeddings_manager):
+        """Test failed API connection."""
         embeddings_manager.openai_client.models.list.side_effect = Exception("Connection error")
-        result = embeddings_manager.test_lm_studio_connection()
+        result = embeddings_manager.test_api_connection()
         assert result is False
 
-    def test_verbose_api_connection_test_success(self, embeddings_manager, capsys):
+    def test_test_api_connection_verbose_success(self, embeddings_manager, capsys):
         """Test verbose connection test prints success messages."""
-        result = embeddings_manager.verbose_api_connection_test()
+        result = embeddings_manager.test_api_connection(verbose=True)
 
         assert result is True
         captured = capsys.readouterr()
-        assert "Testing OpenAI API connection" in captured.out
         assert "Successfully connected to OpenAI API" in captured.out
         assert captured.err == ""
 
-    def test_verbose_api_connection_test_failure(self, embeddings_manager, capsys):
+    def test_test_api_connection_verbose_failure(self, embeddings_manager, capsys):
         """Test verbose connection test prints failure details."""
         embeddings_manager.openai_client.models.list.side_effect = Exception("Connection error")
 
-        result = embeddings_manager.verbose_api_connection_test()
+        result = embeddings_manager.test_api_connection(verbose=True)
 
         assert result is False
         captured = capsys.readouterr()
@@ -111,15 +104,23 @@ class TestEmbeddingsManager:
         assert embeddings_manager.lm_studio_url in captured.err
         assert embeddings_manager.model_name in captured.err
 
-    def test_verbose_api_connection_test_model_hint(self, embeddings_manager, capsys):
+    def test_test_api_connection_model_hint(self, embeddings_manager, capsys):
         """Test verbose connection test uses a custom model hint."""
         embeddings_manager.openai_client.models.list.side_effect = Exception("Connection error")
 
-        result = embeddings_manager.verbose_api_connection_test(model_hint="A language model is loaded")
+        result = embeddings_manager.test_api_connection(verbose=True, model_hint="A language model is loaded")
 
         assert result is False
         captured = capsys.readouterr()
         assert "A language model is loaded" in captured.err
+
+    def test_close_closes_openai_client(self, embeddings_manager):
+        """Test that close() closes and resets the OpenAI client."""
+        embeddings_manager.client
+        openai_client = embeddings_manager.openai_client
+        embeddings_manager.close()
+        assert embeddings_manager._openai_client is None
+        openai_client.close.assert_called_once()
 
     def test_generate_embedding_success(self, embeddings_manager):
         """Test successful embedding generation."""
@@ -213,6 +214,26 @@ class TestEmbeddingsManager:
 
         stats = embeddings_manager.get_collection_stats()
         assert stats["count"] == 1
+        embeddings_manager.close()
+
+    def test_add_paper_updates_existing(self, embeddings_manager, mock_lm_studio):
+        """Test that add_paper replaces the embedding when a paper's content changes."""
+        embeddings_manager.create_collection()
+
+        uid = "update_paper"
+        embeddings_manager.add_paper({"uid": uid, "title": "Title", "abstract": "Old abstract"})
+        old_hash = embeddings_manager.collection.get(ids=[uid])["documents"][0]
+
+        embeddings_manager.add_paper({"uid": uid, "title": "Title", "abstract": "New abstract"})
+
+        stored = embeddings_manager.collection.get(ids=[uid])
+        assert embeddings_manager.collection.count() == 1
+        assert stored["documents"][0] != old_hash
+        assert stored["documents"][0] == hash_text("Title\n\nNew abstract")
+        assert (
+            embeddings_manager.paper_needs_update({"uid": uid, "title": "Title", "abstract": "New abstract"}) is False
+        )
+
         embeddings_manager.close()
 
     def test_add_paper_empty_abstract(self, embeddings_manager, mock_lm_studio):
@@ -524,38 +545,6 @@ class TestEmbeddingsManager:
         assert all(metadata is None for metadata in stored["metadatas"])
         assert all(is_content_hash(document) for document in stored["documents"])
 
-        embeddings_manager.close()
-
-    def test_paper_exists(self, embeddings_manager, mock_lm_studio):
-        """Test paper_exists method."""
-        embeddings_manager.create_collection()
-
-        # Initially paper should not exist
-        assert not embeddings_manager.paper_exists("test_paper_1")
-
-        # Add a paper
-        paper = {
-            "uid": "test_paper_1",
-            "title": "Test Paper",
-            "abstract": "This is a test abstract",
-        }
-        embeddings_manager.add_paper(paper)
-
-        # Now paper should exist
-        assert embeddings_manager.paper_exists("test_paper_1")
-
-        # Other papers should not exist
-        assert not embeddings_manager.paper_exists("test_paper_2")
-
-        embeddings_manager.close()
-
-    def test_paper_exists_auto_initializes(self, embeddings_manager):
-        """Test that paper_exists auto-initializes client and collection if needed."""
-        # Should not raise - auto-initializes (paper doesn't exist yet)
-        result = embeddings_manager.paper_exists("test_paper_1")
-        assert result is False
-        assert embeddings_manager._client is not None
-        assert embeddings_manager._collection is not None
         embeddings_manager.close()
 
     def test_embed_from_database_skip_existing(self, embeddings_manager, test_database, mock_lm_studio):

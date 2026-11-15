@@ -1164,7 +1164,7 @@ class TestEmbeddingsExportImport:
         assert count == 2
 
         mock_collection.delete.assert_called_once_with(ids=["old1"])
-        mock_collection.add.assert_called_once()
+        mock_collection.upsert.assert_called_once()
 
     def test_import_embeddings_empty(self):
         """Empty import returns 0."""

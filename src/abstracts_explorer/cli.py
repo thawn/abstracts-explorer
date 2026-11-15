@@ -320,7 +320,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
                 args.force = True
 
         # Test connection
-        if not em.verbose_api_connection_test():
+        if not em.test_api_connection(verbose=True):
             return 1
 
         # Create or reset collection.
@@ -455,7 +455,7 @@ def search_command(args: argparse.Namespace) -> int:
         )
 
         # Test OpenAI API connection
-        if not em.verbose_api_connection_test():
+        if not em.test_api_connection(verbose=True):
             return 1
 
         # Check collection stats
@@ -603,7 +603,7 @@ def chat_command(args: argparse.Namespace) -> int:
         )
 
         # Test OpenAI API connection
-        if not em.verbose_api_connection_test(model_hint="A language model is loaded"):
+        if not em.test_api_connection(verbose=True, model_hint="A language model is loaded"):
             return 1
 
         # Get collection stats
@@ -1747,7 +1747,7 @@ def eval_run_command(args: argparse.Namespace) -> int:
             collection_name=args.collection,
         )
 
-        if not em.verbose_api_connection_test():
+        if not em.test_api_connection(verbose=True):
             return 1
 
         with DatabaseManager() as db:

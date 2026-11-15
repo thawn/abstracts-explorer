@@ -1019,7 +1019,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = False
+            mock_em.test_api_connection.return_value = False
             MockEM.return_value = mock_em
 
             with patch.object(
@@ -1061,7 +1061,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = False
+            mock_em.test_api_connection.return_value = False
             MockEM.return_value = mock_em
 
             with patch.object(
@@ -1075,7 +1075,7 @@ class TestCLI:
                 exit_code = main()
 
         assert exit_code == 1
-        mock_em.verbose_api_connection_test.assert_called_once()
+        mock_em.test_api_connection.assert_called_once()
 
     def test_create_embeddings_success(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings command completes successfully."""
@@ -1115,7 +1115,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 2
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 2}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1169,7 +1169,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1234,7 +1234,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (False, "old-model", "new-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             MockEM.return_value = mock_em
@@ -1278,7 +1278,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (False, "old-model", "new-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             MockEM.return_value = mock_em
 
             args = self._create_mismatch_test_args()
@@ -1317,7 +1317,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.delete_embeddings_by_ids.return_value = 0
@@ -1377,7 +1377,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.delete_embeddings_by_ids.return_value = 2
@@ -1435,7 +1435,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.delete_embeddings_by_ids.return_value = 5
@@ -1494,7 +1494,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1548,7 +1548,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1604,7 +1604,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, custom_model)
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1660,7 +1660,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.init.side_effect = EmbeddingsError("Connection failed")
             MockEM.return_value = mock_em
 
@@ -1710,7 +1710,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1773,7 +1773,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1844,7 +1844,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1911,7 +1911,7 @@ class TestCLI:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 2
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 2}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1968,7 +1968,7 @@ class TestCLI:
         # Mock embeddings manager with OpenAI API unavailable
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
-            mock_em.verbose_api_connection_test.return_value = False
+            mock_em.test_api_connection.return_value = False
             MockEM.return_value = mock_em
 
             with patch.object(
@@ -1983,7 +1983,7 @@ class TestCLI:
                 exit_code = main()
 
         assert exit_code == 1
-        mock_em.verbose_api_connection_test.assert_called_once()
+        mock_em.test_api_connection.assert_called_once()
 
     def test_search_success(self, tmp_path, capsys, monkeypatch):
         """Test search command completes successfully."""
@@ -1999,7 +1999,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.DatabaseManager") as MockDB,
         ):
             mock_em = Mock()
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 100}
             mock_em.search_similar.return_value = {
                 "ids": [["123", "456"]],
@@ -2085,7 +2085,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.DatabaseManager") as MockDB,
         ):
             mock_em = Mock()
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 10}
             mock_em.search_similar.return_value = {
                 "ids": [["789"]],
@@ -2143,7 +2143,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.DatabaseManager") as MockDB,
         ):
             mock_em = Mock()
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 50}
             mock_em.search_similar.return_value = {
                 "ids": [["111"]],
@@ -2210,7 +2210,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.DatabaseManager") as MockDB,
         ):
             mock_em = Mock()
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 100}
             mock_em.search_similar.return_value = {"ids": [[]], "distances": [[]], "metadatas": [[]]}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -2270,7 +2270,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.DatabaseManager") as MockDB,
         ):
             mock_em = Mock()
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.search_similar.return_value = {
                 "ids": [["1"]],
@@ -2345,7 +2345,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.DatabaseManager") as MockDB,
         ):
             mock_em = Mock()
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.search_similar.return_value = {
                 "ids": [["1"]],
@@ -2405,7 +2405,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.DatabaseManager") as MockDB,
         ):
             mock_em = Mock()
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.search_similar.return_value = {
                 "ids": [["1"]],
@@ -2458,7 +2458,7 @@ class TestCLI:
         # Mock embeddings manager to raise unexpected exception
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.get_collection_stats.side_effect = Exception("Unexpected error")
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
@@ -3205,13 +3205,13 @@ class TestCLI:
 
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
-            mock_em.verbose_api_connection_test.return_value = False
+            mock_em.test_api_connection.return_value = False
             MockEM.return_value = mock_em
 
             exit_code = chat_command(args)
 
         assert exit_code == 1
-        mock_em.verbose_api_connection_test.assert_called_once()
+        mock_em.test_api_connection.assert_called_once()
 
     def test_chat_rag_error(self, tmp_path, capsys, monkeypatch):
         """Test chat command with RAG error."""
@@ -3243,7 +3243,7 @@ class TestCLI:
 
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = Mock()
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 100}
             MockEM.return_value = mock_em
 
@@ -3517,7 +3517,7 @@ class TestCLIEmbeddingsProgressAndStats:
         with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.collection_exists.return_value = False
 
             # Mock embed_from_database to simulate progress callbacks

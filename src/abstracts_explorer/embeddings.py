@@ -13,15 +13,17 @@ import logging
 import re
 import sys
 import threading
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 import httpx2
-from openai import OpenAI
 import chromadb
 from chromadb.config import Settings
+from openai import OpenAI
 
 from abstracts_explorer.config import get_config
 from abstracts_explorer.database import DatabaseManager, normalize_model_name
@@ -32,6 +34,15 @@ _TOKEN_SAFETY_MARGIN_RATIO = 0.1
 _CHAR_FALLBACK_RATIO = 2
 _MAX_CONTEXT_RETRIES = 3
 _CONTEXT_RETRY_SHRINK = 0.75
+
+HASH_PREFIX = "sha256:"
+_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+# Maximum number of results to request from ChromaDB in a single query.
+# Prevents "too many SQL variables" errors in the underlying SQLite backend.
+_MAX_QUERY_RESULTS = 32766  # this is the maximum for sqlite 3.32 and above
+
+_DELETE_BATCH_SIZE = 1000
 
 
 @lru_cache(maxsize=1)
@@ -54,19 +65,36 @@ def _count_tokens(text: str) -> Optional[int]:
     return len(encoding.encode(text))
 
 
-def _truncate_to_token_limit(text: str, max_tokens: int) -> str:
-    """Truncate *text* to at most *max_tokens* tokens."""
+def _truncate_with_counts(text: str, max_tokens: int) -> tuple[str, Optional[int], Optional[int]]:
+    """
+    Truncate *text* to at most *max_tokens* tokens in a single encode/decode pass.
+
+    Parameters
+    ----------
+    text : str
+        Text to truncate.
+    max_tokens : int
+        Maximum number of tokens. Non-positive values disable truncation.
+
+    Returns
+    -------
+    tuple of (str, int or None, int or None)
+        The (possibly truncated) text, the original token count, and the
+        truncated token count. Token counts are ``None`` when tiktoken is
+        unavailable or truncation is disabled.
+    """
     if max_tokens <= 0 or not text:
-        return text
+        return text, None, None
 
     encoding = _get_token_encoding()
     if encoding is None:
-        return text[: max_tokens * _CHAR_FALLBACK_RATIO]
+        return text[: max_tokens * _CHAR_FALLBACK_RATIO], None, None
 
     tokens = encoding.encode(text)
-    if len(tokens) <= max_tokens:
-        return text
-    return encoding.decode(tokens[:max_tokens])
+    original_count = len(tokens)
+    if original_count <= max_tokens:
+        return text, original_count, original_count
+    return encoding.decode(tokens[:max_tokens]), original_count, max_tokens
 
 
 def _is_context_length_error(error: Exception) -> bool:
@@ -88,10 +116,6 @@ def _context_length_limit_from_error(error: Exception) -> Optional[int]:
     if match is None:
         return None
     return int(match.group(1))
-
-
-HASH_PREFIX = "sha256:"
-_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 def hash_text(text: str) -> str:
@@ -127,6 +151,23 @@ def is_content_hash(value: Optional[str]) -> bool:
         ``True`` when *value* matches the ``sha256:<hex>`` format.
     """
     return bool(value) and bool(_HASH_RE.match(str(value)))
+
+
+def _iter_batches(items: Sequence[Any], size: int) -> Iterator[Sequence[Any]]:
+    """Yield consecutive slices of *items* with at most *size* elements."""
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
+
+
+@contextmanager
+def _translate_errors(message: str) -> Iterator[None]:
+    """Wrap unexpected exceptions in :class:`EmbeddingsError`, passing existing ones through."""
+    try:
+        yield
+    except EmbeddingsError:
+        raise
+    except Exception as e:
+        raise EmbeddingsError(f"{message}: {str(e)}") from e
 
 
 class RateLimitedTransport(httpx2.BaseTransport, httpx2.AsyncBaseTransport):
@@ -165,6 +206,13 @@ class RateLimitedTransport(httpx2.BaseTransport, httpx2.AsyncBaseTransport):
         if global_rate_limiter is None:
             global_rate_limiter = TokenBucketRateLimiter(requests_per_minute=requests_per_minute)
             set_global_rate_limiter(global_rate_limiter)
+        elif global_rate_limiter.requests_per_minute != requests_per_minute:
+            logger.warning(
+                "Reusing existing global rate limiter with %d requests/minute; "
+                "requested rate of %d requests/minute is ignored",
+                global_rate_limiter.requests_per_minute,
+                requests_per_minute,
+            )
 
         self._rate_limiter = global_rate_limiter
 
@@ -173,16 +221,14 @@ class RateLimitedTransport(httpx2.BaseTransport, httpx2.AsyncBaseTransport):
         if not isinstance(self._transport, httpx2.BaseTransport):
             raise TypeError("Cannot use a synchronous client with an async transport.")
         self._rate_limiter.acquire(tokens=1.0)
-        response = self._transport.handle_request(request)
-        return response
+        return self._transport.handle_request(request)
 
     async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
         """Send *request* after acquiring a rate-limit token asynchronously."""
         if not isinstance(self._transport, httpx2.AsyncBaseTransport):
             raise TypeError("Cannot use an async client with a synchronous transport.")
         await self._rate_limiter.async_acquire(tokens=1.0)
-        response = await self._transport.handle_async_request(request)
-        return response
+        return await self._transport.handle_async_request(request)
 
     def close(self) -> None:
         """Close the underlying sync transport."""
@@ -197,13 +243,6 @@ class RateLimitedTransport(httpx2.BaseTransport, httpx2.AsyncBaseTransport):
 
 class EmbeddingsError(Exception):
     """Exception raised for embedding operations."""
-
-    pass
-
-
-# Maximum number of results to request from ChromaDB in a single query.
-# Prevents "too many SQL variables" errors in the underlying SQLite backend.
-_MAX_QUERY_RESULTS = 32766  # this is the maximum for sqlite 3.32 and above
 
 
 class EmbeddingsManager:
@@ -253,7 +292,7 @@ class EmbeddingsManager:
     Examples
     --------
     >>> em = EmbeddingsManager()
-    >>> em.add_paper(paper_dict)  # connect() and create_collection() called automatically
+    >>> em.add_paper(paper_dict)  # client and collection created automatically
     >>> results = em.search_similar("machine learning", n_results=5)
     >>> em.close()
     """
@@ -297,18 +336,14 @@ class EmbeddingsManager:
         )
         self._learned_token_budget: Optional[int] = None
 
-        # Get ChromaDB configuration from config
         self.embedding_db = config.embedding_db
-
         self.collection_name = collection_name or config.collection_name
         self._client: Optional[Any] = None  # chromadb.Client
         self._collection: Optional[Any] = None  # chromadb.Collection
         self._init_lock = threading.RLock()
 
-        # OpenAI client - lazy loaded on first use to avoid API calls during test collection
         self._openai_client: Optional[OpenAI] = None
 
-        # Rate limiting: maximum API requests per minute (0 = unlimited)
         self.requests_per_minute = (
             requests_per_minute if requests_per_minute is not None else config.requests_per_minute
         )
@@ -331,8 +366,7 @@ class EmbeddingsManager:
         if self._client is None:
             with self._init_lock:
                 if self._client is None:
-                    self.connect()
-        assert self._client is not None  # connect() always sets _client or raises EmbeddingsError
+                    self._connect()
         return self._client
 
     @client.setter
@@ -344,8 +378,8 @@ class EmbeddingsManager:
         """
         Get the ChromaDB collection, creating it automatically on first access.
 
-        Calling this property for the first time also triggers :meth:`connect` if
-        the client has not been initialized yet.
+        Calling this property for the first time also connects the client if
+        it has not been initialized yet.
 
         Returns
         -------
@@ -376,80 +410,75 @@ class EmbeddingsManager:
         is wrapped around the default httpx2 transport and passed as the ``http_client``
         argument so that every HTTP request is automatically throttled.
 
-        This lazy loading prevents API calls during test collection.
-
         Returns
         -------
         OpenAI
             Initialized OpenAI client instance.
         """
         if self._openai_client is None:
-            http_client: Optional[Any] = None
-            if self.requests_per_minute > 0:
-                transport = RateLimitedTransport(httpx2.HTTPTransport(), self.requests_per_minute)
-                http_client = httpx2.Client(transport=transport)
-            self._openai_client = OpenAI(
-                base_url=f"{self.lm_studio_url}/v1",
-                api_key=self.llm_backend_auth_token or "lm-studio-local",
-                http_client=http_client,
-            )
+            with self._init_lock:
+                if self._openai_client is None:
+                    self._openai_client = self._create_openai_client()
         return self._openai_client
 
-    def connect(self) -> None:
-        """
-        Connect to ChromaDB.
+    def _create_openai_client(self) -> OpenAI:
+        """Create the OpenAI client, optionally with a rate-limited HTTP transport."""
+        http_client: Optional[Any] = None
+        if self.requests_per_minute > 0:
+            transport = RateLimitedTransport(httpx2.HTTPTransport(), self.requests_per_minute)
+            http_client = httpx2.Client(transport=transport)
+        return OpenAI(
+            base_url=f"{self.lm_studio_url}/v1",
+            api_key=self.llm_backend_auth_token or "lm-studio-local",
+            http_client=http_client,
+        )
 
-        Uses HTTP client if embedding_db is a URL, otherwise uses persistent client
-        with local storage directory.
-
-        Raises
-        ------
-        EmbeddingsError
-            If connection fails.
-        """
+    def _connect(self) -> None:
+        """Connect to ChromaDB via HTTP for URLs or persistent storage for local paths."""
         try:
-            if self.embedding_db.startswith("http://") or self.embedding_db.startswith("https://"):
-                # Use HTTP client for remote ChromaDB service
-                # Parse URL properly using urllib
-                parsed = urlparse(self.embedding_db)
-                host = parsed.hostname or "localhost"
-                port = parsed.port or 8000
-
+            parsed = urlparse(self.embedding_db)
+            if parsed.scheme in ("http", "https"):
                 self._client = chromadb.HttpClient(
-                    host=host,
-                    port=port,
+                    host=parsed.hostname or "localhost",
+                    port=parsed.port or 8000,
+                    ssl=parsed.scheme == "https",
                     settings=Settings(anonymized_telemetry=False),
                 )
-                logger.debug(f"Connected to ChromaDB HTTP service at: {self.embedding_db}")
+                logger.debug("Connected to ChromaDB HTTP service at: %s", self.embedding_db)
             else:
-                # Use persistent client for local storage
                 chroma_path = Path(self.embedding_db)
                 chroma_path.mkdir(parents=True, exist_ok=True)
                 self._client = chromadb.PersistentClient(
                     path=str(chroma_path),
                     settings=Settings(anonymized_telemetry=False),
                 )
-                logger.debug(f"Connected to ChromaDB at: {chroma_path}")
+                logger.debug("Connected to ChromaDB at: %s", chroma_path)
         except Exception as e:
             raise EmbeddingsError(f"Failed to connect to ChromaDB: {str(e)}") from e
 
     def close(self) -> None:
         """
-        Close the ChromaDB connection.
+        Close the OpenAI client and reset the ChromaDB connection.
 
-        Does nothing if not connected.
+        Safe to call multiple times.
         """
-        if self._client:
+        if self._openai_client is not None:
+            try:
+                self._openai_client.close()
+            except Exception as e:
+                logger.debug("Failed to close OpenAI client: %s", e)
+            self._openai_client = None
+        if self._client is not None:
             self._client = None
             self._collection = None
             logger.debug("ChromaDB connection closed")
 
-    def __enter__(self):
-        """Context manager entry."""
-        self.connect()
+    def __enter__(self) -> "EmbeddingsManager":
+        """Context manager entry; connects to ChromaDB."""
+        _ = self.client
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Context manager exit."""
         self.close()
 
@@ -474,42 +503,24 @@ class EmbeddingsManager:
         >>> em.init()
         """
         with self._init_lock:
-            self.connect()
             self.create_collection(reset=reset)
 
-    def test_lm_studio_connection(self) -> bool:
+    def test_api_connection(
+        self,
+        *,
+        verbose: bool = False,
+        model_hint: Optional[str] = None,
+    ) -> bool:
         """
-        Test connection to OpenAI-compatible API endpoint.
-
-        Returns
-        -------
-        bool
-            True if connection is successful, False otherwise.
-
-        Examples
-        --------
-        >>> em = EmbeddingsManager()
-        >>> if em.test_lm_studio_connection():
-        ...     print("API is accessible")
-        """
-        try:
-            # Try to get models list
-            _ = self.openai_client.models.list()
-            logger.debug(f"Successfully connected to OpenAI API at {self.lm_studio_url}")
-            return True
-        except Exception as e:
-            logger.warning(f"Failed to connect to OpenAI API: {str(e)}")
-            return False
-
-    def verbose_api_connection_test(self, model_hint: Optional[str] = None) -> bool:
-        """
-        Test the OpenAI-compatible API connection and print user-facing messages.
+        Test the connection to the OpenAI-compatible API endpoint.
 
         Parameters
         ----------
+        verbose : bool, optional
+            If True, print user-facing status messages, by default False.
         model_hint : str, optional
-            Description of the expected model shown in the failure message.
-            If None, a message using ``self.model_name`` is shown.
+            Description of the expected model shown in the verbose failure
+            message. If None, a message using ``self.model_name`` is shown.
 
         Returns
         -------
@@ -519,19 +530,24 @@ class EmbeddingsManager:
         Examples
         --------
         >>> em = EmbeddingsManager()
-        >>> if em.verbose_api_connection_test():
+        >>> if em.test_api_connection():
         ...     print("API is accessible")
         """
-        print("\n🔌 Testing OpenAI API connection...")
-        if not self.test_lm_studio_connection():
-            print("\n❌ Failed to connect to OpenAI API!", file=sys.stderr)
-            print("\nPlease ensure:", file=sys.stderr)
-            print(f"  - OpenAI-compatible API is running at {self.lm_studio_url}", file=sys.stderr)
-            hint = model_hint or f"The {self.model_name} model is loaded"
-            print(f"  - {hint}", file=sys.stderr)
+        try:
+            _ = self.openai_client.models.list()
+            logger.debug("Successfully connected to OpenAI-compatible API at %s", self.lm_studio_url)
+            if verbose:
+                print("✅ Successfully connected to OpenAI API")
+            return True
+        except Exception as e:
+            logger.warning("Failed to connect to OpenAI-compatible API: %s", str(e))
+            if verbose:
+                print("\n❌ Failed to connect to OpenAI API!", file=sys.stderr)
+                print("\nPlease ensure:", file=sys.stderr)
+                print(f"  - OpenAI-compatible API is running at {self.lm_studio_url}", file=sys.stderr)
+                hint = model_hint or f"The {self.model_name} model is loaded"
+                print(f"  - {hint}", file=sys.stderr)
             return False
-        print("✅ Successfully connected to OpenAI API")
-        return True
 
     def _effective_token_budget(self) -> int:
         """
@@ -576,13 +592,11 @@ class EmbeddingsManager:
         if budget <= 0:
             return text
 
-        truncated = _truncate_to_token_limit(text, budget)
+        truncated, original_tokens, truncated_tokens = _truncate_with_counts(text, budget)
         if truncated == text:
             return text
 
-        original_tokens = _count_tokens(text)
-        truncated_tokens = _count_tokens(truncated)
-        if original_tokens is not None and truncated_tokens is not None:
+        if original_tokens is not None:
             logger.warning(
                 "Truncated embedding input from %d to %d tokens (budget %d) for model %s",
                 original_tokens,
@@ -629,9 +643,10 @@ class EmbeddingsManager:
         target = min(target, max(1, current_tokens - 1))
 
         self._learned_token_budget = target
-        return _truncate_to_token_limit(original_text, target)
+        truncated, _, _ = _truncate_with_counts(original_text, target)
+        return truncated
 
-    def generate_embedding(self, text: str) -> List[float]:
+    def generate_embedding(self, text: str) -> list[float]:
         """
         Generate embedding for a given text using OpenAI-compatible API.
 
@@ -649,7 +664,7 @@ class EmbeddingsManager:
 
         Returns
         -------
-        List[float]
+        list of float
             Embedding vector.
 
         Raises
@@ -669,30 +684,28 @@ class EmbeddingsManager:
 
         prepared_text = self._prepare_embedding_input(text)
 
-        for attempt in range(_MAX_CONTEXT_RETRIES + 1):
+        attempt = 0
+        while True:
             try:
                 response = self.openai_client.embeddings.create(model=self.model_name, input=prepared_text)
-
-                if not response.data or len(response.data) == 0:
+                if not response.data:
                     raise EmbeddingsError("No embedding data in API response")
 
                 embedding = response.data[0].embedding
-                logger.debug(f"Generated embedding with dimension: {len(embedding)}")
+                logger.debug("Generated embedding with dimension: %d", len(embedding))
                 return embedding
-
             except Exception as e:
                 if not _is_context_length_error(e) or attempt >= _MAX_CONTEXT_RETRIES:
                     raise EmbeddingsError(f"Failed to generate embedding via OpenAI API: {str(e)}") from e
 
                 prepared_text = self._shrink_embedding_input(text, prepared_text, e)
+                attempt += 1
                 logger.warning(
                     "Embedding input exceeded the model context window; retrying with a shorter input "
                     "(attempt %d/%d)",
-                    attempt + 1,
+                    attempt,
                     _MAX_CONTEXT_RETRIES,
                 )
-
-        raise EmbeddingsError("Failed to generate embedding via OpenAI API: retries exhausted")
 
     def create_collection(self, reset: bool = False) -> None:
         """
@@ -717,7 +730,7 @@ class EmbeddingsManager:
             if reset:
                 try:
                     self.client.delete_collection(name=self.collection_name)
-                    logger.info(f"Deleted existing collection: {self.collection_name}")
+                    logger.info("Deleted existing collection: %s", self.collection_name)
                 except Exception:
                     pass  # Collection might not exist
 
@@ -725,52 +738,13 @@ class EmbeddingsManager:
                 name=self.collection_name,
                 metadata={"description": "NeurIPS paper abstracts and metadata"},
             )
-            logger.debug(f"Created/retrieved collection: {self.collection_name}")
-
+            logger.debug("Created/retrieved collection: %s", self.collection_name)
         except Exception as e:
             raise EmbeddingsError(f"Failed to create collection: {str(e)}") from e
 
-    def paper_exists(self, paper_id: str) -> bool:
-        """
-        Check if a paper already exists in the collection.
-
-        Parameters
-        ----------
-        paper_id : int or str
-            Unique identifier for the paper.
-
-        Returns
-        -------
-        bool
-            True if paper exists in collection, False otherwise.
-
-        Raises
-        ------
-        EmbeddingsError
-            If collection not initialized.
-
-        Examples
-        --------
-        >>> em = EmbeddingsManager()
-        >>> em.init()
-        >>> em.paper_exists("uid1")
-        False
-        >>> em.add_paper(paper_dict)
-        >>> em.paper_exists("uid1")
-        True
-        """
-        try:
-            # Try to get the paper by ID
-            result = self.collection.get(ids=[paper_id], include=[])
-            # If the result has any IDs, the paper exists
-            return len(result["ids"]) > 0
-        except Exception as e:
-            logger.warning(f"Error checking if paper {paper_id} exists: {str(e)}")
-            return False
-
     def paper_needs_update(self, paper: dict) -> bool:
         """
-        Check if a paper's embedding needs to be updated.
+        Check if a paper's embedding needs to be created or updated.
 
         The stored document is a SHA-256 content hash of the text that was
         embedded.  A paper needs an update when the hash for its current title
@@ -785,11 +759,6 @@ class EmbeddingsManager:
         -------
         bool
             True if the paper needs to be updated, False otherwise.
-
-        Raises
-        ------
-        EmbeddingsError
-            If collection not initialized.
 
         Examples
         --------
@@ -808,9 +777,8 @@ class EmbeddingsManager:
                 return True
 
             return existing_documents[0] != self.embedding_hash_from_paper(paper)
-
         except Exception as e:
-            logger.warning(f"Error checking if paper {paper['uid']} needs update: {str(e)}")
+            logger.warning("Error checking if paper %s needs update: %s", paper["uid"], str(e))
             return True
 
     @staticmethod
@@ -852,9 +820,15 @@ class EmbeddingsManager:
         """
         return hash_text(cls.embedding_text_from_paper(paper))
 
+    def _store_embeddings(self, ids: list[str], documents: list[str], embeddings: list[list[float]]) -> None:
+        """Create or replace records in the collection (upsert semantics)."""
+        self.collection.upsert(ids=ids, embeddings=embeddings, documents=documents)
+
     def add_paper(self, paper: dict) -> None:
         """
         Add a paper to the vector database.
+
+        If an embedding for the paper's UID already exists, it is replaced.
 
         Parameters
         ----------
@@ -875,23 +849,83 @@ class EmbeddingsManager:
         try:
             embedding_text = self.embedding_text_from_paper(paper)
             embedding = self.generate_embedding(embedding_text)
-
-            self.collection.add(
-                embeddings=[embedding],
-                documents=[hash_text(embedding_text)],
+            self._store_embeddings(
                 ids=[paper["uid"]],
+                documents=[hash_text(embedding_text)],
+                embeddings=[embedding],
             )
-            logger.debug(f"Added paper {paper['uid']} to collection")
-
+            logger.debug("Added paper %s to collection", paper["uid"])
         except Exception as e:
             raise EmbeddingsError(f"Failed to add paper {paper['uid']}: {str(e)}") from e
+
+    def _query_embeddings(
+        self,
+        query: str,
+        *,
+        ids: Optional[list[str]] = None,
+        query_embedding: Optional[list[float]] = None,
+        n_results: Optional[int] = None,
+    ) -> tuple[list[str], list[float], list[float]]:
+        """
+        Run a distance query against the collection and return flat results.
+
+        Generates the query embedding when not supplied. The number of results
+        is capped by ``n_results`` (when given), the number of candidate IDs,
+        the collection size, and :data:`_MAX_QUERY_RESULTS`. When no candidates
+        exist, empty result lists are returned without querying.
+
+        Parameters
+        ----------
+        query : str
+            The search query text.
+        ids : list of str, optional
+            Restrict the query to these paper UIDs.
+        query_embedding : list of float, optional
+            Pre-computed embedding for the query.
+        n_results : int, optional
+            Maximum number of results to return.
+
+        Returns
+        -------
+        tuple of (list of str, list of float, list of float)
+            Paper IDs, distances, and the query embedding.
+
+        Raises
+        ------
+        EmbeddingsError
+            If the query is empty or the query itself fails.
+        """
+        if not query or not query.strip():
+            raise EmbeddingsError("Query cannot be empty")
+
+        if query_embedding is None:
+            query_embedding = self.generate_embedding(query)
+
+        candidate_count = len(ids) if ids is not None else self.collection.count()
+        limit = min(
+            n_results if n_results is not None else candidate_count,
+            candidate_count,
+            _MAX_QUERY_RESULTS,
+        )
+        if limit <= 0:
+            return [], [], query_embedding
+
+        results = self.collection.query(
+            query_embeddings=[query_embedding],
+            n_results=limit,
+            include=["distances"],
+            ids=ids,
+        )
+        paper_ids = list(results["ids"][0]) if results.get("ids") else []
+        distances = list(results["distances"][0]) if results.get("distances") else []
+        return paper_ids, distances, query_embedding
 
     def search_similar(
         self,
         query: str,
         n_results: int = 10,
-        ids: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
+        ids: Optional[list[str]] = None,
+    ) -> dict[str, Any]:
         """
         Search for similar papers using semantic similarity.
 
@@ -902,7 +936,8 @@ class EmbeddingsManager:
         n_results : int, optional
             Number of results to return, by default 10.
         ids : list of str, optional
-            Restrict the search to these paper UIDs.
+            Restrict the search to these paper UIDs. An empty list returns an
+            empty result.
 
         Returns
         -------
@@ -928,24 +963,15 @@ class EmbeddingsManager:
             return {"ids": [[]], "distances": [[]]}
 
         try:
-            query_embedding = self.generate_embedding(query)
-            if ids is not None:
-                n_results = min(n_results, len(ids))
-
-            results = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=n_results,
-                ids=ids,
-                include=["distances"],
-            )
-
-            logger.info(f"Found {len(results['ids'][0])} similar papers")
-            return {"ids": results.get("ids", [[]]), "distances": results.get("distances", [[]])}
-
+            paper_ids, distances, _ = self._query_embeddings(query, ids=ids, n_results=n_results)
+            logger.info("Found %d similar papers", len(paper_ids))
+            return {"ids": [paper_ids], "distances": [distances]}
+        except EmbeddingsError:
+            raise
         except Exception as e:
             raise EmbeddingsError(f"Failed to search: {str(e)}") from e
 
-    def get_collection_stats(self) -> Dict[str, Any]:
+    def get_collection_stats(self) -> dict[str, Any]:
         """
         Get statistics about the collection.
 
@@ -975,7 +1001,7 @@ class EmbeddingsManager:
         except Exception as e:
             raise EmbeddingsError(f"Failed to get collection stats: {str(e)}") from e
 
-    def check_model_compatibility(self) -> Tuple[bool, Optional[str], Optional[str]]:
+    def check_model_compatibility(self) -> tuple[bool, Optional[str], Optional[str]]:
         """
         Check if the current embedding model matches the one stored in the database.
 
@@ -998,27 +1024,21 @@ class EmbeddingsManager:
         >>> if not compatible:
         ...     print(f"Model mismatch: stored={stored}, current={current}")
         """
-        try:
-            # Use DatabaseManager to check the stored model
-            db_manager = DatabaseManager()
+        with _translate_errors("Failed to check model compatibility"):
+            with DatabaseManager() as db_manager:
+                stored_model = db_manager.get_embedding_model()
 
-            stored_model = db_manager.get_embedding_model()
-            db_manager.close()
-
-            # If no model is stored, consider it compatible (first time embedding)
             if stored_model is None:
                 return True, None, self.model_name
-
-            # Check if models match
-            compatible = normalize_model_name(stored_model) == normalize_model_name(self.model_name)
-            return compatible, stored_model, self.model_name
-
-        except Exception as e:
-            raise EmbeddingsError(f"Failed to check model compatibility: {str(e)}") from e
+            return (
+                normalize_model_name(stored_model) == normalize_model_name(self.model_name),
+                stored_model,
+                self.model_name,
+            )
 
     def embed_from_database(
         self,
-        where_filters: Optional[Dict[str, Any]] = None,
+        where_filters: Optional[dict[str, Any]] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None,
         force_recreate: bool = False,
     ) -> int:
@@ -1057,65 +1077,44 @@ class EmbeddingsManager:
         >>> # Only embed accepted papers
         >>> count = em.embed_from_database(where_filters={"award": {"$ne": None}})
         """
-        try:
-            # Use DatabaseManager for database operations
-            db_manager = DatabaseManager()
+        with _translate_errors("Failed to embed from database"):
+            with DatabaseManager() as db_manager:
+                db_manager.set_embedding_model(self.model_name)
+                rows = db_manager.get_paper(where_filters, limit=0)
+                total = len(rows)
+                logger.debug("Found %d papers to embed", total)
 
-            # Store the embedding model in the database
-            db_manager.set_embedding_model(self.model_name)
-
-            rows = db_manager.get_paper(where_filters, limit=0)
-            total = len(rows)
-
-            logger.debug(f"Found {total} papers to embed")
-
-            if total == 0:
-                db_manager.close()
-                return 0
-
-            # Process papers one by one
-            embedded_count = 0
-            skipped_count = 0
-            for i, row in enumerate(rows):
-                # Convert sqlite3.Row to dict
-                paper = dict(row)
-
-                # Check if paper already exists in the collection and if it needs to be updated
-                # Skip this check if force_recreate is True
-                if not force_recreate and not self.paper_needs_update(paper):
-                    logger.debug(f"Skipping paper {paper['uid']}: already exists in collection")
-                    skipped_count += 1
-                    # Still call progress callback to update the progress bar
+                embedded_count = 0
+                skipped_count = 0
+                for i, row in enumerate(rows):
+                    paper = dict(row)
+                    if not force_recreate and not self.paper_needs_update(paper):
+                        logger.debug("Skipping paper %s: already exists in collection", paper["uid"])
+                        skipped_count += 1
+                    else:
+                        try:
+                            self.add_paper(paper)
+                            embedded_count += 1
+                        except Exception as e:
+                            logger.error("Failed to embed paper %s: %s", paper["uid"], str(e))
                     if progress_callback:
                         progress_callback(i + 1, total)
-                    continue
-                else:
-                    try:
-                        self.add_paper(paper)
-                        embedded_count += 1
-                        # Call progress callback if provided
-                        if progress_callback:
-                            progress_callback(i + 1, total)
 
-                    except Exception as e:
-                        logger.error(f"Failed to embed paper {paper['uid']}: {str(e)}")
-                        continue
-
-            db_manager.close()
-            logger.info(f"Successfully embedded {embedded_count} papers, skipped {skipped_count} existing papers")
+            logger.info("Successfully embedded %d papers, skipped %d existing papers", embedded_count, skipped_count)
             return embedded_count
-
-        except Exception as e:
-            raise EmbeddingsError(f"Failed to embed from database: {str(e)}") from e
 
     def _query_collection(
         self,
         query: str,
-        ids: Optional[List[str]] = None,
-        query_embedding: Optional[List[float]] = None,
-    ) -> Dict[str, Any]:
+        ids: Optional[list[str]] = None,
+        query_embedding: Optional[list[float]] = None,
+    ) -> dict[str, Any]:
         """
         Run a distance query against the embeddings collection.
+
+        Unlike :meth:`search_similar`, this helper treats empty candidate sets
+        and missing results as errors, which is the contract expected by the
+        distance-based helpers below.
 
         Parameters
         ----------
@@ -1123,7 +1122,7 @@ class EmbeddingsManager:
             The search query text.
         ids : list of str, optional
             Restrict the query to these paper UIDs.
-        query_embedding : list[float], optional
+        query_embedding : list of float, optional
             Pre-computed embedding for the query.  When omitted, an embedding
             is generated with :meth:`generate_embedding`.
 
@@ -1139,34 +1138,18 @@ class EmbeddingsManager:
             If the query is empty, the collection is empty, no IDs matched, or
             no results are returned.
         """
-        if not query or not query.strip():
-            raise EmbeddingsError("Query cannot be empty")
-
         if ids is not None and not ids:
             raise EmbeddingsError("No papers matched the filters")
 
-        if query_embedding is None:
-            query_embedding = self.generate_embedding(query)
-
-        total_count = self.collection.count()
-        if total_count == 0:
+        if self.collection.count() == 0:
             raise EmbeddingsError("No papers in collection")
 
-        n_results_query = min(_MAX_QUERY_RESULTS, len(ids) if ids is not None else total_count)
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n_results_query,
-            include=["distances"],
-            ids=ids,
-        )
-
-        paper_ids = results["ids"][0] if results.get("ids") else []
-        distances = results["distances"][0] if results.get("distances") else []
+        paper_ids, distances, embedding = self._query_embeddings(query, ids=ids, query_embedding=query_embedding)
         if not paper_ids:
             raise EmbeddingsError("No results from collection query")
 
         return {
-            "query_embedding": query_embedding,
+            "query_embedding": embedding,
             "ids": paper_ids,
             "distances": distances,
             "total_considered": len(paper_ids),
@@ -1174,18 +1157,18 @@ class EmbeddingsManager:
 
     @staticmethod
     def _matching_pairs(
-        paper_ids: List[str],
-        distances: List[float],
+        paper_ids: list[str],
+        distances: list[float],
         distance_threshold: float,
-    ) -> List[Tuple[str, float]]:
+    ) -> list[tuple[str, float]]:
         """
         Return identifier/distance pairs within a distance threshold.
 
         Parameters
         ----------
-        paper_ids : list[str]
+        paper_ids : list of str
             Paper identifiers, sorted by distance.
-        distances : list[float]
+        distances : list of float
             Distances corresponding to ``paper_ids``.
         distance_threshold : float
             Maximum distance to include.
@@ -1195,65 +1178,20 @@ class EmbeddingsManager:
         list of tuple
             ``(paper_id, distance)`` pairs within the threshold.
         """
-        pairs: List[Tuple[str, float]] = []
+        pairs: list[tuple[str, float]] = []
         for paper_id, distance in zip(paper_ids, distances):
             if distance > distance_threshold:
                 break
             pairs.append((paper_id, float(distance)))
         return pairs
 
-    def count_papers_within_distance(
-        self,
-        query: str,
-        distance_threshold: float = 1.1,
-        ids: Optional[List[str]] = None,
-        query_embedding: Optional[List[float]] = None,
-    ) -> int:
-        """
-        Count papers within a distance threshold.
-
-        Parameters
-        ----------
-        query : str
-            The search query text.
-        distance_threshold : float, optional
-            Euclidean distance radius, by default 1.1.
-        ids : list of str, optional
-            Restrict the count to these paper UIDs.
-        query_embedding : list[float], optional
-            Pre-computed embedding for the query.
-
-        Returns
-        -------
-        int
-            Number of papers within the distance threshold.
-
-        Raises
-        ------
-        EmbeddingsError
-            If embeddings collection is empty or operation fails.
-        """
-        try:
-            result = self._query_collection(
-                query=query,
-                ids=ids,
-                query_embedding=query_embedding,
-            )
-            matches = self._matching_pairs(result["ids"], result["distances"], distance_threshold)
-            return len(matches)
-        except EmbeddingsError:
-            raise
-        except Exception as e:
-            logger.error(f"Error counting papers within distance: {e}", exc_info=True)
-            raise EmbeddingsError(f"Failed to count papers within distance: {str(e)}") from e
-
     def query_ids_within_distance(
         self,
         query: str,
         distance_threshold: float = 1.1,
-        ids: Optional[List[str]] = None,
-        query_embedding: Optional[List[float]] = None,
-    ) -> Dict[str, Any]:
+        ids: Optional[list[str]] = None,
+        query_embedding: Optional[list[float]] = None,
+    ) -> dict[str, Any]:
         """
         Return identifiers and distances within a distance threshold.
 
@@ -1265,7 +1203,7 @@ class EmbeddingsManager:
             Euclidean distance radius, by default 1.1.
         ids : list of str, optional
             Restrict the query to these paper UIDs.
-        query_embedding : list[float], optional
+        query_embedding : list of float, optional
             Pre-computed embedding for the query.
 
         Returns
@@ -1279,12 +1217,8 @@ class EmbeddingsManager:
         EmbeddingsError
             If embeddings collection is empty or operation fails.
         """
-        try:
-            result = self._query_collection(
-                query=query,
-                ids=ids,
-                query_embedding=query_embedding,
-            )
+        with _translate_errors("Failed to query papers within distance"):
+            result = self._query_collection(query=query, ids=ids, query_embedding=query_embedding)
             matches = self._matching_pairs(result["ids"], result["distances"], distance_threshold)
             return {
                 "query": query,
@@ -1295,13 +1229,47 @@ class EmbeddingsManager:
                 "count": len(matches),
                 "total_considered": result["total_considered"],
             }
-        except EmbeddingsError:
-            raise
-        except Exception as e:
-            logger.error(f"Error querying papers within distance: {e}", exc_info=True)
-            raise EmbeddingsError(f"Failed to query papers within distance: {str(e)}") from e
 
-    def delete_embeddings_by_ids(self, ids: List[str]) -> int:
+    def count_papers_within_distance(
+        self,
+        query: str,
+        distance_threshold: float = 1.1,
+        ids: Optional[list[str]] = None,
+        query_embedding: Optional[list[float]] = None,
+    ) -> int:
+        """
+        Count papers within a distance threshold.
+
+        Parameters
+        ----------
+        query : str
+            The search query text.
+        distance_threshold : float, optional
+            Euclidean distance radius, by default 1.1.
+        ids : list of str, optional
+            Restrict the count to these paper UIDs.
+        query_embedding : list of float, optional
+            Pre-computed embedding for the query.
+
+        Returns
+        -------
+        int
+            Number of papers within the distance threshold.
+
+        Raises
+        ------
+        EmbeddingsError
+            If embeddings collection is empty or operation fails.
+        """
+        result = self.query_ids_within_distance(
+            query=query,
+            distance_threshold=distance_threshold,
+            ids=ids,
+            query_embedding=query_embedding,
+        )
+        return result["count"]
+
+    def delete_embeddings_by_ids(self, ids: list[str]) -> int:
         """
         Delete embeddings by paper UID.
 
@@ -1313,7 +1281,7 @@ class EmbeddingsManager:
         Returns
         -------
         int
-            Number of embeddings deleted.
+            Number of embeddings submitted for deletion.
 
         Raises
         ------
@@ -1323,21 +1291,14 @@ class EmbeddingsManager:
         if not ids:
             return 0
 
-        try:
+        with _translate_errors("Failed to delete embeddings"):
             deleted = 0
-            for start in range(0, len(ids), 1000):
-                batch = ids[start : start + 1000]
-                self.collection.delete(ids=batch)
+            for batch in _iter_batches(ids, _DELETE_BATCH_SIZE):
+                self.collection.delete(ids=list(batch))
                 deleted += len(batch)
             return deleted
-        except Exception as e:
-            raise EmbeddingsError(f"Failed to delete embeddings: {str(e)}") from e
 
-    # ------------------------------------------------------------------
-    # Registry export / import helpers
-    # ------------------------------------------------------------------
-
-    def export_embeddings(self, ids: List[str]) -> Dict[str, Any]:
+    def export_embeddings(self, ids: list[str]) -> dict[str, Any]:
         """
         Export embeddings and content hashes for the given paper UIDs.
 
@@ -1357,14 +1318,13 @@ class EmbeddingsManager:
         EmbeddingsError
             If the export fails or the collection has not been compacted.
         """
-        try:
-            exported_ids: List[str] = []
-            documents: List[str] = []
-            embeddings: List[List[float]] = []
+        with _translate_errors("Failed to export embeddings"):
+            exported_ids: list[str] = []
+            documents: list[str] = []
+            embeddings: list[list[float]] = []
 
-            for start in range(0, len(ids), 1000):
-                batch = ids[start : start + 1000]
-                results = self.collection.get(ids=batch, include=["documents", "embeddings"])
+            for batch in _iter_batches(ids, _DELETE_BATCH_SIZE):
+                results = self.collection.get(ids=list(batch), include=["documents", "embeddings"])
                 result_ids = results.get("ids", [])
                 result_docs = results.get("documents", [])
                 result_embeddings = results.get("embeddings", [])
@@ -1390,15 +1350,11 @@ class EmbeddingsManager:
                 "documents": documents,
                 "embeddings": embeddings,
             }
-        except EmbeddingsError:
-            raise
-        except Exception as e:
-            raise EmbeddingsError(f"Failed to export embeddings: {str(e)}") from e
 
     def import_embeddings(
         self,
-        data: Dict[str, Any],
-        replace_ids: Optional[List[str]] = None,
+        data: dict[str, Any],
+        replace_ids: Optional[list[str]] = None,
         batch_size: int = 100,
     ) -> int:
         """
@@ -1437,28 +1393,19 @@ class EmbeddingsManager:
         if not all(is_content_hash(document) for document in documents):
             raise EmbeddingsError("Embeddings artifact contains invalid content hashes")
 
-        try:
+        with _translate_errors("Failed to import embeddings"):
             if replace_ids:
                 self.delete_embeddings_by_ids(replace_ids)
 
             imported = 0
             for start in range(0, len(ids), batch_size):
-                batch_ids = ids[start : start + batch_size]
-                self.collection.add(
-                    ids=batch_ids,
+                self._store_embeddings(
+                    ids=ids[start : start + batch_size],
                     documents=documents[start : start + batch_size],
                     embeddings=embeddings[start : start + batch_size],
                 )
-                imported += len(batch_ids)
+                imported += min(batch_size, len(ids) - start)
             return imported
-        except EmbeddingsError:
-            raise
-        except Exception as e:
-            raise EmbeddingsError(f"Failed to import embeddings: {str(e)}") from e
-
-    # ------------------------------------------------------------------
-    # Collection compaction
-    # ------------------------------------------------------------------
 
     def remove_all_metadata(self, batch_size: int = 1000) -> int:
         """
@@ -1479,12 +1426,11 @@ class EmbeddingsManager:
         EmbeddingsError
             If the update fails.
         """
-        try:
-            all_ids = list(self.collection.get(include=[])["ids"])
+        with _translate_errors("Failed to remove metadata"):
+            all_ids = self._all_ids()
             processed = 0
-            for start in range(0, len(all_ids), batch_size):
-                batch = all_ids[start : start + batch_size]
-                existing = self.collection.get(ids=batch, include=["metadatas"])
+            for batch in _iter_batches(all_ids, batch_size):
+                existing = self.collection.get(ids=list(batch), include=["metadatas"])
                 keys: set[str] = set()
                 for metadata in existing.get("metadatas") or []:
                     if metadata:
@@ -1493,14 +1439,22 @@ class EmbeddingsManager:
                     processed += len(batch)
                     continue
                 null_metadata = {key: None for key in keys}
-                self.collection.update(ids=batch, metadatas=[null_metadata] * len(batch))
+                self.collection.update(ids=list(batch), metadatas=[null_metadata] * len(batch))
                 processed += len(batch)
             return processed
-        except Exception as e:
-            raise EmbeddingsError(f"Failed to remove metadata: {str(e)}") from e
 
-    def _update_documents(self, ids: List[str], documents: List[str]) -> None:
-        """Update documents without touching embeddings or metadata."""
+    def _all_ids(self) -> list[str]:
+        """Return all record IDs in the collection."""
+        return list(self.collection.get(include=[])["ids"])
+
+    def _update_documents(self, ids: list[str], documents: list[str]) -> None:
+        """
+        Update documents without touching embeddings or metadata.
+
+        Uses ChromaDB's private update API because the public
+        ``collection.update`` recomputes embeddings from documents when no
+        embeddings are supplied.
+        """
         self.collection._client._update(  # type: ignore[attr-defined]
             collection_id=self.collection.id,
             ids=ids,
@@ -1530,16 +1484,15 @@ class EmbeddingsManager:
         EmbeddingsError
             If the update fails.
         """
-        try:
-            all_ids = list(self.collection.get(include=[])["ids"])
+        with _translate_errors("Failed to hash documents"):
+            all_ids = self._all_ids()
             updated = 0
-            for start in range(0, len(all_ids), batch_size):
-                batch = all_ids[start : start + batch_size]
-                existing = self.collection.get(ids=batch, include=["documents"])
+            for batch in _iter_batches(all_ids, batch_size):
+                existing = self.collection.get(ids=list(batch), include=["documents"])
                 result_ids = existing.get("ids", [])
                 result_documents = existing.get("documents", [])
-                update_ids: List[str] = []
-                update_documents: List[str] = []
+                update_ids: list[str] = []
+                update_documents: list[str] = []
                 for uid, document in zip(result_ids, result_documents):
                     if not document:
                         continue
@@ -1552,12 +1505,8 @@ class EmbeddingsManager:
                     self._update_documents(update_ids, update_documents)
                     updated += len(update_ids)
             return updated
-        except EmbeddingsError:
-            raise
-        except Exception as e:
-            raise EmbeddingsError(f"Failed to hash documents: {str(e)}") from e
 
-    def prune_orphan_embeddings(self, database: DatabaseManager, batch_size: int = 1000) -> int:
+    def prune_orphan_embeddings(self, database: DatabaseManager) -> int:
         """
         Delete embeddings whose UIDs no longer exist in the paper database.
 
@@ -1565,8 +1514,6 @@ class EmbeddingsManager:
         ----------
         database : DatabaseManager
             Database used to resolve valid paper UIDs.
-        batch_size : int, optional
-            Number of records to process per batch.
 
         Returns
         -------
@@ -1578,10 +1525,8 @@ class EmbeddingsManager:
         EmbeddingsError
             If the operation fails.
         """
-        try:
-            embedding_ids = set(self.collection.get(include=[])["ids"])
+        with _translate_errors("Failed to prune orphan embeddings"):
+            embedding_ids = set(self._all_ids())
             paper_ids = set(database.get_paper_uids())
             orphans = list(embedding_ids - paper_ids)
             return self.delete_embeddings_by_ids(orphans)
-        except Exception as e:
-            raise EmbeddingsError(f"Failed to prune orphan embeddings: {str(e)}") from e
