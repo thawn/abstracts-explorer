@@ -24,6 +24,7 @@ from abstracts_explorer.cli import (
     pre_process_command,
     download_command,
     create_embeddings_command,
+    _download_single,
 )
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.plugin import LightweightPaper, get_failed_downloads_path
@@ -53,6 +54,42 @@ def patch_get_config_for_test(monkeypatch, embeddings_path):
 
     # Patch get_config in the cli module
     monkeypatch.setattr("abstracts_explorer.cli.get_config", get_config_with_reload)
+
+
+class TestDownloadSingleOptions:
+    """Test plugin-specific option forwarding in _download_single."""
+
+    def test_agu_forwards_concurrency_and_resume_options(self, tmp_path):
+        plugin = Mock()
+        plugin.plugin_name = "agu"
+        plugin.download.return_value = []
+        args = argparse.Namespace(max_workers=12, request_delay=0.25, no_resume=True)
+
+        _download_single(plugin, 2026, tmp_path / "abstracts.json", False, args)
+
+        plugin.download.assert_called_once_with(
+            year=2026,
+            output_path=str(tmp_path / "agu_2026.json"),
+            force_download=False,
+            max_workers=12,
+            request_delay=0.25,
+            resume=False,
+        )
+
+    def test_agu_uses_plugin_defaults_without_cli_overrides(self, tmp_path):
+        plugin = Mock()
+        plugin.plugin_name = "agu"
+        plugin.download.return_value = []
+        args = argparse.Namespace(max_workers=20, request_delay=None, no_resume=False)
+
+        _download_single(plugin, 2026, tmp_path / "abstracts.json", True, args)
+
+        plugin.download.assert_called_once_with(
+            year=2026,
+            output_path=str(tmp_path / "agu_2026.json"),
+            force_download=True,
+            max_workers=20,
+        )
 
 
 class TestBuildEmbeddingsWhereFilters:

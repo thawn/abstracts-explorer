@@ -73,6 +73,14 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Run 'chroma vacuum' after compaction to reclaim disk space.",
     )
     parser.add_argument(
+        "--vacuum-path",
+        help=(
+            "Locally mounted ChromaDB persistent directory to vacuum. Use this when "
+            "EMBEDDING_DB points at a remote server and the volume is mounted into a "
+            "maintenance container."
+        ),
+    )
+    parser.add_argument(
         "--paper-db",
         help="Override PAPER_DB for this command only. Accepts a SQLite path or full database URL.",
     )
@@ -194,7 +202,11 @@ def prune_orphan_embeddings(embeddings_manager: EmbeddingsManager, database: Dat
     return embeddings_manager.delete_embeddings_by_ids(list(embedding_ids - paper_ids))
 
 
-def vacuum(embedding_db: str) -> None:
+class RemoteChromaVacuumError(RuntimeError):
+    """Raised when vacuum is requested for a remote ChromaDB instance."""
+
+
+def vacuum(embedding_db: str, vacuum_path: Optional[str] = None) -> None:
     """
     Reclaim disk space in a local ChromaDB directory.
 
@@ -202,18 +214,33 @@ def vacuum(embedding_db: str) -> None:
     ----------
     embedding_db : str
         ChromaDB URL or local storage path.
+    vacuum_path : str, optional
+        Local path to vacuum instead of *embedding_db*. This allows a
+        maintenance container to vacuum a mounted ChromaDB volume while the
+        application itself connects to a remote ChromaDB server.
 
     Raises
     ------
+    RemoteChromaVacuumError
+        If the database is remote and no local *vacuum_path* is provided.
     RuntimeError
-        If the database is remote and therefore cannot be vacuumed locally.
+        If the local ChromaDB path does not exist.
     """
-    if embedding_db.startswith("http://") or embedding_db.startswith("https://"):
-        raise RuntimeError("Cannot vacuum a remote ChromaDB instance from the client.")
+    target = vacuum_path or embedding_db
+    if target.startswith("http://") or target.startswith("https://"):
+        raise RemoteChromaVacuumError(
+            "Cannot vacuum a remote ChromaDB instance from this container. "
+            "Compaction and pruning completed; only disk reclamation was skipped. "
+            "Run scripts/vacuum-chromadb.sh on the container host."
+        )
+
+    target_path = Path(target)
+    if not target_path.exists():
+        raise RuntimeError(f"ChromaDB path does not exist: {target_path}")
 
     print("🧹 Vacuuming ChromaDB...")
     subprocess.run(
-        ["chroma", "vacuum", "--path", str(Path(embedding_db)), "--force"],
+        ["chroma", "vacuum", "--path", str(target_path), "--force"],
         check=True,
     )
 
@@ -263,8 +290,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.vacuum:
         try:
-            vacuum(config.embedding_db)
-        except RuntimeError as exc:
+            vacuum(config.embedding_db, args.vacuum_path)
+        except RemoteChromaVacuumError as exc:
             print(f"⚠️  {exc}", file=sys.stderr)
         except Exception as exc:
             print(f"❌ Vacuum failed: {exc}", file=sys.stderr)

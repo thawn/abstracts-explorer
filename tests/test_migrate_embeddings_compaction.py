@@ -133,8 +133,10 @@ class TestMain:
         assert "Compaction failed" in capsys.readouterr().err
         embeddings_manager.close.assert_called_once()
 
-    def test_vacuum_runs_subprocess_for_local_storage(self, migration):
-        config, embeddings_manager, _, _ = self._context(migration, embedding_db="/tmp/chroma")
+    def test_vacuum_runs_subprocess_for_local_storage(self, migration, tmp_path):
+        chroma_path = tmp_path / "chroma"
+        chroma_path.mkdir()
+        config, embeddings_manager, _, _ = self._context(migration, embedding_db=str(chroma_path))
 
         with (
             patch.object(migration, "get_config", return_value=config),
@@ -147,7 +149,7 @@ class TestMain:
 
         assert exit_code == 0
         mock_subprocess.run.assert_called_once_with(
-            ["chroma", "vacuum", "--path", str(Path("/tmp/chroma")), "--force"],
+            ["chroma", "vacuum", "--path", str(chroma_path), "--force"],
             check=True,
         )
 
@@ -164,7 +166,47 @@ class TestMain:
             exit_code = migration.main(["--vacuum"])
 
         assert exit_code == 0
-        assert "Cannot vacuum a remote ChromaDB instance" in capsys.readouterr().err
+        error = capsys.readouterr().err
+        assert "Cannot vacuum a remote ChromaDB instance" in error
+        assert "scripts/vacuum-chromadb.sh" in error
+        mock_subprocess.run.assert_not_called()
+
+    def test_vacuum_path_override_vacuums_remote_storage(self, migration, tmp_path, capsys):
+        chroma_path = tmp_path / "mounted-chroma"
+        chroma_path.mkdir()
+        config, embeddings_manager, _, _ = self._context(migration, embedding_db="http://chroma:8000")
+
+        with (
+            patch.object(migration, "get_config", return_value=config),
+            patch.object(migration, "EmbeddingsManager", return_value=embeddings_manager),
+            patch.object(migration, "remove_all_metadata", return_value=0),
+            patch.object(migration, "hash_all_documents", return_value=0),
+            patch.object(migration, "subprocess") as mock_subprocess,
+        ):
+            exit_code = migration.main(["--vacuum", "--vacuum-path", str(chroma_path)])
+
+        assert exit_code == 0
+        mock_subprocess.run.assert_called_once_with(
+            ["chroma", "vacuum", "--path", str(chroma_path), "--force"],
+            check=True,
+        )
+        assert "Cannot vacuum a remote" not in capsys.readouterr().err
+
+    def test_missing_vacuum_path_fails(self, migration, tmp_path, capsys):
+        missing_path = tmp_path / "does-not-exist"
+        config, embeddings_manager, _, _ = self._context(migration, embedding_db="http://chroma:8000")
+
+        with (
+            patch.object(migration, "get_config", return_value=config),
+            patch.object(migration, "EmbeddingsManager", return_value=embeddings_manager),
+            patch.object(migration, "remove_all_metadata", return_value=0),
+            patch.object(migration, "hash_all_documents", return_value=0),
+            patch.object(migration, "subprocess") as mock_subprocess,
+        ):
+            exit_code = migration.main(["--vacuum", "--vacuum-path", str(missing_path)])
+
+        assert exit_code == 1
+        assert "does not exist" in capsys.readouterr().err
         mock_subprocess.run.assert_not_called()
 
     def test_paper_db_override_reloads_config(self, migration, monkeypatch):

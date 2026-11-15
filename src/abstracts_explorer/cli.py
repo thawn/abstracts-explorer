@@ -749,8 +749,15 @@ def _download_single(
     """
     kwargs: Dict[str, Any] = {}
 
-    if plugin.plugin_name == "ml4ps":
+    if plugin.plugin_name in {"ml4ps", "agu"}:
         kwargs["max_workers"] = getattr(args, "max_workers", 20)
+
+    if plugin.plugin_name == "agu":
+        request_delay = getattr(args, "request_delay", None)
+        if request_delay is not None:
+            kwargs["request_delay"] = request_delay
+        if getattr(args, "no_resume", False):
+            kwargs["resume"] = False
 
     if plugin.plugin_name == "chi":
         input_file = getattr(args, "input_file", None)
@@ -3079,6 +3086,17 @@ Examples:
         type=int,
         default=20,
         help="Maximum parallel workers for fetching data (default: 20)",
+    )
+    download_parser.add_argument(
+        "--request-delay",
+        type=float,
+        default=None,
+        help="Delay before each HTTP request for plugins that support it (AGU).",
+    )
+    download_parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Discard an interrupted download checkpoint and start fresh (AGU).",
     )
     download_parser.add_argument(
         "--input-file",
