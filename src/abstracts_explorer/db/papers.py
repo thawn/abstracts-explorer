@@ -565,3 +565,35 @@ class PapersMixin(WhereFilterMixin):
 
         except Exception as e:
             raise self._db_error(f"Failed to delete papers for {conference}/{year}", e)
+
+    def delete_papers_by_uids(self, uids: List[str]) -> int:
+        """
+        Delete papers by their UIDs.
+
+        Parameters
+        ----------
+        uids : list of str
+            Paper UIDs to delete.
+
+        Returns
+        -------
+        int
+            Number of papers deleted.
+
+        Raises
+        ------
+        DatabaseError
+            If deletion fails.
+        """
+        if not uids:
+            return 0
+
+        try:
+            result = self.session.execute(delete(Paper).where(Paper.uid.in_(uids)))
+            self.session.commit()
+            self._invalidate_metadata_cache()
+            count = getattr(result, "rowcount", 0) or 0
+            logger.info("Deleted %d papers by UID", count)
+            return count
+        except Exception as e:
+            raise self._db_error("Failed to delete papers by UID", e)

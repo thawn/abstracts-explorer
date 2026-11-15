@@ -9,7 +9,7 @@ in the process (including managers created lazily inside MCP tools).
 
 The main entry point is :class:`SqlProfiler`::
 
-    from abstracts_explorer.profiling import SqlProfiler
+    from tools.profiling import SqlProfiler
 
     with SqlProfiler() as profiler:
         with profiler.case("search"):
@@ -18,7 +18,9 @@ The main entry point is :class:`SqlProfiler`::
     for case in profiler.aggregated():
         print(case.label, case.wall_ms_mean, case.sql_ms_mean)
 
-Profiling is read-only and does not modify the database.
+The profiler itself does not modify the database; ``explain_statement`` with
+``analyze=True`` executes the supplied statement, so only pass SELECT queries
+there.
 """
 
 from __future__ import annotations
@@ -493,10 +495,11 @@ class SqlProfiler:
         self.detach()
 
     def reset(self) -> None:
-        """Clear all recorded statements and cases."""
+        """Clear all recorded statements, cases, and in-flight start times."""
         with self._lock:
             self._records.clear()
             self._cases.clear()
+            self._pending.clear()
 
     @contextlib.contextmanager
     def case(self, label: str):

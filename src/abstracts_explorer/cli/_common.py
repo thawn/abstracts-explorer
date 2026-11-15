@@ -198,8 +198,9 @@ def _resolve_conference_arg(conference: Optional[str]) -> Optional[str]:
 
     Opens the local database, calls
     :py:meth:`~abstracts_explorer.database.DatabaseManager.resolve_conference_name`,
-    and returns the result.  If *conference* is ``None`` or the database
-    cannot be reached, the original value is returned unchanged.
+    and returns the result.  If *conference* is ``None``, ``None`` is
+    returned.  Raises :class:`~abstracts_explorer.database.DatabaseError`
+    when the database cannot be reached or the conference is unknown.
 
     This helper should be called **once** at the entry point of every CLI
     command that accepts a ``--conference`` option.  After the call, all

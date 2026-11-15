@@ -1756,7 +1756,7 @@ class TestGetConferenceYearsFromDb:
 
     def test_uses_single_query(self, connected_db, sample_paper):
         """The conference/year mapping is built with one SQL statement."""
-        from abstracts_explorer.profiling import SqlProfiler
+        from tools.profiling import SqlProfiler
 
         connected_db.add_paper(sample_paper)
 
@@ -1781,7 +1781,7 @@ class TestMetadataCacheIntegration:
 
     def test_postgresql_metadata_cache_hits(self, connected_db, sample_paper, monkeypatch):
         """A cached metadata call executes no SQL after the first call."""
-        from abstracts_explorer.profiling import SqlProfiler
+        from tools.profiling import SqlProfiler
 
         self._enable_cache(monkeypatch)
         connected_db.add_paper(sample_paper)
@@ -1799,7 +1799,7 @@ class TestMetadataCacheIntegration:
 
     def test_sqlite_bypasses_metadata_cache(self, connected_db, sample_paper):
         """SQLite metadata calls always execute SQL."""
-        from abstracts_explorer.profiling import SqlProfiler
+        from tools.profiling import SqlProfiler
 
         connected_db.add_paper(sample_paper)
 

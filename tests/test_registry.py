@@ -2509,7 +2509,7 @@ class TestCLICommands:
                 "tok",
                 "-c",
                 "n",
-                "-y",
+                "--year",
                 "24",
             ],
         ):
@@ -2535,7 +2535,7 @@ class TestCLICommands:
                 "tok",
                 "-c",
                 "n",
-                "-y",
+                "--year",
                 "24",
             ],
         ):

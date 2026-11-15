@@ -7,7 +7,7 @@ import json
 import pytest
 from sqlalchemy import create_engine, text
 
-from abstracts_explorer.profiling import (
+from tools.profiling import (
     SqlProfiler,
     explain_statement,
     normalize_sql,

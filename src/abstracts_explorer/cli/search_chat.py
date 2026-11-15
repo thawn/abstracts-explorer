@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 
 from abstracts_explorer.config import get_config
-from abstracts_explorer.database import DatabaseManager, DatabaseError
+from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager, EmbeddingsError
 from abstracts_explorer.rag import RAGChat, RAGError
 
@@ -233,11 +233,7 @@ def chat_command(args: argparse.Namespace) -> int:
         chat_conferences: Optional[List[str]] = None
         chat_years: Optional[List[int]] = None
         if conference:
-            try:
-                stored_name = db.resolve_conference_name(conference)
-            except DatabaseError:
-                stored_name = conference
-            chat_conferences = [stored_name]
+            chat_conferences = [conference]
         if year is not None:
             chat_years = [year]
 
