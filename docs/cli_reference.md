@@ -227,7 +227,6 @@ Cluster embeddings and optionally export results.
 ```text
 usage: abstracts-explorer clustering run [-h] [--collection COLLECTION]
                                          [--output OUTPUT] [--limit LIMIT]
-                                         [--conference CONFERENCE] [--year YEAR]
 ```
 
 | Option | Description |
@@ -235,7 +234,6 @@ usage: abstracts-explorer clustering run [-h] [--collection COLLECTION]
 | `--collection COLLECTION` | Name of the ChromaDB collection (default: `papers`) |
 | `--output OUTPUT` | Path to export clustering results as JSON (optional) |
 | `--limit LIMIT` | Maximum number of embeddings to process (optional) |
-| `--conference CONFERENCE` / `--year YEAR` | Scope the clustering run. |
 
 ### clustering clear-cache
 
@@ -244,13 +242,11 @@ the cache becomes stale).
 
 ```text
 usage: abstracts-explorer clustering clear-cache [-h] [--embedding-model EMBEDDING_MODEL]
-                                                 [--conference CONFERENCE] [--year YEAR]
 ```
 
 | Option | Description |
 | ------ | ----------- |
 | `--embedding-model EMBEDDING_MODEL` | Only clear cache for this embedding model (optional) |
-| `--conference CONFERENCE` / `--year YEAR` | Scope the cache clearing. |
 
 **Examples:**
 
@@ -268,9 +264,9 @@ Pre-generate clustering results and persist them to the database cache so
 the web UI serves them instantly.
 
 - Without arguments: generates for every conference combined with each
-  individual year and with all years.
-- With `--conference` only: generates for that conference with all years
-  combined AND each individual year.
+  individual year.
+- With `--conference` only: generates for that conference for each
+  individual year.
 - With `--conference` and `--year`: generates for that specific
   conference/year only.
 
@@ -294,7 +290,7 @@ usage: abstracts-explorer clustering pre-generate [-h] [--collection COLLECTION]
 # Pre-generate for all conference/year combinations (default)
 abstracts-explorer clustering pre-generate
 
-# Pre-generate for a specific conference (all years + each year)
+# Pre-generate for a specific conference (each year)
 abstracts-explorer clustering pre-generate --conference NeurIPS
 
 # Pre-generate for a specific conference and year
@@ -342,7 +338,7 @@ usage: abstracts-explorer delete-data [-h] --conference CONFERENCE --year YEAR [
 | Option | Description |
 | ------ | ----------- |
 | `--conference, -c CONFERENCE` | Conference to delete (required). Case-insensitive. |
-| `--year, -y YEAR` | Year of conference/workshop to delete (required). |
+| `--year YEAR` | Year of conference/workshop to delete (required). |
 | `--yes` | Skip the interactive confirmation prompt. |
 
 **Examples:**
@@ -421,7 +417,6 @@ usage: abstracts-explorer eval generate [-h] [--n-pairs N_PAIRS]
                                         [--tools TOOLS [TOOLS ...]] [--no-followups]
                                         [--n-followups N_FOLLOWUPS] [--model MODEL]
                                         [--backend-url BACKEND_URL]
-                                        [--conference CONFERENCE] [--year YEAR]
 ```
 
 | Option | Description |
@@ -431,7 +426,6 @@ usage: abstracts-explorer eval generate [-h] [--n-pairs N_PAIRS]
 | `--no-followups` | Disable follow-up question generation |
 | `--n-followups N_FOLLOWUPS` | Follow-up turns per initial pair (default: 1) |
 | `--model MODEL` / `--backend-url BACKEND_URL` | LLM used for generation |
-| `--conference CONFERENCE` / `--year YEAR` | Scope for paper sampling. |
 
 ```bash
 abstracts-explorer eval generate
@@ -445,14 +439,12 @@ Interactively verify, edit, or delete Q/A pairs.
 
 ```text
 usage: abstracts-explorer eval verify [-h] [--sample SAMPLE] [--all]
-                                      [--conference CONFERENCE] [--year YEAR]
 ```
 
 | Option | Description |
 | ------ | ----------- |
 | `--sample SAMPLE` | Number of pairs to randomly sample for review |
 | `--all` | Review all pairs (including already verified) |
-| `--conference CONFERENCE` / `--year YEAR` | Scope. |
 
 ```bash
 abstracts-explorer eval verify --sample 10
@@ -467,7 +459,6 @@ usage: abstracts-explorer eval run [-h] [--collection COLLECTION] [--model MODEL
                                    [--embedding-model EMBEDDING_MODEL]
                                    [--backend-url BACKEND_URL] [--limit LIMIT]
                                    [--include-unverified]
-                                   [--conference CONFERENCE] [--year YEAR]
 ```
 
 | Option | Description |
@@ -476,7 +467,6 @@ usage: abstracts-explorer eval run [-h] [--collection COLLECTION] [--model MODEL
 | `--model MODEL` / `--embedding-model EMBEDDING_MODEL` / `--backend-url BACKEND_URL` | Models used for the run |
 | `--limit LIMIT` | Maximum number of pairs to evaluate |
 | `--include-unverified` | Include unverified Q/A pairs |
-| `--conference CONFERENCE` / `--year YEAR` | Scope. |
 
 ```bash
 abstracts-explorer eval run
@@ -489,7 +479,6 @@ Browse and display evaluation results.
 ```text
 usage: abstracts-explorer eval results [-h] [--run-id RUN_ID] [--detail]
                                        [--sample SAMPLE] [--clear] [--yes]
-                                       [--conference CONFERENCE] [--year YEAR]
 ```
 
 | Option | Description |
@@ -499,7 +488,6 @@ usage: abstracts-explorer eval results [-h] [--run-id RUN_ID] [--detail]
 | `--sample SAMPLE` | Randomly sample N results for browsing |
 | `--clear` | Delete all stored results for the selected run |
 | `--yes, -y` | Skip confirmation prompt when using `--clear` |
-| `--conference CONFERENCE` / `--year YEAR` | Scope. |
 
 ```bash
 abstracts-explorer eval results --detail
@@ -511,7 +499,7 @@ abstracts-explorer eval results --detail --sample 5
 Delete all accepted (verified) Q/A pairs.
 
 ```text
-usage: abstracts-explorer eval clear [-h] [--yes, -y] [--conference CONFERENCE] [--year YEAR]
+usage: abstracts-explorer eval clear [-h] [--yes, -y]
 ```
 
 ```bash
@@ -543,7 +531,7 @@ usage: abstracts-explorer registry upload [-h] [--repository REPOSITORY]
 | `--repository, -r REPOSITORY` | OCI repository (or `REGISTRY_REPOSITORY` env var) |
 | `--token TOKEN` | Authentication token, e.g. GitHub PAT (or `GITHUB_TOKEN` env var) |
 | `--conference, -c CONFERENCE` | Conference name or `all` (default: all) |
-| `--year, -y YEAR` | Conference year (default: all available years) |
+| `--year YEAR` | Conference year (default: all available years) |
 | `--tag TAG` | Custom tag (default: derived from conference, year and embedding model) |
 
 ```bash
@@ -565,7 +553,7 @@ usage: abstracts-explorer registry download [-h] [--repository REPOSITORY]
 | ------ | ----------- |
 | `--repository, -r REPOSITORY` / `--token TOKEN` | Registry location and auth (see upload) |
 | `--conference, -c CONFERENCE` | Conference name or `all` (default: all) |
-| `--year, -y YEAR` | Conference year (default: all years in the artifact) |
+| `--year YEAR` | Conference year (default: all years in the artifact) |
 | `--tag TAG` | Custom tag (default: derived from conference, year and embedding model) |
 | `--embedding-model EMBEDDING_MODEL` | Embedding model for tag derivation (defaults to local DB metadata / `EMBEDDING_MODEL` env var) |
 | `--yes` | Skip confirmation prompt |
@@ -588,7 +576,6 @@ usage: abstracts-explorer registry list [-h] [--repository REPOSITORY]
 | ------ | ----------- |
 | `--repository, -r REPOSITORY` / `--token TOKEN` | Registry location and auth |
 | `--tag TAG` | Inspect a specific tag (shows details instead of listing) |
-| `--conference CONFERENCE` / `--year YEAR` | Scope. |
 
 ```bash
 abstracts-explorer registry list --repository ghcr.io/thawn/abstracts-data

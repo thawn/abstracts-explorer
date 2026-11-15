@@ -68,6 +68,7 @@ The web interface provides:
 src/abstracts_explorer/web_ui/
 ├── __init__.py          # Module exports
 ├── app.py               # Flask application (routes + server startup)
+├── dependencies.py      # Request-scoped DB/embeddings/RAG helpers and caches
 ├── api_utils.py         # Shared API helpers
 ├── static/
 │   ├── app.js           # Frontend entry point

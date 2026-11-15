@@ -19,7 +19,22 @@ Guidance for AI coding agents working on **abstracts-explorer** (Python package 
 
 ## Layout
 
-- `src/abstracts_explorer/`: `db/` package (`DatabaseManager` composed from mixins; `database.py` is a re-export facade), `db_models.py`, `embeddings.py` (ChromaDB), `clustering.py`, `rag.py`, `mcp_server.py`, `mcp_tools.py`, `interesting_papers.py`, `evaluation.py`, `registry.py`, `rate_limiter.py`, `llm_utils.py`, `export_utils.py`, `config.py`, `cli/` package (argparse; one module per command group, `main.py` wires/dispatches), `plugin.py`, `plugins/`, `web_ui/` (Flask + modular ES6).
+- `src/abstracts_explorer/`: mostly packages with thin facades for stable import paths:
+  - `cli/`: `main.py` (dispatch), `parsers.py` (argparse wiring), `_common.py`, one module per command group.
+  - `db/`: `DatabaseManager` mixins (`manager.py`); `database.py` is a re-export facade.
+  - `embeddings/`: ChromaDB store, generation, queries, ingestion, artifacts.
+  - `clustering/`: Agglomerative + t-SNE, hierarchy, labeling, results, cache/pipeline.
+  - `plugin/`: plugin framework, models, registry, HTTP, persistence; `plugin.py` is no longer present.
+  - `plugins/`: conference downloaders.
+  - `mcp/`: MCP server, resources, cache, tools; `mcp_server.py` is a facade. `mcp_tools.py` is the tool registry/normalizer/formatter.
+  - `rag/`: agent, tool wrappers, conversation, extraction.
+  - `evaluation/`: prompts, formatting, generator, runner.
+  - `interesting_papers/`: loading, summary, recommendations.
+  - `export/`: markdown/ZIP export (`export_utils.py` is a facade).
+  - `utils/`: shared time/json/url/conference/paper-presentation helpers.
+  - Top-level: `config.py`, `db_models.py`, `paper_utils.py`, `registry.py`, `rate_limiter.py`, `metadata_cache.py`, `llm_utils.py`, `web_ui/` (Flask + `dependencies.py` + modular ES6).
+- `tools/profiling.py`: dev-only SQL profiler (not shipped in the wheel).
+- `scripts/archive/`: applied one-off migrations kept for reference.
 - `tests/`: pytest suite.
 - `docs/`: Sphinx (Markdown).
 - `src/abstracts_explorer/web_ui/tests/`: Jest tests.

@@ -5,31 +5,34 @@ codebase, including module relationships, data flow, and function-level flow-cha
 
 ## Module Overview
 
-The codebase comprises **~28,200 lines** of Python:
+The codebase comprises **~21,200 lines** of Python (plus the dev-only
+`tools/profiling.py`, which is not shipped in the wheel):
 
 | Module | Lines | Responsibility |
 |--------|------:|----------------|
-| `cli/` package | 4,653 | Command-line interface (`main.py` wiring + one module per command group) |
-| `db/` package | 3,975 | SQL database operations as `DatabaseManager` mixins (+ 27-line `database.py` facade) |
-| `clustering.py` | 1,787 | Agglomerative clustering & visualization (fixed pipeline: ward/150 + t-SNE) |
+| `cli/` package | 4,640 | Command-line interface (`main.py` dispatch + `parsers.py` wiring + per-command modules) |
+| `db/` package | 4,061 | SQL database operations as `DatabaseManager` mixins (+ 27-line `database.py` facade) |
+| `plugins/` | 4,079 | Conference downloader plugins (11 plugins) |
+| `clustering/` package | 1,976 | Agglomerative clustering, t-SNE, labeling, hierarchy, cache |
+| `plugin/` package | 1,753 | Plugin framework, models, registry, HTTP, persistence |
 | `registry.py` | 1,684 | OCI registry upload/download |
-| `mcp_server.py` | 1,306 | MCP server & tool implementations (8 tools) |
-| `plugin.py` | 1,314 | Plugin system & data models |
-| `embeddings.py` | 1,223 | ChromaDB vector embeddings |
-| `web_ui/app.py` | 1,199 | Flask web API (19 routes) |
-| `rag.py` | 989 | RAG chat with Pydantic AI |
-| `evaluation.py` | 851 | RAG evaluation framework |
-| `interesting_papers.py` | 823 | Interesting-paper summaries & recommendations |
-| `profiling.py` | 742 | DB access profiling (development tool) |
-| `mcp_tools.py` | 679 | MCP tool argument normalization & LLM formatting |
-| `export_utils.py` | 667 | Paper export (ZIP/Markdown) |
+| `mcp/` package | 1,481 | MCP server, resources, cache, tool implementations (8 tools) |
+| `embeddings/` package | 1,426 | ChromaDB store, generation, queries, ingestion, artifacts |
+| `rag/` package | 1,064 | RAG agent, tool wrappers, conversation, extraction |
+| `web_ui/app.py` | 1,037 | Flask web API (19 routes) |
+| `web_ui/dependencies.py` | 178 | Request-scoped DB/embeddings/RAG helpers |
+| `evaluation/` package | 882 | RAG evaluation (prompts, generation, running) |
+| `interesting_papers/` package | 823 | Interesting-paper summaries & recommendations |
+| `export/` package | 709 | Paper export (ZIP/Markdown) |
+| `mcp_tools.py` | 705 | Tool registry, argument normalization, LLM formatting |
 | `config.py` | 501 | Configuration management |
 | `db_models.py` | 429 | SQLAlchemy ORM models |
-| `plugins/*.py` | ~4,083 | Conference downloader plugins (11 plugins) |
+| `utils/` package | 256 | Shared time/json/url/conference/presentation helpers |
 | `rate_limiter.py` | 222 | Token-bucket rate limiter & cooldown |
 | `paper_utils.py` | 167 | Paper formatting utilities |
 | `metadata_cache.py` | 112 | TTL cache for PostgreSQL metadata |
 | `llm_utils.py` | 76 | Shared one-shot chat-completion helper |
+| `tools/profiling.py` | 745 | DB profiling (development tool, not shipped) |
 
 ## High-Level Module Dependency Graph
 
@@ -39,18 +42,18 @@ graph TD
     CFG[config.py<br/>501 lines]
     DB[db/ package<br/>DatabaseManager mixins]
     DBM[db_models.py<br/>429 lines]
-    EMB[embeddings.py<br/>1223 lines]
-    CLU[clustering.py<br/>1787 lines]
-    RAG[rag.py<br/>989 lines]
-    MCP[mcp_server.py<br/>1306 lines]
-    MCT[mcp_tools.py<br/>679 lines]
-    WEB[web_ui/app.py<br/>1199 lines]
-    PLG[plugin.py<br/>1314 lines]
+    EMB[embeddings/<br/>ChromaDB + generation]
+    CLU[clustering/<br/>Agglomerative + t-SNE]
+    RAG[rag/<br/>agent + tools]
+    MCP[mcp/<br/>server + tools]
+    MCT[mcp_tools.py<br/>registry + formatting]
+    WEB[web_ui/<br/>Flask app + deps]
+    PLG[plugin/<br/>framework + registry]
     PLI[plugins/*<br/>11 downloaders]
-    EXP[export_utils.py<br/>667 lines]
+    EXP[export/<br/>markdown + zip]
     PAP[paper_utils.py<br/>167 lines]
     REG[registry.py<br/>1684 lines]
-    EVL[evaluation.py<br/>851 lines]
+    EVL[evaluation/<br/>generate + run]
 
     CLI --> CFG
     CLI --> DB
@@ -120,7 +123,7 @@ graph TD
 
 ## CLI Command Flow
 
-The CLI (`cli.py`) is the primary entry point with 25 command functions. All commands
+The CLI (`cli/` package) is the primary entry point. All commands
 follow a repeated pattern: parse args → load config → initialize resources → execute → handle errors.
 
 ```{mermaid}
@@ -221,19 +224,14 @@ graph LR
 
 ```{mermaid}
 graph TD
-    subgraph "DatabaseManager - 2943 lines"
+    subgraph "DatabaseManager mixins (db/ package)"
         direction TB
         CONN["Connection Management<br/>__init__, connect, close, __enter__, __exit__"]
-
-        subgraph "⚠ Duplicate: Session Validation"
-            SV1["if not self._session: raise DatabaseError<br/>(repeated in 30+ methods)"]
-        end
 
         subgraph "Paper Operations"
             ADD["add_paper / add_papers"]
             SEARCH["search_papers<br/>(flexible filter builder)"]
             KWSEARCH["search_papers_keyword<br/>(⚠ thin wrapper around search_papers)"]
-            AUTHSEARCH["search_authors_in_papers"]
         end
 
         subgraph "⚠ Duplicate: Faceting Methods"
@@ -265,19 +263,18 @@ graph TD
         end
     end
 
-    CONN --> SV1
-    SV1 --> ADD
-    SV1 --> SEARCH
+    CONN --> ADD
+    CONN --> ADD
+    CONN --> SEARCH
     SEARCH --> KWSEARCH
-    SV1 --> SESS
-    SV1 --> CONF
-    SV1 --> YEARS
-    SV1 --> CGET
-    SV1 --> QA
-    SV1 --> ER
-    SV1 --> EXPS
+    CONN --> SESS
+    CONN --> CONF
+    CONN --> YEARS
+    CONN --> CGET
+    CONN --> QA
+    CONN --> ER
+    CONN --> EXPS
 
-    style SV1 fill:#ffcccc,stroke:#cc0000
     style KWSEARCH fill:#ffffcc,stroke:#cccc00
 ```
 
@@ -313,7 +310,7 @@ graph TD
         subgraph "Shared keyword extraction"
             T1["extract_cluster_keywords"]
             T2["_extract_keywords_for_samples"]
-            T3["_compute_tfidf_keywords<br/>(shared TF-IDF implementation)"]
+            T3["compute_tfidf_keywords<br/>(shared TF-IDF implementation)"]
         end
 
         subgraph "Shared LLM label generation"
@@ -346,31 +343,15 @@ graph TD
     PF --> CLOAD
     CWC --> CLOAD
 
-    W1 -.->|"duplicate logic"| W2
-    W1 -.->|"duplicate logic"| W3
-    W1 -.->|"duplicate logic"| W4
-    T1 -.->|"duplicate logic"| T2
-    L1 -.->|"duplicate logic"| L2
-    L1 -.->|"duplicate logic"| L3
 
-    style W1 fill:#ffcccc,stroke:#cc0000
-    style W2 fill:#ffcccc,stroke:#cc0000
-    style W3 fill:#ffcccc,stroke:#cc0000
-    style W4 fill:#ffcccc,stroke:#cc0000
-    style T1 fill:#ffcccc,stroke:#cc0000
-    style T2 fill:#ffcccc,stroke:#cc0000
-    style L1 fill:#ffcccc,stroke:#cc0000
-    style L2 fill:#ffcccc,stroke:#cc0000
-    style L3 fill:#ffcccc,stroke:#cc0000
 ```
 
 ## RAG Chat & MCP Tools Flow
 
 ```{mermaid}
 graph TD
-    subgraph "RAG Chat (rag.py)"
+    subgraph "RAG Chat (rag/ package)"
         RQUERY["query()"]
-        RCHAT["chat()"]
         RBUILD["_build_agent()"]
 
         subgraph "Explicit Tool Wrappers (8)"
@@ -394,7 +375,7 @@ graph TD
         FORMAT["format_tool_result_for_llm"]
     end
 
-    subgraph "MCP Server (mcp_server.py)"
+    subgraph "MCP Server (mcp/ package)"
         subgraph "Core Tool Functions"
             S1["search_papers"]
             S2["get_conference_topics"]
@@ -480,7 +461,7 @@ graph TD
 
 ```{mermaid}
 graph TD
-    subgraph "export_utils.py"
+    subgraph "export/ package"
         EXP["export_papers_to_zip"] --> GFS["generate_folder_structure_export"]
         GFS --> GMR["generate_main_readme"]
         GFS --> GAP["generate_all_papers_markdown"]
@@ -533,24 +514,26 @@ graph LR
     style PC4 fill:#ffcccc,stroke:#cc0000
 ```
 
-## Summary of Duplicate Code Paths
+## Refactoring Status
 
-The following table summarizes all identified duplicate code patterns, ordered by
-severity:
+The major duplication patterns identified during the refactor have been
+resolved. The table records where each concern now lives.
 
-| # | Pattern | Occurrences | Modules | Severity |
-|---|---------|-------------|---------|----------|
-| 1 | SQL filter/UID resolution | 5+ | database.py, clustering.py, mcp_server.py | Resolved (`resolve_paper_uids`) |
-| 2 | CLI command header printing | 15+ | cli.py | Medium |
-| 3 | TF-IDF keyword extraction | 2 | clustering.py | Medium |
-| 4 | LLM label generation (OpenAI call + fallback) | 3 | clustering.py | Medium |
-| 5 | RAG tool execution/logging tail | 8 | rag.py | Resolved (`_run_rag_tool`) |
-| 6 | MCP argument normalization functions | 8 tools | mcp_tools.py | Resolved (`NormRule` + `_normalize_args`) |
-| 7 | Resource init in MCP tools (config → embed → db) | 8 | mcp_server.py | Resolved (`_get_mcp_resources`) |
-| 8 | Conference/year argument resolution | 8+ | cli.py | Low |
-| 9 | Paper markdown formatting (session grouping) | 2 | export_utils.py | Low |
-| 10 | Error handling + traceback pattern | 15+ | cli.py | Low |
-| 11 | Faceting query pattern | 4 | database.py | Low |
-| 12 | Eval CRUD parallel structures | 2×5 | database.py | Low |
-| 13 | Progress callback definitions | 4 | registry.py | Low |
-| 14 | Web route error handling (try/except/jsonify) | 22 | web_ui/app.py | Low |
+| # | Pattern | Now |
+|---|---------|-----|
+| 1 | SQL filter/UID resolution | `db/search.py` (`resolve_paper_uids`, shared filter builder) |
+| 2 | CLI header printing | `cli/_common.py` (`_print_header`) |
+| 3 | TF-IDF keyword extraction | `clustering/tfidf.py` (fit once, shared) |
+| 4 | LLM label generation | `clustering/labeling.py` + `llm_utils.py` |
+| 5 | RAG tool execution/logging tail | `rag/tools.py` (`_run_rag_tool`) |
+| 6 | MCP argument normalization | `mcp_tools.py` (`NormRule` + `_normalize_args`) |
+| 7 | Resource init in MCP tools | `mcp/resources.py` (`_get_mcp_resources`) |
+| 8 | Conference/year argument resolution | `cli/_common.py` (`_resolve_conference_arg`) |
+| 9 | Paper markdown formatting | `export/markdown.py` |
+| 10 | Error handling + traceback pattern | `cli/_common.py` (`_unexpected_error`) |
+| 11 | Faceting query pattern | `db/catalog.py` |
+| 12 | Eval CRUD parallel structures | `db/evaluation.py` |
+| 13 | Progress callback definitions | `registry.py` |
+| 14 | Web route error handling | `web_ui/api_utils.py` (`api_error_handler`) |
+| 15 | Timestamps / JSON / URL / conference parsing | `utils/` package |
+| 16 | Tool descriptions/examples (evaluation drift) | `mcp_tools.py` (`TOOL_DESCRIPTIONS`) |
