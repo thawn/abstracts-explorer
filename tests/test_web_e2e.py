@@ -252,7 +252,6 @@ def _prepopulate_clustering_cache(test_database, em, collection_name):
     # Cluster on full embeddings (this is fast with only 3 test papers)
     cm.cluster(
         n_clusters=None,
-        use_reduced=False,
         distance_threshold=150.0,
         linkage="ward",
     )

@@ -10,8 +10,8 @@ from abstracts_explorer.clustering import (
     ClusteringManager,
     ClusteringError,
     calculate_default_clusters,
-    _compute_tfidf_keywords,
 )
+from abstracts_explorer.clustering.tfidf import compute_tfidf_keywords as _compute_tfidf_keywords
 
 
 class TestCalculateDefaultClusters:
@@ -123,7 +123,7 @@ class TestClusteringManager:
         cm.load_embeddings()
 
         # Cluster with n_clusters=None should auto-calculate
-        labels = cm.cluster(n_clusters=None, use_reduced=False)
+        labels = cm.cluster(n_clusters=None)
 
         assert labels.shape == (10,)
         assert cm.cluster_labels is not None
@@ -138,7 +138,7 @@ class TestClusteringManager:
         cm.load_embeddings()
 
         # Cluster on full embeddings (not reduced)
-        labels = cm.cluster(n_clusters=3, use_reduced=False)
+        labels = cm.cluster(n_clusters=3)
 
         assert labels.shape == (10,)
         assert cm.cluster_labels is not None
@@ -149,7 +149,7 @@ class TestClusteringManager:
         cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
         # Cluster first on full embeddings
-        cm.cluster(n_clusters=3, use_reduced=False)
+        cm.cluster(n_clusters=3)
 
         stats = cm.get_cluster_statistics()
 
@@ -165,7 +165,7 @@ class TestClusteringManager:
         cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
         # Cluster first, then reduce for visualization
-        cm.cluster(n_clusters=3, use_reduced=False)
+        cm.cluster(n_clusters=3)
         cm.reduce_dimensions(n_components=2)
 
         results = cm.get_clustering_results()
@@ -196,7 +196,7 @@ class TestClusteringManager:
         cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
         # Cluster first, then reduce for visualization
-        cm.cluster(n_clusters=3, use_reduced=False)
+        cm.cluster(n_clusters=3)
         cm.reduce_dimensions(n_components=2)
 
         output_path = tmp_path / "clusters.json"
@@ -305,7 +305,7 @@ class TestClusterLabeling:
         mock_embeddings_manager.collection = mock_collection_with_data
         cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
-        cm.cluster(n_clusters=3, use_reduced=False)
+        cm.cluster(n_clusters=3)
 
         keywords = cm.extract_cluster_keywords(n_keywords=5)
 
@@ -330,7 +330,7 @@ class TestClusterLabeling:
         mock_embeddings_manager.collection = mock_collection_with_data
         cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
-        cm.cluster(n_clusters=3, use_reduced=False)
+        cm.cluster(n_clusters=3)
 
         labels = cm.generate_cluster_labels(use_llm=False)
 
@@ -358,7 +358,7 @@ class TestClusterLabeling:
 
         cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
-        cm.cluster(n_clusters=3, use_reduced=False)
+        cm.cluster(n_clusters=3)
 
         labels = cm.generate_cluster_labels(use_llm=True)
 
@@ -505,7 +505,7 @@ class TestClusterLabeling:
         mock_embeddings_manager.collection = mock_collection_with_data
         cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
-        cm.cluster(n_clusters=3, use_reduced=False)
+        cm.cluster(n_clusters=3)
         helper = mocker.patch.object(cm, "_call_llm_for_label", return_value="Cluster Label")
 
         result = cm._generate_llm_label(0, ["machine", "learning"])
@@ -532,7 +532,7 @@ class TestClusterLabeling:
 
         cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
-        cm.cluster(n_clusters=3, use_reduced=False)
+        cm.cluster(n_clusters=3)
 
         labels = cm.generate_cluster_labels(use_llm=True)
 
@@ -548,7 +548,7 @@ class TestClusterLabeling:
         mock_embeddings_manager.collection = mock_collection_with_data
         cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
-        cm.cluster(n_clusters=3, use_reduced=False)
+        cm.cluster(n_clusters=3)
         cm.reduce_dimensions(n_components=2)
         cm.extract_cluster_keywords(n_keywords=5)
         cm.generate_cluster_labels(use_llm=False)
