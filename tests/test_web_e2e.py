@@ -331,6 +331,7 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
 
     # Get the actual module from sys.modules (now it's loaded)
     app_module = sys.modules["abstracts_explorer.web_ui.app"]
+    deps_module = sys.modules["abstracts_explorer.web_ui.dependencies"]
     # Get the Flask app instance
     flask_app = app_module.app
 
@@ -365,12 +366,18 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
 
         return real_get_config(reload=True, env_path=get_env_test_path())
 
+    # Patch both the route module and the dependency module: routes use the
+    # names imported into ``app``, while the lazy managers live in
+    # ``dependencies``.
+    original_deps_get_config = deps_module.get_config
     app_module.get_config = mock_get_config
+    deps_module.get_config = mock_get_config
 
     # Inject the pre-created embeddings manager directly
     # CRITICAL: Set this BEFORE starting the server to avoid race conditions
     # This prevents get_embeddings_manager() from creating a new instance
     app_module.embeddings_manager = em
+    deps_module.embeddings_manager = em
     app_module._reset_rag_chat_local()
 
     # Pre-populate the database with cached clustering results so that MCP
@@ -395,7 +402,9 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
             g.db.create_tables()  # Ensure all tables exist (including clustering_cache)
         return g.db
 
+    original_deps_get_database = deps_module.get_database
     app_module.get_database = mock_get_database_wrapper
+    deps_module.get_database = mock_get_database_wrapper
 
     # Use werkzeug's make_server for better cross-platform compatibility
     # This works more reliably in threads than Flask's app.run()
@@ -430,10 +439,14 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     # Cleanup
     server.shutdown()
 
-    # Reset the app module state
+    # Reset the app and dependency module state
     app_module.embeddings_manager = None
+    deps_module.embeddings_manager = None
     app_module._reset_rag_chat_local()
     app_module.get_database = original_get_database
+    deps_module.get_database = original_deps_get_database
+    deps_module.get_config = original_deps_get_config
+    app_module.get_config = original_deps_get_config
 
     # Restore original environment variables
     if original_default_conference is not None:
