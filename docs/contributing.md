@@ -178,7 +178,7 @@ the file.
 
 For a local LM Studio instance, change these values in `.env.tests.local`:
 
-```dotenv
+```bash
 LLM_BACKEND_URL=http://localhost:1234
 LLM_BACKEND_AUTH_TOKEN=
 CHAT_MODEL=<local-chat-model-id>
@@ -187,7 +187,7 @@ EMBEDDING_MODEL=<local-embedding-model-id>
 
 For Blablador, set the remote URL and your personal token instead:
 
-```dotenv
+```bash
 LLM_BACKEND_URL=https://api.helmholtz-blablador.fz-juelich.de
 LLM_BACKEND_AUTH_TOKEN=<your-token>
 ```
