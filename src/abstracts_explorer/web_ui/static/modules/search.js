@@ -15,6 +15,14 @@ import { formatPaperCard } from './paper-card.js';
 let latestSearchRequest = 0;
 
 /**
+ * Invalidate any in-flight search request so its response is ignored.
+ * Call this when filters change while a search may still be running.
+ */
+export function cancelPendingSearch() {
+    latestSearchRequest += 1;
+}
+
+/**
  * Search papers using the search API
  * @async
  */

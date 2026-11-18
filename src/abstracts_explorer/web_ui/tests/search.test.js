@@ -9,7 +9,7 @@ global.fetch = jest.fn();
 global.marked = { parse: jest.fn((text) => text), use: jest.fn() };
 global.markedKatex = jest.fn(() => ({}));
 
-import { searchPapers, displaySearchResults, openAdvancedSearch, closeAdvancedSearch, applyAdvancedSearch } from '../static/modules/search.js';
+import { searchPapers, cancelPendingSearch, displaySearchResults, openAdvancedSearch, closeAdvancedSearch, applyAdvancedSearch } from '../static/modules/search.js';
 import * as State from '../static/modules/state.js';
 
 describe('Search Module', () => {
@@ -124,6 +124,29 @@ describe('Search Module', () => {
 
             const results = document.getElementById('search-results');
             expect(results.innerHTML).toContain('The server took too long to respond');
+        });
+
+        it('should discard an in-flight response after cancellation', async () => {
+            let resolveFetch;
+            global.fetch.mockReturnValueOnce(new Promise((resolve) => {
+                resolveFetch = resolve;
+            }));
+
+            const searchPromise = searchPapers();
+            cancelPendingSearch();
+
+            resolveFetch({
+                ok: true,
+                json: async () => ({
+                    papers: [{ uid: 'stale', title: 'Stale Paper', authors: [] }],
+                    count: 1
+                })
+            });
+
+            await searchPromise;
+
+            const results = document.getElementById('search-results');
+            expect(results.innerHTML).not.toContain('Stale Paper');
         });
 
         it('should set current search term', async () => {

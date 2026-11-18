@@ -7,6 +7,9 @@
 import { API_BASE } from './utils/constants.js';
 import { parseJsonResponse } from './utils/api-utils.js';
 import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
+import { cancelPendingSearch } from './search.js';
+
+let latestFilterRequest = 0;
 
 /**
  * Show the conference URL error banner if window.urlConferenceError is set.
@@ -102,6 +105,7 @@ export function dismissDefaultFilterError() {
  * @async
  */
 export async function loadFilterOptions() {
+    const requestId = ++latestFilterRequest;
     try {
         // Show conference URL error banner if present (only on first call)
         showConferenceErrorBanner();
@@ -121,6 +125,8 @@ export async function loadFilterOptions() {
         const filtersResponse = await fetch(`${API_BASE}/api/filters?${filterParams.toString()}`);
         const filtersData = await parseJsonResponse(filtersResponse);
 
+        if (requestId !== latestFilterRequest) return;
+
         if (filtersData.error) {
             console.error('Error loading filters:', filtersData.error);
             return;
@@ -129,6 +135,8 @@ export async function loadFilterOptions() {
         // Load available conferences and years from database
         const availableResponse = await fetch(`${API_BASE}/api/available-filters`);
         const availableData = await parseJsonResponse(availableResponse);
+
+        if (requestId !== latestFilterRequest) return;
 
         if (availableData.error) {
             console.error('Error loading available filters:', availableData.error);
@@ -372,6 +380,8 @@ export function syncFiltersFromModal(context) {
  * Handle year selector change
  */
 export function handleYearChange() {
+    cancelPendingSearch();
+
     // Reload stats
     if (window.loadStats) window.loadStats();
 
@@ -417,6 +427,7 @@ export function handleYearChange() {
  */
 export function handleConferenceChange() {
     updateYearsForConference();
+    cancelPendingSearch();
 
     // Reload stats
     if (window.loadStats) window.loadStats();
