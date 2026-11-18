@@ -17,6 +17,19 @@ Guidance for AI coding agents working on **abstracts-explorer** (Python package 
 - NumPy-style docstrings on all public functions/classes/methods.
 - No comments unless asked.
 
+## Lint and Format Before Tests
+
+Run the same checks as the git hooks (`.githooks/pre-commit`) before running
+tests; fix all failures first.
+
+- `uv run black src/ tests/` (formatter; hook uses `black --check`)
+- `uv run ruff check src/ tests/ --fix` (linter/autofix)
+- `uv run mypy src/ --ignore-missing-imports` (type check)
+- Then run tests: `uv run pytest` / `npm test`
+
+Hooks are installed by `npm install` (or `npm run setup:hooks`); do not bypass
+them with `--no-verify` unless explicitly asked.
+
 ## Layout
 
 - `src/abstracts_explorer/`: mostly packages with thin facades for stable import paths:
