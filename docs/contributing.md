@@ -158,6 +158,9 @@ uv run pytest -m slow
 # Run stress tests against a live deployment
 uv run pytest tests/test_stress.py -m stress --server-url http://localhost:5000 -s
 
+# Run only the browser UI stress test (requires Chromium)
+uv run pytest tests/test_stress.py -m stress --server-url http://localhost:5000 -k browser -s
+
 # Run all tests including slow ones
 uv run pytest -m ""
 ```
