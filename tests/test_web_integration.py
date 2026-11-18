@@ -116,6 +116,8 @@ def web_server(test_database, tmp_path_factory):
     original_embedding_db = os.environ.get("EMBEDDING_DB")
     original_collection_name = os.environ.get("COLLECTION_NAME")
     original_cors_origins = os.environ.get("CORS_ORIGINS")
+    deps_module = None
+    original_embeddings_manager = None
 
     os.environ["PAPER_DB"] = str(test_database)
     os.environ["EMBEDDING_DB"] = str(embeddings_path)
@@ -170,12 +172,11 @@ def web_server(test_database, tmp_path_factory):
         db.close()
 
         # Inject the pre-created embeddings manager directly
-        import sys
+        import abstracts_explorer.web_ui.dependencies as deps_module
 
-        app_module = sys.modules["abstracts_explorer.web_ui.app"]
-
-        app_module.embeddings_manager = em
-        app_module._reset_rag_chat_local()
+        original_embeddings_manager = deps_module.embeddings_manager
+        deps_module.embeddings_manager = em
+        deps_module._reset_rag_chat_local()
 
         # Use werkzeug's make_server for better cross-platform compatibility
         # This works more reliably in threads than Flask's app.run()
@@ -211,6 +212,10 @@ def web_server(test_database, tmp_path_factory):
     finally:
         # Ensure mock is always stopped
         mock_openai_patcher.stop()
+
+        if deps_module is not None:
+            deps_module.embeddings_manager = original_embeddings_manager
+            deps_module._reset_rag_chat_local()
 
         # Restore original environment variables
         if original_paper_db is not None:
