@@ -354,7 +354,7 @@ graph TD
         RQUERY["query()"]
         RBUILD["_build_agent()"]
 
-        subgraph "Explicit Tool Wrappers (8)"
+        subgraph "Explicit Tool Wrappers (9)"
             TW1["_tool_search_papers"]
             TW2["_tool_get_conference_topics"]
             TW3["_tool_get_topic_evolution"]
@@ -363,6 +363,7 @@ graph TD
             TW6["_tool_get_paper_details"]
             TW7["_tool_summarize_interesting_papers"]
             TW8["_tool_recommend_related_papers"]
+            TW9["_tool_suggest_authors_to_meet"]
         end
 
         RH["_run_rag_tool<br/>(logging + result capture + formatting)"]
@@ -385,13 +386,14 @@ graph TD
             S6["get_paper_details"]
             S7["summarize_interesting_papers"]
             S8["recommend_related_papers"]
+            S9["suggest_authors_to_meet"]
         end
 
         RES["_get_mcp_resources()<br/>_get_clustering_resources()"]
 
     end
 
-        TW1 & TW2 & TW3 & TW4 & TW5 & TW6 & TW7 & TW8 --> RH
+        TW1 & TW2 & TW3 & TW4 & TW5 & TW6 & TW7 & TW8 & TW9 --> RH
 
     TW1 --> S1
     TW2 --> S2
@@ -401,14 +403,15 @@ graph TD
     TW6 --> S6
     TW7 --> S7
     TW8 --> S8
+    TW9 --> S9
 
     EXEC --> NORM
     NORM --> RULES
-    EXEC --> S1 & S2 & S3 & S4 & S5 & S6 & S7 & S8
+    EXEC --> S1 & S2 & S3 & S4 & S5 & S6 & S7 & S8 & S9
     EXEC --> FORMAT
 
     S1 --> WB
-    S1 & S3 & S4 & S8 --> RES
+    S1 & S3 & S4 & S8 & S9 --> RES
     S6 & S7 --> RES
     S2 & S5 --> RES
 ```

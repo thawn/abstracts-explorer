@@ -39,6 +39,11 @@ def _paper_record(paper: Dict[str, Any], include_abstract: bool = False) -> Dict
     if url:
         record["url"] = url
 
+    for field in ("room_name", "starttime", "endtime"):
+        value = paper.get(field)
+        if value:
+            record[field] = value
+
     if include_abstract:
         abstract = str(paper.get("abstract") or "")
         if abstract:

@@ -65,6 +65,8 @@ def get_database():
             if g.db.database_url not in _INITIALIZED_DB_URLS:
                 g.db.create_tables()
                 _INITIALIZED_DB_URLS.add(g.db.database_url)
+            else:
+                g.db.mark_schema_ready()
     return g.db
 
 

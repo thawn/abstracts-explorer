@@ -39,7 +39,7 @@ for stable imports:
 - `abstracts_explorer.mcp` — MCP server/resources/cache/tools (`mcp_server.py` facade)
 - `abstracts_explorer.rag` — agent, tool wrappers, conversation, extraction
 - `abstracts_explorer.evaluation` — prompts, formatting, generation, running
-- `abstracts_explorer.interesting_papers` — loading, summary, recommendations
+- `abstracts_explorer.interesting_papers` — loading, summary, recommendations, author suggestions
 - `abstracts_explorer.export` — Markdown/ZIP export (`export_utils.py` facade)
 - `abstracts_explorer.cli` — `main.py` dispatch, `parsers.py` wiring, per-command modules
 - `abstracts_explorer.utils` — shared time/json/url/conference/presentation helpers

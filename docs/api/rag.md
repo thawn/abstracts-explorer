@@ -97,6 +97,7 @@ MCP (Model Context Protocol) tools are specialized functions that the LLM can ca
 6. **get_paper_details** - Look up authors, links, sessions, and other metadata
 7. **summarize_interesting_papers** - Summarize the papers the user marked as interesting
 8. **recommend_related_papers** - Suggest related papers based on the user's interesting papers
+9. **suggest_authors_to_meet** - Suggest authors to meet based on the user's interesting papers
 
 ### How It Works
 
@@ -138,7 +139,7 @@ response = chat.query(
     paper_priorities={"paper-uid": {"priority": 5, "searchTerm": "llms"}},
 )
 print(response)
-# The LLM calls summarize_interesting_papers and recommend_related_papers
+# The LLM calls summarize_interesting_papers, recommend_related_papers, and suggest_authors_to_meet
 ```
 
 ### Tool Selection
@@ -150,6 +151,7 @@ The LLM automatically decides which tool(s) to use based on the question:
 - **Questions about "recent", "latest", "new"** → Uses `search_papers`
 - **Questions about "papers I marked/starred/rated as interesting"** → Uses `summarize_interesting_papers`
 - **Questions about suggestions/recommendations based on interesting papers** → Uses `recommend_related_papers`
+- **Questions about who to meet, talk to, or network with** → Uses `suggest_authors_to_meet`
 - **Questions about specific papers** → Uses standard RAG (no tools)
 
 ### Disabling MCP Tools

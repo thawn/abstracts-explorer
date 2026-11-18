@@ -156,6 +156,69 @@ class TestMCPResources:
         close_mcp_resources()
         mock_db.close.assert_called_once()
 
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    def test_close_defers_resources_owned_by_live_thread(self, mock_db_class):
+        """Default cleanup must not close resources used by another live thread."""
+        from abstracts_explorer.mcp_server import _get_mcp_resources, close_mcp_resources
+
+        first_db = Mock()
+        second_db = Mock()
+        mock_db_class.side_effect = [first_db, second_db]
+        started = threading.Event()
+        release = threading.Event()
+        created = {}
+
+        def worker() -> None:
+            with _get_mcp_resources(with_embeddings=False) as (_, db):
+                created["first"] = db
+            started.set()
+            release.wait(timeout=5)
+            with _get_mcp_resources(with_embeddings=False) as (_, db):
+                created["second"] = db
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        try:
+            assert started.wait(timeout=5)
+            close_mcp_resources()
+            first_db.close.assert_not_called()
+        finally:
+            release.set()
+            thread.join(timeout=5)
+
+        assert not thread.is_alive()
+        first_db.close.assert_called_once()
+        assert created["second"] is second_db
+        close_mcp_resources(force=True)
+        second_db.close.assert_called_once()
+
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    def test_force_close_closes_other_thread_resources(self, mock_db_class):
+        """Forced cleanup closes resources even when the owner thread is alive."""
+        from abstracts_explorer.mcp_server import _get_mcp_resources, close_mcp_resources
+
+        db = Mock()
+        mock_db_class.return_value = db
+        started = threading.Event()
+        release = threading.Event()
+
+        def worker() -> None:
+            with _get_mcp_resources(with_embeddings=False):
+                started.set()
+                release.wait(timeout=5)
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        try:
+            assert started.wait(timeout=5)
+            close_mcp_resources(force=True)
+            db.close.assert_called_once()
+        finally:
+            release.set()
+            thread.join(timeout=5)
+
+        assert not thread.is_alive()
+
     @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
     @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
     @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
@@ -935,6 +998,7 @@ class TestMCPServerIntegration:
             "search_papers",
             "summarize_interesting_papers",
             "recommend_related_papers",
+            "suggest_authors_to_meet",
         }
 
 
@@ -1487,6 +1551,63 @@ class TestInterestingPaperMCPTools:
         mock_db.close.assert_not_called()
 
 
+class TestSuggestAuthorsMCPTool:
+    """Tests for the suggest-authors-to-meet MCP tool."""
+
+    def test_suggest_authors_without_ratings_returns_error(self):
+        from abstracts_explorer.mcp_server import suggest_authors_to_meet
+
+        with pytest.raises(ToolError, match="No interesting papers"):
+            suggest_authors_to_meet()
+
+    @patch("abstracts_explorer.mcp.shared_dependencies._suggest_authors_to_meet")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    def test_suggest_authors_delegates_to_core(
+        self,
+        mock_db_class,
+        mock_em_class,
+        mock_config,
+        mock_suggest,
+    ):
+        from abstracts_explorer.mcp_server import suggest_authors_to_meet
+
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config.return_value = mock_config_obj
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+        mock_suggest.return_value = {"authors": [], "authors_count": 0}
+
+        result = json.loads(
+            suggest_authors_to_meet(
+                priorities={"p1": {"priority": 5}},
+                conferences=["ICLR"],
+                years=[2026],
+                limit=3,
+                paper_limit=20,
+            )
+        )
+
+        assert result["authors_count"] == 0
+        mock_suggest.assert_called_once_with(
+            database=mock_db,
+            embeddings_manager=mock_em,
+            priorities={"p1": {"priority": 5}},
+            paper_ids=None,
+            conferences=["ICLR"],
+            years=[2026],
+            limit=3,
+            paper_limit=20,
+            exclude_ids=None,
+        )
+        mock_em.close.assert_not_called()
+        mock_db.close.assert_not_called()
+
+
 class TestInterestingPaperLegacyFormatRejection:
     """Legacy scalar ratings are rejected by the interesting-paper tools."""
 
@@ -1517,5 +1638,24 @@ class TestInterestingPaperLegacyFormatRejection:
 
         with pytest.raises(ToolError, match="Invalid rating format"):
             recommend_related_papers(priorities={"p1": 5})
+        mock_em.close.assert_not_called()
+        mock_db.close.assert_not_called()
+
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    def test_suggest_authors_rejects_scalar_priorities(self, mock_db_class, mock_em_class, mock_config):
+        from abstracts_explorer.mcp_server import suggest_authors_to_meet
+
+        mock_config_obj = Mock()
+        mock_config_obj.collection_name = "papers"
+        mock_config.return_value = mock_config_obj
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+        mock_em = Mock()
+        mock_em_class.return_value = mock_em
+
+        with pytest.raises(ToolError, match="Invalid rating format"):
+            suggest_authors_to_meet(priorities={"p1": 5})
         mock_em.close.assert_not_called()
         mock_db.close.assert_not_called()

@@ -178,6 +178,8 @@ def _judge_with_llm(query: str, response: str, criteria: str | None = None) -> t
         )
         resp.raise_for_status()
         content = resp.json()["choices"][0]["message"]["content"]
+        if not content:
+            return None, "LLM judgment unavailable (empty response)"
         passed = content.strip().upper().startswith("YES")
         return passed, content
     except _requests.exceptions.RequestException as exc:
@@ -365,6 +367,93 @@ def _submit_search_query(page: Page, query: str) -> None:
     search_input = page.locator("#search-input")
     search_input.fill(query)
     search_input.press("Enter")
+
+
+def _seed_interesting_papers(
+    staging_url: str,
+    page: Page,
+    query: str = "learning",
+    count: int = 2,
+) -> None:
+    """
+    Rate the first *count* search results as 5-star interesting papers.
+
+    Parameters
+    ----------
+    staging_url : str
+        Base URL of the staging deployment.
+    page : Page
+        The Playwright page.
+    query : str, optional
+        Search query used to find papers to rate (default: ``"learning"``).
+    count : int, optional
+        Number of search results to rate (default: 2).
+    """
+    page.goto(staging_url)
+    page.evaluate("localStorage.removeItem('paperPriorities')")
+    page.reload()
+    _submit_search_query(page, query)
+
+    stars = page.locator("#search-results .paper-star")
+    expect(stars.first).to_be_attached(timeout=15000)
+
+    for index in range(count):
+        star = stars.nth(index * 5 + 4)
+        expect(star).to_be_attached(timeout=15000)
+        star.click()
+
+    page.wait_for_function(
+        """count => {
+            const raw = localStorage.getItem('paperPriorities');
+            if (!raw) return false;
+            return Object.keys(JSON.parse(raw)).length >= count;
+        }""",
+        arg=count,
+        timeout=5000,
+    )
+
+
+def _clear_interesting_paper_ratings(page: Page) -> None:
+    """
+    Remove interesting-paper ratings and reset the app's in-memory state.
+
+    Parameters
+    ----------
+    page : Page
+        The Playwright page.
+    """
+    if page.is_closed():
+        return
+    page.evaluate("localStorage.removeItem('paperPriorities')")
+    page.reload()
+
+
+@pytest.fixture
+def interesting_paper_ratings(staging_url, staging_page):
+    """
+    Provide two 5-star interesting papers and clean them up afterward.
+
+    The fixture is function-scoped so every test starts with a known rating
+    state and leaves ``localStorage.paperPriorities`` empty for later tests.
+    Cleanup runs even when the test fails.
+
+    Parameters
+    ----------
+    staging_url : str
+        Base URL of the staging deployment.
+    staging_page : Page
+        Module-scoped Playwright page shared by staging tests.
+
+    Yields
+    ------
+    None
+        The fixture only prepares and clears browser state.
+    """
+    try:
+        _seed_interesting_papers(staging_url, staging_page)
+        yield
+    finally:
+        _clear_interesting_paper_ratings(staging_page)
 
 
 # ---------------------------------------------------------------------------
@@ -1034,6 +1123,102 @@ class TestMCPToolSmokeTests:
             query,
             response,
             criteria=("the response should describe or reference a cluster visualization. Note: " + formatted_answer),
+        )
+
+    def test_summarize_interesting_papers(self, staging_url, staging_page, interesting_paper_ratings):
+        """
+        MCP tool: ``summarize_interesting_papers``.
+
+        Example query: *"Summarize the papers I marked as interesting."*
+
+        Success criteria (LLM-judged): the response summarises the interesting
+        papers, indicates how many were marked, and mentions at least one
+        paper title, topic, keyword, or rating.
+
+        Parameters
+        ----------
+        staging_url : str
+            Base URL of the staging deployment.
+        staging_page : Page
+            Playwright page instance.
+        interesting_paper_ratings : None
+            Fixture that seeds and clears interesting-paper ratings.
+        """
+        query = "Summarize the papers I marked as interesting."
+        response, _ = self._send_chat_query(staging_url, staging_page, query)
+        if not response:
+            pytest.skip("LLM backend unavailable – no response received")
+        _assert_llm_judgment(
+            query,
+            response,
+            criteria=(
+                "the response should summarize the user's interesting paper(s), indicate how many "
+                "papers were marked, and mention at least one paper title, topic, keyword, or rating"
+            ),
+        )
+
+    def test_recommend_related_papers(self, staging_url, staging_page, interesting_paper_ratings):
+        """
+        MCP tool: ``recommend_related_papers``.
+
+        Example query: *"Based on my interesting papers, suggest other papers
+        that may interest me."*
+
+        Success criteria (LLM-judged): the response recommends at least one
+        additional paper related to the user's interesting papers.
+
+        Parameters
+        ----------
+        staging_url : str
+            Base URL of the staging deployment.
+        staging_page : Page
+            Playwright page instance.
+        interesting_paper_ratings : None
+            Fixture that seeds and clears interesting-paper ratings.
+        """
+        query = "Based on my interesting papers, suggest other papers that may interest me."
+        response, _ = self._send_chat_query(staging_url, staging_page, query)
+        if not response:
+            pytest.skip("LLM backend unavailable – no response received")
+        _assert_llm_judgment(
+            query,
+            response,
+            criteria=(
+                "the response should recommend at least one additional paper related to the "
+                "user's interesting papers; it may include a title, topic, or reason for the recommendation"
+            ),
+        )
+
+    def test_suggest_authors_to_meet(self, staging_url, staging_page, interesting_paper_ratings):
+        """
+        MCP tool: ``suggest_authors_to_meet``.
+
+        Example query: *"Who should I meet based on my interesting papers?"*
+
+        Success criteria (LLM-judged): the response names at least one author
+        working on topics similar to the user's interesting papers, ideally
+        with a session or poster location.
+
+        Parameters
+        ----------
+        staging_url : str
+            Base URL of the staging deployment.
+        staging_page : Page
+            Playwright page instance.
+        interesting_paper_ratings : None
+            Fixture that seeds and clears interesting-paper ratings.
+        """
+        query = "Who should I meet based on my interesting papers?"
+        response, _ = self._send_chat_query(staging_url, staging_page, query)
+        if not response:
+            pytest.skip("LLM backend unavailable – no response received")
+        _assert_llm_judgment(
+            query,
+            response,
+            criteria=(
+                "the response should name at least one author who works on topics similar to the "
+                "user's interesting papers, ideally with a session or poster location"
+            ),
         )
 
 

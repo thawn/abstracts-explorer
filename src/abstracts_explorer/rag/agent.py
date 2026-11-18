@@ -27,6 +27,7 @@ from abstracts_explorer.rag.tools import (
     _tool_get_topic_evolution,
     _tool_recommend_related_papers,
     _tool_search_papers,
+    _tool_suggest_authors_to_meet,
     _tool_summarize_interesting_papers,
 )
 from abstracts_explorer.utils.http_utils import build_llm_timeout
@@ -56,6 +57,29 @@ def _get_tool_executor(max_workers: int) -> ThreadPoolExecutor:
                 max_workers,
             )
         return _TOOL_EXECUTOR
+
+
+def shutdown_tool_executor(wait: bool = True) -> None:
+    """
+    Shut down the shared RAG tool executor.
+
+    A subsequent ``RAGChat`` creates a fresh executor on demand.
+
+    Parameters
+    ----------
+    wait : bool, optional
+        Wait for running tool tasks to complete before returning (default:
+        ``True``).  Pending tasks are cancelled.
+    """
+    global _TOOL_EXECUTOR, _TOOL_EXECUTOR_WORKERS
+
+    with _TOOL_EXECUTOR_LOCK:
+        executor = _TOOL_EXECUTOR
+        _TOOL_EXECUTOR = None
+        _TOOL_EXECUTOR_WORKERS = 0
+
+    if executor is not None:
+        executor.shutdown(wait=wait, cancel_futures=True)
 
 
 class AgentMixin:
@@ -126,6 +150,7 @@ class AgentMixin:
             "When the user asks about papers they marked, starred, liked, or rated as interesting, "
             "use the summarize_interesting_papers or recommend_related_papers tools; their ratings "
             "are provided automatically by the web UI, so do not ask for paper IDs. "
+            "When the user asks who to meet, talk to, or network with, use suggest_authors_to_meet. "
             f"Today's date is {format_timestamp(datetime.now(), '%Y-%m-%d')}. "
             "When referencing specific papers, cite them using local markdown links: "
             "[Paper-1](#paper-1), [Paper-2](#paper-2), etc. "
@@ -236,6 +261,11 @@ class AgentMixin:
                         _tool_recommend_related_papers,
                         takes_ctx=True,
                         name="recommend_related_papers",
+                    ),
+                    Tool(
+                        _tool_suggest_authors_to_meet,
+                        takes_ctx=True,
+                        name="suggest_authors_to_meet",
                     ),
                 ]
             )

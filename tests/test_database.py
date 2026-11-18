@@ -233,6 +233,17 @@ class TestDatabaseManager:
 
         db_manager.close()
 
+    def test_mark_schema_ready_skips_create_all(self, db_manager):
+        """Managers can skip schema creation when another manager initialized it."""
+        from abstracts_explorer import database as database_module
+
+        with patch.object(database_module.Base.metadata, "create_all") as create_all:
+            db_manager.mark_schema_ready()
+            assert db_manager.session is not None
+
+        create_all.assert_not_called()
+        db_manager.close()
+
     def test_create_tables_caches_schema_for_postgresql(self, db_manager, monkeypatch):
         """PostgreSQL schema verification is cached across manager instances."""
         from abstracts_explorer import database as database_module

@@ -25,6 +25,7 @@ from abstracts_explorer.mcp_server import (
     get_paper_details,
     summarize_interesting_papers,
     recommend_related_papers,
+    suggest_authors_to_meet,
 )
 from abstracts_explorer.utils.paper_presentation import truncate_abstract
 
@@ -42,6 +43,7 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
     "get_paper_details": "Get detailed metadata for one or more papers by title or paper ID.",
     "summarize_interesting_papers": "Summarize the papers the user marked as interesting.",
     "recommend_related_papers": "Recommend further papers based on the user's interesting papers.",
+    "suggest_authors_to_meet": "Suggest authors to meet based on the user's interesting papers.",
 }
 
 TOOL_ARGUMENT_EXAMPLES: Dict[str, str] = {
@@ -53,6 +55,7 @@ TOOL_ARGUMENT_EXAMPLES: Dict[str, str] = {
     "get_paper_details": '{"title": "attention is all you need"}',
     "summarize_interesting_papers": '{"conference": "ICLR", "years": [2026]}',
     "recommend_related_papers": '{"conferences": ["ICLR"], "years": [2026], "limit": 10}',
+    "suggest_authors_to_meet": '{"conferences": ["ICLR"], "years": [2026], "limit": 10, "paper_limit": 50}',
 }
 
 
@@ -375,6 +378,12 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
                 arguments,
                 INTERESTING_PAPER_ARRAY_RULES,
             )
+        elif tool_name == "suggest_authors_to_meet":
+            result = _execute_tool(
+                suggest_authors_to_meet,
+                arguments,
+                INTERESTING_PAPER_ARRAY_RULES,
+            )
         else:
             # Return error JSON for unknown tools
             error_result = {"error": f"Unknown MCP tool: {tool_name}"}
@@ -432,6 +441,8 @@ def format_tool_result_for_llm(tool_name: str, result: str) -> str:
             return _format_summarize_interesting_papers_result(result_data)
         elif tool_name == "recommend_related_papers":
             return _format_recommend_related_papers_result(result_data)
+        elif tool_name == "suggest_authors_to_meet":
+            return _format_suggest_authors_to_meet_result(result_data)
         else:
             # Return raw result for unknown tools
             return result
@@ -711,5 +722,63 @@ def _format_recommend_related_papers_result(data: Dict[str, Any]) -> str:
         abstract = paper.get("abstract_snippet", "")
         if abstract:
             lines.append(f"   Abstract: {abstract}")
+
+    return "\n".join(lines)
+
+
+def _format_author_location(paper: Dict[str, Any]) -> str:
+    """Format where an author can be found for one of their papers."""
+    parts: List[str] = []
+    session = paper.get("session")
+    room = paper.get("room_name")
+    poster = paper.get("poster_position")
+    if session:
+        parts.append(str(session))
+    if room:
+        parts.append(f"room {room}")
+    if poster:
+        parts.append(f"poster {poster}")
+    return f" — {', '.join(parts)}" if parts else ""
+
+
+def _format_suggest_authors_to_meet_result(data: Dict[str, Any]) -> str:
+    """Format suggested authors to meet for the LLM."""
+    authors = data.get("authors", [])
+    lines = [f"Suggested Authors to Meet ({len(authors)} found):\n"]
+
+    filters = data.get("filters", {})
+    if filters.get("conferences") or filters.get("years"):
+        lines.append(f"Scope: conferences={filters.get('conferences')}, years={filters.get('years')}")
+
+    if data.get("warning"):
+        lines.append(f"Note: {data['warning']}")
+
+    if not authors:
+        return "\n".join(lines)
+
+    for index, author in enumerate(authors, 1):
+        star = " ⭐" if author.get("starred_author") else ""
+        lines.append(
+            f"\n{index}. {author.get('name')}{star} — relevance score: {author.get('score', 0)} "
+            f"({author.get('similar_paper_count', 0)} similar, "
+            f"{author.get('starred_paper_count', 0)} starred)"
+        )
+
+        reasons = author.get("why", [])
+        if reasons:
+            lines.append(f"   Why: {'; '.join(reasons)}")
+
+        for paper in author.get("starred_papers", []):
+            lines.append(
+                f"   Starred paper: {paper.get('title')} "
+                f"({paper.get('conference')} {paper.get('year')}){_format_author_location(paper)}"
+            )
+
+        for paper in author.get("papers", []):
+            lines.append(
+                f"   Similar paper: {paper.get('title')} "
+                f"({paper.get('conference')} {paper.get('year')})"
+                f"{_format_author_location(paper)}"
+            )
 
     return "\n".join(lines)

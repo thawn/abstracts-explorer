@@ -800,6 +800,8 @@ describe('Chat Module', () => {
             expect(html).toContain('papers I marked as interesting');
             // Interesting papers recommendations
             expect(html).toContain('suggest other papers');
+            // Authors to meet
+            expect(html).toContain('Who should I meet');
         });
 
         it('removeMcpToolsHint should add hide class when hint exists', () => {

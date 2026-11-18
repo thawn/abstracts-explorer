@@ -15,9 +15,12 @@ import os
 from pathlib import Path
 from playwright.sync_api import Page, TimeoutError, expect
 from abstracts_explorer.database import DatabaseManager
+from abstracts_explorer.mcp import close_mcp_resources
+from abstracts_explorer.rag import shutdown_tool_executor
 from tests.helpers import (
     raw_query,
     find_free_port,
+    stop_test_server,
 )
 from tests.conftest import set_test_db
 
@@ -320,7 +323,6 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     tuple
         Tuple of (base_url, port)
     """
-    from abstracts_explorer.database import DatabaseManager
 
     # Import the module first, then access it from sys.modules
     import sys
@@ -380,23 +382,6 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     # clustering is pre-generated via the CLI.
     _prepopulate_clustering_cache(test_database, em, collection_name)
 
-    # Mock get_database to not check file existence
-    # Each Flask request thread will create its own database connection
-    def mock_get_database_wrapper():
-        """Wrapper that skips file existence check and ensures tables exist."""
-        from flask import g
-
-        if "db" not in g:
-            db_path = str(test_database)
-            # Don't check file existence in tests - the database was created in a temp dir
-            set_test_db(db_path)
-            g.db = DatabaseManager()
-            g.db.create_tables()  # Ensure all tables exist (including clustering_cache)
-        return g.db
-
-    original_services_get_database = services_module.get_database
-    services_module.get_database = mock_get_database_wrapper
-
     # Use werkzeug's make_server for better cross-platform compatibility
     # This works more reliably in threads than Flask's app.run()
     from werkzeug.serving import make_server
@@ -427,35 +412,36 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
 
     yield (base_url, port)
 
-    # Cleanup
-    server.shutdown()
+    try:
+        stop_test_server(server, server_thread)
+        shutdown_tool_executor()
+        close_mcp_resources(force=True)
+    finally:
+        # Reset the dependency module state
+        services_module.embeddings_manager = None
+        services_module._reset_rag_chat_local()
+        services_module.get_config = original_services_get_config
 
-    # Reset the dependency module state
-    services_module.embeddings_manager = None
-    services_module._reset_rag_chat_local()
-    services_module.get_database = original_services_get_database
-    services_module.get_config = original_services_get_config
+        # Restore original environment variables
+        if original_default_conference is not None:
+            os.environ["DEFAULT_CONFERENCE"] = original_default_conference
+        elif "DEFAULT_CONFERENCE" in os.environ:
+            del os.environ["DEFAULT_CONFERENCE"]
 
-    # Restore original environment variables
-    if original_default_conference is not None:
-        os.environ["DEFAULT_CONFERENCE"] = original_default_conference
-    elif "DEFAULT_CONFERENCE" in os.environ:
-        del os.environ["DEFAULT_CONFERENCE"]
+        if original_paper_db is not None:
+            os.environ["PAPER_DB"] = original_paper_db
+        elif "PAPER_DB" in os.environ:
+            del os.environ["PAPER_DB"]
 
-    if original_paper_db is not None:
-        os.environ["PAPER_DB"] = original_paper_db
-    elif "PAPER_DB" in os.environ:
-        del os.environ["PAPER_DB"]
+        if original_embedding_db is not None:
+            os.environ["EMBEDDING_DB"] = original_embedding_db
+        elif "EMBEDDING_DB" in os.environ:
+            del os.environ["EMBEDDING_DB"]
 
-    if original_embedding_db is not None:
-        os.environ["EMBEDDING_DB"] = original_embedding_db
-    elif "EMBEDDING_DB" in os.environ:
-        del os.environ["EMBEDDING_DB"]
-
-    if original_collection_name is not None:
-        os.environ["COLLECTION_NAME"] = original_collection_name
-    elif "COLLECTION_NAME" in os.environ:
-        del os.environ["COLLECTION_NAME"]
+        if original_collection_name is not None:
+            os.environ["COLLECTION_NAME"] = original_collection_name
+        elif "COLLECTION_NAME" in os.environ:
+            del os.environ["COLLECTION_NAME"]
 
 
 @pytest.mark.e2e
