@@ -115,6 +115,13 @@ class Config:
         Maximum number of model requests per RAG query (default: 50).
     rag_query_timeout : int
         Wall-clock timeout in seconds for one RAG query (default: 120).
+    llm_connect_timeout : int
+        TCP/TLS connect timeout in seconds for LLM and embedding HTTP
+        requests (default: 10).
+    llm_request_timeout : int
+        Timeout in seconds for one HTTP request to the LLM backend
+        (default: 60). Clamped to ``rag_query_timeout`` so it never exceeds
+        the overall RAG limit.
     chat_temperature : float
         Default temperature for chat generation.
     chat_max_tokens : int
@@ -260,6 +267,18 @@ class Config:
         self.rag_max_parallel_tools = max(1, self._get_env_int("RAG_MAX_PARALLEL_TOOLS", default=8))
         self.rag_request_limit = max(1, self._get_env_int("RAG_REQUEST_LIMIT", default=50))
         self.rag_query_timeout = max(1, self._get_env_int("RAG_QUERY_TIMEOUT", default=120))
+
+        # LLM HTTP Timeout Settings
+        # Per-request timeout is clamped to the overall RAG query timeout so a
+        # single HTTP request can never outlive the RAG query ceiling.
+        self.llm_connect_timeout = max(
+            1,
+            self._get_env_int("LLM_CONNECT_TIMEOUT", default=10),
+        )
+        self.llm_request_timeout = min(
+            max(1, self._get_env_int("LLM_REQUEST_TIMEOUT", default=60)),
+            self.rag_query_timeout,
+        )
 
         # Query Rewriting Settings
         self.enable_query_rewriting = self._get_env_bool("ENABLE_QUERY_REWRITING", default=True)
@@ -443,6 +462,8 @@ class Config:
             "rag_max_parallel_tools": self.rag_max_parallel_tools,
             "rag_request_limit": self.rag_request_limit,
             "rag_query_timeout": self.rag_query_timeout,
+            "llm_connect_timeout": self.llm_connect_timeout,
+            "llm_request_timeout": self.llm_request_timeout,
         }
 
     def _mask_database_url(self, url: str) -> str:

@@ -21,6 +21,7 @@ class RunnerMixin:
 
     db: Any
     model: str
+    request_timeout: float
     openai_client: Any
     embeddings_manager: Any
 
@@ -60,7 +61,7 @@ class RunnerMixin:
                 user_prompt=user_prompt,
                 temperature=0.1,
                 max_tokens=300,
-                timeout=60,
+                timeout=self.request_timeout,
             )
             logger.debug(f"Judge raw response: {raw[:200]}")
             cleaned = _strip_reasoning_and_fences(raw)

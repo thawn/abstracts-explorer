@@ -28,6 +28,7 @@ from abstracts_explorer.rag.tools import (
     _tool_search_papers,
     _tool_summarize_interesting_papers,
 )
+from abstracts_explorer.utils.http_utils import build_llm_timeout
 from abstracts_explorer.utils.time_utils import format_timestamp
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,8 @@ class AgentMixin:
         self.max_parallel_tools = config.rag_max_parallel_tools
         self.request_limit = config.rag_request_limit
         self.query_timeout = config.rag_query_timeout
+        self.request_timeout = config.llm_request_timeout
+        self.connect_timeout = config.llm_connect_timeout
         self._tool_executor = _get_tool_executor(self.max_parallel_tools)
 
         # Message history for multi-turn conversation
@@ -189,13 +192,17 @@ class AgentMixin:
         config = get_config()
         requests_per_minute = config.requests_per_minute
 
-        # Build rate-limited async HTTP client when RPM > 0.
-        http_client: Optional[httpx2.AsyncClient] = None
+        # Build the async HTTP client with an explicit structured timeout.
+        # When RPM > 0, wrap the transport so every request is throttled.
+        transport = None
         if requests_per_minute > 0:
             from abstracts_explorer.rate_limiter import RateLimitedTransport
 
             transport = RateLimitedTransport(httpx2.AsyncHTTPTransport(), requests_per_minute=requests_per_minute)
-            http_client = httpx2.AsyncClient(transport=transport)
+        http_client = httpx2.AsyncClient(
+            transport=transport,
+            timeout=build_llm_timeout(self.request_timeout, self.connect_timeout),
+        )
 
         self._http_client = http_client
 
@@ -337,6 +344,7 @@ class AgentMixin:
             settings = OpenAIChatModelSettings(
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
+                timeout=self.request_timeout,
                 openai_reasoning_effort="low",
             )
 

@@ -12,6 +12,7 @@ from openai import OpenAI
 from abstracts_explorer.database import DatabaseManager, normalize_model_name
 from abstracts_explorer.embeddings.errors import translate_errors
 from abstracts_explorer.rate_limiter import RateLimitedTransport
+from abstracts_explorer.utils.http_utils import build_llm_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -25,16 +26,18 @@ class ModelMixin:
     llm_backend_auth_token: Optional[str]
     model_name: str
     requests_per_minute: int
+    request_timeout: float
+    connect_timeout: float
 
     @property
     def openai_client(self) -> OpenAI:
         """
         Get the OpenAI client, creating it lazily on first access.
 
-        When ``requests_per_minute`` is greater than 0 a
+        The client always uses an explicit structured timeout. When
+        ``requests_per_minute`` is greater than 0 a
         :class:`RateLimitedTransport` is wrapped around the default httpx2
-        transport and passed as the ``http_client`` argument so that every
-        HTTP request is automatically throttled.
+        transport so that every HTTP request is automatically throttled.
 
         Returns
         -------
@@ -48,11 +51,14 @@ class ModelMixin:
         return self._openai_client
 
     def _create_openai_client(self) -> OpenAI:
-        """Create the OpenAI client, optionally with a rate-limited HTTP transport."""
-        http_client: Optional[Any] = None
+        """Create the OpenAI client with an explicit structured timeout."""
+        transport: Optional[Any] = None
         if self.requests_per_minute > 0:
             transport = RateLimitedTransport(httpx2.HTTPTransport(), self.requests_per_minute)
-            http_client = httpx2.Client(transport=transport)
+        http_client = httpx2.Client(
+            transport=transport,
+            timeout=build_llm_timeout(self.request_timeout, self.connect_timeout),
+        )
         return OpenAI(
             base_url=f"{self.backend_url}/v1",
             api_key=self.llm_backend_auth_token or "lm-studio-local",

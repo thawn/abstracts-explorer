@@ -42,6 +42,8 @@ nano .env
 
 - **LLM_BACKEND_URL**: URL of the LLM backend server (default: `http://localhost:1234`)
 - **LLM_BACKEND_AUTH_TOKEN**: Optional authentication token for LLM backend (default: empty)
+- **LLM_CONNECT_TIMEOUT**: TCP/TLS connect (and connection-pool) timeout in seconds for LLM and embedding HTTP requests (default: `10`)
+- **LLM_REQUEST_TIMEOUT**: Timeout in seconds for one HTTP request to the LLM backend, applied to RAG, embeddings, clustering labels, and evaluation calls (default: `60`). It is clamped to `RAG_QUERY_TIMEOUT`, so it can never exceed the overall RAG query limit.
 
 ### Data Directory
 
@@ -127,7 +129,7 @@ The configuration automatically detects the type based on the format:
 - **MAX_CONTEXT_PAPERS**: Number of papers to include in RAG context (default: `5`)
 - **RAG_MAX_PARALLEL_TOOLS**: Maximum number of tool calls executed concurrently by the RAG agent; excess calls are queued (default: `8`)
 - **RAG_REQUEST_LIMIT**: Maximum number of model requests per RAG query (default: `50`)
-- **RAG_QUERY_TIMEOUT**: Wall-clock timeout in seconds for one RAG query (default: `120`)
+- **RAG_QUERY_TIMEOUT**: Wall-clock timeout in seconds for one RAG query (default: `120`). This must not exceed the reverse proxy's `proxy_read_timeout` (nginx default used in this project: `120s`); otherwise the proxy may close the connection before the RAG query finishes. `LLM_REQUEST_TIMEOUT` is clamped to this value.
 - **ENABLE_QUERY_REWRITING**: Rewrite follow-up questions into self-contained search queries before retrieval (default: `true`)
 - **QUERY_SIMILARITY_THRESHOLD**: Maximum embedding distance for a rewritten-query answer to be accepted as a hit (default: `0.7`)
 

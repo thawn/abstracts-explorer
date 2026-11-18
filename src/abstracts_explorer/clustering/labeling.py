@@ -188,6 +188,7 @@ class LabelingMixin:
             user_prompt=user_prompt,
             temperature=0.3,
             max_tokens=max_tokens,
+            timeout=config.llm_request_timeout,
             # Suppress the hidden reasoning block on GPT-OSS-120B so the
             # ~5-token label fits comfortably.  Qwen3.8 ignores this param
             # (its reasoning is controlled by enable_thinking, which the

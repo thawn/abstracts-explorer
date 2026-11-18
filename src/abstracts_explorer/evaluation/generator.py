@@ -31,6 +31,7 @@ class GeneratorMixin:
 
     db: Any
     model: str
+    request_timeout: float
     openai_client: Any
     embeddings_manager: Any
 
@@ -133,7 +134,7 @@ class GeneratorMixin:
                     user_prompt=user_prompt,
                     temperature=0.7,
                     max_tokens=2000,
-                    timeout=120,
+                    timeout=self.request_timeout,
                 )
                 pairs = _parse_json_array(raw)
             except EvaluationError:
@@ -189,7 +190,7 @@ class GeneratorMixin:
                             user_prompt=followup_prompt,
                             temperature=0.7,
                             max_tokens=2000,
-                            timeout=120,
+                            timeout=self.request_timeout,
                         )
                         followups = _parse_json_array(fu_raw)
                     except Exception as exc:

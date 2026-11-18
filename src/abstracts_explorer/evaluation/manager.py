@@ -58,6 +58,7 @@ class Evaluator(GeneratorMixin, RunnerMixin):
         self.embeddings_manager = embeddings_manager
         self.db = db
         self.model = model or config.chat_model
+        self.request_timeout = config.llm_request_timeout
 
     @property
     def openai_client(self):

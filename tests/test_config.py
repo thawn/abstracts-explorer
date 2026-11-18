@@ -53,6 +53,8 @@ def clean_config_env_vars():
         "RAG_MAX_PARALLEL_TOOLS",
         "RAG_REQUEST_LIMIT",
         "RAG_QUERY_TIMEOUT",
+        "LLM_CONNECT_TIMEOUT",
+        "LLM_REQUEST_TIMEOUT",
         "GITHUB_TOKEN",
         "REGISTRY_REPOSITORY",
     }
@@ -165,6 +167,8 @@ class TestConfig:
         assert config.rag_max_parallel_tools == 8
         assert config.rag_request_limit == 50
         assert config.rag_query_timeout == 120
+        assert config.llm_connect_timeout == 10
+        assert config.llm_request_timeout == 60
 
     def test_embedding_max_input_tokens_from_env(self, tmp_path):
         """Test parsing EMBEDDING_MAX_INPUT_TOKENS."""
@@ -191,6 +195,24 @@ class TestConfig:
         assert config.rag_max_parallel_tools == 3
         assert config.rag_request_limit == 20
         assert config.rag_query_timeout == 45
+
+    def test_llm_timeouts_from_env(self, tmp_path):
+        """LLM connect and request timeouts are configurable."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("LLM_CONNECT_TIMEOUT=5\nLLM_REQUEST_TIMEOUT=45\n")
+
+        config = Config(env_path=env_file)
+        assert config.llm_connect_timeout == 5
+        assert config.llm_request_timeout == 45
+
+    def test_llm_request_timeout_clamped_to_query_timeout(self, tmp_path):
+        """LLM request timeout cannot exceed the overall RAG query timeout."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("RAG_QUERY_TIMEOUT=120\nLLM_REQUEST_TIMEOUT=240\n")
+
+        config = Config(env_path=env_file)
+        assert config.rag_query_timeout == 120
+        assert config.llm_request_timeout == 120
 
     def test_rag_settings_are_clamped(self, tmp_path):
         """Non-positive RAG settings fall back to safe minimums."""
@@ -304,6 +326,8 @@ CHAT_MAX_TOKENS=500
         assert "collection_name" in config_dict
         assert "max_context_papers" in config_dict
         assert "metadata_cache_ttl" in config_dict
+        assert "llm_connect_timeout" in config_dict
+        assert "llm_request_timeout" in config_dict
 
     def test_config_to_dict_hides_token(self, tmp_path):
         """Test that to_dict hides auth token."""

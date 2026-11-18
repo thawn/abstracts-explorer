@@ -1417,6 +1417,8 @@ class TestRateLimiting:
         transport = client._client._transport
         assert isinstance(transport._rate_limiter, TokenBucketRateLimiter)
         assert transport._rate_limiter.requests_per_minute == 30
+        assert client._client.timeout.connect == 10
+        assert client._client.timeout.read == 60
 
     def test_no_rate_limited_transport_when_rpm_zero(self, tmp_path, monkeypatch):
         """Test that no RateLimitedTransport is used when requests_per_minute=0."""
@@ -1429,9 +1431,11 @@ class TestRateLimiting:
 
         em = EmbeddingsManager(requests_per_minute=0)
         client = em.openai_client
-        # When rate limiting is disabled, the http_client is not a custom one wrapping RateLimitedTransport
-        # The OpenAI client uses its own default transport
+        # When rate limiting is disabled, the transport is not rate limited,
+        # but the client still uses the explicit structured timeout.
         assert not isinstance(getattr(getattr(client, "_client", None), "_transport", None), RateLimitedTransport)
+        assert client._client.timeout.connect == 10
+        assert client._client.timeout.read == 60
 
     def test_rate_limited_transport_sleeps_when_tokens_exhausted(self, monkeypatch):
         """Test that RateLimitedTransport blocks when token bucket is empty."""

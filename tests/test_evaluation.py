@@ -559,6 +559,7 @@ class TestGenerateQAPairs:
         assert pairs[0]["query"] == "What papers discuss deep learning?"
         # expected_answer comes from the tool output, not the LLM
         assert pairs[0]["expected_answer"] != ""
+        assert evaluator_with_papers.openai_client.chat.completions.create.call_args.kwargs["timeout"] == 60
 
     def test_generate_qa_pairs_with_followups(self, evaluator_with_papers):
         """Test Q/A pair generation with follow-ups."""
@@ -729,6 +730,7 @@ class TestJudgeAnswer:
         result = ev._judge_answer("q", "expected", "actual")
         assert result["score"] == 4
         assert result["reasoning"] == "ok"
+        assert ev.openai_client.chat.completions.create.call_args.kwargs["timeout"] == 60
 
     def test_judge_markdown_fenced(self, eval_db, mock_em):
         """Judge strips markdown fences before parsing."""
