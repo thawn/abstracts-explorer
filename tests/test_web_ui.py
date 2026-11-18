@@ -429,7 +429,7 @@ class TestGetLLMBackendInfo:
     def test_rossendorf_url_detected(self):
         """Test that the chat.fz-rossendorf.de URL is recognised."""
         result = self.get_llm_backend_info("https://chat.fz-rossendorf.de/v1")
-        assert result["name"] == "chat.fz-rossendorf.de"
+        assert result["name"] == "HZDR Chat"
         assert result["homepage"] == "https://chat.fz-rossendorf.de"
         assert result["logo"] is None
 
