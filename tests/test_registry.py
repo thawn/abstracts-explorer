@@ -461,6 +461,31 @@ class TestDatabaseExportImport:
         finally:
             db.close()
 
+    def test_resolve_conference_name_db_error_still_uses_plugin_fallback(self, tmp_path):
+        """A failing DB lookup is logged but does not block plugin fallback."""
+        set_test_db(tmp_path / "empty.db")
+        db = DatabaseManager()
+        db.create_tables()
+        try:
+            with patch.object(db, "get_conferences", side_effect=DatabaseError("boom")):
+                assert db.resolve_conference_name("neurips") == "NeurIPS"
+        finally:
+            db.close()
+
+    def test_resolve_conference_name_chains_db_error(self, tmp_path):
+        """The underlying DB error is attached as the cause of the resolution failure."""
+        set_test_db(tmp_path / "empty.db")
+        db = DatabaseManager()
+        db.create_tables()
+        try:
+            original = DatabaseError("database unavailable")
+            with patch.object(db, "get_conferences", side_effect=original):
+                with pytest.raises(DatabaseError, match="Failed to resolve conference name") as excinfo:
+                    db.resolve_conference_name("unknown-conf-xyz-999")
+            assert excinfo.value.__cause__ is original
+        finally:
+            db.close()
+
     def test_import_with_resolved_conference_name(self, tmp_path):
         """Import works correctly when conference name is resolved before calling import."""
         from abstracts_explorer.db_models import Paper

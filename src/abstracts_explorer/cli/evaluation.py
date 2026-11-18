@@ -6,6 +6,7 @@
 import argparse
 import logging
 import sys
+from contextlib import closing
 
 
 from abstracts_explorer.config import get_config
@@ -62,42 +63,43 @@ def eval_generate_command(args: argparse.Namespace) -> int:
 
     try:
         # Initialize embeddings manager for its openai_client
-        em = EmbeddingsManager(
-            backend_url=args.backend_url,
-        )
-
-        with DatabaseManager() as db:
-            db.create_tables()
-
-            total_papers = db.get_paper_count()
-            if total_papers == 0:
-                print("\n❌ No papers in database. Download papers first.", file=sys.stderr)
-                return 1
-            print(f"\n📊 Found {total_papers:,} papers in database")
-
-            evaluator = Evaluator(embeddings_manager=em, db=db, model=args.model)
-
-            print("\n🤖 Generating Q/A pairs...")
-            pairs = evaluator.generate_qa_pairs(
-                n_pairs_per_tool=args.n_pairs,
-                tools=args.tools if args.tools else None,
-                generate_followups=not args.no_followups,
-                n_followups=args.n_followups,
+        with closing(
+            EmbeddingsManager(
+                backend_url=args.backend_url,
             )
+        ) as em:
+            with DatabaseManager() as db:
+                db.create_tables()
 
-            count = evaluator.store_qa_pairs(pairs)
-            print(f"\n✅ Generated and stored {count} Q/A pair(s)")
+                total_papers = db.get_paper_count()
+                if total_papers == 0:
+                    print("\n❌ No papers in database. Download papers first.", file=sys.stderr)
+                    return 1
+                print(f"\n📊 Found {total_papers:,} papers in database")
 
-            # Show summary by tool
-            tool_counts: dict = {}
-            for p in pairs:
-                t = p.get("tool_name", "unknown")
-                tool_counts[t] = tool_counts.get(t, 0) + 1
-            print("\n📊 Pairs per tool:")
-            for tool, cnt in sorted(tool_counts.items()):
-                print(f"   {tool}: {cnt}")
+                evaluator = Evaluator(embeddings_manager=em, db=db, model=args.model)
 
-        return 0
+                print("\n🤖 Generating Q/A pairs...")
+                pairs = evaluator.generate_qa_pairs(
+                    n_pairs_per_tool=args.n_pairs,
+                    tools=args.tools if args.tools else None,
+                    generate_followups=not args.no_followups,
+                    n_followups=args.n_followups,
+                )
+
+                count = evaluator.store_qa_pairs(pairs)
+                print(f"\n✅ Generated and stored {count} Q/A pair(s)")
+
+                # Show summary by tool
+                tool_counts: dict = {}
+                for p in pairs:
+                    t = p.get("tool_name", "unknown")
+                    tool_counts[t] = tool_counts.get(t, 0) + 1
+                print("\n📊 Pairs per tool:")
+                for tool, cnt in sorted(tool_counts.items()):
+                    print(f"   {tool}: {cnt}")
+
+            return 0
 
     except EvaluationError as e:
         print(f"\n❌ Evaluation error: {e}", file=sys.stderr)
@@ -277,38 +279,37 @@ def eval_run_command(args: argparse.Namespace) -> int:
 
     try:
         # Initialize embeddings
-        em = EmbeddingsManager(
-            backend_url=args.backend_url,
-            model_name=args.embedding_model,
-            collection_name=args.collection,
-        )
-
-        if not em.test_api_connection(verbose=True):
-            return 1
-
-        with DatabaseManager() as db:
-            db.create_tables()
-
-            pair_count = db.get_eval_qa_pair_count(verified_only=not args.include_unverified)
-            if pair_count == 0:
-                print("\n❌ No Q/A pairs found. Generate and verify pairs first.", file=sys.stderr)
-                em.close()
+        with closing(
+            EmbeddingsManager(
+                backend_url=args.backend_url,
+                model_name=args.embedding_model,
+                collection_name=args.collection,
+            )
+        ) as em:
+            if not em.test_api_connection(verbose=True):
                 return 1
 
-            actual_count = min(pair_count, args.limit) if args.limit else pair_count
-            print(f"\n📊 Evaluating {actual_count} Q/A pair(s)...")
+            with DatabaseManager() as db:
+                db.create_tables()
 
-            evaluator = Evaluator(embeddings_manager=em, db=db, model=args.model)
-            run_id = evaluator.run_evaluation(
-                verified_only=not args.include_unverified,
-                limit=args.limit,
-            )
+                pair_count = db.get_eval_qa_pair_count(verified_only=not args.include_unverified)
+                if pair_count == 0:
+                    print("\n❌ No Q/A pairs found. Generate and verify pairs first.", file=sys.stderr)
+                    return 1
 
-            # Show summary
-            print(f"\n{evaluator.format_run_summary(run_id)}")
+                actual_count = min(pair_count, args.limit) if args.limit else pair_count
+                print(f"\n📊 Evaluating {actual_count} Q/A pair(s)...")
 
-        em.close()
-        return 0
+                evaluator = Evaluator(embeddings_manager=em, db=db, model=args.model)
+                run_id = evaluator.run_evaluation(
+                    verified_only=not args.include_unverified,
+                    limit=args.limit,
+                )
+
+                # Show summary
+                print(f"\n{evaluator.format_run_summary(run_id)}")
+
+            return 0
 
     except EvaluationError as e:
         print(f"\n❌ Evaluation error: {e}", file=sys.stderr)

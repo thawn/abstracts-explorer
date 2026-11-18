@@ -1086,6 +1086,7 @@ class TestCLI:
 
         assert exit_code == 1
         assert nonexistent_db.exists()
+        mock_em.close.assert_called_once()
 
     def test_create_embeddings_lm_studio_not_available(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings when OpenAI API is not available."""
@@ -1131,6 +1132,7 @@ class TestCLI:
 
         assert exit_code == 1
         mock_em.test_api_connection.assert_called_once()
+        mock_em.close.assert_called_once()
 
     def test_create_embeddings_success(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings command completes successfully."""
@@ -2039,6 +2041,7 @@ class TestCLI:
 
         assert exit_code == 1
         mock_em.test_api_connection.assert_called_once()
+        mock_em.close.assert_called_once()
 
     def test_search_success(self, tmp_path, capsys, monkeypatch):
         """Test search command completes successfully."""
@@ -2823,6 +2826,7 @@ class TestCLI:
             assert kw["linkage"] == "ward"
             assert kw["distance_threshold"] == 150.0
             assert kw["n_clusters"] is None
+        mock_em.close.assert_called_once()
 
     def test_pre_generate_clustering_no_conferences_in_db(self, tmp_path, capsys, monkeypatch):
         """Test pre-generate-clustering without args fails gracefully when DB is empty."""
@@ -3293,6 +3297,7 @@ class TestCLI:
 
         assert exit_code == 1
         mock_em.test_api_connection.assert_called_once()
+        mock_em.close.assert_called_once()
 
     def test_chat_rag_error(self, tmp_path, capsys, monkeypatch):
         """Test chat command with RAG error."""

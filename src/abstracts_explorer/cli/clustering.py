@@ -5,6 +5,7 @@ clustering commands
 import argparse
 import logging
 import sys
+from contextlib import closing
 from typing import Optional
 
 
@@ -230,55 +231,57 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     )
 
     try:
-        em = EmbeddingsManager(
-            collection_name=args.collection,
-            requests_per_minute=args.requests_per_minute,
-        )
+        with closing(
+            EmbeddingsManager(
+                collection_name=args.collection,
+                requests_per_minute=args.requests_per_minute,
+            )
+        ) as em:
+            success_count = 0
+            fail_count = 0
 
-        success_count = 0
-        fail_count = 0
+            for conf_name, yr in combos:
+                c_conferences = [conf_name] if conf_name else None
+                c_years = [yr] if yr is not None else None
 
-        for conf_name, yr in combos:
-            c_conferences = [conf_name] if conf_name else None
-            c_years = [yr] if yr is not None else None
-
-            label = f"{conf_name or 'all'}"
-            if yr is not None:
-                label += f" {yr}"
-            else:
-                raise ValueError(
-                    "Year must be specified for clustering pre-generation to ensure manageable computation"
-                )
-
-            print(f"\n🚀 Clustering {label}...")
-
-            try:
-                with DatabaseManager() as db:
-                    results = compute_clusters_with_cache(
-                        embeddings_manager=em,
-                        database=db,
-                        embedding_model=config.embedding_model,
-                        n_components=DEFAULT_N_COMPONENTS,
-                        n_clusters=None,
-                        limit=None,
-                        force=args.force,
-                        conferences=c_conferences,
-                        years=c_years,
-                        **DEFAULT_CLUSTERING_PARAMS,
+                label = f"{conf_name or 'all'}"
+                if yr is not None:
+                    label += f" {yr}"
+                else:
+                    raise ValueError(
+                        "Year must be specified for clustering pre-generation to ensure manageable computation"
                     )
 
-                stats = results.get("statistics", {})
-                n_papers = stats.get("total_papers", "N/A")
-                n_clusters = stats.get("n_clusters", "N/A")
-                n_papers_str = f"{n_papers:,}" if isinstance(n_papers, int) else str(n_papers)
-                print(f"   ✅ {label}: {n_papers_str} papers → {n_clusters} clusters")
-                success_count += 1
-            except Exception as e:
-                print(f"   ❌ {label}: {e}")
-                fail_count += 1
+                print(f"\n🚀 Clustering {label}...")
 
-        print(f"\n{'=' * 70}")
-        print(f"✅ Pre-generation complete: {success_count} succeeded, {fail_count} failed")
+                try:
+                    with DatabaseManager() as db:
+                        results = compute_clusters_with_cache(
+                            embeddings_manager=em,
+                            database=db,
+                            embedding_model=config.embedding_model,
+                            n_components=DEFAULT_N_COMPONENTS,
+                            n_clusters=None,
+                            limit=None,
+                            force=args.force,
+                            conferences=c_conferences,
+                            years=c_years,
+                            **DEFAULT_CLUSTERING_PARAMS,
+                        )
+
+                    stats = results.get("statistics", {})
+                    n_papers = stats.get("total_papers", "N/A")
+                    n_clusters = stats.get("n_clusters", "N/A")
+                    n_papers_str = f"{n_papers:,}" if isinstance(n_papers, int) else str(n_papers)
+                    print(f"   ✅ {label}: {n_papers_str} papers → {n_clusters} clusters")
+                    success_count += 1
+                except Exception as e:
+                    print(f"   ❌ {label}: {e}")
+                    fail_count += 1
+
+            print(f"\n{'=' * 70}")
+            print(f"✅ Pre-generation complete: {success_count} succeeded, {fail_count} failed")
+
         return 0 if fail_count == 0 else 1
 
     except ClusteringError as e:

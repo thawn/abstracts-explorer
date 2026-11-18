@@ -6,6 +6,7 @@
 import argparse
 import logging
 import sys
+from contextlib import closing
 from typing import List
 
 
@@ -93,10 +94,9 @@ def delete_data_command(args: argparse.Namespace) -> int:
     # Count ChromaDB embeddings for the resolved UIDs
     embedding_count = 0
     try:
-        em = EmbeddingsManager()
-        existing = em.collection.get(ids=paper_uids, include=[])
-        embedding_count = len(existing.get("ids", []))
-        em.close()
+        with closing(EmbeddingsManager()) as em:
+            existing = em.collection.get(ids=paper_uids, include=[])
+            embedding_count = len(existing.get("ids", []))
     except Exception as e:
         logger.warning(f"Could not count ChromaDB embeddings (will still attempt deletion): {e}")
         embedding_count = 0
@@ -120,9 +120,8 @@ def delete_data_command(args: argparse.Namespace) -> int:
 
     # 1. Delete embeddings from ChromaDB using the UIDs resolved above
     try:
-        em = EmbeddingsManager()
-        deleted_embeddings = em.delete_embeddings_by_ids(paper_uids)
-        em.close()
+        with closing(EmbeddingsManager()) as em:
+            deleted_embeddings = em.delete_embeddings_by_ids(paper_uids)
         print(f"\n✅ Deleted {deleted_embeddings:,} embedding(s) from ChromaDB.")
     except Exception as e:
         msg = f"Failed to delete embeddings: {e}"

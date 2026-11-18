@@ -1764,6 +1764,29 @@ class TestGetChatDonations:
         assert len(result_offset) == 2
         assert result_offset[0]["id"] == result_all[2]["id"]
 
+    def test_get_chat_donations_breaks_timestamp_ties_by_id(self, connected_db):
+        """Equal timestamps are ordered by id descending for stable pagination."""
+        from datetime import datetime, timezone
+
+        from sqlalchemy.orm import Session
+
+        from abstracts_explorer.db_models import ChatDonation
+
+        fixed = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        with Session(connected_db.engine) as session:
+            for _ in range(3):
+                session.add(ChatDonation(rating="up", transcript="[]", donated_at=fixed))
+            session.commit()
+
+        result = connected_db.get_chat_donations()
+        ids = [row["id"] for row in result]
+        assert ids == sorted(ids, reverse=True)
+
+        first_page = connected_db.get_chat_donations(limit=2)
+        second_page = connected_db.get_chat_donations(limit=2, offset=2)
+        assert [row["id"] for row in first_page] == ids[:2]
+        assert [row["id"] for row in second_page] == ids[2:]
+
     def test_get_chat_donations_includes_parsed_transcript(self, connected_db):
         """Returned dicts include parsed transcript (list)."""
         transcript = [{"role": "user", "text": "hello"}, {"role": "assistant", "text": "hi"}]
@@ -1850,6 +1873,29 @@ class TestGetValidationData:
         result_offset = connected_db.get_validation_data(offset=2)
         assert len(result_offset) == 2
         assert result_offset[0]["id"] == result_all[2]["id"]
+
+    def test_get_validation_data_breaks_timestamp_ties_by_id(self, connected_db):
+        """Equal timestamps are ordered by id descending for stable pagination."""
+        from datetime import datetime, timezone
+
+        from sqlalchemy.orm import Session
+
+        from abstracts_explorer.db_models import ValidationData
+
+        fixed = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        with Session(connected_db.engine) as session:
+            for i in range(3):
+                session.add(ValidationData(paper_uid=f"uid{i}", priority=i + 1, donated_at=fixed))
+            session.commit()
+
+        result = connected_db.get_validation_data()
+        ids = [row["id"] for row in result]
+        assert ids == sorted(ids, reverse=True)
+
+        first_page = connected_db.get_validation_data(limit=2)
+        second_page = connected_db.get_validation_data(limit=2, offset=2)
+        assert [row["id"] for row in first_page] == ids[:2]
+        assert [row["id"] for row in second_page] == ids[2:]
 
     def test_get_validation_data_includes_fields(self, connected_db):
         """Returned dicts include all expected fields."""

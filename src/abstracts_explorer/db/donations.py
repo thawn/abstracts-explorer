@@ -198,7 +198,7 @@ class DonationsMixin(SessionMixin):
             stmt = select(ChatDonation)
             if rating is not None:
                 stmt = stmt.where(ChatDonation.rating == rating)
-            stmt = stmt.order_by(ChatDonation.donated_at.desc())
+            stmt = stmt.order_by(ChatDonation.donated_at.desc(), ChatDonation.id.desc())
             if offset:
                 stmt = stmt.offset(offset)
             if limit is not None:
@@ -306,7 +306,7 @@ class DonationsMixin(SessionMixin):
         ...     data = db.get_validation_data(limit=20)
         """
         try:
-            stmt = select(ValidationData).order_by(ValidationData.donated_at.desc())
+            stmt = select(ValidationData).order_by(ValidationData.donated_at.desc(), ValidationData.id.desc())
             if offset:
                 stmt = stmt.offset(offset)
             if limit is not None:

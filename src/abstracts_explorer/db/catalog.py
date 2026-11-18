@@ -215,8 +215,8 @@ class CatalogMixin(PapersMixin):
         Performs a case-insensitive match against conference names already
         present in the database.  If no database match is found, falls back
         to a case-insensitive match against the ``conference_name`` attribute of
-        every registered downloader plugin.  If neither lookup succeeds the
-        original *conference* string is returned unchanged.
+        every registered downloader plugin.  If neither lookup succeeds a
+        :class:`~abstracts_explorer.db.errors.DatabaseError` is raised.
 
         This is the single authoritative place where conference-name
         normalization must happen.  CLI commands should call this method
@@ -234,8 +234,14 @@ class CatalogMixin(PapersMixin):
         -------
         str
             The conference name exactly as it appears in the database (first
-            match), or exactly as defined by the first matching plugin, or the
-            input string if no match is found.
+            match) or exactly as defined by the first matching plugin.
+
+        Raises
+        ------
+        DatabaseError
+            If the name matches neither the database nor any registered plugin.
+            When the database lookup itself failed, the underlying error is
+            attached as the cause.
 
         Examples
         --------
@@ -244,13 +250,16 @@ class CatalogMixin(PapersMixin):
         ...     canonical = db.resolve_conference_name("ml4ps")
         ...     # Returns "ML4PS" if that form is stored in the DB
         """
+        db_error: Optional[Exception] = None
+
         # 1. Try case-insensitive match against conferences already in the DB
         try:
             for conf in self.get_conferences():
                 if conf.lower() == conference.lower():
                     return conf
-        except Exception:
-            pass
+        except DatabaseError as err:
+            db_error = err
+            logger.warning("Could not query conference names from database: %s", err)
 
         # 2. Fall back to plugin conference names
         try:
@@ -260,12 +269,12 @@ class CatalogMixin(PapersMixin):
                 plugin_conf = getattr(plugin, "conference_name", None)
                 if plugin_conf and plugin_conf.lower() == conference.lower():
                     return plugin_conf
-        except Exception:
-            pass
+        except Exception as err:
+            logger.warning("Could not enumerate downloader plugins for conference resolution: %s", err)
 
         raise DatabaseError(
             f"Failed to resolve conference name: {conference}.\n" f"No match found in database or plugins."
-        )
+        ) from db_error
 
     def resolve_conference_for_url(self, url_path: str) -> dict:
         """

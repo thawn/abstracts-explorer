@@ -6,6 +6,7 @@
 import argparse
 import logging
 import sys
+from contextlib import closing
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -71,96 +72,94 @@ def search_command(args: argparse.Namespace) -> int:
 
     try:
         # Initialize embeddings manager
-        em = EmbeddingsManager(
-            backend_url=args.backend_url,
-            model_name=args.model,
-            collection_name=args.collection,
-        )
-
-        # Test OpenAI API connection
-        if not em.test_api_connection(verbose=True):
-            return 1
-
-        # Check collection stats
-        stats = em.get_collection_stats()
-        print(f"\n📊 Searching {stats['count']:,} papers in collection '{stats['name']}'")
-
-        # Parse metadata filter from --where option
-        where_filter: Optional[Dict[str, Any]] = None
-        if args.where:
-            # Simple key=value parsing
-            try:
-                where_filter = {}
-                for condition in args.where.split(","):
-                    key, value = condition.split("=", 1)
-                    where_filter[key.strip()] = value.strip().strip("\"'")
-                print(f"🔍 Filter: {where_filter}")
-            except Exception as e:
-                print(f"❌ Could not parse filter '{args.where}': {e}", file=sys.stderr)
-                em.close()
+        with closing(
+            EmbeddingsManager(
+                backend_url=args.backend_url,
+                model_name=args.model,
+                collection_name=args.collection,
+            )
+        ) as em:
+            # Test OpenAI API connection
+            if not em.test_api_connection(verbose=True):
                 return 1
 
-        # Perform search through the DatabaseManager search entry point
-        print(f"\n🔍 Searching for: '{args.query}'...\n")
-        database = DatabaseManager()
-        try:
-            papers, _ = database.search(
-                args.query,
-                limit=args.limit,
-                years=[year] if year is not None else None,
-                conferences=[conference] if conference else None,
-                distance_threshold=distance_threshold,
-                where_filters=where_filter,
-                embeddings_manager=em,
-                use_embeddings=True,
-            )
-        finally:
-            database.close()
+            # Check collection stats
+            stats = em.get_collection_stats()
+            print(f"\n📊 Searching {stats['count']:,} papers in collection '{stats['name']}'")
 
-        if not papers:
-            print("❌ No results found.")
-            em.close()
+            # Parse metadata filter from --where option
+            where_filter: Optional[Dict[str, Any]] = None
+            if args.where:
+                # Simple key=value parsing
+                try:
+                    where_filter = {}
+                    for condition in args.where.split(","):
+                        key, value = condition.split("=", 1)
+                        where_filter[key.strip()] = value.strip().strip("\"'")
+                    print(f"🔍 Filter: {where_filter}")
+                except Exception as e:
+                    print(f"❌ Could not parse filter '{args.where}': {e}", file=sys.stderr)
+                    return 1
+
+            # Perform search through the DatabaseManager search entry point
+            print(f"\n🔍 Searching for: '{args.query}'...\n")
+            database = DatabaseManager()
+            try:
+                papers, _ = database.search(
+                    args.query,
+                    limit=args.limit,
+                    years=[year] if year is not None else None,
+                    conferences=[conference] if conference else None,
+                    distance_threshold=distance_threshold,
+                    where_filters=where_filter,
+                    embeddings_manager=em,
+                    use_embeddings=True,
+                )
+            finally:
+                database.close()
+
+            if not papers:
+                print("❌ No results found.")
+                return 0
+
+            num_results = len(papers)
+            print(f"✅ Found {num_results} similar paper(s):\n")
+
+            for i, paper in enumerate(papers):
+                similarity = paper.get("similarity", 0.0)
+
+                print(f"{i + 1}. Paper ID: {paper.get('uid', 'N/A')}")
+                print(f"   Title: {paper.get('title', 'N/A')}")
+
+                authors = paper.get("authors", [])
+                authors_display = "; ".join(authors) if isinstance(authors, list) else str(authors)
+                print(f"   Authors: {authors_display}")
+
+                if paper.get("session"):
+                    print(f"   Session: {paper.get('session')}")
+
+                if paper.get("decision"):
+                    print(f"   Decision: {paper.get('decision')}")
+
+                if paper.get("topic"):
+                    print(f"   Topic: {paper.get('topic')}")
+
+                if paper.get("url") or paper.get("paper_url"):
+                    print(f"   URL: {paper.get('url') or paper.get('paper_url')}")
+
+                if paper.get("poster_position"):
+                    print(f"   Poster Position: {paper.get('poster_position')}")
+
+                print(f"   Similarity: {similarity:.4f}")
+
+                if args.show_abstract and paper.get("abstract"):
+                    abstract = paper["abstract"]
+                    abstract = abstract[:300] + "..." if len(abstract) > 300 else abstract
+                    print(f"   Abstract: {abstract}")
+
+                print()
+
             return 0
-
-        num_results = len(papers)
-        print(f"✅ Found {num_results} similar paper(s):\n")
-
-        for i, paper in enumerate(papers):
-            similarity = paper.get("similarity", 0.0)
-
-            print(f"{i + 1}. Paper ID: {paper.get('uid', 'N/A')}")
-            print(f"   Title: {paper.get('title', 'N/A')}")
-
-            authors = paper.get("authors", [])
-            authors_display = "; ".join(authors) if isinstance(authors, list) else str(authors)
-            print(f"   Authors: {authors_display}")
-
-            if paper.get("session"):
-                print(f"   Session: {paper.get('session')}")
-
-            if paper.get("decision"):
-                print(f"   Decision: {paper.get('decision')}")
-
-            if paper.get("topic"):
-                print(f"   Topic: {paper.get('topic')}")
-
-            if paper.get("url") or paper.get("paper_url"):
-                print(f"   URL: {paper.get('url') or paper.get('paper_url')}")
-
-            if paper.get("poster_position"):
-                print(f"   Poster Position: {paper.get('poster_position')}")
-
-            print(f"   Similarity: {similarity:.4f}")
-
-            if args.show_abstract and paper.get("abstract"):
-                abstract = paper["abstract"]
-                abstract = abstract[:300] + "..." if len(abstract) > 300 else abstract
-                print(f"   Abstract: {abstract}")
-
-            print()
-
-        em.close()
-        return 0
 
     except EmbeddingsError as e:
         print(f"\n❌ Search error: {e}", file=sys.stderr)
@@ -215,106 +214,104 @@ def chat_command(args: argparse.Namespace) -> int:
             return 1
 
         # Initialize embeddings manager
-        em = EmbeddingsManager(
-            collection_name=args.collection,
-            backend_url=args.backend_url,
-            model_name=args.embedding_model,
-        )
+        with closing(
+            EmbeddingsManager(
+                collection_name=args.collection,
+                backend_url=args.backend_url,
+                model_name=args.embedding_model,
+            )
+        ) as em:
+            # Test OpenAI API connection
+            if not em.test_api_connection(verbose=True, model_hint="A language model is loaded"):
+                return 1
 
-        # Test OpenAI API connection
-        if not em.test_api_connection(verbose=True, model_hint="A language model is loaded"):
-            return 1
+            # Get collection stats
+            stats = em.get_collection_stats()
+            print(f"\n📊 Loaded {stats['count']:,} papers from collection '{stats['name']}'")
 
-        # Get collection stats
-        stats = em.get_collection_stats()
-        print(f"\n📊 Loaded {stats['count']:,} papers from collection '{stats['name']}'")
+            # Initialize database connection
+            with closing(DatabaseManager()) as db:
+                # Build conference/year context for RAG queries (case-insensitive via DB lookup)
+                chat_conferences: Optional[List[str]] = None
+                chat_years: Optional[List[int]] = None
+                if conference:
+                    chat_conferences = [conference]
+                if year is not None:
+                    chat_years = [year]
 
-        # Initialize database connection
-        db = DatabaseManager()
+                # Initialize RAG chat
+                chat = RAGChat(
+                    embeddings_manager=em,
+                    database=db,
+                    backend_url=args.backend_url,
+                    model=args.model,
+                    max_context_papers=args.max_context,
+                    temperature=args.temperature,
+                )
 
-        # Build conference/year context for RAG queries (case-insensitive via DB lookup)
-        chat_conferences: Optional[List[str]] = None
-        chat_years: Optional[List[int]] = None
-        if conference:
-            chat_conferences = [conference]
-        if year is not None:
-            chat_years = [year]
-
-        # Initialize RAG chat
-        chat = RAGChat(
-            embeddings_manager=em,
-            database=db,
-            backend_url=args.backend_url,
-            model=args.model,
-            max_context_papers=args.max_context,
-            temperature=args.temperature,
-        )
-
-        print("\n💬 Chat started! Type 'exit' or 'quit' to end, 'reset' to clear history.")
-        print("=" * 70)
-        print()
-
-        # Interactive chat loop
-        while True:
-            try:
-                # Get user input
-                user_input = input("You: ").strip()
-
-                if not user_input:
-                    continue
-
-                # Check for commands
-                if user_input.lower() in ["exit", "quit", "q"]:
-                    print("\n👋 Goodbye!")
-                    break
-
-                if user_input.lower() == "reset":
-                    chat.reset_conversation()
-                    print("🔄 Conversation history cleared.\n")
-                    continue
-
-                if user_input.lower() == "help":
-                    print("\nAvailable commands:")
-                    print("  exit, quit, q  - Exit chat")
-                    print("  reset          - Clear conversation history")
-                    print("  help           - Show this help message")
-                    print()
-                    continue
-
-                # Query RAG system
-                print("\n🔍 Searching papers...", end="", flush=True)
-                result = chat.query(user_input, conferences=chat_conferences, years=chat_years)
-                print("\r" + " " * 50 + "\r", end="")  # Clear the line
-
-                # Display response
-                print(f"Assistant (based on {result['metadata']['n_papers']} papers):")
-                print(result["response"])
+                print("\n💬 Chat started! Type 'exit' or 'quit' to end, 'reset' to clear history.")
+                print("=" * 70)
                 print()
 
-                # Show source papers if requested
-                if args.show_sources and result["papers"]:
-                    print("📚 Source papers:")
-                    for i, paper in enumerate(result["papers"], 1):
-                        score = paper.get("relevance_score", paper.get("similarity", 0))
-                        print(f"  {i}. {paper.get('title', 'Unknown')} (relevance: {score:.3f})")
-                    print()
+                # Interactive chat loop
+                while True:
+                    try:
+                        # Get user input
+                        user_input = input("You: ").strip()
 
-            except KeyboardInterrupt:
-                print("\n\n👋 Goodbye!")
-                break
-            except EOFError:
-                print("\n\n👋 Goodbye!")
-                break
+                        if not user_input:
+                            continue
 
-        # Export conversation if requested
-        if args.export:
-            export_path = Path(args.export)
-            chat.export_conversation(export_path)
-            print(f"💾 Conversation exported to: {export_path}")
+                        # Check for commands
+                        if user_input.lower() in ["exit", "quit", "q"]:
+                            print("\n👋 Goodbye!")
+                            break
 
-        db.close()
-        em.close()
-        return 0
+                        if user_input.lower() == "reset":
+                            chat.reset_conversation()
+                            print("🔄 Conversation history cleared.\n")
+                            continue
+
+                        if user_input.lower() == "help":
+                            print("\nAvailable commands:")
+                            print("  exit, quit, q  - Exit chat")
+                            print("  reset          - Clear conversation history")
+                            print("  help           - Show this help message")
+                            print()
+                            continue
+
+                        # Query RAG system
+                        print("\n🔍 Searching papers...", end="", flush=True)
+                        result = chat.query(user_input, conferences=chat_conferences, years=chat_years)
+                        print("\r" + " " * 50 + "\r", end="")  # Clear the line
+
+                        # Display response
+                        print(f"Assistant (based on {result['metadata']['n_papers']} papers):")
+                        print(result["response"])
+                        print()
+
+                        # Show source papers if requested
+                        if args.show_sources and result["papers"]:
+                            print("📚 Source papers:")
+                            for i, paper in enumerate(result["papers"], 1):
+                                score = paper.get("relevance_score", paper.get("similarity", 0))
+                                print(f"  {i}. {paper.get('title', 'Unknown')} (relevance: {score:.3f})")
+                            print()
+
+                    except KeyboardInterrupt:
+                        print("\n\n👋 Goodbye!")
+                        break
+                    except EOFError:
+                        print("\n\n👋 Goodbye!")
+                        break
+
+                # Export conversation if requested
+                if args.export:
+                    export_path = Path(args.export)
+                    chat.export_conversation(export_path)
+                    print(f"💾 Conversation exported to: {export_path}")
+
+                return 0
 
     except RAGError as e:
         print(f"\n❌ RAG error: {e}", file=sys.stderr)
