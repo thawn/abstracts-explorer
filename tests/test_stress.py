@@ -51,6 +51,14 @@ _RAG_QUERIES = [
     "Find papers about unsupervised learning at NeurIPS 2025.",
 ]
 
+pytestmark = [
+    pytest.mark.stress,
+    pytest.mark.skipif(
+        "not (config.getoption('--server-url') or os.environ.get('SERVER_URL'))",
+        reason="Server URL not provided. Use --server-url or set SERVER_URL env var.",
+    ),
+]
+
 
 @dataclass
 class WaveResult:
@@ -172,7 +180,6 @@ def _run_wave(server_url: str, concurrency: int) -> WaveResult:
     return WaveResult(concurrency=concurrency, results=results, elapsed=time.monotonic() - start)
 
 
-@pytest.mark.stress
 def test_parallel_chat_capacity(server_url: str, record_property: Callable[[str, object], None]) -> None:
     """
     Find the maximum number of parallel RAG chat requests the server handles.
