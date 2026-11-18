@@ -155,6 +155,16 @@ error when the LLM backend is unavailable).
 | `get_paper_details` | *"Who are the authors of 'Attention is All You Need'?"* | Response includes author names, URL/PDF links, and session info (if available). |
 | `analyze_topic_relevance` | *"How relevant is uncertainty quantification at NeurIPS 2025?"* | Response contains a relevance score or paper count within the embedding distance threshold. |
 | `get_cluster_visualization` | *"Show me a visual overview of NeurIPS 2025 clusters."* | Response returns or references visualization data (Plotly JSON or a rendered plot). |
+| `summarize_interesting_papers` | *"Summarize the papers I marked as interesting."* | Response states how many papers are marked and mentions at least one title, topic, keyword, or rating. |
+| `recommend_related_papers` | *"Based on my interesting papers, suggest other papers that may interest me."* | Response recommends at least one additional paper related to the interesting papers. |
+| `suggest_authors_to_meet` | *"Who should I meet based on my interesting papers?"* | Response names at least one author working on similar topics, ideally with a session or poster location. |
+
+```{note}
+The three interesting-paper smoke tests mark the first search results as
+5-star interesting papers via the web UI before sending the chat query.  The
+ratings are stored in the browser's ``localStorage`` and are forwarded
+automatically with the chat request.
+```
 
 ### 5. Clustering tab
 

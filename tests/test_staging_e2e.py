@@ -865,6 +865,54 @@ class TestMCPToolSmokeTests:
         _print_chat_history(history, query)
         return response_text, history
 
+    def _mark_interesting_papers(
+        self,
+        staging_url,
+        staging_page,
+        query: str = "learning",
+        count: int = 2,
+    ) -> None:
+        """
+        Rate the first *count* search results as 5-star interesting papers.
+
+        Interesting-paper tools need seed ratings.  The ratings are stored in
+        ``localStorage`` by the web UI, so they survive the navigation performed
+        by :meth:`_send_chat_query`.
+
+        Parameters
+        ----------
+        staging_url : str
+            Base URL of the staging deployment.
+        staging_page : Page
+            Playwright page instance.
+        query : str, optional
+            Search query used to find papers to rate (default: ``"learning"``).
+        count : int, optional
+            Number of search results to rate (default: 2).
+        """
+        staging_page.goto(staging_url)
+        staging_page.evaluate("localStorage.removeItem('paperPriorities')")
+        staging_page.reload()
+        _submit_search_query(staging_page, query)
+
+        stars = staging_page.locator("#search-results .paper-star")
+        expect(stars.first).to_be_attached(timeout=15000)
+
+        for index in range(count):
+            star = stars.nth(index * 5 + 4)
+            expect(star).to_be_attached(timeout=15000)
+            star.click()
+
+        staging_page.wait_for_function(
+            """count => {
+                const raw = localStorage.getItem('paperPriorities');
+                if (!raw) return false;
+                return Object.keys(JSON.parse(raw)).length >= count;
+            }""",
+            arg=count,
+            timeout=5000,
+        )
+
     # ------------------------------------------------------------------
     # Individual MCP tool tests
     # ------------------------------------------------------------------
@@ -1034,6 +1082,99 @@ class TestMCPToolSmokeTests:
             query,
             response,
             criteria=("the response should describe or reference a cluster visualization. Note: " + formatted_answer),
+        )
+
+    def test_summarize_interesting_papers(self, staging_url, staging_page):
+        """
+        MCP tool: ``summarize_interesting_papers``.
+
+        Example query: *"Summarize the papers I marked as interesting."*
+
+        Success criteria (LLM-judged): the response summarises the interesting
+        papers, indicates how many were marked, and mentions at least one
+        paper title, topic, keyword, or rating.
+
+        Parameters
+        ----------
+        staging_url : str
+            Base URL of the staging deployment.
+        staging_page : Page
+            Playwright page instance.
+        """
+        query = "Summarize the papers I marked as interesting."
+        self._mark_interesting_papers(staging_url, staging_page)
+        response, _ = self._send_chat_query(staging_url, staging_page, query)
+        if not response:
+            pytest.skip("LLM backend unavailable – no response received")
+        _assert_llm_judgment(
+            query,
+            response,
+            criteria=(
+                "the response should summarize the user's interesting paper(s), indicate how many "
+                "papers were marked, and mention at least one paper title, topic, keyword, or rating"
+            ),
+        )
+
+    def test_recommend_related_papers(self, staging_url, staging_page):
+        """
+        MCP tool: ``recommend_related_papers``.
+
+        Example query: *"Based on my interesting papers, suggest other papers
+        that may interest me."*
+
+        Success criteria (LLM-judged): the response recommends at least one
+        additional paper related to the user's interesting papers.
+
+        Parameters
+        ----------
+        staging_url : str
+            Base URL of the staging deployment.
+        staging_page : Page
+            Playwright page instance.
+        """
+        query = "Based on my interesting papers, suggest other papers that may interest me."
+        self._mark_interesting_papers(staging_url, staging_page)
+        response, _ = self._send_chat_query(staging_url, staging_page, query)
+        if not response:
+            pytest.skip("LLM backend unavailable – no response received")
+        _assert_llm_judgment(
+            query,
+            response,
+            criteria=(
+                "the response should recommend at least one additional paper related to the "
+                "user's interesting papers; it may include a title, topic, or reason for the recommendation"
+            ),
+        )
+
+    def test_suggest_authors_to_meet(self, staging_url, staging_page):
+        """
+        MCP tool: ``suggest_authors_to_meet``.
+
+        Example query: *"Who should I meet based on my interesting papers?"*
+
+        Success criteria (LLM-judged): the response names at least one author
+        working on topics similar to the user's interesting papers, ideally
+        with a session or poster location.
+
+        Parameters
+        ----------
+        staging_url : str
+            Base URL of the staging deployment.
+        staging_page : Page
+            Playwright page instance.
+        """
+        query = "Who should I meet based on my interesting papers?"
+        self._mark_interesting_papers(staging_url, staging_page)
+        response, _ = self._send_chat_query(staging_url, staging_page, query)
+        if not response:
+            pytest.skip("LLM backend unavailable – no response received")
+        _assert_llm_judgment(
+            query,
+            response,
+            criteria=(
+                "the response should name at least one author who works on topics similar to the "
+                "user's interesting papers, ideally with a session or poster location"
+            ),
         )
 
 

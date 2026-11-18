@@ -77,6 +77,10 @@ export function buildMcpToolsHintHtml() {
                     <i class="fas fa-wand-magic-sparkles text-pink-400 mt-0.5 flex-shrink-0"></i>
                     <span><em>"Based on my interesting papers, suggest other papers that may interest me."</em></span>
                 </li>
+                <li class="flex items-start gap-2">
+                    <i class="fas fa-users text-teal-400 mt-0.5 flex-shrink-0"></i>
+                    <span><em>"Who should I meet based on my interesting papers?"</em></span>
+                </li>
             </ul>
         </div>`;
 }
