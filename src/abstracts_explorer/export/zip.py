@@ -3,12 +3,13 @@ ZIP archive generation for interesting-paper exports.
 """
 
 import logging
-import re
 import zipfile
 from io import BytesIO
 from typing import Any, Dict, List
 
 from abstracts_explorer.export.markdown import (
+    _coerce_priority,
+    build_search_term_filename_map,
     generate_all_papers_markdown,
     generate_main_readme,
     generate_search_term_markdown,
@@ -50,20 +51,17 @@ def generate_folder_structure_export(
     """
     # Create in-memory zip file
     zip_buffer = BytesIO()
-    used_names = {"readme", "all_papers"}
 
-    def unique_name(base: str) -> str:
-        candidate = base
-        counter = 2
-        while candidate.lower() in used_names:
-            candidate = f"{base}_{counter}"
-            counter += 1
-        used_names.add(candidate.lower())
-        return f"{candidate}.md"
+    search_terms: Dict[str, List[Dict[str, Any]]] = {}
+    for paper in papers:
+        search_term = str(paper.get("searchTerm") or "Unknown")
+        search_terms.setdefault(search_term, []).append(paper)
+
+    search_term_files = build_search_term_filename_map(search_terms.keys())
 
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
         # Generate main README.md with conference information
-        readme_content = generate_main_readme(papers, sort_order)
+        readme_content = generate_main_readme(papers, sort_order, search_term_files=search_term_files)
         zipf.writestr("README.md", readme_content)
 
         if sort_order == "poster-search-rating":
@@ -75,10 +73,8 @@ def generate_folder_structure_export(
             # Rating is first priority - split by rating
             priority_groups: Dict[int, List[Dict[str, Any]]] = {}
             for paper in papers:
-                priority = paper.get("priority", 0)
-                if priority not in priority_groups:
-                    priority_groups[priority] = []
-                priority_groups[priority].append(paper)
+                priority = _coerce_priority(paper.get("priority", 0))
+                priority_groups.setdefault(priority, []).append(paper)
 
             # Create a markdown file for each priority rating
             for priority in sorted(priority_groups.keys(), reverse=True):  # Higher priorities first
@@ -92,31 +88,18 @@ def generate_folder_structure_export(
                 )
 
                 # Write to file named by priority
-                zipf.writestr(unique_name(priority_name), priority_markdown)
+                zipf.writestr(f"{priority_name}.md", priority_markdown)
 
         else:  # sort_order == "search-rating-poster"
             # Search term is first priority - split by search term
-            search_terms: Dict[str, List[Dict[str, Any]]] = {}
-            for paper in papers:
-                search_term = paper.get("searchTerm") or "Unknown"
-                if search_term not in search_terms:
-                    search_terms[search_term] = []
-                search_terms[search_term].append(paper)
-
-            # Create a markdown file for each search term
-            for search_term, term_papers in search_terms.items():
-                # Sanitize search term for filename
-                safe_name = re.sub(r"[^\w\s-]", "", search_term).strip().replace(" ", "_")
-                safe_name = safe_name[:50]  # Limit length
-
-                if not safe_name:
-                    safe_name = "unknown"
+            for search_term in sorted(search_terms.keys()):
+                term_papers = search_terms[search_term]
 
                 # Generate markdown for this search term
                 term_markdown = generate_search_term_markdown(search_term, term_papers)
 
                 # Write to file named by search term
-                zipf.writestr(unique_name(safe_name), term_markdown)
+                zipf.writestr(search_term_files[search_term], term_markdown)
 
     zip_buffer.seek(0)
     return zip_buffer
@@ -148,42 +131,46 @@ def export_papers_to_zip(papers: List[Dict[str, Any]], sort_order: str = "search
     >>> papers = [{"title": "Paper 1", "priority": 5, "searchTerm": "AI"}]
     >>> zip_buffer = export_papers_to_zip(papers, "search-rating-poster")
     """
-    # Sort papers based on the selected sort order
+    # Sort papers based on the selected sort order without mutating the caller's list
     if sort_order == "search-rating-poster":
         # Search term, then priority, then poster position
-        papers.sort(
+        papers = sorted(
+            papers,
             key=lambda p: (
-                p.get("searchTerm") or "",
-                -p.get("priority", 0),  # Descending priority
+                str(p.get("searchTerm") or ""),
+                -_coerce_priority(p.get("priority", 0)),  # Descending priority
                 natural_sort_key(p.get("poster_position") or ""),
-            )
+            ),
         )
     elif sort_order == "rating-poster-search":
         # Priority, then poster position, then search term
-        papers.sort(
+        papers = sorted(
+            papers,
             key=lambda p: (
-                -p.get("priority", 0),  # Descending priority
+                -_coerce_priority(p.get("priority", 0)),  # Descending priority
                 natural_sort_key(p.get("poster_position") or ""),
-                p.get("searchTerm") or "",
-            )
+                str(p.get("searchTerm") or ""),
+            ),
         )
     elif sort_order == "poster-search-rating":
         # Poster position, then search term, then priority
-        papers.sort(
+        papers = sorted(
+            papers,
             key=lambda p: (
                 natural_sort_key(p.get("poster_position") or ""),
-                p.get("searchTerm") or "",
-                -p.get("priority", 0),  # Descending priority
-            )
+                str(p.get("searchTerm") or ""),
+                -_coerce_priority(p.get("priority", 0)),  # Descending priority
+            ),
         )
     else:
         # Default: search term, priority, poster position
-        papers.sort(
+        papers = sorted(
+            papers,
             key=lambda p: (
-                p.get("searchTerm") or "",
-                -p.get("priority", 0),  # Descending priority
+                str(p.get("searchTerm") or ""),
+                -_coerce_priority(p.get("priority", 0)),  # Descending priority
                 natural_sort_key(p.get("poster_position") or ""),
-            )
+            ),
         )
 
     # Generate zip file with folder structure

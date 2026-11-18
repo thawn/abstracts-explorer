@@ -6,8 +6,8 @@ kept as a stable import path.
 """
 
 from abstracts_explorer.export import (
+    build_search_term_filename_map,
     export_papers_to_zip,
-    fetch_conference_info,
     generate_all_papers_markdown,
     generate_folder_structure_export,
     generate_main_readme,
@@ -18,7 +18,7 @@ from abstracts_explorer.export import (
 
 __all__ = [
     "natural_sort_key",
-    "fetch_conference_info",
+    "build_search_term_filename_map",
     "get_poster_url",
     "generate_all_papers_markdown",
     "generate_search_term_markdown",

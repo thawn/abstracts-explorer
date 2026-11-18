@@ -5,8 +5,8 @@ The public API is re-exported here; ``abstracts_explorer.export_utils`` remains
 as an import-compatibility facade.
 """
 
-from abstracts_explorer.export.conference_info import fetch_conference_info
 from abstracts_explorer.export.markdown import (
+    build_search_term_filename_map,
     generate_all_papers_markdown,
     generate_main_readme,
     generate_search_term_markdown,
@@ -17,7 +17,7 @@ from abstracts_explorer.export.zip import export_papers_to_zip, generate_folder_
 
 __all__ = [
     "natural_sort_key",
-    "fetch_conference_info",
+    "build_search_term_filename_map",
     "get_poster_url",
     "generate_all_papers_markdown",
     "generate_search_term_markdown",
