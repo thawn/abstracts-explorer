@@ -28,6 +28,31 @@ from abstracts_explorer.db.filters import WhereFilterMixin, _filter_has_key
 logger = logging.getLogger(__name__)
 
 
+def _coerce_year(value: Any) -> int:
+    """
+    Convert a year operand to ``int``.
+
+    Parameters
+    ----------
+    value : Any
+        Year value, typically an ``int`` or a numeric string.
+
+    Returns
+    -------
+    int
+        The converted year.
+
+    Raises
+    ------
+    DatabaseError
+        If *value* cannot be converted to an integer.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError) as e:
+        raise DatabaseError(f"Invalid year value: {value!r}") from e
+
+
 class PapersMixin(WhereFilterMixin):
     """Paper CRUD and query methods."""
 
@@ -333,7 +358,7 @@ class PapersMixin(WhereFilterMixin):
         if conferences and not _filter_has_key(normalized_where, "conference"):
             terms.append({"conference": {"$in": list(conferences)}})
         if years and not _filter_has_key(normalized_where, "year"):
-            terms.append({"year": {"$in": [int(year) for year in years]}})
+            terms.append({"year": {"$in": [_coerce_year(year) for year in years]}})
         if sessions and not _filter_has_key(normalized_where, "session"):
             terms.append({"session": {"$in": list(sessions)}})
         if field_filters:

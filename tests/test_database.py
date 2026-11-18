@@ -7,6 +7,9 @@ old field names) have been removed. See test_authors.py for comprehensive tests
 using the new schema with integer IDs and proper author relationships.
 """
 
+import threading
+from types import SimpleNamespace
+
 import pytest
 from sqlalchemy import exc as sqlalchemy_exc
 from unittest.mock import Mock, patch
@@ -19,6 +22,14 @@ from tests.helpers import raw_query
 # Fixtures are now imported from conftest.py:
 # - db_manager: DatabaseManager instance with temporary database
 # - connected_db: Connected database with tables created
+
+
+class _FakeOrig(Exception):
+    """DBAPI-orig stand-in carrying arbitrary attributes like ``sqlstate``."""
+
+    def __init__(self, **attrs):
+        super().__init__("database error")
+        self.__dict__.update(attrs)
 
 
 @pytest.fixture
@@ -252,6 +263,100 @@ class TestDatabaseManager:
         finally:
             database_module.reset_schema_cache()
             db_manager.close()
+
+    def test_create_tables_sqlite_already_exists_is_success(self, db_manager):
+        """SQLite 'already exists' is treated as an idempotent success."""
+        from abstracts_explorer import database as database_module
+
+        exc = sqlalchemy_exc.OperationalError("CREATE TABLE papers", {}, Exception("table papers already exists"))
+        with patch.object(database_module.Base.metadata, "create_all", side_effect=exc):
+            db_manager.create_tables()
+
+        assert db_manager._schema_ready is True
+        db_manager.close()
+
+    def test_create_tables_postgres_duplicate_table_is_success(self, db_manager):
+        """PostgreSQL duplicate_table/object SQLSTATEs are treated as success."""
+        from abstracts_explorer import database as database_module
+
+        for sqlstate in ("42P07", "42710"):
+            database_module.reset_schema_cache()
+            orig = _FakeOrig(sqlstate=sqlstate, diag=None)
+            exc = sqlalchemy_exc.ProgrammingError("CREATE TABLE", {}, orig)
+            db_manager._session = None
+            db_manager.engine = Mock()
+            db_manager.engine.dialect.name = "postgresql"
+            with patch.object(database_module.Base.metadata, "create_all", side_effect=exc):
+                db_manager.create_tables(force=True)
+            assert db_manager._schema_ready is True
+
+        database_module.reset_schema_cache()
+        db_manager.close()
+
+    def test_create_tables_postgres_pg_type_race_is_success(self, db_manager):
+        """The pg_type unique-violation race is treated as success."""
+        from abstracts_explorer import database as database_module
+
+        database_module.reset_schema_cache()
+        orig = _FakeOrig(
+            sqlstate="23505",
+            diag=SimpleNamespace(constraint_name="pg_type_typname_nsp_index"),
+        )
+        exc = sqlalchemy_exc.IntegrityError("CREATE TABLE", {}, orig)
+        db_manager._session = None
+        db_manager.engine = Mock()
+        db_manager.engine.dialect.name = "postgresql"
+        with patch.object(database_module.Base.metadata, "create_all", side_effect=exc):
+            db_manager.create_tables(force=True)
+
+        assert db_manager._schema_ready is True
+        database_module.reset_schema_cache()
+        db_manager.close()
+
+    def test_create_tables_unrelated_error_containing_duplicate_raises(self, db_manager):
+        """A non-schema error whose text contains 'duplicate' is not swallowed."""
+        from abstracts_explorer import database as database_module
+
+        exc = sqlalchemy_exc.OperationalError(
+            "CREATE TABLE papers", {}, Exception("duplicate key value violates unique constraint")
+        )
+        with patch.object(database_module.Base.metadata, "create_all", side_effect=exc):
+            with pytest.raises(DatabaseError):
+                db_manager.create_tables()
+
+        db_manager.close()
+
+    def test_concurrent_connect_creates_single_engine(self, db_manager, monkeypatch):
+        """Concurrent lazy connect() calls create exactly one engine."""
+        import abstracts_explorer.db.session as session_module
+
+        real_create_engine = session_module.create_engine
+        calls = []
+
+        def counting_create_engine(*args, **kwargs):
+            calls.append(1)
+            return real_create_engine(*args, **kwargs)
+
+        monkeypatch.setattr(session_module, "create_engine", counting_create_engine)
+
+        errors = []
+
+        def worker():
+            try:
+                db_manager.connect()
+            except Exception as e:  # pragma: no cover - only on failure
+                errors.append(e)
+
+        threads = [threading.Thread(target=worker) for _ in range(10)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert not errors
+        assert len(calls) == 1
+        assert db_manager._session is not None
+        db_manager.close()
 
     def test_query_auto_connects(self, db_manager):
         """Querying an uninitialized database creates the schema lazily."""
@@ -2048,6 +2153,17 @@ class TestPaperUidResolution:
     def test_resolve_paper_uids_empty_scope(self, connected_db, sample_paper):
         connected_db.add_paper(sample_paper)
         assert connected_db.resolve_paper_uids(conferences=["ICLR"]) == []
+
+    def test_resolve_paper_uids_invalid_year_raises(self, connected_db):
+        """Non-numeric years raise DatabaseError instead of a raw ValueError."""
+        with pytest.raises(DatabaseError, match="Invalid year value"):
+            connected_db.resolve_paper_uids(years=["abc"])
+
+    def test_resolve_paper_uids_numeric_string_year(self, connected_db, sample_paper):
+        """Numeric-string years are coerced to int."""
+        connected_db.add_paper(sample_paper)
+        uids = connected_db.resolve_paper_uids(years=["2025"])
+        assert len(uids) == 1
 
     def test_summaries_preserve_order_and_omit_missing(self, connected_db, sample_paper):
         uid = connected_db.add_paper(sample_paper)

@@ -38,6 +38,43 @@ def mask_database_url(url: str) -> str:
         return url
 
 
+def _is_duplicate_schema_error(exc: Exception, dialect_name: str) -> bool:
+    """
+    Return whether *exc* represents an idempotent "already exists" schema error.
+
+    Detection uses structured error information rather than broad substring
+    matching: PostgreSQL SQLSTATE codes for duplicate tables/objects (and the
+    ``pg_type`` unique-violation race), and a narrow message check for SQLite
+    (which does not expose SQLSTATE).
+
+    Parameters
+    ----------
+    exc : Exception
+        The SQLAlchemy error raised by ``create_all``.
+    dialect_name : str
+        Name of the SQLAlchemy dialect (``"postgresql"`` or ``"sqlite"``).
+
+    Returns
+    -------
+    bool
+        ``True`` when the error merely indicates the schema already exists.
+    """
+    orig = getattr(exc, "orig", None)
+    sqlstate = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+
+    if sqlstate in {"42P07", "42710"}:
+        return True
+    if sqlstate == "23505":
+        diag = getattr(orig, "diag", None)
+        constraint = getattr(diag, "constraint_name", None) if diag is not None else None
+        return constraint == "pg_type_typname_nsp_index"
+
+    if dialect_name == "sqlite":
+        return "already exists" in str(exc).lower()
+
+    return False
+
+
 def reset_schema_cache() -> None:
     """
     Clear the process-level schema-ready cache.
@@ -201,15 +238,16 @@ class SessionMixin:
 
         Does nothing if not connected.
         """
-        if self._session:
-            self._session.close()
-            self._session = None
-        self._schema_ready = False
-        if self.engine:
-            self.engine.dispose()
-            self.engine = None
-        self.SessionLocal = None
-        logger.debug("Database connection closed")
+        with self._connect_lock:
+            if self._session:
+                self._session.close()
+                self._session = None
+            self._schema_ready = False
+            if self.engine:
+                self.engine.dispose()
+                self.engine = None
+            self.SessionLocal = None
+            logger.debug("Database connection closed")
 
     def __enter__(self):
         """Context manager entry."""
@@ -246,38 +284,38 @@ class SessionMixin:
         DatabaseError
             If table creation fails.
         """
-        if self.engine is None:
-            self.connect()
-        assert self.engine is not None
+        with self._connect_lock:
+            if self.engine is None:
+                self.connect()
+            assert self.engine is not None
 
-        if not force and self._schema_cache_applies():
-            with _SCHEMA_LOCK:
-                if self.database_url in _SCHEMA_READY_URLS:
-                    self._schema_ready = True
-                    return
+            if not force and self._schema_cache_applies():
+                with _SCHEMA_LOCK:
+                    if self.database_url in _SCHEMA_READY_URLS:
+                        self._schema_ready = True
+                        return
 
-        try:
-            # Create tables only if they don't exist (checkfirst=True is the default)
-            # This makes the operation idempotent
-            Base.metadata.create_all(bind=self.engine, checkfirst=True)
-            self._mark_schema_ready()
-            logger.debug("Database tables created successfully")
-        except (OperationalError, ProgrammingError, IntegrityError) as e:
-            # These exceptions can occur when tables already exist, especially with:
-            # - Race conditions in concurrent environments
-            # - PostgreSQL's pg_type_typname_nsp_index constraint
-            # - SQLite "table already exists" errors
-            error_msg = str(e).lower()
-            if any(x in error_msg for x in ["already exists", "duplicate", "pg_type_typname_nsp_index"]):
-                # Tables already exist - this is fine, just log it
+            try:
+                # Create tables only if they don't exist (checkfirst=True is the default)
+                # This makes the operation idempotent
+                Base.metadata.create_all(bind=self.engine, checkfirst=True)
                 self._mark_schema_ready()
-                logger.debug(f"Tables already exist (this is normal): {str(e)}")
-                return
-            # For other database errors, re-raise with context
-            raise DatabaseError(f"Failed to create tables: {str(e)}") from e
-        except Exception as e:
-            # Catch any other unexpected errors
-            raise DatabaseError(f"Failed to create tables: {str(e)}") from e
+                logger.debug("Database tables created successfully")
+            except (OperationalError, ProgrammingError, IntegrityError) as e:
+                # These exceptions can occur when tables already exist, especially with:
+                # - Race conditions in concurrent environments
+                # - PostgreSQL's pg_type_typname_nsp_index constraint
+                # - SQLite "table already exists" errors
+                if _is_duplicate_schema_error(e, self.engine.dialect.name):
+                    # Tables already exist - this is fine, just log it
+                    self._mark_schema_ready()
+                    logger.debug(f"Tables already exist (this is normal): {str(e)}")
+                    return
+                # For other database errors, re-raise with context
+                raise DatabaseError(f"Failed to create tables: {str(e)}") from e
+            except Exception as e:
+                # Catch any other unexpected errors
+                raise DatabaseError(f"Failed to create tables: {str(e)}") from e
 
     def _schema_cache_applies(self) -> bool:
         """

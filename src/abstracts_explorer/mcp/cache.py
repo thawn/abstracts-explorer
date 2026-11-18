@@ -64,9 +64,9 @@ def _lookup_clustering_cache(
     """
     Look up pre-computed clustering results from the database cache.
 
-    Tries an exact match first.  When *years* is non-empty and no exact
-    match is found, retries without the year filter so that an all-years
-    cache entry can serve as a fallback.
+    A single requested year performs an exact per-year match and never falls
+    back to an all-years entry.  Multi-year or empty ``years`` use the
+    all-years entry (``year`` stored as ``NULL``).
 
     Parameters
     ----------
