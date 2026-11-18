@@ -19,9 +19,12 @@ from abstracts_explorer.config import get_config
 def _reset_global_rate_limiter():
     """Reset the global rate limiter between tests to avoid test pollution."""
     from abstracts_explorer.rate_limiter import set_global_rate_limiter
+    from abstracts_explorer.web_ui.rate_limit import reset_client_rate_limiter
 
     set_global_rate_limiter(None)
+    reset_client_rate_limiter()
     yield
+    reset_client_rate_limiter()
 
 
 @pytest.fixture(autouse=True)

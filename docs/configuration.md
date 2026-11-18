@@ -37,6 +37,7 @@ nano .env
 - **EMBEDDING_MODEL**: The embedding model to use (default: `text-embedding-qwen3-embedding-4b`)
 - **EMBEDDING_MAX_INPUT_TOKENS**: Maximum number of tokens sent to the embedding model in one request (default: `8192`). Longer titles/abstracts are truncated before the API call; the full text is still stored in ChromaDB. Set to `0` to disable proactive truncation.
 - **REQUESTS_PER_MINUTE**: Maximum embedding API requests per minute, `0` disables rate limiting (default: `60`). Can be overridden per command with `--requests-per-minute`.
+- **WEB_RATE_LIMIT_PER_MINUTE**: Maximum expensive web API requests per client per minute for chat, semantic search, cluster search, and topic evolution; `0` disables client rate limiting (default: `30`). The limiter is per-process; multi-worker deployments need a shared store for global enforcement.
 
 ### LLM Backend Configuration
 
@@ -142,14 +143,21 @@ The configuration automatically detects the type based on the format:
 ### Reverse Proxy Header Handling
 
 These settings configure Werkzeug's `ProxyFix` middleware, i.e. the number of
-trusted reverse-proxy layers for each `X-Forwarded-*` header (defaults match the
-single nginx layer in `docker-compose.yml`). Set a value to `0` to disable
-trust for that header:
+trusted reverse-proxy layers for each `X-Forwarded-*` header. The defaults are
+`0` (trust no forwarded headers), so deployments behind nginx should set the
+hop counts explicitly. The bundled `docker-compose.yml` and systemd unit already
+set them to `1`.
 
-- **PROXY_X_FOR**: Trusted `X-Forwarded-For` proxy hops (default: `1`)
-- **PROXY_X_PROTO**: Trusted `X-Forwarded-Proto` proxy hops (default: `1`)
-- **PROXY_X_HOST**: Trusted `X-Forwarded-Host` proxy hops (default: `1`)
-- **PROXY_X_PREFIX**: Trusted `X-Forwarded-Prefix` proxy hops (default: `1`)
+- **PROXY_X_FOR**: Trusted `X-Forwarded-For` proxy hops (default: `0`)
+- **PROXY_X_PROTO**: Trusted `X-Forwarded-Proto` proxy hops (default: `0`)
+- **PROXY_X_HOST**: Trusted `X-Forwarded-Host` proxy hops (default: `0`)
+- **PROXY_X_PREFIX**: Trusted `X-Forwarded-Prefix` proxy hops (default: `0`)
+
+### Web UI Security
+
+- **FLASK_SECRET_KEY**: Flask session signing key. When unset, a stable key is generated once in `<DATA_DIR>/.flask_secret` (mode `0600`).
+- **MAX_CONTENT_LENGTH**: Maximum accepted request body size in bytes (default: `2097152`, 2 MiB).
+- **CORS_ORIGINS**: Comma-separated allowed browser origins. CORS is disabled when unset; use `*` only for trusted deployments.
 
 ### Logging
 

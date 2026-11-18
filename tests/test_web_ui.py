@@ -21,7 +21,7 @@ from tests.conftest import set_test_db
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from abstracts_explorer.web_ui import app as flask_app
-from abstracts_explorer.database import DatabaseManager
+from abstracts_explorer.database import DatabaseError, DatabaseManager
 from abstracts_explorer.config import get_config
 from tests.helpers import raw_query
 
@@ -457,7 +457,7 @@ class TestConferenceURLRoute:
 
         app_module = sys.modules["abstracts_explorer.web_ui.app"]
         mock_db = MagicMock()
-        mock_db.resolve_conference_for_url.return_value = {"conference": "NeurIPS", "error": None}
+        mock_db.resolve_conference_for_url.return_value = {"conference": "NeurIPS", "error": None, "reason": "found"}
 
         with patch.object(app_module, "get_database", return_value=mock_db):
             response = client.get("/neurips")
@@ -474,7 +474,7 @@ class TestConferenceURLRoute:
 
         app_module = sys.modules["abstracts_explorer.web_ui.app"]
         mock_db = MagicMock()
-        mock_db.resolve_conference_for_url.return_value = {"conference": "ICML", "error": None}
+        mock_db.resolve_conference_for_url.return_value = {"conference": "ICML", "error": None, "reason": "found"}
 
         with patch.object(app_module, "get_database", return_value=mock_db):
             response = client.get("/ICML")
@@ -488,7 +488,7 @@ class TestConferenceURLRoute:
 
         app_module = sys.modules["abstracts_explorer.web_ui.app"]
         mock_db = MagicMock()
-        mock_db.resolve_conference_for_url.return_value = {"conference": "NeurIPS", "error": None}
+        mock_db.resolve_conference_for_url.return_value = {"conference": "NeurIPS", "error": None, "reason": "found"}
 
         with patch.object(app_module, "get_database", return_value=mock_db):
             response = client.get("/NeurIPS")
@@ -509,12 +509,13 @@ class TestConferenceURLRoute:
                 "message": "Conference 'unknownconf' not found.",
                 "available_conferences": ["ICLR", "NeurIPS"],
             },
+            "reason": "not_found",
         }
 
         with patch.object(app_module, "get_database", return_value=mock_db):
             response = client.get("/unknownconf")
 
-        assert response.status_code == 200
+        assert response.status_code == 404
         assert b"Abstracts Explorer" in response.data
         # Should contain error info
         assert b"window.urlConferenceError" in response.data
@@ -534,12 +535,13 @@ class TestConferenceURLRoute:
                 "message": "No data available for conference 'ICML'. Please download data first.",
                 "available_conferences": ["NeurIPS"],
             },
+            "reason": "no_data",
         }
 
         with patch.object(app_module, "get_database", return_value=mock_db):
             response = client.get("/icml")
 
-        assert response.status_code == 200
+        assert response.status_code == 404
         assert b"window.urlConferenceError" in response.data
         assert b"No data available" in response.data
 
@@ -735,7 +737,7 @@ class TestSearchEndpoint:
         mock_em = MagicMock()
         mock_db = MagicMock()
         mock_papers = [{"uid": "test1", "title": "Test Paper", "abstract": "Test", "authors": ["John Smith"]}]
-        mock_db.search_papers_keyword.return_value = mock_papers
+        mock_db.search_papers_keyword_with_total.return_value = (mock_papers, None)
 
         with patch.object(app_module, "get_embeddings_manager", return_value=mock_em):
             with patch.object(app_module, "get_database", return_value=mock_db):
@@ -952,7 +954,7 @@ class TestErrorHandling:
     def test_search_json_error(self, client):
         """Test search with invalid JSON."""
         response = client.post("/api/search", data="invalid json", content_type="application/json")
-        assert response.status_code in [400, 500]
+        assert response.status_code == 400
 
 
 if __name__ == "__main__":
@@ -999,7 +1001,7 @@ class TestWebUISemanticSearchDetails:
                             "distance": 0.2,
                         },
                     ]
-                    mock_db.search_papers_keyword.return_value = mock_papers
+                    mock_db.search_papers_keyword_with_total.return_value = (mock_papers, 25)
                     mock_em.query_ids_within_distance.return_value = {"ids": ["uid"] * 25}
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
@@ -1038,7 +1040,7 @@ class TestWebUISemanticSearchDetails:
                 with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                     mock_em = Mock()
                     mock_db = Mock()
-                    mock_db.search_papers_keyword.return_value = []
+                    mock_db.search_papers_keyword_with_total.return_value = ([], 0)
                     mock_em.query_ids_within_distance.return_value = {"ids": []}
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
@@ -1063,7 +1065,7 @@ class TestWebUISemanticSearchDetails:
                     with patch("abstracts_explorer.web_ui.app._SIMILAR_DISTANCE_THRESHOLD", 1.2):
                         mock_em = Mock()
                         mock_db = Mock()
-                        mock_db.search_papers_keyword.return_value = []
+                        mock_db.search_papers_keyword_with_total.return_value = ([], 0)
                         mock_em.query_ids_within_distance.return_value = {"ids": []}
                         mock_get_em.return_value = mock_em
                         mock_get_db.return_value = mock_db
@@ -1074,7 +1076,7 @@ class TestWebUISemanticSearchDetails:
                         )
 
                         assert response.status_code == 200
-                        call_kwargs = mock_db.search_papers_keyword.call_args
+                        call_kwargs = mock_db.search_papers_keyword_with_total.call_args
                         assert call_kwargs.kwargs.get("distance_threshold") == 1.2
 
     def test_semantic_search_accepts_per_request_distance_threshold(self):
@@ -1086,7 +1088,7 @@ class TestWebUISemanticSearchDetails:
                 with patch("abstracts_explorer.web_ui.app.get_database") as mock_get_db:
                     mock_em = Mock()
                     mock_db = Mock()
-                    mock_db.search_papers_keyword.return_value = []
+                    mock_db.search_papers_keyword_with_total.return_value = ([], 0)
                     mock_em.query_ids_within_distance.return_value = {"ids": []}
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
@@ -1103,7 +1105,7 @@ class TestWebUISemanticSearchDetails:
 
                     assert response.status_code == 200
                     # Verify the per-request value was used, not the module default
-                    call_kwargs = mock_db.search_papers_keyword.call_args
+                    call_kwargs = mock_db.search_papers_keyword_with_total.call_args
                     assert call_kwargs.kwargs.get("distance_threshold") == 0.7
 
 
@@ -3378,3 +3380,124 @@ class TestExportInterestingPapersPriorities:
         exported_papers = mock_export.call_args.args[0]
         assert exported_papers[0]["priority"] == 5
         assert exported_papers[0]["searchTerm"] == "llms"
+
+
+class TestWebInputHardeningAndRateLimits:
+    """Tests for bounded API inputs, 413 handling, and client rate limiting."""
+
+    def test_payload_too_large_returns_json_413(self, client):
+        old_limit = flask_app.config.get("MAX_CONTENT_LENGTH")
+        flask_app.config["MAX_CONTENT_LENGTH"] = 10
+        try:
+            response = client.post(
+                "/api/search",
+                data=json.dumps({"query": "a" * 100}),
+                content_type="application/json",
+            )
+        finally:
+            flask_app.config["MAX_CONTENT_LENGTH"] = old_limit
+
+        assert response.status_code == 413
+        assert response.get_json()["error"] == "Request body too large"
+
+    def test_search_rejects_too_many_filters(self, client):
+        response = client.post(
+            "/api/search",
+            json={"query": "test", "conferences": [str(i) for i in range(101)]},
+        )
+        assert response.status_code == 400
+        assert "at most" in response.get_json()["error"]
+
+    def test_chat_rejects_oversized_message(self, client):
+        response = client.post("/api/chat", json={"message": "x" * 8001})
+        assert response.status_code == 400
+        assert "at most" in response.get_json()["error"]
+
+    def test_search_rejects_non_finite_distance(self, client):
+        response = client.post(
+            "/api/search",
+            json={"query": "test", "use_embeddings": True, "distance_threshold": "NaN"},
+        )
+        assert response.status_code == 400
+        assert "finite" in response.get_json()["error"]
+
+    def test_custom_cluster_rejects_invalid_distance(self, client):
+        response = client.post("/api/clusters/search", json={"query": "test", "distance": "abc"})
+        assert response.status_code == 400
+        assert "number" in response.get_json()["error"]
+
+    def test_expensive_endpoint_rate_limit_returns_429(self, client):
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        mock_db = MagicMock()
+        mock_db.find_papers_within_distance.return_value = {
+            "query": "test",
+            "query_embedding": [],
+            "distance": 1.1,
+            "papers": [],
+            "count": 0,
+            "total_matches": 0,
+            "total_considered": 0,
+        }
+        mock_config = Mock(web_rate_limit_per_minute=2)
+
+        with patch("abstracts_explorer.web_ui.rate_limit.get_config", return_value=mock_config):
+            with patch.object(app_module, "get_embeddings_manager", return_value=Mock()):
+                with patch.object(app_module, "get_database", return_value=mock_db):
+                    first = client.post("/api/clusters/search", json={"query": "test"})
+                    second = client.post("/api/clusters/search", json={"query": "test"})
+                    third = client.post("/api/clusters/search", json={"query": "test"})
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert third.status_code == 429
+        assert third.headers["Retry-After"]
+
+    def test_rate_limit_zero_disables_limiting(self, client):
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        mock_db = MagicMock()
+        mock_db.find_papers_within_distance.return_value = {
+            "query": "test",
+            "query_embedding": [],
+            "distance": 1.1,
+            "papers": [],
+            "count": 0,
+            "total_matches": 0,
+            "total_considered": 0,
+        }
+        mock_config = Mock(web_rate_limit_per_minute=0)
+
+        with patch("abstracts_explorer.web_ui.rate_limit.get_config", return_value=mock_config):
+            with patch.object(app_module, "get_embeddings_manager", return_value=Mock()):
+                with patch.object(app_module, "get_database", return_value=mock_db):
+                    responses = [client.post("/api/clusters/search", json={"query": "test"}) for _ in range(5)]
+
+        assert all(response.status_code == 200 for response in responses)
+
+    def test_conference_route_database_error_returns_503(self, client):
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        with patch.object(app_module, "get_database", side_effect=DatabaseError("db down")):
+            response = client.get("/neurips")
+
+        assert response.status_code == 503
+        assert b"temporarily unavailable" in response.data
+
+    def test_robots_txt_returns_404(self, client):
+        import sys
+
+        app_module = sys.modules["abstracts_explorer.web_ui.app"]
+        mock_db = MagicMock()
+        mock_db.resolve_conference_for_url.return_value = {
+            "conference": None,
+            "error": {"message": "Conference 'robots.txt' not found.", "available_conferences": []},
+            "reason": "not_found",
+        }
+        with patch.object(app_module, "get_database", return_value=mock_db):
+            response = client.get("/robots.txt")
+
+        assert response.status_code == 404

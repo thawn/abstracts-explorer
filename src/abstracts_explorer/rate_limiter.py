@@ -73,6 +73,49 @@ class TokenBucketRateLimiter:
 
             self._tokens -= tokens
 
+    def try_acquire(self, tokens: float = 1.0) -> bool:
+        """
+        Try to acquire tokens without blocking.
+
+        Parameters
+        ----------
+        tokens : float, optional
+            Number of tokens to acquire (default: 1).
+
+        Returns
+        -------
+        bool
+            ``True`` when the tokens were acquired, ``False`` otherwise.
+        """
+        with self._lock:
+            self._refill()
+            if self._tokens < tokens:
+                return False
+            self._tokens -= tokens
+            return True
+
+    def time_until_available(self, tokens: float = 1.0) -> float:
+        """
+        Return the seconds until the requested tokens are available.
+
+        Parameters
+        ----------
+        tokens : float, optional
+            Number of tokens required (default: 1).
+
+        Returns
+        -------
+        float
+            Non-negative wait time in seconds.
+        """
+        with self._lock:
+            self._refill()
+            if self._tokens >= tokens:
+                return 0.0
+            if self._rate <= 0:
+                return float("inf")
+            return (tokens - self._tokens) / self._rate
+
     async def async_acquire(self, tokens: float = 1.0) -> None:
         """
         Acquire tokens from the bucket asynchronously.

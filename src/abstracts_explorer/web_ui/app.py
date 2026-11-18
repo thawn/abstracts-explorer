@@ -15,7 +15,8 @@ from pathlib import Path
 from flask import Flask, render_template, request, jsonify, send_file, abort
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from abstracts_explorer.database import DatabaseManager, normalize_model_name
+from abstracts_explorer.database import normalize_model_name
+from abstracts_explorer.db.errors import DatabaseError
 from abstracts_explorer.clustering import (
     DEFAULT_CLUSTERING_METHOD,
     DEFAULT_CLUSTERING_PARAMS,
@@ -41,10 +42,13 @@ from abstracts_explorer.web_ui.api_utils import (
     api_error_handler,
     coerce_int_list,
     coerce_limit,
+    coerce_number,
     coerce_str_list,
+    coerce_text,
     get_conference_year_params,
     get_json_object,
 )
+from abstracts_explorer.web_ui.rate_limit import enforce_client_rate_limit
 
 # Import version
 try:
@@ -59,6 +63,23 @@ logger = logging.getLogger(__name__)
 # Lower values are stricter (fewer, more similar results).
 # Users can adjust this per-search via the web UI settings or --distance-threshold CLI flag.
 _SIMILAR_DISTANCE_THRESHOLD = 1.2
+
+_MAX_FILTER_ITEMS = 100
+_MAX_QUERY_LENGTH = 2000
+_MAX_CHAT_MESSAGE_LENGTH = 8000
+_MAX_PRIORITY_ENTRIES = 1000
+_MAX_SEARCH_TERM_LENGTH = 500
+_MAX_TRANSCRIPT_MESSAGES = 200
+_MAX_TRANSCRIPT_CHARS = 20000
+_MAX_CLUSTER_RESULTS = 500
+_MAX_DISTANCE = 10000.0
+_EXPORT_SORT_ORDERS = {"search-rating-poster", "rating-poster-search", "poster-search-rating"}
+
+
+def _client_id() -> str:
+    """Return a stable identifier for the current client."""
+    return request.remote_addr or "unknown"
+
 
 # Get the directory where this file is located
 PACKAGE_DIR = Path(__file__).parent
@@ -169,8 +190,9 @@ def conference_index(conference_name):
     Render the main page with a specific conference pre-selected.
 
     Resolves the conference name case-insensitively against known
-    conferences from plugins and the database. When no match is found,
-    renders the page with an error listing the available conferences.
+    conferences from plugins and the database. Unknown paths and
+    conferences without downloaded data return 404 while still rendering
+    the helpful error banner.
 
     Paths starting with a dot (e.g. ``.well-known``) are excluded so
     that ACME challenges and other hidden-path conventions are not
@@ -183,8 +205,8 @@ def conference_index(conference_name):
 
     Returns
     -------
-    str
-        Rendered HTML template with conference context
+    tuple
+        Rendered HTML template and HTTP status code
     """
     # Don't intercept hidden paths (e.g. .well-known used by Let's Encrypt)
     if conference_name.startswith("."):
@@ -194,24 +216,45 @@ def conference_index(conference_name):
     try:
         database = get_database()
         result = database.resolve_conference_for_url(conference_name)
-        return render_template(
+    except DatabaseError as exc:
+        logger.error("Database error in conference URL route: %s", exc, exc_info=True)
+        return (
+            render_template(
+                "index.html",
+                version=__version__,
+                imprint_link=_config.imprint_link,
+                url_conference=None,
+                url_conference_error={"message": "Conference data is temporarily unavailable."},
+                llm_backend=llm_backend,
+            ),
+            503,
+        )
+    except Exception as exc:
+        logger.error("Error in conference URL route: %s", exc, exc_info=True)
+        return (
+            render_template(
+                "index.html",
+                version=__version__,
+                imprint_link=_config.imprint_link,
+                url_conference=None,
+                url_conference_error={"message": "Unable to load conference information."},
+                llm_backend=llm_backend,
+            ),
+            500,
+        )
+
+    status = 200 if result.get("reason") == "found" else 404
+    return (
+        render_template(
             "index.html",
             version=__version__,
             imprint_link=_config.imprint_link,
             url_conference=result["conference"],
             url_conference_error=result["error"],
             llm_backend=llm_backend,
-        )
-    except Exception as e:
-        logger.error(f"Error in conference URL route: {e}", exc_info=True)
-        return render_template(
-            "index.html",
-            version=__version__,
-            imprint_link=_config.imprint_link,
-            url_conference=None,
-            url_conference_error=None,
-            llm_backend=llm_backend,
-        )
+        ),
+        status,
+    )
 
 
 @app.route("/health")
@@ -398,24 +441,33 @@ def search():
         Search results with papers
     """
     data = get_json_object()
-    query = str(data.get("query", "") or "")
+    query = coerce_text(data.get("query"), "query", _MAX_QUERY_LENGTH)
     use_embeddings = bool(data.get("use_embeddings", False))
     limit = coerce_limit(data.get("limit", 10))
-    sessions = coerce_str_list(data.get("sessions", []), "sessions")
-    years = coerce_int_list(data.get("years", []), "years")
-    conferences = coerce_str_list(data.get("conferences", []), "conferences")
+    sessions = coerce_str_list(data.get("sessions", []), "sessions", max_items=_MAX_FILTER_ITEMS)
+    years = coerce_int_list(data.get("years", []), "years", max_items=_MAX_FILTER_ITEMS)
+    conferences = coerce_str_list(data.get("conferences", []), "conferences", max_items=_MAX_FILTER_ITEMS)
+    distance_threshold = coerce_number(
+        data.get("distance_threshold"),
+        "distance_threshold",
+        default=_SIMILAR_DISTANCE_THRESHOLD,
+        minimum=0.0,
+        maximum=_MAX_DISTANCE,
+    )
 
     if not query:
         return jsonify({"error": "Query is required"}), 400
+
+    if use_embeddings:
+        enforce_client_rate_limit(_client_id())
 
     database = get_database()
 
     if use_embeddings:
         # Semantic search using embeddings
         em = get_embeddings_manager()
-        distance_threshold = float(data.get("distance_threshold", _SIMILAR_DISTANCE_THRESHOLD))
 
-        papers = database.search_papers_keyword(
+        papers, total_similar = database.search_papers_keyword_with_total(
             query=query,
             limit=limit,
             sessions=sessions,
@@ -425,31 +477,6 @@ def search():
             distance_threshold=distance_threshold,
             embeddings_manager=em,
         )
-
-        # Count total similar papers within distance threshold.
-        # Parse field filters to determine the semantic portion of the query;
-        # when the query consists only of field filters there is no meaningful
-        # embedding to compare against, so skip the count.
-        field_filters, remaining_query = DatabaseManager.parse_field_filters(query)
-        if remaining_query:
-            try:
-                candidate_ids = database.resolve_paper_uids(
-                    conferences=conferences if conferences else None,
-                    years=years if years else None,
-                    sessions=sessions if sessions else None,
-                    field_filters=field_filters or None,
-                )
-                total_similar = len(
-                    em.query_ids_within_distance(
-                        query=remaining_query,
-                        distance_threshold=distance_threshold,
-                        ids=candidate_ids,
-                    )["ids"]
-                )
-            except Exception:
-                total_similar = None
-        else:
-            total_similar = None
     else:
         # Keyword search in database
         papers = database.search_papers_keyword(
@@ -564,7 +591,7 @@ def chat():
     """
     config = get_config()  # Get config lazily
     data = get_json_object()
-    message = str(data.get("message", "") or "")
+    message = coerce_text(data.get("message"), "message", _MAX_CHAT_MESSAGE_LENGTH)
     n_papers = coerce_limit(
         data.get("n_papers", config.max_context_papers), default=config.max_context_papers, maximum=100
     )
@@ -572,14 +599,17 @@ def chat():
     paper_priorities = data.get("paper_priorities", {}) or {}
     if not isinstance(paper_priorities, dict):
         raise ApiError("paper_priorities must be an object", 400)
+    if len(paper_priorities) > _MAX_PRIORITY_ENTRIES:
+        raise ApiError(f"paper_priorities must contain at most {_MAX_PRIORITY_ENTRIES} entries", 400)
 
     # Get filters
-    years = coerce_int_list(data.get("years", []), "years")
-    conferences = coerce_str_list(data.get("conferences", []), "conferences")
+    years = coerce_int_list(data.get("years", []), "years", max_items=_MAX_FILTER_ITEMS)
+    conferences = coerce_str_list(data.get("conferences", []), "conferences", max_items=_MAX_FILTER_ITEMS)
 
     if not message:
         return jsonify({"error": "Message is required"}), 400
 
+    enforce_client_rate_limit(_client_id())
     rag = get_rag_chat()
 
     if reset:
@@ -647,8 +677,8 @@ def compute_clusters():
     """
     data = get_json_object()
 
-    conferences = coerce_str_list(data.get("conferences"), "conferences") or None
-    years = coerce_int_list(data.get("years"), "years") or None
+    conferences = coerce_str_list(data.get("conferences"), "conferences", max_items=_MAX_FILTER_ITEMS) or None
+    years = coerce_int_list(data.get("years"), "years", max_items=_MAX_FILTER_ITEMS) or None
 
     # Get config and database
     config = get_config()
@@ -725,15 +755,19 @@ def search_custom_cluster():
     if not data.get("query"):
         return jsonify({"error": "Missing required field: query"}), 400
 
-    query = str(data["query"])
-    try:
-        distance_threshold = float(data.get("distance", 1.1))
-    except (TypeError, ValueError) as exc:
-        raise ApiError("distance must be a number", 400) from exc
-    conferences = coerce_str_list(data.get("conferences"), "conferences") or None
-    years = coerce_int_list(data.get("years"), "years") or None
+    query = coerce_text(data["query"], "query", _MAX_QUERY_LENGTH)
+    distance_threshold = coerce_number(
+        data.get("distance"),
+        "distance",
+        default=1.1,
+        minimum=0.0,
+        maximum=_MAX_DISTANCE,
+    )
+    conferences = coerce_str_list(data.get("conferences"), "conferences", max_items=_MAX_FILTER_ITEMS) or None
+    years = coerce_int_list(data.get("years"), "years", max_items=_MAX_FILTER_ITEMS) or None
 
     # Get embeddings manager and database
+    enforce_client_rate_limit(_client_id())
     em = get_embeddings_manager()
     database = get_database()
 
@@ -747,7 +781,7 @@ def search_custom_cluster():
     )
 
     if isinstance(results, dict) and isinstance(results.get("papers"), list):
-        results["papers"] = results["papers"][:500]
+        results["papers"] = results["papers"][:_MAX_CLUSTER_RESULTS]
         results["count"] = len(results["papers"])
     return jsonify(results)
 
@@ -779,15 +813,19 @@ def topic_evolution():
     if not data.get("topic_keywords"):
         return jsonify({"error": "Missing required field: topic_keywords"}), 400
 
-    topic_keywords = str(data["topic_keywords"])
-    conferences = coerce_str_list(data.get("conferences"), "conferences") or None
-    try:
-        distance_threshold = float(data.get("distance_threshold", 1.1))
-    except (TypeError, ValueError) as exc:
-        raise ApiError("distance_threshold must be a number", 400) from exc
+    topic_keywords = coerce_text(data["topic_keywords"], "topic_keywords", _MAX_QUERY_LENGTH)
+    conferences = coerce_str_list(data.get("conferences"), "conferences", max_items=_MAX_FILTER_ITEMS) or None
+    distance_threshold = coerce_number(
+        data.get("distance_threshold"),
+        "distance_threshold",
+        default=1.1,
+        minimum=0.0,
+        maximum=_MAX_DISTANCE,
+    )
 
     from abstracts_explorer.mcp_server import get_topic_evolution as mcp_get_topic_evolution
 
+    enforce_client_rate_limit(_client_id())
     result_json = mcp_get_topic_evolution(
         topic_keywords=topic_keywords,
         conferences=conferences,
@@ -858,13 +896,17 @@ def export_interesting_papers():
         raise ApiError("paper_ids must be a list", 400)
     if len(paper_ids) > 1000:
         raise ApiError("Too many paper IDs (maximum 1000)", 400)
-    sort_order = data.get("sort_order", "search-rating-poster")
+    sort_order = coerce_text(data.get("sort_order"), "sort_order", 50, default="search-rating-poster")
+    if sort_order not in _EXPORT_SORT_ORDERS:
+        raise ApiError("Invalid sort_order", 400)
 
     if not paper_ids:
         return jsonify({"error": "No paper IDs provided"}), 400
 
     if not isinstance(priorities, dict):
         return jsonify({"error": "Invalid priorities format. Expected a dict keyed by paper UID."}), 400
+    if len(priorities) > _MAX_PRIORITY_ENTRIES:
+        raise ApiError(f"priorities must contain at most {_MAX_PRIORITY_ENTRIES} entries", 400)
 
     for paper_uid, priority_data in priorities.items():
         if not isinstance(priority_data, dict):
@@ -895,9 +937,16 @@ def export_interesting_papers():
             except (TypeError, ValueError) as exc:
                 raise ApiError(f"Invalid priority for paper '{paper_id}'", 400) from exc
             paper["priority"] = max(0, min(priority_value, 5))
-            paper["searchTerm"] = str(priority_data.get("searchTerm", "Unknown"))
+            paper["searchTerm"] = coerce_text(
+                priority_data.get("searchTerm", "Unknown"),
+                "searchTerm",
+                _MAX_SEARCH_TERM_LENGTH,
+                default="Unknown",
+            )
 
             papers.append(paper)
+        except ApiError:
+            raise
         except Exception:
             logger.warning(f"Paper {paper_id} not found")
             continue
@@ -937,6 +986,12 @@ def donate_data():
 
     if not paper_priorities:
         return jsonify({"error": "No data provided"}), 400
+    if not isinstance(paper_priorities, dict):
+        raise ApiError("paperPriorities must be an object", 400)
+    if len(paper_priorities) > _MAX_PRIORITY_ENTRIES:
+        raise ApiError(f"paperPriorities must contain at most {_MAX_PRIORITY_ENTRIES} entries", 400)
+    if any(not isinstance(value, dict) for value in paper_priorities.values()):
+        raise ApiError("Invalid data format. Expected dict with priority and searchTerm", 400)
 
     database = get_database()
 
@@ -980,6 +1035,18 @@ def donate_chat():
 
     if not rating or not transcript:
         return jsonify({"error": "Both 'rating' and 'transcript' are required"}), 400
+    if not isinstance(transcript, list):
+        raise ApiError("transcript must be a list", 400)
+    if len(transcript) > _MAX_TRANSCRIPT_MESSAGES:
+        raise ApiError(f"transcript must contain at most {_MAX_TRANSCRIPT_MESSAGES} messages", 400)
+    total_chars = 0
+    for message in transcript:
+        if not isinstance(message, dict):
+            raise ApiError("transcript entries must be objects", 400)
+        text = message.get("text", "")
+        total_chars += len(str(text))
+    if total_chars > _MAX_TRANSCRIPT_CHARS:
+        raise ApiError(f"transcript must contain at most {_MAX_TRANSCRIPT_CHARS} characters", 400)
 
     database = get_database()
 
@@ -1001,6 +1068,12 @@ def donate_chat():
 def not_found(e):
     """Handle 404 errors."""
     return jsonify({"error": "Not found"}), 404
+
+
+@app.errorhandler(413)
+def payload_too_large(e):
+    """Handle requests larger than MAX_CONTENT_LENGTH."""
+    return jsonify({"error": "Request body too large"}), 413
 
 
 @app.errorhandler(500)

@@ -50,6 +50,7 @@ def clean_config_env_vars():
         "PROXY_X_PREFIX",
         "IMPRINT_LINK",
         "REQUESTS_PER_MINUTE",
+        "WEB_RATE_LIMIT_PER_MINUTE",
         "RAG_MAX_PARALLEL_TOOLS",
         "RAG_REQUEST_LIMIT",
         "RAG_QUERY_TIMEOUT",
@@ -169,6 +170,11 @@ class TestConfig:
         assert config.rag_query_timeout == 120
         assert config.llm_connect_timeout == 10
         assert config.llm_request_timeout == 60
+        assert config.proxy_x_for == 0
+        assert config.proxy_x_proto == 0
+        assert config.proxy_x_host == 0
+        assert config.proxy_x_prefix == 0
+        assert config.web_rate_limit_per_minute == 30
 
     def test_embedding_max_input_tokens_from_env(self, tmp_path):
         """Test parsing EMBEDDING_MAX_INPUT_TOKENS."""

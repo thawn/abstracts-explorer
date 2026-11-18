@@ -274,9 +274,11 @@ class CatalogMixin(PapersMixin):
         Combines plugin-based name resolution with a database data check.
         Returns a result dict describing the outcome:
 
-        - **found with data**: ``{"conference": "<name>", "error": None}``
-        - **found without data**: ``{"conference": None, "error": {"message": "...", "available_conferences": [...]}}``
-        - **not found**: ``{"conference": None, "error": {"message": "...", "available_conferences": [...]}}``
+        - **found with data**: ``{"conference": "<name>", "error": None, "reason": "found"}``
+        - **found without data**:
+          ``{"conference": None, "error": {"message": "...", "available_conferences": [...]}, "reason": "no_data"}``
+        - **not found**:
+          ``{"conference": None, "error": {"message": "...", "available_conferences": [...]}, "reason": "not_found"}``
 
         Parameters
         ----------
@@ -286,8 +288,13 @@ class CatalogMixin(PapersMixin):
         Returns
         -------
         dict
-            Dictionary with keys ``"conference"`` (str or None) and
-            ``"error"`` (dict or None).
+            Dictionary with keys ``"conference"`` (str or None), ``"error"``
+            (dict or None), and ``"reason"`` (str).
+
+        Raises
+        ------
+        DatabaseError
+            If the database cannot be queried.
 
         Examples
         --------
@@ -298,11 +305,7 @@ class CatalogMixin(PapersMixin):
         """
         from abstracts_explorer.plugin import get_available_filters, resolve_conference_from_url
 
-        db_conference_years: Dict[str, List[int]] = {}
-        try:
-            db_conference_years = self.get_conference_years_from_db()
-        except Exception:
-            pass
+        db_conference_years: Dict[str, List[int]] = self.get_conference_years_from_db()
 
         # Also check DB conferences directly (in case they don't have a plugin)
         resolved = resolve_conference_from_url(url_path)
@@ -319,7 +322,7 @@ class CatalogMixin(PapersMixin):
                         resolved = stored
                         break
             if resolved in db_conference_years:
-                return {"conference": resolved, "error": None}
+                return {"conference": resolved, "error": None, "reason": "found"}
             else:
                 available_conferences = sorted(db_conference_years.keys())
                 return {
@@ -328,6 +331,7 @@ class CatalogMixin(PapersMixin):
                         "message": f"No data available for conference '{resolved}'. Please download data first.",
                         "available_conferences": available_conferences,
                     },
+                    "reason": "no_data",
                 }
         else:
             plugin_conferences = get_available_filters().get("conferences", [])
@@ -338,6 +342,7 @@ class CatalogMixin(PapersMixin):
                     "message": f"Conference '{url_path}' not found.",
                     "available_conferences": available_conferences,
                 },
+                "reason": "not_found",
             }
 
     def get_sessions(self, conference: Optional[str] = None, year: Optional[int] = None) -> List[str]:

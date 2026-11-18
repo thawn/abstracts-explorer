@@ -156,6 +156,10 @@ class Config:
     requests_per_minute : int
         Maximum number of embedding API requests per minute (default: 60).
         Set to 0 to disable rate limiting.
+    web_rate_limit_per_minute : int
+        Maximum number of expensive web API requests per client per minute
+        (chat, semantic search, cluster search, and topic evolution).
+        Set to 0 to disable client rate limiting (default: 30).
 
     Examples
     --------
@@ -292,12 +296,12 @@ class Config:
         self.log_level = self._get_env("LOG_LEVEL", default="").upper()
 
         # Reverse-proxy hop counts for werkzeug ProxyFix.
-        # Set to 0 to disable; set to the number of reverse-proxy layers in front of
-        # the app (default 1 matches the single nginx layer in docker-compose.yml).
-        self.proxy_x_for = self._get_env_int("PROXY_X_FOR", default=1)
-        self.proxy_x_proto = self._get_env_int("PROXY_X_PROTO", default=1)
-        self.proxy_x_host = self._get_env_int("PROXY_X_HOST", default=1)
-        self.proxy_x_prefix = self._get_env_int("PROXY_X_PREFIX", default=1)
+        # Default to 0 (trust no forwarded headers). Deployments behind a
+        # reverse proxy must set the number of trusted hops explicitly.
+        self.proxy_x_for = self._get_env_int("PROXY_X_FOR", default=0)
+        self.proxy_x_proto = self._get_env_int("PROXY_X_PROTO", default=0)
+        self.proxy_x_host = self._get_env_int("PROXY_X_HOST", default=0)
+        self.proxy_x_prefix = self._get_env_int("PROXY_X_PREFIX", default=0)
 
         # Web UI Footer Configuration
         # Optional imprint/legal notice URL shown in the footer (empty = not shown)
@@ -306,6 +310,9 @@ class Config:
         # Embedding API Rate Limiting
         # Maximum number of API requests per minute (0 = no limit)
         self.requests_per_minute = self._get_env_int("REQUESTS_PER_MINUTE", default=60)
+
+        # Web API client rate limiting for expensive endpoints (0 = disabled)
+        self.web_rate_limit_per_minute = max(0, self._get_env_int("WEB_RATE_LIMIT_PER_MINUTE", default=30))
 
         # Registry Settings
         # GitHub Personal Access Token for registry operations
@@ -464,6 +471,7 @@ class Config:
             "rag_query_timeout": self.rag_query_timeout,
             "llm_connect_timeout": self.llm_connect_timeout,
             "llm_request_timeout": self.llm_request_timeout,
+            "web_rate_limit_per_minute": self.web_rate_limit_per_minute,
         }
 
     def _mask_database_url(self, url: str) -> str:

@@ -978,6 +978,42 @@ class TestSearchPapersFieldFilters:
         assert results[0]["title"] == "Attention is All You Need"
         assert isinstance(results[0]["authors"], list)
 
+    def test_search_papers_keyword_with_total_semantic(self, db_with_papers):
+        """Semantic search returns top papers and the pre-limit match count."""
+        uid = db_with_papers.get_paper({"title": "Attention is All You Need"})[0]["uid"]
+        em = Mock()
+        em.query_ids_within_distance.return_value = {
+            "ids": [uid],
+            "distances": [0.2],
+            "query_embedding": [0.1],
+            "total_considered": 3,
+        }
+
+        papers, total = db_with_papers.search_papers_keyword_with_total(
+            "transformer",
+            limit=5,
+            use_embeddings=True,
+            embeddings_manager=em,
+        )
+
+        assert total == 1
+        assert [paper["uid"] for paper in papers] == [uid]
+        em.query_ids_within_distance.assert_called_once()
+
+    def test_search_papers_keyword_with_total_field_only(self, db_with_papers):
+        """Field-filter-only semantic searches skip the embedding query."""
+        em = Mock()
+
+        papers, total = db_with_papers.search_papers_keyword_with_total(
+            'authors:"Vaswani"',
+            use_embeddings=True,
+            embeddings_manager=em,
+        )
+
+        assert total is None
+        assert [paper["title"] for paper in papers] == ["Attention is All You Need"]
+        em.query_ids_within_distance.assert_not_called()
+
     def test_case_insensitive_field_name_parsing(self, db_with_papers):
         """Test that field names in field:\"value\" syntax are case-insensitive."""
         # Uppercase
@@ -2197,6 +2233,45 @@ class TestPaperUidResolution:
         assert result["papers"][0]["distance"] == 0.25
         em.query_ids_within_distance.assert_called_once()
         assert em.query_ids_within_distance.call_args.kwargs["ids"] == [uid]
+
+    def test_find_papers_within_distance_field_filters(self, connected_db, sample_paper, sample_paper_minimal):
+        neurips_uid = connected_db.add_paper(sample_paper)
+        connected_db.add_paper(sample_paper_minimal)
+        em = Mock()
+        em.query_ids_within_distance.return_value = {
+            "ids": [neurips_uid],
+            "distances": [0.25],
+            "query_embedding": [0.1],
+            "total_considered": 1,
+        }
+
+        result = connected_db.find_papers_within_distance(
+            em,
+            "query",
+            field_filters={"conference": "NeurIPS"},
+        )
+
+        assert result["total_matches"] == 1
+        assert em.query_ids_within_distance.call_args.kwargs["ids"] == [neurips_uid]
+
+    def test_find_papers_within_distance_limit_keeps_total_matches(
+        self, connected_db, sample_paper, sample_paper_minimal
+    ):
+        first_uid = connected_db.add_paper(sample_paper)
+        second_uid = connected_db.add_paper(sample_paper_minimal)
+        em = Mock()
+        em.query_ids_within_distance.return_value = {
+            "ids": [first_uid, second_uid],
+            "distances": [0.1, 0.2],
+            "query_embedding": [0.1],
+            "total_considered": 2,
+        }
+
+        result = connected_db.find_papers_within_distance(em, "query", limit=1)
+
+        assert result["count"] == 1
+        assert result["total_matches"] == 2
+        assert [paper["uid"] for paper in result["papers"]] == [first_uid]
 
 
 class TestGetPaperWhereFilters:
