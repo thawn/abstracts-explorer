@@ -163,6 +163,10 @@ class Config:
         Maximum number of expensive web API requests per client per minute
         (chat, semantic search, cluster search, and topic evolution).
         Set to 0 to disable client rate limiting (default: 30).
+    web_ui_threads : int
+        Number of Waitress worker threads for the web UI (default: 6).
+        Values below 1 are clamped to 1. Ignored when the Flask development
+        server is used.
 
     Examples
     --------
@@ -317,6 +321,9 @@ class Config:
 
         # Web API client rate limiting for expensive endpoints (0 = disabled)
         self.web_rate_limit_per_minute = max(0, self._get_env_int("WEB_RATE_LIMIT_PER_MINUTE", default=30))
+
+        # Waitress worker threads for the web UI
+        self.web_ui_threads = max(1, self._get_env_int("WEB_UI_THREADS", default=6))
 
         # Registry Settings
         # GitHub Personal Access Token for registry operations
@@ -477,6 +484,7 @@ class Config:
             "llm_connect_timeout": self.llm_connect_timeout,
             "llm_request_timeout": self.llm_request_timeout,
             "web_rate_limit_per_minute": self.web_rate_limit_per_minute,
+            "web_ui_threads": self.web_ui_threads,
         }
 
     def _mask_database_url(self, url: str) -> str:

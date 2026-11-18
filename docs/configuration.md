@@ -140,6 +140,7 @@ The configuration automatically detects the type based on the format:
 - **DEFAULT_CONFERENCE**: Pre-selected conference in the web UI (default: `ML4PS`)
 - **DEFAULT_YEAR**: Pre-selected year in the web UI; `0` disables the default (default: `0`)
 - **IMPRINT_LINK**: Optional URL of a legal notice/imprint shown in the web UI footer (default: empty = not shown)
+- **WEB_UI_THREADS**: Number of Waitress worker threads for the web UI (default: `6`). Values below `1` are clamped to `1`. Ignored when the Flask development server is used (`--dev`). The `web-ui --threads` option overrides this setting.
 
 ### Reverse Proxy Header Handling
 

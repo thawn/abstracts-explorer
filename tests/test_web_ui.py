@@ -1674,6 +1674,7 @@ class TestWebUIRunServer:
                 mock_cfg = Mock()
                 mock_cfg.paper_db_path = "/some/path/test.db"
                 mock_cfg.embedding_db_path = "/some/path/chroma_db"
+                mock_cfg.web_ui_threads = 6
                 mock_config.return_value = mock_cfg
 
                 # Mock Waitress serve with timeout
@@ -1702,6 +1703,7 @@ class TestWebUIRunServer:
                 mock_cfg = Mock()
                 mock_cfg.paper_db_path = "/some/path/test.db"
                 mock_cfg.embedding_db_path = "/some/path/chroma_db"
+                mock_cfg.web_ui_threads = 6
                 mock_config.return_value = mock_cfg
 
                 # Mock Waitress serve with timeout (debug mode now works with Waitress)
@@ -1751,6 +1753,7 @@ class TestWebUIRunServer:
                 mock_cfg = Mock()
                 mock_cfg.paper_db_path = "/some/path/test.db"
                 mock_cfg.embedding_db_path = "/some/path/chroma_db"
+                mock_cfg.web_ui_threads = 6
                 mock_config.return_value = mock_cfg
 
                 sigterm_handler = None
@@ -1864,7 +1867,9 @@ class TestServerInitialization:
 
         # Mock config to use our test database
         with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config:
-            mock_config.return_value = Mock(database_url=f"sqlite:///{str(db_path)}", embedding_db_path="chroma_db")
+            mock_config.return_value = Mock(
+                database_url=f"sqlite:///{str(db_path)}", embedding_db_path="chroma_db", web_ui_threads=6
+            )
 
             # Mock app.run
             with patch.object(app, "run") as mock_run:
@@ -1890,7 +1895,9 @@ class TestServerInitialization:
 
         # Mock config to use our test database
         with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config:
-            mock_config.return_value = Mock(database_url=f"sqlite:///{str(db_path)}", embedding_db_path="chroma_db")
+            mock_config.return_value = Mock(
+                database_url=f"sqlite:///{str(db_path)}", embedding_db_path="chroma_db", web_ui_threads=6
+            )
 
             # Mock Waitress serve (debug mode now works with Waitress)
             with patch("waitress.serve") as mock_serve:
@@ -1921,7 +1928,9 @@ class TestServerInitialization:
 
         # Mock config to use our test database
         with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config:
-            mock_config.return_value = Mock(database_url=f"sqlite:///{str(db_path)}", embedding_db_path="chroma_db")
+            mock_config.return_value = Mock(
+                database_url=f"sqlite:///{str(db_path)}", embedding_db_path="chroma_db", web_ui_threads=6
+            )
 
             # Mock waitress import to fail
             import builtins
@@ -1957,7 +1966,7 @@ class TestServerInitialization:
             run_server(host="127.0.0.1", port=5000)
 
     def test_run_server_default_threads(self, tmp_path):
-        """Test that run_server passes default threads=6 to waitress.serve."""
+        """Test that run_server uses the config default of 6 threads."""
         from abstracts_explorer.web_ui.app import run_server
         from abstracts_explorer.database import DatabaseManager
 
@@ -1976,6 +1985,29 @@ class TestServerInitialization:
             mock_serve.assert_called_once()
             call_args = mock_serve.call_args
             assert call_args[1]["threads"] == 6
+
+    def test_run_server_threads_from_config(self, tmp_path, monkeypatch):
+        """Test that run_server uses WEB_UI_THREADS when threads is omitted."""
+        from abstracts_explorer.web_ui.app import run_server
+        from abstracts_explorer.database import DatabaseManager
+
+        db_path = tmp_path / "test.db"
+        set_test_db(db_path)
+        db = DatabaseManager()
+        with db:
+            db.create_tables()
+
+        monkeypatch.setattr(get_config(), "web_ui_threads", 9)
+
+        with patch("waitress.serve") as mock_serve:
+            mock_serve.side_effect = KeyboardInterrupt()
+
+            with pytest.raises(KeyboardInterrupt):
+                run_server(host="127.0.0.1", port=5000)
+
+            mock_serve.assert_called_once()
+            call_args = mock_serve.call_args
+            assert call_args[1]["threads"] == 9
 
     def test_run_server_custom_threads(self, tmp_path):
         """Test that run_server forwards a custom threads value to waitress.serve."""

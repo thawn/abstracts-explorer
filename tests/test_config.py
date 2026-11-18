@@ -51,6 +51,7 @@ def clean_config_env_vars():
         "IMPRINT_LINK",
         "REQUESTS_PER_MINUTE",
         "WEB_RATE_LIMIT_PER_MINUTE",
+        "WEB_UI_THREADS",
         "RAG_MAX_PARALLEL_TOOLS",
         "RAG_REQUEST_LIMIT",
         "RAG_QUERY_TIMEOUT",
@@ -236,6 +237,31 @@ class TestConfig:
         assert config.proxy_x_host == 0
         assert config.proxy_x_prefix == 0
         assert config.web_rate_limit_per_minute == 30
+        assert config.web_ui_threads == 6
+
+    def test_web_ui_threads_from_env(self, tmp_path):
+        """WEB_UI_THREADS overrides the default Waitress thread count."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("WEB_UI_THREADS=12\n")
+
+        config = Config(env_path=env_file)
+        assert config.web_ui_threads == 12
+
+    def test_web_ui_threads_are_clamped(self, tmp_path):
+        """Invalid or non-positive WEB_UI_THREADS values fall back safely."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("WEB_UI_THREADS=0\n")
+
+        config = Config(env_path=env_file)
+        assert config.web_ui_threads == 1
+
+        env_file.write_text("WEB_UI_THREADS=-4\n")
+        config = Config(env_path=env_file)
+        assert config.web_ui_threads == 1
+
+        env_file.write_text("WEB_UI_THREADS=invalid\n")
+        config = Config(env_path=env_file)
+        assert config.web_ui_threads == 6
 
     def test_embedding_max_input_tokens_from_env(self, tmp_path):
         """Test parsing EMBEDDING_MAX_INPUT_TOKENS."""
@@ -408,6 +434,7 @@ CHAT_MAX_TOKENS=500
         assert "chat_history_ttl" in config_dict
         assert "llm_connect_timeout" in config_dict
         assert "llm_request_timeout" in config_dict
+        assert "web_ui_threads" in config_dict
 
     def test_config_to_dict_hides_token(self, tmp_path):
         """Test that to_dict hides auth token."""

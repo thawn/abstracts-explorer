@@ -132,6 +132,7 @@ to `.env`. Full reference: `docs/configuration.md`.
 | `ENABLE_QUERY_REWRITING`, `QUERY_SIMILARITY_THRESHOLD` | RAG query behavior |
 | `DEFAULT_CONFERENCE`, `DEFAULT_YEAR` | Web UI initial filters |
 | `LOG_LEVEL`, `PROXY_X_*`, `IMPRINT_LINK` | Web/deployment settings |
+| `WEB_UI_THREADS` | Waitress worker threads (default `6`) |
 | `REQUESTS_PER_MINUTE` | API rate limit |
 | `GITHUB_TOKEN`, `REGISTRY_REPOSITORY` | OCI registry access |
 

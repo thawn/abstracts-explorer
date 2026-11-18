@@ -359,8 +359,12 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
     web_parser.add_argument(
         "--threads",
         type=int,
-        default=6,
-        help="Number of Waitress worker threads (default: 6). Must be >= 1. Ignored when --dev is set.",
+        default=config.web_ui_threads,
+        help=(
+            "Number of Waitress worker threads "
+            f"(default: WEB_UI_THREADS or {config.web_ui_threads}). "
+            "Must be >= 1. Ignored when --dev is set."
+        ),
     )
 
     # -------------------------------------------------------------------------

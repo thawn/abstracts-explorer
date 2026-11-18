@@ -69,7 +69,7 @@ them with `--no-verify` unless explicitly asked.
 ## Configuration
 
 - Priority: CLI args > env vars > `.env` > built-in defaults.
-- Key vars: `CHAT_MODEL`, `EMBEDDING_MODEL`, `LLM_BACKEND_URL`, `LLM_BACKEND_AUTH_TOKEN`, `PAPER_DB` (SQLite path or PostgreSQL URL), `EMBEDDING_DB`, `COLLECTION_NAME`, `MAX_CONTEXT_PAPERS`, `DATA_DIR`.
+- Key vars: `CHAT_MODEL`, `EMBEDDING_MODEL`, `LLM_BACKEND_URL`, `LLM_BACKEND_AUTH_TOKEN`, `PAPER_DB` (SQLite path or PostgreSQL URL), `EMBEDDING_DB`, `COLLECTION_NAME`, `MAX_CONTEXT_PAPERS`, `DATA_DIR`, `WEB_UI_THREADS`.
 - Access via `get_config()` from `abstracts_explorer.config`.
 - Never commit `.env` or secrets.
 

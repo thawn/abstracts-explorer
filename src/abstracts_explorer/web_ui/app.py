@@ -1065,7 +1065,7 @@ def internal_error(e):
     return jsonify({"error": "Internal server error"}), 500
 
 
-def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=6):
+def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=None):
     """
     Run the Flask web server.
 
@@ -1079,8 +1079,9 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=6):
         Enable debug mode (default: False)
     dev : bool
         Use Flask development server instead of production server (default: False)
-    threads : int
-        Number of worker threads for Waitress (default: 6). Must be >= 1.
+    threads : int, optional
+        Number of worker threads for Waitress. Defaults to ``WEB_UI_THREADS``
+        from the configuration (built-in default: 6). Must be >= 1.
 
     Raises
     ------
@@ -1089,10 +1090,13 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=6):
     FileNotFoundError
         If the database file does not exist.
     """
+    config = services.get_config()  # Get config lazily
+
+    if threads is None:
+        threads = config.web_ui_threads
+
     if threads < 1:
         raise ValueError(f"threads must be >= 1, got {threads}")
-
-    config = services.get_config()  # Get config lazily
 
     if debug and host not in ("127.0.0.1", "localhost", "::1"):
         print(
@@ -1178,7 +1182,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dev", action="store_true", help="Use Flask development server instead of production server"
     )
-    parser.add_argument("--threads", type=int, default=6, help="Number of Waitress worker threads")
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=None,
+        help="Number of Waitress worker threads (default: WEB_UI_THREADS or 6)",
+    )
 
     args = parser.parse_args()
 

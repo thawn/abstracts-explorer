@@ -3429,6 +3429,28 @@ class TestWebUICommand:
         assert exit_code == 0
         mock_run_server.assert_called_once_with(host="127.0.0.1", port=5000, debug=False, dev=False, threads=10)
 
+    def test_web_ui_threads_default_from_config(self):
+        """The web-ui --threads default comes from the loaded config."""
+        from abstracts_explorer.cli.parsers import build_parser
+
+        config = Config()
+        config.web_ui_threads = 12
+        parser, _ = build_parser(config)
+
+        args = parser.parse_args(["web-ui"])
+        assert args.threads == 12
+
+    def test_web_ui_threads_cli_overrides_config(self):
+        """An explicit --threads value overrides the configured default."""
+        from abstracts_explorer.cli.parsers import build_parser
+
+        config = Config()
+        config.web_ui_threads = 12
+        parser, _ = build_parser(config)
+
+        args = parser.parse_args(["web-ui", "--threads", "3"])
+        assert args.threads == 3
+
     def test_web_ui_invalid_threads_returns_error(self, capsys):
         """Test that web-ui command returns exit code 1 when threads < 1."""
         from abstracts_explorer.cli import web_ui_command

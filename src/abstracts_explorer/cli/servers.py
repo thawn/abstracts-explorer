@@ -59,7 +59,7 @@ def web_ui_command(args: argparse.Namespace) -> int:
             port=args.port,
             debug=debug,
             dev=getattr(args, "dev", False),
-            threads=getattr(args, "threads", 6),
+            threads=getattr(args, "threads", None),
         )
         return 0
 
