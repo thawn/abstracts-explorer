@@ -53,7 +53,7 @@ def eval_generate_command(args: argparse.Namespace) -> int:
 
     _print_header(
         "Generate Evaluation Q/A Pairs",
-        f"Database: {config.database_url}",
+        f"Database: {config.masked_database_url}",
         f"Model: {args.model}",
         f"Pairs/tool: {args.n_pairs}",
         f"Follow-ups: {'disabled' if args.no_followups else args.n_followups}",
@@ -126,7 +126,7 @@ def eval_verify_command(args: argparse.Namespace) -> int:
         with DatabaseManager() as db:
             db.create_tables()
 
-            pairs = db.get_eval_qa_pairs(verified_only=False)
+            pairs = db.get_eval_qa_pairs(verified_only=False, include_rejected=args.all)
             if not pairs:
                 print("No Q/A pairs found. Generate pairs first with 'eval generate'.")
                 return 0
@@ -269,7 +269,7 @@ def eval_run_command(args: argparse.Namespace) -> int:
 
     _print_header(
         "Run Evaluation",
-        f"Database: {config.database_url}",
+        f"Database: {config.masked_database_url}",
         f"Model: {args.model}",
         f"Embeddings: {config.embedding_db}",
         f"Collection: {args.collection}",

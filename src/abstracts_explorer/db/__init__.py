@@ -15,6 +15,7 @@ from abstracts_explorer.db.errors import (
 )
 from abstracts_explorer.db.manager import DatabaseManager
 from abstracts_explorer.db.session import (
+    mask_database_url,
     reset_metadata_cache,
     reset_schema_cache,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "DatabaseManager",
     "EmbeddingModelConflictError",
     "normalize_model_name",
+    "mask_database_url",
     "reset_metadata_cache",
     "reset_schema_cache",
 ]

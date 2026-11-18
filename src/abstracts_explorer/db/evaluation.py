@@ -15,7 +15,6 @@ from abstracts_explorer.db_models import (
     EvalResult,
 )
 
-from abstracts_explorer.db.errors import DatabaseError
 from abstracts_explorer.db.session import SessionMixin
 
 logger = logging.getLogger(__name__)
@@ -87,6 +86,7 @@ class EvaluationRepoMixin(SessionMixin):
         conversation_id: Optional[str] = None,
         limit: Optional[int] = None,
         offset: int = 0,
+        include_rejected: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Retrieve evaluation Q/A pairs with optional filters.
@@ -103,6 +103,9 @@ class EvaluationRepoMixin(SessionMixin):
             Maximum number of pairs to return.
         offset : int
             Number of rows to skip (for pagination).
+        include_rejected : bool
+            When ``True``, include rows with ``verified == -1``.  Rejected rows
+            are excluded by default.
 
         Returns
         -------
@@ -118,11 +121,13 @@ class EvaluationRepoMixin(SessionMixin):
             stmt = select(EvalQAPair)
             if verified_only:
                 stmt = stmt.where(EvalQAPair.verified == 1)
+            elif not include_rejected:
+                stmt = stmt.where(EvalQAPair.verified != -1)
             if tool_name:
                 stmt = stmt.where(EvalQAPair.tool_name == tool_name)
             if conversation_id:
                 stmt = stmt.where(EvalQAPair.conversation_id == conversation_id)
-            stmt = stmt.order_by(EvalQAPair.conversation_id, EvalQAPair.turn_number)
+            stmt = stmt.order_by(EvalQAPair.conversation_id, EvalQAPair.turn_number, EvalQAPair.id)
             if offset:
                 stmt = stmt.offset(offset)
             if limit:
@@ -144,9 +149,15 @@ class EvaluationRepoMixin(SessionMixin):
                 for r in rows
             ]
         except Exception as e:
-            raise DatabaseError(f"Failed to get eval QA pairs: {str(e)}") from e
+            raise self._db_error("Failed to get eval QA pairs", e)
 
-    def get_eval_qa_pair_count(self, verified_only: bool = False) -> int:
+    def get_eval_qa_pair_count(
+        self,
+        verified_only: bool = False,
+        tool_name: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        include_rejected: bool = False,
+    ) -> int:
         """
         Count evaluation Q/A pairs.
 
@@ -154,6 +165,13 @@ class EvaluationRepoMixin(SessionMixin):
         ----------
         verified_only : bool
             If ``True``, count only verified pairs.
+        tool_name : str, optional
+            Filter by expected MCP tool name.
+        conversation_id : str, optional
+            Filter by conversation.
+        include_rejected : bool
+            When ``True``, include rows with ``verified == -1``.  Rejected rows
+            are excluded by default.
 
         Returns
         -------
@@ -169,9 +187,15 @@ class EvaluationRepoMixin(SessionMixin):
             stmt = select(func.count()).select_from(EvalQAPair)
             if verified_only:
                 stmt = stmt.where(EvalQAPair.verified == 1)
+            elif not include_rejected:
+                stmt = stmt.where(EvalQAPair.verified != -1)
+            if tool_name:
+                stmt = stmt.where(EvalQAPair.tool_name == tool_name)
+            if conversation_id:
+                stmt = stmt.where(EvalQAPair.conversation_id == conversation_id)
             return self.session.execute(stmt).scalar() or 0
         except Exception as e:
-            raise DatabaseError(f"Failed to count eval QA pairs: {str(e)}") from e
+            raise self._db_error("Failed to count eval QA pairs", e)
 
     def update_eval_qa_pair(self, pair_id: int, **fields) -> bool:
         """
@@ -193,10 +217,15 @@ class EvaluationRepoMixin(SessionMixin):
 
         Raises
         ------
+        ValueError
+            If *fields* contains unknown column names.
         DatabaseError
             If update fails.
         """
         allowed = {"query", "expected_answer", "tool_name", "verified", "source_info"}
+        unknown = set(fields) - allowed
+        if unknown:
+            raise ValueError(f"Unknown field(s) for eval QA pair: {', '.join(sorted(unknown))}")
         to_set = {k: v for k, v in fields.items() if k in allowed}
         if not to_set:
             return False
@@ -227,6 +256,8 @@ class EvaluationRepoMixin(SessionMixin):
             If deletion fails.
         """
         try:
+            verified_ids: Any = select(EvalQAPair.id).where(EvalQAPair.verified == 1)
+            self.session.execute(delete(EvalResult).where(EvalResult.qa_pair_id.in_(verified_ids)))
             result = self.session.execute(delete(EvalQAPair).where(EvalQAPair.verified == 1))
             count = getattr(result, "rowcount", 0) or 0
             self.session.commit()
@@ -385,7 +416,7 @@ class EvaluationRepoMixin(SessionMixin):
                 for r in rows
             ]
         except Exception as e:
-            raise DatabaseError(f"Failed to get eval results: {str(e)}") from e
+            raise self._db_error("Failed to get eval results", e)
 
     def get_eval_run_ids(self) -> List[str]:
         """
@@ -410,7 +441,7 @@ class EvaluationRepoMixin(SessionMixin):
             )
             return [row.run_id for row in self.session.execute(stmt).all()]
         except Exception as e:
-            raise DatabaseError(f"Failed to get eval run IDs: {str(e)}") from e
+            raise self._db_error("Failed to get eval run IDs", e)
 
     def get_eval_run_summary(self, run_id: str) -> Dict[str, Any]:
         """
@@ -469,4 +500,4 @@ class EvaluationRepoMixin(SessionMixin):
                 "run_date": run_date,
             }
         except Exception as e:
-            raise DatabaseError(f"Failed to compute eval run summary: {str(e)}") from e
+            raise self._db_error("Failed to compute eval run summary", e)

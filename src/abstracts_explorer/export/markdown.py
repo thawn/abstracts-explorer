@@ -14,6 +14,11 @@ from abstracts_explorer.utils.url_utils import paper_pdf_url
 logger = logging.getLogger(__name__)
 
 
+def _escape_md(value: Any) -> str:
+    """Escape Markdown table/heading metacharacters in user-provided text."""
+    return str(value).replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ").replace("\r", " ")
+
+
 def natural_sort_key(s: str) -> List:
     """
     Generate a sort key for natural sorting of strings with numbers.
@@ -111,11 +116,11 @@ def _format_paper_block(paper: Dict[str, Any]) -> str:
     """
     markdown = ""
     stars = "⭐" * paper.get("priority", 0)
-    markdown += f"### {paper.get('title', 'Untitled')}\n\n"
+    markdown += f"### {_escape_md(paper.get('title', 'Untitled'))}\n\n"
     markdown += f"**Rating:** {stars} ({paper.get('priority', 0)}/5)\n\n"
 
     if paper.get("searchTerm"):
-        markdown += f"**Search Term:** {paper.get('searchTerm')}\n\n"
+        markdown += f"**Search Term:** {_escape_md(paper.get('searchTerm'))}\n\n"
 
     if paper.get("authors"):
         authors = ", ".join(paper["authors"]) if isinstance(paper["authors"], list) else paper["authors"]
@@ -330,7 +335,7 @@ def generate_main_readme(papers: List[Dict[str, Any]], sort_order: str = "search
             term_data = search_terms[search_term]
             sessions_str = f"{len(term_data['sessions'])} session(s)"
             avg_stars = "⭐" * round(term_data["avg_priority"])
-            markdown += f"| {search_term} | {term_data['count']} | {sessions_str} | {avg_stars} ({term_data['avg_priority']:.1f}/5) |\n"
+            markdown += f"| {_escape_md(search_term)} | {term_data['count']} | {sessions_str} | {avg_stars} ({term_data['avg_priority']:.1f}/5) |\n"
 
     elif sort_order == "rating-poster-search":
         # Files organized by rating
@@ -383,7 +388,7 @@ def generate_main_readme(papers: List[Dict[str, Any]], sort_order: str = "search
             sessions_str = f"{len(term_data['sessions'])} session(s)"
             avg_stars = "⭐" * round(term_data["avg_priority"])
 
-            markdown += f"| [{search_term}]({safe_name}.md) | {term_data['count']} | {sessions_str} | {avg_stars} ({term_data['avg_priority']:.1f}/5) | {safe_name}.md |\n"
+            markdown += f"| [{_escape_md(search_term)}]({safe_name}.md) | {term_data['count']} | {sessions_str} | {avg_stars} ({term_data['avg_priority']:.1f}/5) | {safe_name}.md |\n"
 
     markdown += "\n---\n\n"
 
@@ -399,7 +404,7 @@ def generate_main_readme(papers: List[Dict[str, Any]], sort_order: str = "search
     markdown += "## Sessions Overview\n\n"
     for session in sorted(sessions.keys()):
         session_data = sessions[session]
-        markdown += f"### {session}\n\n"
+        markdown += f"### {_escape_md(session)}\n\n"
         markdown += f"- **Papers:** {session_data['count']}\n"
         markdown += f"- **Search Terms:** {', '.join(sorted(session_data['search_terms']))}\n\n"
 

@@ -1544,6 +1544,26 @@ class TestDistanceHelpers:
         )
         assert manager._collection.query.call_args.kwargs["ids"] == ["paper-a", "paper-b"]
 
+    def test_large_id_lists_are_queried_in_batches(self):
+        manager = self._make_manager()
+        ids = [f"paper-{index}" for index in range(600)]
+
+        def fake_query(**kwargs):
+            batch = kwargs["ids"]
+            return {"ids": [batch], "distances": [[0.1] * len(batch)]}
+
+        manager._collection.query.side_effect = fake_query
+
+        result = manager.query_ids_within_distance(
+            query="query",
+            distance_threshold=1.0,
+            ids=ids,
+            query_embedding=[0.1],
+        )
+
+        assert manager._collection.query.call_count == 2
+        assert result["total_considered"] == 600
+
     def test_empty_ids_raise(self):
         manager = self._make_manager()
         with pytest.raises(EmbeddingsError, match="No papers matched"):

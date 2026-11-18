@@ -115,9 +115,7 @@ class FailureSidecar:
         if not failures:
             path.unlink(missing_ok=True)
             return
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump({"conference": self.conference, "year": self.year, "failed": failures}, f, indent=2)
+        save_json(path, {"conference": self.conference, "year": self.year, "failed": failures})
         logger.warning(
             "Recorded %d failed page(s) in %s; they will be retried automatically on the next run. "
             "Delete this file to skip retrying them.",

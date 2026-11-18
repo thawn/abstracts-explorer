@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from itertools import takewhile
 from typing import Any, Optional
 
-from abstracts_explorer.embeddings.batching import MAX_QUERY_RESULTS
+from abstracts_explorer.embeddings.batching import ID_BATCH_SIZE, MAX_QUERY_RESULTS, iter_batches
 from abstracts_explorer.embeddings.errors import EmbeddingsError, translate_errors
 
 logger = logging.getLogger(__name__)
@@ -70,6 +70,7 @@ class QueryMixin:
 
         if query_embedding is None:
             query_embedding = self.generate_embedding(query)
+        assert query_embedding is not None
 
         candidate_count = len(ids) if ids is not None else self.collection.count()
         limit = min(
@@ -80,15 +81,34 @@ class QueryMixin:
         if limit <= 0:
             return QueryResult([], [], query_embedding)
 
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=limit,
-            include=["distances"],
-            ids=ids,
-        )
-        paper_ids = list(results["ids"][0]) if results.get("ids") else []
-        distances = list(results["distances"][0]) if results.get("distances") else []
-        return QueryResult(paper_ids, distances, query_embedding)
+        if ids is None:
+            results = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=limit,
+                include=["distances"],
+            )
+            paper_ids = list(results["ids"][0]) if results.get("ids") else []
+            distances = list(results["distances"][0]) if results.get("distances") else []
+            return QueryResult(paper_ids, distances, query_embedding)
+
+        merged: list[tuple[str, float]] = []
+        for batch in iter_batches(ids, ID_BATCH_SIZE):
+            batch_limit = min(limit, len(batch))
+            if batch_limit <= 0:
+                break
+            results = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=batch_limit,
+                include=["distances"],
+                ids=list(batch),
+            )
+            batch_ids = list(results["ids"][0]) if results.get("ids") else []
+            batch_distances = list(results["distances"][0]) if results.get("distances") else []
+            merged.extend(zip(batch_ids, batch_distances))
+
+        merged.sort(key=lambda item: item[1])
+        merged = merged[:limit]
+        return QueryResult([uid for uid, _ in merged], [distance for _, distance in merged], query_embedding)
 
     def search_similar(
         self,

@@ -3473,7 +3473,7 @@ class TestCLISearchErrorHandling:
     """Test search command error handling paths."""
 
     def test_search_command_where_parse_warning(self, tmp_path, capsys, monkeypatch):
-        """Test warning when where clause cannot be parsed (lines 229-230)."""
+        """An invalid --where clause aborts instead of running an unfiltered search."""
         import argparse
 
         embeddings_path = tmp_path / "chroma_db"
@@ -3507,7 +3507,7 @@ class TestCLISearchErrorHandling:
 
             exit_code = search_command(args)
 
-        assert exit_code == 0  # Should still succeed
+        assert exit_code == 1
         captured = capsys.readouterr()
         # Should show warning about filter parsing
         assert "Warning" in captured.err or "Could not parse" in captured.err

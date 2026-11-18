@@ -34,7 +34,9 @@ class GenerationMixin:
 
         The configured model limit is reduced by a safety margin to account for
         tokenizer differences. A smaller budget learned from a previous API
-        context-length error takes precedence.
+        context-length error takes precedence when proactive truncation is
+        enabled. A non-positive ``max_input_tokens`` disables truncation
+        entirely and also ignores any learned budget.
 
         Returns
         -------
@@ -42,13 +44,12 @@ class GenerationMixin:
             Token budget, or 0 when proactive truncation is disabled.
         """
         limit = self.max_input_tokens
-        if limit > 0:
-            budget = max(1, limit - token_margin(limit))
-        else:
-            budget = 0
+        if limit <= 0:
+            return 0
+        budget = max(1, limit - token_margin(limit))
 
         if self._learned_token_budget is not None:
-            budget = self._learned_token_budget if budget <= 0 else min(budget, self._learned_token_budget)
+            budget = min(budget, self._learned_token_budget)
 
         return budget
 
@@ -213,6 +214,7 @@ class GenerationMixin:
         if not texts:
             return []
 
+        texts = list(texts)
         for text in texts:
             if not text or not text.strip():
                 raise EmbeddingsError("Cannot generate embedding for empty text")
@@ -225,11 +227,17 @@ class GenerationMixin:
             if len(response.data) != len(prepared):
                 fallback_reason = "unexpected number of embeddings in API response"
             else:
-                return [item.embedding for item in response.data]
+                indices = [item.index for item in response.data]
+                if sorted(indices) != list(range(len(prepared))):
+                    fallback_reason = "invalid embedding indices in API response"
+                else:
+                    ordered = sorted(response.data, key=lambda item: item.index)
+                    return [item.embedding for item in ordered]
         except Exception as e:
-            if not is_context_length_error(e):
-                raise EmbeddingsError(f"Failed to generate embeddings via OpenAI API: {str(e)}") from e
-            fallback_reason = "input exceeded the model context window"
+            if is_context_length_error(e):
+                fallback_reason = "input exceeded the model context window"
+            else:
+                fallback_reason = f"batch request failed: {e}"
 
         logger.warning("Batch embedding failed (%s); retrying texts individually", fallback_reason)
         return [self.generate_embedding(text) for text in texts]

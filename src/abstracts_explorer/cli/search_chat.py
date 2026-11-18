@@ -96,7 +96,9 @@ def search_command(args: argparse.Namespace) -> int:
                     where_filter[key.strip()] = value.strip().strip("\"'")
                 print(f"🔍 Filter: {where_filter}")
             except Exception as e:
-                print(f"⚠️  Warning: Could not parse filter '{args.where}': {e}", file=sys.stderr)
+                print(f"❌ Could not parse filter '{args.where}': {e}", file=sys.stderr)
+                em.close()
+                return 1
 
         # Perform search through the DatabaseManager search entry point
         print(f"\n🔍 Searching for: '{args.query}'...\n")

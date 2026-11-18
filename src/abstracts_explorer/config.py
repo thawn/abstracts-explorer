@@ -108,6 +108,13 @@ class Config:
     metadata_cache_ttl : int
         Time-to-live in seconds for the PostgreSQL metadata cache. ``0``
         disables the cache.
+    rag_max_parallel_tools : int
+        Maximum number of RAG tool calls executed concurrently (default: 8).
+        Excess calls are queued by the agent's thread pool.
+    rag_request_limit : int
+        Maximum number of model requests per RAG query (default: 50).
+    rag_query_timeout : int
+        Wall-clock timeout in seconds for one RAG query (default: 120).
     chat_temperature : float
         Default temperature for chat generation.
     chat_max_tokens : int
@@ -250,6 +257,9 @@ class Config:
         # RAG Settings
         self.max_context_papers = self._get_env_int("MAX_CONTEXT_PAPERS", default=5)
         self.metadata_cache_ttl = self._get_env_int("METADATA_CACHE_TTL", default=86400)
+        self.rag_max_parallel_tools = max(1, self._get_env_int("RAG_MAX_PARALLEL_TOOLS", default=8))
+        self.rag_request_limit = max(1, self._get_env_int("RAG_REQUEST_LIMIT", default=50))
+        self.rag_query_timeout = max(1, self._get_env_int("RAG_QUERY_TIMEOUT", default=120))
 
         # Query Rewriting Settings
         self.enable_query_rewriting = self._get_env_bool("ENABLE_QUERY_REWRITING", default=True)
@@ -394,6 +404,13 @@ class Config:
         # Resolve relative to data_dir and make absolute
         return str((Path(self.data_dir) / path).absolute())
 
+    @property
+    def masked_database_url(self) -> str:
+        """Return the database URL with any password masked for display."""
+        from abstracts_explorer.db.session import mask_database_url
+
+        return mask_database_url(self.database_url)
+
     def to_dict(self) -> Dict[str, Any]:
         """
         Convert configuration to dictionary.
@@ -423,6 +440,9 @@ class Config:
             "collection_name": self.collection_name,
             "max_context_papers": self.max_context_papers,
             "metadata_cache_ttl": self.metadata_cache_ttl,
+            "rag_max_parallel_tools": self.rag_max_parallel_tools,
+            "rag_request_limit": self.rag_request_limit,
+            "rag_query_timeout": self.rag_query_timeout,
         }
 
     def _mask_database_url(self, url: str) -> str:

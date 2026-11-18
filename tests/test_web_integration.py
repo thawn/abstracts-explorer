@@ -115,10 +115,12 @@ def web_server(test_database, tmp_path_factory):
     original_paper_db = os.environ.get("PAPER_DB")
     original_embedding_db = os.environ.get("EMBEDDING_DB")
     original_collection_name = os.environ.get("COLLECTION_NAME")
+    original_cors_origins = os.environ.get("CORS_ORIGINS")
 
     os.environ["PAPER_DB"] = str(test_database)
     os.environ["EMBEDDING_DB"] = str(embeddings_path)
     os.environ["COLLECTION_NAME"] = collection_name
+    os.environ["CORS_ORIGINS"] = "*"
 
     # Mock the OpenAI API for embedding generation
     # Integration tests should not require a real API connection
@@ -142,7 +144,7 @@ def web_server(test_database, tmp_path_factory):
         mock_client.embeddings.create.return_value = mock_embedding_response
 
         # Import after setting environment variables and mocking
-        from abstracts_explorer.web_ui import app as flask_app
+        from abstracts_explorer.web_ui.app import app as flask_app
         from abstracts_explorer.embeddings import EmbeddingsManager
         from abstracts_explorer.config import get_config
 
@@ -225,6 +227,11 @@ def web_server(test_database, tmp_path_factory):
             os.environ["COLLECTION_NAME"] = original_collection_name
         elif "COLLECTION_NAME" in os.environ:
             del os.environ["COLLECTION_NAME"]
+
+        if original_cors_origins is not None:
+            os.environ["CORS_ORIGINS"] = original_cors_origins
+        elif "CORS_ORIGINS" in os.environ:
+            del os.environ["CORS_ORIGINS"]
 
 
 class TestWebUIIntegration:

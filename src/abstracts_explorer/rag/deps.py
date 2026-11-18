@@ -2,6 +2,7 @@
 RAG agent dependencies.
 """
 
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -27,6 +28,11 @@ class RAGDeps:
         Paper ratings from the web UI (``localStorage.paperPriorities``).
         Keys are paper UIDs; values are either star ratings or dicts with
         ``priority`` and ``searchTerm`` fields.
+    tool_cache : dict
+        Raw results of tool calls already executed during this query, keyed by
+        tool name and canonical arguments.  Used to coalesce duplicate calls.
+    tool_cache_lock : threading.Lock
+        Guards ``tool_cache`` when tool calls run in parallel.
     """
 
     tool_results: List[Dict[str, Any]] = field(default_factory=list)
@@ -34,3 +40,5 @@ class RAGDeps:
     years: List[int] = field(default_factory=list)
     n_results: Optional[int] = None
     paper_priorities: Dict[str, Any] = field(default_factory=dict)
+    tool_cache: Dict[str, str] = field(default_factory=dict)
+    tool_cache_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)

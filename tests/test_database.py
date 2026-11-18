@@ -617,8 +617,8 @@ class TestAddPapers:
         assert db_manager.get_paper_count() == 1
         db_manager.close()
 
-    def test_add_papers_skips_erroneous_abstract_and_continues(self, connected_db, mocker):
-        """Test that an import error on one abstract doesn't abort the rest."""
+    def test_add_papers_rolls_back_batch_on_error(self, connected_db, mocker):
+        """A failure while building a paper aborts the whole batch."""
         good_paper = LightweightPaper(
             title="Good Paper",
             authors=["Author"],
@@ -637,31 +637,20 @@ class TestAddPapers:
             year=2025,
             conference="NeurIPS",
         )
-        another_good_paper = LightweightPaper(
-            title="Another Good Paper",
-            authors=["Author"],
-            abstract="Another good abstract",
-            session="Session",
-            poster_position="P3",
-            year=2025,
-            conference="NeurIPS",
-        )
 
-        original_add_paper = connected_db.add_paper
+        original_build = connected_db._build_paper_model
 
-        def add_paper_side_effect(paper):
+        def build_side_effect(paper):
             if paper.title == "Bad Paper":
                 raise DatabaseError("Simulated import error")
-            return original_add_paper(paper)
+            return original_build(paper)
 
-        mocker.patch.object(connected_db, "add_paper", side_effect=add_paper_side_effect)
+        mocker.patch.object(connected_db, "_build_paper_model", side_effect=build_side_effect)
 
-        count = connected_db.add_papers([good_paper, bad_paper, another_good_paper])
+        with pytest.raises(DatabaseError):
+            connected_db.add_papers([good_paper, bad_paper])
 
-        # Two good papers inserted, bad one skipped
-        assert count == 2
-        total_count = connected_db.get_paper_count()
-        assert total_count == 2
+        assert connected_db.get_paper_count() == 0
 
 
 class TestParseFieldFilters:
@@ -1226,6 +1215,48 @@ class TestClusteringCache:
             year=None,
         )
         assert cached_global is None
+
+    def test_clustering_cache_is_scoped_by_collection(self, connected_db):
+        """The same model/conference/year in another collection must not collide."""
+        results = {"points": [], "statistics": {"n_clusters": 1}}
+        connected_db.save_clustering_cache(
+            embedding_model="model1",
+            reduction_method="tsne",
+            n_components=2,
+            clustering_method="agglomerative",
+            results=results,
+            n_clusters=1,
+            conference="NeurIPS",
+            year=2024,
+            collection_name="collection-a",
+        )
+
+        assert (
+            connected_db.get_clustering_cache(
+                embedding_model="model1",
+                reduction_method="tsne",
+                n_components=2,
+                clustering_method="agglomerative",
+                n_clusters=1,
+                conference="NeurIPS",
+                year=2024,
+                collection_name="collection-a",
+            )
+            is not None
+        )
+        assert (
+            connected_db.get_clustering_cache(
+                embedding_model="model1",
+                reduction_method="tsne",
+                n_components=2,
+                clustering_method="agglomerative",
+                n_clusters=1,
+                conference="NeurIPS",
+                year=2024,
+                collection_name="collection-b",
+            )
+            is None
+        )
 
     def test_save_fills_n_clusters_from_statistics(self, connected_db):
         """Test that n_clusters is auto-filled from results statistics when None."""
@@ -2079,6 +2110,99 @@ class TestGetPaperWhereFilters:
         results = connected_db.get_paper({"title": {"$contains": "test"}})
         assert len(results) == 1
         assert results[0]["title"] == "Test Paper"
+
+    def test_or_preserves_per_branch_and_grouping(self, connected_db):
+        """(conference=NeurIPS AND year=2024) OR conference=ICLR stays grouped."""
+        papers = [
+            LightweightPaper(
+                title="NeurIPS 2024",
+                authors=["A"],
+                abstract="Abstract",
+                session="S",
+                poster_position="P1",
+                year=2024,
+                conference="NeurIPS",
+            ),
+            LightweightPaper(
+                title="NeurIPS 2025",
+                authors=["A"],
+                abstract="Abstract",
+                session="S",
+                poster_position="P2",
+                year=2025,
+                conference="NeurIPS",
+            ),
+            LightweightPaper(
+                title="ICLR 2025",
+                authors=["A"],
+                abstract="Abstract",
+                session="S",
+                poster_position="P3",
+                year=2025,
+                conference="ICLR",
+            ),
+        ]
+        connected_db.add_papers(papers)
+
+        results = connected_db.get_paper(
+            {"$or": [{"conference": "NeurIPS", "year": 2024}, {"conference": "ICLR"}]},
+            limit=0,
+        )
+
+        assert {paper["title"] for paper in results} == {"NeurIPS 2024", "ICLR 2025"}
+
+    def test_requested_conference_is_not_suppressed_by_not_filter(self, connected_db):
+        """A conference inside $not must not count as a top-level restriction."""
+        papers = [
+            LightweightPaper(
+                title="NeurIPS Paper",
+                authors=["A"],
+                abstract="Abstract",
+                session="S",
+                poster_position="P1",
+                year=2025,
+                conference="NeurIPS",
+            ),
+            LightweightPaper(
+                title="ICLR Paper",
+                authors=["A"],
+                abstract="Abstract",
+                session="S",
+                poster_position="P2",
+                year=2025,
+                conference="ICLR",
+            ),
+            LightweightPaper(
+                title="ICML Paper",
+                authors=["A"],
+                abstract="Abstract",
+                session="S",
+                poster_position="P3",
+                year=2025,
+                conference="ICML",
+            ),
+        ]
+        connected_db.add_papers(papers)
+
+        uids = connected_db.resolve_paper_uids(
+            conferences=["NeurIPS"],
+            where_filters={"$not": {"conference": "ICLR"}},
+        )
+
+        assert len(uids) == 1
+        assert connected_db.get_paper_by_uid(uids[0])["title"] == "NeurIPS Paper"
+
+    def test_donation_validation_error_does_not_leave_pending_rows(self, connected_db):
+        """Validation happens before any rows are added to the session."""
+        with pytest.raises(ValueError):
+            connected_db.donate_validation_data(
+                {
+                    "valid-uid": {"priority": 3},
+                    "invalid-uid": 5,
+                }
+            )
+
+        assert connected_db.get_validation_data() == []
 
     def test_unknown_field_raises(self, connected_db):
         with pytest.raises(DatabaseError, match="Unknown paper field"):

@@ -122,7 +122,7 @@ def clear_clustering_cache_command(args: argparse.Namespace) -> int:
 
     _print_header(
         "Clear Clustering Cache",
-        f"Database: {config.database_url}",
+        f"Database: {config.masked_database_url}",
         f"Filtering by model: {args.embedding_model}" if args.embedding_model else "Clearing all cache entries",
     )
 
@@ -197,7 +197,10 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
             with DatabaseManager() as db:
                 conferences = [resolved_conference] if resolved_conference else db.get_conferences()
                 for conf in conferences:
-                    for year in db.get_years(conference=conf):
+                    years_for_conf = db.get_years(conference=conf)
+                    if year_arg is not None:
+                        years_for_conf = [year for year in years_for_conf if year == year_arg]
+                    for year in years_for_conf:
                         combos.append((conf, year))
         except Exception:
             pass

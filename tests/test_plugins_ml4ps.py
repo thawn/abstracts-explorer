@@ -1276,7 +1276,7 @@ class TestML4PSParallelFetching:
 
         with patch.object(ml4ps_plugin, "_fetch_single_abstract") as mock_fetch:
             # Simulate different outcomes for different papers
-            def side_effect(paper):
+            def side_effect(paper, *args, **kwargs):
                 return paper, paper["id"] % 2 == 0
 
             mock_fetch.side_effect = side_effect
@@ -1352,9 +1352,9 @@ class TestML4PSDownloadIntegration:
         """Test download when scraping returns empty list."""
         mock_scrape.return_value = []
 
-        result = ml4ps_plugin.download(year=2025)
+        with pytest.raises(RuntimeError, match="No papers were scraped"):
+            ml4ps_plugin.download(year=2025)
 
-        assert result == []
         mock_fetch.assert_not_called()
 
     @patch.object(ML4PSDownloaderPlugin, "_scrape_papers")

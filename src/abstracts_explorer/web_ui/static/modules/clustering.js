@@ -100,10 +100,19 @@ export function resetClusters() {
     customQueryClusters = [];
     customClusterMode = false;
     customClusterVisibility = {};
+    selectedClusters.clear();
+    hierarchyMode = false;
+    currentHierarchyLevel = 0;
+    maxHierarchyLevel = 0;
+    currentParentId = null;
     // Reset topic evolution state
     topicEvolutionTraces = [];
     topicEvolutionColorIdx = 0;
     topicEvolutionTopics = [];
+    const topicContainer = document.getElementById('topic-evolution-container');
+    if (topicContainer) {
+        topicContainer.innerHTML = '';
+    }
 }
 
 /**
@@ -644,6 +653,7 @@ export function visualizeClusters() {
     document.getElementById('cluster-plot').on('plotly_click', function(data) {
         const point = data.points[0];
         const customdata = point.customdata;
+        if (!customdata || !customdata.id) return;
         showClusterPaperDetails(customdata.id, customdata);
     });
 }
@@ -1211,6 +1221,7 @@ function updateClusterVisualization() {
     document.getElementById('cluster-plot').on('plotly_click', function(data) {
         const point = data.points[0];
         const customdata = point.customdata;
+        if (!customdata || !customdata.id) return;
         showClusterPaperDetails(customdata.id, customdata);
     });
     
@@ -1308,14 +1319,16 @@ export function exportClusters() {
     }
     
     const dataStr = JSON.stringify(clusterData, null, 2);
-    const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
-    
+    const blob = new Blob([dataStr], { type: 'application/json;charset=utf-8' });
+    const objectUrl = URL.createObjectURL(blob);
+
     const exportFileDefaultName = 'clusters.json';
-    
+
     const linkElement = document.createElement('a');
-    linkElement.setAttribute('href', dataUri);
+    linkElement.setAttribute('href', objectUrl);
     linkElement.setAttribute('download', exportFileDefaultName);
     linkElement.click();
+    URL.revokeObjectURL(objectUrl);
 }
 
 /**

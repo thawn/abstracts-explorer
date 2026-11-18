@@ -5,7 +5,7 @@
  */
 
 import { API_BASE } from './utils/constants.js';
-import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
+import { escapeAttr, escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
 import { renderEmptyState } from './utils/ui-utils.js';
 import { naturalSortPosterPosition } from './utils/sort-utils.js';
 import {
@@ -280,7 +280,7 @@ export function displayInterestingPapers(papers) {
         const activeClass = isActive ? 'border-b-2 border-purple-600 text-purple-600 dark:text-purple-400' : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:border-gray-300';
         tabsHtml += `
             <button 
-                onclick="switchInterestingSession('${escapeHtml(session).replace(/'/g, "\\'")}')"
+                onclick="switchInterestingSession(${escapeAttr(JSON.stringify(session))})"
                 class="px-6 py-3 text-sm font-medium ${activeClass} border-b-2 border-transparent focus:outline-none transition-colors whitespace-nowrap">
                 <i class="fas fa-calendar-alt mr-2"></i>${escapeHtml(session)}
             </button>
@@ -325,7 +325,7 @@ export function displayInterestingPapers(papers) {
                 html += '</div>';
             } else {
                 const editButton = (sortOrder === 'search-rating-poster')
-                    ? `<button onclick="editSearchTerm('${escapeHtml(currentSession).replace(/'/g, "\\'")}', '${escapeHtml(groupKey).replace(/'/g, "\\'")}', event)" 
+                    ? `<button onclick="editSearchTerm(${escapeAttr(JSON.stringify(currentSession))}, ${escapeAttr(JSON.stringify(groupKey))}, event)" 
                               class="ml-2 text-sm text-purple-600 hover:text-purple-800 focus:outline-none" 
                               title="Edit search term">
                            <i class="fas fa-edit"></i>

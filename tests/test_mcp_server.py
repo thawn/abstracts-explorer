@@ -563,8 +563,8 @@ class TestParseConferenceYear:
     @patch("abstracts_explorer.mcp.resources.load_clustering_data")
     @patch("abstracts_explorer.mcp.tools.topics.analyze_cluster_topics")
     @patch("abstracts_explorer.mcp.deps.get_config")
-    def test_fallback_to_all_years_cache(self, mock_config, mock_analyze, mock_load):
-        """When per-year cache is not found, fallback to all-years cache."""
+    def test_missing_year_cache_does_not_fallback(self, mock_config, mock_analyze, mock_load):
+        """A missing per-year cache must not be replaced by all-years data."""
         mock_config_obj = Mock()
         mock_config_obj.collection_name = "papers"
         mock_config_obj.embedding_model = "test-model"
@@ -591,26 +591,14 @@ class TestParseConferenceYear:
             "sample_titles": ["Paper 1"],
         }
 
-        # First call (with years) returns None, second (without years) returns cache
-        mock_db.get_clustering_cache.side_effect = [
-            None,  # per-year lookup fails
-            {  # all-years fallback succeeds
-                "points": [{"id": "p1", "cluster": 0, "x": 0.0, "y": 0.0}],
-                "statistics": {"n_clusters": 1, "n_noise": 0, "cluster_sizes": {0: 1}, "total_papers": 1},
-                "cluster_labels": {"0": "AI"},
-                "cluster_keywords": {"0": ["artificial"]},
-            },
-        ]
+        mock_db.get_clustering_cache.return_value = None
 
         from abstracts_explorer.mcp_server import _get_conference_topics_for_single_conference
 
         result = _get_conference_topics_for_single_conference("NeurIPS", years=[2025])
 
-        assert "error" not in result
-        assert mock_db.get_clustering_cache.call_count == 2
-        # Second call should NOT have 'years' in params
-        fallback_params = mock_db.get_clustering_cache.call_args_list[1][1]["clustering_params"]
-        assert "years" not in fallback_params
+        assert "error" in result
+        assert mock_db.get_clustering_cache.call_count == 1
 
 
 class TestTopicEvolutionAndRelevance:

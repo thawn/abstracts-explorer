@@ -248,10 +248,11 @@ class TestIGARSSPluginCurrentYear:
         with patch.object(plugin, "_check_current_year_available", return_value=True):
             assert datetime.now().year in plugin.supported_years
 
-    def test_supported_years_excludes_current_year_when_unavailable(self):
+    def test_supported_years_is_metadata_safe_when_current_year_unavailable(self):
         plugin = IGARSSDownloaderPlugin()
         with patch.object(plugin, "_check_current_year_available", return_value=False):
-            assert datetime.now().year not in plugin.supported_years
+            assert datetime.now().year in plugin.supported_years
+            assert plugin._resolve_year(None) == datetime.now().year - 1
 
     def test_validate_year_accepts_current_year_when_available(self):
         plugin = IGARSSDownloaderPlugin()

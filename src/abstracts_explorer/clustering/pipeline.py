@@ -2,6 +2,7 @@
 End-to-end clustering pipelines (uncached and cached).
 """
 
+import hashlib
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -213,6 +214,7 @@ def compute_clusters_with_cache(
     """
     cache_conference = conferences[0] if conferences and len(conferences) == 1 else None
     cache_year = years[0] if years and len(years) == 1 else None
+    cache_collection = getattr(embeddings_manager, "collection_name", None)
 
     if not force and not limit:
         cache_n_clusters: Optional[int] = n_clusters
@@ -229,6 +231,7 @@ def compute_clusters_with_cache(
             clustering_params=cache_params or None,
             conference=cache_conference,
             year=cache_year,
+            collection_name=cache_collection,
         )
         if exact_cached:
             logger.info("Using exact cached clustering results (including reduction)")
@@ -250,10 +253,23 @@ def compute_clusters_with_cache(
     if cm.cluster_hierarchy is not None:
         linkage_method = clustering_kwargs.get("linkage", "ward")
         use_llm = clustering_kwargs.get("use_llm_labels", True)
+        fingerprint = hashlib.sha256("\n".join(str(uid) for uid in (cm.paper_ids or [])).encode("utf-8")).hexdigest()[
+            :16
+        ]
+        label_scope = "|".join(
+            [
+                str(cache_collection or ""),
+                str(cache_conference or ""),
+                str(cache_year if cache_year is not None else ""),
+                linkage_method,
+                fingerprint,
+            ]
+        )
 
         cached_hier_labels = database.get_hierarchical_label_cache(
             embedding_model=embedding_model,
             linkage=linkage_method,
+            scope=label_scope,
         )
 
         if cached_hier_labels:
@@ -269,6 +285,7 @@ def compute_clusters_with_cache(
                             embedding_model=embedding_model,
                             labels=hierarchical_labels,
                             linkage=linkage_method,
+                            scope=label_scope,
                         )
                     except Exception as e:
                         logger.warning(f"Failed to save hierarchical label cache: {e}")
@@ -301,6 +318,7 @@ def compute_clusters_with_cache(
                 clustering_params=save_params or None,
                 conference=cache_conference,
                 year=cache_year,
+                collection_name=cache_collection,
             )
         except Exception as e:
             logger.warning(f"Failed to save clustering cache: {e}")

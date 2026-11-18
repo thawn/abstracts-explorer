@@ -268,8 +268,8 @@ class TestEvalQAPairModel:
             query="Query",
             expected_answer="Answer",
         )
-        result = eval_db.update_eval_qa_pair(pair_id, invalid_field="value")
-        assert result is False
+        with pytest.raises(ValueError):
+            eval_db.update_eval_qa_pair(pair_id, invalid_field="value")
 
     def test_delete_verified_eval_qa_pairs_empty(self, eval_db):
         """Deleting verified pairs when there are none returns 0."""

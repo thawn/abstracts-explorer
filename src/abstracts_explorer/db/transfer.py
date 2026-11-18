@@ -4,11 +4,13 @@ SQLite/JSON export and import (registry transfer).
 
 import json
 import logging
+import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, cast
 
-from sqlalchemy import create_engine, select, delete, and_, text
+from sqlalchemy import create_engine, select, delete, and_, func, text
 from sqlalchemy.orm import Session
 
 # Import Pydantic models from plugin framework
@@ -91,27 +93,28 @@ class TransferMixin(SessionMixin):
         DatabaseError
             If the export fails or no papers are found.
         """
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp_name = tempfile.mkstemp(suffix=".db", dir=output_path.parent)
+        os.close(fd)
+        temp_path = Path(temp_name)
+        export_engine = None
         try:
-
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            export_engine = create_engine(f"sqlite:///{output_path}")
+            export_engine = create_engine(f"sqlite:///{temp_path}")
             Base.metadata.create_all(export_engine)
 
             paper_count = 0
             with Session(export_engine) as export_session:
-                # Export papers filtered by conference and year
                 query = select(Paper).where(and_(Paper.conference == conference, Paper.year == year))
                 for paper in self.session.execute(query).scalars():
                     paper_dict = _row_to_dict(Paper, paper)
                     export_session.add(Paper(**paper_dict))
                     paper_count += 1
 
-                # Export hierarchical label cache
                 for entry in self.session.execute(select(HierarchicalLabelCache)).scalars():
                     entry_dict = _row_to_dict(HierarchicalLabelCache, entry)
                     export_session.add(HierarchicalLabelCache(**entry_dict))
 
-                # Export embeddings metadata
                 for meta_entry in self.session.execute(select(EmbeddingsMetadata)).scalars():
                     entry_dict = _row_to_dict(EmbeddingsMetadata, meta_entry)
                     export_session.add(EmbeddingsMetadata(**entry_dict))
@@ -119,12 +122,18 @@ class TransferMixin(SessionMixin):
                 export_session.commit()
 
             export_engine.dispose()
+            os.replace(temp_path, output_path)
             return paper_count
 
         except DatabaseError:
             raise
         except Exception as e:
             raise DatabaseError(f"Failed to export papers: {str(e)}") from e
+        finally:
+            if export_engine is not None:
+                export_engine.dispose()
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)
 
     def import_papers_from_sqlite(
         self,
@@ -159,6 +168,7 @@ class TransferMixin(SessionMixin):
         DatabaseError
             If the import fails or the embedding model is inconsistent.
         """
+        source_engine = None
         try:
             source_engine = create_engine(
                 f"sqlite:///{sqlite_path}",
@@ -167,26 +177,49 @@ class TransferMixin(SessionMixin):
 
             paper_count = 0
             with Session(source_engine) as source_session:
-                # --- Validate EmbeddingsMetadata consistency ---
-                imported_meta = source_session.execute(select(EmbeddingsMetadata)).scalars().first()
-                if imported_meta:
-                    existing_meta = self.session.execute(select(EmbeddingsMetadata)).scalars().first()
-                    if existing_meta and normalize_model_name(
-                        str(existing_meta.embedding_model)
-                    ) != normalize_model_name(str(imported_meta.embedding_model)):
-                        raise EmbeddingModelConflictError(
-                            str(existing_meta.embedding_model), str(imported_meta.embedding_model)
-                        )
+                try:
+                    source_count = (
+                        source_session.execute(
+                            select(func.count())
+                            .select_from(Paper)
+                            .where(and_(Paper.conference == conference, Paper.year == year))
+                        ).scalar()
+                        or 0
+                    )
+                except Exception as e:
+                    raise DatabaseError(
+                        f"Failed to import papers: source file is not a valid papers export or has an incompatible schema: {e}"
+                    ) from e
 
-                # Delete existing papers for this conference+year
-                self.session.execute(delete(Paper).where(and_(Paper.conference == conference, Paper.year == year)))
+                if source_count == 0:
+                    raise DatabaseError(
+                        f"Failed to import papers: source file contains no papers for {conference}/{year}; refusing to replace local data."
+                    )
 
-                # Delete only hierarchical label cache entries whose
-                # embedding_model matches one from the imported data
+                imported_meta = (
+                    source_session.execute(
+                        select(EmbeddingsMetadata).order_by(EmbeddingsMetadata.updated_at.desc()).limit(1)
+                    )
+                    .scalars()
+                    .first()
+                )
+                existing_model = self.session.execute(
+                    select(EmbeddingsMetadata.embedding_model).order_by(EmbeddingsMetadata.updated_at.desc()).limit(1)
+                ).scalar_one_or_none()
+                if (
+                    imported_meta
+                    and existing_model
+                    and normalize_model_name(str(existing_model))
+                    != normalize_model_name(str(imported_meta.embedding_model))
+                ):
+                    raise EmbeddingModelConflictError(str(existing_model), str(imported_meta.embedding_model))
+
                 imported_models_result: List[str] = cast(
                     List[str],
                     source_session.execute(select(HierarchicalLabelCache.embedding_model).distinct()).scalars().all(),
                 )
+
+                self.session.execute(delete(Paper).where(and_(Paper.conference == conference, Paper.year == year)))
                 if imported_models_result:
                     self.session.execute(
                         delete(HierarchicalLabelCache).where(
@@ -194,33 +227,23 @@ class TransferMixin(SessionMixin):
                         )
                     )
 
-                self.session.commit()
-
-                # Import papers — use merge() to handle any UID collisions
-                # (e.g. the same paper existing under a different conference
-                # casing that the DELETE above didn't catch).
-                for paper in source_session.execute(select(Paper)).scalars():
+                for paper in source_session.execute(
+                    select(Paper).where(and_(Paper.conference == conference, Paper.year == year))
+                ).scalars():
                     paper_dict = _row_to_dict(Paper, paper)
                     self.session.merge(Paper(**paper_dict))
                     paper_count += 1
 
-                # Import hierarchical labels
                 for entry in source_session.execute(select(HierarchicalLabelCache)).scalars():
                     entry_dict = _row_to_dict(HierarchicalLabelCache, entry)
                     self.session.add(HierarchicalLabelCache(**entry_dict))
 
-                # Import embeddings metadata (only if not already present)
-                if imported_meta:
-                    existing_meta = self.session.execute(select(EmbeddingsMetadata)).scalars().first()
-                    if not existing_meta:
-                        meta_dict = {
-                            c.name: getattr(imported_meta, c.name) for c in EmbeddingsMetadata.__table__.columns
-                        }
-                        self.session.add(EmbeddingsMetadata(**meta_dict))
+                if imported_meta and existing_model is None:
+                    meta_dict = {c.name: getattr(imported_meta, c.name) for c in EmbeddingsMetadata.__table__.columns}
+                    self.session.add(EmbeddingsMetadata(**meta_dict))
 
                 self.session.commit()
 
-            source_engine.dispose()
             self._invalidate_metadata_cache()
             return paper_count
 
@@ -228,6 +251,9 @@ class TransferMixin(SessionMixin):
             raise
         except Exception as e:
             raise self._db_error("Failed to import papers", e)
+        finally:
+            if source_engine is not None:
+                source_engine.dispose()
 
     # ------------------------------------------------------------------
     # Clustering cache JSON export / import

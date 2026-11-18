@@ -365,6 +365,67 @@ class TestRAGChatInstructions:
         assert "response" in result
 
 
+class TestRAGToolQueue:
+    """Tests for bounded parallel tool execution and duplicate coalescing."""
+
+    def test_agent_uses_bounded_thread_executor(self, mock_embeddings_manager, mock_database):
+        """The agent receives a thread-pool executor with the configured worker count."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        try:
+            assert chat.max_parallel_tools == 8
+            assert chat._tool_executor._max_workers == 8
+            capabilities = chat.agent._root_capability.capabilities
+            assert any(capability.__class__.__name__ == "UseThreadExecutor" for capability in capabilities)
+        finally:
+            chat.close()
+
+    def test_query_has_no_tool_call_limit_and_uses_budget(self, mock_embeddings_manager, mock_database):
+        """Tool calls are not capped; request limit and timeout are applied."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        result = Mock(output="ok")
+        result.all_messages.return_value = []
+        try:
+            with patch.object(chat.agent, "run_sync", return_value=result) as run_sync:
+                chat.query("What are the main topics?")
+        finally:
+            chat.close()
+
+        kwargs = run_sync.call_args.kwargs
+        assert kwargs["usage_limits"].tool_calls_limit is None
+        assert kwargs["usage_limits"].request_limit == 50
+        assert kwargs["timeout"] == 120
+
+    def test_duplicate_tool_call_is_reused(self):
+        """Identical calls execute once and the second result is marked cached."""
+        from abstracts_explorer.rag import _run_rag_tool, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        mcp_func = Mock(return_value=json.dumps({"papers": []}))
+
+        first = _run_rag_tool(ctx, "search_papers", mcp_func, {"topic_keywords": "transformers"})
+        second = _run_rag_tool(ctx, "search_papers", mcp_func, {"topic_keywords": "transformers"})
+
+        assert mcp_func.call_count == 1
+        assert "cache" in second.lower()
+        assert "cache" not in first.lower()
+        assert len(ctx.deps.tool_results) == 1
+
+    def test_duplicate_error_tells_model_not_to_retry(self):
+        """Cached errors include an explicit no-retry instruction."""
+        from abstracts_explorer.rag import _run_rag_tool, RAGDeps
+
+        ctx = Mock()
+        ctx.deps = RAGDeps()
+        mcp_func = Mock(return_value=json.dumps({"error": "No pre-computed clustering data"}))
+
+        _run_rag_tool(ctx, "get_conference_topics", mcp_func, {"conferences": ["NeurIPS"]})
+        second = _run_rag_tool(ctx, "get_conference_topics", mcp_func, {"conferences": ["NeurIPS"]})
+
+        assert mcp_func.call_count == 1
+        assert "do not repeat" in second.lower()
+
+
 class TestRAGChatQuery:
     """Test RAGChat query method."""
 

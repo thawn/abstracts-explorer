@@ -188,7 +188,7 @@ export async function sendChatMessage() {
         const data = await parseJsonResponse(response);
 
         // Remove loading message
-        document.getElementById(loadingId).remove();
+        document.getElementById(loadingId)?.remove();
 
         if (data.error) {
             addChatMessage(`Error: ${data.error}`, 'assistant');
@@ -230,7 +230,7 @@ export async function sendChatMessage() {
         displayChatPapers(papers, metadata);
     } catch (error) {
         console.error('Chat error:', error);
-        document.getElementById(loadingId).remove();
+        document.getElementById(loadingId)?.remove();
         const message = error && error.message
             ? `Sorry, an error occurred: ${error.message}`
             : 'Sorry, an error occurred. Please try again.';
@@ -401,9 +401,12 @@ export function addChatMessage(text, role, isLoading = false) {
  */
 export async function resetChat() {
     try {
-        await fetch(`${API_BASE}/api/chat/reset`, {
+        const response = await fetch(`${API_BASE}/api/chat/reset`, {
             method: 'POST'
         });
+        if (!response.ok) {
+            throw new Error(`Reset failed (HTTP ${response.status})`);
+        }
 
         const messagesDiv = document.getElementById('chat-messages');
         messagesDiv.innerHTML = '';

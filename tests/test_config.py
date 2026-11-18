@@ -50,6 +50,9 @@ def clean_config_env_vars():
         "PROXY_X_PREFIX",
         "IMPRINT_LINK",
         "REQUESTS_PER_MINUTE",
+        "RAG_MAX_PARALLEL_TOOLS",
+        "RAG_REQUEST_LIMIT",
+        "RAG_QUERY_TIMEOUT",
         "GITHUB_TOKEN",
         "REGISTRY_REPOSITORY",
     }
@@ -159,6 +162,9 @@ class TestConfig:
         assert config.chat_max_tokens == 2000
         assert config.cluster_label_model == "alias-fast"
         assert config.embedding_max_input_tokens == 8192
+        assert config.rag_max_parallel_tools == 8
+        assert config.rag_request_limit == 50
+        assert config.rag_query_timeout == 120
 
     def test_embedding_max_input_tokens_from_env(self, tmp_path):
         """Test parsing EMBEDDING_MAX_INPUT_TOKENS."""
@@ -175,6 +181,26 @@ class TestConfig:
 
         config = Config(env_path=env_file)
         assert config.embedding_max_input_tokens == 0
+
+    def test_rag_settings_from_env(self, tmp_path):
+        """RAG concurrency and budget settings are configurable."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("RAG_MAX_PARALLEL_TOOLS=3\nRAG_REQUEST_LIMIT=20\nRAG_QUERY_TIMEOUT=45\n")
+
+        config = Config(env_path=env_file)
+        assert config.rag_max_parallel_tools == 3
+        assert config.rag_request_limit == 20
+        assert config.rag_query_timeout == 45
+
+    def test_rag_settings_are_clamped(self, tmp_path):
+        """Non-positive RAG settings fall back to safe minimums."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("RAG_MAX_PARALLEL_TOOLS=0\nRAG_REQUEST_LIMIT=-1\nRAG_QUERY_TIMEOUT=0\n")
+
+        config = Config(env_path=env_file)
+        assert config.rag_max_parallel_tools == 1
+        assert config.rag_request_limit == 1
+        assert config.rag_query_timeout == 1
 
     def test_metadata_cache_ttl_from_env(self, tmp_path):
         """METADATA_CACHE_TTL overrides the default."""

@@ -180,7 +180,7 @@ def test_metadata_and_supported_years(aaai_site):
     assert metadata["supported_years"][0] == 2010
     assert "request_delay" in metadata["parameters"]
     plugin.get_metadata()
-    assert get.call_count == 1
+    assert get.call_count == 0
     assert plugin.get_url(2010) == plugin.get_url(2026) == BASE + "/issue/archive"
 
 
@@ -295,7 +295,7 @@ def test_explicit_download_after_failed_availability_probe(aaai_site, monkeypatc
     monkeypatch.setattr("abstracts_explorer.plugins.aaai_downloader.datetime", clock)
     respond = get.side_effect
     get.side_effect = requests.Timeout("availability probe failed")
-    assert 2026 not in plugin.get_metadata()["supported_years"]
+    assert 2026 in plugin.get_metadata()["supported_years"]
     get.side_effect = respond
     get.reset_mock()
     papers = plugin.download(2026, timeout=60, verify_ssl=False, request_delay=0)

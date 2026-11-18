@@ -8,6 +8,7 @@ Downloads abstracts from the AGU annual meeting's public m-anage meeting API.
 import json
 import logging
 import string
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -60,6 +61,23 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
     _ACCEPT = "application/json, text/plain, */*"
     _SOURCE_LABEL = "AGU meeting data"
 
+    def __init__(self, *args, **kwargs) -> None:
+        """Initialize the AGU downloader and its shared request delay state."""
+        super().__init__(*args, **kwargs)
+        self._delay_lock = threading.Lock()
+        self._last_request_at = 0.0
+
+    def _wait_for_request_slot(self, request_delay: float) -> None:
+        """Wait so concurrent workers share one aggregate request rate."""
+        if request_delay <= 0:
+            return
+        with self._delay_lock:
+            now = time.monotonic()
+            wait = max(0.0, self._last_request_at + request_delay - now)
+            self._last_request_at = now + wait
+        if wait > 0:
+            time.sleep(wait)
+
     def get_url(self, year: int) -> str:
         """
         Get the AGU meeting-app URL for a conference year.
@@ -108,8 +126,12 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
             futures = {executor.submit(worker, item): index for index, item in enumerate(items)}
             with tqdm(total=len(items), desc=desc, unit=unit, disable=disable) as progress:
                 for future in as_completed(futures):
-                    results[futures[future]] = future.result()
-                    progress.update(1)
+                    try:
+                        results[futures[future]] = future.result()
+                    except Exception as exc:
+                        logger.warning("AGU request failed: %s", exc)
+                    finally:
+                        progress.update(1)
         return results
 
     @staticmethod
@@ -216,7 +238,7 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
 
         if output_path and not force_download:
             cached_papers = self._load_papers_json(output_path, "AGU")
-            if cached_papers is not None:
+            if cached_papers is not None and self._cache_matches_requested_year(cached_papers, year):
                 self._clear_checkpoint(self._checkpoint_dir(output_path))
                 return cached_papers
 
@@ -426,12 +448,11 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
                     if isinstance(record, dict):
                         records[ref] = record
                     single_fetches += 1
-                    if request_delay > 0:
-                        time.sleep(request_delay)
+                    self._wait_for_request_slot(request_delay)
 
                 progress.update(len(batch))
-                if request_delay > 0 and start + self._BATCH_SIZE < len(refs):
-                    time.sleep(request_delay)
+                if start + self._BATCH_SIZE < len(refs):
+                    self._wait_for_request_slot(request_delay)
 
         if single_fetches:
             logger.info(
@@ -476,8 +497,7 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
         def fetch(item: Any) -> Any:
             program, session_key = item
             parent = str(program.get("_url") or f"Program/{program.get('id')}")
-            if request_delay > 0:
-                time.sleep(request_delay)
+            self._wait_for_request_slot(request_delay)
             data = self._fetch_json(f"{api_url}/{parent}/{session_key}", timeout, verify_ssl, params)
             return program, session_key, data
 
@@ -562,8 +582,7 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
             session_ref = str(session.get("_url") or f"Session/{session.get('id')}")
             if not session.get("ChildList_Paper") or session_ref in done_sessions:
                 return session_ref, None
-            if request_delay > 0:
-                time.sleep(request_delay)
+            self._wait_for_request_slot(request_delay)
             data = self._fetch_json(f"{api_url}/{session_ref}/ChildList_Paper", timeout, verify_ssl, params)
             return session_ref, data
 
@@ -673,8 +692,7 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
         letters = [letter for letter in self._PEOPLE_INDEX_LETTERS if letter not in done_letters]
 
         def fetch(letter: str) -> Any:
-            if request_delay > 0:
-                time.sleep(request_delay)
+            self._wait_for_request_slot(request_delay)
             try:
                 data = self._fetch_json(
                     f"{api_url}/PeopleIndex/{letter}/ChildList_Person",

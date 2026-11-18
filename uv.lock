@@ -73,7 +73,7 @@ requires-dist = [
     { name = "oras", specifier = ">=0.2.42" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "pydantic-ai-slim", extras = ["openai"], specifier = ">=2.32.0" },
+    { name = "pydantic-ai-slim", extras = ["openai"], specifier = ">=2.66.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.11.0" },

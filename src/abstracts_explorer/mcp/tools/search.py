@@ -56,6 +56,7 @@ def search_papers(
         JSON string containing search results
     """
     try:
+        n_results = max(1, min(int(n_results), 50))
         if not conference:
             return json.dumps(
                 {
@@ -162,6 +163,7 @@ def get_paper_details(
                     result_papers = [paper]
 
             if not result_papers and title:
+                limit = max(1, min(int(limit), 50))
                 # Keyword search on title with optional conference/year filters
                 result_papers = db.search_papers(
                     keyword=title,

@@ -8,6 +8,8 @@ Uses the lightweight plugin API for simplified implementation.
 
 from typing import Any, Dict, List, Optional
 import logging
+import threading
+import time
 from bs4 import BeautifulSoup
 import re
 from urllib.parse import urljoin
@@ -73,6 +75,7 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
         super().__init__()
         self.configure_pool(20)
         self._current_year: int = self._start_year
+        self._download_lock = threading.Lock()
 
     @property
     def session(self):
@@ -123,18 +126,28 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
         list of LightweightPaper
             List of validated paper objects ready for database insertion.
         """
-        self._current_year = year
+        with self._download_lock:
+            self._current_year = year
 
-        logger.info(f"Scraping ML4PS {year} workshop papers...")
+            logger.info(f"Scraping ML4PS {year} workshop papers...")
 
-        papers_raw = self._scrape_papers()
+            papers_raw = self._scrape_papers(
+                timeout=options.timeout,
+                verify_ssl=options.verify_ssl,
+                request_delay=options.request_delay,
+            )
 
-        if not papers_raw:
-            logger.error("No papers were scraped")
-            return []
+            if not papers_raw:
+                raise RuntimeError("No papers were scraped; refusing to report an empty successful download.")
 
-        logger.info(f"Fetching abstracts for {len(papers_raw)} papers...")
-        self._fetch_abstracts_for_papers(papers_raw, max_workers=options.max_workers)
+            logger.info(f"Fetching abstracts for {len(papers_raw)} papers...")
+            self._fetch_abstracts_for_papers(
+                papers_raw,
+                max_workers=options.max_workers,
+                timeout=options.timeout,
+                verify_ssl=options.verify_ssl,
+                request_delay=options.request_delay,
+            )
 
         lightweight_papers_data = self._convert_to_lightweight_format(papers_raw)
         papers = validate_lightweight_papers(lightweight_papers_data)
@@ -162,7 +175,7 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
                     "type": "int",
                     "required": True,
                     "description": "Workshop year to download",
-                    "default": self._resolve_year(None),
+                    "default": max(self.supported_years, default=self._start_year),
                 },
                 "output_path": {"type": "str", "required": False, "description": "Path to save the downloaded data"},
                 "force_download": {
@@ -182,10 +195,24 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
 
     # Internal helper methods
 
-    def _fetch_page(self, url: str, max_retries: int = 3) -> Optional[BeautifulSoup]:
+    def _fetch_page(
+        self,
+        url: str,
+        max_retries: int = 3,
+        timeout: Optional[float] = None,
+        verify_ssl: Optional[bool] = None,
+        request_delay: float = 0.0,
+    ) -> Optional[BeautifulSoup]:
         """Fetch and parse a web page, returning ``None`` after retries fail."""
         try:
-            response = self._request(url, self.timeout, self.verify_ssl, max_attempts=max_retries)
+            if request_delay > 0:
+                time.sleep(request_delay)
+            response = self._request(
+                url,
+                timeout if timeout is not None else self.timeout,
+                verify_ssl if verify_ssl is not None else self.verify_ssl,
+                max_attempts=max_retries,
+            )
             return BeautifulSoup(response.content, "html.parser")
         except RuntimeError as exc:
             logger.warning("Failed to fetch %s: %s", url, exc)
@@ -209,14 +236,25 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
             return match.group(1)
         return None
 
-    def _fetch_abstract_and_openreview(self, paper_id: str) -> tuple[Optional[str], Optional[str]]:
+    def _fetch_abstract_and_openreview(
+        self,
+        paper_id: str,
+        timeout: Optional[float] = None,
+        verify_ssl: Optional[bool] = None,
+        request_delay: float = 0.0,
+    ) -> tuple[Optional[str], Optional[str]]:
         """Fetch abstract and OpenReview URL from NeurIPS virtual conference page."""
         virtual_base = self._get_neurips_virtual_base(self._current_year)
         if not virtual_base:
             return None, None
 
         url = f"{virtual_base}{paper_id}"
-        soup = self._fetch_page(url)
+        soup = self._fetch_page(
+            url,
+            timeout=timeout,
+            verify_ssl=verify_ssl,
+            request_delay=request_delay,
+        )
 
         if not soup:
             return None, None
@@ -375,12 +413,22 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
             logger.warning(f"Error parsing paper row: {e}")
             return None
 
-    def _scrape_papers(self) -> List[Dict]:
+    def _scrape_papers(
+        self,
+        timeout: Optional[float] = None,
+        verify_ssl: Optional[bool] = None,
+        request_delay: float = 0.0,
+    ) -> List[Dict]:
         """Scrape all papers from the workshop page."""
         base_url = self.get_url(self._current_year)
         logger.info(f"Scraping ML4PS {self._current_year} workshop papers...")
 
-        soup = self._fetch_page(base_url)
+        soup = self._fetch_page(
+            base_url,
+            timeout=timeout,
+            verify_ssl=verify_ssl,
+            request_delay=request_delay,
+        )
         if not soup:
             return []
 
@@ -411,7 +459,13 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
         logger.info(f"Successfully scraped {len(papers)} papers")
         return papers
 
-    def _fetch_single_abstract(self, paper: Dict) -> tuple[Dict, bool]:
+    def _fetch_single_abstract(
+        self,
+        paper: Dict,
+        timeout: Optional[float] = None,
+        verify_ssl: Optional[bool] = None,
+        request_delay: float = 0.0,
+    ) -> tuple[Dict, bool]:
         """Fetch abstract for a single paper."""
         if not paper.get("poster_url"):
             return paper, False
@@ -424,7 +478,12 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
         paper["neurips_paper_id"] = neurips_paper_id
 
         # Fetch abstract and OpenReview URL
-        abstract, openreview_url = self._fetch_abstract_and_openreview(neurips_paper_id)
+        abstract, openreview_url = self._fetch_abstract_and_openreview(
+            neurips_paper_id,
+            timeout=timeout,
+            verify_ssl=verify_ssl,
+            request_delay=request_delay,
+        )
 
         if abstract:
             paper["abstract"] = abstract
@@ -435,7 +494,14 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
         success = abstract is not None or openreview_url is not None
         return paper, success
 
-    def _fetch_abstracts_for_papers(self, papers: List[Dict], max_workers: int = 20):
+    def _fetch_abstracts_for_papers(
+        self,
+        papers: List[Dict],
+        max_workers: int = 20,
+        timeout: Optional[float] = None,
+        verify_ssl: Optional[bool] = None,
+        request_delay: float = 0.0,
+    ):
         """Fetch abstracts for all papers in parallel."""
         logger.info(f"Fetching abstracts for {len(papers)} papers using {max_workers} parallel workers...")
 
@@ -444,7 +510,16 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
         processed_count = 0
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_paper = {executor.submit(self._fetch_single_abstract, paper): paper for paper in papers}
+            future_to_paper = {
+                executor.submit(
+                    self._fetch_single_abstract,
+                    paper,
+                    timeout,
+                    verify_ssl,
+                    request_delay,
+                ): paper
+                for paper in papers
+            }
 
             for future in as_completed(future_to_paper):
                 paper, success = future.result()

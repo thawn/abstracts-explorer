@@ -167,7 +167,7 @@ class NormRule:
 
 
 SEARCH_PAPERS_RULES = [
-    NormRule("years", ("year",), _as_list, convert_existing=False),
+    NormRule("years", ("year",), _to_int_list_or_none),
     NormRule("topic_keywords", ("query",), _join_list),
     NormRule("conference", ("conferences",), _first_or_none),
     NormRule(
@@ -180,8 +180,18 @@ SEARCH_PAPERS_RULES = [
 
 GET_TOPIC_EVOLUTION_RULES = [
     NormRule("topic_keywords", (), _join_list),
-    NormRule("start_year", (), _first_or_none),
-    NormRule("end_year", (), _first_or_none),
+    NormRule("start_year", (), _first_int_or_none),
+    NormRule("end_year", (), _first_int_or_none),
+]
+
+GET_CONFERENCE_TOPICS_RULES = [
+    NormRule("conferences", ("conference",), _to_conference_list),
+    NormRule("years", ("year",), _to_int_list_or_none),
+]
+
+GET_CLUSTER_VISUALIZATION_RULES = [
+    NormRule("conferences", ("conference",), _to_conference_list),
+    NormRule("years", ("year",), _to_int_list_or_none),
 ]
 
 ANALYZE_TOPIC_RELEVANCE_RULES = [
@@ -338,19 +348,19 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
         names) are returned as ``{"error": ...}`` JSON strings rather than
         raised, so callers always receive a string.
     """
-    logger.info("Executing MCP tool: %s with arguments: %s", tool_name, arguments)
+    logger.info("Executing MCP tool: %s with argument keys: %s", tool_name, sorted(arguments))
 
     try:
         if tool_name == "analyze_topic_relevance":
             result = _execute_tool(analyze_topic_relevance, arguments, ANALYZE_TOPIC_RELEVANCE_RULES)
         elif tool_name == "get_conference_topics":
-            result = _execute_tool(get_conference_topics, arguments, [])
+            result = _execute_tool(get_conference_topics, arguments, GET_CONFERENCE_TOPICS_RULES)
         elif tool_name == "get_topic_evolution":
             result = _execute_tool(get_topic_evolution, arguments, GET_TOPIC_EVOLUTION_RULES)
         elif tool_name == "search_papers":
             result = _execute_tool(search_papers, arguments, SEARCH_PAPERS_RULES)
         elif tool_name == "get_cluster_visualization":
-            result = _execute_tool(get_cluster_visualization, arguments, [])
+            result = _execute_tool(get_cluster_visualization, arguments, GET_CLUSTER_VISUALIZATION_RULES)
         elif tool_name == "get_paper_details":
             result = _execute_tool(get_paper_details, arguments, GET_PAPER_DETAILS_RULES)
         elif tool_name == "summarize_interesting_papers":

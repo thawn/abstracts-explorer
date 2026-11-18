@@ -2,6 +2,7 @@
 Pydantic-AI tool wrappers around the MCP tools.
 """
 
+import json
 import logging
 from typing import Any, Callable, Dict, List, Optional
 
@@ -48,9 +49,32 @@ def _run_rag_tool(
     str
         Human-readable tool result for the LLM.
     """
-    logger.info("Tool call: %s(%s)", tool_name, kwargs)
+    cache_key = f"{tool_name}:{json.dumps(kwargs, sort_keys=True, default=str)}"
+    with ctx.deps.tool_cache_lock:
+        cached = ctx.deps.tool_cache.get(cache_key)
+
+    if cached is not None:
+        logger.info("Tool cache hit: %s(keys=%s)", tool_name, sorted(kwargs))
+        is_error = False
+        try:
+            parsed = json.loads(cached)
+            is_error = isinstance(parsed, dict) and "error" in parsed
+        except (TypeError, ValueError):
+            pass
+        if is_error:
+            note = (
+                "\n\nNote: this identical tool call already ran and returned an error. "
+                "Do not repeat it; change the arguments or answer with the data you have."
+            )
+        else:
+            note = "\n\nNote: identical tool call reused from this query's cache."
+        return format_tool_result_for_llm(tool_name, cached) + note
+
+    logger.info("Tool call: %s(keys=%s)", tool_name, sorted(kwargs))
     raw = mcp_func(**kwargs)
     logger.info("Tool result: %s → %s", tool_name, abbreviate_result(raw))
+    with ctx.deps.tool_cache_lock:
+        ctx.deps.tool_cache[cache_key] = raw
     ctx.deps.tool_results.append({"name": tool_name, "raw_result": raw})
     return format_tool_result_for_llm(tool_name, raw)
 
@@ -91,6 +115,7 @@ def _tool_search_papers(
         Alias for n_results.
     """
     count = n_results if n_results is not None else (limit if limit is not None else (ctx.deps.n_results or 10))
+    count = max(1, min(int(count), 50))
     kwargs: Dict[str, Any] = {"topic_keywords": topic_keywords, "n_results": count}
 
     # Determine years: explicit param > deps default

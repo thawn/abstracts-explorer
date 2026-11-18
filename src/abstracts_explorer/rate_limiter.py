@@ -214,7 +214,8 @@ class RateLimitCooldown:
                 return
         time.sleep(remaining)
         with self._lock:
-            self._until = 0.0
+            if self._until <= time.monotonic():
+                self._until = 0.0
 
     def defer(self, delay: float) -> None:
         """Extend the cooldown by at least *delay* seconds."""

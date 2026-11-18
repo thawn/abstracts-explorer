@@ -33,6 +33,7 @@ def _download_single(
     output_path: Path,
     force: bool,
     args: argparse.Namespace,
+    json_path: Optional[Path] = None,
 ) -> List[LightweightPaper]:
     """
     Download papers for a single plugin and year.
@@ -62,8 +63,9 @@ def _download_single(
     """
     kwargs: Dict[str, Any] = {}
 
-    if plugin.plugin_name in {"ml4ps", "agu"}:
-        kwargs["max_workers"] = getattr(args, "max_workers", 20)
+    max_workers = getattr(args, "max_workers", None)
+    if plugin.plugin_name in {"ml4ps", "agu"} and max_workers is not None:
+        kwargs["max_workers"] = max_workers
 
     if plugin.plugin_name == "agu":
         request_delay = getattr(args, "request_delay", None)
@@ -77,8 +79,8 @@ def _download_single(
         if input_file:
             kwargs["input_path"] = input_file
 
-    json_path = output_path.parent / f"{plugin.plugin_name}_{year}.json"
-    return plugin.download(year=year, output_path=str(json_path), force_download=force, **kwargs)
+    target_path = json_path or (output_path.parent / f"{plugin.plugin_name}_{year}.json")
+    return plugin.download(year=year, output_path=str(target_path), force_download=force, **kwargs)
 
 
 def _report_failed_downloads(json_path: Path) -> None:
@@ -160,8 +162,10 @@ def download_command(
             return 1
         plugins_to_download = [plugin]
     else:
-        # No plugin specified: download all plugins
-        plugins_to_download = list(get_all_plugins())
+        # No plugin specified: download all plugins that do not require manual input
+        plugins_to_download = [
+            plugin for plugin in get_all_plugins() if getattr(plugin, "requires_manual_input", False) is not True
+        ]
 
     total_papers = 0
     errors = []
@@ -184,9 +188,9 @@ def download_command(
 
         for yr in years:
             try:
+                json_path = output_path.parent / f"{plugin.plugin_name}_{yr}.json"
                 papers = _download_single(plugin, yr, output_path, args.force, args)
                 print(f"✅ Downloaded {len(papers):,} papers for {plugin.plugin_name} {yr}")
-                json_path = output_path.parent / f"{plugin.plugin_name}_{yr}.json"
                 _report_failed_downloads(json_path)
 
                 with DatabaseManager() as db:
@@ -218,7 +222,7 @@ def download_command(
         print()
 
     config = get_config()
-    print(f"💾 Database updated: {config.database_url}")
+    print(f"💾 Database updated: {config.masked_database_url}")
     print(f"📊 Total papers downloaded: {total_papers:,}")
 
     if errors:

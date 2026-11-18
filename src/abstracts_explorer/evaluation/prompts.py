@@ -35,7 +35,7 @@ Example format:
 [
   {{
     "query": "What are the main topics in NeurIPS 2025?",
-    "tool_arguments": {{"n_clusters": 8}}
+    "tool_arguments": {{"conferences": ["NeurIPS"], "years": [2025]}}
   }}
 ]
 

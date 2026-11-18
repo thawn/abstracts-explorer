@@ -142,16 +142,30 @@ class HAICONDownloaderPlugin(HTTPDownloaderPlugin):
         logger.info("Found %d sessions to scrape", len(session_ids))
 
         papers_by_key: Dict[Any, LightweightPaper] = {}
+        failed_sessions: List[int] = []
         for session_id in session_ids:
             if request_delay > 0:
                 time.sleep(request_delay)
-            session_papers = self._fetch_session_papers(base_url, session_id, year, timeout, verify_ssl)
+            session_papers = self._fetch_session_papers(
+                base_url,
+                session_id,
+                year,
+                timeout,
+                verify_ssl,
+                failed_sessions=failed_sessions,
+            )
             for paper in session_papers:
                 if paper.original_id is not None:
                     key: Any = paper.original_id
                 else:
                     key = ("title", paper.title.casefold())
                 papers_by_key.setdefault(key, paper)
+
+        if failed_sessions:
+            raise RuntimeError(
+                f"Failed to fetch {len(failed_sessions)} HAICON session(s) "
+                f"({', '.join(map(str, failed_sessions))}); refusing to cache partial data."
+            )
 
         papers = list(papers_by_key.values())
         logger.info(
@@ -245,6 +259,7 @@ class HAICONDownloaderPlugin(HTTPDownloaderPlugin):
         year: int,
         timeout: float,
         verify_ssl: bool,
+        failed_sessions: Optional[List[int]] = None,
     ) -> List[LightweightPaper]:
         """
         Fetch and parse all papers from a single ConfTool session detail page.
@@ -285,6 +300,8 @@ class HAICONDownloaderPlugin(HTTPDownloaderPlugin):
                 session_id,
                 exc,
             )
+            if failed_sessions is not None:
+                failed_sessions.append(session_id)
             return []
 
         # Extract session name from the page header

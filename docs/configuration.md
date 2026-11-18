@@ -125,6 +125,9 @@ The configuration automatically detects the type based on the format:
 
 - **COLLECTION_NAME**: ChromaDB collection name (default: `papers`)
 - **MAX_CONTEXT_PAPERS**: Number of papers to include in RAG context (default: `5`)
+- **RAG_MAX_PARALLEL_TOOLS**: Maximum number of tool calls executed concurrently by the RAG agent; excess calls are queued (default: `8`)
+- **RAG_REQUEST_LIMIT**: Maximum number of model requests per RAG query (default: `50`)
+- **RAG_QUERY_TIMEOUT**: Wall-clock timeout in seconds for one RAG query (default: `120`)
 - **ENABLE_QUERY_REWRITING**: Rewrite follow-up questions into self-contained search queries before retrieval (default: `true`)
 - **QUERY_SIMILARITY_THRESHOLD**: Maximum embedding distance for a rewritten-query answer to be accepted as a hit (default: `0.7`)
 

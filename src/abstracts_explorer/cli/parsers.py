@@ -132,8 +132,8 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
     download_parser.add_argument(
         "--max-workers",
         type=int,
-        default=20,
-        help="Maximum parallel workers for fetching data (default: 20)",
+        default=None,
+        help="Maximum parallel workers for fetching data (plugin-specific default when omitted)",
     )
     download_parser.add_argument(
         "--request-delay",

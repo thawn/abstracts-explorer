@@ -75,9 +75,12 @@ export async function loadStats() {
         const data = await response.json();
 
         if (data.error) {
-            document.getElementById('stats').innerHTML = `
-                <div class="text-sm text-red-200">${data.error}</div>
-            `;
+            const errorBox = document.createElement('div');
+            errorBox.className = 'text-sm text-red-200';
+            errorBox.textContent = data.error;
+            const statsBox = document.getElementById('stats');
+            statsBox.innerHTML = '';
+            statsBox.appendChild(errorBox);
             return;
         }
 
@@ -96,10 +99,16 @@ export async function loadStats() {
             displayText = 'All Papers';
         }
 
-        document.getElementById('stats').innerHTML = `
-            <div class="text-sm font-semibold">${data.total_papers.toLocaleString()} Abstracts</div>
-            <div class="text-xs opacity-90">${displayText}</div>
-        `;
+        const statsBox = document.getElementById('stats');
+        statsBox.innerHTML = '';
+        const totalLine = document.createElement('div');
+        totalLine.className = 'text-sm font-semibold';
+        totalLine.textContent = `${data.total_papers.toLocaleString()} Abstracts`;
+        const contextLine = document.createElement('div');
+        contextLine.className = 'text-xs opacity-90';
+        contextLine.textContent = displayText;
+        statsBox.appendChild(totalLine);
+        statsBox.appendChild(contextLine);
     } catch (error) {
         console.error('Error loading stats:', error);
         document.getElementById('stats').innerHTML = `

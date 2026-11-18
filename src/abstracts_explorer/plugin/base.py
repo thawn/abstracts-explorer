@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from abstracts_explorer.plugin.models import LightweightPaper, validate_lightweight_papers
+from abstracts_explorer.plugin.persistence import save_json
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,7 @@ class DownloaderPlugin(ABC):
     # Plugin metadata (should be overridden in subclasses)
     plugin_name: str = "base"
     plugin_description: str = "Base downloader plugin"
+    requires_manual_input: bool = False
     _start_year: int = 0
 
     @property
@@ -91,9 +93,9 @@ class DownloaderPlugin(ABC):
         """
         Dynamically computed supported years.
 
-        Builds the range ``[_start_year, current_year)`` and appends the
-        current year when its data URL is already accessible (checked via
-        a HEAD request to ``get_url(current_year)``).
+        Builds the pure range ``[_start_year, current_year]`` without any
+        network access.  Current-year availability is probed only when a
+        download actually needs a default year.
 
         Returns
         -------
@@ -103,10 +105,7 @@ class DownloaderPlugin(ABC):
         if not hasattr(self, "_supported_years_cache"):
             if self._start_year > 0:
                 current_year = datetime.now().year
-                years = list(range(self._start_year, current_year))
-                if self._check_current_year_available(current_year):
-                    years.append(current_year)
-                self._supported_years_cache: List[int] = years
+                self._supported_years_cache: List[int] = list(range(self._start_year, current_year + 1))
             else:
                 self._supported_years_cache = []
         return self._supported_years_cache
@@ -119,8 +118,8 @@ class DownloaderPlugin(ABC):
         """
         Get the data URL for a specific year.
 
-        Override in subclasses to enable automatic current-year availability
-        checking in :attr:`supported_years`.
+        Override in subclasses to enable current-year availability checking
+        when resolving a default download year.
 
         Parameters
         ----------
@@ -208,8 +207,14 @@ class DownloaderPlugin(ABC):
 
         if output_path and not force_download:
             cached = self._load_papers_json(output_path, self._cache_source_label)
-            if cached is not None:
+            if cached is not None and self._cache_matches_requested_year(cached, year):
                 return self._handle_cached(cached, year, output_path, options)
+            if cached is not None:
+                logger.info(
+                    "%s cache does not match requested year %d; downloading fresh data",
+                    self.plugin_name,
+                    year,
+                )
 
         papers = self._download_uncached(year, output_path, options)
         self._save_papers_json(papers, output_path, self._save_label)
@@ -269,7 +274,18 @@ class DownloaderPlugin(ABC):
         """
         if year is not None:
             return year
-        return max(self.supported_years, default=self._start_year)
+        years = self.supported_years
+        current_year = datetime.now().year
+        if current_year in years and not self._check_current_year_available(current_year):
+            older = [year for year in years if year < current_year]
+            if older:
+                return max(older)
+        return max(years, default=self._start_year)
+
+    @staticmethod
+    def _cache_matches_requested_year(cached: List[LightweightPaper], year: int) -> bool:
+        """Return whether every cached paper belongs to *year*."""
+        return bool(cached) and all(paper.year == year for paper in cached)
 
     def _handle_cached(
         self,
@@ -352,7 +368,7 @@ class DownloaderPlugin(ABC):
         """
         if year is not None and self.supported_years and year not in self.supported_years:
             raise ValueError(
-                f"Year {year} not supported by {self.plugin_name}. " f"Supported years: {self.supported_years}"
+                f"Year {year} not supported by {self.plugin_name}. Supported years: {self.supported_years}"
             )
 
     def _save_papers_json(self, papers: List["LightweightPaper"], output_path: Optional[str], label: str) -> None:
@@ -372,11 +388,7 @@ class DownloaderPlugin(ABC):
             Conference/source name used only in log messages.
         """
         if output_path and papers:
-            output_file = Path(output_path)
-            output_file.parent.mkdir(parents=True, exist_ok=True)
-            papers_json = [paper.model_dump() for paper in papers]
-            with open(output_file, "w", encoding="utf-8") as f:
-                json.dump(papers_json, f, indent=2, ensure_ascii=False)
+            save_json(Path(output_path), [paper.model_dump() for paper in papers])
             logger.info("Saved %d %s papers to %s", len(papers), label, output_path)
         elif output_path:
             logger.info("No papers found; skipping save of %s", output_path)

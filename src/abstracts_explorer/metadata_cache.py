@@ -34,10 +34,11 @@ class MetadataCache:
     False
     """
 
-    def __init__(self, clock: Callable[[], float] = time.monotonic):
+    def __init__(self, clock: Callable[[], float] = time.monotonic, max_entries: int = 1000):
         self._entries: dict[Hashable, Tuple[float, Any]] = {}
         self._lock = threading.RLock()
         self._clock = clock
+        self._max_entries = max(1, max_entries)
 
     def get(self, key: Hashable, ttl_seconds: int) -> Optional[Any]:
         """
@@ -89,7 +90,15 @@ class MetadataCache:
             return
 
         with self._lock:
-            self._entries[key] = (self._clock() + ttl_seconds, copy.deepcopy(value))
+            now = self._clock()
+            if len(self._entries) >= self._max_entries:
+                expired = [entry_key for entry_key, (expires_at, _) in self._entries.items() if now >= expires_at]
+                for entry_key in expired:
+                    del self._entries[entry_key]
+            while len(self._entries) >= self._max_entries:
+                oldest_key = next(iter(self._entries))
+                del self._entries[oldest_key]
+            self._entries[key] = (now + ttl_seconds, copy.deepcopy(value))
 
     def invalidate_database(self, database_url: str) -> None:
         """

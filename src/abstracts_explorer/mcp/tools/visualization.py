@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 def get_cluster_visualization(
     conferences: Optional[List[str]] = None,
     years: Optional[List[int]] = None,
-    output_path: Optional[str] = None,
     collection_name: Optional[str] = None,
     **kwargs,
 ) -> str:
@@ -40,8 +39,6 @@ def get_cluster_visualization(
         Required – returns an error when not provided.
     years : list of int, optional
         Filter by publication years.
-    output_path : str, optional
-        Path to save visualization JSON file (optional).
     collection_name : str, optional
         Name of ChromaDB collection.
     **kwargs
@@ -81,7 +78,7 @@ def get_cluster_visualization(
                     vis_years = sorted(vis_years + [extracted_year])
 
             with resources._get_clustering_resources(collection_name) as (_, db):
-                cached = cache._lookup_clustering_cache(db, config, parsed_conf, vis_years)
+                cached = cache._lookup_clustering_cache(db, config, parsed_conf, vis_years, collection_name)
 
             if not cached:
                 return json.dumps(
@@ -108,24 +105,11 @@ def get_cluster_visualization(
                     "statistics", {}
                 ).get("total_papers", 0)
 
-        # Export if requested
-        if output_path:
-            import pathlib
-
-            try:
-                export_data = {"points": all_points, "statistics": combined_stats}
-                pathlib.Path(output_path).write_text(json.dumps(export_data, indent=2))
-            except OSError as exc:
-                logger.warning(f"Failed to write visualization to {output_path}: {exc}")
-                output_path = None
-
         result = {
             "n_dimensions": 2,
             "n_points": len(all_points),
             "statistics": combined_stats,
-            "points": all_points[:1000],  # Limit for MCP response size
-            "visualization_saved": output_path is not None,
-            "output_path": output_path if output_path else None,
+            "points": all_points[:1000],
         }
 
         return json.dumps(result, indent=2)

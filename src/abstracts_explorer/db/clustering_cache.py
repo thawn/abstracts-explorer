@@ -12,12 +12,10 @@ from sqlalchemy import select, delete, update, func, and_
 
 # Import SQLAlchemy models
 from abstracts_explorer.db_models import (
-    Paper,
     ClusteringCache,
     HierarchicalLabelCache,
 )
 
-from abstracts_explorer.db.errors import DatabaseError
 from abstracts_explorer.db.session import SessionMixin
 
 logger = logging.getLogger(__name__)
@@ -36,6 +34,7 @@ class ClusteringCacheMixin(SessionMixin):
         n_components: Optional[int] = None,
         conference: Optional[str] = None,
         year: Optional[int] = None,
+        collection_name: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Get cached clustering results matching the parameters.
@@ -69,6 +68,10 @@ class ClusteringCacheMixin(SessionMixin):
         year : int, optional
             Conference year to filter by.  ``None`` matches entries that
             have no year set.
+        collection_name : str, optional
+            ChromaDB collection the cached results were computed from.  When
+            provided, the cache key includes the collection name so that
+            different collections sharing one SQL database cannot collide.
 
         Returns
         -------
@@ -80,6 +83,10 @@ class ClusteringCacheMixin(SessionMixin):
         DatabaseError
             If query fails.
         """
+        if collection_name is not None:
+            clustering_params = dict(clustering_params or {})
+            clustering_params["__collection__"] = collection_name
+
         try:
             # Build query conditions
             stmt = select(ClusteringCache).where(
@@ -142,7 +149,7 @@ class ClusteringCacheMixin(SessionMixin):
             return None
 
         except Exception as e:
-            raise DatabaseError(f"Failed to get clustering cache: {str(e)}") from e
+            raise self._db_error("Failed to get clustering cache", e)
 
     def save_clustering_cache(
         self,
@@ -155,6 +162,7 @@ class ClusteringCacheMixin(SessionMixin):
         clustering_params: Optional[Dict[str, Any]] = None,
         conference: Optional[str] = None,
         year: Optional[int] = None,
+        collection_name: Optional[str] = None,
     ) -> None:
         """
         Save clustering results to cache.
@@ -192,6 +200,10 @@ class ClusteringCacheMixin(SessionMixin):
         DatabaseError
             If save fails.
         """
+        if collection_name is not None:
+            clustering_params = dict(clustering_params or {})
+            clustering_params["__collection__"] = collection_name
+
         try:
             # Always try to fill n_clusters from the results statistics
             if n_clusters is None:
@@ -202,7 +214,7 @@ class ClusteringCacheMixin(SessionMixin):
 
             # Serialize results and params to JSON
             results_json = json.dumps(results)
-            params_json = json.dumps(clustering_params) if clustering_params else None
+            params_json = json.dumps(clustering_params) if clustering_params is not None else None
 
             # Create new cache entry
             cache_entry = ClusteringCache(
@@ -228,40 +240,6 @@ class ClusteringCacheMixin(SessionMixin):
 
         except Exception as e:
             raise self._db_error("Failed to save clustering cache", e)
-
-    def delete_papers_by_conference_year(self, conference: str, year: int) -> int:
-        """
-        Delete all papers for a specific conference and year combination.
-
-        Parameters
-        ----------
-        conference : str
-            Conference name (exact, as stored in the database).
-        year : int
-            Conference year.
-
-        Returns
-        -------
-        int
-            Number of papers deleted.
-
-        Raises
-        ------
-        DatabaseError
-            If deletion fails.
-        """
-        try:
-            result = self.session.execute(
-                delete(Paper).where(and_(Paper.conference == conference, Paper.year == year))
-            )
-            self.session.commit()
-            self._invalidate_metadata_cache()
-            count = getattr(result, "rowcount", 0) or 0
-            logger.info(f"Deleted {count} papers for {conference}/{year}")
-            return count
-
-        except Exception as e:
-            raise self._db_error(f"Failed to delete papers for {conference}/{year}", e)
 
     def delete_clustering_cache_by_conference_year(self, conference: str, year: int) -> int:
         """
@@ -328,7 +306,7 @@ class ClusteringCacheMixin(SessionMixin):
             return result.scalar() or 0
 
         except Exception as e:
-            raise DatabaseError(f"Failed to count clustering cache for {conference}/{year}: {str(e)}") from e
+            raise self._db_error(f"Failed to count clustering cache for {conference}/{year}", e)
 
     def clear_clustering_cache(self, embedding_model: Optional[str] = None) -> int:
         """
@@ -434,6 +412,7 @@ class ClusteringCacheMixin(SessionMixin):
         self,
         embedding_model: str,
         linkage: str = "ward",
+        scope: Optional[str] = None,
     ) -> Optional[Dict[int, str]]:
         """
         Get cached hierarchical labels for agglomerative clustering.
@@ -448,6 +427,9 @@ class ClusteringCacheMixin(SessionMixin):
             Name of the embedding model.
         linkage : str, optional
             Agglomerative linkage method (default: ``"ward"``).
+        scope : str, optional
+            Dataset fingerprint.  When provided, only labels saved for the
+            same dataset are returned; legacy unscoped entries are ignored.
 
         Returns
         -------
@@ -470,23 +452,27 @@ class ClusteringCacheMixin(SessionMixin):
                     )
                 )
                 .order_by(HierarchicalLabelCache.created_at.desc())
-                .limit(1)
             )
-            result = self.session.execute(stmt).scalars().first()
-            if result is None:
-                return None
-            raw = json.loads(result.labels_json)
-            # JSON keys are always strings – convert back to int
-            return {int(k): v for k, v in raw.items()}
+            for result in self.session.execute(stmt).scalars():
+                raw = json.loads(result.labels_json)
+                if isinstance(raw, dict) and "_labels" in raw:
+                    if scope is not None and raw.get("_scope") != scope:
+                        continue
+                    raw = raw["_labels"]
+                elif scope is not None:
+                    continue
+                return {int(k): v for k, v in raw.items()}
+            return None
 
         except Exception as e:
-            raise DatabaseError(f"Failed to get hierarchical label cache: {str(e)}") from e
+            raise self._db_error("Failed to get hierarchical label cache", e)
 
     def save_hierarchical_label_cache(
         self,
         embedding_model: str,
         labels: Dict[int, str],
         linkage: str = "ward",
+        scope: Optional[str] = None,
     ) -> None:
         """
         Save hierarchical cluster labels to cache.
@@ -499,6 +485,9 @@ class ClusteringCacheMixin(SessionMixin):
             Mapping of ``{node_id: label}`` to store.
         linkage : str, optional
             Agglomerative linkage method (default: ``"ward"``).
+        scope : str, optional
+            Dataset fingerprint stored with the labels so entries are not
+            reused across different datasets.
 
         Raises
         ------
@@ -506,7 +495,11 @@ class ClusteringCacheMixin(SessionMixin):
             If save fails.
         """
         try:
-            labels_json = json.dumps({str(k): v for k, v in labels.items()})
+            encoded_labels = {str(k): v for k, v in labels.items()}
+            if scope is None:
+                labels_json = json.dumps(encoded_labels)
+            else:
+                labels_json = json.dumps({"_scope": scope, "_labels": encoded_labels})
             entry = HierarchicalLabelCache(
                 embedding_model=embedding_model,
                 linkage=linkage,

@@ -61,6 +61,7 @@ class CHIDownloaderPlugin(DownloaderPlugin):
     """
 
     plugin_name = "chi"
+    requires_manual_input = True
     plugin_description = "CHI (ACM CHI) conference data loaded from the SIGCHI program JSON"
     _start_year = 2018
     conference_name = "CHI"
@@ -142,7 +143,7 @@ class CHIDownloaderPlugin(DownloaderPlugin):
         # Return cached lightweight data when it already exists
         if output_path and not force_download:
             cached = self._load_papers_json(output_path, "CHI cache")
-            if cached is not None:
+            if cached is not None and year is not None and self._cache_matches_requested_year(cached, year):
                 return cached
 
         # Require the CHI program JSON for a fresh parse

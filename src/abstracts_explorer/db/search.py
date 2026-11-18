@@ -182,7 +182,7 @@ class SearchMixin(PapersMixin):
         except DatabaseError:
             raise
         except Exception as e:
-            raise DatabaseError(f"Search failed: {str(e)}") from e
+            raise self._db_error("Search failed", e)
 
     def search_papers_keyword(
         self,

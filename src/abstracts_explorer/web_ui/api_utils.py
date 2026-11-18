@@ -2,9 +2,10 @@
 
 import logging
 from functools import wraps
-from typing import Any, Callable, Optional, ParamSpec, Tuple, TypeVar, overload
+from typing import Any, Callable, Dict, List, Optional, ParamSpec, Tuple, TypeVar, overload
 
 from flask import Request, jsonify, request
+from werkzeug.exceptions import BadRequest, UnsupportedMediaType
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,12 @@ def api_error_handler(func: Optional[Callable[P, R]] = None, *, error_message: O
                 if exc.status_code >= 500:
                     logger.error("API error in %s: %s", request.endpoint, exc.message, exc_info=True)
                 return jsonify({"error": exc.message}), exc.status_code
+            except BadRequest as exc:
+                logger.warning("Invalid request body in %s: %s", request.endpoint, exc)
+                return jsonify({"error": "Invalid JSON request body"}), 400
+            except UnsupportedMediaType as exc:
+                logger.warning("Unsupported media type in %s: %s", request.endpoint, exc)
+                return jsonify({"error": "Content-Type must be application/json"}), 415
             except Exception as exc:
                 logger.error("Error in %s endpoint: %s", request.endpoint, exc, exc_info=True)
                 message = error_message if error_message is not None else str(exc)
@@ -78,6 +85,48 @@ def api_error_handler(func: Optional[Callable[P, R]] = None, *, error_message: O
     if func is None:
         return decorator
     return decorator(func)
+
+
+def get_json_object() -> Dict[str, Any]:
+    """Return the request JSON body as a dict or raise a 400 ``ApiError``."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        raise ApiError("Request body must be a JSON object", 400)
+    return data
+
+
+def coerce_limit(value: Any, default: int = 10, minimum: int = 1, maximum: int = 1000) -> int:
+    """Coerce a client-supplied result limit into a safe integer range."""
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ApiError(f"Invalid limit: {value}", 400) from exc
+    if parsed < minimum or parsed > maximum:
+        raise ApiError(f"limit must be between {minimum} and {maximum}", 400)
+    return parsed
+
+
+def coerce_int_list(value: Any, name: str) -> List[int]:
+    """Coerce a client-supplied value into a list of integers."""
+    if value in (None, ""):
+        return []
+    if not isinstance(value, list):
+        raise ApiError(f"{name} must be a list", 400)
+    try:
+        return [int(item) for item in value]
+    except (TypeError, ValueError) as exc:
+        raise ApiError(f"{name} must contain integers", 400) from exc
+
+
+def coerce_str_list(value: Any, name: str) -> List[str]:
+    """Coerce a client-supplied value into a list of strings."""
+    if value in (None, ""):
+        return []
+    if not isinstance(value, list):
+        raise ApiError(f"{name} must be a list", 400)
+    return [str(item) for item in value]
 
 
 def get_int_param(request: Request, name: str, default: Optional[int] = None) -> Optional[int]:

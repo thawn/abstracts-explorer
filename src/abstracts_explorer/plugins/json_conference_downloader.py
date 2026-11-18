@@ -89,7 +89,7 @@ class JSONConferenceDownloaderPlugin(HTTPDownloaderPlugin):
             return
 
         try:
-            response = self._request(url, timeout, verify_ssl, max_attempts=1)
+            response = self._request(url, timeout, verify_ssl)
         except RuntimeError as exc:
             logger.warning("Failed to download companion abstracts from %s: %s", url, exc)
             return
@@ -213,7 +213,7 @@ class JSONConferenceDownloaderPlugin(HTTPDownloaderPlugin):
                     "type": "int",
                     "required": True,
                     "description": "Conference year to download",
-                    "default": self._resolve_year(None),
+                    "default": max(self.supported_years, default=self._start_year),
                 },
                 "output_path": {"type": "str", "required": False, "description": "Path to save the downloaded data"},
                 "force_download": {

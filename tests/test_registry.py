@@ -568,6 +568,24 @@ class TestDatabaseExportImport:
         finally:
             db.close()
 
+    def test_import_rejects_empty_source_without_deleting_local_data(self, tmp_path):
+        """An empty export must not wipe the destination conference/year."""
+        target_path = tmp_path / "target.db"
+        db = _populate_test_db(target_path)
+        before = db.get_paper_count()
+        try:
+            empty_source_path = tmp_path / "empty-source.db"
+            other_db = _populate_test_db(tmp_path / "other-source.db")
+            assert other_db.export_papers_to_sqlite(empty_source_path, "neurips", 1999) == 0
+            other_db.close()
+
+            with pytest.raises(DatabaseError, match="contains no papers"):
+                db.import_papers_from_sqlite(empty_source_path, "neurips", 2024)
+
+            assert db.get_paper_count() == before
+        finally:
+            db.close()
+
     def test_import_auto_connects(self, tmp_path):
         """Import connects lazily before reporting source errors."""
         set_test_db(tmp_path / "auto.db")

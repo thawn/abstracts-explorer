@@ -50,6 +50,16 @@ def generate_folder_structure_export(
     """
     # Create in-memory zip file
     zip_buffer = BytesIO()
+    used_names = {"readme", "all_papers"}
+
+    def unique_name(base: str) -> str:
+        candidate = base
+        counter = 2
+        while candidate.lower() in used_names:
+            candidate = f"{base}_{counter}"
+            counter += 1
+        used_names.add(candidate.lower())
+        return f"{candidate}.md"
 
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
         # Generate main README.md with conference information
@@ -82,7 +92,7 @@ def generate_folder_structure_export(
                 )
 
                 # Write to file named by priority
-                zipf.writestr(f"{priority_name}.md", priority_markdown)
+                zipf.writestr(unique_name(priority_name), priority_markdown)
 
         else:  # sort_order == "search-rating-poster"
             # Search term is first priority - split by search term
@@ -106,7 +116,7 @@ def generate_folder_structure_export(
                 term_markdown = generate_search_term_markdown(search_term, term_papers)
 
                 # Write to file named by search term
-                zipf.writestr(f"{safe_name}.md", term_markdown)
+                zipf.writestr(unique_name(safe_name), term_markdown)
 
     zip_buffer.seek(0)
     return zip_buffer

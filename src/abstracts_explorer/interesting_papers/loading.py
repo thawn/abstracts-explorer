@@ -70,7 +70,12 @@ def normalize_priorities(priorities: Optional[Dict[str, Any]]) -> Dict[str, Dict
 
 def _ordered_uids(paper_ids: Optional[Sequence[str]], priorities: Dict[str, Dict[str, Any]]) -> List[str]:
     """Return a de-duplicated, order-preserving UID list."""
-    raw_ids = list(paper_ids) if paper_ids else list(priorities.keys())
+    if isinstance(paper_ids, str):
+        raw_ids = [paper_ids]
+    elif paper_ids:
+        raw_ids = list(paper_ids)
+    else:
+        raw_ids = list(priorities.keys())
     seen: set[str] = set()
     ordered: List[str] = []
     for raw_uid in raw_ids:

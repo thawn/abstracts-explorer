@@ -75,6 +75,13 @@ def registry_upload_command(args: argparse.Namespace) -> int:
         f"Tag: {args.tag}" if args.tag else None,
     )
 
+    if conference == "all" and (args.year is not None or args.tag):
+        print(
+            "❌ --year and --tag cannot be combined with --conference all.",
+            file=sys.stderr,
+        )
+        return 1
+
     try:
         client = RegistryClient(repository=repository, token=token)
 
@@ -197,6 +204,13 @@ def registry_download_command(args: argparse.Namespace) -> int:
         f"Year: {year_display}",
         f"Tag: {args.tag}" if args.tag else None,
     )
+
+    if conference == "all" and (args.year is not None or args.tag):
+        print(
+            "❌ --year and --tag cannot be combined with --conference all.",
+            file=sys.stderr,
+        )
+        return 1
 
     if not args.yes and _registry_download_has_existing_data(conference, args.year):
         scope = f"{conference}/{year_display}"

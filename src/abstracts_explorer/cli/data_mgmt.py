@@ -70,7 +70,7 @@ def delete_data_command(args: argparse.Namespace) -> int:
 
     _print_header(
         "Delete Conference/Year Data",
-        f"Database: {config.database_url}",
+        f"Database: {config.masked_database_url}",
         f"Embedding DB: {config.embedding_db}",
         f"Conference: {conference}",
         f"Year: {year}",

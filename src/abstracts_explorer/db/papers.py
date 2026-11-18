@@ -63,6 +63,30 @@ class PapersMixin(WhereFilterMixin):
         uid_source = f"{title}:{original_id}:{conference}:{year}"
         return hashlib.sha256(uid_source.encode("utf-8")).hexdigest()[:16]
 
+    def _build_paper_model(self, paper: LightweightPaper) -> tuple[str, Paper]:
+        """Build a ``Paper`` ORM object and its deterministic UID."""
+        paper_id = paper.original_id if paper.original_id else None
+        uid = self.compute_uid(paper.title, paper_id, paper.conference, paper.year)
+        return uid, Paper(
+            uid=uid,
+            original_id=str(paper.original_id) if paper.original_id else None,
+            title=paper.title,
+            authors=serialize_authors_to_string(paper.authors),
+            abstract=paper.abstract,
+            session=paper.session,
+            poster_position=paper.poster_position,
+            paper_pdf_url=paper.paper_pdf_url,
+            poster_image_url=paper.poster_image_url,
+            url=paper.url,
+            room_name=paper.room_name,
+            keywords=serialize_keywords_to_string(paper.keywords) if paper.keywords else "",
+            starttime=paper.starttime,
+            endtime=paper.endtime,
+            award=paper.award,
+            year=paper.year,
+            conference=paper.conference,
+        )
+
     def add_paper(self, paper: LightweightPaper) -> Optional[str]:
         """
         Add a single paper to the database.
@@ -101,50 +125,12 @@ class PapersMixin(WhereFilterMixin):
         >>> print(f"Inserted paper with UID: {paper_uid}")
         """
         try:
-            # Extract validated fields from LightweightPaper
-            paper_id = paper.original_id if paper.original_id else None
-            title = paper.title
-            abstract = paper.abstract
-
-            # Handle authors - store as semicolon-separated names
-            authors_str = serialize_authors_to_string(paper.authors)
-
-            # Generate UID as hash from title + conference + year
-            uid = self.compute_uid(title, paper_id, paper.conference, paper.year)
-
-            # Check if paper already exists (by UID)
-            existing = self.session.execute(select(Paper).where(Paper.uid == uid)).scalar_one_or_none()
+            uid, new_paper = self._build_paper_model(paper)
+            existing = self.session.execute(select(Paper.uid).where(Paper.uid == uid)).scalar_one_or_none()
 
             if existing:
-                logger.debug(f"Skipping duplicate paper: {title} (uid: {uid})")
+                logger.debug(f"Skipping duplicate paper: {paper.title} (uid: {uid})")
                 return None
-
-            # Handle keywords (could be list or None)
-            keywords_str = serialize_keywords_to_string(paper.keywords) if paper.keywords else ""
-
-            # Use paper's original_id if available
-            original_id = str(paper.original_id) if paper.original_id else None
-
-            # Create Paper ORM object
-            new_paper = Paper(
-                uid=uid,
-                original_id=original_id,
-                title=title,
-                authors=authors_str,
-                abstract=abstract,
-                session=paper.session,
-                poster_position=paper.poster_position,
-                paper_pdf_url=paper.paper_pdf_url,
-                poster_image_url=paper.poster_image_url,
-                url=paper.url,
-                room_name=paper.room_name,
-                keywords=keywords_str,
-                starttime=paper.starttime,
-                endtime=paper.endtime,
-                award=paper.award,
-                year=paper.year,
-                conference=paper.conference,
-            )
 
             self.session.add(new_paper)
             self.session.commit()
@@ -203,22 +189,39 @@ class PapersMixin(WhereFilterMixin):
         ...     count = db.add_papers(papers)
         >>> print(f"Inserted {count} papers")
         """
-        inserted_count = 0
-        skipped_count = 0
+        if not papers:
+            return 0
 
-        for paper in papers:
-            try:
-                result = self.add_paper(paper)
-                if result is not None:
-                    inserted_count += 1
-            except DatabaseError as e:
-                skipped_count += 1
-                logger.warning(f"Skipping paper '{paper.title}': {e}")
+        try:
+            prepared: List[tuple[str, Paper]] = []
+            seen: set[str] = set()
+            for paper in papers:
+                uid, model = self._build_paper_model(paper)
+                if uid in seen:
+                    logger.debug(f"Skipping duplicate paper in batch: {paper.title} (uid: {uid})")
+                    continue
+                seen.add(uid)
+                prepared.append((uid, model))
 
-        if skipped_count:
-            logger.warning(f"Skipped {skipped_count} paper(s) due to import errors")
-        logger.debug(f"Successfully inserted {inserted_count} of {len(papers)} papers")
-        return inserted_count
+            existing_uids: set[str] = set()
+            uids = [uid for uid, _ in prepared]
+            for start in range(0, len(uids), 500):
+                batch = uids[start : start + 500]
+                existing_uids.update(
+                    self.session.execute(select(Paper.uid).where(Paper.uid.in_(batch))).scalars().all()
+                )
+
+            to_insert = [model for uid, model in prepared if uid not in existing_uids]
+            self.session.add_all(to_insert)
+            self.session.commit()
+            if to_insert:
+                self._invalidate_metadata_cache()
+
+            logger.debug(f"Successfully inserted {len(to_insert)} of {len(papers)} papers")
+            return len(to_insert)
+
+        except Exception as e:
+            raise self._db_error("Failed to add papers", e)
 
     def get_paper(
         self,
@@ -261,7 +264,7 @@ class PapersMixin(WhereFilterMixin):
         except DatabaseError:
             raise
         except Exception as e:
-            raise DatabaseError(f"Failed to retrieve papers: {str(e)}") from e
+            raise self._db_error("Failed to retrieve papers", e)
 
     def get_paper_count(self, where_filters: Optional[Dict[str, Any]] = None) -> int:
         """
@@ -292,7 +295,7 @@ class PapersMixin(WhereFilterMixin):
         except DatabaseError:
             raise
         except Exception as e:
-            raise DatabaseError(f"Failed to count papers: {str(e)}") from e
+            raise self._db_error("Failed to count papers", e)
 
     def resolve_paper_uids(
         self,
@@ -378,7 +381,7 @@ class PapersMixin(WhereFilterMixin):
         except DatabaseError:
             raise
         except Exception as e:
-            raise DatabaseError(f"Failed to retrieve paper UIDs: {str(e)}") from e
+            raise self._db_error("Failed to retrieve paper UIDs", e)
 
     def get_paper_summaries_by_uids(self, uids: List[str]) -> List[Dict[str, Any]]:
         """
@@ -428,7 +431,7 @@ class PapersMixin(WhereFilterMixin):
         except DatabaseError:
             raise
         except Exception as e:
-            raise DatabaseError(f"Failed to retrieve paper summaries: {str(e)}") from e
+            raise self._db_error("Failed to retrieve paper summaries", e)
 
     def get_paper_by_uid(self, uid: str) -> Optional[Dict[str, Any]]:
         """
@@ -589,10 +592,13 @@ class PapersMixin(WhereFilterMixin):
             return 0
 
         try:
-            result = self.session.execute(delete(Paper).where(Paper.uid.in_(uids)))
+            count = 0
+            for start in range(0, len(uids), 500):
+                batch = uids[start : start + 500]
+                result = self.session.execute(delete(Paper).where(Paper.uid.in_(batch)))
+                count += getattr(result, "rowcount", 0) or 0
             self.session.commit()
             self._invalidate_metadata_cache()
-            count = getattr(result, "rowcount", 0) or 0
             logger.info("Deleted %d papers by UID", count)
             return count
         except Exception as e:

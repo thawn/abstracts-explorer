@@ -62,7 +62,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     year = getattr(args, "year", None)
     _print_header(
         "Embeddings Generator",
-        f"Database: {config.database_url}",
+        f"Database: {config.masked_database_url}",
         f"Embedding DB: {config.embedding_db}",
         f"Collection: {args.collection}",
         f"Model: {args.model}",

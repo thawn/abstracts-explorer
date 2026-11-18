@@ -11,6 +11,8 @@ import { showError, renderEmptyState } from './utils/ui-utils.js';
 import { setCurrentSearchTerm } from './state.js';
 import { formatPaperCard } from './paper-card.js';
 
+let latestSearchRequest = 0;
+
 /**
  * Search papers using the search API
  * @async
@@ -33,6 +35,8 @@ export async function searchPapers() {
         showError('Please enter a search query');
         return;
     }
+
+    const requestId = ++latestSearchRequest;
 
     // Store the current search term for rating papers
     setCurrentSearchTerm(query);
@@ -80,15 +84,20 @@ export async function searchPapers() {
             body: JSON.stringify(requestBody)
         });
 
+        if (requestId !== latestSearchRequest) return;
+
         const data = await response.json();
 
-        if (data.error) {
-            showError(data.error);
+        if (requestId !== latestSearchRequest) return;
+
+        if (!response.ok || data.error) {
+            showError(data.error || `Search failed (HTTP ${response.status})`);
             return;
         }
 
         displaySearchResults(data);
     } catch (error) {
+        if (requestId !== latestSearchRequest) return;
         console.error('Search error:', error);
         showError('An error occurred while searching. Please try again.');
     }

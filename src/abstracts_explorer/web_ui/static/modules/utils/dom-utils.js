@@ -11,8 +11,34 @@
  */
 export function escapeHtml(text) {
     const div = document.createElement('div');
-    div.textContent = text;
+    div.textContent = text == null ? '' : String(text);
     return div.innerHTML;
+}
+
+/**
+ * Escape a value for use inside a quoted HTML attribute or inline handler.
+ * Unlike escapeHtml, this also escapes quotes so the value cannot break out
+ * of the attribute.
+ * @param {string} text - Text to escape
+ * @returns {string} Escaped attribute-safe string
+ */
+export function escapeAttr(text) {
+    return escapeHtml(text)
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/`/g, '&#96;');
+}
+
+/**
+ * Return a safe URL for an href, or '' when the scheme is not allowed.
+ * @param {string} url - Candidate URL
+ * @returns {string} Safe absolute/relative URL or ''
+ */
+export function sanitizeUrl(url) {
+    const value = String(url == null ? '' : url).trim();
+    if (!value) return '';
+    if (/^(https?:\/\/|\/|#)/i.test(value)) return value;
+    return '';
 }
 
 /**

@@ -6,7 +6,9 @@ instances live here so routes and tests use one set of helpers.
 """
 
 import logging
+import threading
 import uuid
+from collections import OrderedDict
 from typing import Any, Dict, List, Optional
 
 from flask import g, session
@@ -20,8 +22,11 @@ logger = logging.getLogger(__name__)
 
 # Initialize components (lazy loading)
 embeddings_manager = None
-_rag_chat_cache: Dict[str, RAGChat] = {}
+_rag_chat_cache: "OrderedDict[str, RAGChat]" = OrderedDict()
 _RAG_CHAT_CACHE_MAX = 1024
+_RAG_CHAT_LOCK = threading.Lock()
+_SCHEMA_INIT_LOCK = threading.Lock()
+_INITIALIZED_DB_URLS: set[str] = set()
 
 
 def get_database():
@@ -35,7 +40,10 @@ def get_database():
     """
     if "db" not in g:
         g.db = DatabaseManager()
-        g.db.create_tables()
+        with _SCHEMA_INIT_LOCK:
+            if g.db.database_url not in _INITIALIZED_DB_URLS:
+                g.db.create_tables()
+                _INITIALIZED_DB_URLS.add(g.db.database_url)
     return g.db
 
 
@@ -89,21 +97,28 @@ def get_rag_chat():
     database = get_database()
     session_id = _get_session_id()
 
-    if session_id not in _rag_chat_cache:
-        if len(_rag_chat_cache) >= _RAG_CHAT_CACHE_MAX:
-            oldest_key = next(iter(_rag_chat_cache))
-            del _rag_chat_cache[oldest_key]
+    with _RAG_CHAT_LOCK:
+        if session_id in _rag_chat_cache:
+            _rag_chat_cache.move_to_end(session_id)
+            return _rag_chat_cache[session_id]
+
+        while len(_rag_chat_cache) >= _RAG_CHAT_CACHE_MAX:
+            _evicted_id, evicted = _rag_chat_cache.popitem(last=False)
+            try:
+                evicted.close()
+            except Exception as exc:
+                logger.debug("Failed to close evicted RAG chat %s: %s", _evicted_id, exc)
 
         config = get_config()
         em = get_embeddings_manager()
-        _rag_chat_cache[session_id] = RAGChat(
+        chat = RAGChat(
             embeddings_manager=em,
             database=database,
             backend_url=config.llm_backend_url,
             model=config.chat_model,
         )
-
-    return _rag_chat_cache[session_id]
+        _rag_chat_cache[session_id] = chat
+        return chat
 
 
 def _reset_rag_chat_local():
@@ -116,10 +131,19 @@ def _reset_rag_chat_local():
     """
     try:
         session_id = _get_session_id()
-        if session_id in _rag_chat_cache:
-            del _rag_chat_cache[session_id]
+        with _RAG_CHAT_LOCK:
+            chat = _rag_chat_cache.pop(session_id, None)
+        if chat is not None:
+            chat.close()
     except (RuntimeError, KeyError):
-        _rag_chat_cache.clear()
+        with _RAG_CHAT_LOCK:
+            chats = list(_rag_chat_cache.values())
+            _rag_chat_cache.clear()
+        for chat in chats:
+            try:
+                chat.close()
+            except Exception as exc:
+                logger.debug("Failed to close RAG chat: %s", exc)
 
 
 def teardown_db(exception) -> None:
@@ -140,7 +164,7 @@ _LLM_BACKENDS: List[Dict[str, Any]] = [
     },
     {
         "url_fragments": ["chat.fz-rossendorf.de"],
-        "name": "chat.fz-rossendorf.de",
+        "name": "HZDR Chat",
         "homepage": "https://chat.fz-rossendorf.de",
         "logo": None,
     },

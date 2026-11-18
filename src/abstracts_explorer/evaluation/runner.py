@@ -146,8 +146,29 @@ class RunnerMixin:
                 actual_tool = None
                 error_msg = None
 
+                conferences = None
+                years = None
+                source_info = pair.get("source_info")
+                if source_info:
+                    try:
+                        parsed_source = json.loads(source_info) if isinstance(source_info, str) else source_info
+                        tool_args = parsed_source.get("tool_args", {}) if isinstance(parsed_source, dict) else {}
+                        if isinstance(tool_args, dict):
+                            raw_conferences = tool_args.get("conferences") or tool_args.get("conference")
+                            if isinstance(raw_conferences, str):
+                                conferences = [raw_conferences]
+                            elif isinstance(raw_conferences, list):
+                                conferences = [str(item) for item in raw_conferences]
+                            raw_years = tool_args.get("years") or tool_args.get("year")
+                            if isinstance(raw_years, int):
+                                years = [raw_years]
+                            elif isinstance(raw_years, list):
+                                years = [int(item) for item in raw_years if str(item).isdigit()]
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        logger.debug("Could not parse source_info context for pair %s", qa_pair_id)
+
                 try:
-                    result = rag.query(query_text)
+                    result = rag.query(query_text, conferences=conferences, years=years)
                     actual_answer = (result.get("response") or "").strip()
                     tools_used = result.get("metadata", {}).get("tools_executed", [])
                     actual_tool = tools_used[0] if tools_used else None
@@ -160,7 +181,7 @@ class RunnerMixin:
                 # Tool correctness
                 tool_correct = None
                 if expected_tool and actual_tool is not None:
-                    tool_correct = 1 if actual_tool == expected_tool else 0
+                    tool_correct = 1 if expected_tool in tools_used else 0
 
                 # LLM judge scoring
                 judge_result: Dict[str, Any] = {"score": None, "reasoning": ""}

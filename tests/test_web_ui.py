@@ -1687,8 +1687,8 @@ class TestWebUIRunServer:
                     call_args = mock_serve.call_args
                     assert call_args[1]["host"] == "0.0.0.0"
                     assert call_args[1]["port"] == 8080
-                    # Verify Flask debug flag was set
-                    assert app.debug
+                    # Debug mode is intentionally disabled on non-loopback binds
+                    assert not app.debug
 
     def test_run_server_database_not_found(self, capsys):
         """Test that run_server raises FileNotFoundError when database doesn't exist."""

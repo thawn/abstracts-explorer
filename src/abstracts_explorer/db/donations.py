@@ -66,30 +66,27 @@ class DonationsMixin(SessionMixin):
         if not paper_priorities:
             raise ValueError("No data provided")
 
+        validated: List[tuple[str, int, Optional[str]]] = []
+        for paper_uid, priority_data in paper_priorities.items():
+            if not isinstance(priority_data, dict):
+                raise ValueError("Invalid data format. Expected dict with priority and searchTerm")
+            validated.append(
+                (
+                    paper_uid,
+                    priority_data.get("priority", 0),
+                    priority_data.get("searchTerm", None),
+                )
+            )
+
         try:
-            donated_count = 0
-            for paper_uid, priority_data in paper_priorities.items():
-                # Validate data format
-                if not isinstance(priority_data, dict):
-                    raise ValueError("Invalid data format. Expected dict with priority and searchTerm")
+            for paper_uid, priority, search_term in validated:
+                self.session.add(ValidationData(paper_uid=paper_uid, priority=priority, search_term=search_term))
 
-                priority = priority_data.get("priority", 0)
-                search_term = priority_data.get("searchTerm", None)
-
-                # Create validation data entry
-                validation_entry = ValidationData(paper_uid=paper_uid, priority=priority, search_term=search_term)
-                self.session.add(validation_entry)
-                donated_count += 1
-
-            # Commit all changes
             self.session.commit()
 
-            logger.info(f"Successfully donated {donated_count} papers to validation data")
-            return donated_count
+            logger.info(f"Successfully donated {len(validated)} papers to validation data")
+            return len(validated)
 
-        except ValueError:
-            # Re-raise validation errors without rollback
-            raise
         except Exception as e:
             self._rollback()
             logger.error(f"Error donating validation data: {e}", exc_info=True)
@@ -211,7 +208,8 @@ class DonationsMixin(SessionMixin):
             for entry in self.session.execute(stmt).scalars().all():
                 try:
                     transcript = json.loads(entry.transcript)
-                except Exception:
+                except json.JSONDecodeError:
+                    logger.warning("Malformed transcript JSON in chat donation %s; returning empty list", entry.id)
                     transcript = []
                 results.append(
                     {
@@ -225,7 +223,7 @@ class DonationsMixin(SessionMixin):
 
         except Exception as e:
             logger.error(f"Error retrieving chat donations: {e}", exc_info=True)
-            raise DatabaseError(f"Failed to retrieve chat donations: {e}")
+            raise self._db_error("Failed to retrieve chat donations", e)
 
     def get_chat_donation_stats(self) -> Dict[str, Any]:
         """
@@ -269,7 +267,7 @@ class DonationsMixin(SessionMixin):
 
         except Exception as e:
             logger.error(f"Error retrieving chat donation stats: {e}", exc_info=True)
-            raise DatabaseError(f"Failed to retrieve chat donation stats: {e}")
+            raise self._db_error("Failed to retrieve chat donation stats", e)
 
     def get_validation_data(
         self,
@@ -327,7 +325,7 @@ class DonationsMixin(SessionMixin):
 
         except Exception as e:
             logger.error(f"Error retrieving validation data: {e}", exc_info=True)
-            raise DatabaseError(f"Failed to retrieve validation data: {e}")
+            raise self._db_error("Failed to retrieve validation data", e)
 
     def get_validation_data_stats(self) -> Dict[str, Any]:
         """
@@ -372,7 +370,7 @@ class DonationsMixin(SessionMixin):
 
         except Exception as e:
             logger.error(f"Error retrieving validation data stats: {e}", exc_info=True)
-            raise DatabaseError(f"Failed to retrieve validation data stats: {e}")
+            raise self._db_error("Failed to retrieve validation data stats", e)
 
     def delete_chat_donations(self, ids: Optional[List[int]] = None) -> int:
         """
@@ -401,11 +399,15 @@ class DonationsMixin(SessionMixin):
         ...     print(f"Deleted {deleted} donations")
         """
         try:
-            stmt = delete(ChatDonation)
-            if ids is not None:
-                stmt = stmt.where(ChatDonation.id.in_(ids))
-            result = self.session.execute(stmt)
-            count = getattr(result, "rowcount", 0) or 0
+            if ids is None:
+                result = self.session.execute(delete(ChatDonation))
+                count = getattr(result, "rowcount", 0) or 0
+            else:
+                count = 0
+                for start in range(0, len(ids), 500):
+                    batch = ids[start : start + 500]
+                    result = self.session.execute(delete(ChatDonation).where(ChatDonation.id.in_(batch)))
+                    count += getattr(result, "rowcount", 0) or 0
             self.session.commit()
             logger.info(f"Deleted {count} chat donation(s)")
             return count
@@ -442,11 +444,15 @@ class DonationsMixin(SessionMixin):
         ...     print(f"Deleted {deleted} entries")
         """
         try:
-            stmt = delete(ValidationData)
-            if ids is not None:
-                stmt = stmt.where(ValidationData.id.in_(ids))
-            result = self.session.execute(stmt)
-            count = getattr(result, "rowcount", 0) or 0
+            if ids is None:
+                result = self.session.execute(delete(ValidationData))
+                count = getattr(result, "rowcount", 0) or 0
+            else:
+                count = 0
+                for start in range(0, len(ids), 500):
+                    batch = ids[start : start + 500]
+                    result = self.session.execute(delete(ValidationData).where(ValidationData.id.in_(batch)))
+                    count += getattr(result, "rowcount", 0) or 0
             self.session.commit()
             logger.info(f"Deleted {count} validation data entry(ies)")
             return count

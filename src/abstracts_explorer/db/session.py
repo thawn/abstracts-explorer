@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import OperationalError, ProgrammingError, IntegrityError
 
 # Import Pydantic models from plugin framework
@@ -28,6 +28,14 @@ logger = logging.getLogger(__name__)
 _SCHEMA_READY_URLS: set[str] = set()
 _SCHEMA_LOCK = threading.Lock()
 _METADATA_CACHE = MetadataCache()
+
+
+def mask_database_url(url: str) -> str:
+    """Return *url* with any password replaced by ``***``."""
+    try:
+        return make_url(url).render_as_string(hide_password=True)
+    except Exception:
+        return url
 
 
 def reset_schema_cache() -> None:
@@ -63,6 +71,7 @@ class SessionMixin:
         self.SessionLocal: Optional[sessionmaker] = None
         self._session: Optional[Session] = None
         self._schema_ready = False
+        self._connect_lock = threading.RLock()
 
     @property
     def session(self) -> Session:
@@ -82,12 +91,13 @@ class SessionMixin:
         DatabaseError
             If connecting to the database or creating the schema fails.
         """
-        if self._session is None:
-            self.connect()
-        if not self._schema_ready:
-            self.create_tables()
-        assert self._session is not None
-        return self._session
+        with self._connect_lock:
+            if self._session is None:
+                self.connect()
+            if not self._schema_ready:
+                self.create_tables()
+            assert self._session is not None
+            return self._session
 
     def connect(self) -> None:
         """
@@ -101,67 +111,61 @@ class SessionMixin:
         DatabaseError
             If connection fails.
         """
-        if self._session is not None:
-            return
-        try:
-            # Create parent directories for SQLite
-            if self.database_url.startswith("sqlite:///"):
-                db_path_str = self.database_url.replace("sqlite:///", "")
-                db_path = Path(db_path_str)
-                db_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._connect_lock:
+            if self._session is not None:
+                return
+            try:
+                # Create parent directories for SQLite
+                if self.database_url.startswith("sqlite:///"):
+                    db_path_str = self.database_url.replace("sqlite:///", "")
+                    db_path = Path(db_path_str)
+                    db_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Create engine with appropriate settings
-            connect_args = {}
-            if self.database_url.startswith("sqlite"):
-                # SQLite-specific settings. ``timeout`` is the busy timeout used
-                # while another connection holds a write lock.
-                connect_args = {"check_same_thread": False, "timeout": 30}
+                # Create engine with appropriate settings
+                connect_args = {}
+                if self.database_url.startswith("sqlite"):
+                    # SQLite-specific settings. ``timeout`` is the busy timeout used
+                    # while another connection holds a write lock.
+                    connect_args = {"check_same_thread": False, "timeout": 30}
 
-            self.engine = create_engine(
-                self.database_url,
-                connect_args=connect_args,
-                echo=False,  # Set to True for SQL debugging
-            )
+                self.engine = create_engine(
+                    self.database_url,
+                    connect_args=connect_args,
+                    echo=False,  # Set to True for SQL debugging
+                )
 
-            if self.database_url.startswith("sqlite"):
+                if self.database_url.startswith("sqlite"):
 
-                @event.listens_for(self.engine, "connect")
-                def _set_sqlite_pragmas(dbapi_connection: Any, connection_record: Any) -> None:
-                    cursor = dbapi_connection.cursor()
-                    try:
-                        # WAL allows reads while a write transaction is active;
-                        # busy_timeout makes writers wait instead of failing
-                        # immediately with "database is locked".
-                        cursor.execute("PRAGMA journal_mode=WAL")
-                        cursor.execute("PRAGMA busy_timeout=30000")
-                    finally:
-                        cursor.close()
+                    @event.listens_for(self.engine, "connect")
+                    def _set_sqlite_pragmas(dbapi_connection: Any, connection_record: Any) -> None:
+                        cursor = dbapi_connection.cursor()
+                        try:
+                            # WAL allows reads while a write transaction is active;
+                            # busy_timeout makes writers wait instead of failing
+                            # immediately with "database is locked".
+                            cursor.execute("PRAGMA journal_mode=WAL")
+                            cursor.execute("PRAGMA busy_timeout=30000")
+                        finally:
+                            cursor.close()
 
-            # Create session factory
-            self.SessionLocal = sessionmaker(
-                autocommit=False,
-                autoflush=False,
-                bind=self.engine,
-            )
+                # Create session factory
+                self.SessionLocal = sessionmaker(
+                    autocommit=False,
+                    autoflush=False,
+                    bind=self.engine,
+                )
 
-            # Create a session
-            self._session = self.SessionLocal()
-            self._schema_ready = False
+                # Create a session
+                self._session = self.SessionLocal()
+                self._schema_ready = False
 
-            logger.debug(f"Connected to database: {self._mask_url(self.database_url)}")
-        except Exception as e:
-            raise DatabaseError(f"Failed to connect to database: {str(e)}") from e
+                logger.debug(f"Connected to database: {self._mask_url(self.database_url)}")
+            except Exception as e:
+                raise DatabaseError(f"Failed to connect to database: {str(e)}") from e
 
     def _mask_url(self, url: str) -> str:
         """Mask password in URL for logging."""
-        if "@" in url and ":" in url:
-            parts = url.split("@")
-            if len(parts) == 2:
-                before_at = parts[0]
-                if "://" in before_at:
-                    protocol_user = before_at.rsplit(":", 1)[0]
-                    return f"{protocol_user}:***@{parts[1]}"
-        return url
+        return mask_database_url(url)
 
     def _rollback(self) -> None:
         """Roll back the active session if one exists."""

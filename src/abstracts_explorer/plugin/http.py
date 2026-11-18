@@ -22,6 +22,7 @@ from abstracts_explorer.utils.time_utils import utcnow
 logger = logging.getLogger(__name__)
 
 _RETRYABLE_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504})
+_DEFAULT_MAX_RETRY_DELAY = 120.0
 
 
 def _http_status_code(exc: Exception) -> Optional[int]:
@@ -52,9 +53,10 @@ def _compute_retry_delay(
                 delay = (retry_at - utcnow()).total_seconds()
             except (TypeError, ValueError, OverflowError):
                 pass
-    if max_retry_delay is not None:
-        delay = min(delay, max_retry_delay)
-    return max(0.0, delay)
+    if delay <= 0 and retry_after:
+        delay = retry_base_delay * (2**attempt)
+    cap = max_retry_delay if max_retry_delay is not None else _DEFAULT_MAX_RETRY_DELAY
+    return max(0.0, min(delay, cap))
 
 
 def fetch_with_retries(
@@ -68,7 +70,7 @@ def fetch_with_retries(
     retryable_statuses: frozenset[int] = _RETRYABLE_HTTP_STATUSES,
     params: Optional[Dict[str, Any]] = None,
     retry_base_delay: float = 1.0,
-    max_retry_delay: Optional[float] = None,
+    max_retry_delay: Optional[float] = _DEFAULT_MAX_RETRY_DELAY,
     cooldown: Optional[RateLimitCooldown] = None,
     method: str = "GET",
     json_body: Optional[Any] = None,
@@ -102,7 +104,7 @@ def fetch_with_retries(
     retry_base_delay : float, optional
         Base delay for exponential backoff in seconds (default: 1).
     max_retry_delay : float, optional
-        Maximum retry delay in seconds (default: no cap).
+        Maximum retry delay in seconds (default: 120 seconds).
     cooldown : RateLimitCooldown, optional
         Shared cooldown applied after HTTP 429 responses.
     method : str, optional
@@ -172,7 +174,7 @@ class HTTPDownloaderPlugin(DownloaderPlugin):
     _SOURCE_LABEL = "data"
     _MAX_FETCH_ATTEMPTS = 3
     _RETRY_BASE_DELAY = 1.0
-    _MAX_RETRY_DELAY: Optional[float] = None
+    _MAX_RETRY_DELAY: Optional[float] = _DEFAULT_MAX_RETRY_DELAY
     _RETRYABLE_STATUSES = _RETRYABLE_HTTP_STATUSES
 
     def __init__(self, timeout: float = 30, verify_ssl: bool = True) -> None:

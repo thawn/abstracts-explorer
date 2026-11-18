@@ -125,7 +125,7 @@ def _get_conference_topics_for_single_conference(
             years = sorted(years + [extracted_year])
 
     with resources._get_clustering_resources(collection_name) as (cm, db):
-        cached = cache._lookup_clustering_cache(db, config, conference, years)
+        cached = cache._lookup_clustering_cache(db, config, conference, years, collection_name)
 
         if not cached:
             return {

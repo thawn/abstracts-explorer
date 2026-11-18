@@ -6,7 +6,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import or_, and_
+from sqlalchemy import String, cast, or_, and_
 
 # Import Pydantic models from plugin framework
 
@@ -22,18 +22,27 @@ logger = logging.getLogger(__name__)
 
 
 def _filter_has_key(filters: Optional[Dict[str, Any]], key: str) -> bool:
-    """Return whether *key* appears anywhere in a nested filter dict."""
+    """
+    Return whether *key* is constrained at the top level or under ``$and``.
+
+    Keys nested inside ``$or``/``$not`` do not count as an equivalent
+    top-level restriction and must not suppress caller-supplied filters.
+    """
     if not isinstance(filters, dict):
         return False
-    if key in filters:
-        return True
-    for value in filters.values():
-        if isinstance(value, dict) and _filter_has_key(value, key):
+    key_lower = key.lower()
+    for raw_key, value in filters.items():
+        if str(raw_key).lower() == key_lower:
             return True
-        if isinstance(value, list):
-            if any(isinstance(item, dict) and _filter_has_key(item, key) for item in value):
+        if str(raw_key).lower() == "$and" and isinstance(value, list):
+            if any(_filter_has_key(item, key) for item in value):
                 return True
     return False
+
+
+def _escape_like(value: Any) -> str:
+    """Escape SQL ``LIKE`` wildcards so the operand is matched literally."""
+    return str(value).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 class WhereFilterMixin(SessionMixin):
@@ -70,10 +79,15 @@ class WhereFilterMixin(SessionMixin):
             if key in ("$and", "$or"):
                 if not isinstance(value, list):
                     raise DatabaseError(f"'{raw_key}' expects a list of filter dictionaries")
-                nested: List[List[Any]] = [self._build_where_conditions(item) for item in value]
-                flattened: List[Any] = [cond for group in nested for cond in group]
-                if flattened:
-                    conditions.append(and_(*flattened) if key == "$and" else or_(*flattened))
+                nested: List[List[Any]] = [
+                    self._build_where_conditions(item) for item in value if isinstance(item, dict)
+                ]
+                groups = [group for group in nested if group]
+                if groups:
+                    if key == "$and":
+                        conditions.append(and_(*[cond for group in groups for cond in group]))
+                    else:
+                        conditions.append(or_(*[and_(*group) for group in groups]))
                 continue
 
             if key == "$not":
@@ -92,20 +106,29 @@ class WhereFilterMixin(SessionMixin):
             if isinstance(value, dict):
                 for op, operand in value.items():
                     op_lower = op.lower()
+                    if field_name == "year" and op_lower not in (
+                        "$contains",
+                        "$startswith",
+                        "$endswith",
+                    ):
+                        operand = self._normalize_year_operand(operand)
                     if op_lower == "$eq":
                         conditions.append(column == operand)
                     elif op_lower == "$ne":
-                        conditions.append(column != operand)
+                        if operand is None:
+                            conditions.append(column.isnot(None))
+                        else:
+                            conditions.append(or_(column != operand, column.is_(None)))
                     elif op_lower == "$in":
                         conditions.append(column.in_(operand))
                     elif op_lower == "$nin":
                         conditions.append(column.notin_(operand))
                     elif op_lower == "$contains":
-                        conditions.append(column.ilike(f"%{operand}%"))
+                        conditions.append(cast(column, String).ilike(f"%{_escape_like(operand)}%", escape="\\"))
                     elif op_lower == "$startswith":
-                        conditions.append(column.ilike(f"{operand}%"))
+                        conditions.append(cast(column, String).ilike(f"{_escape_like(operand)}%", escape="\\"))
                     elif op_lower == "$endswith":
-                        conditions.append(column.ilike(f"%{operand}"))
+                        conditions.append(cast(column, String).ilike(f"%{_escape_like(operand)}", escape="\\"))
                     elif op_lower == "$gt":
                         conditions.append(column > operand)
                     elif op_lower == "$gte":
@@ -117,6 +140,8 @@ class WhereFilterMixin(SessionMixin):
                     else:
                         raise DatabaseError(f"Unknown where-filter operator: {op}")
             else:
+                if field_name == "year":
+                    value = self._normalize_year_operand(value)
                 conditions.append(column == value)
 
         return conditions
@@ -213,7 +238,9 @@ class WhereFilterMixin(SessionMixin):
             field_name = alias_lower.get(raw_field, raw_field)
             value = match.group(2).strip()
             if field_name in fields_lower:
-                field_filters[fields_lower[field_name]] = value
+                canonical = fields_lower[field_name]
+                if canonical not in field_filters:
+                    field_filters[canonical] = value
                 remaining = remaining[: match.start()] + remaining[match.end() :]
 
         remaining = " ".join(remaining.split())  # normalise whitespace

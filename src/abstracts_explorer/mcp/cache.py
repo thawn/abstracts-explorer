@@ -59,6 +59,7 @@ def _lookup_clustering_cache(
     config: Any,
     conference: str,
     years: Optional[List[int]],
+    collection_name: Optional[str] = None,
 ) -> Any:
     """
     Look up pre-computed clustering results from the database cache.
@@ -77,6 +78,8 @@ def _lookup_clustering_cache(
         Conference name (already parsed, no trailing year).
     years : list of int or None
         Year filter.
+    collection_name : str, optional
+        ChromaDB collection the cache must belong to.
 
     Returns
     -------
@@ -88,7 +91,7 @@ def _lookup_clustering_cache(
     # Determine single year for column-based lookup
     cache_year = years[0] if years and len(years) == 1 else None
 
-    cached = db.get_clustering_cache(
+    return db.get_clustering_cache(
         embedding_model=config.embedding_model,
         reduction_method=DEFAULT_REDUCTION_METHOD,
         n_components=DEFAULT_N_COMPONENTS,
@@ -97,19 +100,5 @@ def _lookup_clustering_cache(
         clustering_params=clustering_params,
         conference=conference,
         year=cache_year,
+        collection_name=collection_name or config.collection_name,
     )
-
-    # Fallback: if per-year cache not found, try the all-years cache
-    if not cached and years:
-        cached = db.get_clustering_cache(
-            embedding_model=config.embedding_model,
-            reduction_method=DEFAULT_REDUCTION_METHOD,
-            n_components=DEFAULT_N_COMPONENTS,
-            clustering_method=DEFAULT_CLUSTERING_METHOD,
-            n_clusters=None,
-            clustering_params=clustering_params,
-            conference=conference,
-            year=None,
-        )
-
-    return cached

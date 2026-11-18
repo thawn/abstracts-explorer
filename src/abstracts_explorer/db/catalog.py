@@ -116,7 +116,7 @@ class CatalogMixin(PapersMixin):
             self._metadata_cache_set(result, "conference_years")
             return result
         except Exception as e:
-            raise DatabaseError(f"Failed to get conference years from DB: {str(e)}") from e
+            raise self._db_error("Failed to get conference years from DB", e)
 
     def confirm_default_conference_year_exists(
         self,
@@ -313,6 +313,11 @@ class CatalogMixin(PapersMixin):
                     break
 
         if resolved:
+            if resolved not in db_conference_years:
+                for stored in db_conference_years:
+                    if stored.lower() == resolved.lower():
+                        resolved = stored
+                        break
             if resolved in db_conference_years:
                 return {"conference": resolved, "error": None}
             else:
@@ -385,7 +390,7 @@ class CatalogMixin(PapersMixin):
             self._metadata_cache_set(result, "sessions", conference, year)
             return result
         except Exception as e:
-            raise DatabaseError(f"Failed to get sessions: {str(e)}") from e
+            raise self._db_error("Failed to get sessions", e)
 
     def get_conferences(self, year: Optional[int] = None) -> List[str]:
         """
@@ -431,7 +436,7 @@ class CatalogMixin(PapersMixin):
             self._metadata_cache_set(result, "conferences", year)
             return result
         except Exception as e:
-            raise DatabaseError(f"Failed to get conferences: {str(e)}") from e
+            raise self._db_error("Failed to get conferences", e)
 
     def get_years(self, conference: Optional[str] = None) -> List[int]:
         """
@@ -475,7 +480,7 @@ class CatalogMixin(PapersMixin):
             self._metadata_cache_set(result, "years", conference)
             return result
         except Exception as e:
-            raise DatabaseError(f"Failed to get years: {str(e)}") from e
+            raise self._db_error("Failed to get years", e)
 
     def get_embedding_model(self) -> Optional[str]:
         """
@@ -507,7 +512,7 @@ class CatalogMixin(PapersMixin):
             result = self.session.execute(stmt).scalar_one_or_none()
             return result
         except Exception as e:
-            raise DatabaseError(f"Failed to get embedding model: {str(e)}") from e
+            raise self._db_error("Failed to get embedding model", e)
 
     def set_embedding_model(self, model_name: str) -> None:
         """

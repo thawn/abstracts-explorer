@@ -282,6 +282,7 @@ def _prepopulate_clustering_cache(test_database, em, collection_name):
         results=results,
         n_clusters=None,
         clustering_params={"linkage": "ward", "distance_threshold": 150.0},
+        collection_name=collection_name,
     )
 
     # The clustering tab requests results for the selected conference/year
@@ -296,6 +297,7 @@ def _prepopulate_clustering_cache(test_database, em, collection_name):
         clustering_params={"linkage": "ward", "distance_threshold": 150.0},
         conference="NeurIPS",
         year=2025,
+        collection_name=collection_name,
     )
     db.close()
 

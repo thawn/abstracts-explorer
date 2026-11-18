@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from abstracts_explorer.clustering.errors import ClusteringError
+from abstracts_explorer.embeddings.batching import ID_BATCH_SIZE, iter_batches
 
 logger = logging.getLogger(__name__)
 
@@ -59,16 +60,36 @@ class LoadingMixin:
                 raise ClusteringError("No embeddings found in collection")
 
             get_kwargs: Dict[str, Any] = {"include": ["embeddings"]}
-            if limit:
-                get_kwargs["limit"] = limit
-            if ids is not None:
-                get_kwargs["ids"] = ids
-            results = self.embeddings_manager.collection.get(**get_kwargs)
+            if ids is None:
+                if limit:
+                    get_kwargs["limit"] = limit
+                results = self.embeddings_manager.collection.get(**get_kwargs)
+            else:
+                batched_ids: List[str] = []
+                batched_embeddings: List[Any] = []
+                remaining = limit
+                for batch in iter_batches(ids, ID_BATCH_SIZE):
+                    batch_kwargs: Dict[str, Any] = {"include": ["embeddings"], "ids": list(batch)}
+                    if remaining:
+                        batch_kwargs["limit"] = remaining
+                    batch_results = self.embeddings_manager.collection.get(**batch_kwargs)
+                    batch_ids = batch_results.get("ids") or []
+                    batch_embeddings = batch_results.get("embeddings")
+                    if batch_embeddings is None:
+                        continue
+                    batched_ids.extend(batch_ids)
+                    batched_embeddings.extend(batch_embeddings)
+                    if remaining:
+                        remaining -= len(batch_ids)
+                        if remaining <= 0:
+                            break
+                results = {"ids": batched_ids, "embeddings": batched_embeddings}
 
             chroma_ids = results.get("ids") or []
             chroma_embeddings = results.get("embeddings")
             if not chroma_ids or chroma_embeddings is None:
                 raise ClusteringError("No embeddings found in collection")
+            assert chroma_embeddings is not None
 
             summaries = {paper["uid"]: paper for paper in self.database.get_paper_summaries_by_uids(list(chroma_ids))}
             keep_indices = [index for index, uid in enumerate(chroma_ids) if uid in summaries]
