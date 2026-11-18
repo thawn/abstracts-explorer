@@ -159,7 +159,7 @@ def aaai_site(monkeypatch):
     plugin = AAAIDownloaderPlugin()
     get = Mock(side_effect=respond)
     monkeypatch.setattr(plugin._session, "get", get)
-    monkeypatch.setattr("abstracts_explorer.plugin.http.time.sleep", Mock())
+    monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", Mock())
     return plugin, pages, get
 
 
@@ -278,7 +278,7 @@ def test_transport_options_and_delay(aaai_site, monkeypatch):
     """Forward HTTP options and delay every proceedings request."""
     plugin, _, get = aaai_site
     sleep = Mock()
-    monkeypatch.setattr("abstracts_explorer.plugin.http.time.sleep", sleep)
+    monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", sleep)
     plugin.download(2026, timeout=7, verify_ssl=False, request_delay=0.25)
     for call in get.call_args_list:
         assert call.kwargs == {"timeout": 7, "verify": False}

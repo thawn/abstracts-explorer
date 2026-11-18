@@ -38,7 +38,7 @@ def _check_ml4ps_website_available() -> bool:
 @pytest.fixture(autouse=True)
 def _mock_network_delays(monkeypatch):
     """Avoid retry backoff sleeps in unit tests."""
-    monkeypatch.setattr("abstracts_explorer.plugin.http.time.sleep", lambda seconds: None)
+    monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", lambda seconds: None)
 
 
 @pytest.fixture

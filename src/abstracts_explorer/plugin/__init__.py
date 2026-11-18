@@ -6,10 +6,9 @@ Extensible downloader plugin framework for abstracts-explorer.
 
 The framework consists of:
 
-- :mod:`~abstracts_explorer.plugin.base` — ``DownloaderPlugin`` and
-  ``DownloaderPlugin`` base class
-- :mod:`~abstracts_explorer.plugin.http` — shared HTTP retry/cooldown handling
-  and ``HTTPDownloaderPlugin``
+- :mod:`~abstracts_explorer.plugin.base` — ``DownloaderPlugin``,
+  ``HTTPDownloaderPlugin``, ``DownloadOptions``, and the shared HTTP
+  retry/cooldown helpers
 - :mod:`~abstracts_explorer.plugin.models` — ``LightweightPaper`` and
   validation/serialization helpers
 - :mod:`~abstracts_explorer.plugin.converters` —
@@ -21,9 +20,13 @@ All public names are re-exported here so ``from abstracts_explorer.plugin
 import ...`` continues to work.
 """
 
-from abstracts_explorer.plugin.base import DownloadOptions, DownloaderPlugin
+from abstracts_explorer.plugin.base import (
+    DownloadOptions,
+    DownloaderPlugin,
+    HTTPDownloaderPlugin,
+    fetch_with_retries,
+)
 from abstracts_explorer.plugin.converters import convert_to_lightweight_schema
-from abstracts_explorer.plugin.http import HTTPDownloaderPlugin, fetch_with_retries
 from abstracts_explorer.plugin.models import (
     LightweightPaper,
     deserialize_authors_from_string,
