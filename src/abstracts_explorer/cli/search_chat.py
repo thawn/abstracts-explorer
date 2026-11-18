@@ -36,7 +36,7 @@ def search_command(args: argparse.Namespace) -> int:
         Command-line arguments containing:
         - query: Search query text
         - collection: Name of the ChromaDB collection
-        - n_results: Number of results to return
+        - limit: Number of results to return
         - where: Metadata filter conditions
         - show_abstract: Whether to show paper abstracts
         - backend_url: URL for OpenAI-compatible API
@@ -63,7 +63,7 @@ def search_command(args: argparse.Namespace) -> int:
         f"Query: {args.query}",
         f"Embeddings: {config.embedding_db}",
         f"Collection: {args.collection}",
-        f"Results: {args.n_results}",
+        f"Results: {args.limit}",
         f"Distance threshold: {distance_threshold}",
         f"Conference: {conference}" if conference else None,
         f"Year: {year}" if year is not None else None,
@@ -104,14 +104,15 @@ def search_command(args: argparse.Namespace) -> int:
         print(f"\n🔍 Searching for: '{args.query}'...\n")
         database = DatabaseManager()
         try:
-            papers = database.search_papers_semantic(
+            papers, _ = database.search(
                 args.query,
-                limit=args.n_results,
+                limit=args.limit,
                 years=[year] if year is not None else None,
                 conferences=[conference] if conference else None,
                 distance_threshold=distance_threshold,
                 where_filters=where_filter,
                 embeddings_manager=em,
+                use_embeddings=True,
             )
         finally:
             database.close()

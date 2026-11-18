@@ -195,8 +195,8 @@ class TestRAGChatInit:
 
         assert chat.embeddings_manager == mock_embeddings_manager
         assert chat.database == mock_database
-        assert chat.backend_url == "https://api.helmholtz-blablador.fz-juelich.de"
-        assert chat.model == "deepseek-v4.1-flash-at-hzdr"
+        assert chat.backend_url.rstrip("/") == get_config().llm_backend_url.rstrip("/")
+        assert chat.model == get_config().chat_model
         assert chat.max_context_papers > 0
         assert 0 <= chat.temperature <= 1
         assert chat.max_tokens == get_config().chat_max_tokens
@@ -1431,7 +1431,7 @@ class TestRAGToolLogging:
         ctx.deps.conferences = ["NeurIPS"]
 
         with caplog.at_level("INFO", logger="abstracts_explorer.rag"):
-            _tool_search_papers(ctx, topic_keywords="transformers", n_results=5)
+            _tool_search_papers(ctx, topic_keywords="transformers", limit=5)
 
         assert "Tool call: search_papers" in caplog.text
         assert "Tool result: search_papers" in caplog.text
@@ -1567,47 +1567,47 @@ class TestRAGToolConferenceDefaults:
         call_kwargs = mock_search_papers.call_args[1]
         assert "years" not in call_kwargs
 
-    def test_search_papers_explicit_n_results(self, mock_search_papers):
-        """_tool_search_papers passes explicit n_results."""
+    def test_search_papers_explicit_limit(self, mock_search_papers):
+        """_tool_search_papers passes an explicit limit."""
         from abstracts_explorer.rag import _tool_search_papers, RAGDeps
 
         ctx = Mock()
         ctx.deps = RAGDeps()
         ctx.deps.conferences = ["NeurIPS"]
 
-        _tool_search_papers(ctx, topic_keywords="transformers", n_results=20)
+        _tool_search_papers(ctx, topic_keywords="transformers", limit=20)
 
         call_kwargs = mock_search_papers.call_args[1]
-        assert call_kwargs.get("n_results") == 20
+        assert call_kwargs.get("limit") == 20
 
-    def test_search_papers_limit_alias(self, mock_search_papers):
-        """_tool_search_papers maps limit alias to n_results."""
+    def test_search_papers_n_results_alias(self, mock_search_papers):
+        """_tool_search_papers maps the n_results alias to limit."""
         from abstracts_explorer.rag import _tool_search_papers, RAGDeps
 
         ctx = Mock()
         ctx.deps = RAGDeps()
         ctx.deps.conferences = ["NeurIPS"]
 
-        _tool_search_papers(ctx, topic_keywords="transformers", limit=15)
+        _tool_search_papers(ctx, topic_keywords="transformers", n_results=15)
 
         call_kwargs = mock_search_papers.call_args[1]
-        assert call_kwargs.get("n_results") == 15
+        assert call_kwargs.get("limit") == 15
 
-    def test_search_papers_uses_deps_n_results(self, mock_search_papers):
-        """_tool_search_papers uses ctx.deps.n_results when not provided."""
+    def test_search_papers_uses_deps_limit(self, mock_search_papers):
+        """_tool_search_papers uses ctx.deps.limit when not provided."""
         from abstracts_explorer.rag import _tool_search_papers, RAGDeps
 
         ctx = Mock()
-        ctx.deps = RAGDeps(n_results=25)
+        ctx.deps = RAGDeps(limit=25)
         ctx.deps.conferences = ["NeurIPS"]
 
         _tool_search_papers(ctx, topic_keywords="transformers")
 
         call_kwargs = mock_search_papers.call_args[1]
-        assert call_kwargs.get("n_results") == 25
+        assert call_kwargs.get("limit") == 25
 
-    def test_search_papers_default_n_results(self, mock_search_papers):
-        """_tool_search_papers defaults to 10 when neither param nor deps provide n_results."""
+    def test_search_papers_default_limit(self, mock_search_papers):
+        """_tool_search_papers defaults to 10 when neither param nor deps provide a limit."""
         from abstracts_explorer.rag import _tool_search_papers, RAGDeps
 
         ctx = Mock()
@@ -1617,7 +1617,7 @@ class TestRAGToolConferenceDefaults:
         _tool_search_papers(ctx, topic_keywords="transformers")
 
         call_kwargs = mock_search_papers.call_args[1]
-        assert call_kwargs.get("n_results") == 10
+        assert call_kwargs.get("limit") == 10
 
     def test_analyze_topic_relevance_uses_deps_conference_when_not_specified(self, mock_analyze_topic):
         """_tool_analyze_topic_relevance uses ctx.deps.conferences when no conference provided."""
@@ -2000,7 +2000,7 @@ class TestRAGChatInterestingPaperTools:
 
         mock_recommend.assert_called_once_with(
             priorities={"p1": {"priority": 5}},
-            n_results=10,
+            limit=10,
             conferences=["ICLR"],
             years=[2026],
         )

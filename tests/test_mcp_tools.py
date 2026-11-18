@@ -312,7 +312,7 @@ class TestNormalizeSearchPapersArgs:
 
     def test_valid_args_unchanged(self):
         """Already-valid args are passed through unchanged."""
-        args = {"topic_keywords": "deep learning", "years": [2024, 2025], "n_results": 5}
+        args = {"topic_keywords": "deep learning", "years": [2024, 2025], "limit": 5}
         result = _normalize_search_papers_args(args)
         assert result == args
 
@@ -328,32 +328,32 @@ class TestNormalizeSearchPapersArgs:
         assert result["topic_keywords"] == "reinforcement learning autoregressive image editing"
         assert result["conference"] == "NeurIPS"
         assert result["years"] == [2025]
-        assert result["n_results"] == 2
+        assert result["limit"] == 2
         assert "year" not in result
 
-    def test_limit_alias(self):
-        """'limit' alias is normalized to 'n_results'."""
-        result = _normalize_search_papers_args({"topic_keywords": "RL", "limit": 20})
-        assert result["n_results"] == 20
-        assert "limit" not in result
+    def test_n_results_alias(self):
+        """'n_results' alias is normalized to 'limit'."""
+        result = _normalize_search_papers_args({"topic_keywords": "RL", "n_results": 20})
+        assert result["limit"] == 20
+        assert "n_results" not in result
 
     def test_num_results_alias(self):
-        """'num_results' alias is normalized to 'n_results'."""
+        """'num_results' alias is normalized to 'limit'."""
         result = _normalize_search_papers_args({"topic_keywords": "RL", "num_results": 15})
-        assert result["n_results"] == 15
+        assert result["limit"] == 15
         assert "num_results" not in result
 
     def test_limit_and_n_results_coexist(self):
-        """When both 'n_results' and 'limit' are present, 'n_results' is kept and 'limit' dropped."""
+        """When both 'n_results' and 'limit' are present, 'limit' wins."""
         result = _normalize_search_papers_args({"topic_keywords": "RL", "n_results": 12, "limit": 25})
-        assert result["n_results"] == 12
-        assert "limit" not in result
+        assert result["limit"] == 25
+        assert "n_results" not in result
 
     def test_n_results_string_converted_to_int(self):
         """'n_results' as string is converted to int."""
         result = _normalize_search_papers_args({"topic_keywords": "RL", "n_results": "20"})
-        assert result["n_results"] == 20
-        assert isinstance(result["n_results"], int)
+        assert result["limit"] == 20
+        assert isinstance(result["limit"], int)
 
 
 class TestNormalizeGetTopicEvolutionArgs:
@@ -461,10 +461,10 @@ class TestFilterUnknownKwargs:
         from abstracts_explorer.mcp_server import search_papers
 
         with caplog.at_level("WARNING", logger="abstracts_explorer.mcp_tools"):
-            result = _filter_unknown_kwargs(search_papers, {"topic_keywords": "RL", "n_years": 5, "n_results": 3})
+            result = _filter_unknown_kwargs(search_papers, {"topic_keywords": "RL", "n_years": 5, "limit": 3})
 
         assert "topic_keywords" in result
-        assert "n_results" in result
+        assert "limit" in result
         assert "n_years" not in result
         assert "n_years" in caplog.text
 
@@ -495,7 +495,7 @@ class TestExecuteMCPToolE2E:
             result = execute_mcp_tool("search_papers", {"topic_keywords": "deep learning", "n_results": 3})
 
         assert json.loads(result)["topic"] == "deep learning"
-        mock_fn.assert_called_once_with(topic_keywords="deep learning", n_results=3)
+        mock_fn.assert_called_once_with(topic_keywords="deep learning", limit=3)
 
     def test_search_papers_year_singular_normalized(self):
         """search_papers normalizes 'year' (singular) to 'years'."""
@@ -534,7 +534,7 @@ class TestExecuteMCPToolE2E:
         assert kwargs["topic_keywords"] == "reinforcement learning autoregressive image editing"
         assert kwargs["conference"] == "NeurIPS"
         assert kwargs["years"] == [2025]
-        assert kwargs["n_results"] == 2
+        assert kwargs["limit"] == 2
 
     def test_search_papers_query_alias(self):
         """search_papers maps 'query' to 'topic_keywords' (legacy alias)."""
@@ -586,28 +586,31 @@ class TestExecuteMCPToolE2E:
         }
 
         mock_db = Mock()
-        mock_db.search_papers_semantic.return_value = [
-            {
-                "uid": "p1",
-                "title": "Paper 1",
-                "year": 2025,
-                "conference": "NeurIPS",
-                "session": "ML",
-                "authors": [],
-                "abstract": "Abstract 1",
-                "relevance_score": 0.9,
-            },
-            {
-                "uid": "p2",
-                "title": "Paper 2",
-                "year": 2025,
-                "conference": "NeurIPS",
-                "session": "DL",
-                "authors": [],
-                "abstract": "Abstract 2",
-                "relevance_score": 0.7,
-            },
-        ]
+        mock_db.search.return_value = (
+            [
+                {
+                    "uid": "p1",
+                    "title": "Paper 1",
+                    "year": 2025,
+                    "conference": "NeurIPS",
+                    "session": "ML",
+                    "authors": [],
+                    "abstract": "Abstract 1",
+                    "relevance_score": 0.9,
+                },
+                {
+                    "uid": "p2",
+                    "title": "Paper 2",
+                    "year": 2025,
+                    "conference": "NeurIPS",
+                    "session": "DL",
+                    "authors": [],
+                    "abstract": "Abstract 2",
+                    "relevance_score": 0.7,
+                },
+            ],
+            None,
+        )
 
         with (
             patch("abstracts_explorer.mcp.deps.EmbeddingsManager", return_value=mock_em),
@@ -703,12 +706,7 @@ class TestExecuteMCPToolE2E:
         """get_topic_evolution executes end-to-end with mocked EmbeddingsManager."""
         mock_em = Mock()
 
-        mock_em.query_ids_within_distance.return_value = {
-            "ids": ["a1", "a2", "a3"],
-            "distances": [0.1, 0.2, 0.3],
-            "count": 3,
-            "total_considered": 90,
-        }
+        mock_em.query_ids_within_distance.return_value = [("a1", 0.1), ("a2", 0.2), ("a3", 0.3)]
         mock_db = Mock()
         mock_db.get_years.return_value = [2022, 2023, 2024]
         mock_db.resolve_paper_uids.return_value = ["a1", "a2", "a3"]
@@ -763,15 +761,10 @@ class TestExecuteMCPToolE2E:
     def test_analyze_topic_relevance_real_execution(self):
         """analyze_topic_relevance executes end-to-end with mocked EmbeddingsManager."""
         mock_em = Mock()
-        mock_em.query_ids_within_distance.return_value = {
-            "ids": ["p1", "p2"],
-            "distances": [0.5, 1.0],
-            "count": 2,
-            "total_considered": 100,
-        }
+        mock_em.query_ids_within_distance.return_value = [("p1", 0.5), ("p2", 1.0)]
         mock_db = Mock()
         mock_db.resolve_paper_uids.return_value = ["p1", "p2"]
-        mock_db.get_papers_by_uids.return_value = [
+        mock_db.get_result_details.return_value = [
             {"uid": "p1", "title": "Paper 1", "year": 2025, "conference": "NeurIPS"},
             {"uid": "p2", "title": "Paper 2", "year": 2025, "conference": "NeurIPS"},
         ]
@@ -796,15 +789,10 @@ class TestExecuteMCPToolE2E:
     def test_analyze_topic_relevance_conference_singular_normalized(self):
         """analyze_topic_relevance maps 'conference' (singular) to 'conferences'."""
         mock_em = Mock()
-        mock_em.query_ids_within_distance.return_value = {
-            "ids": ["p1"],
-            "distances": [0.5],
-            "count": 1,
-            "total_considered": 50,
-        }
+        mock_em.query_ids_within_distance.return_value = [("p1", 0.5)]
         mock_db = Mock()
         mock_db.resolve_paper_uids.return_value = ["p1"]
-        mock_db.get_papers_by_uids.return_value = [{"uid": "p1", "title": "P", "year": 2025, "conference": "NeurIPS"}]
+        mock_db.get_result_details.return_value = [{"uid": "p1", "title": "P", "year": 2025, "conference": "NeurIPS"}]
 
         with (
             patch("abstracts_explorer.mcp.deps.EmbeddingsManager", return_value=mock_em),
@@ -897,7 +885,7 @@ class TestExecuteMCPToolE2E:
     def test_get_paper_details_real_execution_by_title(self):
         """get_paper_details executes end-to-end with mocked DatabaseManager."""
         mock_db = Mock()
-        mock_db.search_papers.return_value = [
+        mock_db.keyword_search.return_value = [
             {
                 "uid": "abc123",
                 "original_id": "neurips2023/abc",
@@ -1341,7 +1329,7 @@ def test_normalize_interesting_paper_tool_args():
     assert result["paper_ids"] == ["a", "b"]
     assert result["years"] == [2026]
     assert result["conferences"] == ["ICLR"]
-    assert result["n_results"] == 5
+    assert result["limit"] == 5
 
 
 def test_execute_mcp_tool_summarize_interesting_papers():
@@ -1387,7 +1375,7 @@ def test_execute_mcp_tool_recommend_related_papers():
         priorities={"a": {"priority": 5}},
         conferences=["ICLR"],
         years=[2026],
-        n_results=3,
+        limit=3,
     )
 
 

@@ -74,7 +74,7 @@ print(response3)
 # Query with custom settings
 response = chat.query(
     query="Explain self-attention mechanisms",
-    n_results=10,              # Use 10 papers for context
+    limit=10,              # Use 10 papers for context
     temperature=0.8,           # More creative responses
     max_tokens=2000,           # Longer responses
     system_prompt="You are a helpful research assistant."
@@ -391,7 +391,7 @@ except Exception as e:
 
 Factors affecting response time:
 
-- Number of papers retrieved (n_results)
+- Number of papers retrieved (limit)
 - LLM model size and speed
 - Token generation length (max_tokens)
 - Network latency to LLM backend
@@ -406,13 +406,13 @@ Factors affecting response time:
 
 ```python
 # Faster responses
-chat.query(query, n_results=3, max_tokens=500)
+chat.query(query, limit=3, max_tokens=500)
 
 # More comprehensive but slower
-chat.query(query, n_results=10, max_tokens=2000)
+chat.query(query, limit=10, max_tokens=2000)
 
 # Balance quality and speed
-chat.query(query, n_results=5, max_tokens=1000)
+chat.query(query, limit=5, max_tokens=1000)
 ```
 
 ## Best Practices
@@ -421,6 +421,6 @@ chat.query(query, n_results=5, max_tokens=1000)
 2. **Use filters** - Provide conference/year context to narrow results
 3. **Manage history** - Reset conversation when changing topics
 4. **Export important conversations** - Save valuable interactions
-5. **Adjust parameters** - Tune n_results and temperature for your needs
+5. **Adjust parameters** - Tune limit and temperature for your needs
 6. **Monitor backend** - Ensure LM Studio/LLM is running and responsive
 7. **Handle errors** - Wrap calls in try-except for production use

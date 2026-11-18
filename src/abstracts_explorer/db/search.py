@@ -2,15 +2,30 @@
 Keyword and semantic search methods.
 """
 
+from __future__ import annotations
+
 import logging
-from typing import Any, Dict, List, Optional, Tuple
-
-# Import Pydantic models from plugin framework
-
-# Import SQLAlchemy models
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple, TypedDict
 
 from abstracts_explorer.db.errors import DatabaseError
+from abstracts_explorer.db.filters import _filter_has_key
 from abstracts_explorer.db.papers import PapersMixin
+
+if TYPE_CHECKING:
+    from abstracts_explorer.embeddings.query import QueryEmbedding
+
+PaperMatch = tuple[str, float]
+
+
+class _SearchFilterKwargs(TypedDict, total=False):
+    """Shared keyword arguments for structured search filters."""
+
+    conferences: Optional[List[str]]
+    years: Optional[List[int]]
+    sessions: Optional[List[str]]
+    where_filters: Optional[Dict[str, Any]]
+    field_filters: Optional[Dict[str, str]]
+
 
 logger = logging.getLogger(__name__)
 
@@ -18,113 +33,36 @@ logger = logging.getLogger(__name__)
 class SearchMixin(PapersMixin):
     """Keyword and semantic search methods."""
 
-    def find_papers_within_distance(
+    def _resolve_filter_ids(
         self,
-        embeddings_manager: Any,
-        query: str,
-        distance_threshold: float = 1.1,
+        *,
         conferences: Optional[List[str]] = None,
         years: Optional[List[int]] = None,
         sessions: Optional[List[str]] = None,
         where_filters: Optional[Dict[str, Any]] = None,
         field_filters: Optional[Dict[str, str]] = None,
-        query_embedding: Optional[List[float]] = None,
-        limit: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        """
-        Return full paper records within a distance threshold.
-
-        Parameters
-        ----------
-        embeddings_manager : EmbeddingsManager
-            Connected embeddings manager.
-        query : str
-            Search query text.
-        distance_threshold : float, optional
-            Euclidean distance radius, by default 1.1.
-        conferences : list of str, optional
-            Restrict results to these conferences.
-        years : list of int, optional
-            Restrict results to these years.
-        sessions : list of str, optional
-            Restrict results to these sessions.
-        where_filters : dict, optional
-            Additional SQL-style filters.
-        field_filters : dict of str to str, optional
-            Case-insensitive SQL substring filters applied per field.
-        query_embedding : list of float, optional
-            Pre-computed query embedding.
-        limit : int, optional
-            Maximum number of paper records to hydrate.  The total number of
-            matches within the distance threshold is still reported in
-            ``total_matches``.
-
-        Returns
-        -------
-        dict
-            Dictionary with ``query``, ``query_embedding``, ``distance``,
-            ``papers``, ``count``, ``total_matches``, and ``total_considered``.
-        """
-        has_filters = bool(conferences or years or sessions or where_filters or field_filters)
-        ids = (
-            self.resolve_paper_uids(
-                conferences=conferences,
-                years=years,
-                sessions=sessions,
-                where_filters=where_filters,
-                field_filters=field_filters,
-            )
-            if has_filters
-            else None
+    ) -> Optional[List[str]]:
+        """Return candidate UIDs, or None when no filters are present."""
+        if not (conferences or years or sessions or where_filters or field_filters):
+            return None
+        return self.resolve_paper_uids(
+            conferences=conferences,
+            years=years,
+            sessions=sessions,
+            where_filters=where_filters,
+            field_filters=field_filters,
         )
-        if ids is not None and not ids:
-            return {
-                "query": query,
-                "query_embedding": query_embedding,
-                "distance": distance_threshold,
-                "papers": [],
-                "count": 0,
-                "total_matches": 0,
-                "total_considered": 0,
-            }
 
-        result = embeddings_manager.query_ids_within_distance(
-            query=query,
-            distance_threshold=distance_threshold,
-            ids=ids,
-            query_embedding=query_embedding,
-        )
-        total_matches = len(result["ids"])
-        matched_ids = result["ids"][:limit] if limit else result["ids"]
-        matched_distances = result["distances"][:limit] if limit else result["distances"]
-        papers_by_uid = {paper["uid"]: paper for paper in self.get_papers_by_uids(matched_ids)}
-        papers: List[Dict[str, Any]] = []
-        for uid, distance in zip(matched_ids, matched_distances):
-            paper = papers_by_uid.get(uid)
-            if paper is None:
-                continue
-            paper["distance"] = distance
-            paper["similarity"] = max(0.0, 1.0 - float(distance))
-            papers.append(paper)
-
-        return {
-            "query": query,
-            "query_embedding": result["query_embedding"],
-            "distance": distance_threshold,
-            "papers": papers,
-            "count": len(papers),
-            "total_matches": total_matches,
-            "total_considered": result["total_considered"],
-        }
-
-    def search_papers(
+    def keyword_search(
         self,
         keyword: Optional[str] = None,
-        field_filters: Optional[Dict[str, str]] = None,
-        sessions: Optional[List[str]] = None,
-        years: Optional[List[int]] = None,
-        conferences: Optional[List[str]] = None,
         limit: int = 100,
+        *,
+        conferences: Optional[List[str]] = None,
+        years: Optional[List[int]] = None,
+        sessions: Optional[List[str]] = None,
+        where_filters: Optional[Dict[str, Any]] = None,
+        field_filters: Optional[Dict[str, str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Search papers in the SQL database.
@@ -137,18 +75,21 @@ class SearchMixin(PapersMixin):
         ----------
         keyword : str, optional
             Keyword to search in title, abstract, or keywords fields.
+        limit : int, default=100
+            Maximum number of results to return.
+        conferences : list[str], optional
+            List of conferences to filter by (matches ANY).
+        years : list[int], optional
+            List of years to filter by (matches ANY).
+        sessions : list[str], optional
+            List of sessions to filter by (matches ANY).
+        where_filters : dict, optional
+            Additional SQL-style filters.  Structured conference/year/session
+            filters already present here are not duplicated.
         field_filters : dict of str to str, optional
             Mapping of Paper column names to search values.  Each entry adds
             a case-insensitive substring condition on the corresponding column
             (e.g. ``{"authors": "Smith", "award": "Best Paper"}``).
-        sessions : list[str], optional
-            List of sessions to filter by (matches ANY).
-        years : list[int], optional
-            List of years to filter by (matches ANY).
-        conferences : list[str], optional
-            List of conferences to filter by (matches ANY).
-        limit : int, default=100
-            Maximum number of results to return.
 
         Returns
         -------
@@ -161,7 +102,11 @@ class SearchMixin(PapersMixin):
             If search fails.
         """
         try:
+            normalized_where = self._normalize_where_filters(where_filters)
             filter_terms: List[Dict[str, Any]] = []
+
+            if normalized_where:
+                filter_terms.append(normalized_where)
 
             if keyword:
                 filter_terms.append(
@@ -174,121 +119,166 @@ class SearchMixin(PapersMixin):
                     }
                 )
 
+            if conferences and not _filter_has_key(normalized_where, "conference"):
+                filter_terms.append({"conference": {"$in": conferences}})
+            if years and not _filter_has_key(normalized_where, "year"):
+                filter_terms.append({"year": {"$in": years}})
+            if sessions and not _filter_has_key(normalized_where, "session"):
+                filter_terms.append({"session": {"$in": sessions}})
             if field_filters:
                 for field_name, value in field_filters.items():
                     filter_terms.append({field_name: {"$contains": value}})
 
-            if sessions:
-                filter_terms.append({"session": {"$in": sessions}})
-            if years:
-                filter_terms.append({"year": {"$in": years}})
-            if conferences:
-                filter_terms.append({"conference": {"$in": conferences}})
-
             if not filter_terms:
-                where_filters: Optional[Dict[str, Any]] = None
+                combined_filters: Optional[Dict[str, Any]] = None
             elif len(filter_terms) == 1:
-                where_filters = filter_terms[0]
+                combined_filters = filter_terms[0]
             else:
-                where_filters = {"$and": filter_terms}
+                combined_filters = {"$and": filter_terms}
 
-            return self.get_paper(where_filters, limit=limit)
+            return self.get_paper(combined_filters, limit=limit)
         except DatabaseError:
             raise
         except Exception as e:
             raise self._db_error("Search failed", e)
 
-    def search_papers_keyword(
+    def find_paper_ids_within_distance(
         self,
-        query: str,
-        limit: int = 10,
-        sessions: Optional[List[str]] = None,
-        years: Optional[List[int]] = None,
-        conferences: Optional[List[str]] = None,
-        *,
-        use_embeddings: bool = False,
+        query: QueryEmbedding,
         distance_threshold: float = 1.1,
-        embeddings_manager: Optional[Any] = None,
-    ) -> List[Dict[str, Any]]:
+        *,
+        conferences: Optional[List[str]] = None,
+        years: Optional[List[int]] = None,
+        sessions: Optional[List[str]] = None,
+        where_filters: Optional[Dict[str, Any]] = None,
+        field_filters: Optional[Dict[str, str]] = None,
+        limit: Optional[int] = None,
+    ) -> List[PaperMatch]:
         """
-        Perform a user-query search, optionally using semantic embeddings.
+        Return ordered paper matches within a distance threshold.
 
-        This is the main search entry point for the web UI and CLI.  It parses
-        ``field:"value"`` filters from *query*, converts the remaining filter
-        arguments into structured where filters, and then delegates either to
-        :meth:`search_papers` or :meth:`search_papers_semantic`.
+        This method resolves structured filters to candidate paper UIDs and
+        runs one Chroma distance query.  It returns ordered ``(paper_uid, distance)``
+        pairs for all matches within the threshold, no full paper details.
+        use :meth:`get_result_details` for that.
 
         Parameters
         ----------
-        query : str
-            Search query text.  May include ``field:"value"`` filters.
-        limit : int, optional
-            Maximum number of results, by default 10.
-        sessions : list of str, optional
-            Filter by paper sessions.
-        years : list of int, optional
-            Filter by publication years.
-        conferences : list of str, optional
-            Filter by conference names.
-        use_embeddings : bool, optional
-            Use semantic search instead of SQL keyword search.
+        query : QueryEmbedding
+            Query embedding object. Its vector is generated lazily once.
         distance_threshold : float, optional
-            Maximum embedding distance for semantic results.
+            Euclidean distance radius, by default 1.1.
+        conferences : list of str, optional
+            Restrict results to these conferences.
+        years : list of int, optional
+            Restrict results to these years.
+        sessions : list of str, optional
+            Restrict results to these sessions.
+        where_filters : dict, optional
+            Additional SQL-style filters.
+        field_filters : dict of str to str, optional
+            Case-insensitive SQL substring filters applied per field.
+        limit : int, optional
+            Maximum number of matches to return.  When omitted, all matches
+            within the threshold are returned.
+
+        Returns
+        -------
+        list of tuple
+            Ordered ``(paper_uid, distance)`` pairs within the threshold.
+        """
+        ids = self._resolve_filter_ids(
+            conferences=conferences,
+            years=years,
+            sessions=sessions,
+            where_filters=where_filters,
+            field_filters=field_filters,
+        )
+        if ids is not None and not ids:
+            return []
+
+        return query.embeddings_manager.query_ids_within_distance(
+            query=query,
+            distance_threshold=distance_threshold,
+            ids=ids,
+            limit=limit,
+        )
+
+    def get_result_details(
+        self,
+        matches: Sequence[PaperMatch],
+        result_slice: Optional[slice] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Hydrate a slice of ordered semantic matches.
+
+        The slice is applied before querying the SQL database, so only the
+        selected paper UIDs are fetched. Distances and match order are
+        preserved for the hydrated papers.
+
+        Parameters
+        ----------
+        matches : sequence of tuple[str, float]
+            Ordered ``(paper_uid, distance)`` pairs returned by
+            :meth:`find_paper_ids_within_distance`.
+        result_slice : slice, optional
+            Slice of *matches* to hydrate. Use ``slice(0, limit)`` for the
+            first page, ``slice(offset, offset + limit)`` for pagination, or
+            ``None`` for all matches. Standard Python slice semantics apply,
+            including negative indices and steps.
 
         Returns
         -------
         list of dict
-            List of paper dictionaries.
+            Hydrated paper dictionaries with ``distance`` and ``similarity``
+            fields, preserving the selected match order. Returns an empty list
+            when the slice selects no matches.
 
-        Raises
-        ------
-        DatabaseError
-            If the search fails.
+        Examples
+        --------
+        >>> matches = db.find_paper_ids_within_distance(query, threshold)
+        >>> total_matches = len(matches)
+        >>> first_page = db.get_result_details(matches, slice(0, 20))
+        >>> second_page = db.get_result_details(matches, slice(20, 40))
+        >>> all_results = db.get_result_details(matches)
         """
-        field_filters, remaining_query = self.parse_field_filters(query)
+        selected = matches if result_slice is None else matches[result_slice]
+        if not selected:
+            return []
 
-        if use_embeddings:
-            return self.search_papers_semantic(
-                remaining_query,
-                limit=limit,
-                sessions=sessions,
-                years=years,
-                conferences=conferences,
-                distance_threshold=distance_threshold,
-                field_filters=field_filters,
-                embeddings_manager=embeddings_manager,
-            )
+        ids = [uid for uid, _ in selected]
+        distances = [distance for _, distance in selected]
+        papers_by_uid = {paper["uid"]: paper for paper in self.get_papers_by_uids(ids)}
+        papers: List[Dict[str, Any]] = []
+        for uid, distance in zip(ids, distances):
+            paper = papers_by_uid.get(uid)
+            if paper is None:
+                continue
+            paper["distance"] = distance
+            paper["similarity"] = max(0.0, 1.0 - float(distance))
+            papers.append(paper)
+        return papers
 
-        return self.search_papers(
-            keyword=remaining_query if remaining_query else None,
-            field_filters=field_filters if field_filters else None,
-            sessions=sessions,
-            years=years,
-            conferences=conferences,
-            limit=limit,
-        )
-
-    def search_papers_keyword_with_total(
+    def search(
         self,
         query: str,
         limit: int = 10,
-        sessions: Optional[List[str]] = None,
-        years: Optional[List[int]] = None,
-        conferences: Optional[List[str]] = None,
         *,
+        conferences: Optional[List[str]] = None,
+        years: Optional[List[int]] = None,
+        sessions: Optional[List[str]] = None,
+        where_filters: Optional[Dict[str, Any]] = None,
         use_embeddings: bool = False,
         distance_threshold: float = 1.1,
         embeddings_manager: Optional[Any] = None,
+        include_total: bool = False,
     ) -> Tuple[List[Dict[str, Any]], Optional[int]]:
         """
-        Search papers and return the total semantic match count when available.
+        Perform a user-query search, optionally using semantic embeddings.
 
-        This is a thin wrapper around :meth:`search_papers_keyword` and
-        :meth:`find_papers_within_distance`.  For semantic searches it performs
-        a single embedding query and returns both the top results and the
-        number of papers within *distance_threshold* before the limit is
-        applied.  Keyword and field-filter-only searches return ``None`` for the
-        total because no semantic comparison is performed.
+        This is the main search entry point for the web UI.  It parses
+        ``field:"value"`` filters from *query* and combines the keyword or
+        semantic search primitives.
 
         Parameters
         ----------
@@ -296,12 +286,14 @@ class SearchMixin(PapersMixin):
             Search query text.  May include ``field:"value"`` filters.
         limit : int, optional
             Maximum number of results, by default 10.
-        sessions : list of str, optional
-            Filter by paper sessions.
-        years : list of int, optional
-            Filter by publication years.
         conferences : list of str, optional
             Filter by conference names.
+        years : list of int, optional
+            Filter by publication years.
+        sessions : list of str, optional
+            Filter by paper sessions.
+        where_filters : dict, optional
+            Additional SQL-style filters.
         use_embeddings : bool, optional
             Use semantic search instead of SQL keyword search.
         distance_threshold : float, optional
@@ -309,122 +301,18 @@ class SearchMixin(PapersMixin):
         embeddings_manager : EmbeddingsManager, optional
             Connected embeddings manager.  A temporary manager is created when
             omitted.
+        include_total : bool, optional
+            When ``True``, return the total number of semantic matches before
+            the limit in the second tuple element.  This requires a full match
+            query.  When ``False`` (default), only the top results are fetched
+            and the total is ``None``.
 
         Returns
         -------
         tuple
-            ``(papers, total_similar)`` where ``total_similar`` is ``None``
-            when no semantic count is available.
-
-        Raises
-        ------
-        DatabaseError
-            If the search fails.
-        """
-        field_filters, remaining_query = self.parse_field_filters(query)
-
-        if not use_embeddings:
-            papers = self.search_papers(
-                keyword=remaining_query if remaining_query else None,
-                field_filters=field_filters if field_filters else None,
-                sessions=sessions,
-                years=years,
-                conferences=conferences,
-                limit=limit,
-            )
-            return papers, None
-
-        if field_filters and not remaining_query:
-            uids = self.resolve_paper_uids(
-                conferences=conferences,
-                years=years,
-                sessions=sessions,
-                field_filters=field_filters,
-            )
-            return self.get_papers_by_uids(uids[:limit] if limit else uids), None
-
-        if not field_filters:
-            author_uids = self.resolve_paper_uids(
-                conferences=conferences,
-                years=years,
-                sessions=sessions,
-                field_filters={"authors": remaining_query},
-            )
-            if author_uids:
-                return self.get_papers_by_uids(author_uids[:limit]), None
-
-        from abstracts_explorer.embeddings import EmbeddingsError, EmbeddingsManager
-
-        owns_manager = embeddings_manager is None
-        em = embeddings_manager or EmbeddingsManager()
-        try:
-            result = self.find_papers_within_distance(
-                embeddings_manager=em,
-                query=remaining_query,
-                distance_threshold=distance_threshold,
-                conferences=conferences,
-                years=years,
-                sessions=sessions,
-                field_filters=field_filters if field_filters else None,
-                limit=limit,
-            )
-        except EmbeddingsError as exc:
-            message = str(exc)
-            if "No papers in collection" in message or "No results from collection query" in message:
-                return [], 0
-            raise
-        finally:
-            if owns_manager:
-                em.close()
-
-        return result["papers"], result["total_matches"]
-
-    def search_papers_semantic(
-        self,
-        query: str,
-        limit: int = 10,
-        sessions: Optional[List[str]] = None,
-        years: Optional[List[int]] = None,
-        conferences: Optional[List[str]] = None,
-        distance_threshold: float = 1.1,
-        field_filters: Optional[Dict[str, str]] = None,
-        where_filters: Optional[Dict[str, Any]] = None,
-        embeddings_manager: Optional[Any] = None,
-    ) -> List[Dict[str, Any]]:
-        """
-        Perform semantic paper search using embeddings.
-
-        Field filters parsed from the query are applied through the SQL
-        database.  The remaining query text is used for the embedding
-        similarity search.  Author-name matches are returned first when the
-        query text matches an author.
-
-        Parameters
-        ----------
-        query : str
-            Semantic query text (field filters already removed when
-            *field_filters* is supplied).
-        limit : int, optional
-            Maximum number of results, by default 10.
-        sessions : list of str, optional
-            Filter by paper sessions.
-        years : list of int, optional
-            Filter by publication years.
-        conferences : list of str, optional
-            Filter by conference names.
-        distance_threshold : float, optional
-            Maximum embedding distance for results, by default 1.1.
-        field_filters : dict, optional
-            Field filters to apply in SQL.  When omitted, filters are parsed
-            from *query*.
-        where_filters : dict, optional
-            Additional SQL-style filter.  Merged with the session/year/
-            conference filters.
-
-        Returns
-        -------
-        list of dict
-            Paper dictionaries ordered by relevance.
+            ``(papers, total_similar)``.  ``total_similar`` is the number of
+            semantic matches before limiting, or ``None`` for keyword,
+            field-filter-only, and implicit-author searches.
 
         Raises
         ------
@@ -432,64 +320,51 @@ class SearchMixin(PapersMixin):
             If the search fails.
         """
         from abstracts_explorer.embeddings import EmbeddingsManager
-        from abstracts_explorer.paper_utils import PaperFormattingError, format_search_results
 
-        if field_filters is None:
-            field_filters, query = self.parse_field_filters(query)
-        # Query consisting only of field filters: no meaningful embedding.
-        if field_filters and not query:
-            uids = self.resolve_paper_uids(
-                conferences=conferences,
-                years=years,
-                sessions=sessions,
-                where_filters=where_filters,
-                field_filters=field_filters,
+        field_filters, remaining_query = self.parse_field_filters(query)
+        filters: _SearchFilterKwargs = {
+            "conferences": conferences,
+            "years": years,
+            "sessions": sessions,
+            "where_filters": where_filters,
+            "field_filters": field_filters or None,
+        }
+
+        if not use_embeddings:
+            papers = self.keyword_search(
+                keyword=remaining_query if remaining_query else None,
+                limit=limit,
+                **filters,
             )
-            return self.get_papers_by_uids(uids[:limit] if limit else uids)
+            return papers, None
 
-        semantic_query = query
+        if field_filters and not remaining_query:
+            uids = self._resolve_filter_ids(**filters) or []
+            return self.get_papers_by_uids(uids[:limit] if limit else uids), None
 
         if not field_filters:
-            author_uids = self.resolve_paper_uids(
-                conferences=conferences,
-                years=years,
-                sessions=sessions,
-                where_filters=where_filters,
-                field_filters={"authors": semantic_query},
-            )
+            author_filters: _SearchFilterKwargs = {
+                **filters,
+                "field_filters": {"authors": remaining_query},
+            }
+            author_uids = self._resolve_filter_ids(**author_filters) or []
             if author_uids:
-                return self.get_papers_by_uids(author_uids[:limit])
-
-        has_filters = bool(conferences or years or sessions or where_filters or field_filters)
-        matching_uids = (
-            self.resolve_paper_uids(
-                conferences=conferences,
-                years=years,
-                sessions=sessions,
-                where_filters=where_filters,
-                field_filters=field_filters,
-            )
-            if has_filters
-            else None
-        )
-        if has_filters and not matching_uids:
-            return []
+                return self.get_papers_by_uids(author_uids[:limit]), None
 
         owns_manager = embeddings_manager is None
         em = embeddings_manager or EmbeddingsManager()
         try:
-            results = em.search_similar(
-                semantic_query,
-                n_results=limit * 2,
-                ids=matching_uids,
+            from abstracts_explorer.embeddings.query import QueryEmbedding
+
+            query_embedding = QueryEmbedding(remaining_query, em)
+            matches = self.find_paper_ids_within_distance(
+                query_embedding,
+                distance_threshold,
+                limit=None if include_total else limit,
+                **filters,
             )
-            try:
-                papers = format_search_results(results, self)
-            except PaperFormattingError:
-                return []
+            total_similar = len(matches) if include_total else None
+            return self.get_result_details(matches, slice(0, limit)), total_similar
         finally:
             if owns_manager:
                 em.close()
-
-        papers = [paper for paper in papers if paper.get("distance", 0.0) <= distance_threshold]
-        return papers[:limit]

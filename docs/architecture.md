@@ -230,8 +230,8 @@ graph TD
 
         subgraph "Paper Operations"
             ADD["add_paper / add_papers"]
-            SEARCH["search_papers<br/>(flexible filter builder)"]
-            KWSEARCH["search_papers_keyword<br/>(⚠ thin wrapper around search_papers)"]
+            SEARCH["keyword_search<br/>(flexible filter builder)"]
+            QUERY["search<br/>(query parser + router)"]
         end
 
         subgraph "⚠ Duplicate: Faceting Methods"
@@ -266,7 +266,8 @@ graph TD
     CONN --> ADD
     CONN --> ADD
     CONN --> SEARCH
-    SEARCH --> KWSEARCH
+    CONN --> QUERY
+    SEARCH --> QUERY
     CONN --> SESS
     CONN --> CONF
     CONN --> YEARS
@@ -275,7 +276,6 @@ graph TD
     CONN --> ER
     CONN --> EXPS
 
-    style KWSEARCH fill:#ffffcc,stroke:#cccc00
 ```
 
 ## Embeddings & Clustering Flow
@@ -288,12 +288,12 @@ graph TD
         EADD["add_paper / embed_from_database<br/>→ generate_embedding(s) → store"]
         ESRCH["search_similar (low level)"]
         EQRY["_query_embeddings"]
-        EFIND["DatabaseManager.find_papers_within_distance<br/>(full records)"]
+        EFIND["DatabaseManager.find_paper_ids_within_distance<br/>(UIDs + distances)"]
         EQUERY["query_ids_within_distance<br/>(IDs + distances)"]
         EIMP["import/export_embeddings"]
 
         subgraph "SQL filter resolution"
-            W1["DatabaseManager.search_papers_semantic:<br/>SQL filters → UIDs → Chroma ids"]
+            W1["DatabaseManager.search:<br/>SQL filters → UIDs → Chroma ids"]
             W2["_query_embeddings:<br/>IDs + distances only"]
         end
     end

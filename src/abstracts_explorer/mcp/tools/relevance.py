@@ -5,8 +5,9 @@ Topic-relevance analysis tools.
 import json
 import logging
 from collections import Counter
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
+from abstracts_explorer.embeddings import QueryEmbedding
 from abstracts_explorer.mcp import deps, resources
 from abstracts_explorer.mcp.server import mcp
 
@@ -96,20 +97,14 @@ def analyze_topic_relevance(
 
             candidate_ids = db.resolve_paper_uids(conferences=conferences, years=years)
             if candidate_ids:
-                result_data = em.query_ids_within_distance(
-                    query=topic,
+                query = QueryEmbedding(topic, em)
+                matches = em.query_ids_within_distance(
+                    query=query,
                     distance_threshold=distance_threshold,
                     ids=candidate_ids,
                 )
-                papers_by_uid = {paper["uid"]: paper for paper in db.get_papers_by_uids(result_data["ids"])}
-                papers: List[Dict[str, Any]] = []
-                for uid, distance in zip(result_data["ids"], result_data["distances"]):
-                    paper = papers_by_uid.get(uid)
-                    if paper is None:
-                        continue
-                    paper["distance"] = distance
-                    papers.append(paper)
-                total_considered = result_data.get("total_considered", len(papers))
+                papers = db.get_result_details(matches)
+                total_considered = len(candidate_ids)
             else:
                 papers = []
                 total_considered = 0

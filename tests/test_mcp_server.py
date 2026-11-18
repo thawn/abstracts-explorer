@@ -486,7 +486,7 @@ class TestToolResourceCleanup:
         mock_db = Mock()
         mock_em_class.return_value = mock_em
         mock_db_class.return_value = mock_db
-        mock_db.search_papers_semantic.side_effect = RuntimeError("boom")
+        mock_db.search.side_effect = RuntimeError("boom")
 
         from abstracts_explorer.mcp_server import search_papers
 
@@ -620,12 +620,7 @@ class TestTopicEvolutionAndRelevance:
             {"uid": "a2", "title": "Paper 2", "session": "DL", "year": 2023, "conference": "NeurIPS", "abstract": ""},
             {"uid": "a3", "title": "Paper 3", "session": "ML", "year": 2024, "conference": "NeurIPS", "abstract": ""},
         ]
-        mock_em.query_ids_within_distance.return_value = {
-            "ids": ["a1", "a2", "a3"],
-            "distances": [0.1, 0.2, 0.3],
-            "count": 3,
-            "total_considered": 90,
-        }
+        mock_em.query_ids_within_distance.return_value = [("a1", 0.1), ("a2", 0.2), ("a3", 0.3)]
         mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 100}
 
         from abstracts_explorer.mcp_server import get_topic_evolution
@@ -636,12 +631,10 @@ class TestTopicEvolutionAndRelevance:
         cdata = result["conference_data"]["NeurIPS"]
         assert cdata["year_counts"]["2023"] == 2
         assert cdata["year_counts"]["2024"] == 1
-        mock_em.query_ids_within_distance.assert_called_once_with(
-            query="transformers",
-            distance_threshold=1.1,
-            ids=["a1", "a2", "a3"],
-            query_embedding=mock_em.generate_embedding.return_value,
-        )
+        query_arg = mock_em.query_ids_within_distance.call_args.kwargs["query"]
+        assert query_arg.text == "transformers"
+        assert mock_em.query_ids_within_distance.call_args.kwargs["distance_threshold"] == 1.1
+        assert mock_em.query_ids_within_distance.call_args.kwargs["ids"] == ["a1", "a2", "a3"]
         mock_em.close.assert_called_once()
         mock_db.close.assert_called_once()
 
@@ -674,12 +667,7 @@ class TestTopicEvolutionAndRelevance:
                 "abstract": "",
             },
         ]
-        mock_em.query_ids_within_distance.return_value = {
-            "ids": ["a1", "a2"],
-            "distances": [0.1, 0.2],
-            "count": 2,
-            "total_considered": 60,
-        }
+        mock_em.query_ids_within_distance.return_value = [("a1", 0.1), ("a2", 0.2)]
         mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 50}
 
         from abstracts_explorer.mcp_server import get_topic_evolution
@@ -714,12 +702,7 @@ class TestTopicEvolutionAndRelevance:
         mock_db.get_paper_summaries_by_uids.return_value = [
             {"uid": "a1", "title": "Paper 1", "session": "ML", "year": 2024, "conference": "NeurIPS", "abstract": ""}
         ]
-        mock_em.query_ids_within_distance.return_value = {
-            "ids": ["a1"],
-            "distances": [0.3],
-            "count": 1,
-            "total_considered": 50,
-        }
+        mock_em.query_ids_within_distance.return_value = [("a1", 0.3)]
         mock_db.get_stats.return_value = {"total_papers": 200}
 
         from abstracts_explorer.mcp_server import get_topic_evolution
@@ -780,12 +763,7 @@ class TestTopicEvolutionAndRelevance:
             },
         }
         mock_db.get_paper_summaries_by_uids.side_effect = lambda uids: [summaries[uid] for uid in uids]
-        mock_em.query_ids_within_distance.side_effect = lambda ids=None, **kwargs: {
-            "ids": ids,
-            "distances": [0.1 for _ in ids],
-            "count": len(ids),
-            "total_considered": 100,
-        }
+        mock_em.query_ids_within_distance.side_effect = lambda ids=None, **kwargs: [(uid, 0.1) for uid in (ids or [])]
         mock_db.get_stats.return_value = {"total_papers": 100}
 
         from abstracts_explorer.mcp_server import get_topic_evolution
@@ -804,7 +782,7 @@ class TestTopicEvolutionAndRelevance:
         mock_em_class.return_value = Mock()
         mock_db = Mock()
         mock_db_class.return_value = mock_db
-        mock_db.search_papers_semantic.return_value = [{"uid": "p1", "title": "Paper 1"}]
+        mock_db.search.return_value = ([{"uid": "p1", "title": "Paper 1"}], None)
 
         from abstracts_explorer.mcp_server import search_papers
 
@@ -819,7 +797,7 @@ class TestTopicEvolutionAndRelevance:
         )
 
         assert result["papers_found"] == 1
-        call_kwargs = mock_db.search_papers_semantic.call_args.kwargs
+        call_kwargs = mock_db.search.call_args.kwargs
         assert call_kwargs["where_filters"] == filters
         assert call_kwargs["conferences"] == ["NeurIPS"]
         assert call_kwargs["years"] == [2024, 2025]
@@ -832,7 +810,7 @@ class TestTopicEvolutionAndRelevance:
         mock_em_class.return_value = Mock()
         mock_db = Mock()
         mock_db_class.return_value = mock_db
-        mock_db.search_papers_semantic.return_value = [{"uid": "p1", "title": "Paper 1"}]
+        mock_db.search.return_value = ([{"uid": "p1", "title": "Paper 1"}], None)
 
         from abstracts_explorer.mcp_server import search_papers
 
@@ -842,7 +820,7 @@ class TestTopicEvolutionAndRelevance:
         )
 
         assert result["topic"] == "deep learning"
-        assert mock_db.search_papers_semantic.call_args.kwargs["where_filters"] == filters
+        assert mock_db.search.call_args.kwargs["where_filters"] == filters
 
     @patch("abstracts_explorer.mcp.resources.load_clustering_data")
     @patch("abstracts_explorer.mcp.deps.get_config")
@@ -954,16 +932,19 @@ class TestSearchPapersPaperCardFields:
             "distances": [[0.1]],
         }
         mock_db = Mock()
-        mock_db.search_papers_semantic.return_value = [
-            {
-                "uid": "abc123",
-                "title": "Test Paper",
-                "year": 2024,
-                "conference": "NeurIPS",
-                "authors": ["Alice", "Bob"],
-                "abstract": "Test abstract",
-            }
-        ]
+        mock_db.search.return_value = (
+            [
+                {
+                    "uid": "abc123",
+                    "title": "Test Paper",
+                    "year": 2024,
+                    "conference": "NeurIPS",
+                    "authors": ["Alice", "Bob"],
+                    "abstract": "Test abstract",
+                }
+            ],
+            None,
+        )
         mock_db_class.return_value = mock_db
 
         from abstracts_explorer.mcp_server import search_papers
@@ -1012,16 +993,19 @@ class TestSearchPapersPaperCardFields:
             "distances": [[0.1]],
         }
         mock_db = Mock()
-        mock_db.search_papers_semantic.return_value = [
-            {
-                "uid": "abc123",
-                "title": "Test Paper",
-                "year": 2024,
-                "conference": "NeurIPS",
-                "authors": ["Alice Smith", "Bob Jones", "Carol White"],
-                "abstract": "Test abstract",
-            }
-        ]
+        mock_db.search.return_value = (
+            [
+                {
+                    "uid": "abc123",
+                    "title": "Test Paper",
+                    "year": 2024,
+                    "conference": "NeurIPS",
+                    "authors": ["Alice Smith", "Bob Jones", "Carol White"],
+                    "abstract": "Test abstract",
+                }
+            ],
+            None,
+        )
         mock_db_class.return_value = mock_db
 
         from abstracts_explorer.mcp_server import search_papers
@@ -1055,16 +1039,19 @@ class TestSearchPapersPaperCardFields:
             "distances": [[0.2]],
         }
         mock_db = Mock()
-        mock_db.search_papers_semantic.return_value = [
-            {
-                "uid": "xyz789",
-                "title": "No Authors Paper",
-                "year": 2024,
-                "conference": "ICLR",
-                "authors": [],
-                "abstract": "Abstract text",
-            }
-        ]
+        mock_db.search.return_value = (
+            [
+                {
+                    "uid": "xyz789",
+                    "title": "No Authors Paper",
+                    "year": 2024,
+                    "conference": "ICLR",
+                    "authors": [],
+                    "abstract": "Abstract text",
+                }
+            ],
+            None,
+        )
         mock_db_class.return_value = mock_db
 
         from abstracts_explorer.mcp_server import search_papers
@@ -1108,17 +1095,20 @@ class TestSearchPapersPaperCardFields:
             "distances": [[0.05]],
         }
         mock_db = Mock()
-        mock_db.search_papers_semantic.return_value = [
-            {
-                "uid": "p1",
-                "title": "Conference Paper",
-                "year": 2025,
-                "conference": "NeurIPS",
-                "session": "Oral",
-                "authors": ["Author A"],
-                "abstract": "Abstract",
-            }
-        ]
+        mock_db.search.return_value = (
+            [
+                {
+                    "uid": "p1",
+                    "title": "Conference Paper",
+                    "year": 2025,
+                    "conference": "NeurIPS",
+                    "session": "Oral",
+                    "authors": ["Author A"],
+                    "abstract": "Abstract",
+                }
+            ],
+            None,
+        )
         mock_db_class.return_value = mock_db
 
         from abstracts_explorer.mcp_server import search_papers
@@ -1163,18 +1153,21 @@ class TestSearchPapersPaperCardFields:
             "distances": [[0.15]],
         }
         mock_db = Mock()
-        mock_db.search_papers_semantic.return_value = [
-            {
-                "uid": "p42",
-                "title": "Full Paper",
-                "year": 2024,
-                "conference": "ICML",
-                "session": "Best Paper Session",
-                "authors": ["First Author", "Second Author"],
-                "abstract": "This is the abstract text.",
-                "relevance_score": 0.85,
-            }
-        ]
+        mock_db.search.return_value = (
+            [
+                {
+                    "uid": "p42",
+                    "title": "Full Paper",
+                    "year": 2024,
+                    "conference": "ICML",
+                    "session": "Best Paper Session",
+                    "authors": ["First Author", "Second Author"],
+                    "abstract": "This is the abstract text.",
+                    "relevance_score": 0.85,
+                }
+            ],
+            None,
+        )
         mock_db_class.return_value = mock_db
 
         from abstracts_explorer.mcp_server import search_papers
@@ -1238,7 +1231,7 @@ class TestGetPaperDetails:
         from abstracts_explorer.mcp_server import get_paper_details
 
         mock_db = Mock()
-        mock_db.search_papers.return_value = [self._make_paper_row()]
+        mock_db.keyword_search.return_value = [self._make_paper_row()]
 
         with patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db):
             result = json.loads(get_paper_details(title="Test Paper"))
@@ -1251,7 +1244,7 @@ class TestGetPaperDetails:
         assert paper["authors"] == ["Smith, John", "Doe, Jane"]
         assert paper["paper_pdf_url"] == "https://example.com/paper.pdf"
         assert paper["keywords"] == "deep learning, transformers"
-        mock_db.search_papers.assert_called_once_with(keyword="Test Paper", conferences=None, years=None, limit=5)
+        mock_db.keyword_search.assert_called_once_with(keyword="Test Paper", conferences=None, years=None, limit=5)
 
     def test_lookup_by_paper_id(self):
         """get_paper_details performs exact UID/original_id lookup when paper_id is provided."""
@@ -1277,7 +1270,7 @@ class TestGetPaperDetails:
 
         mock_db = Mock()
         mock_db.get_paper_by_original_id_or_uid.return_value = None  # ID not found
-        mock_db.search_papers.return_value = [self._make_paper_row()]
+        mock_db.keyword_search.return_value = [self._make_paper_row()]
 
         with patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db):
             result = json.loads(get_paper_details(paper_id="notfound", title="Test Paper"))
@@ -1285,14 +1278,14 @@ class TestGetPaperDetails:
         assert "error" not in result
         assert result["papers_found"] == 1
         mock_db.get_paper_by_original_id_or_uid.assert_called_once()
-        mock_db.search_papers.assert_called_once()
+        mock_db.keyword_search.assert_called_once()
 
     def test_authors_with_no_semicolon(self):
         """Single author is returned as one-element list (DatabaseManager already returns list)."""
         from abstracts_explorer.mcp_server import get_paper_details
 
         mock_db = Mock()
-        mock_db.search_papers.return_value = [self._make_paper_row(authors=["Solo Author"])]
+        mock_db.keyword_search.return_value = [self._make_paper_row(authors=["Solo Author"])]
 
         with patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db):
             result = json.loads(get_paper_details(title="Paper"))
@@ -1304,7 +1297,7 @@ class TestGetPaperDetails:
         from abstracts_explorer.mcp_server import get_paper_details
 
         mock_db = Mock()
-        mock_db.search_papers.return_value = [self._make_paper_row(authors=[])]
+        mock_db.keyword_search.return_value = [self._make_paper_row(authors=[])]
 
         with patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db):
             result = json.loads(get_paper_details(title="Paper"))
@@ -1316,31 +1309,31 @@ class TestGetPaperDetails:
         from abstracts_explorer.mcp_server import get_paper_details
 
         mock_db = Mock()
-        mock_db.search_papers.return_value = []
+        mock_db.keyword_search.return_value = []
 
         with patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db):
             get_paper_details(title="Paper", conference="ICLR", year=2024, limit=3)
 
-        mock_db.search_papers.assert_called_once_with(keyword="Paper", conferences=["ICLR"], years=[2024], limit=3)
+        mock_db.keyword_search.assert_called_once_with(keyword="Paper", conferences=["ICLR"], years=[2024], limit=3)
 
     def test_limit_parameter(self):
         """limit parameter controls how many results are requested from DB."""
         from abstracts_explorer.mcp_server import get_paper_details
 
         mock_db = Mock()
-        mock_db.search_papers.return_value = []
+        mock_db.keyword_search.return_value = []
 
         with patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db):
             get_paper_details(title="Paper", limit=10)
 
-        mock_db.search_papers.assert_called_once_with(keyword="Paper", conferences=None, years=None, limit=10)
+        mock_db.keyword_search.assert_called_once_with(keyword="Paper", conferences=None, years=None, limit=10)
 
     def test_no_papers_found(self):
         """No matching papers returns papers_found=0 and empty list."""
         from abstracts_explorer.mcp_server import get_paper_details
 
         mock_db = Mock()
-        mock_db.search_papers.return_value = []
+        mock_db.keyword_search.return_value = []
 
         with patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db):
             result = json.loads(get_paper_details(title="Nonexistent Paper"))
@@ -1354,7 +1347,7 @@ class TestGetPaperDetails:
         from abstracts_explorer.mcp_server import get_paper_details
 
         mock_db = Mock()
-        mock_db.search_papers.side_effect = Exception("DB connection failed")
+        mock_db.keyword_search.side_effect = Exception("DB connection failed")
 
         with patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db):
             result = json.loads(get_paper_details(title="Paper"))
@@ -1437,7 +1430,7 @@ class TestInterestingPaperMCPTools:
                 priorities={"p1": {"priority": 5}},
                 conferences=["ICLR"],
                 years=[2026],
-                n_results=3,
+                limit=3,
             )
         )
 
@@ -1449,7 +1442,7 @@ class TestInterestingPaperMCPTools:
             paper_ids=None,
             conferences=["ICLR"],
             years=[2026],
-            n_results=3,
+            limit=3,
             exclude_ids=None,
         )
         mock_em.close.assert_called_once()

@@ -81,7 +81,7 @@ def recommend_related_papers(
     priorities: Optional[Dict[str, Any]] = None,
     conferences: Optional[List[str]] = None,
     years: Optional[List[int]] = None,
-    n_results: int = 10,
+    limit: int = 10,
     exclude_ids: Optional[List[str]] = None,
     collection_name: Optional[str] = None,
 ) -> str:
@@ -112,7 +112,7 @@ def recommend_related_papers(
     years : list of int, optional
         Restrict recommendations to these years.  When omitted, the years of
         the interesting papers are used.
-    n_results : int, optional
+    limit : int, optional
         Number of recommendations to return (default: 10).
     exclude_ids : list of str, optional
         Additional paper UIDs to exclude from the results.
@@ -147,7 +147,7 @@ def recommend_related_papers(
                 paper_ids=paper_ids,
                 conferences=conferences,
                 years=years,
-                n_results=n_results,
+                limit=limit,
                 exclude_ids=exclude_ids,
             )
             return json.dumps(result, indent=2, default=str)

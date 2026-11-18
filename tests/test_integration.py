@@ -1,6 +1,7 @@
 """
 Integration tests for the abstracts_explorer package.
 
+
 Note: This test file contains integration tests for the lightweight paper schema
 used by the current plugins.
 """
@@ -11,6 +12,13 @@ from abstracts_explorer import DatabaseManager
 from abstracts_explorer.plugin import LightweightPaper, convert_to_lightweight_schema
 from tests.conftest import set_test_db, set_test_embedding_db
 from tests.helpers import raw_query, requires_lm_studio
+
+
+def _search_semantic(db, query, **kwargs):
+    """Run a semantic search through the unified DatabaseManager.search()."""
+    papers, _ = db.search(query, use_embeddings=True, **kwargs)
+    return papers
+
 
 # Fixtures imported from conftest.py:
 # - sample_neurips_data: List of 2 papers with authors
@@ -32,10 +40,10 @@ class TestIntegration:
 
             assert db.get_paper_count() == 0
 
-            results = db.search_papers(keyword="anything")
+            results = db.keyword_search(keyword="anything")
             assert len(results) == 0
 
-            results = db.search_papers(sessions=["Session A"])
+            results = db.keyword_search(sessions=["Session A"])
             assert len(results) == 0
 
     def _get_real_neurips_subset(self):
@@ -438,36 +446,36 @@ class TestIntegration:
 
             # Test 1: Query by session (lightweight schema uses session field)
             # The test data has various sessions, we can verify we get results
-            all_papers = db.search_papers()
+            all_papers = db.keyword_search()
             assert len(all_papers) == 7
 
             # Test 2: Search for specific paper by keyword
-            disco_papers = db.search_papers(keyword="DisCO")
+            disco_papers = db.keyword_search(keyword="DisCO")
             assert len(disco_papers) >= 1
 
             # Test 3: Search by year
-            papers_2025 = db.search_papers(years=[2025])
+            papers_2025 = db.keyword_search(years=[2025])
             assert len(papers_2025) == 7
 
             # Test 4: Search by conference
-            papers = db.search_papers(conferences=["NeurIPS"])
+            papers = db.keyword_search(conferences=["NeurIPS"])
             assert len(papers) == 7
 
             # Test 3: Keyword search
-            graph_papers = db.search_papers(keyword="graph")
+            graph_papers = db.keyword_search(keyword="graph")
             assert len(graph_papers) >= 1
             assert any("Graph" in p["title"] for p in graph_papers)
 
-            learning_papers = db.search_papers(keyword="learning")
+            learning_papers = db.keyword_search(keyword="learning")
             assert len(learning_papers) >= 1
 
             # Test 4: Search by keywords related to different areas
-            graph_papers_2 = db.search_papers(keyword="representation")
+            graph_papers_2 = db.keyword_search(keyword="representation")
             assert len(graph_papers_2) >= 1
 
             # Test 6: Verify author data is stored correctly
             # Get papers and check their author strings
-            papers = db.search_papers()
+            papers = db.keyword_search()
             paper1 = next((p for p in papers if p["original_id"] == "119718"), None)
             assert paper1 is not None
             # Authors are stored as semicolon-separated string
@@ -554,28 +562,26 @@ class TestIntegration:
             assert stats["count"] == 7
 
             # Step 3: Test semantic search - Find papers about "graph learning"
-            graph_results = em.search_similar("graph learning representation", n_results=3)
+            graph_results = em.search_similar("graph learning representation", limit=3)
 
-            assert "ids" in graph_results
-            assert len(graph_results["ids"][0]) <= 3
-            assert len(graph_results["ids"][0]) > 0
+            assert len(graph_results) <= 3
+            assert len(graph_results) > 0
 
             # Verify we got paper UIDs back (UIDs are hex strings in lightweight schema)
-            result_uids = graph_results["ids"][0]
+            result_uids = [uid for uid, _ in graph_results]
             assert all(isinstance(uid, str) for uid in result_uids)
             # Verify UIDs are valid hex strings (8+ characters)
             assert all(len(uid) >= 8 for uid in result_uids)
 
             # Verify distances are present and reasonable
-            distances = graph_results["distances"][0]
+            distances = [distance for _, distance in graph_results]
             assert all(isinstance(d, (int, float)) for d in distances)
-            assert len(distances) == len(result_uids)
 
             # Step 4: Test search with different query
-            reasoning_results = em.search_similar("reasoning and language models", n_results=2)
+            reasoning_results = em.search_similar("reasoning and language models", limit=2)
 
-            assert len(reasoning_results["ids"][0]) <= 2
-            assert len(reasoning_results["ids"][0]) > 0
+            assert len(reasoning_results) <= 2
+            assert len(reasoning_results) > 0
 
             # Step 5: Test metadata filtering through SQL-resolved IDs
             with DatabaseManager() as db:
@@ -583,11 +589,11 @@ class TestIntegration:
                 first_session = results[0]["session"]
                 session_ids = db.resolve_paper_uids(sessions=[first_session])
 
-            session_results = em.search_similar("machine learning", n_results=5, ids=session_ids)
-            assert len(session_results["ids"][0]) > 0
+            session_results = em.search_similar("machine learning", limit=5, ids=session_ids)
+            assert len(session_results) > 0
 
             # Step 6: Verify documents are content hashes and metadata is absent
-            stored = em.collection.get(ids=graph_results["ids"][0], include=["documents", "metadatas"])
+            stored = em.collection.get(ids=result_uids, include=["documents", "metadatas"])
             assert all(isinstance(doc, str) and doc.startswith("sha256:") for doc in stored["documents"])
             assert all(metadata is None for metadata in stored["metadatas"])
 
@@ -603,8 +609,8 @@ class TestIntegration:
             assert stats["count"] == 7
 
             # Can still perform searches
-            results = em.search_similar("neural networks", n_results=3)
-            assert len(results["ids"][0]) > 0
+            results = em.search_similar("neural networks", limit=3)
+            assert len(results) > 0
 
     @requires_lm_studio
     def test_search_papers_semantic_e2e(self, tmp_path):
@@ -675,7 +681,7 @@ class TestIntegration:
 
             # Test 1: Search without filters - should return all papers
             with DatabaseManager() as db:
-                results_all = db.search_papers_semantic("neural networks learning", limit=10, embeddings_manager=em)
+                results_all = _search_semantic(db, "neural networks learning", limit=10, embeddings_manager=em)
                 assert len(results_all) > 0, "Search without filters should return results"
                 # Verify similarity scores are included
                 for paper in results_all:
@@ -684,7 +690,8 @@ class TestIntegration:
 
             # Test 2: Search with year filter [2024] - should return only 2024 paper
             with DatabaseManager() as db:
-                results_2024 = db.search_papers_semantic(
+                results_2024 = _search_semantic(
+                    db,
                     "deep learning neural networks image recognition",
                     limit=10,
                     years=[2024],
@@ -697,7 +704,8 @@ class TestIntegration:
 
             # Test 3: Search with year filter [2025] - should return only 2025 papers
             with DatabaseManager() as db:
-                results_2025 = db.search_papers_semantic(
+                results_2025 = _search_semantic(
+                    db,
                     "reinforcement learning robotics transformers vision",
                     limit=10,
                     years=[2025],
@@ -710,7 +718,8 @@ class TestIntegration:
 
             # Test 4: Search with session filter
             with DatabaseManager() as db:
-                results_oral = db.search_papers_semantic(
+                results_oral = _search_semantic(
+                    db,
                     "deep learning neural networks image recognition",
                     limit=10,
                     sessions=["Oral Session 1"],

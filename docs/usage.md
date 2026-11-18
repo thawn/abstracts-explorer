@@ -55,7 +55,7 @@ Search papers by keyword or semantic similarity:
 uv run abstracts-explorer search "transformer architecture"
 
 # Limit results
-uv run abstracts-explorer search "reinforcement learning" --n-results 10
+uv run abstracts-explorer search "reinforcement learning" --limit 10
 
 # Filter by year
 uv run abstracts-explorer search "neural networks" --year 2025
@@ -90,13 +90,13 @@ db = DatabaseManager()
 papers = db.get_paper(limit=0)
 
 # Keyword search across title, abstract, and keywords
-results = db.search_papers(keyword="transformer")
+results = db.keyword_search(keyword="transformer")
 
 # Field-specific substring search
-title_matches = db.search_papers(field_filters={"title": "attention"})
+title_matches = db.keyword_search(field_filters={"title": "attention"})
 
 # Filter by year
-papers_2025 = db.search_papers(years=[2025])
+papers_2025 = db.keyword_search(years=[2025])
 
 # Authors are stored on the paper record as a semicolon-separated string
 authors = papers[0]["authors"] if papers else None
@@ -140,7 +140,10 @@ em = EmbeddingsManager(
 em.embed_from_database()
 
 # Search by semantic similarity
-results = em.search_similar("transformer attention mechanism", n_results=5)
+from abstracts_explorer.embeddings import QueryEmbedding
+
+query = QueryEmbedding("transformer attention mechanism", em)
+results = em.search_similar(query, limit=5)
 
 # Search with metadata filter
 from abstracts_explorer.database import DatabaseManager
@@ -148,8 +151,8 @@ from abstracts_explorer.database import DatabaseManager
 db = DatabaseManager()
 uids = db.resolve_paper_uids(years=[2025])
 results = em.search_similar(
-    "deep learning",
-    n_results=10,
+    QueryEmbedding("deep learning", em),
+    limit=10,
     ids=uids,
 )
 ```
@@ -219,7 +222,7 @@ from abstracts_explorer.database import DatabaseManager
 db = DatabaseManager()
 
 # Complex search with multiple filters
-papers = db.search_papers(
+papers = db.keyword_search(
     title="learning",
     abstract="neural network",
     year=2025,

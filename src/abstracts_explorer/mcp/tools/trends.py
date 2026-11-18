@@ -6,6 +6,7 @@ import json
 import logging
 from typing import Any, Dict, Optional
 
+from abstracts_explorer.embeddings import QueryEmbedding
 from abstracts_explorer.mcp import deps, resources
 from abstracts_explorer.mcp.server import mcp
 
@@ -79,7 +80,7 @@ def get_topic_evolution(
 
             # Embed the query once here and reuse for every (conference, year) pair
             # to avoid redundant LLM API calls.
-            query_embedding = em.generate_embedding(topic_keywords)
+            query_embedding = QueryEmbedding(topic_keywords, em)
 
             conference_data: Dict[str, Dict[str, Any]] = {}
             total_papers = 0
@@ -110,17 +111,17 @@ def get_topic_evolution(
                         years=available_years,
                     )
                     if candidate_ids:
-                        result_data = em.query_ids_within_distance(
-                            query=topic_keywords,
+                        matches = em.query_ids_within_distance(
+                            query=query_embedding,
                             distance_threshold=distance_threshold,
                             ids=candidate_ids,
-                            query_embedding=query_embedding,
                         )
                         summaries = {
-                            paper["uid"]: paper for paper in db.get_paper_summaries_by_uids(result_data["ids"])
+                            paper["uid"]: paper
+                            for paper in db.get_paper_summaries_by_uids([uid for uid, _ in matches])
                         }
 
-                        for uid, distance in zip(result_data["ids"], result_data["distances"]):
+                        for uid, distance in matches:
                             paper = summaries.get(uid)
                             if paper is None:
                                 continue

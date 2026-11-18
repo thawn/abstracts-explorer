@@ -160,7 +160,7 @@ def _fallback_recommendations(
     excluded_uids: set[str],
     conferences: Optional[Sequence[str]],
     years: Optional[Sequence[int]],
-    n_results: int,
+    limit: int,
     reason: str,
 ) -> Dict[str, Any]:
     """Metadata/keyword-only fallback when embeddings are unavailable."""
@@ -178,7 +178,7 @@ def _fallback_recommendations(
     candidates: Dict[str, Dict[str, Any]] = {}
     match_counts: Counter[str] = Counter()
     for keyword, _ in keyword_counts.most_common(8):
-        matches = database.search_papers(
+        matches = database.keyword_search(
             keyword=keyword,
             conferences=list(conferences) if conferences else None,
             years=list(years) if years else None,
@@ -196,7 +196,7 @@ def _fallback_recommendations(
     ranked = sorted(candidates.values(), key=lambda paper: match_counts[str(paper.get("uid"))], reverse=True)
 
     recommendations: List[Dict[str, Any]] = []
-    for paper in ranked[:n_results]:
+    for paper in ranked[:limit]:
         uid = str(paper.get("uid"))
         score = round(match_counts[uid] / max_matches, 4)
         record = _paper_record(paper, include_abstract=True)
@@ -219,7 +219,7 @@ def recommend_related_papers(
     paper_ids: Optional[Sequence[str]] = None,
     conferences: Optional[Sequence[str]] = None,
     years: Optional[Sequence[int]] = None,
-    n_results: int = DEFAULT_RECOMMENDATION_LIMIT,
+    limit: int = DEFAULT_RECOMMENDATION_LIMIT,
     exclude_ids: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     """
@@ -243,7 +243,7 @@ def recommend_related_papers(
         Restrict recommendations to these conferences.
     years : sequence of int, optional
         Restrict recommendations to these years.
-    n_results : int, optional
+    limit : int, optional
         Number of recommendations to return.
     exclude_ids : sequence of str, optional
         Additional UIDs to exclude from the results.
@@ -254,7 +254,7 @@ def recommend_related_papers(
         Dictionary with ``papers`` (recommendations), filter metadata, and
         an optional ``warning``.
     """
-    n_results = max(1, min(int(n_results), 50))
+    limit = max(1, min(int(limit), 50))
     loaded = load_interesting_papers(
         database=database,
         priorities=priorities,
@@ -331,7 +331,7 @@ def recommend_related_papers(
             excluded_uids=excluded_uids,
             conferences=resolved_conferences,
             years=resolved_years,
-            n_results=n_results,
+            limit=limit,
             reason=(
                 "No stored embeddings were available for the interesting papers; "
                 "recommendations use metadata keyword overlap instead."
@@ -353,22 +353,22 @@ def recommend_related_papers(
             excluded_uids=excluded_uids,
             conferences=resolved_conferences,
             years=resolved_years,
-            n_results=n_results,
+            limit=limit,
             reason="The embedding collection is empty; recommendations use metadata keyword overlap instead.",
         )
         fallback["seed_count"] = len(seed_papers)
         fallback["filters"] = filters
         return fallback
 
-    n_query = min(
+    candidate_limit = min(
         len(candidate_uids) if candidate_uids is not None else collection_size,
-        max(n_results + len(excluded_uids) + 20, n_results * 4),
+        max(limit + len(excluded_uids) + 20, limit * 4),
     )
 
     try:
         results = embeddings_manager.collection.query(
             query_embeddings=[centroid],
-            n_results=n_query,
+            n_results=candidate_limit,
             ids=candidate_uids,
             include=["distances"],
         )
@@ -380,7 +380,7 @@ def recommend_related_papers(
             excluded_uids=excluded_uids,
             conferences=resolved_conferences,
             years=resolved_years,
-            n_results=n_results,
+            limit=limit,
             reason=f"Embedding search failed ({exc}); recommendations use metadata keyword overlap instead.",
         )
         fallback["seed_count"] = len(seed_papers)
@@ -417,7 +417,7 @@ def recommend_related_papers(
             recommendations.append(record)
             seen.add(uid)
 
-            if len(recommendations) >= n_results:
+            if len(recommendations) >= limit:
                 break
 
     warning = None

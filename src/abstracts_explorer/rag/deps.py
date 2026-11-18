@@ -38,7 +38,7 @@ class RAGDeps:
     tool_results: List[Dict[str, Any]] = field(default_factory=list)
     conferences: List[str] = field(default_factory=list)
     years: List[int] = field(default_factory=list)
-    n_results: Optional[int] = None
+    limit: Optional[int] = None
     paper_priorities: Dict[str, Any] = field(default_factory=dict)
     tool_cache: Dict[str, str] = field(default_factory=dict)
     tool_cache_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)

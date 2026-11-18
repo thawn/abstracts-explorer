@@ -251,7 +251,7 @@ class AgentMixin:
     def query(
         self,
         question: str,
-        n_results: Optional[int] = None,
+        limit: Optional[int] = None,
         system_prompt: Optional[str] = None,
         conferences: Optional[List[str]] = None,
         years: Optional[List[int]] = None,
@@ -265,7 +265,7 @@ class AgentMixin:
         ----------
         question : str
             User's question.
-        n_results : int, optional
+        limit : int, optional
             Number of papers to retrieve for context.
         system_prompt : str, optional
             Custom system prompt for the model (overrides default instructions including
@@ -310,7 +310,7 @@ class AgentMixin:
         with self._query_lock:
             return self._query(
                 question,
-                n_results,
+                limit,
                 system_prompt,
                 conferences,
                 years,
@@ -321,7 +321,7 @@ class AgentMixin:
     def _query(
         self,
         question: str,
-        n_results: Optional[int],
+        limit: Optional[int],
         system_prompt: Optional[str],
         conferences: Optional[List[str]],
         years: Optional[List[int]],
@@ -329,14 +329,14 @@ class AgentMixin:
         paper_priorities: Optional[Dict[str, Any]],
     ) -> Dict[str, Any]:
         try:
-            if n_results is None:
-                n_results = self.max_context_papers
+            if limit is None:
+                limit = self.max_context_papers
 
             # Fresh deps for each query to capture tool results
             deps = RAGDeps(
                 conferences=conferences or [],
                 years=years or [],
-                n_results=n_results,
+                limit=limit,
                 paper_priorities=paper_priorities or {},
             )
 

@@ -71,7 +71,7 @@ class EmbeddingsManager(GenerationMixin, QueryMixin, IngestMixin, ArtifactsMixin
     --------
     >>> em = EmbeddingsManager()
     >>> em.add_paper(paper_dict)  # client and collection created automatically
-    >>> results = em.search_similar("machine learning", n_results=5)
+    >>> results = em.search_similar(QueryEmbedding("machine learning", em), limit=5)
     >>> em.close()
     """
 

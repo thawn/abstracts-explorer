@@ -3,7 +3,7 @@ Similarity queries against the ChromaDB collection.
 """
 
 import logging
-from dataclasses import dataclass
+import threading
 from itertools import takewhile
 from typing import Any, Optional
 
@@ -12,14 +12,61 @@ from abstracts_explorer.embeddings.errors import EmbeddingsError, translate_erro
 
 logger = logging.getLogger(__name__)
 
+PaperMatch = tuple[str, float]
 
-@dataclass
-class QueryResult:
-    """Flat result of a distance query against the embedding collection."""
 
-    ids: list[str]
-    distances: list[float]
-    query_embedding: list[float]
+class QueryEmbedding:
+    """
+    Lazily generated query embedding bound to an embeddings manager.
+
+    The embedding vector is generated on first access and cached, so the
+    same object can be reused across distance filtering, counting via
+    ``len(matches)``, and result hydration without duplicate embedding API
+    calls.
+
+    Parameters
+    ----------
+    text : str
+        Query text to embed.
+    embeddings_manager : EmbeddingsManager
+        Manager used to generate the embedding vector.
+
+    Examples
+    --------
+    >>> query = QueryEmbedding("graph neural networks", em)
+    >>> query.embedding  # generated once
+    >>> em.search_similar(query, limit=5)
+    """
+
+    __slots__ = ("text", "_manager", "_vector", "_lock")
+
+    def __init__(self, text: str, embeddings_manager: Any) -> None:
+        self.text = text
+        self._manager = embeddings_manager
+        self._vector: Optional[list[float]] = None
+        self._lock = threading.Lock()
+
+    @property
+    def embeddings_manager(self) -> Any:
+        """Return the embeddings manager bound to this query."""
+        return self._manager
+
+    @property
+    def embedding(self) -> list[float]:
+        """
+        Return the embedding vector, generating it on first access.
+
+        Returns
+        -------
+        list of float
+            Query embedding vector.
+        """
+        if self._vector is None:
+            with self._lock:
+                if self._vector is None:
+                    self._vector = self._manager.generate_embedding(self.text)
+        assert self._vector is not None
+        return self._vector
 
 
 class QueryMixin:
@@ -30,70 +77,64 @@ class QueryMixin:
 
     def _query_embeddings(
         self,
-        query: str,
+        query: QueryEmbedding,
         *,
         ids: Optional[list[str]] = None,
-        query_embedding: Optional[list[float]] = None,
-        n_results: Optional[int] = None,
-    ) -> QueryResult:
+        limit: Optional[int] = None,
+    ) -> list[PaperMatch]:
         """
-        Run a distance query against the collection and return flat results.
+        Run a distance query against the collection.
 
-        Generates the query embedding when not supplied. The number of results
-        is capped by ``n_results`` (when given), the number of candidate IDs,
-        the collection size, and :data:`~abstracts_explorer.embeddings.batching.MAX_QUERY_RESULTS`.
-        When no candidates exist, empty result lists are returned without querying.
+        The number of results is capped by ``limit`` (when given), the
+        number of candidate IDs, the collection size, and
+        :data:`~abstracts_explorer.embeddings.batching.MAX_QUERY_RESULTS`.
+        When no candidates exist, an empty list is returned without querying.
 
         Parameters
         ----------
-        query : str
-            The search query text.
+        query : QueryEmbedding
+            Query embedding object. Its vector is generated lazily once.
         ids : list of str, optional
             Restrict the query to these paper UIDs.
-        query_embedding : list of float, optional
-            Pre-computed embedding for the query.
-        n_results : int, optional
+        limit : int, optional
             Maximum number of results to return.
 
         Returns
         -------
-        QueryResult
-            Paper IDs, distances, and the query embedding.
+        list of tuple
+            Ordered ``(paper_uid, distance)`` pairs.
 
         Raises
         ------
         EmbeddingsError
-            If the query is empty or the query itself fails.
+            If the query text is empty or the query itself fails.
         """
-        if not query or not query.strip():
+        if not query.text or not query.text.strip():
             raise EmbeddingsError("Query cannot be empty")
 
-        if query_embedding is None:
-            query_embedding = self.generate_embedding(query)
-        assert query_embedding is not None
-
+        query_embedding = query.embedding
         candidate_count = len(ids) if ids is not None else self.collection.count()
-        limit = min(
-            n_results if n_results is not None else candidate_count,
+        request_limit = min(
+            limit if limit is not None else candidate_count,
             candidate_count,
             MAX_QUERY_RESULTS,
         )
-        if limit <= 0:
-            return QueryResult([], [], query_embedding)
+        if request_limit <= 0:
+            return []
 
         if ids is None:
             results = self.collection.query(
                 query_embeddings=[query_embedding],
-                n_results=limit,
+                n_results=request_limit,
                 include=["distances"],
             )
             paper_ids = list(results["ids"][0]) if results.get("ids") else []
             distances = list(results["distances"][0]) if results.get("distances") else []
-            return QueryResult(paper_ids, distances, query_embedding)
+            return list(zip(paper_ids, distances))
 
-        merged: list[tuple[str, float]] = []
+        merged: list[PaperMatch] = []
         for batch in iter_batches(ids, ID_BATCH_SIZE):
-            batch_limit = min(limit, len(batch))
+            batch_limit = min(request_limit, len(batch))
             if batch_limit <= 0:
                 break
             results = self.collection.query(
@@ -107,23 +148,22 @@ class QueryMixin:
             merged.extend(zip(batch_ids, batch_distances))
 
         merged.sort(key=lambda item: item[1])
-        merged = merged[:limit]
-        return QueryResult([uid for uid, _ in merged], [distance for _, distance in merged], query_embedding)
+        return merged[:request_limit]
 
     def search_similar(
         self,
-        query: str,
-        n_results: int = 10,
+        query: QueryEmbedding,
+        limit: int = 10,
         ids: Optional[list[str]] = None,
-    ) -> dict[str, Any]:
+    ) -> list[PaperMatch]:
         """
         Search for similar papers using semantic similarity.
 
         Parameters
         ----------
-        query : str
-            Query text to search for.
-        n_results : int, optional
+        query : QueryEmbedding
+            Query embedding object.
+        limit : int, optional
             Number of results to return, by default 10.
         ids : list of str, optional
             Restrict the search to these paper UIDs. An empty list returns an
@@ -131,8 +171,8 @@ class QueryMixin:
 
         Returns
         -------
-        dict
-            ChromaDB-compatible query results containing ``ids`` and ``distances``.
+        list of tuple
+            Ordered ``(paper_uid, distance)`` pairs.
 
         Raises
         ------
@@ -141,68 +181,64 @@ class QueryMixin:
 
         Examples
         --------
-        >>> em = EmbeddingsManager()
-        >>> em.create_collection()
-        >>> results = em.search_similar("deep learning transformers", n_results=5)
-        >>> for i, paper_id in enumerate(results['ids'][0]):
-        ...     print(f"{i+1}. Paper {paper_id}: {results['distances'][0][i]}")
+        >>> query = QueryEmbedding("deep learning transformers", em)
+        >>> results = em.search_similar(query, limit=5)
+        >>> for paper_id, distance in results:
+        ...     print(f"{paper_id}: {distance}")
         """
-        if not query or not query.strip():
+        if not query.text or not query.text.strip():
             raise EmbeddingsError("Query cannot be empty")
         if ids is not None and not ids:
-            return {"ids": [[]], "distances": [[]]}
+            return []
 
         with translate_errors("Failed to search"):
-            result = self._query_embeddings(query, ids=ids, n_results=n_results)
-            logger.info("Found %d similar papers", len(result.ids))
-            return {"ids": [result.ids], "distances": [result.distances]}
+            result = self._query_embeddings(query, ids=ids, limit=limit)
+            logger.info("Found %d similar papers", len(result))
+            return result
 
     def query_ids_within_distance(
         self,
-        query: str,
+        query: QueryEmbedding,
         distance_threshold: float = 1.1,
         ids: Optional[list[str]] = None,
-        query_embedding: Optional[list[float]] = None,
-    ) -> dict[str, Any]:
+        limit: Optional[int] = None,
+    ) -> list[PaperMatch]:
         """
-        Return identifiers and distances within a distance threshold.
+        Return paper matches within a distance threshold.
 
         Parameters
         ----------
-        query : str
-            The search query text.
+        query : QueryEmbedding
+            Query embedding object.
         distance_threshold : float, optional
             Euclidean distance radius, by default 1.1.
         ids : list of str, optional
             Restrict the query to these paper UIDs.
-        query_embedding : list of float, optional
-            Pre-computed embedding for the query.
+        limit : int, optional
+            Maximum number of matches to return.  When omitted, all matches
+            within the threshold are returned.
 
         Returns
         -------
-        dict
-            Dictionary containing ``query_embedding``, ``ids``, ``distances``,
-            and ``total_considered``.
+        list of tuple
+            Ordered ``(paper_uid, distance)`` pairs within the threshold.
 
         Raises
         ------
         EmbeddingsError
-            If embeddings collection is empty or operation fails.
+            If the query fails.
         """
         if ids is not None and not ids:
-            raise EmbeddingsError("No papers matched the filters")
+            return []
         if self.collection.count() == 0:
-            raise EmbeddingsError("No papers in collection")
+            return []
+
+        # ChromaDB has no distance-threshold parameter: it returns the nearest
+        # neighbors first. Request 2x the requested match limit so distance
+        # filtering still has enough candidates to return up to `limit` matches.
+        request_limit = None if limit is None else limit * 2
 
         with translate_errors("Failed to query papers within distance"):
-            result = self._query_embeddings(query, ids=ids, query_embedding=query_embedding)
-            if not result.ids:
-                raise EmbeddingsError("No results from collection query")
-
-            matches = list(takewhile(lambda pair: pair[1] <= distance_threshold, zip(result.ids, result.distances)))
-            return {
-                "query_embedding": result.query_embedding,
-                "ids": [paper_id for paper_id, _ in matches],
-                "distances": [float(distance) for _, distance in matches],
-                "total_considered": len(result.ids),
-            }
+            result = self._query_embeddings(query, ids=ids, limit=request_limit)
+            matches = list(takewhile(lambda pair: pair[1] <= distance_threshold, result))
+            return matches[:limit] if limit is not None else matches

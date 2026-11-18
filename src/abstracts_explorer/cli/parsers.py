@@ -49,7 +49,7 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
 
       # Search with custom settings
       abstracts-explorer search "deep learning transformers" \\
-    --n-results 10 \\
+    --limit 10 \\
     --show-abstract
 
       # Search with metadata filter
@@ -239,7 +239,7 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         help=f"Name of the ChromaDB collection (default: {config.collection_name})",
     )
     search_parser.add_argument(
-        "--n-results",
+        "--limit",
         type=int,
         default=config.max_context_papers,
         help=f"Number of results to return (default: {config.max_context_papers})",

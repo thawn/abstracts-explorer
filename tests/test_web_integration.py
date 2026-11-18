@@ -834,7 +834,7 @@ class TestWebUIChatEndpointFull:
         Test chat endpoint with custom n_papers parameter.
 
         This integration test verifies custom paper count with real API.
-        For unit testing without LM Studio, see TestRAGChatQuery.test_query_with_n_results in test_rag.py.
+        For unit testing without LM Studio, see TestRAGChatQuery.test_query_with_limit in test_rag.py.
         """
         host, port, base_url = web_server
 

@@ -533,7 +533,7 @@ class TestGenerateQAPairs:
                         [
                             {
                                 "query": "What papers discuss deep learning?",
-                                "tool_arguments": {"topic_keywords": "deep learning", "n_results": 5},
+                                "tool_arguments": {"topic_keywords": "deep learning", "limit": 5},
                             }
                         ]
                     )

@@ -45,14 +45,14 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
 }
 
 TOOL_ARGUMENT_EXAMPLES: Dict[str, str] = {
-    "search_papers": '{"topic_keywords": "deep learning", "conference": "NeurIPS", "n_results": 5}',
+    "search_papers": '{"topic_keywords": "deep learning", "conference": "NeurIPS", "limit": 5}',
     "get_conference_topics": '{"conferences": ["NeurIPS"], "years": [2025]}',
     "analyze_topic_relevance": '{"topic": "transformers", "conferences": ["NeurIPS"], "distance_threshold": 1.1}',
     "get_topic_evolution": '{"topic_keywords": "reinforcement learning", "conferences": ["NeurIPS"], "start_year": 2020}',
     "get_cluster_visualization": '{"conferences": ["NeurIPS"], "years": [2025]}',
     "get_paper_details": '{"title": "attention is all you need"}',
     "summarize_interesting_papers": '{"conference": "ICLR", "years": [2026]}',
-    "recommend_related_papers": '{"conferences": ["ICLR"], "years": [2026], "n_results": 10}',
+    "recommend_related_papers": '{"conferences": ["ICLR"], "years": [2026], "limit": 10}',
 }
 
 
@@ -171,8 +171,8 @@ SEARCH_PAPERS_RULES = [
     NormRule("topic_keywords", ("query",), _join_list),
     NormRule("conference", ("conferences",), _first_or_none),
     NormRule(
-        "n_results",
-        ("limit", "num_results", "max_results", "count"),
+        "limit",
+        ("n_results", "num_results", "max_results", "count"),
         int,
         drop_on_error=True,
     ),
@@ -217,8 +217,8 @@ def _interesting_paper_rules(array_conference: bool) -> List[NormRule]:
         NormRule("years", ("year",), _to_int_list_or_none),
         conference_rule,
         NormRule(
-            "n_results",
-            ("limit", "num_results", "max_results", "count"),
+            "limit",
+            ("n_results", "num_results", "max_results", "count"),
             int,
             drop_on_error=True,
         ),

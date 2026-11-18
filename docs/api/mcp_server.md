@@ -34,7 +34,7 @@ evolution = get_topic_evolution(
 # Search for papers on a topic
 results = search_papers(
     topic_keywords="reinforcement learning",
-    n_results=10,
+    limit=10,
 )
 ```
 

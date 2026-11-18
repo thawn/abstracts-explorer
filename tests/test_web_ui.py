@@ -590,7 +590,7 @@ class TestSearchEndpoint:
         mock_papers = [{"id": 1, "name": "Test Paper", "abstract": "Test abstract", "uid": "test1", "authors": []}]
 
         # Setup the mock to return our test data
-        mock_db.search_papers_keyword.return_value = mock_papers
+        mock_db.search.return_value = (mock_papers, None)
 
         # Patch the get_database function to return our mock
         with patch.object(web_deps, "get_database", return_value=mock_db):
@@ -603,8 +603,8 @@ class TestSearchEndpoint:
 
         # Verify search_papers_keyword was called with correct parameters
         # This is the key test - it should use 'query' parameter
-        mock_db.search_papers_keyword.assert_called_once()
-        call_args = mock_db.search_papers_keyword.call_args
+        mock_db.search.assert_called_once()
+        call_args = mock_db.search.call_args
 
         # Check that it was called with 'query' parameter
         assert "query" in call_args.kwargs, "search_papers_keyword should be called with 'query' parameter"
@@ -635,7 +635,7 @@ class TestSearchEndpoint:
             {"id": i, "name": f"Paper {i}", "abstract": "About transformers", "authors": []} for i in range(5)
         ]
 
-        mock_db.search_papers_keyword.return_value = mock_papers[:2]  # Return limited results
+        mock_db.search.return_value = (mock_papers[:2], None)  # Return limited results
 
         # Patch the get_database function
         with patch.object(web_deps, "get_database", return_value=mock_db):
@@ -647,7 +647,7 @@ class TestSearchEndpoint:
             )
 
         # Verify limit was passed
-        call_args = mock_db.search_papers_keyword.call_args
+        call_args = mock_db.search.call_args
         assert call_args.kwargs["limit"] == 2
 
         assert response.status_code == 200
@@ -685,7 +685,7 @@ class TestSearchEndpoint:
         mock_papers = [
             {"id": 1, "name": "Test Paper", "abstract": "Test abstract", "uid": "test1", "authors": ["John Smith"]}
         ]
-        mock_db.search_papers_keyword.return_value = mock_papers
+        mock_db.search.return_value = (mock_papers, None)
 
         with patch.object(web_deps, "get_database", return_value=mock_db):
             response = client.post(
@@ -694,8 +694,8 @@ class TestSearchEndpoint:
                 content_type="application/json",
             )
 
-        mock_db.search_papers_keyword.assert_called_once()
-        call_args = mock_db.search_papers_keyword.call_args
+        mock_db.search.assert_called_once()
+        call_args = mock_db.search.call_args
         assert call_args.kwargs["query"] == 'authors:"John Smith"'
 
         assert response.status_code == 200
@@ -709,7 +709,7 @@ class TestSearchEndpoint:
         mock_em = MagicMock()
         mock_db = MagicMock()
         mock_papers = [{"uid": "test1", "title": "Test Paper", "abstract": "Test", "authors": ["John Smith"]}]
-        mock_db.search_papers_keyword_with_total.return_value = (mock_papers, None)
+        mock_db.search.return_value = (mock_papers, None)
 
         with patch.object(web_deps, "get_embeddings_manager", return_value=mock_em):
             with patch.object(web_deps, "get_database", return_value=mock_db):
@@ -813,7 +813,7 @@ class TestExtractTopKeywords:
                 "abstract": "Convolutional deep learning for image classification.",
             },
         ]
-        mock_db.search_papers_keyword.return_value = mock_papers
+        mock_db.search.return_value = (mock_papers, None)
 
         with patch.object(web_deps, "get_database", return_value=mock_db):
             response = client.post(
@@ -868,14 +868,14 @@ class TestDatabaseSearchIntegration:
     def test_search_papers_with_keyword(self, test_db):
         """Test search_papers with keyword parameter."""
         with test_db:
-            results = test_db.search_papers(keyword="transformer")
+            results = test_db.keyword_search(keyword="transformer")
             assert len(results) > 0
             # Should find papers with "transformer" in name or abstract
 
     def test_search_papers_limit(self, test_db):
         """Test search_papers limit parameter."""
         with test_db:
-            results = test_db.search_papers(keyword="", limit=2)
+            results = test_db.keyword_search(keyword="", limit=2)
             assert len(results) <= 2
 
     def test_search_papers_no_invalid_params(self, test_db):
@@ -888,25 +888,25 @@ class TestDatabaseSearchIntegration:
         with test_db:
             # These should raise TypeError if we try to pass invalid params
             with pytest.raises(TypeError):
-                test_db.search_papers(title="test")
+                test_db.keyword_search(title="test")
 
             with pytest.raises(TypeError):
-                test_db.search_papers(abstract="test")
+                test_db.keyword_search(abstract="test")
 
             with pytest.raises(TypeError):
-                test_db.search_papers(invalid_param="test")
+                test_db.keyword_search(invalid_param="test")
 
     def test_search_papers_valid_params_only(self, test_db):
         """Test that only valid parameters work."""
         with test_db:
             # These should work
-            results = test_db.search_papers(keyword="attention")
+            results = test_db.keyword_search(keyword="attention")
             assert isinstance(results, list)
 
-            results = test_db.search_papers(years=[2017])
+            results = test_db.keyword_search(years=[2017])
             assert isinstance(results, list)
 
-            results = test_db.search_papers(limit=5)
+            results = test_db.keyword_search(limit=5)
             assert isinstance(results, list)
 
 
@@ -970,7 +970,7 @@ class TestWebUISemanticSearchDetails:
                             "distance": 0.2,
                         },
                     ]
-                    mock_db.search_papers_keyword_with_total.return_value = (mock_papers, 25)
+                    mock_db.search.return_value = (mock_papers, 25)
                     mock_em.query_ids_within_distance.return_value = {"ids": ["uid"] * 25}
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
@@ -1009,7 +1009,7 @@ class TestWebUISemanticSearchDetails:
                 with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
                     mock_em = Mock()
                     mock_db = Mock()
-                    mock_db.search_papers_keyword_with_total.return_value = ([], 0)
+                    mock_db.search.return_value = ([], 0)
                     mock_em.query_ids_within_distance.return_value = {"ids": []}
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
@@ -1034,7 +1034,7 @@ class TestWebUISemanticSearchDetails:
                     with patch("abstracts_explorer.web_ui.app._SIMILAR_DISTANCE_THRESHOLD", 1.2):
                         mock_em = Mock()
                         mock_db = Mock()
-                        mock_db.search_papers_keyword_with_total.return_value = ([], 0)
+                        mock_db.search.return_value = ([], 0)
                         mock_em.query_ids_within_distance.return_value = {"ids": []}
                         mock_get_em.return_value = mock_em
                         mock_get_db.return_value = mock_db
@@ -1045,7 +1045,7 @@ class TestWebUISemanticSearchDetails:
                         )
 
                         assert response.status_code == 200
-                        call_kwargs = mock_db.search_papers_keyword_with_total.call_args
+                        call_kwargs = mock_db.search.call_args
                         assert call_kwargs.kwargs.get("distance_threshold") == 1.2
 
     def test_semantic_search_accepts_per_request_distance_threshold(self):
@@ -1057,7 +1057,7 @@ class TestWebUISemanticSearchDetails:
                 with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
                     mock_em = Mock()
                     mock_db = Mock()
-                    mock_db.search_papers_keyword_with_total.return_value = ([], 0)
+                    mock_db.search.return_value = ([], 0)
                     mock_em.query_ids_within_distance.return_value = {"ids": []}
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
@@ -1074,7 +1074,7 @@ class TestWebUISemanticSearchDetails:
 
                     assert response.status_code == 200
                     # Verify the per-request value was used, not the module default
-                    call_kwargs = mock_db.search_papers_keyword_with_total.call_args
+                    call_kwargs = mock_db.search.call_args
                     assert call_kwargs.kwargs.get("distance_threshold") == 0.7
 
 
@@ -1146,7 +1146,7 @@ class TestWebUIChatEndpointSuccess:
                     # Verify n_papers was used
                     call_kwargs = mock_rag.query.call_args
                     assert call_kwargs.args[0] == "Test question"
-                    assert call_kwargs.kwargs["n_results"] == 5
+                    assert call_kwargs.kwargs["limit"] == 5
                     assert call_kwargs.kwargs["conferences"] is None
                     assert call_kwargs.kwargs["years"] is None
 
@@ -1334,7 +1334,7 @@ class TestWebUISearchExceptionHandling:
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
                 mock_db = Mock()
-                mock_db.search_papers.side_effect = Exception("Database connection failed")
+                mock_db.keyword_search.side_effect = Exception("Database connection failed")
                 mock_db.get_paper_authors.return_value = []
                 mock_get_db.return_value = mock_db
 
@@ -2493,34 +2493,30 @@ class TestClusteringEndpoint:
                 with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
                     # Mock embeddings manager
                     mock_em = Mock()
+                    mock_em.generate_embedding.return_value = [0.1] * 100
                     mock_db = Mock()
-                    mock_query_emb = [0.1] * 100  # Mock 100-dim embedding
 
-                    # Mock the find_papers_within_distance method directly
-                    mock_db.find_papers_within_distance.return_value = {
-                        "query": "Uncertainty quantification",
-                        "query_embedding": mock_query_emb,
-                        "distance": 150,
-                        "papers": [
-                            {
-                                "uid": "paper1",
-                                "title": "Paper 1",
-                                "abstract": "Abstract for paper1",
-                                "year": 2025,
-                                "authors": ["Author 1"],
-                                "distance": 0.5,
-                            },
-                            {
-                                "uid": "paper2",
-                                "title": "Paper 2",
-                                "abstract": "Abstract for paper2",
-                                "year": 2025,
-                                "authors": ["Author 2"],
-                                "distance": 1.0,
-                            },
-                        ],
-                        "count": 2,
-                    }
+                    # Mock the find_paper_ids_within_distance method directly
+                    cluster_papers = [
+                        {
+                            "uid": "paper1",
+                            "title": "Paper 1",
+                            "abstract": "Abstract for paper1",
+                            "year": 2025,
+                            "authors": ["Author 1"],
+                            "distance": 0.5,
+                        },
+                        {
+                            "uid": "paper2",
+                            "title": "Paper 2",
+                            "abstract": "Abstract for paper2",
+                            "year": 2025,
+                            "authors": ["Author 2"],
+                            "distance": 1.0,
+                        },
+                    ]
+                    mock_db.find_paper_ids_within_distance.return_value = [("paper1", 0.5), ("paper2", 1.0)]
+                    mock_db.get_result_details.return_value = cluster_papers
 
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
@@ -2564,16 +2560,12 @@ class TestClusteringEndpoint:
                 with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
                     # Mock embeddings manager
                     mock_em = Mock()
+                    mock_em.generate_embedding.return_value = [0.1] * 100
                     mock_db = Mock()
 
-                    # Mock find_papers_within_distance to return result with default distance
-                    mock_db.find_papers_within_distance.return_value = {
-                        "query": "Test query",
-                        "query_embedding": [0.1] * 100,
-                        "distance": 1.1,
-                        "papers": [],
-                        "count": 0,
-                    }
+                    # Mock find_paper_ids_within_distance to return no matches
+                    mock_db.find_paper_ids_within_distance.return_value = []
+                    mock_db.get_result_details.return_value = []
 
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
@@ -2598,8 +2590,8 @@ class TestClusteringEndpoint:
                     mock_em = Mock()
                     mock_db = Mock()
 
-                    # Mock find_papers_within_distance to raise EmbeddingsError
-                    mock_db.find_papers_within_distance.side_effect = EmbeddingsError("No papers in collection")
+                    # Mock find_paper_ids_within_distance to raise EmbeddingsError
+                    mock_db.find_paper_ids_within_distance.side_effect = EmbeddingsError("No papers in collection")
 
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
@@ -2962,7 +2954,7 @@ class TestPaperCardDisplayFieldsUnit:
         mock_db = MagicMock()
         if papers is None:
             papers = self._SAMPLE_PAPERS
-        mock_db.search_papers_keyword.return_value = papers
+        mock_db.search.return_value = (papers, None)
         return mock_db
 
     @pytest.fixture
@@ -3403,19 +3395,14 @@ class TestWebInputHardeningAndRateLimits:
 
     def test_expensive_endpoint_rate_limit_returns_429(self, client):
         mock_db = MagicMock()
-        mock_db.find_papers_within_distance.return_value = {
-            "query": "test",
-            "query_embedding": [],
-            "distance": 1.1,
-            "papers": [],
-            "count": 0,
-            "total_matches": 0,
-            "total_considered": 0,
-        }
+        mock_db.find_paper_ids_within_distance.return_value = []
+        mock_db.get_result_details.return_value = []
         mock_config = Mock(web_rate_limit_per_minute=2)
 
         with patch("abstracts_explorer.web_ui.rate_limit.get_config", return_value=mock_config):
-            with patch.object(web_deps, "get_embeddings_manager", return_value=Mock()):
+            with patch.object(
+                web_deps, "get_embeddings_manager", return_value=Mock(generate_embedding=Mock(return_value=[]))
+            ):
                 with patch.object(web_deps, "get_database", return_value=mock_db):
                     first = client.post("/api/clusters/search", json={"query": "test"})
                     second = client.post("/api/clusters/search", json={"query": "test"})
@@ -3428,19 +3415,14 @@ class TestWebInputHardeningAndRateLimits:
 
     def test_rate_limit_zero_disables_limiting(self, client):
         mock_db = MagicMock()
-        mock_db.find_papers_within_distance.return_value = {
-            "query": "test",
-            "query_embedding": [],
-            "distance": 1.1,
-            "papers": [],
-            "count": 0,
-            "total_matches": 0,
-            "total_considered": 0,
-        }
+        mock_db.find_paper_ids_within_distance.return_value = []
+        mock_db.get_result_details.return_value = []
         mock_config = Mock(web_rate_limit_per_minute=0)
 
         with patch("abstracts_explorer.web_ui.rate_limit.get_config", return_value=mock_config):
-            with patch.object(web_deps, "get_embeddings_manager", return_value=Mock()):
+            with patch.object(
+                web_deps, "get_embeddings_manager", return_value=Mock(generate_embedding=Mock(return_value=[]))
+            ):
                 with patch.object(web_deps, "get_database", return_value=mock_db):
                     responses = [client.post("/api/clusters/search", json={"query": "test"}) for _ in range(5)]
 

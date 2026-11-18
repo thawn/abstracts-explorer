@@ -82,10 +82,10 @@ def _run_rag_tool(
 def _tool_search_papers(
     ctx: RunContext[RAGDeps],
     topic_keywords: str,
-    n_results: Optional[int] = None,
+    limit: Optional[int] = None,
     years: Optional[List[int]] = None,
     conference: Optional[str] = None,
-    limit: Optional[int] = None,
+    n_results: Optional[int] = None,
 ) -> str:
     """Search for papers about a specific topic using semantic search.
 
@@ -103,7 +103,7 @@ def _tool_search_papers(
         Agent context with dependencies.
     topic_keywords : str
         Keywords describing the topic to search for.
-    n_results : int, optional
+    limit : int, optional
         Number of papers to return (default: 10, or session default).
     years : list of int, optional
         Filter by publication years (e.g. [2024, 2025]).
@@ -111,12 +111,12 @@ def _tool_search_papers(
     conference : str, optional
         Filter by conference name (e.g. "NeurIPS", "ICLR").
         When omitted, the default conference from the current session is used.
-    limit : int, optional
-        Alias for n_results.
+    n_results : int, optional
+        Optional alias for ``limit`` accepted from LLM tool calls.
     """
-    count = n_results if n_results is not None else (limit if limit is not None else (ctx.deps.n_results or 10))
+    count = limit if limit is not None else (n_results if n_results is not None else (ctx.deps.limit or 10))
     count = max(1, min(int(count), 50))
-    kwargs: Dict[str, Any] = {"topic_keywords": topic_keywords, "n_results": count}
+    kwargs: Dict[str, Any] = {"topic_keywords": topic_keywords, "limit": count}
 
     # Determine years: explicit param > deps default
     if years is not None:
@@ -399,7 +399,7 @@ def _tool_recommend_related_papers(
     ctx: RunContext[RAGDeps],
     conferences: Optional[List[str]] = None,
     years: Optional[List[int]] = None,
-    n_results: int = 10,
+    limit: int = 10,
 ) -> str:
     """Recommend further papers based on the user's interesting papers.
 
@@ -418,7 +418,7 @@ def _tool_recommend_related_papers(
     years : list of int, optional
         Restrict recommendations to these years. When omitted, the currently
         selected years from the web UI are used automatically.
-    n_results : int, optional
+    limit : int, optional
         Number of recommendations to return (default: 10).
     """
     priorities = ctx.deps.paper_priorities or {}
@@ -430,7 +430,7 @@ def _tool_recommend_related_papers(
     resolved_conferences = conferences if conferences else (ctx.deps.conferences or None)
     resolved_years = years if years is not None else (ctx.deps.years or None)
 
-    kwargs: Dict[str, Any] = {"priorities": priorities, "n_results": n_results}
+    kwargs: Dict[str, Any] = {"priorities": priorities, "limit": limit}
     if resolved_conferences:
         kwargs["conferences"] = resolved_conferences
     if resolved_years:

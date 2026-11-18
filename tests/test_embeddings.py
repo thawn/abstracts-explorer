@@ -10,12 +10,20 @@ from unittest.mock import Mock
 from abstracts_explorer.embeddings import (
     EmbeddingsError,
     EmbeddingsManager,
+    QueryEmbedding,
     hash_text,
     is_content_hash,
 )
 from abstracts_explorer.embeddings.tokens import count_tokens as _count_tokens
 from tests.conftest import set_test_db
 from tests.helpers import FakeTime
+
+
+def _search_semantic(db, query, **kwargs):
+    """Run a semantic search through the unified DatabaseManager.search()."""
+    papers, _ = db.search(query, use_embeddings=True, **kwargs)
+    return papers
+
 
 # Fixtures imported from conftest.py:
 # - mock_lm_studio: Mock LM Studio API responses
@@ -371,13 +379,11 @@ class TestEmbeddingsManager:
             embeddings_manager.add_paper(paper)
 
         # Search
-        results = embeddings_manager.search_similar("machine learning", n_results=2)
+        query = QueryEmbedding("machine learning", embeddings_manager)
+        results = embeddings_manager.search_similar(query, limit=2)
 
-        assert "ids" in results
-        assert "distances" in results
-        assert "metadatas" not in results
-        assert "documents" not in results
-        assert len(results["ids"][0]) <= 2
+        assert len(results) <= 2
+        assert all(isinstance(uid, str) and isinstance(distance, float) for uid, distance in results)
         embeddings_manager.close()
 
     def test_search_similar_empty_query(self, embeddings_manager):
@@ -385,17 +391,17 @@ class TestEmbeddingsManager:
         embeddings_manager.create_collection()
 
         with pytest.raises(EmbeddingsError, match="Query cannot be empty"):
-            embeddings_manager.search_similar("")
+            embeddings_manager.search_similar(QueryEmbedding("", embeddings_manager))
 
         embeddings_manager.close()
 
     def test_search_similar_auto_initializes(self, embeddings_manager, mock_lm_studio):
         """Test that search_similar auto-initializes client and collection if needed."""
         # Should not raise - auto-initializes (collection is empty so 0 results)
-        results = embeddings_manager.search_similar("test query", n_results=1)
+        results = embeddings_manager.search_similar(QueryEmbedding("test query", embeddings_manager), limit=1)
         assert embeddings_manager._client is not None
         assert embeddings_manager._collection is not None
-        assert "ids" in results
+        assert results == []
         embeddings_manager.close()
 
     def test_get_collection_stats(self, embeddings_manager, mock_lm_studio):
@@ -808,24 +814,24 @@ def test_search_papers_semantic_with_year_filter(embeddings_manager, tmp_path, m
 
     # Test search without filter - should return both papers
     with DatabaseManager() as db:
-        results_all = db.search_papers_semantic("paper", limit=10)
+        results_all = _search_semantic(db, "paper", limit=10)
         assert len(results_all) == 2, f"Expected 2 papers without filter, got {len(results_all)}"
 
     # Test search with year filter [2024] - should return only 2024 paper
     with DatabaseManager() as db:
-        results_2024 = db.search_papers_semantic("paper", limit=10, years=[2024])
+        results_2024 = _search_semantic(db, "paper", limit=10, years=[2024])
         assert len(results_2024) == 1, f"Expected 1 paper with year=2024 filter, got {len(results_2024)}"
         assert results_2024[0]["year"] == 2024, f"Expected year 2024, got {results_2024[0]['year']}"
 
     # Test search with year filter [2025] - should return only 2025 paper
     with DatabaseManager() as db:
-        results_2025 = db.search_papers_semantic("paper", limit=10, years=[2025])
+        results_2025 = _search_semantic(db, "paper", limit=10, years=[2025])
         assert len(results_2025) == 1, f"Expected 1 paper with year=2025 filter, got {len(results_2025)}"
         assert results_2025[0]["year"] == 2025, f"Expected year 2025, got {results_2025[0]['year']}"
 
     # Test search with multiple year filters - should return both papers
     with DatabaseManager() as db:
-        results_both = db.search_papers_semantic("paper", limit=10, years=[2024, 2025])
+        results_both = _search_semantic(db, "paper", limit=10, years=[2024, 2025])
         assert len(results_both) == 2, f"Expected 2 papers with years=[2024, 2025] filter, got {len(results_both)}"
 
     embeddings_manager.close()
@@ -886,7 +892,8 @@ def test_search_papers_semantic_field_filter_partial_match(embeddings_manager, t
     # This query previously triggered:
     #   "Expected where operator … got $contains in query."
     with DatabaseManager() as db:
-        results = db.search_papers_semantic(
+        results = _search_semantic(
+            db,
             'authors:"Vaswani" attention',
             limit=10,
         )
@@ -897,7 +904,8 @@ def test_search_papers_semantic_field_filter_partial_match(embeddings_manager, t
 
     # Confirm the non-matching paper is excluded
     with DatabaseManager() as db:
-        no_results = db.search_papers_semantic(
+        no_results = _search_semantic(
+            db,
             'authors:"Lecun" attention',
             limit=10,
         )
@@ -952,7 +960,8 @@ def test_search_papers_semantic_field_filter_only(embeddings_manager, tmp_path, 
 
     # Query with only a field filter (no remaining keywords)
     with DatabaseManager() as db:
-        results = db.search_papers_semantic(
+        results = _search_semantic(
+            db,
             'authors:"Vaswani"',
             limit=10,
         )
@@ -965,7 +974,8 @@ def test_search_papers_semantic_field_filter_only(embeddings_manager, tmp_path, 
 
     # Test with the 'author' alias
     with DatabaseManager() as db:
-        results = db.search_papers_semantic(
+        results = _search_semantic(
+            db,
             'author:"Vaswani"',
             limit=10,
         )
@@ -975,7 +985,8 @@ def test_search_papers_semantic_field_filter_only(embeddings_manager, tmp_path, 
 
     # Test with no matching results
     with DatabaseManager() as db:
-        results = db.search_papers_semantic(
+        results = _search_semantic(
+            db,
             'authors:"Nonexistent"',
             limit=10,
         )
@@ -1023,7 +1034,8 @@ def test_search_papers_semantic_field_filter_only_with_filters(embeddings_manage
 
     # Both papers by John Smith
     with DatabaseManager() as db:
-        results = db.search_papers_semantic(
+        results = _search_semantic(
+            db,
             'authors:"John Smith"',
             limit=10,
         )
@@ -1031,7 +1043,8 @@ def test_search_papers_semantic_field_filter_only_with_filters(embeddings_manage
 
     # Filter by year
     with DatabaseManager() as db:
-        results = db.search_papers_semantic(
+        results = _search_semantic(
+            db,
             'authors:"John Smith"',
             limit=10,
             years=[2024],
@@ -1041,7 +1054,8 @@ def test_search_papers_semantic_field_filter_only_with_filters(embeddings_manage
 
     # Filter by conference
     with DatabaseManager() as db:
-        results = db.search_papers_semantic(
+        results = _search_semantic(
+            db,
             'authors:"John Smith"',
             limit=10,
             conferences=["ICLR"],
@@ -1097,7 +1111,8 @@ def test_search_papers_semantic_implicit_author_match(embeddings_manager, tmp_pa
     # Search for "LeCun" without the author: field prefix — should still find
     # the LeCun paper first (implicit author match).
     with DatabaseManager() as db:
-        results = db.search_papers_semantic(
+        results = _search_semantic(
+            db,
             "LeCun",
             limit=10,
         )
@@ -1150,7 +1165,8 @@ def test_search_papers_semantic_implicit_author_match_no_duplicate(embeddings_ma
     embeddings_manager.embed_from_database()
 
     with DatabaseManager() as db:
-        results = db.search_papers_semantic(
+        results = _search_semantic(
+            db,
             "LeCun",
             limit=10,
         )
@@ -1194,7 +1210,8 @@ def test_search_papers_semantic_no_author_match_falls_back_to_semantic(embedding
 
     # Query that does NOT match any author name
     with DatabaseManager() as db:
-        results = db.search_papers_semantic(
+        results = _search_semantic(
+            db,
             "transformer architecture",
             limit=10,
         )
@@ -1254,25 +1271,23 @@ def test_search_papers_semantic_distance_threshold(embeddings_manager, tmp_path,
 
     # Mock search_similar to return controlled distances:
     # close_paper has distance 0.5 (within threshold), far_paper has distance 1.5 (outside)
-    mock_results = {
-        "ids": [[close_uid, far_uid]],
-        "distances": [[0.5, 1.5]],
-        "documents": [["doc1", "doc2"]],
-        "metadatas": [[{"uid": close_uid}, {"uid": far_uid}]],
-    }
+    mock_results = [(close_uid, 0.5), (far_uid, 1.5)]
 
-    with mock_patch.object(embeddings_manager, "search_similar", return_value=mock_results):
+    def fake_query_ids(query, distance_threshold=1.1, ids=None, limit=None):
+        return [(uid, distance) for uid, distance in mock_results if distance <= distance_threshold]
+
+    with mock_patch.object(embeddings_manager, "query_ids_within_distance", side_effect=fake_query_ids):
         with DatabaseManager() as db:
             # With default threshold (1.1): only the close paper should be returned
-            results = db.search_papers_semantic("query", limit=10, embeddings_manager=embeddings_manager)
+            results = _search_semantic(db, "query", limit=10, embeddings_manager=embeddings_manager)
             titles = [r["title"] for r in results]
             assert "Close Paper" in titles, "Close paper (distance 0.5) should be within threshold 1.1"
             assert "Far Paper" not in titles, "Far paper (distance 1.5) should be outside threshold 1.1"
 
         with DatabaseManager() as db:
             # With higher threshold (2.0): both papers should be returned
-            results_high = db.search_papers_semantic(
-                "query", limit=10, distance_threshold=2.0, embeddings_manager=embeddings_manager
+            results_high = _search_semantic(
+                db, "query", limit=10, distance_threshold=2.0, embeddings_manager=embeddings_manager
             )
             titles_high = [r["title"] for r in results_high]
             assert "Close Paper" in titles_high, "Close paper should be returned with threshold 2.0"
@@ -1280,8 +1295,8 @@ def test_search_papers_semantic_distance_threshold(embeddings_manager, tmp_path,
 
         with DatabaseManager() as db:
             # With very low threshold (0.1): no papers should be returned
-            results_none = db.search_papers_semantic(
-                "query", limit=10, distance_threshold=0.1, embeddings_manager=embeddings_manager
+            results_none = _search_semantic(
+                db, "query", limit=10, distance_threshold=0.1, embeddings_manager=embeddings_manager
             )
             assert len(results_none) == 0, "No papers should be returned with threshold 0.1"
 
@@ -1502,6 +1517,30 @@ class TestRateLimiting:
         mock_inner.handle_request.assert_called_once()
 
 
+class TestQueryEmbedding:
+    """Tests for lazy query embeddings."""
+
+    def test_embedding_is_generated_once(self):
+        manager = Mock()
+        manager.generate_embedding.return_value = [0.1, 0.2]
+        query = QueryEmbedding("test query", manager)
+
+        assert query.embedding == [0.1, 0.2]
+        assert query.embedding == [0.1, 0.2]
+        manager.generate_embedding.assert_called_once_with("test query")
+
+    def test_embedding_retries_after_failure(self):
+        manager = Mock()
+        manager.generate_embedding.side_effect = [EmbeddingsError("boom"), [0.3]]
+        query = QueryEmbedding("test query", manager)
+
+        with pytest.raises(EmbeddingsError, match="boom"):
+            _ = query.embedding
+
+        assert query.embedding == [0.3]
+        assert manager.generate_embedding.call_count == 2
+
+
 class TestDistanceHelpers:
     """Tests for ID-based distance helpers."""
 
@@ -1519,32 +1558,44 @@ class TestDistanceHelpers:
     def test_query_ids_within_distance(self):
         manager = self._make_manager()
         result = manager.query_ids_within_distance(
-            query="query",
+            QueryEmbedding("query", manager),
             distance_threshold=1.0,
-            query_embedding=[0.1],
         )
-        assert result["total_considered"] == 3
-        assert result["ids"] == ["paper-a", "paper-b"]
-        assert result["distances"] == [0.1, 0.2]
+        assert result == [("paper-a", 0.1), ("paper-b", 0.2)]
         assert manager._collection.query.call_args.kwargs["include"] == ["distances"]
+
+    def test_query_ids_within_distance_overfetches_for_limit(self):
+        """limit applies after threshold filtering, so Chroma gets limit * 2 candidates."""
+        manager = self._make_manager()
+        manager._collection.count.return_value = 100
+        manager._collection.query.return_value = {
+            "ids": [["paper-a", "paper-b", "paper-c", "paper-d"]],
+            "distances": [[0.1, 0.2, 0.3, 0.9]],
+        }
+
+        result = manager.query_ids_within_distance(
+            QueryEmbedding("query", manager),
+            distance_threshold=0.5,
+            limit=2,
+        )
+
+        assert result == [("paper-a", 0.1), ("paper-b", 0.2)]
+        assert manager._collection.query.call_args.kwargs["n_results"] == 4
 
     def test_query_ids_within_distance_reuses_query_embedding(self):
         manager = self._make_manager()
-        manager.query_ids_within_distance(
-            query="query",
-            distance_threshold=1.0,
-            query_embedding=[0.5, 0.6],
-        )
+        query = QueryEmbedding("query", manager)
+        query._vector = [0.5, 0.6]
+        manager.query_ids_within_distance(query, distance_threshold=1.0)
         manager.generate_embedding.assert_not_called()
         assert manager._collection.query.call_args.kwargs["query_embeddings"] == [[0.5, 0.6]]
 
     def test_query_ids_within_distance_with_ids(self):
         manager = self._make_manager()
         manager.query_ids_within_distance(
-            query="query",
+            QueryEmbedding("query", manager),
             distance_threshold=1.0,
             ids=["paper-a", "paper-b"],
-            query_embedding=[0.1],
         )
         assert manager._collection.query.call_args.kwargs["ids"] == ["paper-a", "paper-b"]
 
@@ -1559,30 +1610,27 @@ class TestDistanceHelpers:
         manager._collection.query.side_effect = fake_query
 
         result = manager.query_ids_within_distance(
-            query="query",
+            QueryEmbedding("query", manager),
             distance_threshold=1.0,
             ids=ids,
-            query_embedding=[0.1],
         )
 
         assert manager._collection.query.call_count == 2
-        assert result["total_considered"] == 600
+        assert len(result) == 600
 
-    def test_empty_ids_raise(self):
+    def test_empty_ids_returns_empty(self):
         manager = self._make_manager()
-        with pytest.raises(EmbeddingsError, match="No papers matched"):
-            manager.query_ids_within_distance(query="query", ids=[], query_embedding=[0.1])
+        assert manager.query_ids_within_distance(QueryEmbedding("query", manager), ids=[]) == []
 
     def test_query_ids_reject_empty_query(self):
         manager = self._make_manager()
         with pytest.raises(EmbeddingsError, match="Query cannot be empty"):
-            manager.query_ids_within_distance(query="  ", distance_threshold=1.0)
+            manager.query_ids_within_distance(QueryEmbedding("  ", manager), distance_threshold=1.0)
 
-    def test_query_ids_raises_when_no_results(self):
+    def test_query_ids_returns_empty_when_no_results(self):
         manager = self._make_manager()
         manager._collection.query.return_value = {"ids": [[]], "distances": [[]]}
-        with pytest.raises(EmbeddingsError, match="No results from collection query"):
-            manager.query_ids_within_distance(query="query", query_embedding=[0.1])
+        assert manager.query_ids_within_distance(QueryEmbedding("query", manager)) == []
 
 
 class TestEmbeddingInputTruncation:

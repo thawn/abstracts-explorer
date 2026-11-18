@@ -15,6 +15,7 @@ from sqlalchemy import exc as sqlalchemy_exc
 from unittest.mock import Mock, patch
 
 from abstracts_explorer.database import DatabaseManager, DatabaseError, normalize_model_name
+from abstracts_explorer.embeddings import QueryEmbedding
 from abstracts_explorer.plugin import LightweightPaper
 from tests.conftest import set_test_db
 from tests.helpers import raw_query
@@ -897,40 +898,56 @@ class TestSearchPapersFieldFilters:
 
     def test_search_papers_by_author(self, db_with_papers):
         """Test search_papers with authors field filter."""
-        results = db_with_papers.search_papers(field_filters={"authors": "Vaswani"})
+        results = db_with_papers.keyword_search(field_filters={"authors": "Vaswani"})
         assert len(results) == 1
         assert results[0]["title"] == "Attention is All You Need"
 
     def test_search_papers_by_author_case_insensitive(self, db_with_papers):
         """Test that field filter search is case-insensitive."""
-        results = db_with_papers.search_papers(field_filters={"authors": "vaswani"})
+        results = db_with_papers.keyword_search(field_filters={"authors": "vaswani"})
         assert len(results) == 1
         assert results[0]["title"] == "Attention is All You Need"
 
     def test_search_papers_author_partial_match(self, db_with_papers):
         """Test that field filter matches partial values."""
-        results = db_with_papers.search_papers(field_filters={"authors": "Kaiming"})
+        results = db_with_papers.keyword_search(field_filters={"authors": "Kaiming"})
         assert len(results) == 1
         assert results[0]["title"] == "ResNet Paper"
 
     def test_search_papers_author_no_match(self, db_with_papers):
         """Test field filter with no matches."""
-        results = db_with_papers.search_papers(field_filters={"authors": "Nonexistent Author"})
+        results = db_with_papers.keyword_search(field_filters={"authors": "Nonexistent Author"})
         assert len(results) == 0
+
+    def test_keyword_search_where_filters(self, db_with_papers):
+        """Keyword search accepts raw where filters."""
+        results = db_with_papers.keyword_search(keyword="Paper", where_filters={"conference": "ICLR"})
+
+        assert [paper["title"] for paper in results] == ["ResNet Paper"]
+
+    def test_keyword_search_where_filter_wins_over_structured_filter(self, db_with_papers):
+        """A raw where filter is not duplicated by the structured filter."""
+        results = db_with_papers.keyword_search(
+            keyword="Paper",
+            conferences=["NeurIPS"],
+            where_filters={"conference": "ICLR"},
+        )
+
+        assert [paper["title"] for paper in results] == ["ResNet Paper"]
 
     def test_search_papers_field_filter_and_keyword(self, db_with_papers):
         """Test combining field filter and keyword search."""
         # Author matches but keyword doesn't
-        results = db_with_papers.search_papers(field_filters={"authors": "Vaswani"}, keyword="BERT")
+        results = db_with_papers.keyword_search(field_filters={"authors": "Vaswani"}, keyword="BERT")
         assert len(results) == 0
 
         # Both author and keyword match
-        results = db_with_papers.search_papers(field_filters={"authors": "Vaswani"}, keyword="Transformer")
+        results = db_with_papers.keyword_search(field_filters={"authors": "Vaswani"}, keyword="Transformer")
         assert len(results) == 1
 
     def test_search_papers_keyword_author_syntax(self, db_with_papers):
         """Test search_papers_keyword with authors:"Name" syntax."""
-        results = db_with_papers.search_papers_keyword(query='authors:"Vaswani"', limit=10)
+        results, _ = db_with_papers.search(query='authors:"Vaswani"', limit=10)
         assert len(results) == 1
         assert results[0]["title"] == "Attention is All You Need"
         # Authors should be parsed into a list
@@ -938,42 +955,42 @@ class TestSearchPapersFieldFilters:
 
     def test_search_papers_keyword_author_with_keyword(self, db_with_papers):
         """Test search_papers_keyword with authors and keyword combined."""
-        results = db_with_papers.search_papers_keyword(query='authors:"Devlin" BERT', limit=10)
+        results, _ = db_with_papers.search(query='authors:"Devlin" BERT', limit=10)
         assert len(results) == 1
         assert results[0]["title"] == "BERT Paper"
 
     def test_search_papers_keyword_author_no_match_keyword(self, db_with_papers):
         """Test authors matches but keyword doesn't."""
-        results = db_with_papers.search_papers_keyword(query='authors:"Vaswani" BERT', limit=10)
+        results, _ = db_with_papers.search(query='authors:"Vaswani" BERT', limit=10)
         assert len(results) == 0
 
     def test_search_by_award(self, db_with_papers):
         """Test search_papers_keyword with award field filter."""
-        results = db_with_papers.search_papers_keyword(query='award:"Best Paper"', limit=10)
+        results, _ = db_with_papers.search(query='award:"Best Paper"', limit=10)
         assert len(results) == 1
         assert results[0]["title"] == "Attention is All You Need"
 
     def test_search_by_conference(self, db_with_papers):
         """Test search_papers_keyword with conference field filter."""
-        results = db_with_papers.search_papers_keyword(query='conference:"ICLR"', limit=10)
+        results, _ = db_with_papers.search(query='conference:"ICLR"', limit=10)
         assert len(results) == 1
         assert results[0]["title"] == "ResNet Paper"
 
     def test_search_by_multiple_fields(self, db_with_papers):
         """Test search_papers_keyword with multiple field filters."""
-        results = db_with_papers.search_papers_keyword(query='authors:"Vaswani" conference:"NeurIPS"', limit=10)
+        results, _ = db_with_papers.search(query='authors:"Vaswani" conference:"NeurIPS"', limit=10)
         assert len(results) == 1
         assert results[0]["title"] == "Attention is All You Need"
 
     def test_search_by_keywords_field(self, db_with_papers):
         """Test search_papers_keyword with keywords field filter."""
-        results = db_with_papers.search_papers_keyword(query='keywords:"computer vision"', limit=10)
+        results, _ = db_with_papers.search(query='keywords:"computer vision"', limit=10)
         assert len(results) == 1
         assert results[0]["title"] == "ResNet Paper"
 
     def test_author_alias_in_keyword_search(self, db_with_papers):
         """Test that 'author' alias works the same as 'authors'."""
-        results = db_with_papers.search_papers_keyword(query='author:"Vaswani"', limit=10)
+        results, _ = db_with_papers.search(query='author:"Vaswani"', limit=10)
         assert len(results) == 1
         assert results[0]["title"] == "Attention is All You Need"
         assert isinstance(results[0]["authors"], list)
@@ -982,18 +999,14 @@ class TestSearchPapersFieldFilters:
         """Semantic search returns top papers and the pre-limit match count."""
         uid = db_with_papers.get_paper({"title": "Attention is All You Need"})[0]["uid"]
         em = Mock()
-        em.query_ids_within_distance.return_value = {
-            "ids": [uid],
-            "distances": [0.2],
-            "query_embedding": [0.1],
-            "total_considered": 3,
-        }
+        em.query_ids_within_distance.return_value = [(uid, 0.2)]
 
-        papers, total = db_with_papers.search_papers_keyword_with_total(
+        papers, total = db_with_papers.search(
             "transformer",
             limit=5,
             use_embeddings=True,
             embeddings_manager=em,
+            include_total=True,
         )
 
         assert total == 1
@@ -1004,7 +1017,7 @@ class TestSearchPapersFieldFilters:
         """Field-filter-only semantic searches skip the embedding query."""
         em = Mock()
 
-        papers, total = db_with_papers.search_papers_keyword_with_total(
+        papers, total = db_with_papers.search(
             'authors:"Vaswani"',
             use_embeddings=True,
             embeddings_manager=em,
@@ -1014,20 +1027,37 @@ class TestSearchPapersFieldFilters:
         assert [paper["title"] for paper in papers] == ["Attention is All You Need"]
         em.query_ids_within_distance.assert_not_called()
 
+    def test_search_semantic_without_total_uses_top_n_query(self, db_with_papers):
+        """Semantic searches without include_total use the top-N query path."""
+        uid = db_with_papers.get_paper({"title": "Attention is All You Need"})[0]["uid"]
+        em = Mock()
+        em.query_ids_within_distance.return_value = [(uid, 0.2)]
+
+        papers, total = db_with_papers.search(
+            "transformer",
+            limit=5,
+            use_embeddings=True,
+            embeddings_manager=em,
+        )
+
+        assert total is None
+        assert [paper["uid"] for paper in papers] == [uid]
+        em.query_ids_within_distance.assert_called_once()
+
     def test_case_insensitive_field_name_parsing(self, db_with_papers):
         """Test that field names in field:\"value\" syntax are case-insensitive."""
         # Uppercase
-        results = db_with_papers.search_papers_keyword(query='AUTHOR:"Vaswani"', limit=10)
+        results, _ = db_with_papers.search(query='AUTHOR:"Vaswani"', limit=10)
         assert len(results) == 1
         assert results[0]["title"] == "Attention is All You Need"
 
         # Title case
-        results = db_with_papers.search_papers_keyword(query='Author:"Vaswani"', limit=10)
+        results, _ = db_with_papers.search(query='Author:"Vaswani"', limit=10)
         assert len(results) == 1
         assert results[0]["title"] == "Attention is All You Need"
 
         # Mixed case field with keyword
-        results = db_with_papers.search_papers_keyword(query='Authors:"Devlin" BERT', limit=10)
+        results, _ = db_with_papers.search(query='Authors:"Devlin" BERT', limit=10)
         assert len(results) == 1
         assert results[0]["title"] == "BERT Paper"
 
@@ -2211,67 +2241,71 @@ class TestPaperUidResolution:
         assert summaries[0]["abstract"] == sample_paper.abstract
         assert set(summaries[0]) == {"uid", "title", "abstract", "year", "conference", "session"}
 
-    def test_find_papers_within_distance_hydrates(self, connected_db, sample_paper):
+    def test_find_paper_ids_within_distance_returns_matches(self, connected_db, sample_paper):
         uid = connected_db.add_paper(sample_paper)
         em = Mock()
-        em.query_ids_within_distance.return_value = {
-            "ids": [uid],
-            "distances": [0.25],
-            "query_embedding": [0.1],
-            "total_considered": 1,
-        }
+        em.query_ids_within_distance.return_value = [(uid, 0.25)]
+        query = QueryEmbedding("query", em)
 
-        result = connected_db.find_papers_within_distance(
-            em,
-            "query",
+        result = connected_db.find_paper_ids_within_distance(
+            query,
             conferences=["NeurIPS"],
             years=[2025],
         )
 
-        assert result["count"] == 1
-        assert result["papers"][0]["uid"] == uid
-        assert result["papers"][0]["distance"] == 0.25
+        assert result == [(uid, 0.25)]
         em.query_ids_within_distance.assert_called_once()
         assert em.query_ids_within_distance.call_args.kwargs["ids"] == [uid]
 
-    def test_find_papers_within_distance_field_filters(self, connected_db, sample_paper, sample_paper_minimal):
+    def test_find_paper_ids_within_distance_field_filters(self, connected_db, sample_paper, sample_paper_minimal):
         neurips_uid = connected_db.add_paper(sample_paper)
         connected_db.add_paper(sample_paper_minimal)
         em = Mock()
-        em.query_ids_within_distance.return_value = {
-            "ids": [neurips_uid],
-            "distances": [0.25],
-            "query_embedding": [0.1],
-            "total_considered": 1,
-        }
+        em.query_ids_within_distance.return_value = [(neurips_uid, 0.25)]
+        query = QueryEmbedding("query", em)
 
-        result = connected_db.find_papers_within_distance(
-            em,
-            "query",
+        result = connected_db.find_paper_ids_within_distance(
+            query,
             field_filters={"conference": "NeurIPS"},
         )
 
-        assert result["total_matches"] == 1
+        assert result == [(neurips_uid, 0.25)]
         assert em.query_ids_within_distance.call_args.kwargs["ids"] == [neurips_uid]
 
-    def test_find_papers_within_distance_limit_keeps_total_matches(
-        self, connected_db, sample_paper, sample_paper_minimal
-    ):
+    def test_find_paper_ids_within_distance_limit(self, connected_db, sample_paper):
+        uid = connected_db.add_paper(sample_paper)
+        em = Mock()
+        em.query_ids_within_distance.return_value = [(uid, 0.1)]
+        query = QueryEmbedding("query", em)
+
+        result = connected_db.find_paper_ids_within_distance(query, distance_threshold=0.5, limit=2)
+
+        assert result == [(uid, 0.1)]
+        assert em.query_ids_within_distance.call_args.kwargs["limit"] == 2
+
+    def test_get_result_details_slices_matches(self, connected_db, sample_paper, sample_paper_minimal):
         first_uid = connected_db.add_paper(sample_paper)
         second_uid = connected_db.add_paper(sample_paper_minimal)
-        em = Mock()
-        em.query_ids_within_distance.return_value = {
-            "ids": [first_uid, second_uid],
-            "distances": [0.1, 0.2],
-            "query_embedding": [0.1],
-            "total_considered": 2,
-        }
+        matches = [(first_uid, 0.1), (second_uid, 0.2)]
 
-        result = connected_db.find_papers_within_distance(em, "query", limit=1)
+        first_page = connected_db.get_result_details(matches, slice(0, 1))
+        second_page = connected_db.get_result_details(matches, slice(1, 2))
+        empty_page = connected_db.get_result_details(matches, slice(10, 20))
 
-        assert result["count"] == 1
-        assert result["total_matches"] == 2
-        assert [paper["uid"] for paper in result["papers"]] == [first_uid]
+        assert [paper["uid"] for paper in first_page] == [first_uid]
+        assert first_page[0]["distance"] == 0.1
+        assert [paper["uid"] for paper in second_page] == [second_uid]
+        assert second_page[0]["distance"] == 0.2
+        assert empty_page == []
+
+    def test_get_result_details_without_slice_hydrates_all(self, connected_db, sample_paper, sample_paper_minimal):
+        first_uid = connected_db.add_paper(sample_paper)
+        second_uid = connected_db.add_paper(sample_paper_minimal)
+        matches = [(first_uid, 0.1), (second_uid, 0.2)]
+
+        papers = connected_db.get_result_details(matches)
+
+        assert [paper["uid"] for paper in papers] == [first_uid, second_uid]
 
 
 class TestGetPaperWhereFilters:

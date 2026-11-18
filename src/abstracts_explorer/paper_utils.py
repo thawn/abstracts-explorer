@@ -53,7 +53,7 @@ def format_search_results(
 
     Examples
     --------
-    >>> results = embeddings_manager.search_similar("transformers", n_results=5)
+    >>> results = embeddings_manager.search_similar(QueryEmbedding("transformers", embeddings_manager), limit=5)
     >>> papers = format_search_results(results, database)
     >>> for paper in papers:
     ...     print(paper['title'], paper['similarity'])

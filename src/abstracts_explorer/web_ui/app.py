@@ -23,6 +23,7 @@ from abstracts_explorer.clustering import (
     DEFAULT_N_COMPONENTS,
     DEFAULT_REDUCTION_METHOD,
 )
+from abstracts_explorer.embeddings import QueryEmbedding
 from abstracts_explorer.export_utils import export_papers_to_zip
 from abstracts_explorer.paper_utils import extract_top_keywords
 from abstracts_explorer.web_ui import dependencies as deps
@@ -458,31 +459,18 @@ def search():
         enforce_client_rate_limit(_client_id())
 
     database = deps.get_database()
-
-    if use_embeddings:
-        # Semantic search using embeddings
-        em = deps.get_embeddings_manager()
-
-        papers, total_similar = database.search_papers_keyword_with_total(
-            query=query,
-            limit=limit,
-            sessions=sessions,
-            years=years,
-            conferences=conferences,
-            use_embeddings=True,
-            distance_threshold=distance_threshold,
-            embeddings_manager=em,
-        )
-    else:
-        # Keyword search in database
-        papers = database.search_papers_keyword(
-            query=query,
-            limit=limit,
-            sessions=sessions,
-            years=years,
-            conferences=conferences,
-        )
-        total_similar = None
+    embeddings_manager = deps.get_embeddings_manager() if use_embeddings else None
+    papers, total_similar = database.search(
+        query=query,
+        limit=limit,
+        sessions=sessions,
+        years=years,
+        conferences=conferences,
+        use_embeddings=use_embeddings,
+        distance_threshold=distance_threshold,
+        embeddings_manager=embeddings_manager,
+        include_total=use_embeddings,
+    )
 
     related_topics = extract_top_keywords(papers)
 
@@ -616,7 +604,7 @@ def chat():
     available_conferences = database.get_conferences()
     response = rag.query(
         message,
-        n_results=n_papers,
+        limit=n_papers,
         conferences=conferences if conferences else None,
         years=years if years else None,
         available_conferences=available_conferences,
@@ -767,19 +755,23 @@ def search_custom_cluster():
     em = deps.get_embeddings_manager()
     database = deps.get_database()
 
-    # Call DatabaseManager orchestration method
-    results = database.find_papers_within_distance(
-        embeddings_manager=em,
-        query=query,
-        distance_threshold=distance_threshold,
+    query_embedding = QueryEmbedding(query, em)
+    matches = database.find_paper_ids_within_distance(
+        query_embedding,
+        distance_threshold,
         conferences=conferences,
         years=years,
     )
-
-    if isinstance(results, dict) and isinstance(results.get("papers"), list):
-        results["papers"] = results["papers"][:_MAX_CLUSTER_RESULTS]
-        results["count"] = len(results["papers"])
-    return jsonify(results)
+    papers = database.get_result_details(matches, slice(0, _MAX_CLUSTER_RESULTS))
+    return jsonify(
+        {
+            "query": query,
+            "query_embedding": query_embedding.embedding,
+            "distance": distance_threshold,
+            "papers": papers,
+            "count": len(papers),
+        }
+    )
 
 
 @app.route("/api/topic-evolution", methods=["POST"])

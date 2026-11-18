@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 def search_papers(
     topic_keywords: str,
     years: Optional[List[int]] = None,
-    n_results: int = 10,
+    limit: int = 10,
     conference: Optional[str] = None,
     where_filters: Optional[Dict[str, Any]] = None,
     collection_name: Optional[str] = None,
@@ -33,7 +33,7 @@ def search_papers(
         Keywords describing the topic (e.g., "large language models")
     years : list of int, optional
         List of specific years to filter by (e.g., [2024, 2025]). If None, searches all years.
-    n_results : int, optional
+    limit : int, optional
         Number of papers to return (default: 10)
     conference : str, optional
         Conference name to filter by (e.g., "NeurIPS", "ICLR").
@@ -56,7 +56,7 @@ def search_papers(
         JSON string containing search results
     """
     try:
-        n_results = max(1, min(int(n_results), 50))
+        limit = max(1, min(int(limit), 50))
         if not conference:
             return json.dumps(
                 {
@@ -79,13 +79,14 @@ def search_papers(
             if years:
                 logger.info(f"Year filter: {years}")
 
-            papers = db.search_papers_semantic(
+            papers, _ = db.search(
                 topic_keywords,
-                limit=n_results,
+                limit=limit,
                 years=years,
                 conferences=[conference],
                 where_filters=where_filters,
                 embeddings_manager=em,
+                use_embeddings=True,
             )
 
             result = {
@@ -165,7 +166,7 @@ def get_paper_details(
             if not result_papers and title:
                 limit = max(1, min(int(limit), 50))
                 # Keyword search on title with optional conference/year filters
-                result_papers = db.search_papers(
+                result_papers = db.keyword_search(
                     keyword=title,
                     conferences=[conference] if conference else None,
                     years=[year] if year is not None else None,

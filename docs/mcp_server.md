@@ -57,7 +57,7 @@ Finds the most important recent developments in a specific topic.
 - `topic_keywords` (str): Keywords describing the topic
 - `conference` (str, optional): Filter by conference name (required in practice; pass a conference)
 - `years` (list, optional): Years to consider (default: all years)
-- `n_results` (int): Number of papers to return (default: 10)
+- `limit` (int): Number of papers to return (default: 10)
 - `where_filters` (dict, optional): SQL-style paper filters (e.g. `{"session": {"$in": ["Oral"]}}`)
 - `collection_name` (str, optional): Name of ChromaDB collection
 
@@ -117,7 +117,7 @@ user's interesting papers. Papers the user already rated are excluded.
 - `priorities` (dict, optional): Mapping of paper UID to a dict with `priority` and optional `searchTerm`.
 - `conferences` (list of str, optional): Restrict recommendations to these conferences. Defaults to the dominant conference of the interesting papers.
 - `years` (list of int, optional): Restrict recommendations to these years. Defaults to the years of the interesting papers.
-- `n_results` (int, optional): Number of recommendations (default: 10).
+- `limit` (int, optional): Number of recommendations (default: 10).
 - `exclude_ids` (list of str, optional): Additional UIDs to exclude.
 
 **Returns:** JSON with recommended papers, each including a relevance score and

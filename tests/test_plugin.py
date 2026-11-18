@@ -1792,7 +1792,7 @@ class TestPydanticValidation:
         assert count == 1
 
         # Verify data was inserted correctly
-        papers_result = connected_db.search_papers(keyword="Valid")
+        papers_result = connected_db.keyword_search(keyword="Valid")
         assert len(papers_result) == 1
         assert papers_result[0]["title"] == "Valid Paper Title"
 
@@ -1837,7 +1837,7 @@ class TestPydanticValidation:
         count = connected_db.add_papers(papers)
         assert count == 1
 
-        papers_result = connected_db.search_papers(keyword="Test")
+        papers_result = connected_db.keyword_search(keyword="Test")
         assert papers_result[0]["uid"] is not None  # Should have valid UID
 
     def test_authors_with_semicolons_rejected(self, connected_db):

@@ -54,7 +54,7 @@ class GeneratorMixin:
             return "(no papers in database)"
 
         # Fetch a random page of papers
-        all_papers = self.db.search_papers(limit=min(total, 200))
+        all_papers = self.db.keyword_search(limit=min(total, 200))
         sampled = random.sample(all_papers, min(n_papers, len(all_papers)))
 
         lines: List[str] = []

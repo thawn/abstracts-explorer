@@ -132,7 +132,7 @@ Search the vector database for semantically similar papers.
 
 ```text
 usage: abstracts-explorer search [-h] [--collection COLLECTION]
-                                 [--n-results N_RESULTS] [--where WHERE]
+                                 [--limit N_RESULTS] [--where WHERE]
                                  [--show-abstract] [--backend-url BACKEND_URL]
                                  [--model MODEL] [--distance-threshold DISTANCE_THRESHOLD]
                                  [--conference CONFERENCE] [--year YEAR]
@@ -145,7 +145,7 @@ usage: abstracts-explorer search [-h] [--collection COLLECTION]
 | ------ | ----------- |
 | `query` (positional) | Search query text |
 | `--collection COLLECTION` | Name of the ChromaDB collection (default: `papers`) |
-| `--n-results N_RESULTS` | Number of results to return (default: 5) |
+| `--limit N_RESULTS` | Number of results to return (default: 5) |
 | `--where WHERE` | Metadata filter as key=value pairs, comma-separated (e.g., `"decision=Accept (poster)"`) |
 | `--show-abstract` | Show paper abstracts in results |
 | `--backend-url BACKEND_URL` | URL for OpenAI-compatible API |
@@ -160,7 +160,7 @@ usage: abstracts-explorer search [-h] [--collection COLLECTION]
 abstracts-explorer search "graph neural networks for molecular generation"
 
 abstracts-explorer search "deep learning transformers" \
-  --n-results 10 --show-abstract
+  --limit 10 --show-abstract
 
 abstracts-explorer search "reinforcement learning" \
   --where "decision=Accept (poster)"

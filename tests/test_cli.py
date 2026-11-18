@@ -2081,30 +2081,33 @@ class TestCLI:
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
             mock_db = Mock()
-            mock_db.search_papers_semantic.return_value = [
-                {
-                    "uid": "123",
-                    "title": "Paper 1",
-                    "authors": ["Author 1"],
-                    "abstract": "Abstract 1",
-                    "session": "S",
-                    "year": 2025,
-                    "conference": "NeurIPS",
-                    "distance": 0.1,
-                    "similarity": 0.9,
-                },
-                {
-                    "uid": "456",
-                    "title": "Paper 2",
-                    "authors": ["Author 2"],
-                    "abstract": "Abstract 2",
-                    "session": "S",
-                    "year": 2025,
-                    "conference": "NeurIPS",
-                    "distance": 0.2,
-                    "similarity": 0.8,
-                },
-            ]
+            mock_db.search.return_value = (
+                [
+                    {
+                        "uid": "123",
+                        "title": "Paper 1",
+                        "authors": ["Author 1"],
+                        "abstract": "Abstract 1",
+                        "session": "S",
+                        "year": 2025,
+                        "conference": "NeurIPS",
+                        "distance": 0.1,
+                        "similarity": 0.9,
+                    },
+                    {
+                        "uid": "456",
+                        "title": "Paper 2",
+                        "authors": ["Author 2"],
+                        "abstract": "Abstract 2",
+                        "session": "S",
+                        "year": 2025,
+                        "conference": "NeurIPS",
+                        "distance": 0.2,
+                        "similarity": 0.8,
+                    },
+                ],
+                None,
+            )
             MockDB.return_value = mock_db
 
             with patch.object(
@@ -2114,7 +2117,7 @@ class TestCLI:
                     "abstracts-explorer",
                     "search",
                     "test query",
-                    "--n-results",
+                    "--limit",
                     "2",
                 ],
             ):
@@ -2152,19 +2155,22 @@ class TestCLI:
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
             mock_db = Mock()
-            mock_db.search_papers_semantic.return_value = [
-                {
-                    "uid": "789",
-                    "title": "Test Paper",
-                    "authors": ["Test Author"],
-                    "abstract": "This is a test abstract about machine learning.",
-                    "session": "S",
-                    "year": 2025,
-                    "conference": "NeurIPS",
-                    "distance": 0.15,
-                    "similarity": 0.85,
-                }
-            ]
+            mock_db.search.return_value = (
+                [
+                    {
+                        "uid": "789",
+                        "title": "Test Paper",
+                        "authors": ["Test Author"],
+                        "abstract": "This is a test abstract about machine learning.",
+                        "session": "S",
+                        "year": 2025,
+                        "conference": "NeurIPS",
+                        "distance": 0.15,
+                        "similarity": 0.85,
+                    }
+                ],
+                None,
+            )
             MockDB.return_value = mock_db
 
             with patch.object(
@@ -2218,19 +2224,22 @@ class TestCLI:
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
             mock_db = Mock()
-            mock_db.search_papers_semantic.return_value = [
-                {
-                    "uid": "111",
-                    "title": "Filtered Paper",
-                    "authors": ["Author"],
-                    "abstract": "Abstract",
-                    "session": "S",
-                    "year": 2025,
-                    "conference": "NeurIPS",
-                    "distance": 0.05,
-                    "similarity": 0.95,
-                }
-            ]
+            mock_db.search.return_value = (
+                [
+                    {
+                        "uid": "111",
+                        "title": "Filtered Paper",
+                        "authors": ["Author"],
+                        "abstract": "Abstract",
+                        "session": "S",
+                        "year": 2025,
+                        "conference": "NeurIPS",
+                        "distance": 0.05,
+                        "similarity": 0.95,
+                    }
+                ],
+                None,
+            )
             MockDB.return_value = mock_db
 
             with patch.object(
@@ -2272,7 +2281,7 @@ class TestCLI:
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
             mock_db = Mock()
-            mock_db.search_papers_semantic.return_value = []
+            mock_db.search.return_value = ([], None)
             MockDB.return_value = mock_db
 
             with patch.object(
@@ -2349,21 +2358,24 @@ class TestCLI:
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
             mock_db = Mock()
-            mock_db.search_papers_semantic.return_value = [
-                {
-                    "uid": "1",
-                    "title": "Test Paper",
-                    "authors": ["John Doe", "Jane Smith"],
-                    "abstract": "Test abstract",
-                    "session": "Session 1",
-                    "year": 2025,
-                    "conference": "NeurIPS",
-                    "url": "https://example.com/paper/1",
-                    "poster_position": "A12",
-                    "distance": 0.1,
-                    "similarity": 0.9,
-                }
-            ]
+            mock_db.search.return_value = (
+                [
+                    {
+                        "uid": "1",
+                        "title": "Test Paper",
+                        "authors": ["John Doe", "Jane Smith"],
+                        "abstract": "Test abstract",
+                        "session": "Session 1",
+                        "year": 2025,
+                        "conference": "NeurIPS",
+                        "url": "https://example.com/paper/1",
+                        "poster_position": "A12",
+                        "distance": 0.1,
+                        "similarity": 0.9,
+                    }
+                ],
+                None,
+            )
             MockDB.return_value = mock_db
 
             with patch.object(
@@ -2411,19 +2423,22 @@ class TestCLI:
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
             mock_db = Mock()
-            mock_db.search_papers_semantic.return_value = [
-                {
-                    "uid": "1",
-                    "title": "Test",
-                    "authors": ["101", "102"],
-                    "abstract": "Abstract",
-                    "session": "S",
-                    "year": 2025,
-                    "conference": "NeurIPS",
-                    "distance": 0.1,
-                    "similarity": 0.9,
-                }
-            ]
+            mock_db.search.return_value = (
+                [
+                    {
+                        "uid": "1",
+                        "title": "Test",
+                        "authors": ["101", "102"],
+                        "abstract": "Abstract",
+                        "session": "S",
+                        "year": 2025,
+                        "conference": "NeurIPS",
+                        "distance": 0.1,
+                        "similarity": 0.9,
+                    }
+                ],
+                None,
+            )
             MockDB.return_value = mock_db
 
             with patch.object(
@@ -2471,19 +2486,22 @@ class TestCLI:
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
             mock_db = Mock()
-            mock_db.search_papers_semantic.return_value = [
-                {
-                    "uid": "1",
-                    "title": "Test",
-                    "authors": ["101"],
-                    "abstract": "Abstract",
-                    "session": "S",
-                    "year": 2025,
-                    "conference": "NeurIPS",
-                    "distance": 0.1,
-                    "similarity": 0.9,
-                }
-            ]
+            mock_db.search.return_value = (
+                [
+                    {
+                        "uid": "1",
+                        "title": "Test",
+                        "authors": ["101"],
+                        "abstract": "Abstract",
+                        "session": "S",
+                        "year": 2025,
+                        "conference": "NeurIPS",
+                        "distance": 0.1,
+                        "similarity": 0.9,
+                    }
+                ],
+                None,
+            )
             MockDB.return_value = mock_db
 
             with patch.object(
@@ -3488,7 +3506,7 @@ class TestCLISearchErrorHandling:
             backend_url="http://localhost:1234",
             model="test-model",
             collection="test_collection",
-            n_results=5,
+            limit=5,
             show_abstract=False,
             where="invalid_no_equals_sign",  # Will fail parsing - no = sign
             db_path=None,
@@ -3528,7 +3546,7 @@ class TestCLISearchErrorHandling:
             backend_url="http://localhost:1234",
             model="test-model",
             collection="test_collection",
-            n_results=5,
+            limit=5,
             show_abstract=False,
             where=None,
             db_path=None,
@@ -4104,7 +4122,7 @@ class TestDeleteDataCommand:
 
         # Verify papers deleted from DB
         with DatabaseManager() as db:
-            papers = db.search_papers(conferences=["NeurIPS"], years=[2024], limit=0)
+            papers = db.keyword_search(conferences=["NeurIPS"], years=[2024], limit=0)
             assert len(papers) == 0
 
             # Verify clustering cache deleted
