@@ -26,6 +26,7 @@ from abstracts_explorer.plugin import (
     LightweightPaper,
     sanitize_author_names,
 )
+from abstracts_explorer.plugin.persistence import FailureSidecar
 from abstracts_explorer.utils.url_utils import normalize_doi_url
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,9 @@ class IGARSSDownloaderPlugin(HTTPDownloaderPlugin):
         "Referer": "https://ieeexplore.ieee.org/search/searchresult.jsp",
     }
     _SOURCE_LABEL = "IGARSS data"
+
+    #: IEEE Xplore search uses POST for read-only queries, so retries are safe.
+    _RETRY_NON_IDEMPOTENT = True
 
     def __init__(self, timeout: float = 30, verify_ssl: bool = True):
         """
@@ -419,12 +423,24 @@ class IGARSSDownloaderPlugin(HTTPDownloaderPlugin):
         first_page_data = self._fetch_page(year, 1, timeout, verify_ssl)
         total_records = first_page_data.get("totalRecords", 0)
         records = first_page_data.get("records", [])
+        failures: List[Dict[str, Any]] = []
 
         logger.info(
             "IGARSS %d: found %d total records on IEEE Xplore",
             year,
             total_records,
         )
+
+        if total_records > 0 and not records:
+            failures.append(
+                {
+                    "url": f"{self._API_URL}#page=1",
+                    "type": "page",
+                    "page": 1,
+                    "expected": total_records,
+                    "collected": 0,
+                }
+            )
 
         if total_records > self._ROWS_PER_PAGE:
             total_pages = (total_records + self._ROWS_PER_PAGE - 1) // self._ROWS_PER_PAGE
@@ -439,6 +455,15 @@ class IGARSSDownloaderPlugin(HTTPDownloaderPlugin):
                 page_data = self._fetch_page(year, page_num, timeout, verify_ssl)
                 page_records = page_data.get("records", [])
                 if not page_records:
+                    failures.append(
+                        {
+                            "url": f"{self._API_URL}#page={page_num}",
+                            "type": "page",
+                            "page": page_num,
+                            "expected": total_records,
+                            "collected": len(records),
+                        }
+                    )
                     break
                 records.extend(page_records)
 
@@ -448,12 +473,53 @@ class IGARSSDownloaderPlugin(HTTPDownloaderPlugin):
             if paper is not None:
                 papers.append(paper)
 
+        FailureSidecar(output_path, self.conference_name, year).save(failures)
+
         logger.info(
             "Successfully downloaded %d papers from IGARSS %d",
             len(papers),
             year,
         )
 
+        return papers
+
+    def _handle_cached(
+        self,
+        cached: List[LightweightPaper],
+        year: int,
+        output_path: str,
+        options: DownloadOptions,
+    ) -> List[LightweightPaper]:
+        """
+        Refresh a cached result when a previous download lost pages.
+
+        Parameters
+        ----------
+        cached : list of LightweightPaper
+            Papers loaded from *output_path*.
+        year : int
+            Requested year.
+        output_path : str
+            Cache file that was loaded.
+        options : DownloadOptions
+            Resolved download options.
+
+        Returns
+        -------
+        list of LightweightPaper
+            Refreshed papers, or the cached papers when no sidecar exists.
+        """
+        failures = FailureSidecar(output_path, self.conference_name, year).load()
+        if not failures:
+            return cached
+
+        logger.info(
+            "Retrying IGARSS %d download after %d previously failed page(s).",
+            year,
+            len(failures),
+        )
+        papers = self._download_uncached(year, output_path, options)
+        self._save_papers_json(papers, output_path, self._save_label)
         return papers
 
     def get_metadata(self) -> Dict[str, Any]:

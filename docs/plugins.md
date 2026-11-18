@@ -18,6 +18,13 @@ Conference plugins backed by EventHosts can extend
 joined by paper/event ID before lightweight validation. Existing inline abstracts
 are preserved, and unmatched records are reported and skipped.
 
+If the companion file cannot be downloaded or parsed, the valid records are still
+cached and the still-missing IDs are recorded in `<cache>.failed.json` (for example
+`data/neurips_2026.failed.json`). The next download refreshes the data and
+merges recovered abstracts into the cache. Records that are simply absent from a
+successfully downloaded companion file are treated as genuinely having no abstract
+and are not retried. Delete the sidecar file to skip the automatic retry.
+
 Plugins with a different companion URL convention can override
 `get_companion_abstracts_url()`.
 

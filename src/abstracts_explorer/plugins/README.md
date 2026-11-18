@@ -100,6 +100,10 @@ IGARSS (IEEE International Geoscience and Remote Sensing Symposium) conference d
 - **Source**: <https://ieeexplore.ieee.org/>
 - **API**: Lightweight schema
 
+If a result page cannot be retrieved during pagination, the records collected so
+far are cached and the missing page is recorded in a sibling `.failed.json` file.
+The next download retries the search and merges the recovered records.
+
 
 ## Plugin APIs
 
@@ -226,6 +230,8 @@ a session-wide 429 cooldown, and JSON/HTML fetch helpers.
 - `_EXTRA_HEADERS`: additional session headers
 - `_SOURCE_LABEL`: label used in error messages
 - `_MAX_FETCH_ATTEMPTS`, `_RETRY_BASE_DELAY`, `_MAX_RETRY_DELAY`
+- `_RETRY_NON_IDEMPOTENT`: set to `True` to retry POST requests (default: `False`;
+  only idempotent methods are retried)
 
 **Helpers:**
 - `_request(url, timeout, verify_ssl, ..., method="GET", json_body=None)`

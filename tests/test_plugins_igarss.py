@@ -17,6 +17,7 @@ from abstracts_explorer.plugins.igarss_downloader import (
     IGARSSDownloaderPlugin,
     _strip_highlight_tags,
 )
+from abstracts_explorer.plugin.persistence import FailureSidecar
 from abstracts_explorer.database import DatabaseManager
 from tests.conftest import set_test_db
 from tests.helpers import raw_query, mock_plugin_current_year_probe
@@ -663,24 +664,69 @@ class TestIGARSSDownload:
         assert len(papers) == plugin._ROWS_PER_PAGE + 1
 
     @patch.object(IGARSSDownloaderPlugin, "_fetch_page")
-    def test_download_pagination_stops_on_empty_page(self, mock_fetch):
-        """Test that pagination stops when a page returns no records."""
+    def test_download_pagination_records_failed_page(self, mock_fetch, tmp_path):
+        """An empty page before the expected end is recorded for a retry."""
         plugin = IGARSSDownloaderPlugin()
+        output_path = tmp_path / "igarss_2025.json"
 
         page1_response = {
-            "totalRecords": 200,
-            "records": [SAMPLE_RECORD_1],
+            "totalRecords": plugin._ROWS_PER_PAGE + 1,
+            "records": [SAMPLE_RECORD_1] * plugin._ROWS_PER_PAGE,
         }
         page2_response = {
-            "totalRecords": 200,
+            "totalRecords": plugin._ROWS_PER_PAGE + 1,
             "records": [],
         }
 
         mock_fetch.side_effect = [page1_response, page2_response]
 
-        papers = plugin.download(year=2025, page_delay=0)
+        papers = plugin.download(year=2025, output_path=str(output_path), page_delay=0)
+
         assert mock_fetch.call_count == 2
-        assert len(papers) == 1
+        assert len(papers) == plugin._ROWS_PER_PAGE
+        failures = FailureSidecar(str(output_path), "IGARSS", 2025).load()
+        assert len(failures) == 1
+        assert failures[0]["type"] == "page"
+        assert failures[0]["page"] == 2
+
+    @patch.object(IGARSSDownloaderPlugin, "_fetch_page")
+    def test_download_retries_failed_page_on_cache_hit(self, mock_fetch, tmp_path):
+        """The sidecar forces a fresh download that recovers the missing page."""
+        plugin = IGARSSDownloaderPlugin()
+        output_path = tmp_path / "igarss_2025.json"
+        total = plugin._ROWS_PER_PAGE + 1
+
+        mock_fetch.side_effect = [
+            {"totalRecords": total, "records": [SAMPLE_RECORD_1] * plugin._ROWS_PER_PAGE},
+            {"totalRecords": total, "records": []},
+        ]
+        plugin.download(year=2025, output_path=str(output_path), page_delay=0)
+
+        sidecar = FailureSidecar(str(output_path), "IGARSS", 2025)
+        assert sidecar.load()
+
+        mock_fetch.reset_mock()
+        mock_fetch.side_effect = [
+            {"totalRecords": total, "records": [SAMPLE_RECORD_1] * plugin._ROWS_PER_PAGE},
+            {"totalRecords": total, "records": [SAMPLE_RECORD_2]},
+        ]
+
+        papers = plugin.download(year=2025, output_path=str(output_path), page_delay=0)
+
+        assert mock_fetch.call_count == 2
+        assert len(papers) == total
+        assert sidecar.load() == []
+
+    @patch.object(IGARSSDownloaderPlugin, "_fetch_page")
+    def test_download_no_records_does_not_write_sidecar(self, mock_fetch, tmp_path):
+        """A genuinely empty result is not treated as a failure."""
+        mock_fetch.return_value = {"totalRecords": 0, "records": []}
+        output_path = tmp_path / "igarss_2025.json"
+
+        papers = IGARSSDownloaderPlugin().download(year=2025, output_path=str(output_path))
+
+        assert papers == []
+        assert FailureSidecar(str(output_path), "IGARSS", 2025).load() == []
 
     @patch.object(IGARSSDownloaderPlugin, "_fetch_page")
     def test_download_request_exception(self, mock_fetch):

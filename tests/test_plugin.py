@@ -746,6 +746,38 @@ class TestFetchWithRetries:
         cooldown.defer.assert_called_once_with(7)
         assert cooldown.wait.call_count == 2
 
+    def test_post_is_not_retried_by_default(self, monkeypatch):
+        """POST is non-idempotent and is not retried unless opted in."""
+        sleep = Mock()
+        monkeypatch.setattr("abstracts_explorer.plugin.http.time.sleep", sleep)
+        session = Mock()
+        session.post.return_value = self._response(503)
+
+        with pytest.raises(requests.HTTPError, match="503"):
+            fetch_with_retries(session, "https://example.com", timeout=7, method="POST", json_body={"q": "x"})
+
+        assert session.post.call_count == 1
+        sleep.assert_not_called()
+
+    def test_post_is_retried_when_opted_in(self, monkeypatch):
+        """Plugins with read-only POST requests can opt in to retries."""
+        sleep = Mock()
+        monkeypatch.setattr("abstracts_explorer.plugin.http.time.sleep", sleep)
+        session = Mock()
+        session.post.return_value = self._response(503)
+
+        with pytest.raises(requests.HTTPError, match="503"):
+            fetch_with_retries(
+                session,
+                "https://example.com",
+                timeout=7,
+                method="POST",
+                json_body={"q": "x"},
+                retry_non_idempotent=True,
+            )
+
+        assert session.post.call_count == 3
+
 
 class TestRateLimitCooldown:
     """Tests for the shared rate-limit cooldown."""
@@ -882,6 +914,31 @@ class TestHTTPDownloaderPlugin:
                 plugin._request("https://example.com", 30, True, max_attempts=2)
 
         assert mock_get.call_count == 2
+
+    def test_class_attr_controls_non_idempotent_retries(self):
+        """The base class retries POST only when the plugin opts in."""
+        plugin = _TestHTTPDownloaderPlugin()
+        response = Mock(status_code=503, headers={})
+        response.raise_for_status.side_effect = requests.HTTPError("503", response=response)
+
+        with (
+            patch.object(plugin._session, "post", return_value=response) as mock_post,
+            patch("abstracts_explorer.plugin.http.time.sleep"),
+        ):
+            with pytest.raises(RuntimeError, match="Failed to fetch test data"):
+                plugin._request("https://example.com", 30, True, method="POST", json_body={"q": "x"})
+
+        assert mock_post.call_count == 1
+
+        plugin._RETRY_NON_IDEMPOTENT = True
+        with (
+            patch.object(plugin._session, "post", return_value=response) as mock_post,
+            patch("abstracts_explorer.plugin.http.time.sleep"),
+        ):
+            with pytest.raises(RuntimeError, match="Failed to fetch test data"):
+                plugin._request("https://example.com", 30, True, method="POST", json_body={"q": "x"})
+
+        assert mock_post.call_count == 3
 
 
 # ============================================================

@@ -456,6 +456,24 @@ class TestAGUConcurrency:
 
         assert sorted(papers) == [f"Paper/{index}" for index in range(4)]
 
+    def test_run_parallel_reports_worker_failures(self, agu_plugin):
+        """A failed worker aborts the batch with a clear error, not a None entry."""
+
+        def worker(item):
+            if item == 2:
+                raise RuntimeError("boom")
+            return item
+
+        with pytest.raises(RuntimeError, match="1 of 2 fetching test request"):
+            agu_plugin._run_parallel(
+                [1, 2],
+                worker,
+                max_workers=2,
+                desc="Fetching test",
+                unit="item",
+                show_progress=False,
+            )
+
 
 class TestAGUCheckpoint:
     @staticmethod

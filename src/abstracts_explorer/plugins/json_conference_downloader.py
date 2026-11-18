@@ -17,6 +17,7 @@ from abstracts_explorer.plugin import (
     LightweightPaper,
     validate_lightweight_papers,
 )
+from abstracts_explorer.plugin.persistence import FailureSidecar
 
 logger = logging.getLogger(__name__)
 
@@ -74,38 +75,71 @@ class JSONConferenceDownloaderPlugin(HTTPDownloaderPlugin):
         year: int,
         timeout: float,
         verify_ssl: bool,
-    ) -> None:
-        """Add missing abstracts from an EventHosts companion JSON object."""
+    ) -> List[Dict[str, Any]]:
+        """
+        Add missing abstracts from an EventHosts companion JSON object.
+
+        Records whose companion abstract cannot be retrieved because the
+        companion file itself failed to download or parse are reported in the
+        returned failure list so they can be retried on the next run. Records
+        that are simply absent from a successfully downloaded companion file
+        are treated as genuinely lacking an abstract and are only logged.
+
+        Parameters
+        ----------
+        records : list of dict
+            Event record dictionaries parsed from the main JSON file.
+        year : int
+            Conference year.
+        timeout : float
+            HTTP timeout in seconds.
+        verify_ssl : bool
+            Whether to verify TLS certificates.
+
+        Returns
+        -------
+        list of dict
+            Failure entries suitable for :class:`FailureSidecar`.
+        """
         missing_records = [
             record
             for record in records
             if (not isinstance(record.get("abstract"), str) or not record["abstract"].strip())
         ]
         if not missing_records:
-            return
+            return []
 
         url = self.get_companion_abstracts_url(year)
         if url is None:
-            return
+            return []
+
+        missing_ids = [str(record.get("id")) for record in missing_records if record.get("id") is not None]
 
         try:
             response = self._request(url, timeout, verify_ssl)
         except RuntimeError as exc:
             logger.warning("Failed to download companion abstracts from %s: %s", url, exc)
-            return
+            return [{"url": url, "type": "companion", "ids": missing_ids, "reason": str(exc)}]
 
         try:
             abstracts = response.json()
         except (json.JSONDecodeError, ValueError) as exc:
             logger.warning("Invalid JSON in companion abstracts response from %s: %s", url, exc)
-            return
+            return [{"url": url, "type": "companion", "ids": missing_ids, "reason": str(exc)}]
 
         if not isinstance(abstracts, dict):
             logger.warning(
                 "Invalid companion abstracts response from %s: expected an object",
                 url,
             )
-            return
+            return [
+                {
+                    "url": url,
+                    "type": "companion",
+                    "ids": missing_ids,
+                    "reason": "expected a JSON object",
+                }
+            ]
 
         matched = 0
         for record in missing_records:
@@ -118,11 +152,13 @@ class JSONConferenceDownloaderPlugin(HTTPDownloaderPlugin):
         unmatched = len(missing_records) - matched
         if unmatched:
             logger.warning(
-                "No companion abstract found for %d of %d records from %s",
+                "No companion abstract found for %d of %d records from %s; "
+                "they are treated as having no abstract.",
                 unmatched,
                 len(missing_records),
                 url,
             )
+        return []
 
     def _download_uncached(
         self,
@@ -171,9 +207,10 @@ class JSONConferenceDownloaderPlugin(HTTPDownloaderPlugin):
 
         papers_data = []
         source_record_count = 0
+        failures: List[Dict[str, Any]] = []
         if "results" in data and isinstance(data["results"], list):
             source_record_count = len(data["results"])
-            self._merge_companion_abstracts(data["results"], year, timeout, verify_ssl)
+            failures = self._merge_companion_abstracts(data["results"], year, timeout, verify_ssl)
 
             for paper in data["results"]:
                 paper["year"] = year
@@ -190,8 +227,50 @@ class JSONConferenceDownloaderPlugin(HTTPDownloaderPlugin):
                 year,
             )
 
+        FailureSidecar(output_path, self.conference_name, year).save(failures)
+
         logger.info(f"Successfully downloaded {len(papers)} papers from {self.conference_name} {year}")
 
+        return papers
+
+    def _handle_cached(
+        self,
+        cached: List[LightweightPaper],
+        year: int,
+        output_path: str,
+        options: DownloadOptions,
+    ) -> List[LightweightPaper]:
+        """
+        Refresh a cached result when companion abstracts previously failed.
+
+        Parameters
+        ----------
+        cached : list of LightweightPaper
+            Papers loaded from *output_path*.
+        year : int
+            Requested year.
+        output_path : str
+            Cache file that was loaded.
+        options : DownloadOptions
+            Resolved download options.
+
+        Returns
+        -------
+        list of LightweightPaper
+            Refreshed papers, or the cached papers when no sidecar exists.
+        """
+        failures = FailureSidecar(output_path, self.conference_name, year).load()
+        if not failures:
+            return cached
+
+        logger.info(
+            "Retrying %d previously failed %s %d companion abstract fetch(es).",
+            len(failures),
+            self.conference_name,
+            year,
+        )
+        papers = self._download_uncached(year, output_path, options)
+        self._save_papers_json(papers, output_path, self._save_label)
         return papers
 
     def get_metadata(self) -> Dict[str, Any]:

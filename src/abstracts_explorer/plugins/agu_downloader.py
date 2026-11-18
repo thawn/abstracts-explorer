@@ -121,6 +121,7 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
         if not items:
             return results
 
+        errors: List[Exception] = []
         disable = None if show_progress is None else not show_progress
         with ThreadPoolExecutor(max_workers=max(1, max_workers)) as executor:
             futures = {executor.submit(worker, item): index for index, item in enumerate(items)}
@@ -129,9 +130,16 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
                     try:
                         results[futures[future]] = future.result()
                     except Exception as exc:
+                        errors.append(exc)
                         logger.warning("AGU request failed: %s", exc)
                     finally:
                         progress.update(1)
+
+        if errors:
+            first_error = errors[0]
+            raise RuntimeError(
+                f"{len(errors)} of {len(items)} {desc.lower()} request(s) failed; " f"first error: {first_error}"
+            ) from first_error
         return results
 
     @staticmethod

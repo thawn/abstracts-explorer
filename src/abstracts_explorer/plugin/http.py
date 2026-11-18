@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 _RETRYABLE_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504})
 _DEFAULT_MAX_RETRY_DELAY = 120.0
+_IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "PUT", "DELETE", "OPTIONS", "TRACE"})
 
 
 def _http_status_code(exc: Exception) -> Optional[int]:
@@ -75,6 +76,7 @@ def fetch_with_retries(
     method: str = "GET",
     json_body: Optional[Any] = None,
     headers: Optional[Dict[str, str]] = None,
+    retry_non_idempotent: bool = False,
 ) -> requests.Response:
     """
     Fetch a URL, retrying transient failures with exponential backoff.
@@ -113,6 +115,10 @@ def fetch_with_retries(
         JSON body for POST requests.
     headers : dict, optional
         Additional request headers.
+    retry_non_idempotent : bool, optional
+        Retry non-idempotent methods such as ``POST`` (default: False).
+        Only enable this for requests that are safe to repeat, such as
+        read-only search queries.
 
     Returns
     -------
@@ -125,6 +131,7 @@ def fetch_with_retries(
         The last request failure after all retry attempts are exhausted.
     """
     last_error: Optional[requests.RequestException] = None
+    method_is_idempotent = method.upper() in _IDEMPOTENT_METHODS
     for attempt in range(max_attempts):
         if cooldown is not None:
             cooldown.wait()
@@ -153,6 +160,8 @@ def fetch_with_retries(
                 if status is not None
                 else isinstance(exc, (requests.ConnectionError, requests.Timeout))
             )
+            if not method_is_idempotent and not retry_non_idempotent:
+                retryable = False
             if not retryable or attempt == max_attempts - 1:
                 break
             delay = _compute_retry_delay(exc, attempt, retry_base_delay, max_retry_delay)
@@ -176,6 +185,7 @@ class HTTPDownloaderPlugin(DownloaderPlugin):
     _RETRY_BASE_DELAY = 1.0
     _MAX_RETRY_DELAY: Optional[float] = _DEFAULT_MAX_RETRY_DELAY
     _RETRYABLE_STATUSES = _RETRYABLE_HTTP_STATUSES
+    _RETRY_NON_IDEMPOTENT: bool = False
 
     def __init__(self, timeout: float = 30, verify_ssl: bool = True) -> None:
         """
@@ -240,6 +250,7 @@ class HTTPDownloaderPlugin(DownloaderPlugin):
                 method=method,
                 json_body=json_body,
                 headers=headers,
+                retry_non_idempotent=self._RETRY_NON_IDEMPOTENT,
             )
         except requests.RequestException as exc:
             status = _http_status_code(exc)

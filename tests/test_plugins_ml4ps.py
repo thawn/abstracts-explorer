@@ -461,6 +461,15 @@ class TestML4PSLightweightConversion:
         for author in lightweight[0]["authors"]:
             assert ";" not in author
 
+    def test_convert_uses_explicit_year(self, ml4ps_plugin, sample_scraped_papers):
+        """An explicit year wins over the shared mutable _current_year."""
+        ml4ps_plugin._current_year = 2022
+
+        lightweight = ml4ps_plugin._convert_to_lightweight_format(sample_scraped_papers, 2024)
+
+        assert all(paper["year"] == 2024 for paper in lightweight)
+        assert all("2024" in paper["session"] for paper in lightweight)
+
 
 # ============================================================================
 # Unit Tests - Paper Row Extraction
@@ -920,6 +929,15 @@ class TestML4PSWebScraping:
             papers = ml4ps_plugin._scrape_papers()
 
             assert papers == []
+
+    def test_scrape_papers_uses_explicit_year(self, ml4ps_plugin):
+        """The workshop URL comes from the explicit year, not _current_year."""
+        ml4ps_plugin._current_year = 2022
+
+        with patch.object(ml4ps_plugin, "_fetch_page", return_value=None) as mock_fetch:
+            ml4ps_plugin._scrape_papers(2024)
+
+        assert mock_fetch.call_args.args[0] == "https://ml4physicalsciences.github.io/2024/"
 
     def test_scrape_papers_no_table(self, ml4ps_plugin):
         """Test scraping when table not found."""
